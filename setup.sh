@@ -5,7 +5,8 @@ set -e
 echo "Setting up your environment..."
 
 # Define the source directory
-SRC_DIR="src"
+SRC_DIR="lib"
+OG_DIR=$(pwd)
 
 # Check if the source directory exists
 if [ ! -d "$SRC_DIR" ]; then
@@ -14,18 +15,18 @@ if [ ! -d "$SRC_DIR" ]; then
 fi
 
 for DIR in "$SRC_DIR"/*/ ; do
-    # Check if it's a directory
-    if [ ! -d "$DIR" ]; then
-      # If not a directory, skip to the next iteration
-      continue
-    fi
+    # # Check if it's a directory
+    # if [ ! -d "$DIR" ]; then
+    #   # If not a directory, skip to the next iteration
+    #   continue
+    # fi
 
     
     RAW_NAME="$(basename "$DIR")"
-    echo "Parsing directory: $RAW_NAME"
+    echo "\nParsing directory: $RAW_NAME"
 
     # Define an array of filenames to ignore
-    IGNORE_LIST=("src" "default.project.json", "wally.lock", "wally.toml")
+    IGNORE_LIST=("src" "default.project.json" "wally.lock" "wally.toml")
 
     # Construct the find command with multiple -name options for ignoring files
     IGNORE_PATHS=""
@@ -42,7 +43,9 @@ for DIR in "$SRC_DIR"/*/ ; do
         exit 1
     fi
 
-    cd "$dir"/src
+    cd "$DIR"
+    dir
+
     # Install the Wally Packages
     echo "Installing Wally Package Dependencies..."
     if ! wally install; then
@@ -50,28 +53,21 @@ for DIR in "$SRC_DIR"/*/ ; do
         exit 1
     fi
 
-    cd ..
-
-    echo "Moving Packages directory up one level..."
-    if ! mv "$RAW_NAME"/Packages ./; then
-        echo "Error: Failed to move Packages directory."
-        exit 1
-    fi
-
-    # Ensure a sourcemap exists
-    echo "Generating sourcemap..."
-    if ! rojo sourcemap default.project.json -o sourcemap.json; then
-        echo "Error: Failed to generate sourcemap."
-        exit 1
-    fi
-
-    # Generate the Wally Package Types
-    echo "Generating Wally Package Types..."
-    if ! wally-package-types --sourcemap sourcemap.json src/Packages/; then
-        echo "Error: Failed to generate Wally package types."
-        exit 1
-    fi
-
+    # # Generate the Wally Package Types
+    # echo "Generating Wally Package Types..."
+    # if ! wally-package-types --sourcemap sourcemap.json Packages; then
+    #     echo "Error: Failed to generate Wally package types."
+    #     exit 1
+    # fi
 done
+
+cd "$OG_DIR"
+
+# Ensure a sourcemap exists
+echo "Generating sourcemap..."
+if ! rojo sourcemap . -o sourcemap.json; then
+    echo "Error: Failed to generate sourcemap."
+    exit 1
+fi
 
 echo "Setup complete!"

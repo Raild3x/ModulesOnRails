@@ -8,7 +8,7 @@ registry = "https://github.com/UpliftGames/wally-test-index"
 realm = "shared"
 
 [dependencies]
-# BaseObject = "raild3x/baseobject@^1.0.0"
 Janitor = "howmanysmall/janitor@^1.16.0"
 Signal = "lucasmzreal/fastsignal@^10.2.1"
 Fusion = "acecateer/fusion@0.3.1"
+# BaseObject = "raild3x/baseobject@^1.0.0"

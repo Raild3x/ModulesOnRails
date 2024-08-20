@@ -25,6 +25,7 @@
 	[STATIC METHODS]
 	.getObjectFromId(id: number) -> BaseObject?
 	.new(tbl: {}?) -> BaseObject
+	.isDestroyed(self: BaseObject) -> boolean
 
 	[OBJECT PROPS]
 	.IsDestroyed: boolean?
@@ -233,6 +234,14 @@ end
 --[=[
 	Marks the Object as Destroyed, fires the Destroyed Signal, cleans up
 	the BaseObject, and sets the metatable to nil/a special locked MT.
+	:::caution Overriding
+	If you override this method, you need to make sure you call
+	`getmetatable(self).Destroy(self)` to call the superclass methods.
+	```lua
+	function MyCustomClass:Destroy()
+		getmetatable(SuperClass).Destroy(self) -- calls the superclass method to clean up events, tasks, etc..
+	end
+	```
 ]=]
 function BaseObject:Destroy()
 	if self.IsDestroyed then
@@ -253,7 +262,7 @@ function BaseObject:Destroy()
 	end
 
 	-- Mark as destroyed and clean janitor
-	self[KEY_JANITOR]:Destroy()
+	(self[KEY_JANITOR] :: Janitor):Destroy()
 
 	-- Set metatable to destroyed metatable
 	setmetatable(self, destroyedMetatable)
