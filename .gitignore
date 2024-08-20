@@ -6,12 +6,18 @@ src/baseobject/*
 !src/baseobject/baseobject
 
 src/tablemanager/*
-!src/tablemanager/tablemanager
+
 
 src/tablereplicator/*
 !src/tablereplicator/tablereplicator
+
+lib/*/*
+!lib/*/src
 
 
 **/wally.lock
 **/build
 **/sourcemap.json
+
+!**/wally.toml
+!**/default.project.json

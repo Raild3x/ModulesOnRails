@@ -25,7 +25,7 @@ for DIR in "$SRC_DIR"/*/ ; do
     echo "Parsing directory: $RAW_NAME"
 
     # Define an array of filenames to ignore
-    IGNORE_LIST=("$RAW_NAME" "default.project.json")
+    IGNORE_LIST=("src" "default.project.json", "wally.lock", "wally.toml")
 
     # Construct the find command with multiple -name options for ignoring files
     IGNORE_PATHS=""
@@ -42,7 +42,7 @@ for DIR in "$SRC_DIR"/*/ ; do
         exit 1
     fi
 
-    cd "$dir""$RAW_NAME"
+    cd "$dir"/src
     # Install the Wally Packages
     echo "Installing Wally Package Dependencies..."
     if ! wally install; then

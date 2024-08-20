@@ -5,7 +5,7 @@
         "ReplicatedStorage": {
             "$className": "ReplicatedStorage",
             "src": {
-                "$path": "src"
+                "$path": "lib"
             },
             "TestEZ": {
                 "$path": "modules/testez/src"
