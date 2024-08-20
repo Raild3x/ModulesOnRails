@@ -1,6 +1,15 @@
 {
-	"name": "railutil",
-	"tree": {
-		"$path": "src"
-	}
+    "name": "rail-modules",
+    "tree": {
+        "$className": "DataModel",
+        "ReplicatedStorage": {
+            "$className": "ReplicatedStorage",
+            "src": {
+                "$path": "src"
+            },
+            "TestEZ": {
+                "$path": "modules/testez/src"
+            }
+        }
+    }
 }

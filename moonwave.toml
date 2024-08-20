@@ -1,6 +1,9 @@
 gitSourceBranch = "main"
 
 [[classOrder]]
+classes = ["BaseObject"]
+
+[[classOrder]]
 section = "TableManager"
 classes = ["TableManager", "TableState"]
 

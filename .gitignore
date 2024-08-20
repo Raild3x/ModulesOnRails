@@ -3,13 +3,13 @@
 *.rbxl.lock
 
 src/baseobject/*
-!src/baseobject/BaseObject
+!src/baseobject/baseobject
 
 src/tablemanager/*
-!src/tablemanager/TableManager
+!src/tablemanager/tablemanager
 
 src/tablereplicator/*
-!src/tablereplicator/TableReplicator
+!src/tablereplicator/tablereplicator
 
 
 **/wally.lock

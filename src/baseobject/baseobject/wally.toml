@@ -1,0 +1,14 @@
+[package]
+name = "raild3x/baseobject"
+description = "A base class for creating objects with a lifecycle and event system."
+authors = ["Logan Hunt (Raildex)"]
+version = "0.0.1"
+license = "MIT"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+
+[dependencies]
+Promise = "evaera/promise@^4.0.0"
+Janitor = "howmanysmall/janitor@^1.16.0"
+Signal = "lucasmzreal/fastsignal@^10.2.1"
+Fusion = "sleitnik/symbol@^2.0.1"

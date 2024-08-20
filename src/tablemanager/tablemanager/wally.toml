@@ -1,0 +1,14 @@
+[package]
+name = "raild3x/tablemanager"
+description = "A class for managing and observing data in a table. Includes some additional classes for extending functionality."
+authors = ["Logan Hunt (Raildex)"]
+version = "0.0.1"
+license = "MIT"
+registry = "https://github.com/UpliftGames/wally-test-index"
+realm = "shared"
+
+[dependencies]
+Promise = "evaera/promise@^4.0.0"
+Janitor = "howmanysmall/janitor@^1.16.0"
+Signal = "lucasmzreal/fastsignal@^10.2.1"
+Fusion = "sleitnik/symbol@^2.0.1"

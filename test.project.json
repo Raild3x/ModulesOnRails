@@ -2,20 +2,14 @@
 	"name": "RailUtil-test",
 	"tree": {
 		"$className": "DataModel",
-		"ServerScriptService": {
-			"$className": "ServerScriptService",
-			"src": {
-				"$path": "src"
-			}
-		},
 
 		"ReplicatedStorage": {
 			"$className": "ReplicatedStorage",
+			"src": {
+				"$path": "src"
+			},
 			"TestEZ": {
 				"$path": "modules/testez/src"
-			},
-			"runTests.story": {
-				"$path": "runTests.story.lua"
 			}
 		},
 
