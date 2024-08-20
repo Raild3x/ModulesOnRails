@@ -1,0 +1,17 @@
+
+*.rbxl
+*.rbxl.lock
+
+src/baseobject/*
+!src/baseobject/BaseObject
+
+src/tablemanager/*
+!src/tablemanager/TableManager
+
+src/tablereplicator/*
+!src/tablereplicator/TableReplicator
+
+
+**/wally.lock
+**/build
+**/sourcemap.json

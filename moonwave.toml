@@ -1,0 +1,9 @@
+gitSourceBranch = "main"
+
+[[classOrder]]
+section = "TableManager"
+classes = ["TableManager", "TableState"]
+
+[[classOrder]]
+section = "TableReplicator"
+classes = ["TableReplicator", "TableServerReplicator", "TableClientReplicator"]
