@@ -290,7 +290,7 @@ function TableServerReplicator.newClassToken(tokenName: string): ClassToken
     table.freeze(token)
 
     table.insert(USED_CLASS_TOKENS, tokenName)
-    return token :: ClassToken
+    return token :: any
 end
 TableServerReplicator.createClassToken = TableServerReplicator.newClassToken -- alias
 

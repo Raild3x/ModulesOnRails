@@ -27,7 +27,7 @@ local ClientCustomRemote = require(script.Parent.ClientCustomRemote)
 --// Types //--
 type ClientCustomRemote = ClientCustomRemote.ClientCustomRemote
 type TableManager = TableManager.TableManager
-type Promise = Promise.Promise
+type Promise = typeof(Promise.new())
 
 type Tags = TableReplicatorUtil.Tags
 type Id = number

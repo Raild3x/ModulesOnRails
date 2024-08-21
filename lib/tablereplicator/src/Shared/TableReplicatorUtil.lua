@@ -2,6 +2,7 @@
 -- January 05, 2024
 
 --// Types //--
+type table = {[any]: any}
 
 --[=[
     @within BaseTableReplicator

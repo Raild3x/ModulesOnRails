@@ -29,14 +29,14 @@ local TableReplicatorUtil = require(script.Parent.TableReplicatorUtil)
 type TableManager = TableManager.TableManager
 type ClassToken = TableReplicatorUtil.ClassToken
 type Tags = TableReplicatorUtil.Tags
-type Promise = Promise.Promise
+type Promise = typeof(Promise.new())
 
 --[=[
     @within BaseTableReplicator
     @type Id number
     The id of a replicator.
 ]=]
-type Id = number
+export type Id = number
 
 type CreationListener = (replicator: BaseTableReplicator) -> ()
 type CanBeArray<T> = T | {T}

@@ -4,11 +4,15 @@ description = "A base class for creating objects with a lifecycle and event syst
 authors = ["Logan Hunt (Raildex)"]
 version = "0.0.1"
 license = "MIT"
-registry = "https://github.com/UpliftGames/wally-test-index"
+registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
 
 [dependencies]
 Janitor = "howmanysmall/janitor@^1.16.0"
 Signal = "lucasmzreal/fastsignal@^10.2.1"
 Fusion = "acecateer/fusion@0.3.1"
+Symbol = "sleitnick/symbol@^2.0.1"
+Promise = "evaera/promise@^4.0.0"
+TableManager = "raild3x/tablemanager@0"
+RailUtil = "raild3x/railutil@1"
 # BaseObject = "raild3x/baseobject@^1.0.0"
