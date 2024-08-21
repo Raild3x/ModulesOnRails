@@ -22,6 +22,8 @@ README_FILE="README.md"
 
 # Start the README file with a title and table header
 cat <<EOF > "$README_FILE"
+$REPO_NAME is a collection of Wally packages.
+
 # Packages
 
 | Package | Latest Version | Description |
