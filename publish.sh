@@ -21,43 +21,49 @@ fi
 
 echo "Current version: $CURRENT_VERSION"
 
-# Ask how to increment the version (major, minor, or patch)
-read -p "Do you want to increment the version by major, minor, or patch? " INCREMENT_TYPE
+# Prompt to increment the version number
+read -p "Do you want to increment the version? (y/n): " SHOULD_INCREMENT
 
-# Split the version number into major, minor, and patch components
-IFS='.' read -r -a VERSION_PARTS <<< "$CURRENT_VERSION"
-MAJOR=${VERSION_PARTS[0]}
-MINOR=${VERSION_PARTS[1]}
-PATCH=${VERSION_PARTS[2]}
+if [ "$SHOULD_INCREMENT" = "y" ]; then
+    # Ask how to increment the version (major, minor, or patch)
+    read -p "Do you want to increment the version by major, minor, or patch? " INCREMENT_TYPE
 
-# Increment the version based on user input
-case $INCREMENT_TYPE in
-    major)
-        MAJOR=$((MAJOR + 1))
-        MINOR=0
-        PATCH=0
-        ;;
-    minor)
-        MINOR=$((MINOR + 1))
-        PATCH=0
-        ;;
-    patch)
-        PATCH=$((PATCH + 1))
-        ;;
-    *)
-        echo "Invalid increment type. Please specify major, minor, or patch."
-        exit 1
-        ;;
-esac
+    # Split the version number into major, minor, and patch components
+    IFS='.' read -r -a VERSION_PARTS <<< "$CURRENT_VERSION"
+    MAJOR=${VERSION_PARTS[0]}
+    MINOR=${VERSION_PARTS[1]}
+    PATCH=${VERSION_PARTS[2]}
 
-# Construct the new version number
-NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+    # Increment the version based on user input
+    case $INCREMENT_TYPE in
+        major)
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+            ;;
+        minor)
+            MINOR=$((MINOR + 1))
+            PATCH=0
+            ;;
+        patch)
+            PATCH=$((PATCH + 1))
+            ;;
+        *)
+            echo "Invalid increment type. Please specify major, minor, or patch."
+            exit 1
+            ;;
+    esac
 
-# Update the version number in wally.toml
-sed -i.bak "s/^version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/" wally.toml
+    # Construct the new version number
+    NEW_VERSION="$MAJOR.$MINOR.$PATCH"
 
-# Confirm the update
-echo "Version updated to $NEW_VERSION in wally.toml."
+    # Update the version number in wally.toml
+    sed -i.bak "s/^version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/" wally.toml
+
+    # Confirm the update
+    echo "Version updated to $NEW_VERSION in wally.toml."
+fi
+
 
 # Run wally publish
 read -p "Do you want to publish the package now? (y/n) " PUBLISH
@@ -67,6 +73,8 @@ if [ "$PUBLISH" = "n" ]; then
 fi
 
 echo "Clearing the package directory..."
+cd ../..
+
 # Define an array of filenames to ignore
 IGNORE_LIST=("src" "default.project.json" "wally.toml")
 
@@ -77,13 +85,15 @@ for IGNORE_FILE in "${IGNORE_LIST[@]}"; do
 done
 
 # Combine the ignore paths with the find command
-COMMAND="find \"$DIR\" -mindepth 1 -maxdepth 1 $IGNORE_PATHS -exec rm -rf {} +"
+COMMAND="find \"$PACKAGE_DIR\" -mindepth 1 -maxdepth 1 $IGNORE_PATHS -exec rm -rf {} +"
 
 # Evaluate and execute the command
 if ! eval "$COMMAND"; then
-    echo "Error: Failed to remove files from $DIR."
+    echo "Error: Failed to remove files from $PACKAGE_DIR."
     exit 1
 fi
+
+cd "$PACKAGE_DIR" || { echo "Failed to access $PACKAGE_DIR"; exit 1; }
 
 echo "Publishing package to Wally..."
 wally publish

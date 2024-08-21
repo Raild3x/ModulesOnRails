@@ -1,7 +1,7 @@
 -- Authors: Logan Hunt (Raildex)
 -- January 22, 2024
 --[=[
-    @class ReplicatedTableSingleton
+    @class TableReplicatorSingleton
     @client
 
     This class provides a system for creating easy access to a single TableReplicator
@@ -10,23 +10,22 @@
     the TableReplicator is not ready yet.
 ]=]
 
---// Services //--
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
---// Imports //--
-local Import = require(ReplicatedStorage.Orion.Import)
+local Packages = script.Parent.Parent.Parent
+local Fusion = require(Packages.Fusion)
+local Promise = require(Packages.Promise)
+local Janitor = require(Packages.Janitor)
+local TableManager = require(Packages.TableManager)
+local BaseObject = require(Packages.BaseObject)
+local SuperClass = BaseObject
 
-local SuperClass = Import("BaseObject") ---@module BaseObject
-local Promise = Import("Promise") ---@module Promise
-local TableReplicator = Import("TableReplicator") ---@module TableReplicator
-local TableManager = Import("TableManager") ---@module TableManager
-local Fusion = Import("Fusion") ---@module Fusion
-local Janitor = Import("Janitor") ---@module Janitor
+local TableClientReplicator : typeof(require(script.Parent.TableClientReplicator))
+type TableClientReplicator = typeof(TableClientReplicator)
 
-type Promise = Promise.Promise
+type Promise = typeof(Promise.new())
+type table = {[any]: any}
 type Path = TableManager.Path
 type TableManager = TableManager.TableManager
-type TableClientReplicator = TableReplicator.TableClientReplicator
 type State<T> = Fusion.StateObject<T>
 
 local PathToArray = TableManager.PathToArray
@@ -46,12 +45,12 @@ end
 --// CLASS //--
 --------------------------------------------------------------------------------
 
-local ReplicatedTableSingleton = setmetatable({}, SuperClass)
-ReplicatedTableSingleton.ClassName = "ReplicatedTableSingleton"
-ReplicatedTableSingleton.__index = ReplicatedTableSingleton
+local TableReplicatorSingleton = setmetatable({}, SuperClass)
+TableReplicatorSingleton.ClassName = "TableReplicatorSingleton"
+TableReplicatorSingleton.__index = TableReplicatorSingleton
 
 --[=[
-    @within ReplicatedTableSingleton
+    @within TableReplicatorSingleton
     @interface Config
     .ClassTokenName string -- The name of the class token to listen for.
     .DefaultDataSchema table? -- The default schema to use if the replicator is not ready yet.
@@ -64,10 +63,10 @@ type Config = {
 }
 
 --[=[
-    Creates a new ReplicatedTableSingleton.
+    Creates a new TableReplicatorSingleton.
 
     ```lua
-    local ClientPlayerData = ReplicatedTableSingleton.new {
+    local ClientPlayerData = TableReplicatorSingleton.new {
         ClassTokenName = "PlayerData";
         DefaultDataSchema = Import("PlayerDataSchema");
         ConditionFn = function(replicator)
@@ -78,12 +77,12 @@ type Config = {
     return ClientPlayerData
     ```
 ]=]
-function ReplicatedTableSingleton.new(config: Config)
-    local self = setmetatable(SuperClass.new(), ReplicatedTableSingleton)
+function TableReplicatorSingleton.new(config: Config)
+    local self = setmetatable(SuperClass.new(), TableReplicatorSingleton)
 
     self:RegisterSignal("Loaded")
 
-    assert(typeof(config.ClassTokenName) == "string", "ReplicatedTableSingleton.new() requires a string ClassTokenName")
+    assert(typeof(config.ClassTokenName) == "string", "TableReplicatorSingleton.new() requires a string ClassTokenName")
     self._ClassTokenName = config.ClassTokenName
     self._DefaultSchema = config.DefaultDataSchema
 
@@ -94,6 +93,7 @@ function ReplicatedTableSingleton.new(config: Config)
     ------------------------------------------------------------------------
 
     local conditionFn = config.ConditionFn
+    local TableReplicator = require(script.Parent.TableClientReplicator)
 
     -- Check if a valid replicator already exists
     for _, replicator in TableReplicator.getAll(self._ClassTokenName) do
@@ -133,7 +133,7 @@ end
     local thirdItem = ClientPlayerData:Get("Inventory", 3) -- Equivalent to `ClientPlayerData:Get("Inventory")[3]`
     ```
 ]=]
-function ReplicatedTableSingleton:Get(path: Path, index: number?): any?
+function TableReplicatorSingleton:Get(path: Path, index: number?): any?
     if index then
         path = PathToArray(path)
         table.insert(path, index)
@@ -144,7 +144,7 @@ function ReplicatedTableSingleton:Get(path: Path, index: number?): any?
             local valueAtPath = ParseTableFromPath(self._DefaultSchema, path)
             return valueAtPath
         else
-            warn(":Get() called before ReplicatedTableSingleton was ready and no default schema is set.")
+            warn(":Get() called before TableReplicatorSingleton was ready and no default schema is set.")
             return nil
         end
     end
@@ -162,7 +162,7 @@ end
     end)
     ```
 ]=]
-function ReplicatedTableSingleton:Observe(path: Path, callback: (newValue: any?) -> ()): () -> ()
+function TableReplicatorSingleton:Observe(path: Path, callback: (newValue: any?) -> ()): () -> ()
     local currentValue = self:Get(path)
     task.spawn(callback, currentValue)
     return self:ListenToValueChange(path, callback)
@@ -180,7 +180,7 @@ end
 
     @return function -- A function that, when called, will disconnect the listener.
 ]=]
-function ReplicatedTableSingleton:ListenToValueChange(path: Path, callback: (...any) -> ()): () -> ()
+function TableReplicatorSingleton:ListenToValueChange(path: Path, callback: (...any) -> ()): () -> ()
     local jani = Janitor.new()
     if not self:IsReady() then
         jani:AddPromise(self:OnReady():andThen(function()
@@ -202,7 +202,7 @@ end
     Called when the value at the path is changed through any means.
     This includes if the value is an array and a value in the array is changed, inserted, or removed.
 ]=]
-function ReplicatedTableSingleton:ListenToAnyChange(path: Path, callback: (...any) -> ()): () -> ()
+function TableReplicatorSingleton:ListenToAnyChange(path: Path, callback: (...any) -> ()): () -> ()
     local jani = Janitor.new()
     if not self:IsReady() then
         jani:AddPromise(self:OnReady():andThen(function()
@@ -239,7 +239,7 @@ end
     }
     ```
 ]=]
-function ReplicatedTableSingleton:ToFusionState(path: Path): State<any>
+function TableReplicatorSingleton:ToFusionState(path: Path): State<any>
     local stringPath = PathToString(path)
     if not self._FStates[stringPath] then
         local state = Fusion.Value(self:Get(path))
@@ -253,27 +253,27 @@ function ReplicatedTableSingleton:ToFusionState(path: Path): State<any>
 end
 
 --[=[
-    Gets the TableManager for the ReplicatedTableSingleton. This will error if
+    Gets the TableManager for the TableReplicatorSingleton. This will error if
     the TableManager is not ready yet.
     
     ```lua
     local TM = ClientPlayerData:GetTableManager()
     ```
 ]=]
-function ReplicatedTableSingleton:GetTableManager(): TableManager
+function TableReplicatorSingleton:GetTableManager(): TableManager
     assert(self:IsReady(), "TableManager is not ready yet")
     return self:GetTableReplicator():GetTableManager()
 end
 
 --[=[
-    Gets the TableReplicator for the ReplicatedTableSingleton. This will error if
+    Gets the TableReplicator for the TableReplicatorSingleton. This will error if
     the TableReplicator is not ready yet.
     
     ```lua
     local TR = ClientPlayerData:GetTableReplicator()
     ```
 ]=]
-function ReplicatedTableSingleton:GetTableReplicator(): TableClientReplicator
+function TableReplicatorSingleton:GetTableReplicator(): TableClientReplicator
     assert(self:IsReady(), "TableReplicator is not ready yet")
     return self._TR
 end
@@ -289,7 +289,7 @@ end
 
     @return Promise<TableManager>
 ]=]
-function ReplicatedTableSingleton:PromiseTableManager(): Promise
+function TableReplicatorSingleton:PromiseTableManager(): Promise
     return self:OnReady():andThen(function()
         return self:GetTableManager()
     end)
@@ -306,7 +306,7 @@ end
 
     @return Promise<TableClientReplicator>
 ]=]
-function ReplicatedTableSingleton:PromiseTableReplicator(): Promise
+function TableReplicatorSingleton:PromiseTableReplicator(): Promise
     return self:OnReady():andThen(function()
         return self:GetTableReplicator()
     end)
@@ -321,12 +321,12 @@ end
     end
     ```
 ]=]
-function ReplicatedTableSingleton:IsReady(): boolean
+function TableReplicatorSingleton:IsReady(): boolean
     return self._TR ~= nil
 end
 
 --[=[
-    Returns a promise that resolves when the ReplicatedTableSingleton is ready.
+    Returns a promise that resolves when the TableReplicatorSingleton is ready.
     
     ```lua
     ClientPlayerData:OnReady():andThen(function()
@@ -336,7 +336,7 @@ end
 
     @return Promise<()>
 ]=]
-function ReplicatedTableSingleton:OnReady(): Promise
+function TableReplicatorSingleton:OnReady(): Promise
     if self:IsReady() then
         return Promise.resolve(self:GetTableReplicator())
     else
@@ -344,4 +344,4 @@ function ReplicatedTableSingleton:OnReady(): Promise
     end
 end
 
-return ReplicatedTableSingleton
+return TableReplicatorSingleton

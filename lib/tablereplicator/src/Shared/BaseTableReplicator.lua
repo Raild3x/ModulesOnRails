@@ -167,17 +167,17 @@ function BaseTableReplicator.forEach(
     fn: (replicator: BaseTableReplicator, manager: TableManager?) -> (),
     allowDestroyedReplicators: boolean?
 )
-    condition = ReconcileCondition(condition)
+    local SatisfiesCondition = ReconcileCondition(condition)
 
     -- Iterate over all current replicators
     for _, replicator in pairs(STORAGE) do
         if replicator.IsDestroyed then
-            if allowDestroyedReplicators and condition(replicator) then
+            if allowDestroyedReplicators and SatisfiesCondition(replicator) then
                 fn(replicator, nil)
             end
         else
             local manager = replicator:GetTableManager()
-            if condition(replicator, manager) then
+            if SatisfiesCondition(replicator, manager) then
                 fn(replicator, manager)
             end
         end
@@ -186,12 +186,12 @@ function BaseTableReplicator.forEach(
     -- Watch for new replicators
     return ReplicatorCreatedSignal:Connect(function(replicator)
         if replicator.IsDestroyed then
-            if allowDestroyedReplicators and condition(replicator) then
+            if allowDestroyedReplicators and SatisfiesCondition(replicator) then
                 fn(replicator, nil)
             end
         else
             local manager = replicator:GetTableManager()
-            if condition(replicator, manager) then
+            if SatisfiesCondition(replicator, manager) then
                 fn(replicator, manager)
             end
         end
@@ -216,17 +216,17 @@ end
     @return Promise<BaseTableReplicator, TableManager?>
 ]=]
 function BaseTableReplicator.promiseFirstReplicator(condition: SearchCondition, allowDestroyedReplicators: boolean?): Promise
-    condition = ReconcileCondition(condition)
+    local SatisfiesCondition = ReconcileCondition(condition)
 
     -- Check all current replicators
     for _, replicator in pairs(STORAGE) do
         if replicator.IsDestroyed then
-            if allowDestroyedReplicators and condition(replicator) then
+            if allowDestroyedReplicators and SatisfiesCondition(replicator) then
                 return Promise.resolve(replicator)
             end
         else
             local manager = replicator:GetTableManager()
-            if condition(replicator, manager) then
+            if SatisfiesCondition(replicator, manager) then
                 return Promise.resolve(replicator, manager)
             end
         end
@@ -235,9 +235,9 @@ function BaseTableReplicator.promiseFirstReplicator(condition: SearchCondition, 
     -- Watch for new replicators
     return Promise.fromEvent(ReplicatorCreatedSignal, function(replicator)
         if replicator.IsDestroyed then
-            return if allowDestroyedReplicators then condition(replicator) else false
+            return if allowDestroyedReplicators then SatisfiesCondition(replicator) else false
         else
-            return condition(replicator, replicator:GetTableManager())
+            return SatisfiesCondition(replicator, replicator:GetTableManager())
         end
     end):andThen(function(replicator)
         return replicator, (not replicator.IsDestroyed and replicator:GetTableManager())
@@ -263,15 +263,14 @@ end
     Listens for new replicators that are created with the given class token.
 ]=]
 function BaseTableReplicator.listenForNewReplicator(classToken: CanBeArray<string | ClassToken>, fn: (replicator: BaseTableReplicator) -> ()): (() -> ())
-    if typeof(classToken) == "string" or classToken.Name then
+    if typeof(classToken) == "string" or (classToken :: any).Name then
         classToken = {classToken}
     end
     assert(typeof(fn) == "function", "fn must be a function")
-
+    assert(typeof(classToken) == "table", "classToken must be a string or Token(table)")
     for i, token in ipairs(classToken) do
-        assert(typeof(classToken) == "string" or typeof(classToken) == "table", "classToken must be a string or Token(table)")
         token = (if typeof(token) == "table" then token.Name else token) :: string
-        classToken[i] = token
+        (classToken :: any)[i] = token
 
         local listeners = CREATION_LISTENERS[token]
         if not listeners then
@@ -449,10 +448,10 @@ end
     ```
 ]=]
 function BaseTableReplicator:FindFirstChild(condition: SearchCondition, recursive: boolean?): BaseTableReplicator?
-    condition = ReconcileCondition(condition)
+    local SatisfiesCondition = ReconcileCondition(condition)
 
     for _, child in pairs(self._Children) do
-        if condition(child, child:GetTableManager()) then
+        if SatisfiesCondition(child, child:GetTableManager()) then
             return child
         end
     end
