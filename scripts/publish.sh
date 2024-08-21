@@ -1,5 +1,9 @@
 #!/bin/bash
 
+#Save original directory
+original_dir=$(pwd)
+
+#ascend so we can see the lib directory
 cd ..
 
 # Prompt for the package name
@@ -121,10 +125,9 @@ rm default.project.json
 echo "default.project.json deleted."
 
 # Return to the original directory
-cd -> /dev/null
+cd "$original_dir" || { echo "Failed to return to the original directory"; exit 1; }
 
 # Ask if they want to rebuild the package paths
 #read -p "Do you want to rebuild the sourcemap? (y/n) " PUBLISH
 echo "Rebuilding sourcemap..."
-
 bash setup.sh "$PACKAGE_NAME"
