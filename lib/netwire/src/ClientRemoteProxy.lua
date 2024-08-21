@@ -5,7 +5,7 @@
     @client
     @ignore
 ]=]
-local Packages = script.Parent.Parent.Parent
+local Packages = script.Parent.Parent
 local Promise = require(Packages.Promise) ---@module Promise
 local Signal = require(Packages.Signal) ---@module Signal
 

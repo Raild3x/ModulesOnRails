@@ -74,12 +74,127 @@ type ClientNetWire = {}
 local NetWireCache = {} -- Cache of all Wires
 local NewNetWireSignal = Signal.new() -- Signal for when a new wire is created
 
+--------------------------------------------------------------------------------
+--// NetWire //--
+--------------------------------------------------------------------------------
+
 --[=[
     @class NetWire
 ]=]
 local NetWire = {}
 
---------------------------------------------------------
+--[=[
+    @within NetWire
+    @client
+
+    @prop Client ClientNetWire
+]=]
+
+--[=[
+    @within NetWire
+    @client
+
+    @param wireOrName ClientNetWire | string
+    @param idx string -- The index to wait for existence of
+    @return Promise
+    Returns a promise that resolves when the ClientNetWire is ready for use and the index exists.
+    The resolved value is the value of the index.
+]=]
+function NetWire.indexReady(wireOrName: string | ClientNetWire, idx: string): Promise
+    return NetWire.onReady(wireOrName):andThen(function(wire)
+        if rawget(wire, idx) then
+            return rawget(wire, idx)
+        end
+        return Promise.fromEvent(wire[SIG_KEY], function(idxName, rType, v)
+            return idxName == idx
+        end):andThen(function(idxName, rType, v)
+            return v
+        end)
+    end)
+end
+NetWire.promiseIndex = NetWire.indexReady
+
+--[=[
+    @within NetWire
+    @client
+
+    @param clientNetWire ClientNetWire | string
+    @return Promise
+    Returns a promise that resolves when the ClientNetWire is ready for use.
+]=]
+function NetWire.onReady(clientNetWire: string | ClientNetWire): Promise
+    return Promise.new(function(resolve)
+        if typeof(clientNetWire) == "string" then
+            clientNetWire = NetWireCache[clientNetWire]
+        end
+        if not clientNetWire then
+            resolve(Promise.fromEvent(NewNetWireSignal, function(wire)
+                return wire[NAME_KEY] == clientNetWire
+            end))
+        end
+        resolve(clientNetWire)
+    end):andThen(function(wire)
+        if NetWire.isReady(wire) then
+            return wire
+        end
+        return (wire[COMM_KEY] :: Promise):andThenReturn(wire)
+    end)
+end
+NetWire.promiseWire = NetWire.onReady
+
+--[=[
+    @within NetWire
+    @client
+
+    @param clientNetWire ClientNetWire | string
+    @return boolean
+    Can be used to check if a clientNetWire is ready for use.
+]=]
+function NetWire.isReady(clientNetWire: string | ClientNetWire): boolean
+    if typeof(clientNetWire) == "string" then
+        clientNetWire = NetWireCache[clientNetWire]
+        if not clientNetWire then -- If NetWire is not cached, it is not ready
+            return false
+        end
+    end
+    assert(typeof(clientNetWire) == "table", "ClientNetWire must be a table")
+    return not Promise.is(clientNetWire[COMM_KEY])
+end
+
+--[=[
+    @within NetWire
+    @client
+
+    @param clientNetWire ClientNetWire
+    Destroys a ClientNetWire, removing it from the cache.
+]=]
+function NetWire.destroy(clientNetWire: ClientNetWire)
+    if not NetWireCache[clientNetWire[NAME_KEY]] then
+        warn("Attempted to destroy an uncached ClientNetWire")
+        return
+    end
+    NetWireCache[clientNetWire[NAME_KEY]] = nil
+    clientNetWire[JANI_KEY]:Destroy()
+    clientNetWire[JANI_KEY] = nil
+    clientNetWire[COMM_KEY] = nil
+    warn("Clearing NetWire cache for " .. clientNetWire[NAME_KEY] :: string)
+end
+
+--[=[
+    @within NetWire
+    @client
+
+    @param wireName string
+    @return ClientNetWire?
+    Returns a ClientNetWire from the cache, if it exists.
+]=]
+function NetWire.getClient(wireName: string): ClientNetWire?
+    return NetWireCache[wireName]
+end
+
+--------------------------------------------------------------------------------
+--// ClientNetWire //--
+--------------------------------------------------------------------------------
 
 local ClientNetWire = {}
 ClientNetWire.ClassName = "ClientNetWire";
@@ -212,116 +327,7 @@ NetWire.Client = ClientNetWire
 NetWire.__call = function(_, ...)
     return ClientNetWire.new(...)
 end
-setmetatable(ClientNetWire, NetWire)
-
---[=[
-    @within NetWire
-    @client
-
-    @prop Client ClientNetWire
-]=]
-
---[=[
-    @within NetWire
-    @client
-
-    @param wireOrName ClientNetWire | string
-    @param idx string -- The index to wait for existence of
-    @return Promise
-    Returns a promise that resolves when the ClientNetWire is ready for use and the index exists.
-    The resolved value is the value of the index.
-]=]
-function NetWire.indexReady(wireOrName: string | ClientNetWire, idx: string): Promise
-    return NetWire.onReady(wireOrName):andThen(function(wire)
-        if rawget(wire, idx) then
-            return rawget(wire, idx)
-        end
-        return Promise.fromEvent(wire[SIG_KEY], function(idxName, rType, v)
-            return idxName == idx
-        end):andThen(function(idxName, rType, v)
-            return v
-        end)
-    end)
-end
-NetWire.promiseIndex = NetWire.indexReady
-
---[=[
-    @within NetWire
-    @client
-
-    @param clientNetWire ClientNetWire | string
-    @return Promise
-    Returns a promise that resolves when the ClientNetWire is ready for use.
-]=]
-function NetWire.onReady(clientNetWire: string | ClientNetWire): Promise
-    return Promise.new(function(resolve)
-        if typeof(clientNetWire) == "string" then
-            clientNetWire = NetWireCache[clientNetWire]
-        end
-        if not clientNetWire then
-            resolve(Promise.fromEvent(NewNetWireSignal, function(wire)
-                return wire[NAME_KEY] == clientNetWire
-            end))
-        end
-        resolve(clientNetWire)
-    end):andThen(function(wire)
-        if NetWire.isReady(wire) then
-            return wire
-        end
-        return (wire[COMM_KEY] :: Promise):andThenReturn(wire)
-    end)
-end
-NetWire.promiseWire = NetWire.onReady
-
---[=[
-    @within NetWire
-    @client
-
-    @param clientNetWire ClientNetWire | string
-    @return boolean
-    Can be used to check if a clientNetWire is ready for use.
-]=]
-function NetWire.isReady(clientNetWire: string | ClientNetWire): boolean
-    if typeof(clientNetWire) == "string" then
-        clientNetWire = NetWireCache[clientNetWire]
-        if not clientNetWire then -- If NetWire is not cached, it is not ready
-            return false
-        end
-    end
-    assert(typeof(clientNetWire) == "table", "ClientNetWire must be a table")
-    return not Promise.is(clientNetWire[COMM_KEY])
-end
-
---[=[
-    @within NetWire
-    @client
-
-    @param clientNetWire ClientNetWire
-    Destroys a ClientNetWire, removing it from the cache.
-]=]
-function NetWire.destroy(clientNetWire: ClientNetWire)
-    if not NetWireCache[clientNetWire[NAME_KEY]] then
-        return warn("Attempted to destroy an uncached ClientNetWire")
-    end
-    NetWireCache[clientNetWire[NAME_KEY]] = nil
-    clientNetWire[JANI_KEY]:Destroy()
-    clientNetWire[JANI_KEY] = nil
-    clientNetWire[COMM_KEY] = nil
-    warn("Clearing NetWire cache for " .. clientNetWire[NAME_KEY] :: string)
-end
-
---[=[
-    @within NetWire
-    @client
-
-    @param wireName string
-    @return ClientNetWire?
-    Returns a ClientNetWire from the cache, if it exists.
-]=]
-function NetWire.getClient(wireName: string): ClientNetWire?
-    return NetWireCache[wireName]
-end
-
+ClientNetWire = setmetatable(ClientNetWire, NetWire)
 
 
 return NetWire

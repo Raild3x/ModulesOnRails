@@ -30,11 +30,11 @@ local SuperClass = BaseObject
 --// Types //--
 type TableState = TableState.TableState
 type FusionState<T> = Fusion.StateObject<T>
-type Promise = Promise.Promise
+type Promise = typeof(Promise.new())
 
-type Signal = Signal.Signal
+type Signal = Signal.ScriptSignal<any>
 type SignalInternal = Signal & {_head: any}
-type Connection = Signal.Connection
+type Connection = Signal.ScriptConnection
 
 type Numeric = number | Vector2 | Vector3 | CFrame | table | any
 type table = {[any]: any}
@@ -223,10 +223,11 @@ local function GetContainerTable(tbl: table, path: {string}): table?
         end
         return tbl
     end
+    return nil
 end
 
 -- iterates through a table using a given path and optional lastKey
-local function FetchValueInTableFromPath(tbl: table, path: {string}, lastKey: string | number): any?
+local function FetchValueInTableFromPath(tbl: table, path: {string | number}, lastKey: string | number): any?
     local currentValue = tbl
 
     if lastKey then
@@ -560,6 +561,7 @@ function TableManager:ArrayMutate(path: Path, index: CanBeArray<number> | "#", f
             index = {index}
         end
 
+        assert(typeof(index) == "table")
         for i = 1, #index do
             local idx = index[i]
             local currentValue = array[idx]
@@ -598,7 +600,7 @@ function TableManager:ArrayIncrement(path: Path, index: CanBeArray<number> | '#'
         if not index or index == '#' then
             index = {}
             for i = 1, containerArraySize do
-                table.insert(index, i)
+                table.insert(index :: any, i)
             end
         else
             index = {index}
@@ -606,6 +608,7 @@ function TableManager:ArrayIncrement(path: Path, index: CanBeArray<number> | '#'
     end
     
     amount = amount or 1
+    assert(typeof(index) == "table")
     for i = 1, #index do
         local idx = index[i]
         assert(idx <= containerArraySize, "Index out of bounds!")
@@ -650,13 +653,14 @@ function TableManager:ArraySet(path: Path, index: (CanBeArray<number> | '#')?, v
         if not index or index == '#' then
             index = {}
             for i = 1, containerArraySize do
-                table.insert(index, i)
+                table.insert(index :: any, i)
             end
         else
             index = {index}
         end
     end
 
+    assert(typeof(index) == "table")
     for i = 1, #index do
         local idx = index[i]
         if type(idx) ~= "number" then
@@ -843,11 +847,12 @@ function TableManager:Get(path: Path, idx: (number | string)?): any
 
     local tblData = self._Data
     for i = 1, #path do
+        local idx = (path :: {})[i]
         if typeof(tblData) ~= "table" then
-            warn("Unable to reach end of path!", path, path[i])
+            warn("Unable to reach end of path!", path, idx)
             return nil
         end
-        tblData = tblData[path[i]]
+        tblData = tblData[idx]
     end
 
     if idx then

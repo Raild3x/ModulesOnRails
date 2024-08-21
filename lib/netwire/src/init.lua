@@ -9,9 +9,9 @@ local RunService = game:GetService("RunService")
 local NetWire
 
 if RunService:IsServer() then
-    NetWire = require(script:FindFirstChild("ServerWire"))
+    NetWire = require(script.ServerWire)
 else
-    NetWire = require(script:FindFirstChild("ClientWire"))
+    NetWire = require(script.ClientWire)
 end
 
 return NetWire

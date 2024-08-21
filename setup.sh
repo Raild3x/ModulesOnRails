@@ -27,7 +27,7 @@ for DIR in "$SRC_DIR"/*/ ; do
     echo "\nParsing directory: $RAW_NAME"
 
     # Define an array of filenames to ignore
-    IGNORE_LIST=("src" "default.project.json" "wally.lock" "wally.toml")
+    IGNORE_LIST=("src" "default.project.json" "wally.toml")
 
     # Construct the find command with multiple -name options for ignoring files
     IGNORE_PATHS=""

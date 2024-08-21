@@ -1,8 +1,8 @@
 [package]
-name = "raild3x/baseobject"
-description = "A base class for creating objects with a lifecycle, janitor, and event system."
+name = "raild3x/netwire"
+description = "A networking library based off of sleitnicks comm library."
 authors = ["Logan Hunt (Raildex)"]
-version = "0.0.3"
+version = "0.0.1"
 license = "MIT"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
