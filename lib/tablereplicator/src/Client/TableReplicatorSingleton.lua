@@ -19,8 +19,8 @@ local TableManager = require(Packages.TableManager)
 local BaseObject = require(Packages.BaseObject)
 local SuperClass = BaseObject
 
-local TableClientReplicator : typeof(require(script.Parent.TableClientReplicator))
-type TableClientReplicator = typeof(TableClientReplicator)
+local ClientTableReplicator : typeof(require(script.Parent.ClientTableReplicator))
+type ClientTableReplicator = typeof(ClientTableReplicator)
 
 type Promise = typeof(Promise.new())
 type table = {[any]: any}
@@ -54,12 +54,12 @@ TableReplicatorSingleton.__index = TableReplicatorSingleton
     @interface Config
     .ClassTokenName string -- The name of the class token to listen for.
     .DefaultDataSchema table? -- The default schema to use if the replicator is not ready yet.
-    .ConditionFn ((replicator: TableClientReplicator) -> boolean)? -- A function that returns whether or not the replicator is valid and should be bound.
+    .ConditionFn ((replicator: ClientTableReplicator) -> boolean)? -- A function that returns whether or not the replicator is valid and should be bound.
 ]=]
 type Config = {
     ClassTokenName: string,
     DefaultDataSchema: table?,
-    ConditionFn: ((replicator: TableClientReplicator) -> boolean)?,
+    ConditionFn: ((replicator: ClientTableReplicator) -> boolean)?,
 }
 
 --[=[
@@ -93,7 +93,7 @@ function TableReplicatorSingleton.new(config: Config)
     ------------------------------------------------------------------------
 
     local conditionFn = config.ConditionFn
-    local TableReplicator = require(script.Parent.TableClientReplicator)
+    local TableReplicator = require(script.Parent.ClientTableReplicator)
 
     -- Check if a valid replicator already exists
     for _, replicator in TableReplicator.getAll(self._ClassTokenName) do
@@ -273,7 +273,7 @@ end
     local TR = ClientPlayerData:GetTableReplicator()
     ```
 ]=]
-function TableReplicatorSingleton:GetTableReplicator(): TableClientReplicator
+function TableReplicatorSingleton:GetTableReplicator(): ClientTableReplicator
     assert(self:IsReady(), "TableReplicator is not ready yet")
     return self._TR
 end
@@ -299,12 +299,12 @@ end
     Returns a promise that resolves with the TableReplicator when it is ready.
     
     ```lua
-    ClientPlayerData:PromiseTableReplicator():andThen(function(TR: TableClientReplicator)
+    ClientPlayerData:PromiseTableReplicator():andThen(function(TR: ClientTableReplicator)
         print("TableReplicator is ready!")
     end)
     ```
 
-    @return Promise<TableClientReplicator>
+    @return Promise<ClientTableReplicator>
 ]=]
 function TableReplicatorSingleton:PromiseTableReplicator(): Promise
     return self:OnReady():andThen(function()

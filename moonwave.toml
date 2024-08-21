@@ -9,4 +9,4 @@ classes = ["TableManager", "TableState"]
 
 [[classOrder]]
 section = "TableReplicator"
-classes = ["TableReplicator", "TableServerReplicator", "TableClientReplicator"]
+classes = ["TableReplicator", "ServerTableReplicator", "ClientTableReplicator"]

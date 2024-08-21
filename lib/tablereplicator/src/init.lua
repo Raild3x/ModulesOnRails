@@ -4,15 +4,15 @@
 --// Services //--
 local RunService = game:GetService("RunService")
 
-local TCR : typeof(require(script.Client.TableClientReplicator)) = nil
-local TSR : typeof(require(script.Server.TableServerReplicator)) = nil
+local CTR : typeof(require(script.Client.ClientTableReplicator)) = nil
+local STR : typeof(require(script.Server.ServerTableReplicator)) = nil
 
-export type TableClientReplicator = TCR.TableClientReplicator
-export type TableServerReplicator = TSR.TableServerReplicator
+export type ClientTableReplicator = CTR.ClientTableReplicator
+export type ServerTableReplicator = STR.ServerTableReplicator
 
 
 if RunService:IsClient() then
-    return require(script.Server.TableServerReplicator)
+    return require(script.Server.ServerTableReplicator)
 else
-    return require(script.Client.TableClientReplicator)
+    return require(script.Client.ClientTableReplicator)
 end

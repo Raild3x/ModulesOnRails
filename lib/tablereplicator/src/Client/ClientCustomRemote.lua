@@ -48,10 +48,10 @@ type Connection = any
 local ClientCustomRemote = {}
 ClientCustomRemote.__index = ClientCustomRemote
 ClientCustomRemote.__call = function(remote, ...)
-    local tcr = remote[KEY_REPLICATOR]
+    local CTR = remote[KEY_REPLICATOR]
     local name = remote[KEY_NAME]
     local wire = NetWire.Client("TableReplicator")
-    return wire:RedirectFunction(tcr:GetServerId(), name, ...)
+    return wire:RedirectFunction(CTR:GetServerId(), name, ...)
 end
 
 function ClientCustomRemote.new(remoteName: string, replicator: any, isUnreliable: boolean?)

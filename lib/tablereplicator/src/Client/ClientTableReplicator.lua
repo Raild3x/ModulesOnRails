@@ -1,13 +1,13 @@
 -- Authors: Logan Hunt (Raildex)
 -- January 04, 2024
 --[=[
-    @class TableClientReplicator
+    @class ClientTableReplicator
     @client
 
     Inherits from [BaseTableReplicator](#BaseTableReplicator)
 
     :::warning
-    You must call `TableClientReplicator.requestServerData()` in order to begin
+    You must call `ClientTableReplicator.requestServerData()` in order to begin
     replication to the client. It should only be called ideally once and after
     all listeners have been registered.
     :::
@@ -35,7 +35,7 @@ type table = {[any]: any}
 
 type BindableClass<T> = { -- UNUSED
     ClassName: string;
-    OnStart: (<T>(replicator: TableClientReplicator) -> (T));
+    OnStart: (<T>(replicator: ClientTableReplicator) -> (T));
     OnStop: (<T>(replicator: T) -> ());
     [any]: any;
 }
@@ -56,16 +56,16 @@ local SwapRemoveFirstValue = RailUtil.Table.SwapRemoveFirstValue
 local KEY_SELF = Symbol("Self")
 local ServerMT = {
     __index = function(t, key)
-        local tcr = t[KEY_SELF]
-        local remote = tcr:AddTask(ClientCustomRemote.new(key, tcr))
-        rawset(tcr.Server, key, remote)
+        local CTR = t[KEY_SELF]
+        local remote = CTR:AddTask(ClientCustomRemote.new(key, CTR))
+        rawset(CTR.Server, key, remote)
         task.defer(function()
-            tcr:FireSignal("RemoteSetup", key, remote)
+            CTR:FireSignal("RemoteSetup", key, remote)
         end)
         return remote
     end,
     __newindex = function(_, key, value)
-        error(`Attempted to set '{key}' to '{value}' on the Server table of a TableClientReplicator`)
+        error(`Attempted to set '{key}' to '{value}' on the Server table of a ClientTableReplicator`)
     end
 }
 
@@ -73,17 +73,17 @@ local ServerMT = {
 --// CLASS //--
 --------------------------------------------------------------------------------
 
-local TableClientReplicator = setmetatable({}, BaseTableReplicator)
-TableClientReplicator.ClassName = "TableClientReplicator"
-TableClientReplicator.__index = TableClientReplicator
+local ClientTableReplicator = setmetatable({}, BaseTableReplicator)
+ClientTableReplicator.ClassName = "ClientTableReplicator"
+ClientTableReplicator.__index = ClientTableReplicator
 
 --[=[
     @private
     @unreleased
-    Binds the given table to a TableClientReplicator ClassName.
+    Binds the given table to a ClientTableReplicator ClassName.
 ]=]
-function TableClientReplicator.bind(tblOrStr: table | string): table
-    assert(not IsBooted(), "TableClientReplicator has already booted.")
+function ClientTableReplicator.bind(tblOrStr: table | string): table
+    assert(not IsBooted(), "ClientTableReplicator has already booted.")
     assert(typeof(tblOrStr) == "string" or typeof(tblOrStr) == "table", "Argument 1 must be a string or table")
 
     local boundTable
@@ -100,7 +100,7 @@ function TableClientReplicator.bind(tblOrStr: table | string): table
         assert(typeof(classTokenName) == "string", "ClassName is required")
     end
 
-    TableClientReplicator.listenForNewReplicator(classTokenName, function(replicator)
+    ClientTableReplicator.listenForNewReplicator(classTokenName, function(replicator)
         local object = replicator
         if boundTable.OnStart then
             object = boundTable.OnStart(replicator) or replicator
@@ -118,11 +118,11 @@ end
 
 --[=[
     @private
-    The TCR constructor. is private because it should not be called externally.
+    The CTR constructor. is private because it should not be called externally.
 ]=]
-function TableClientReplicator._newReplicator(config: {
+function ClientTableReplicator._newReplicator(config: {
     Id: Id;
-    Parent: TableClientReplicator?;
+    Parent: ClientTableReplicator?;
     TableManager: TableManager;
     ClassTokenName: string?;
     Tags: Tags?;
@@ -133,7 +133,7 @@ function TableClientReplicator._newReplicator(config: {
         ServerId = config.Id;
         Tags = config.Tags;
         TableManager = config.TableManager;
-    }), TableClientReplicator)
+    }), ClientTableReplicator)
 
     assert(typeof(config.ClassTokenName) == "string", "ClassTokenName is required")
     self._ClassTokenName = config.ClassTokenName;
@@ -148,7 +148,7 @@ function TableClientReplicator._newReplicator(config: {
     self:AddTask(self:GetTableManager(), nil, "TableManager")
 
     if DEBUG then
-        warn("\t[CLIENT] Created TCR:", self, config)
+        warn("\t[CLIENT] Created CTR:", self, config)
     end
 
     return self
@@ -158,17 +158,17 @@ end
     @private
     This method exists to catch people trying to do something they shouldnt.
 ]=]
-function TableClientReplicator.new(...: any)
-    error("TableClientReplicator.new() should not be called.")
+function ClientTableReplicator.new(...: any)
+    error("ClientTableReplicator.new() should not be called.")
 end
 
 
 --[=[
-    Listens for a new TableClientReplicator of the given ClassName.
+    Listens for a new ClientTableReplicator of the given ClassName.
 ]=]
-function TableClientReplicator.listenForNewReplicator(classTokenName: string, fn: (replicator: TableClientReplicator) -> ()): (() -> ())
+function ClientTableReplicator.listenForNewReplicator(classTokenName: string, fn: (replicator: ClientTableReplicator) -> ()): (() -> ())
     if bootProm then
-        warn(`.listenForNewReplicator("{classTokenName}") was called after the TableClientReplicator has already booted.`)
+        warn(`.listenForNewReplicator("{classTokenName}") was called after the ClientTableReplicator has already booted.`)
     end
     return BaseTableReplicator.listenForNewReplicator(classTokenName, fn)
 end
@@ -181,15 +181,15 @@ end
     @private
     Overrides the default Destroy method to prevent the user from destroying
 ]=]
-function TableClientReplicator:Destroy()
-    error("You are not allowed to destroy a TableClientReplicator from the client.")
+function ClientTableReplicator:Destroy()
+    error("You are not allowed to destroy a ClientTableReplicator from the client.")
 end
 
 --[=[
     @private
     This is the actual Destroy method.
 ]=]
-function TableClientReplicator:_Destroy()
+function ClientTableReplicator:_Destroy()
     self._IsDestroying = true
 
     for _, child in ipairs(self:GetChildren()) do
@@ -197,7 +197,7 @@ function TableClientReplicator:_Destroy()
     end
 
     self:FireSignal("Stopping")
-    getmetatable(TableClientReplicator).Destroy(self)
+    getmetatable(ClientTableReplicator).Destroy(self)
 end
 
 
@@ -206,13 +206,13 @@ end
 --------------------------------------------------------------------------------
 
 --[[
-    @within TableClientReplicator
+    @within ClientTableReplicator
     @private
     @unreleased
     Gets a remote signal with the given name.
     If one doesnt exist it will create one at runtime.
 ]]
--- function TableClientReplicator:GetRemoteSignal(remoteName: string): ClientCustomRemote
+-- function ClientTableReplicator:GetRemoteSignal(remoteName: string): ClientCustomRemote
 --     if not self[KEY_REMOTE_SIGNALS][remoteName] then
 --         self[KEY_REMOTE_SIGNALS][remoteName] = ClientCustomRemote.new(remoteName, self)
 --     end
@@ -239,9 +239,9 @@ local function CreateBranch(entries, createdReplicators) -- This is a bunch of b
         return a.Id < b.Id
     end)
 
-    local waitingForParent = {} -- [ParentId] = {TCR, ...}
+    local waitingForParent = {} -- [ParentId] = {CTR, ...}
 
-    -- for each entry, create a TCR
+    -- for each entry, create a CTR
     for _, entry in pairs(sortedEntries) do
         local id = entry.Id
         local classTokenName = entry.ClassName
@@ -252,14 +252,14 @@ local function CreateBranch(entries, createdReplicators) -- This is a bunch of b
         local waitForParent = false
         local parent
         if entry.ParentId then
-            parent = TableClientReplicator.getFromServerId(entry.ParentId)
+            parent = ClientTableReplicator.getFromServerId(entry.ParentId)
             if not parent then
                 waitForParent = true
             end
         end
 
-        --print("[CLIENT] Creating TCR:", entry, "|", id, classTokenName, tags, data)
-        local object = TableClientReplicator._newReplicator({
+        --print("[CLIENT] Creating CTR:", entry, "|", id, classTokenName, tags, data)
+        local object = ClientTableReplicator._newReplicator({
             Id = id;
             Parent = parent or entry.ParentId;
             ClassTokenName = classTokenName;
@@ -300,7 +300,7 @@ end
     be called once, calling it multiple times will return the same promise.
     All replicator listeners should be registered before calling this method.
 ]=]
-function TableClientReplicator.requestServerData(): Promise
+function ClientTableReplicator.requestServerData(): Promise
     if bootProm then
         return bootProm
     end
@@ -338,7 +338,7 @@ function TableClientReplicator.requestServerData(): Promise
             CreateBranch(creationData, createdReplicators)
         end
 
-        -- Broadcast the creation of the TCRs
+        -- Broadcast the creation of the CSTR
         table.sort(createdReplicators, function(a, b)
             return a:GetServerId() < b:GetServerId()
         end)
@@ -351,7 +351,7 @@ function TableClientReplicator.requestServerData(): Promise
             end
         end
 
-        -- 2) New TCR created:
+        -- 2) New CTR created:
         --print("Firing listeners for ", #createdReplicators, " replicators", createdReplicators)
         if DEBUG then
             warn("[CLIENT] Firing creation listeners for ", #createdReplicators, " replicators", createdReplicators)
@@ -364,19 +364,19 @@ function TableClientReplicator.requestServerData(): Promise
 
 
     Replicator.TR_Destroy:Connect(function(id: Id)
-        local TCR = TableClientReplicator.getFromServerId(id) :: TableClientReplicator
-        assert(TCR, `TCR[{id}] not found.`)
-        TCR:_Destroy()
+        local CTR = ClientTableReplicator.getFromServerId(id) :: ClientTableReplicator
+        assert(CTR, `CTR[{id}] not found.`)
+        CTR:_Destroy()
     end)
 
 
     Replicator.TR_SetParent:Connect(function(childId: Id, parentId: Id)
-        local child = TableClientReplicator.getFromServerId(childId) :: TableClientReplicator
-        assert(child, `child TCR[{childId}] not found.`)
+        local child = ClientTableReplicator.getFromServerId(childId) :: ClientTableReplicator
+        assert(child, `child CTR[{childId}] not found.`)
 
         local oldParent = child:GetParent()
-        local newParent = TableClientReplicator.getFromServerId(parentId) :: TableClientReplicator
-        assert(newParent, `newParent TCR[{parentId}] not found.`)
+        local newParent = ClientTableReplicator.getFromServerId(parentId) :: ClientTableReplicator
+        assert(newParent, `newParent CTR[{parentId}] not found.`)
 
         SwapRemoveFirstValue(oldParent._Children, child)
         table.insert(newParent._Children, child)
@@ -389,9 +389,9 @@ function TableClientReplicator.requestServerData(): Promise
 
 
     local function AssertGetTableManager(id: Id): TableManager
-        local TCR = TableClientReplicator.getFromServerId(id) :: TableClientReplicator
-        assert(TCR, `TCR[{id}] not found.`)
-        return TCR:GetTableManager()
+        local CTR = ClientTableReplicator.getFromServerId(id) :: ClientTableReplicator
+        assert(CTR, `CTR[{id}] not found.`)
+        return CTR:GetTableManager()
     end
 
 
@@ -413,12 +413,12 @@ function TableClientReplicator.requestServerData(): Promise
 
 
     Replicator.NetworkEvent:Connect(function(id: Id, remoteName: string, ...)
-        local TCR = TableClientReplicator.getFromServerId(id) :: TableClientReplicator
-        assert(TCR, `TCR[{id}] not found.`)
+        local CTR = ClientTableReplicator.getFromServerId(id) :: ClientTableReplicator
+        assert(CTR, `CTR[{id}] not found.`)
 
-        local remote = rawget(TCR.Server, remoteName)
+        local remote = rawget(CTR.Server, remoteName)
         if not remote then
-            Promise.fromEvent(TCR:GetSignal("RemoteSetup"), function(name)
+            Promise.fromEvent(CTR:GetSignal("RemoteSetup"), function(name)
                 return name == remoteName
             end)
             :timeout(10, `Exhausted Timeout: No Event with name '{remoteName}' has been connected to!`)
@@ -435,10 +435,10 @@ function TableClientReplicator.requestServerData(): Promise
     
 
     -- Replicator.NetworkUnreliableEvent:Connect(function(id: Id, remoteName: string, ...)
-    --     local TCR = TableClientReplicator.getFromServerId(id) :: TableClientReplicator
-    --     assert(TCR, `TCR[{id}] not found.`)
+    --     local CTR = ClientTableReplicator.getFromServerId(id) :: ClientTableReplicator
+    --     assert(CTR, `CTR[{id}] not found.`)
 
-    --     local remote = TCR:GetRemoteSignal(remoteName)
+    --     local remote = CTR:GetRemoteSignal(remoteName)
     --     remote:_FireClient(...)
     -- end)
 
@@ -448,16 +448,16 @@ function TableClientReplicator.requestServerData(): Promise
 end
 
 
-do -- This is a reminder for new users to call TableClientReplicator.requestServerData()
+do -- This is a reminder for new users to call ClientTableReplicator.requestServerData()
     local WARN_DELAY = 10
     task.delay(WARN_DELAY, function()
         if not bootProm then
-            warn(`TableClientReplicator has not yet been booted. Please remember to call TableClientReplicator.requestServerData() in your code.`)
+            warn(`ClientTableReplicator has not yet been booted. Please remember to call ClientTableReplicator.requestServerData() in your code.`)
         end
     end)
 end
 
 
-export type TableClientReplicator = typeof(TableClientReplicator._new({})) -- export the class
+export type ClientTableReplicator = typeof(ClientTableReplicator._new({})) -- export the class
 
-return TableClientReplicator
+return ClientTableReplicator

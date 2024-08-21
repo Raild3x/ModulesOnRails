@@ -1,10 +1,10 @@
 -- Authors: Logan Hunt (Raildex)
 -- January 04, 2024
 --[=[
-    @class TableServerReplicator
+    @class ServerTableReplicator
     @server
 
-    TableServerReplicator handles replication of a given TableManager object to the client.
+    ServerTableReplicator handles replication of a given TableManager object to the client.
     This system very closely follows the idea behind ReplicaService and should be familiar to
     anyone who has used it.
 
@@ -65,7 +65,7 @@ local ClientMT = table.freeze {
     __newindex = function(t, k, v)
         local self = t[KEY_SELF]
         if self._ClassToken then
-            warn("Avoid adding new remotes to TSR after it is fully initialized.")
+            warn("Avoid adding new remotes to STR after it is fully initialized.")
         end
         if v == NetWire.createEvent() then
             self:RegisterRemoteSignal(k)
@@ -79,10 +79,10 @@ local AddedActivePlayerSignal = Signal.new()
 local RemovedActivePlayerSignal = Signal.new()
 
 --[=[
-    @within TableServerReplicator
+    @within ServerTableReplicator
     @type ReplicationTargets "All" | Player | {Player}
-    The Player(s) that the TSR should replicate to.
-    If "All" is given then the TSR will replicate to all current and future players.
+    The Player(s) that the STR should replicate to.
+    If "All" is given then the STR will replicate to all current and future players.
 ]=]
 export type ReplicationTargets = "All" | Player | {Player}
 
@@ -98,10 +98,10 @@ local function FormatRemoteSignalName(signalName: string): string
     return REMOTE_SIGNAL_PREFIX..signalName
 end
 
--- Runs a function on a tsr and all of its descendant tsrs
-local function ParseBranch(tsr, fn)
-    fn(tsr)
-    for _, child in pairs(tsr:GetChildren()) do
+-- Runs a function on a STR and all of its descendant STRs
+local function ParseBranch(STR, fn)
+    fn(STR)
+    for _, child in pairs(STR:GetChildren()) do
         ParseBranch(child, fn)
         -- fn(child) -- Is this needed?
     end
@@ -153,26 +153,26 @@ end
 --// CLASS //--
 --------------------------------------------------------------------------------
 
-local TableServerReplicator = setmetatable({}, BaseTableReplicator)
-TableServerReplicator.ClassName = "TableServerReplicator"
-TableServerReplicator.__index = TableServerReplicator
+local ServerTableReplicator = setmetatable({}, BaseTableReplicator)
+ServerTableReplicator.ClassName = "ServerTableReplicator"
+ServerTableReplicator.__index = ServerTableReplicator
 
 --[=[
-    @within TableServerReplicator
+    @within ServerTableReplicator
     @prop AddedActivePlayer Signal<Player>
     A signal that fires whenever a player starts being replicated to.
     This happens when their client requests the current data from the server.
 ]=]
-TableServerReplicator.AddedActivePlayer = AddedActivePlayerSignal
+ServerTableReplicator.AddedActivePlayer = AddedActivePlayerSignal
 
 --[=[
     @private
-    @within TableServerReplicator
+    @within ServerTableReplicator
     @prop RemovedActivePlayer Signal<Player>
     A signal that fires whenever a player stops being replicated to.
     This happens when the player leaves the game.
 ]=]
-TableServerReplicator.RemovedActivePlayer = RemovedActivePlayerSignal
+ServerTableReplicator.RemovedActivePlayer = RemovedActivePlayerSignal
 
 --------------------------------------------------------------------------------
     --// Core Replication Initialization //-- (Dont touch anything in here)
@@ -199,16 +199,16 @@ local function NetworkEventConnect(player: Player, id: Id, signalName: string, .
     end
 
     if typeof(id) ~= "number" then
-        error("Invalid TSR id type. Expected: 'number', Got: '" .. typeof(id) .. "'")
+        error("Invalid STR id type. Expected: 'number', Got: '" .. typeof(id) .. "'")
     end
 
-    local TSR = TableServerReplicator.getFromServerId(id)
-    if TSR then
-        local signal = TSR[KEY_REMOTE_SIGNALS][signalName]
+    local STR = ServerTableReplicator.getFromServerId(id)
+    if STR then
+        local signal = STR[KEY_REMOTE_SIGNALS][signalName]
         assert(signal, "Unregistered remote signal name: "..signalName)
         signal:_FireServer(player, ...)
     else
-        error("Invalid TSR id: "..tostring(id))
+        error("Invalid STR id: "..tostring(id))
     end
 end
 
@@ -221,26 +221,26 @@ function Replicator:RequestServerData(player: Player)
     end
 
     -- Move player from pending replication to active replication for each object
-    for _, TSR in TableServerReplicator do
-        if TSR:IsReplicationTarget(player) then
-            TSR._Replication.Pending[player] = nil
-            TSR._Replication.Active[player] = true
-            -- print("Moving player from pending to active replication for TSR: ", TSR:GetId(), TSR)
+    for _, STR in ServerTableReplicator do
+        if STR:IsReplicationTarget(player) then
+            STR._Replication.Pending[player] = nil
+            STR._Replication.Active[player] = true
+            -- print("Moving player from pending to active replication for STR: ", STR:GetId(), STR)
         -- else
-            -- print("Player is not a replication target for TSR: ", TSR:GetId(), TSR)
+            -- print("Player is not a replication target for STR: ", STR:GetId(), STR)
         end
     end
       
     -- Replicate all data to the player in a bulk packet
-    local TSR_Bulk_Packet: {TRPacket} = {}
-    for _, TSR in TableServerReplicator do
-        if TSR:IsTopLevel() and TSR:IsReplicationTarget(player) then
-            table.insert(TSR_Bulk_Packet, {TSR:GetId(), TSR._CreationData})
+    local STR_Bulk_Packet: {TRPacket} = {}
+    for _, STR in ServerTableReplicator do
+        if STR:IsTopLevel() and STR:IsReplicationTarget(player) then
+            table.insert(STR_Bulk_Packet, {STR:GetId(), STR._CreationData})
         end
     end
 
     -- send all current data to the player
-    Replicator.TR_Create:Fire(player, TSR_Bulk_Packet)
+    Replicator.TR_Create:Fire(player, STR_Bulk_Packet)
 
     ACTIVE_PLAYERS[player] = true
     AddedActivePlayerSignal:Fire(player)
@@ -248,16 +248,16 @@ end
 
 
 function Replicator:RedirectFunction(player: Player, id: Id, fnName: string, ...: any)
-    local TSR = TableServerReplicator.getFromServerId(id)
-    if not TSR then
-        error("Invalid TSR id: "..tostring(id))
+    local STR = ServerTableReplicator.getFromServerId(id)
+    if not STR then
+        error("Invalid STR id: "..tostring(id))
     end
-    return TSR.Client[fnName](TSR, player, ...)
+    return STR.Client[fnName](STR, player, ...)
 end
 
 Players.PlayerRemoving:Connect(function(player: Player)
-    for _, TSR in TableServerReplicator do
-        local replication = TSR._Replication
+    for _, STR in ServerTableReplicator do
+        local replication = STR._Replication
         replication.Pending[player] = nil
         replication.Active[player] = nil
     end
@@ -271,7 +271,7 @@ end)
 --------------------------------------------------------------------------------
 
 --[=[
-    Returns a ClassToken Symbol that is used for identifying the TSR Class.
+    Returns a ClassToken Symbol that is used for identifying the STR Class.
     We use unique symbols instead of strings to prevent accidental collisions.
     
     :::warning
@@ -280,7 +280,7 @@ end)
     function again with the same string will result in an error.
     :::
 ]=]
-function TableServerReplicator.newClassToken(tokenName: string): ClassToken
+function ServerTableReplicator.newClassToken(tokenName: string): ClassToken
     assert(type(tokenName) == "string", `Invalid token type. Expected: 'string', Got: '{typeof(tokenName)}'`)
     assert(#tokenName > 0, "Class token name cannot be empty")
     assert(not table.find(USED_CLASS_TOKENS, tokenName), `Class token '{tokenName}' already exists.`)
@@ -292,33 +292,33 @@ function TableServerReplicator.newClassToken(tokenName: string): ClassToken
     table.insert(USED_CLASS_TOKENS, tokenName)
     return token :: any
 end
-TableServerReplicator.createClassToken = TableServerReplicator.newClassToken -- alias
+ServerTableReplicator.createClassToken = ServerTableReplicator.newClassToken -- alias
 
 --[=[
-    Creates a new TableServerReplicator instance.
+    Creates a new ServerTableReplicator instance.
     The config must be given a TableManager instance and a ClassToken Symbol.
 
     A list of replication targets can be provided to specify which
-    players the TSR should replicate to immediately. If no replication targets
-    are specified, the TSR will not replicate to any players.
+    players the STR should replicate to immediately. If no replication targets
+    are specified, the STR will not replicate to any players.
 
-    You can specify a Parent TSR instead of giving ReplicationTargets and it will
-    inherit the replication targets of the top level TSR.
+    You can specify a Parent STR instead of giving ReplicationTargets and it will
+    inherit the replication targets of the top level STR.
 
-    Optionally, a list of tags can be provided to help identify the TSR. The
-    tags list will become immutable internally after the TSR is created.
+    Optionally, a list of tags can be provided to help identify the STR. The
+    tags list will become immutable internally after the STR is created.
 
     EXAMPLE:
     ```lua
     -- Some Server Script
-    local token = TableServerReplicator.newClassToken("PlayerData")
+    local token = ServerTableReplicator.newClassToken("PlayerData")
 
     Players.PlayerAdded:Connect(function(player)
         local manager = TableManager.new({
             Money = math.random(1, 100);
         })
 
-        local replicator = TableServerReplicator.new({
+        local replicator = ServerTableReplicator.new({
             TableManager = manager,
             ClassToken = token,
             ReplicationTargets = "All",
@@ -328,8 +328,8 @@ TableServerReplicator.createClassToken = TableServerReplicator.newClassToken -- 
     ```
     ```lua
     -- Some Client Script
-    TableClientReplicator.listenToNewReplicator("PlayerData", function(replicator)
-        print("New PlayerData TSR: ", replicator:GetTag("UserId"))
+    ClientTableReplicator.listenToNewReplicator("PlayerData", function(replicator)
+        print("New PlayerData STR: ", replicator:GetTag("UserId"))
         print("Money: ", replicator:GetTableManager():Get("Money"))
     end)
     ```
@@ -345,11 +345,11 @@ TableServerReplicator.createClassToken = TableServerReplicator.newClassToken -- 
     TopLevel Replicator.
     :::
 ]=]
-function TableServerReplicator.new(config: {
+function ServerTableReplicator.new(config: {
     ClassToken: ClassToken,
     TableManager: TableManager,
     ReplicationTargets: ReplicationTargets?,
-    Parent: TableServerReplicator?,
+    Parent: ServerTableReplicator?,
     Tags: {[string]: any}?,
     Client: {[string]: any}?,
 })
@@ -357,10 +357,10 @@ function TableServerReplicator.new(config: {
     --// Validate Config //--
     local cToken = config.ClassToken
     if type(cToken) == "string" then
-        warn(`ClassToken '{cToken :: string}' given as string. To silence, use 'TableServerReplicator.newClassToken' to provide a ClassToken Symbol`)
+        warn(`ClassToken '{cToken :: string}' given as string. To silence, use 'ServerTableReplicator.newClassToken' to provide a ClassToken Symbol`)
         if not table.find(USED_CLASS_TOKENS, cToken) then
             warn(`Registering ClassToken '{cToken :: string}' . . .`)
-            cToken = TableServerReplicator.newClassToken(cToken :: string)
+            cToken = ServerTableReplicator.newClassToken(cToken :: string)
         else
             error("ClassToken already registered. Expected ClassToken Symbol, Got: "..tostring(cToken))
         end
@@ -372,8 +372,8 @@ function TableServerReplicator.new(config: {
     local repTargets = config.ReplicationTargets
     if parent then
         assert(not parent.IsDestroyed, "Parent already Destroyed")
-        assert(parent.ClassName == "TableServerReplicator", "Parent must be a TSR")
-        assert(not repTargets, "Cannot specify replication targets when creating a child TSR")
+        assert(parent.ClassName == "ServerTableReplicator", "Parent must be a STR")
+        assert(not repTargets, "Cannot specify replication targets when creating a child STR")
         
     else
         if not repTargets then
@@ -398,7 +398,7 @@ function TableServerReplicator.new(config: {
         TableManager = config.TableManager;
         Tags = config.Tags;
         IsTopLevel = parent ~= nil;
-    }), TableServerReplicator)
+    }), ServerTableReplicator)
 
 
     local creationData
@@ -412,7 +412,7 @@ function TableServerReplicator.new(config: {
             replication = {Active = {}, Pending = {}}
         end
     
-        -- The creation data for this TSR
+        -- The creation data for this STR
         local individualCreationData = {
             if parent then parent:GetId() else nil; -- [1] = ParentId?
             cToken.Name; -- [2] = ClassTokenName
@@ -437,7 +437,7 @@ function TableServerReplicator.new(config: {
     self._ClassToken = cToken
     self._CreationData = creationData
 
-    self._Parent = parent :: TableServerReplicator?
+    self._Parent = parent :: ServerTableReplicator?
     
     self._Replication = replication  :: {
         All: boolean?;
@@ -467,9 +467,9 @@ end
 --[=[
     Destroys the Replicator on both the Server and any replicated Clients
 ]=]
-function TableServerReplicator:Destroy()
+function ServerTableReplicator:Destroy()
     self:SetReplicationTargets({})
-    getmetatable(TableServerReplicator).Destroy(self)
+    getmetatable(ServerTableReplicator).Destroy(self)
 end
 
 --------------------------------------------------------------------------------
@@ -479,7 +479,7 @@ end
 --[=[
     @private
 ]=]
-function TableServerReplicator:_InitListeners()
+function ServerTableReplicator:_InitListeners()
     self:AddTask(self:GetTableManager():GetDestroyedSignal():Once(function()
         self:Destroy()
     end))
@@ -522,9 +522,9 @@ end
 
 --[=[
     @private
-    Serializes the TSR into a packet that can be sent to the client.
+    Serializes the STR into a packet that can be sent to the client.
 ]=]
-function TableServerReplicator:_GeneratePacket(): TRPacket
+function ServerTableReplicator:_GeneratePacket(): TRPacket
     return {
         self:GetId(),
         self._ClassToken.Name,
@@ -537,7 +537,7 @@ end
     @private
     Tells the client to stop replicating to the targets.
 ]=]
-function TableServerReplicator:_StopReplicatingToTargets(targets: CanBeArray<Player>)
+function ServerTableReplicator:_StopReplicatingToTargets(targets: CanBeArray<Player>)
     local plrArray = EnsureIsPlayerArray(targets)
 
     local pending = self._Replication.Pending
@@ -558,7 +558,7 @@ end
     @private
     Tries to immediately replicate to the targets if not replicated already.
 ]=]
-function TableServerReplicator:_StartReplicatingToTargets(targets: CanBeArray<Player>)
+function ServerTableReplicator:_StartReplicatingToTargets(targets: CanBeArray<Player>)
     local plrArray = EnsureIsPlayerArray(targets)
 
     local packet = self._CreationData
@@ -594,7 +594,7 @@ end
     @unreleased
     Registers a new reliable remote signal.
 ]=]
-function TableServerReplicator:RegisterRemoteSignal(signalName: string)
+function ServerTableReplicator:RegisterRemoteSignal(signalName: string)
     assert(not self[KEY_REMOTE_SIGNALS][signalName], "Remote signal already registered: "..signalName)
     self[KEY_REMOTE_SIGNALS][signalName] = self:AddTask(ServerCustomRemote.new(signalName, self))
 end
@@ -604,7 +604,7 @@ end
     @unreleased
     Registers a new unreliable remote signal.
 ]=]
-function TableServerReplicator:RegisterRemoteUnreliableSignal(signalName: string)
+function ServerTableReplicator:RegisterRemoteUnreliableSignal(signalName: string)
     assert(not self[KEY_REMOTE_SIGNALS][signalName], "Remote signal already registered: "..signalName)
     self[KEY_REMOTE_SIGNALS][signalName] = self:AddTask(ServerCustomRemote.new(signalName, self, true))
 end
@@ -614,7 +614,7 @@ end
     @unreleased
     Gets an existing RemoteSignal by name. Can be either reliable or unreliable.
 ]=]
-function TableServerReplicator:GetRemoteSignal(signalName: string): ServerCustomRemote
+function ServerTableReplicator:GetRemoteSignal(signalName: string): ServerCustomRemote
     local remoteSignal = self[KEY_REMOTE_SIGNALS][signalName]
     assert(remoteSignal, "Remote signal not registered: "..signalName)
     return remoteSignal :: any
@@ -624,7 +624,7 @@ end
     @private
     @unreleased
 ]=]
-function TableServerReplicator:RegisterRemoteFunction(fnName: string, fn: (...any) -> ...any)
+function ServerTableReplicator:RegisterRemoteFunction(fnName: string, fn: (...any) -> ...any)
 end
 
 --------------------------------------------------------------------------------
@@ -632,9 +632,9 @@ end
 --------------------------------------------------------------------------------
 
 --[=[
-    Returns whether or not this TSR is replicating to all current and future players.
+    Returns whether or not this STR is replicating to all current and future players.
 ]=]
-function TableServerReplicator:IsReplicatingToAll(): boolean
+function ServerTableReplicator:IsReplicatingToAll(): boolean
     return self._Replication.All == true
 end
 
@@ -642,7 +642,7 @@ end
     Checks whether the player is a valid target for replication.
     Not whether the player is currently being replicated to.
 ]=]
-function TableServerReplicator:IsReplicationTarget(player: Player): boolean
+function ServerTableReplicator:IsReplicationTarget(player: Player): boolean
     if self:IsReplicatingToAll() then
         return true
     elseif self._Replication.Active[player] then
@@ -656,7 +656,7 @@ end
 --[=[
     Gets the list of Players that this Replicator is attempting to replicate to.
 ]=]
-function TableServerReplicator:GetReplicationTargets(): {Player}
+function ServerTableReplicator:GetReplicationTargets(): {Player}
     if self:IsReplicatingToAll() then
         return Players:GetPlayers()
     end
@@ -673,7 +673,7 @@ end
     Gets the list of Players that this Replicator is *currently* replicating to.
     This is different from GetReplicationTargets as it does not include pending replication targets.
 ]=]
-function TableServerReplicator:GetActiveReplicationTargets(): {Player}
+function ServerTableReplicator:GetActiveReplicationTargets(): {Player}
     local players = {}
     for player in pairs(self._Replication.Active) do
         table.insert(players, player)
@@ -689,16 +689,16 @@ end
     @private
     Shortcut to set a value in the TableManager.
 ]=]
-function TableServerReplicator:Set(...: any)
+function ServerTableReplicator:Set(...: any)
     return self:GetTableManager():Set(...)
 end
 
 --[=[
-    Sets the Parent of this TSR to the given TSR.
+    Sets the Parent of this STR to the given STR.
 ]=]
-function TableServerReplicator:SetParent(newParent: TableServerReplicator)
-    assert(not self:IsTopLevel(), "Cannot set parent on a top level TSR")
-    assert(newParent._Replication, "Invalid parent. Expected TSR")
+function ServerTableReplicator:SetParent(newParent: ServerTableReplicator)
+    assert(not self:IsTopLevel(), "Cannot set parent on a top level STR")
+    assert(newParent._Replication, "Invalid parent. Expected STR")
 
     local oldParent = self:GetParent()
     if newParent == oldParent then
@@ -710,7 +710,7 @@ function TableServerReplicator:SetParent(newParent: TableServerReplicator)
         while currentParent do
             currentParent = currentParent:GetParent()
             if currentParent == self then
-                error("Cannot Parent a TSR to its own descendant")
+                error("Cannot Parent a STR to its own descendant")
             end
         end
     end
@@ -728,14 +728,14 @@ function TableServerReplicator:SetParent(newParent: TableServerReplicator)
 
         self._CreationData = newCreationData
 
-        -- Collect all creation data for this TSR and its descendants
+        -- Collect all creation data for this STR and its descendants
         local tempCreationData = {} :: {[string]: CreationData}
         do
             ParseBranch(self, function(transferred)
                 local id = tostring(transferred:GetId())
                 tempCreationData[id] = oldCreationData[id]
 
-                -- swap references from the old TSR to the new TSR
+                -- swap references from the old STR to the new STR
                 transferred._CreationData = newCreationData
                 transferred._Replication = newReplication
             end)
@@ -750,7 +750,7 @@ function TableServerReplicator:SetParent(newParent: TableServerReplicator)
         
 
         -- Inform the clients of the change
-        do -- 1) Clients who have this TSR and the new parent only need to know the new parent Id
+        do -- 1) Clients who have this STR and the new parent only need to know the new parent Id
             local ClientsToInform = ACTIVE_PLAYERS
             if not newReplication.All then
                 ClientsToInform = newReplication.Active
@@ -766,7 +766,7 @@ function TableServerReplicator:SetParent(newParent: TableServerReplicator)
             end
         end
        
-        do -- 2) Create a new TSR for each client that have the new parent but not the old parent
+        do -- 2) Create a new STR for each client that have the new parent but not the old parent
             local ClientsToReplicateTo = {}
 
             if not oldReplication.All then
@@ -781,7 +781,7 @@ function TableServerReplicator:SetParent(newParent: TableServerReplicator)
             Replicator.TR_Create:FireFor(ClientsToReplicateTo, self:GetId(), tempCreationData)
         end
 
-        do -- 3) Destroy the TSR for each client that have the old parent but not the new parent
+        do -- 3) Destroy the STR for each client that have the old parent but not the new parent
             local ClientsToDestroy = {}
 
             if not newReplication.All then
@@ -818,7 +818,7 @@ end
 --[=[
     Removes a player or list of players from the replication targets.
 ]=]
-function TableServerReplicator:DestroyFor(targets: ReplicationTargets)
+function ServerTableReplicator:DestroyFor(targets: ReplicationTargets)
     if typeof(targets) == "Instance" then
         if not self:IsReplicationTarget(targets) then
             warn("No Change")-- No change
@@ -843,7 +843,7 @@ function TableServerReplicator:DestroyFor(targets: ReplicationTargets)
 
     else -- if we are currently replicating to all players
         if targets ~= "All" then -- we request to destroy for a specific player[s]
-            error("Don't selectively destroy for clients when TSR is replicated to 'All' - use :DestroyFor(\"All\") first")
+            error("Don't selectively destroy for clients when STR is replicated to 'All' - use :DestroyFor(\"All\") first")
         end
 
         self:SetReplicationTargets({})
@@ -853,7 +853,7 @@ end
 --[=[
     Adds a player or list of players to the replication targets.
 ]=]
-function TableServerReplicator:ReplicateFor(targets: ReplicationTargets)
+function ServerTableReplicator:ReplicateFor(targets: ReplicationTargets)
     if typeof(targets) == "Instance" then
         if self:IsReplicationTarget(targets) then
             warn("No Change") -- No change
@@ -879,7 +879,7 @@ function TableServerReplicator:ReplicateFor(targets: ReplicationTargets)
         end
     else
         if targets ~= "All" then
-            error("Don't selectively replicate for clients when TSR is replicated to 'All' - :DestroyFor(\"All\") first")
+            error("Don't selectively replicate for clients when STR is replicated to 'All' - :DestroyFor(\"All\") first")
         end
     end
 end
@@ -888,8 +888,8 @@ end
 --[=[
     Overwrites the current replication targets with the new targets.
 ]=]
-function TableServerReplicator:SetReplicationTargets(targets: ReplicationTargets)
-    assert(self:IsTopLevel(), "Cannot set replication targets on a child TSR")
+function ServerTableReplicator:SetReplicationTargets(targets: ReplicationTargets)
+    assert(self:IsTopLevel(), "Cannot set replication targets on a child STR")
     if typeof(targets) == "nil" then
         warn("Please pass an empty array instead of nil to remove all replication targets")
         targets = {}
@@ -936,37 +936,37 @@ end
 --------------------------------------------------------------------------------
 
 -- Useful common TopLevel Replicators
-local serverToken = TableServerReplicator.newClassToken("Server")
-local allToken = TableServerReplicator.newClassToken("All")
+local serverToken = ServerTableReplicator.newClassToken("Server")
+local allToken = ServerTableReplicator.newClassToken("All")
 
 --[=[
-    @within TableServerReplicator
-    @prop All TableServerReplicator
-    A TSR that replicates to all current and future players.
-    Used as a global parent for child TSRs that need a home and should
+    @within ServerTableReplicator
+    @prop All ServerTableReplicator
+    A STR that replicates to all current and future players.
+    Used as a global parent for child STRs that need a home and should
     be replicated to all current and future players. Do not modify
-    anything about this TSR, only use it as a Parent.
+    anything about this STR, only use it as a Parent.
 ]=]
-TableServerReplicator.All = TableServerReplicator.new({
+ServerTableReplicator.All = ServerTableReplicator.new({
     TableManager = TableManager.new({});
     ClassToken = allToken;
     ReplicationTargets = "All";
 })
 
 --[=[
-    @within TableServerReplicator
-    @prop None TableServerReplicator
-    A TSR that doesnt replicate to anyone.
-    Used as a global parent for child TSRs that shouldnt be replicated.
-    Do not modify anything about this TSR, only use it as a Parent.
+    @within ServerTableReplicator
+    @prop None ServerTableReplicator
+    A STR that doesnt replicate to anyone.
+    Used as a global parent for child STRs that shouldnt be replicated.
+    Do not modify anything about this STR, only use it as a Parent.
 ]=]
-TableServerReplicator.None = TableServerReplicator.new({
+ServerTableReplicator.None = ServerTableReplicator.new({
     TableManager = TableManager.new({});
     ClassToken = serverToken;
     ReplicationTargets = {};
 })
 
 
-export type TableServerReplicator = typeof(TableServerReplicator.new({}))
+export type ServerTableReplicator = typeof(ServerTableReplicator.new({}))
 
-return TableServerReplicator
+return ServerTableReplicator
