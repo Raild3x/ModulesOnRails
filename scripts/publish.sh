@@ -1,5 +1,7 @@
 #!/bin/bash
 
+cd ..
+
 # Prompt for the package name
 read -p "Enter the package name: " PACKAGE_NAME
 

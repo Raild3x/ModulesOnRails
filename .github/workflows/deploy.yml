@@ -6,7 +6,6 @@ on:
 jobs:
   generate_readme:
     name: Generate README
-    needs: build_docs
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -27,7 +26,7 @@ jobs:
       - name: Install Aftman
         uses: ok-nick/setup-aftman@v0.4.2
       - name: Run Selene
-        run: selene src
+        run: selene lib
 
   build_docs:
     name: Build docs

@@ -561,7 +561,7 @@ function TableManager:ArrayMutate(path: Path, index: CanBeArray<number> | "#", f
             index = {index}
         end
 
-        assert(typeof(index) == "table")
+        assert(typeof(index) == "table", "Index must be able to resolve to a table of numbers!")
         for i = 1, #index do
             local idx = index[i]
             local currentValue = array[idx]
@@ -608,7 +608,7 @@ function TableManager:ArrayIncrement(path: Path, index: CanBeArray<number> | '#'
     end
     
     amount = amount or 1
-    assert(typeof(index) == "table")
+    assert(typeof(index) == "table", "Index must be able to resolve to a table of numbers!")
     for i = 1, #index do
         local idx = index[i]
         assert(idx <= containerArraySize, "Index out of bounds!")
@@ -660,7 +660,7 @@ function TableManager:ArraySet(path: Path, index: (CanBeArray<number> | '#')?, v
         end
     end
 
-    assert(typeof(index) == "table")
+    assert(typeof(index) == "table", "Index must be able to resolve to a table of numbers!")
     for i = 1, #index do
         local idx = index[i]
         if type(idx) ~= "number" then

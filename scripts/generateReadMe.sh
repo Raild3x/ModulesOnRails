@@ -58,7 +58,7 @@ for PACKAGE_DIR in lib/*; do
 
             # Append the package information to the README file
             cat <<EOF >> "$README_FILE"
-| [$FORMATTED_NAME]($PACKAGE_DOCS_LINK) | \`$FORMATTED_NAME = $PACKAGE_NAME@$PACKAGE_VERSION\` | $PACKAGE_DESCRIPTION |
+| [$FORMATTED_NAME]($PACKAGE_DOCS_LINK) | \`$FORMATTED_NAME = "$PACKAGE_NAME@$PACKAGE_VERSION"\` | $PACKAGE_DESCRIPTION |
 EOF
         else
             echo "Warning: $WALLY_TOML not found"
