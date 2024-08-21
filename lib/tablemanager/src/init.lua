@@ -18,25 +18,24 @@
     
 ]=]
 
---// Services //--
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
 --// Imports //--
 local Packages = script.Parent
 local TableState = require(script.TableState)
-local RailUtil = require(Packages.RailUtil)
 local Signal = require(Packages.Signal)
 local Fusion = require(Packages.Fusion)
 local Promise = require(Packages.Promise)
 local BaseObject = require(Packages.BaseObject)
 local SuperClass = BaseObject
 
+--// Types //--
 type TableState = TableState.TableState
 type FusionState<T> = Fusion.StateObject<T>
 type Promise = Promise.Promise
+
 type Signal = Signal.Signal
 type SignalInternal = Signal & {_head: any}
 type Connection = Signal.Connection
+
 type Numeric = number | Vector2 | Vector3 | CFrame | table | any
 type table = {[any]: any}
 
@@ -47,7 +46,7 @@ type ListenerContainer = {
     ArraySet: Signal?;
     ArrayInsert: Signal?;
     ArrayRemove: Signal?;
-    FusionState: State<any>?;
+    FusionState: FusionState<any>?;
 }
 
 --[=[
@@ -149,16 +148,6 @@ local managedTables: {[table]: TableManager} = setmetatable({}, {__mode = "kv"})
 --------------------------------------------------------------------------------
     --// Utility Fns //--
 --------------------------------------------------------------------------------
-local function AreArraysEqual(arr1, arr2): boolean
-    if #arr1 ~= #arr2 then
-        return false
-    end
-    for i = 1, #arr1 do
-        if arr1[i] ~= arr2[i] then
-            return false
-        end
-    end
-end
 
 local function AssertPathIsValid(path: Path) -- This method was deprecated with the introduction of non string paths
     --assert((typeof(path) == "string" or typeof(path) == "table"), "Path is required!")
@@ -178,7 +167,7 @@ local function PathToArray(indexPath: Path): {string}
     elseif pathType == "nil" then
         return ROOT_TABLE_PATH
     elseif pathType == "string" then
-        if not stringToArrayCache[indexPath] then
+        if not stringToArrayCache[indexPath :: string] then
             assert(type(indexPath) == "string", "Invalid indexPath type!")
             local pathArray = indexPath:split(".")
             if pathArray[1] == "" then
@@ -186,9 +175,9 @@ local function PathToArray(indexPath: Path): {string}
             end
             stringToArrayCache[indexPath] = pathArray
         end
-        return stringToArrayCache[indexPath]
+        return stringToArrayCache[indexPath :: string]
     end
-    return {indexPath}
+    return {indexPath :: string}
 end
 
 --[[
@@ -210,12 +199,15 @@ local function PathToString(indexPath: Path): string
         local stringPath = ""
         local pathSize = #indexPath
         for i = 1, pathSize do
-            stringPath = stringPath..indexPath[i]
+            stringPath = stringPath..(indexPath :: {any})[i]
             if i < pathSize then
                 stringPath = tostring(stringPath).."."
             end
         end
     end
+
+    warn("Invalid path format!", indexPath)
+    return ""
 end
 
 --[[
@@ -643,7 +635,7 @@ end
     The index can be a number or an array of numbers. If an array is given then
     the value will be set at each of those indices in the array.
 ]=]
-function TableManager:ArraySet(path: Path, index: CanBeArray<number>?, value: any)
+function TableManager:ArraySet(path: Path, index: (CanBeArray<number> | '#')?, value: any)
     debug.profilebegin("TM:ArraySet")
 
     local arrayPath = PathToArray(path)

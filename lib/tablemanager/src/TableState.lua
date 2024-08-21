@@ -7,21 +7,11 @@
     It is not feature complete and is subject to change.
 ]=]
 
---// Services //--
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
 --// Imports //--
-local Import = require(ReplicatedStorage.Orion.Import)
-local SuperClass = Import("BaseObject")
-
-local TableManager ---@module src.TableManager.TableManager
-type TableManager = TableManager.TableManager
-
-
+local SuperClass = require(script.Parent.Parent.BaseObject)
+type TableManager = any
 type CanBeArray<T> = T | {T}
-
-
-type Path = TableManager.Path
+type Path = any
 
 --------------------------------------------------------------------------------
 --// CLASS //--

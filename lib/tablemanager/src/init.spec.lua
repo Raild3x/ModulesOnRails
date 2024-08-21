@@ -12,7 +12,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 --// Imports //--
-local Import = require(ReplicatedStorage.Orion.Import)
 
 local ROOT_TABLE_PATH = {}
 
@@ -33,6 +32,8 @@ return function ()
     if RunService:IsRunning() then
         return warn("TableManager.spec is disabled while game is running")
     end
+
+    local Import = require(ReplicatedStorage.Orion.Import)
 
     local Janitor = Import("Janitor")
     local TableManager = Import("TableManager")

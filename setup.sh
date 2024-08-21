@@ -15,11 +15,12 @@ if [ ! -d "$SRC_DIR" ]; then
 fi
 
 for DIR in "$SRC_DIR"/*/ ; do
-    # # Check if it's a directory
-    # if [ ! -d "$DIR" ]; then
-    #   # If not a directory, skip to the next iteration
-    #   continue
-    # fi
+    # Check if it's a directory
+    if [ ! -d "$DIR" ]; then
+      # If not a directory, skip to the next iteration
+      echo "Skipping non-directory: $DIR"
+      continue
+    fi
 
     
     RAW_NAME="$(basename "$DIR")"
