@@ -4,6 +4,7 @@
 
 --[=[
 	@class Comm
+	@ignore
 	Remote communication library.
 
 	This exposes the raw functions that are used by the `ServerComm` and `ClientComm` classes.

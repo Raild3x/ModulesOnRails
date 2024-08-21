@@ -95,5 +95,34 @@ fi
 
 cd "$PACKAGE_DIR" || { echo "Failed to access $PACKAGE_DIR"; exit 1; }
 
-echo "Publishing package to Wally..."
-wally publish
+# Create the default.project.json file
+cat > default.project.json <<EOL
+{
+    "name": "$PACKAGE_NAME",
+    "tree": {
+        "\$path": "src"
+    }
+}
+EOL
+
+echo "default.project.json created."
+
+# Try to publish the package
+if wally publish; then
+    echo "Package published successfully."
+else
+    echo "Package publishing failed."
+fi
+
+# Delete the default.project.json file regardless of the result
+rm default.project.json
+echo "default.project.json deleted."
+
+# Return to the original directory
+cd -> /dev/null
+
+# Ask if they want to rebuild the package paths
+#read -p "Do you want to rebuild the sourcemap? (y/n) " PUBLISH
+echo "Rebuilding sourcemap..."
+
+bash setup.sh "$PACKAGE_NAME"

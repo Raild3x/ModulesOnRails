@@ -19,13 +19,13 @@ local TableManager = require(Packages.TableManager)
 local BaseObject = require(Packages.BaseObject)
 local SuperClass = BaseObject
 
-local ClientTableReplicator : typeof(require(script.Parent.ClientTableReplicator))
-type ClientTableReplicator = typeof(ClientTableReplicator)
+local TableReplicator = require(script.Parent.Parent.Shared.BaseTableReplicator)
+type ClientTableReplicator = TableReplicator.BaseTableReplicator
 
-type Promise = typeof(Promise.new())
 type table = {[any]: any}
-type Path = TableManager.Path
+type Promise = typeof(Promise.new())
 type TableManager = TableManager.TableManager
+type Path = TableManager.Path
 type State<T> = Fusion.StateObject<T>
 
 local PathToArray = TableManager.PathToArray
@@ -93,8 +93,7 @@ function TableReplicatorSingleton.new(config: Config)
     ------------------------------------------------------------------------
 
     local conditionFn = config.ConditionFn
-    local TableReplicator = require(script.Parent.ClientTableReplicator)
-
+    
     -- Check if a valid replicator already exists
     for _, replicator in TableReplicator.getAll(self._ClassTokenName) do
         if not conditionFn or conditionFn(replicator)  then

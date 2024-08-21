@@ -7,6 +7,12 @@ license = "MIT"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
 
+[custom]
+# The properly capitalized and spaced name of the library
+formattedName = "TableManager"
+# The intro page for the documentation
+docsLink = "TableManager"
+
 [dependencies]
 Promise = "evaera/promise@^4.0.0"
 Fusion = "acecateer/fusion@0.3.1"

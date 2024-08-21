@@ -7,11 +7,22 @@
     Uses Sleitnick's Comm under the hood. Provides a simple to use interface for networking across
     your codebase. This is a server side only module. To begin using it, you must first create a
     ServerNetWire object. This can be done by calling NetWire.Server, or by calling NetWire.Server.new
+
+    The following variables are all equivalent as NetWires are memoized by their namespace,
+    so creating a new one with the same namespace will return the same object.
     ```lua
     local TestNetWire1 = NetWire.Server.new("TestNetWire")
     local TestNetWire2 = NetWire.Server("TestNetWire")
-    print(TestNetWire1 == TestNetWire2) -- true (NetWires are memoized by their namespace)
+
+    print(TestNetWire1 == TestNetWire2) -- true 
     ```
+    :::info
+    You can also create a by calling the package directly, but this is not encouraged as it
+    obscures the RunContext in which the NetWire is being created.
+    ```lua
+    local TestNetWire3 = NetWire("TestNetWire")
+    ```
+    :::
 
     You can then create client exposed events by registering them with the method or setting their index:
     The following two lines accomplish the same thing.
@@ -28,12 +39,12 @@
 
     local myNetWire = NetWire.Server("MyNetWire")
 
-    -- Aliases (Use either-or)
+    -- Aliases (These are equivalent. You can use either to create remote events)
     myNetWire.ServerSideEvent = NetWire.createEvent()
     myNetWire:RegisterEvent("ServerSideEvent")
 
 
-    -- Setup a method (Creating this calls myNetWire:RegisterMethod() internally via __newindex)
+    -- Setup a method
     function myNetWire:ServerSideFunction(player: Player, someArg: number)
         print(someArg)
         return someArg * 2
@@ -208,12 +219,33 @@ end
     @param service Service
     @return ServerNetWire
 
-    Creates a ServerNetWire from a service.
+    Creates a ServerNetWire from a Roam Service.
     This method will read the service's Name and Client table to create the NetWire.
+    The goal of this function is to recreate the simplicity of Knit's networking features without
+    the systems being coupled together.
 
-    **[CAUTION] It will overwrite the service.Client table with the NetWire**.
+    ```lua
+    local ExampleService = Roam.createService { Name = "ExampleService" }
+    ExampleService.Client = {
+        TestEvent = NetWire.createEvent()
+    }
+
+    function ExampleService:RoamInit()
+        NetWire.Server.setupServiceNetworking(self)
+    end
+    ```
+
+    :::caution Client Table Overwrite
+    Calling this function will overwrite the service's `Client` table with the NetWire.
+    You should not store anything aside from supported NetWire objects in the Client table.
+    :::
+
+    :::info Where to call
+    This function should be called within the init method of the service. This is
+    to prevent netwires from being created outside of a running game.
+    :::
 ]=]
-function ServerNetWire.fromService(service: Service)
+function ServerNetWire.setupServiceNetworking(service: Service)
     assert(RunService:IsServer(), "ServerNetWire.fromService can only be called from the server")
     assert(typeof(service.Client) == "table", "ServerNetWire.fromService expects a table for the service parameter with a Client key")
 
@@ -238,6 +270,7 @@ function ServerNetWire.fromService(service: Service)
 
     return newNetWire
 end
+ServerNetWire.fromService = ServerNetWire.setupServiceNetworking
 
 --[=[
     @tag destructor
@@ -364,8 +397,9 @@ end
     @param functionName string
     @param callback (self: any, plr: Player, ...any) -> (...any)
     @param tbl {}?
-    Creates a remote function with the given name. This is not suggested to be used by end users.
-
+    Creates a remote function with the given name. This is not suggested to be used by end users; instead
+    you should just append a function to a netwire object and it will properly wrap it for you.
+    
     ```lua
     -- Server Side
     local myWire = NetWire.Server("MyWire")
@@ -396,6 +430,7 @@ end
 --------------------------------------------------------
 
 NetWire.Server = ServerNetWire
+NetWire.setupServiceNetworking = ServerNetWire.setupServiceNetworking
 NetWire.__call = function(_, ...)
     return ServerNetWire.new(...)
 end

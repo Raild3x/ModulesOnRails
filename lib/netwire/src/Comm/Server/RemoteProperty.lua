@@ -14,6 +14,7 @@ local None = Util.None
 
 --[=[
 	@class RemoteProperty
+	@ignore
 	@server
 	Created via `ServerComm:CreateProperty()`.
 

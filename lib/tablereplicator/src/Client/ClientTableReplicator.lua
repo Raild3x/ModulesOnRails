@@ -22,6 +22,7 @@ local RailUtil = require(Packages.RailUtil)
 local TableManager = require(Packages.TableManager)
 local TableReplicatorUtil = require(script.Parent.Parent.Shared.TableReplicatorUtil)
 local BaseTableReplicator = require(script.Parent.Parent.Shared.BaseTableReplicator)
+local TableReplicatorSingleton = require(script.Parent.TableReplicatorSingleton)
 local ClientCustomRemote = require(script.Parent.ClientCustomRemote)
 
 --// Types //--
@@ -76,6 +77,17 @@ local ServerMT = {
 local ClientTableReplicator = setmetatable({}, BaseTableReplicator)
 ClientTableReplicator.ClassName = "ClientTableReplicator"
 ClientTableReplicator.__index = ClientTableReplicator
+
+--[=[
+    @tag Static
+    @within ClientTableReplicator
+    @function fromTemplate
+
+    Creates a ReplicatedTableSingleton object from the given template configuration.
+
+    See [TableReplicatorSingleton.new](TableReplicatorSingleton#new) for more information.
+]=]
+ClientTableReplicator.fromTemplate = TableReplicatorSingleton.new
 
 --[=[
     @private

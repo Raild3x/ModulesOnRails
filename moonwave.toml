@@ -9,4 +9,8 @@ classes = ["TableManager", "TableState"]
 
 [[classOrder]]
 section = "TableReplicator"
-classes = ["TableReplicator", "ServerTableReplicator", "ClientTableReplicator"]
+classes = ["ServerTableReplicator", "ClientTableReplicator", "TableReplicatorSingleton", "BaseTableReplicator"]
+
+[[classOrder]]
+section = "NetWire"
+classes = ["NetWire", "ServerNetWire", "ClientNetWire"]

@@ -5,6 +5,7 @@
     @class ClientCustomRemote
     @client
     @unreleased
+    @ignore
 
     Serves as a middleware for handling RemoteObject RemoteEvents.
 

@@ -1,11 +1,18 @@
 [package]
 name = "raild3x/tablereplicator"
-description = "A base class for creating objects with a lifecycle and event system."
+description = "A set of classes for replicating tables and their changes between server and client with minimal effort."
 authors = ["Logan Hunt (Raildex)"]
 version = "0.0.1"
 license = "MIT"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
+
+[custom]
+# The properly capitalized and spaced name of the library
+formattedName = "TableReplicator"
+# The intro page for the documentation
+docsLink = "ServerTableReplicator" 
+
 
 [dependencies]
 Janitor = "howmanysmall/janitor@^1.16.0"

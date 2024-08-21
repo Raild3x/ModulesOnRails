@@ -2,6 +2,29 @@
 -- Sep 15, 2023
 --[=[
     @class NetWire
+
+    NetWire is a networking library that enables functionality similar to Sleitnick's [Comm](https://sleitnick.github.io/RbxUtil/api/Comm/) library,
+    except it doesn't require the usage of intermediate instances.
+
+    Basic usage:
+    ```lua
+    -- SERVER
+    local NetWire = require(Packages.NetWire)
+    local myWire = NetWire("MyWire")
+
+    myWire.MyEvent = NetWire.createEvent()
+
+    myWire.MyEvent:Connect(function(plr: Player, msg: string)
+        print(plr, "said:", msg)
+    end)
+    ```
+    ```lua
+    -- CLIENT
+    local NetWire = require(Packages.NetWire)
+    local myWire = NetWire("MyWire")
+
+    myWire.MyEvent:Fire("Hello, world!")
+    ```
 ]=]
 
 local RunService = game:GetService("RunService")

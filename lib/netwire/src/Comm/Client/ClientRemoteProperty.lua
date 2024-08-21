@@ -26,6 +26,7 @@ local Types = require(Comm.Types)
 
 --[=[
 	@class ClientRemoteProperty
+	@ignore
 	@client
 	Created via `ClientComm:GetProperty()`.
 ]=]

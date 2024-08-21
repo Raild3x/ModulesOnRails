@@ -1,7 +1,8 @@
-Docs: https://raild3x.github.io/RailUtil/
+# Packages
 
-RailUtil is a collection of utility libraries intended to facilitate faster development by removing the need to recreate tedious amounts of commonly used routines as well as providing some other less common, but useful routines.
-
-In order to enable easier editing with linting of other packages, run the `setup` file with `bash setup.sh`
-
-This version of RailUtil is meant to be used with Fusion 0.2.0
+| Package | Latest Version | Description |
+|---------|----------------|-------------|
+| [BaseObject](raild3x.github.io/TableManager-TableReplicator/BaseObject) | `BaseObject = raild3x/baseobject@0.0.3` | A base class for creating objects with a lifecycle, janitor, and event system. |
+| [NetWire](raild3x.github.io/TableManager-TableReplicator/NetWire) | `NetWire = raild3x/netwire@0.0.2` | A networking library based off of sleitnicks comm library. |
+| [TableManager](raild3x.github.io/TableManager-TableReplicator/TableManager) | `TableManager = raild3x/tablemanager@0.0.5` | A class for managing and observing data in a table. Includes some additional classes for extending functionality. |
+| [TableReplicator](raild3x.github.io/TableManager-TableReplicator/ServerTableReplicator) | `TableReplicator = raild3x/tablereplicator@0.0.1` | A set of classes for replicating tables and their changes between server and client with minimal effort. |

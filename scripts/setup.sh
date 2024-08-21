@@ -1,8 +1,12 @@
 #!/bin/bash
 
+# This Bash script sets up the environment for Wally packages so that you can recieve proper linting while you work.
+
 set -e
 
 echo "Setting up your environment..."
+
+cd ..
 
 # Define the source directory
 SRC_DIR="lib"
@@ -14,12 +18,39 @@ if [ ! -d "$SRC_DIR" ]; then
     exit 1
 fi
 
+if [ $# -eq 0 ]; then
+    NO_ARGUMENTS_PROVIDED=true
+else
+    NO_ARGUMENTS_PROVIDED=false
+fi
+
 for DIR in "$SRC_DIR"/*/ ; do
+
     # Check if it's a directory
     if [ ! -d "$DIR" ]; then
       # If not a directory, skip to the next iteration
       echo "Skipping non-directory: $DIR"
       continue
+    fi
+
+    # Check if the directory is in the arguments
+    if [ "$NO_ARGUMENTS_PROVIDED" = false ]; then
+        echo "Arguments provided."
+        IS_ARGUMENT=false
+        for ARG in "$@"; do
+            if [ "$DIR" = "$SRC_DIR/$ARG/" ]; then
+                echo "Argument found: $ARG"
+                IS_ARGUMENT=true
+                break
+            fi
+        done
+        if [ "$IS_ARGUMENT" = false ]; then
+            echo "$SRC_DIR/$ARG/"
+            echo "Skipping non-argument directory: $DIR"
+            continue
+        fi
+    else
+        echo "No arguments provided."
     fi
 
     

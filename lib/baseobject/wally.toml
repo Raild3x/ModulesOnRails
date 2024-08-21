@@ -7,6 +7,12 @@ license = "MIT"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
 
+[custom]
+# The properly capitalized and spaced name of the library
+formattedName = "BaseObject"
+# The intro page for the documentation
+docsLink = "BaseObject"
+
 [dependencies]
 Promise = "evaera/promise@^4.0.0"
 Janitor = "howmanysmall/janitor@^1.16.0"

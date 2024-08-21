@@ -8,6 +8,7 @@ local Types = require(script.Parent.Parent.Types)
 
 --[=[
 	@class ServerComm
+	@ignore
 	@server
 ]=]
 local ServerComm = {}

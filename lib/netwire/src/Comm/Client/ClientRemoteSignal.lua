@@ -10,6 +10,7 @@ local Types = require(Comm.Types)
 
 --[=[
 	@class ClientRemoteSignal
+	@ignore
 	@client
 	Created via `ClientComm:GetSignal()`.
 ]=]
