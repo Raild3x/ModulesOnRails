@@ -22,13 +22,16 @@ jobs:
       - name: Run generateReadMe.sh
         run: scripts/generateReadMe.sh
 
+      - name: Debugging
+        run: echo "Repository: https://${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${{ github.repository }}.git"
+
       - name: Commit README update
         run: |
           git config --global user.email "you@example.com"
           git config --global user.name "GitHub Actions"
           git add README.md
           git commit -m "Update README from GitHub Actions"
-          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git HEAD:main
+          git push https://x-access-token:${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${{ github.repository }}.git HEAD:main
   build:
     name: Build and deploy docs
     runs-on: ubuntu-latest
