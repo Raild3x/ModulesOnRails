@@ -1,4 +1,4 @@
-name: Docs
+name: publish docs
 
 on:
   push:
@@ -28,7 +28,9 @@ jobs:
           git config --global user.name "GitHub Actions"
           git add README.md
           git commit -m "Update README from GitHub Actions"
-          git push
+          git push https://<PAT_TOKEN>@github.com/${{ github.repository }}.git HEAD:main
+        env:
+          PAT_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
 
   build:
     name: Build and deploy docs
