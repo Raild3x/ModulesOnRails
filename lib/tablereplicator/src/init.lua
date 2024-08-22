@@ -12,7 +12,7 @@ export type ServerTableReplicator = STR.ServerTableReplicator
 
 
 if RunService:IsClient() then
-    return require(script.Server.ServerTableReplicator)
-else
     return require(script.Client.ClientTableReplicator)
+else
+    return require(script.Server.ServerTableReplicator)
 end

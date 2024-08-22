@@ -2,7 +2,7 @@
 name = "raild3x/netwire"
 description = "A networking library based off of sleitnicks comm library."
 authors = ["Logan Hunt (Raildex)"]
-version = "0.0.3"
+version = "0.0.4"
 license = "MIT"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"

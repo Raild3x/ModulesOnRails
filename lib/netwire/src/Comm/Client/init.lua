@@ -23,8 +23,8 @@ function Client.GetFunction(
 	assert(rf ~= nil, "Failed to find RemoteFunction: " .. name)
 
 	inboundMiddleware = inboundMiddleware or {}
-	assert(inboundMiddleware, "Missing inboundMiddleware")
-	assert(outboundMiddleware, "Missing outboundMiddleware")
+	-- assert(inboundMiddleware, "Missing inboundMiddleware")
+	-- assert(outboundMiddleware, "Missing outboundMiddleware")
 	table.insert(inboundMiddleware, PCM)
 	local hasInbound = type(inboundMiddleware) == "table" and #inboundMiddleware > 0
 	local hasOutbound = type(outboundMiddleware) == "table" and #outboundMiddleware > 0

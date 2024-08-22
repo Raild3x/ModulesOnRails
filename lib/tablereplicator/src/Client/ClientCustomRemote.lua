@@ -24,16 +24,12 @@
     :Wait(predicate: (Player | Predicate)?) -> (Player, ...any)
 ]]
 
---// Services //--
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
---// References //--
-local Import = require(ReplicatedStorage.Orion.Import)
 
 --// Requires //--
-local Signal = Import("Signal")
-local Symbol = Import("Symbol")
-local NetWire = Import("NetWire")
+local Packages = script.Parent.Parent.Parent
+local Signal = require(Packages.Signal)
+local Symbol = require(Packages.Symbol)
+local NetWire = require(Packages.NetWire)
 
 local KEY_NAME = Symbol("Name")
 local KEY_REPLICATOR = Symbol("Replicator")

@@ -4,7 +4,7 @@ table {
     margin: 0 auto;
 }
 
-pre[class*="language-"][class*="language-"] {
+/* pre[class*="language-"][class*="language-"] {
     --ifm-pre-padding: 0.5em;
     padding: 0.5em !important;
 }
@@ -16,4 +16,4 @@ pre[class*="language-"][class*="language-"] {
 
 [class*="admonition"] {
     margin-bottom: 0.5em;
-}
+} */

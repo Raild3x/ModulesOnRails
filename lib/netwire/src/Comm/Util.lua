@@ -1,6 +1,6 @@
 local RunService = game:GetService("RunService")
 
-local Option = require(script.Parent.Dependencies._Option)
+local Option = require(script.Parent.Parent.Parent.Option)
 
 local Util = {}
 
