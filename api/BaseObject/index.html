@@ -1,0 +1,676 @@
+<!doctype html>
+<html lang="en" dir="ltr" class="plugin-moonwave plugin-id-moonwave">
+<head>
+<meta charset="UTF-8">
+<meta name="generator" content="Docusaurus v2.3.1">
+<title data-rh="true">BaseObject | ModulesOnRails</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:url" content="https://raild3x.github.io/api/BaseObject"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docusaurus_tag" content="default"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docsearch:docusaurus_tag" content="default"><meta data-rh="true" property="og:title" content="BaseObject | ModulesOnRails"><meta data-rh="true" name="description" content="BaseObject provides interface methods for three core features:
+- Object Destruction via adding a :Destroy() method and IsDestroyed flag property,
+- Task Management across the objects lifetime by providing a janitor internally,
+- and Signal Management by providing interfaces to Register, Get, and Fire signals easily.
+
+
+Destroy Behavior:
+* When a BaseObject instance is destroyed, it&#x27;s `IsDestroyed` property is set to true, and it&#x27;s `Destroyed` signal is fired.
+* It&#x27;s metatable is set to a metatable that will error when any of it&#x27;s methods or metamethods are called.
+
+You should check `IsDestroyed` before calling any methods on a BaseObject instance if you are not sure if it has been destroyed or not."><meta data-rh="true" property="og:description" content="BaseObject provides interface methods for three core features:
+- Object Destruction via adding a :Destroy() method and IsDestroyed flag property,
+- Task Management across the objects lifetime by providing a janitor internally,
+- and Signal Management by providing interfaces to Register, Get, and Fire signals easily.
+
+
+Destroy Behavior:
+* When a BaseObject instance is destroyed, it&#x27;s `IsDestroyed` property is set to true, and it&#x27;s `Destroyed` signal is fired.
+* It&#x27;s metatable is set to a metatable that will error when any of it&#x27;s methods or metamethods are called.
+
+You should check `IsDestroyed` before calling any methods on a BaseObject instance if you are not sure if it has been destroyed or not."><link data-rh="true" rel="canonical" href="https://raild3x.github.io/api/BaseObject"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/api/BaseObject" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/api/BaseObject" hreflang="x-default"><link rel="stylesheet" href="/assets/css/styles.1839e2d4.css">
+<link rel="preload" href="/assets/js/runtime~main.ea22b028.js" as="script">
+<link rel="preload" href="/assets/js/main.5e4ed51e.js" as="script">
+</head>
+<body class="navigation-with-keyboard">
+<script>!function(){function e(e){document.documentElement.setAttribute("data-theme",e)}var t=function(){var e=null;try{e=localStorage.getItem("theme")}catch(e){}return e}();null!==t?e(t):window.matchMedia("(prefers-color-scheme: dark)").matches?e("dark"):(window.matchMedia("(prefers-color-scheme: light)").matches,e("light"))}()</script><div id="__docusaurus">
+<div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="navbar navbar--fixed-top"><div class="navbar__inner"><div class="navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/api/">API</a></div><div class="navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-hidden="true" viewBox="0 0 24 24" class="iconExternalLink_nPIU"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"></path></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="Switch between dark and light mode (currently light mode)" aria-label="Switch between dark and light mode (currently light mode)" aria-live="polite"><svg viewBox="0 0 24 24" width="24" height="24" class="lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" class="darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg></button></div><div class="searchBox_ZlJk"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input type="search" id="search_input_react" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="docusaurus_skipToContent_fallback" class="main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" href="/api/BaseObject">​Base​Object</a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/api/TableManager">TableManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/api/ServerTableReplicator">TableReplicator</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/api/NetWire">NetWire</a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/api/PlayerProfileManager">​Player​Profile​Manager</a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><div class="tocCollapsible_ETCw theme-doc-toc-mobile tocMobile_oUs_"><button type="button" class="clean-btn tocCollapsibleButton_TO0P">On this page</button></div><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">Base</span><span style="display:inline-block">Object</span></h1><div class="luaClassTags_EipM"></div><div>
+<p>BaseObject provides interface methods for three core features:</p>
+<ul>
+  <li>Object Destruction via adding a :Destroy() method and IsDestroyed flag property,</li>
+  <li>Task Management across the objects lifetime by providing a janitor internally,</li>
+  <li>and Signal Management by providing interfaces to Register, Get, and Fire signals easily.</li>
+</ul>
+<p>Destroy Behavior:</p>
+<ul>
+  <li>When a BaseObject instance is destroyed, it's <code>IsDestroyed</code> property is set to true, and it's <code>Destroyed</code> signal is fired.</li>
+  <li>It's metatable is set to a metatable that will error when any of it's methods or metamethods are called.</li>
+</ul>
+<p>You should check <code>IsDestroyed</code> before calling any methods on a BaseObject instance if you are not sure if it has been destroyed or not.</p>
+</div></header><h2 class="anchor anchorWithStickyNavbar_LWe7" id="types">Types<a href="#types" class="hash-link" aria-label="Direct link to Types" title="Direct link to Types">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="BaseObject"><code style="text-decoration:none">BaseObject</code><a href="#BaseObject" class="hash-link" aria-label="Direct link to BaseObject" title="Direct link to BaseObject">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/baseobject/src/init.lua#L128"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code class="purple_ieR2">type</code> <code>BaseObject<!-- --> = </code> <code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/api/BaseObject#BaseObject">BaseObject</a></code></div><div></div><h2 class="anchor anchorWithStickyNavbar_LWe7" id="properties">Properties<a href="#properties" class="hash-link" aria-label="Direct link to Properties" title="Direct link to Properties">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="ClassName"><code style="text-decoration:none">ClassName</code><a href="#ClassName" class="hash-link" aria-label="Direct link to ClassName" title="Direct link to ClassName">​</a></h3><span class="badge_Ba2I" style="color:#e74c3c"><span class="badgeTooltip_cWXP">This item is read only and cannot be modified.</span><span class="badgeToolTipTail_H9D_"><svg xmlns="http://www.w3.org/2000/svg" height="300px" width="300px" fill="#e74c3c" x="0px" y="0px" viewBox="0 0 96 96"><path d="M70.354,15.662h-7.496H25.566c-3.282,0-5.19-0.776-5.728-1.169v-1.456c0.538-0.393,2.445-1.168,5.728-1.168h46.479V8H25.566  c-4.776,0-9.594,1.468-9.594,4.747v61.458C15.972,86.645,20.328,88,37.495,88h42.535V15.662H70.354z"></path></svg> <!-- -->Read Only</span></span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/baseobject/src/init.lua#L134"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseObject<!-- -->.<!-- -->ClassName<!-- -->:<!-- --> </code> <code class="blue_P4bS">string</code></div><div></div><h2 class="anchor anchorWithStickyNavbar_LWe7" id="functions">Functions<a href="#functions" class="hash-link" aria-label="Direct link to Functions" title="Direct link to Functions">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="getObjectFromId"><code style="text-decoration:none">getObjectFromId</code><a href="#getObjectFromId" class="hash-link" aria-label="Direct link to getObjectFromId" title="Direct link to getObjectFromId">​</a></h3><span class="docTag__6UZ" style="border-color:#dc0073;color:#dc0073">static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/baseobject/src/init.lua#L150"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseObject<!-- -->.</code><code class="green_DgR4">getObjectFromId</code><code>(</code><code>id<!-- -->: </code><code class="blue_P4bS">number</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/api/BaseObject#BaseObject">BaseObject?</a></code></div><div>
+<p>Fetches the object with the given ID if it exists.</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> obj <span class="token operator">=</span> BaseObject<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+
+<span class="token keyword">local</span> id <span class="token operator">=</span> obj<span class="token punctuation">:</span><span class="token function">GetId</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+
+<span class="token function">print</span><span class="token punctuation">(</span>BaseObject<span class="token punctuation">.</span><span class="token function">getObjectFromId</span><span class="token punctuation">(</span>id<span class="token punctuation">)</span> <span class="token operator">==</span> obj<span class="token punctuation">)</span> <span class="token comment">-- true</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="isDestroyed"><code style="text-decoration:none">isDestroyed</code><a href="#isDestroyed" class="hash-link" aria-label="Direct link to isDestroyed" title="Direct link to isDestroyed">​</a></h3><span class="docTag__6UZ" style="border-color:#dc0073;color:#dc0073">static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/baseobject/src/init.lua#L169"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseObject<!-- -->.</code><code class="green_DgR4">isDestroyed</code><code>(</code><code>self<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/api/BaseObject#BaseObject">BaseObject</a></code><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
+<p>Checks whether or not the object is destroyed.</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> obj <span class="token operator">=</span> BaseObject<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+
+<span class="token function">print</span><span class="token punctuation">(</span>BaseObject<span class="token punctuation">.</span><span class="token function">isDestroyed</span><span class="token punctuation">(</span>obj<span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token comment">-- false</span>
+
+obj<span class="token punctuation">:</span><span class="token function">Destroy</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+
+<span class="token function">print</span><span class="token punctuation">(</span>BaseObject<span class="token punctuation">.</span><span class="token function">isDestroyed</span><span class="token punctuation">(</span>obj<span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token comment">-- true</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="new"><code style="text-decoration:none">new</code><a href="#new" class="hash-link" aria-label="Direct link to new" title="Direct link to new">​</a></h3><span class="docTag__6UZ" style="border-color:#dc0073;color:#dc0073">static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/baseobject/src/init.lua#L214"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseObject<!-- -->.</code><code class="green_DgR4">new</code><code>(</code><div class="inset_uKQm"><div><code>tbl<!-- -->: </code><code class="purple_ieR2">{</code><span><code>[</code><code class="blue_P4bS">any</code><code>]</code></span><code>: </code><code class="blue_P4bS">any</code><code class="purple_ieR2">}</code><code class="blue_P4bS">?</code><span class="inlineDescription_G7Er">-- <span>
+<p>Table to construct the BaseObject with</p>
+</span></span></div></div><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/api/BaseObject#BaseObject">BaseObject</a></code></div><div>
+<p>Constructs a new BaseObject</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> obj <span class="token operator">=</span> BaseObject<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">{</span>
+	X <span class="token operator">=</span> <span class="token number">1</span><span class="token punctuation">,</span>
+	Y <span class="token operator">=</span> <span class="token number">2</span><span class="token punctuation">,</span>
+<span class="token punctuation">}</span><span class="token punctuation">)</span>
+
+obj<span class="token punctuation">.</span>Z <span class="token operator">=</span> <span class="token number">3</span>
+
+<span class="token function">print</span><span class="token punctuation">(</span>obj<span class="token punctuation">.</span>X<span class="token punctuation">,</span> obj<span class="token punctuation">.</span>Y<span class="token punctuation">,</span> obj<span class="token punctuation">.</span>Z<span class="token punctuation">)</span> <span class="token comment">-- 1, 2, 3</span>
+</code></pre>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> SuperClass <span class="token operator">=</span> <span class="token function">setmetatable</span><span class="token punctuation">(</span><span class="token punctuation">{</span><span class="token punctuation">}</span><span class="token punctuation">,</span> BaseObject<span class="token punctuation">)</span>
+SuperClass<span class="token punctuation">.</span>__index <span class="token operator">=</span> SuperClass
+SuperClass<span class="token punctuation">.</span>ClassName <span class="token operator">=</span> <span class="token string">"SuperClass"</span>
+
+<span class="token keyword">function</span> SuperClass<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+	<span class="token keyword">local</span> self <span class="token operator">=</span> <span class="token function">setmetatable</span><span class="token punctuation">(</span>BaseObject<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">,</span> SuperClass<span class="token punctuation">)</span>
+	<span class="token keyword">return</span> self
+<span class="token keyword">end</span>
+
+<span class="token keyword">function</span> SuperClass<span class="token punctuation">:</span><span class="token function">Destroy</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token comment">-- Overwrite the BaseObject Destroy method</span>
+	<span class="token function">getmetatable</span><span class="token punctuation">(</span>SuperClass<span class="token punctuation">)</span><span class="token punctuation">.</span><span class="token function">Destroy</span><span class="token punctuation">(</span>self<span class="token punctuation">)</span> <span class="token comment">-- If you overwrite the BaseObject Destroy method you need to have this line to call the original.</span>
+<span class="token keyword">end</span>
+
+<span class="token keyword">function</span> SuperClass<span class="token punctuation">:</span><span class="token function">Print</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+	<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Hello, World!"</span><span class="token punctuation">)</span>
+<span class="token keyword">end</span>
+
+<span class="token keyword">return</span> SuperClass
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Destroy"><code style="text-decoration:none">Destroy</code><a href="#Destroy" class="hash-link" aria-label="Direct link to Destroy" title="Direct link to Destroy">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/baseobject/src/init.lua#L246"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseObject<!-- -->:</code><code class="green_DgR4">Destroy</code><code>(</code><code>) → </code><code>(</code><code>)</code></div><div>
+<p>
+  Marks the Object as Destroyed, fires the Destroyed Signal, cleans up
+  the BaseObject, and sets the metatable to nil/a special locked MT.
+</p>
+<div class="admonition admonition-caution alert alert--warning">
+  <div class="admonition-heading">
+    <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+          <path d="M8.893 1.5c-.183-.31-.52-.5-.887-.5s-.703.19-.886.5L.138 13.499a.98.98 0 0 0 0 1.001c.193.31.53.501.886.501h13.964c.367 0 .704-.19.877-.5a1.03 1.03 0 0 0 .01-1.002L8.893 1.5zm.133 11.497H6.987v-2.003h2.039v2.003zm0-3.004H6.987V5.987h2.039v4.006z"></path>
+        </svg></span>Overriding</h5>
+  </div>
+  <div class="admonition-content">
+    <p>
+      If you override this method, you need to make sure you call
+      <code>getmetatable(self).Destroy(self)</code> to call the superclass methods.
+    </p>
+    <pre class="language-lua"><code class="language-lua"><span class="token keyword">function</span> MyCustomClass<span class="token punctuation">:</span><span class="token function">Destroy</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+	<span class="token function">getmetatable</span><span class="token punctuation">(</span>SuperClass<span class="token punctuation">)</span><span class="token punctuation">.</span><span class="token function">Destroy</span><span class="token punctuation">(</span>self<span class="token punctuation">)</span> <span class="token comment">-- calls the superclass method to clean up events, tasks, etc..</span>
+<span class="token keyword">end</span>
+</code></pre>
+  </div>
+</div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetId"><code style="text-decoration:none">GetId</code><a href="#GetId" class="hash-link" aria-label="Direct link to GetId" title="Direct link to GetId">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/baseobject/src/init.lua#L278"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseObject<!-- -->:</code><code class="green_DgR4">GetId</code><code>(</code><code>) → </code><code class="blue_P4bS">number</code></div><div>
+<p>
+  Returns the ID of the BaseObject
+  Can be used to fetch the object with BaseObject.getObjectFromId(id)
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="IsA"><code style="text-decoration:none">IsA</code><a href="#IsA" class="hash-link" aria-label="Direct link to IsA" title="Direct link to IsA">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/baseobject/src/init.lua#L286"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseObject<!-- -->:</code><code class="green_DgR4">IsA</code><code>(</code><code>classOrClassName<!-- -->: </code><code class="purple_ieR2">{</code><span><code>[</code><code class="blue_P4bS">any</code><code>]</code></span><code>: </code><code class="blue_P4bS">any</code><code class="purple_ieR2">}</code><code class="op_lSLc"> | </code><code class="blue_P4bS">string</code><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
+<p>
+  Returns true if the given object is of a given class.
+  Takes a class name or class object.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetTask"><code style="text-decoration:none">GetTask</code><a href="#GetTask" class="hash-link" aria-label="Direct link to GetTask" title="Direct link to GetTask">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/baseobject/src/init.lua#L318"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseObject<!-- -->:</code><code class="green_DgR4">GetTask</code><code>(</code><code>taskId<!-- -->: </code><code class="blue_P4bS">any</code><code>) → </code><code class="blue_P4bS">Task?</code></div><div>
+<p>Fetches the task with the given ID if it exists.</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> obj <span class="token operator">=</span> BaseObject<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+
+<span class="token keyword">local</span> part <span class="token operator">=</span> Instance<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token string">"Part"</span><span class="token punctuation">)</span>
+
+obj<span class="token punctuation">:</span><span class="token function">AddTask</span><span class="token punctuation">(</span>part<span class="token punctuation">,</span> <span class="token keyword">nil</span><span class="token punctuation">,</span> <span class="token string">"Test"</span><span class="token punctuation">)</span>
+
+<span class="token function">print</span><span class="token punctuation">(</span>obj<span class="token punctuation">:</span><span class="token function">GetTask</span><span class="token punctuation">(</span><span class="token string">"Test"</span><span class="token punctuation">)</span> <span class="token operator">==</span> part<span class="token punctuation">)</span> <span class="token comment">-- true</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="AddTask"><code style="text-decoration:none">AddTask</code><a href="#AddTask" class="hash-link" aria-label="Direct link to AddTask" title="Direct link to AddTask">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/baseobject/src/init.lua#L343"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseObject<!-- -->:</code><code class="green_DgR4">AddTask</code><code>(</code><div class="inset_uKQm"><div><code>task<!-- -->: </code><code class="blue_P4bS">Task</code><code>,</code></div><div><code>taskCleanupMethod<!-- -->: </code><code class="purple_ieR2">(</code><code class="blue_P4bS">string</code><code class="op_lSLc"> | </code><code class="blue_P4bS">true</code><code class="op_lSLc"> | </code><code class="blue_P4bS">nil</code><code class="purple_ieR2">)</code><code class="blue_P4bS">?</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
+<p>(if none is given it will try to infer; Passing true tells it to call it as a function)</p>
+</span></span></div><div><code>taskId<!-- -->: </code><code class="blue_P4bS">any?</code></div></div><code>) → </code><code class="blue_P4bS">Task</code><span class="inlineDescription_G7Er">-- <span>
+<p>The task that was given</p>
+</span></span></div><div>
+<p>
+  Adds a task to the janitor. If a taskId is provided, it will be used as the
+  key for the task in the janitor and can then be fetched later with :GetTask().
+  If an ID is provided and there already exists a task with that ID, it will
+  clean up the existing task and then replace the index with the new one.
+  It will return the task that was added/given.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> obj <span class="token operator">=</span> BaseObject<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+
+<span class="token keyword">local</span> task <span class="token operator">=</span> obj<span class="token punctuation">:</span><span class="token function">AddTask</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+	<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Hello, World!"</span><span class="token punctuation">)</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+
+obj<span class="token punctuation">:</span><span class="token function">Destroy</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token comment">-- Prints "Hello, World!"</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="AddPromise"><code style="text-decoration:none">AddPromise</code><a href="#AddPromise" class="hash-link" aria-label="Direct link to AddPromise" title="Direct link to AddPromise">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/baseobject/src/init.lua#L365"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseObject<!-- -->:</code><code class="green_DgR4">AddPromise</code><code>(</code><code>prom<!-- -->: </code><code class="blue_P4bS">Promise</code><code>) → </code><code class="blue_P4bS">Promise</code></div><div>
+<p>
+  Adds a promise to the janitor. Similar to :AddTask(). Returns the same Promise
+  that was given to it.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> prom <span class="token operator">=</span> Promise<span class="token punctuation">.</span><span class="token function">delay</span><span class="token punctuation">(</span>math<span class="token punctuation">.</span><span class="token function">random</span><span class="token punctuation">(</span><span class="token number">10</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token keyword">local</span> obj <span class="token operator">=</span> BaseObject<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+obj<span class="token punctuation">:</span><span class="token function">AddPromise</span><span class="token punctuation">(</span>prom<span class="token punctuation">)</span>
+
+task<span class="token punctuation">.</span><span class="token function">wait</span><span class="token punctuation">(</span>math<span class="token punctuation">.</span><span class="token function">random</span><span class="token punctuation">(</span><span class="token number">10</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+obj<span class="token punctuation">:</span><span class="token function">Destroy</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token comment">-- Cancels the promise if it hasn't resolved yet</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="RemoveTask"><code style="text-decoration:none">RemoveTask</code><a href="#RemoveTask" class="hash-link" aria-label="Direct link to RemoveTask" title="Direct link to RemoveTask">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/baseobject/src/init.lua#L388"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseObject<!-- -->:</code><code class="green_DgR4">RemoveTask</code><code>(</code><div class="inset_uKQm"><div><code>taskId<!-- -->: </code><code class="blue_P4bS">any</code><code>,</code></div><div><code>dontClean<!-- -->: </code><code class="blue_P4bS">boolean?</code></div></div><code>) → </code><code>(</code><code>)</code></div><div>
+<p>
+  Removes a task from the janitor. Cleans the task as if :DoCleaning was called.
+  If dontClean is true, it will not clean up the task, it will just remove
+  it from the janitor.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> obj <span class="token operator">=</span> BaseObject<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+
+<span class="token keyword">local</span> task <span class="token operator">=</span> obj<span class="token punctuation">:</span><span class="token function">AddTask</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+	<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Hello, World!"</span><span class="token punctuation">)</span>
+<span class="token keyword">end</span><span class="token punctuation">,</span> <span class="token keyword">nil</span><span class="token punctuation">,</span> <span class="token string">"Test"</span><span class="token punctuation">)</span>
+
+obj<span class="token punctuation">:</span><span class="token function">RemoveTask</span><span class="token punctuation">(</span><span class="token string">"Test"</span><span class="token punctuation">)</span> <span class="token comment">-- Prints "Hello, World!"</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="RemoveTaskNoClean"><code style="text-decoration:none">RemoveTaskNoClean</code><a href="#RemoveTaskNoClean" class="hash-link" aria-label="Direct link to RemoveTaskNoClean" title="Direct link to RemoveTaskNoClean">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/baseobject/src/init.lua#L409"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseObject<!-- -->:</code><code class="green_DgR4">RemoveTaskNoClean</code><code>(</code><code>taskId<!-- -->: </code><code class="blue_P4bS">any</code><code>) → </code><code>(</code><code>)</code></div><div>
+<p>Removes a task from the janitor without cleaning it.</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> obj <span class="token operator">=</span> BaseObject<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+
+<span class="token keyword">local</span> task <span class="token operator">=</span> obj<span class="token punctuation">:</span><span class="token function">AddTask</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+	<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Hello, World!"</span><span class="token punctuation">)</span>
+<span class="token keyword">end</span><span class="token punctuation">,</span> <span class="token keyword">nil</span><span class="token punctuation">,</span> <span class="token string">"Test"</span><span class="token punctuation">)</span>
+
+obj<span class="token punctuation">:</span><span class="token function">RemoveTaskNoClean</span><span class="token punctuation">(</span><span class="token string">"Test"</span><span class="token punctuation">)</span> <span class="token comment">-- Does NOT print "Hello, World!"</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="FireSignal"><code style="text-decoration:none">FireSignal</code><a href="#FireSignal" class="hash-link" aria-label="Direct link to FireSignal" title="Direct link to FireSignal">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/baseobject/src/init.lua#L435"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseObject<!-- -->:</code><code class="green_DgR4">FireSignal</code><code>(</code><div class="inset_uKQm"><div><code>signalName<!-- -->: </code><code class="blue_P4bS">string</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
+<p>The name of the signal to fire</p>
+</span></span></div><div><code>...<!-- -->: </code><code class="blue_P4bS">any</code><span class="inlineDescription_G7Er">-- <span>
+<p>Arguments to pass to the signal</p>
+</span></span></div></div><code>) → </code><code>(</code><code>)</code></div><div>
+<p>
+  Fires the signal with the given name, if it exists.
+  Equivalent to calling <code>:GetSignal(signalName):Fire(...)</code> except this does not require
+  the signal to exist first.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> obj <span class="token operator">=</span> BaseObject<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+<span class="token keyword">local</span> SignalName <span class="token operator">=</span> <span class="token string">"Test"</span>
+
+obj<span class="token punctuation">:</span><span class="token function">RegisterSignal</span><span class="token punctuation">(</span>SignalName<span class="token punctuation">)</span>
+
+obj<span class="token punctuation">:</span><span class="token function">GetSignal</span><span class="token punctuation">(</span>SignalName<span class="token punctuation">)</span><span class="token punctuation">:</span><span class="token function">Connect</span><span class="token punctuation">(</span>print<span class="token punctuation">)</span>
+
+obj<span class="token punctuation">:</span><span class="token function">FireSignal</span><span class="token punctuation">(</span>SignalName<span class="token punctuation">,</span> <span class="token string">"Hello, World!"</span><span class="token punctuation">)</span> <span class="token comment">-- Fires the signal with the argument "Hello, World!"</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="RegisterSignal"><code style="text-decoration:none">RegisterSignal</code><a href="#RegisterSignal" class="hash-link" aria-label="Direct link to RegisterSignal" title="Direct link to RegisterSignal">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/baseobject/src/init.lua#L448"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseObject<!-- -->:</code><code class="green_DgR4">RegisterSignal</code><code>(</code><div class="inset_uKQm"><div><code>signalName<!-- -->: </code><code class="blue_P4bS">string</code><span class="inlineDescription_G7Er">-- <span>
+<p>Name of signal to register</p>
+</span></span></div></div><code>) → </code><code>(</code><code>)</code></div><div>
+<p>
+  Marks a signal with the given name as registered. Does not actually
+  build a new signal, it sets the index to a SignalMarker to identify
+  it as registered so that it can be fetched later.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="HasSignal"><code style="text-decoration:none">HasSignal</code><a href="#HasSignal" class="hash-link" aria-label="Direct link to HasSignal" title="Direct link to HasSignal">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/baseobject/src/init.lua#L476"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseObject<!-- -->:</code><code class="green_DgR4">HasSignal</code><code>(</code><code>signalName<!-- -->: </code><code class="blue_P4bS">string</code><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
+<p>Checks whether or not a signal with the given name is registered.</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> obj <span class="token operator">=</span> BaseObject<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+
+<span class="token keyword">local</span> SignalName <span class="token operator">=</span> <span class="token string">"Test"</span>
+
+<span class="token function">print</span><span class="token punctuation">(</span>obj<span class="token punctuation">:</span><span class="token function">HasSignal</span><span class="token punctuation">(</span>SignalName<span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token comment">-- false</span>
+
+obj<span class="token punctuation">:</span><span class="token function">RegisterSignal</span><span class="token punctuation">(</span>SignalName<span class="token punctuation">)</span>
+
+<span class="token function">print</span><span class="token punctuation">(</span>obj<span class="token punctuation">:</span><span class="token function">HasSignal</span><span class="token punctuation">(</span>SignalName<span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token comment">-- true</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetSignal"><code style="text-decoration:none">GetSignal</code><a href="#GetSignal" class="hash-link" aria-label="Direct link to GetSignal" title="Direct link to GetSignal">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/baseobject/src/init.lua#L485"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseObject<!-- -->:</code><code class="green_DgR4">GetSignal</code><code>(</code><code>signalName<!-- -->: </code><code class="blue_P4bS">string</code><code>) → </code><code class="blue_P4bS">Signal</code></div><div>
+<p>Fetches a signal with the given name. Creates the Signal JIT.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetDestroyedSignal"><code style="text-decoration:none">GetDestroyedSignal</code><a href="#GetDestroyedSignal" class="hash-link" aria-label="Direct link to GetDestroyedSignal" title="Direct link to GetDestroyedSignal">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/baseobject/src/init.lua#L516"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseObject<!-- -->:</code><code class="green_DgR4">GetDestroyedSignal</code><code>(</code><code>) → </code><code class="blue_P4bS">Signal</code></div><div>
+<p>
+  Returns a signal that fires when the object is destroyed. Creates the signal JIT.
+  Kept for backwards compatibility.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> obj <span class="token operator">=</span> BaseObject<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+
+obj<span class="token punctuation">:</span><span class="token function">GetDestroyedSignal</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">:</span><span class="token function">Connect</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+	<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Object Destroyed!"</span><span class="token punctuation">)</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+
+obj<span class="token punctuation">:</span><span class="token function">Destroy</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token comment">-- Prints "Object Destroyed!"</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="BindToInstance"><code style="text-decoration:none">BindToInstance</code><a href="#BindToInstance" class="hash-link" aria-label="Direct link to BindToInstance" title="Direct link to BindToInstance">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/baseobject/src/init.lua#L556"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseObject<!-- -->:</code><code class="green_DgR4">BindToInstance</code><code>(</code><div class="inset_uKQm"><div><code>obj<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Instance" target="_blank" rel="noopener noreferrer">Instance<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>,</code></div><div><code>destroyOnNilParent<!-- -->: </code><code class="blue_P4bS">boolean?</code><span class="inlineDescription_G7Er">-- <span>
+<p>Whether or not to destroy the object when the parent is nil'd</p>
+</span></span></div></div><code>) → </code><code class="blue_P4bS">function</code><span class="inlineDescription_G7Er">-- <span>
+<p>Disconnects the binding</p>
+</span></span></div><div>
+<p>
+  Binds the object to the given instance. When the object is destroyed, it will
+  destroy the instance. When the instance is destroyed, it will destroy the object.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> obj <span class="token operator">=</span> BaseObject<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+<span class="token keyword">local</span> part <span class="token operator">=</span> Instance<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token string">"Part"</span><span class="token punctuation">)</span>
+obj<span class="token punctuation">:</span><span class="token function">BindToInstance</span><span class="token punctuation">(</span>part<span class="token punctuation">)</span>
+
+<span class="token keyword">do</span> <span class="token comment">-- setup prints on destroy</span>
+	obj<span class="token punctuation">:</span><span class="token function">AddTask</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+		<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Object Destroyed!"</span><span class="token punctuation">)</span>
+	<span class="token keyword">end</span><span class="token punctuation">)</span>
+
+	part<span class="token punctuation">.</span>Destroying<span class="token punctuation">:</span><span class="token function">Connect</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+		<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Part Destroyed!"</span><span class="token punctuation">)</span>
+	<span class="token keyword">end</span><span class="token punctuation">)</span>
+<span class="token keyword">end</span>
+
+<span class="token keyword">local</span> X <span class="token operator">=</span> <span class="token keyword">if</span> math<span class="token punctuation">.</span><span class="token function">random</span><span class="token punctuation">(</span><span class="token number">1</span><span class="token punctuation">,</span><span class="token number">2</span><span class="token punctuation">)</span> <span class="token operator">==</span> <span class="token number">1</span> <span class="token keyword">then</span> obj <span class="token keyword">or</span> part
+X<span class="token punctuation">:</span><span class="token function">Destroy</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token comment">-- Prints "Object Destroyed!" and "Part Destroyed!" (Destroying one will destroy the other)</span>
+</code></pre>
+</div></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
+    &quot;functions&quot;: [
+        {
+            &quot;name&quot;: &quot;getObjectFromId&quot;,
+            &quot;desc&quot;: &quot;Fetches the object with the given ID if it exists.\n\n```lua\nlocal obj = BaseObject.new()\n\nlocal id = obj:GetId()\n\nprint(BaseObject.getObjectFromId(id) == obj) -- true\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;id&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;number&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;BaseObject?&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;tags&quot;: [
+                &quot;static&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 150,
+                &quot;path&quot;: &quot;lib/baseobject/src/init.lua&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;isDestroyed&quot;,
+            &quot;desc&quot;: &quot;Checks whether or not the object is destroyed.\n\n```lua\nlocal obj = BaseObject.new()\n\nprint(BaseObject.isDestroyed(obj)) -- false\n\nobj:Destroy()\n\nprint(BaseObject.isDestroyed(obj)) -- true\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;self&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;BaseObject&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;boolean&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;tags&quot;: [
+                &quot;static&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 169,
+                &quot;path&quot;: &quot;lib/baseobject/src/init.lua&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;new&quot;,
+            &quot;desc&quot;: &quot;Constructs a new BaseObject\n\n\n\n```lua\nlocal obj = BaseObject.new({\n\tX = 1,\n\tY = 2,\n})\n\nobj.Z = 3\n\nprint(obj.X, obj.Y, obj.Z) -- 1, 2, 3\n```\n\n```lua\nlocal SuperClass = setmetatable({}, BaseObject)\nSuperClass.__index = SuperClass\nSuperClass.ClassName = \&quot;SuperClass\&quot;\n\nfunction SuperClass.new()\n\tlocal self = setmetatable(BaseObject.new(), SuperClass)\n\treturn self\nend\n\nfunction SuperClass:Destroy() -- Overwrite the BaseObject Destroy method\n\tgetmetatable(SuperClass).Destroy(self) -- If you overwrite the BaseObject Destroy method you need to have this line to call the original.\nend\n\nfunction SuperClass:Print()\n\tprint(\&quot;Hello, World!\&quot;)\nend\n\nreturn SuperClass\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;tbl&quot;,
+                    &quot;desc&quot;: &quot;Table to construct the BaseObject with&quot;,
+                    &quot;lua_type&quot;: &quot;{ [any]: any }?&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;BaseObject&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;tags&quot;: [
+                &quot;static&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 214,
+                &quot;path&quot;: &quot;lib/baseobject/src/init.lua&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;Destroy&quot;,
+            &quot;desc&quot;: &quot;Marks the Object as Destroyed, fires the Destroyed Signal, cleans up\nthe BaseObject, and sets the metatable to nil/a special locked MT.\n:::caution Overriding\nIf you override this method, you need to make sure you call\n`getmetatable(self).Destroy(self)` to call the superclass methods.\n```lua\nfunction MyCustomClass:Destroy()\n\tgetmetatable(SuperClass).Destroy(self) -- calls the superclass method to clean up events, tasks, etc..\nend\n```&quot;,
+            &quot;params&quot;: [],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 246,
+                &quot;path&quot;: &quot;lib/baseobject/src/init.lua&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetId&quot;,
+            &quot;desc&quot;: &quot;Returns the ID of the BaseObject\nCan be used to fetch the object with BaseObject.getObjectFromId(id)&quot;,
+            &quot;params&quot;: [],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;number\r\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 278,
+                &quot;path&quot;: &quot;lib/baseobject/src/init.lua&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;IsA&quot;,
+            &quot;desc&quot;: &quot;Returns true if the given object is of a given class.\nTakes a class name or class object.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;classOrClassName&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{[any]: any} | string&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;boolean\r\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 286,
+                &quot;path&quot;: &quot;lib/baseobject/src/init.lua&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetTask&quot;,
+            &quot;desc&quot;: &quot;Fetches the task with the given ID if it exists.\n\n```lua\nlocal obj = BaseObject.new()\n\nlocal part = Instance.new(\&quot;Part\&quot;)\n\nobj:AddTask(part, nil, \&quot;Test\&quot;)\n\nprint(obj:GetTask(\&quot;Test\&quot;) == part) -- true\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;taskId&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;any&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Task?&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 318,
+                &quot;path&quot;: &quot;lib/baseobject/src/init.lua&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;AddTask&quot;,
+            &quot;desc&quot;: &quot;Adds a task to the janitor. If a taskId is provided, it will be used as the\nkey for the task in the janitor and can then be fetched later with :GetTask().\nIf an ID is provided and there already exists a task with that ID, it will\nclean up the existing task and then replace the index with the new one.\nIt will return the task that was added/given.\n\n```lua\nlocal obj = BaseObject.new()\n\nlocal task = obj:AddTask(function()\n\tprint(\&quot;Hello, World!\&quot;)\nend)\n\nobj:Destroy() -- Prints \&quot;Hello, World!\&quot;\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;task&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Task&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;taskCleanupMethod&quot;,
+                    &quot;desc&quot;: &quot;(if none is given it will try to infer; Passing true tells it to call it as a function)&quot;,
+                    &quot;lua_type&quot;: &quot;(string | true | nil)?&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;taskId&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;any?&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;The task that was given&quot;,
+                    &quot;lua_type&quot;: &quot;Task&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 343,
+                &quot;path&quot;: &quot;lib/baseobject/src/init.lua&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;AddPromise&quot;,
+            &quot;desc&quot;: &quot;Adds a promise to the janitor. Similar to :AddTask(). Returns the same Promise\nthat was given to it.\n\n```lua\nlocal prom = Promise.delay(math.random(10))\n\nlocal obj = BaseObject.new()\nobj:AddPromise(prom)\n\ntask.wait(math.random(10))\n\nobj:Destroy() -- Cancels the promise if it hasn&#x27;t resolved yet\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;prom&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Promise&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Promise&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 365,
+                &quot;path&quot;: &quot;lib/baseobject/src/init.lua&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;RemoveTask&quot;,
+            &quot;desc&quot;: &quot;Removes a task from the janitor. Cleans the task as if :DoCleaning was called.\nIf dontClean is true, it will not clean up the task, it will just remove\nit from the janitor.\n\n```lua\nlocal obj = BaseObject.new()\n\nlocal task = obj:AddTask(function()\n\tprint(\&quot;Hello, World!\&quot;)\nend, nil, \&quot;Test\&quot;)\n\nobj:RemoveTask(\&quot;Test\&quot;) -- Prints \&quot;Hello, World!\&quot;\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;taskId&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;any&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;dontClean&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;boolean?&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 388,
+                &quot;path&quot;: &quot;lib/baseobject/src/init.lua&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;RemoveTaskNoClean&quot;,
+            &quot;desc&quot;: &quot;Removes a task from the janitor without cleaning it.\n\n```lua\nlocal obj = BaseObject.new()\n\nlocal task = obj:AddTask(function()\n\tprint(\&quot;Hello, World!\&quot;)\nend, nil, \&quot;Test\&quot;)\n\nobj:RemoveTaskNoClean(\&quot;Test\&quot;) -- Does NOT print \&quot;Hello, World!\&quot;\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;taskId&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;any&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 409,
+                &quot;path&quot;: &quot;lib/baseobject/src/init.lua&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;FireSignal&quot;,
+            &quot;desc&quot;: &quot;Fires the signal with the given name, if it exists.\nEquivalent to calling `:GetSignal(signalName):Fire(...)` except this does not require\nthe signal to exist first.\n\n```lua\nlocal obj = BaseObject.new()\nlocal SignalName = \&quot;Test\&quot;\n\nobj:RegisterSignal(SignalName)\n\nobj:GetSignal(SignalName):Connect(print)\n\nobj:FireSignal(SignalName, \&quot;Hello, World!\&quot;) -- Fires the signal with the argument \&quot;Hello, World!\&quot;\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;signalName&quot;,
+                    &quot;desc&quot;: &quot;The name of the signal to fire&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;...&quot;,
+                    &quot;desc&quot;: &quot;Arguments to pass to the signal&quot;,
+                    &quot;lua_type&quot;: &quot;any&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 435,
+                &quot;path&quot;: &quot;lib/baseobject/src/init.lua&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;RegisterSignal&quot;,
+            &quot;desc&quot;: &quot;Marks a signal with the given name as registered. Does not actually\nbuild a new signal, it sets the index to a SignalMarker to identify\nit as registered so that it can be fetched later.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;signalName&quot;,
+                    &quot;desc&quot;: &quot;Name of signal to register&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 448,
+                &quot;path&quot;: &quot;lib/baseobject/src/init.lua&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;HasSignal&quot;,
+            &quot;desc&quot;: &quot;Checks whether or not a signal with the given name is registered.\n\n```lua\nlocal obj = BaseObject.new()\n\nlocal SignalName = \&quot;Test\&quot;\n\nprint(obj:HasSignal(SignalName)) -- false\n\nobj:RegisterSignal(SignalName)\n\nprint(obj:HasSignal(SignalName)) -- true\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;signalName&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;boolean\r\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 476,
+                &quot;path&quot;: &quot;lib/baseobject/src/init.lua&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetSignal&quot;,
+            &quot;desc&quot;: &quot;Fetches a signal with the given name. Creates the Signal JIT.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;signalName&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Signal&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 485,
+                &quot;path&quot;: &quot;lib/baseobject/src/init.lua&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetDestroyedSignal&quot;,
+            &quot;desc&quot;: &quot;Returns a signal that fires when the object is destroyed. Creates the signal JIT.\nKept for backwards compatibility.\n\n```lua\nlocal obj = BaseObject.new()\n\nobj:GetDestroyedSignal():Connect(function()\n\tprint(\&quot;Object Destroyed!\&quot;)\nend)\n\nobj:Destroy() -- Prints \&quot;Object Destroyed!\&quot;\n```&quot;,
+            &quot;params&quot;: [],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Signal\r\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 516,
+                &quot;path&quot;: &quot;lib/baseobject/src/init.lua&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;BindToInstance&quot;,
+            &quot;desc&quot;: &quot;Binds the object to the given instance. When the object is destroyed, it will\ndestroy the instance. When the instance is destroyed, it will destroy the object.\n\n```lua\nlocal obj = BaseObject.new()\nlocal part = Instance.new(\&quot;Part\&quot;)\nobj:BindToInstance(part)\n\ndo -- setup prints on destroy\n\tobj:AddTask(function()\n\t\tprint(\&quot;Object Destroyed!\&quot;)\n\tend)\n\n\tpart.Destroying:Connect(function()\n\t\tprint(\&quot;Part Destroyed!\&quot;)\n\tend)\nend\n\nlocal X = if math.random(1,2) == 1 then obj or part\nX:Destroy() -- Prints \&quot;Object Destroyed!\&quot; and \&quot;Part Destroyed!\&quot; (Destroying one will destroy the other)\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;obj&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Instance&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;destroyOnNilParent&quot;,
+                    &quot;desc&quot;: &quot;Whether or not to destroy the object when the parent is nil&#x27;d&quot;,
+                    &quot;lua_type&quot;: &quot;boolean?&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;Disconnects the binding&quot;,
+                    &quot;lua_type&quot;: &quot;function&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 556,
+                &quot;path&quot;: &quot;lib/baseobject/src/init.lua&quot;
+            }
+        }
+    ],
+    &quot;properties&quot;: [
+        {
+            &quot;name&quot;: &quot;ClassName&quot;,
+            &quot;desc&quot;: &quot;&quot;,
+            &quot;lua_type&quot;: &quot;string&quot;,
+            &quot;readonly&quot;: true,
+            &quot;source&quot;: {
+                &quot;line&quot;: 134,
+                &quot;path&quot;: &quot;lib/baseobject/src/init.lua&quot;
+            }
+        }
+    ],
+    &quot;types&quot;: [
+        {
+            &quot;name&quot;: &quot;BaseObject&quot;,
+            &quot;desc&quot;: &quot;&quot;,
+            &quot;lua_type&quot;: &quot;BaseObject&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 128,
+                &quot;path&quot;: &quot;lib/baseobject/src/init.lua&quot;
+            }
+        }
+    ],
+    &quot;name&quot;: &quot;BaseObject&quot;,
+    &quot;desc&quot;: &quot;BaseObject provides interface methods for three core features:\n- Object Destruction via adding a :Destroy() method and IsDestroyed flag property,\n- Task Management across the objects lifetime by providing a janitor internally,\n- and Signal Management by providing interfaces to Register, Get, and Fire signals easily.\n\n\nDestroy Behavior:\n* When a BaseObject instance is destroyed, it&#x27;s `IsDestroyed` property is set to true, and it&#x27;s `Destroyed` signal is fired.\n* It&#x27;s metatable is set to a metatable that will error when any of it&#x27;s methods or metamethods are called.\n\nYou should check `IsDestroyed` before calling any methods on a BaseObject instance if you are not sure if it has been destroyed or not.&quot;,
+    &quot;source&quot;: {
+        &quot;line&quot;: 19,
+        &quot;path&quot;: &quot;lib/baseobject/src/init.lua&quot;
+    }
+}</pre></details></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#types" class="table-of-contents__link toc-highlight">Types</a><ul><li><a href="#BaseObject" class="table-of-contents__link toc-highlight">BaseObject</a></li></ul></li><li><a href="#properties" class="table-of-contents__link toc-highlight">Properties</a><ul><li><a href="#ClassName" class="table-of-contents__link toc-highlight">ClassName</a></li></ul></li><li><a href="#functions" class="table-of-contents__link toc-highlight">Functions</a><ul><li><a href="#AddPromise" class="table-of-contents__link toc-highlight">:AddPromise</a></li><li><a href="#AddTask" class="table-of-contents__link toc-highlight">:AddTask</a></li><li><a href="#BindToInstance" class="table-of-contents__link toc-highlight">:BindToInstance</a></li><li><a href="#Destroy" class="table-of-contents__link toc-highlight">:Destroy</a></li><li><a href="#FireSignal" class="table-of-contents__link toc-highlight">:FireSignal</a></li><li><a href="#GetDestroyedSignal" class="table-of-contents__link toc-highlight">:GetDestroyedSignal</a></li><li><a href="#GetId" class="table-of-contents__link toc-highlight">:GetId</a></li><li><a href="#GetSignal" class="table-of-contents__link toc-highlight">:GetSignal</a></li><li><a href="#GetTask" class="table-of-contents__link toc-highlight">:GetTask</a></li><li><a href="#HasSignal" class="table-of-contents__link toc-highlight">:HasSignal</a></li><li><a href="#IsA" class="table-of-contents__link toc-highlight">:IsA</a></li><li><a href="#RegisterSignal" class="table-of-contents__link toc-highlight">:RegisterSignal</a></li><li><a href="#RemoveTask" class="table-of-contents__link toc-highlight">:RemoveTask</a></li><li><a href="#RemoveTaskNoClean" class="table-of-contents__link toc-highlight">:RemoveTaskNoClean</a></li><li><a href="#getObjectFromId" class="table-of-contents__link toc-highlight">.getObjectFromId</a></li><li><a href="#isDestroyed" class="table-of-contents__link toc-highlight">.isDestroyed</a></li><li><a href="#new" class="table-of-contents__link toc-highlight">.new</a></li></ul></li></ul></div></div></div></div></main></div></div><footer class="footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2024 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
+<script src="/assets/js/runtime~main.ea22b028.js"></script>
+<script src="/assets/js/main.5e4ed51e.js"></script>
+</body>
+</html>
