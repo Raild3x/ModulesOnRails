@@ -46,17 +46,14 @@ for DIR in "$SRC_DIR"/*/ ; do
 
     # Check if the directory is in the arguments
     if [ "$NO_ARGUMENTS_PROVIDED" = false ]; then
-        echo "Arguments provided."
         IS_ARGUMENT=false
         for ARG in "$@"; do
             if [ "$DIR" = "$SRC_DIR/$ARG/" ]; then
-                echo "Argument found: $ARG"
                 IS_ARGUMENT=true
                 break
             fi
         done
         if [ "$IS_ARGUMENT" = false ]; then
-            echo "$SRC_DIR/$ARG/"
             echo "Skipping non-argument directory: $DIR"
             continue
         fi
@@ -103,37 +100,33 @@ for DIR in "$SRC_DIR"/*/ ; do
         exit 1
     fi
 
-    # Generate the Wally Package Types
-    echo "Generating Wally Package Types..."
-    if ! wally-package-types --sourcemap sourcemap.json "$DIR"Packages; then
-        echo "Error: Failed to generate Wally package types."
-        exit 1
-    fi
-
-    # Move the generated Wally files out of the Packages dir and into the src dir
-    echo "Moving Wally Packages out of Packages directory..."
+    
     DIR_TO_MOVE="$DIR/Packages"
+    if [ -d "$DIR_TO_MOVE" ]; then
+        # Generate the Wally Package Types
+        echo "Generating Wally Package Types..."
+        if ! wally-package-types --sourcemap sourcemap.json "$DIR"Packages; then
+            echo "Error: Failed to generate Wally package types."
+            exit 1
+        fi
 
-    # Check if the Packages directory exists before moving files
-    if [ ! -d "$DIR_TO_MOVE" ]; then
-        echo "Error: Directory $DIR_TO_MOVE does not exist."
-        exit 1
+        # Move the generated Wally files out of the Packages dir and into the src dir
+        echo "Moving Wally Packages out of Packages directory..."
+
+        # Move all visible files and directories
+        if ! mv "$DIR_TO_MOVE"/* "$DIR" 2>/dev/null; then
+            echo "Error: Failed to move visible files from $DIR_TO_MOVE to $DIR."
+            exit 1
+        fi
+        echo "Moved visible files."
+
+        # Remove the now-empty original directory
+        echo "Removing original Packages directory..."
+        if ! rmdir "$DIR_TO_MOVE"; then
+            echo "Error: Failed to remove the original Packages directory."
+            exit 1
+        fi
     fi
-
-    # Move all visible files and directories
-    if ! mv "$DIR_TO_MOVE"/* "$DIR" 2>/dev/null; then
-        echo "Error: Failed to move visible files from $DIR_TO_MOVE to $DIR."
-        exit 1
-    fi
-    echo "Moved visible files."
-
-    # Remove the now-empty original directory
-    echo "Removing original Packages directory..."
-    if ! rmdir "$DIR_TO_MOVE"; then
-        echo "Error: Failed to remove the original Packages directory."
-        exit 1
-    fi
-
 done
 
 # Ensure a sourcemap exists
@@ -144,4 +137,4 @@ if ! rojo sourcemap default.project.json -o sourcemap.json; then
 fi
 
 
-echo "Setup complete!"
+echo "Setup complete!  :D"

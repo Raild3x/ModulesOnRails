@@ -12,7 +12,7 @@
     ```lua
     :Set() -- Redirects to :SetValue() or :ArraySet()
     :Increment() -- Redirects to :IncrementValue() or :ArrayIncrement()
-    :Mutate() -- Redirects to :MutateValue() or :ArrayMutate()
+    :Update() -- Redirects to :UpdateValue() or :UpdateArray()
     ```
     :::
     
@@ -426,21 +426,24 @@ end
 --[=[
     Mutates the value at the given path by calling the given function with the current value.
     ```lua
-    :Mutate(myPathToValue, function(currentValue)
+    :Update(myPathToValue, function(currentValue)
         return currentValue + 1
     end)
     ```
+    :::info Aliases
+    `:Mutate` is an alias for `:Update`. This alias is consistent with all other 'Update' methods.
+    :::
 ]=]
-function TableManager:Mutate(path: Path, ...: any): any?
+function TableManager:Update(path: Path, ...: any): any?
     if select('#', ...) == 2 then
         local index, fn = ...
-        return self:ArrayMutate(path, index, fn)
+        return self:ArrayUpdate(path, index, fn)
     else
         local fn = ...
-        return self:MutateValue(path, fn)
+        return self:UpdateValue(path, fn)
     end
 end
-
+TableManager.Mutate = TableManager.Update
 
 --[=[
     Sets the value at the given path to the given value.
@@ -483,7 +486,7 @@ end
     ```lua
     manager:SetValue("MyPath.To.Value", "Hello World")
 
-    local newValue = manager:MutateValue("MyPath.To.Value", function(currentValue)
+    local newValue = manager:UpdateValue("MyPath.To.Value", function(currentValue)
         return string.upper(currentValue) .. "!"
     end)
 
@@ -491,12 +494,13 @@ end
     print(manager:GetValue("MyPath.To.Value")) -- HELLO WORLD!
     ```
 ]=]
-function TableManager:MutateValue(path: Path, fn: (currentValue: any) -> (any)): any
+function TableManager:UpdateValue(path: Path, fn: (currentValue: any) -> (any)): any
     local currentValue = self:GetValue(path)
     local newValue = fn(currentValue)
     self:SetValue(path, newValue)
     return newValue
 end
+TableManager.MutateValue = TableManager.UpdateValue
 
 --[=[
     Sets the values at the given path to the given values.
@@ -540,14 +544,14 @@ end
     ```lua
     manager:SetValue("MyArray", {1, 2, 3, 4, 5})
 
-    manager:ArrayMutate("MyArray", 3, function(currentValue)
+    manager:ArrayUpdate("MyArray", 3, function(currentValue)
         return currentValue * 2
     })
 
     print(manager:GetValue("MyArray")) -- {1, 2, 6, 4, 5}
     ```
 ]=]
-function TableManager:ArrayMutate(path: Path, index: CanBeArray<number> | "#", fn: (currentValue: any) -> (any))
+function TableManager:ArrayUpdate(path: Path, index: CanBeArray<number> | "#", fn: (currentValue: any) -> (any))
     local array = self:GetValue(path)
 
     if index == "#" then
@@ -570,6 +574,9 @@ function TableManager:ArrayMutate(path: Path, index: CanBeArray<number> | "#", f
         end
     end
 end
+TableManager.MutateArray = TableManager.ArrayUpdate
+TableManager.UpdateArray = TableManager.ArrayUpdate
+TableManager.ArrayMutate = TableManager.ArrayUpdate
 
 --[=[
     Increments the indices at the given path by the given amount.

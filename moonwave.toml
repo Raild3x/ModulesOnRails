@@ -19,3 +19,11 @@ classes = ["ServerTableReplicator", "ClientTableReplicator", "TableReplicatorSin
 [[classOrder]]
 section = "NetWire"
 classes = ["NetWire", "ServerNetWire", "ClientNetWire"]
+
+[[classOrder]]
+section = "PlayerProfileManager"
+classes = ["PlayerProfileManager"]
+
+[[classOrder]]
+section = "DropletManager"
+classes = ["DropletManager", "DropletServerManager", "DropletClientManager", "Droplet", "DropletUtil", "ExampleResourceTypeData"]

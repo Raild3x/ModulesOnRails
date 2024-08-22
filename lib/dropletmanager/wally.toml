@@ -1,0 +1,22 @@
+[package]
+name = "raild3x/dropletmanager"
+description = "A Droplet System for managing client-sided collectable items in a game."
+authors = ["Logan Hunt (Raildex)"]
+version = "0.0.1"
+license = "MIT"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+
+[custom]
+# The properly capitalized and spaced name of the library
+formattedName = "DropletManager"
+# The intro page for the documentation
+docsLink = "DropletManager"
+
+[dependencies]
+Promise = "evaera/promise@^4.0.0"
+OctoTree = "sleitnick/octo-tree@0.3.1"
+NetWire = "raild3x/netwire@^0.0.4"
+RailUtil = "raild3x/railutil@^1"
+BaseObject = "raild3x/baseobject@^0.0"
+ProbabilityDistributor = "raild3x/probabilitydistributor@^1.0.4"

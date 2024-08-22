@@ -6,11 +6,12 @@
 
     Uses Sleitnick's Comm under the hood.
 
-    :: caution ::
+    :::caution
     Wire indices may not always be ready for use immediately after creating a ClientNetWire.
     This can be the case if the ServerWire is created dynamically. To wait for a ClientNetWire
     to be ready for use, use NetWire.promiseWire. And then to wait for a
     particular index to be ready, use NetWire.promiseIndex.
+    :::
 
     ```lua
     local NetWire = require(game:GetService("ReplicatedStorage").NetWire)

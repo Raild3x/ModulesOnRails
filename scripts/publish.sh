@@ -1,16 +1,35 @@
 #!/bin/bash
 
+#!/bin/bash
+
+SRC_DIR="lib"
+
+# Start from the current directory
+current_dir=$(pwd)
+
+# Loop until we find the project root file or reach the root directory
+while [ "$current_dir" != "/" ]; do
+  if [ -f "$current_dir/$SRC_DIR" ]; then
+    echo "Found project root at: $current_dir"
+    break
+  fi
+  current_dir=$(dirname "$current_dir")
+done
+
+# Check if the source directory exists
+if [ ! -d "$SRC_DIR" ]; then
+    echo "Error: Source directory $SRC_DIR does not exist."
+    exit 1
+fi
+
 #Save original directory
 original_dir=$(pwd)
-
-#ascend so we can see the lib directory
-cd ..
 
 # Prompt for the package name
 read -p "Enter the package name: " PACKAGE_NAME
 
 # Navigate to the package directory
-PACKAGE_DIR="lib/$PACKAGE_NAME"
+PACKAGE_DIR="$SRC_DIR/$PACKAGE_NAME"
 if [ ! -d "$PACKAGE_DIR" ]; then
     echo "Package directory $PACKAGE_DIR does not exist."
     exit 1
@@ -130,4 +149,4 @@ cd "$original_dir" || { echo "Failed to return to the original directory"; exit 
 # Ask if they want to rebuild the package paths
 #read -p "Do you want to rebuild the sourcemap? (y/n) " PUBLISH
 echo "Rebuilding sourcemap..."
-bash setup.sh "$PACKAGE_NAME"
+bash scripts/setup.sh "$PACKAGE_NAME"
