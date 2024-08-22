@@ -28,7 +28,7 @@ jobs:
           git config --global user.name "GitHub Actions"
           git add README.md
           git commit -m "Update README from GitHub Actions"
-          git push https://${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${{ github.repository }}.git HEAD:main
+          git push https://x-access-token:${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${{ github.repository }}.git HEAD:main
   build:
     name: Build and deploy docs
     runs-on: ubuntu-latest
