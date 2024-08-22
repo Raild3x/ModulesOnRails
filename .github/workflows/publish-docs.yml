@@ -3,7 +3,7 @@ name: publish docs
 on:
   push:
     branches:
-    - main
+      - main
 
 jobs:
   generate_readme:
@@ -23,7 +23,7 @@ jobs:
         run: scripts/generateReadMe.sh
 
       - name: Debugging
-        run: echo "Repository: https://${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${{ github.repository }}.git"
+        run: echo "Repository URL; https://x-access-token:${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${{ github.repository }}.git"
 
       - name: Commit README update
         run: |
@@ -32,6 +32,7 @@ jobs:
           git add README.md
           git commit -m "Update README from GitHub Actions"
           git push https://x-access-token:${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${{ github.repository }}.git HEAD:main
+          
   build:
     name: Build and deploy docs
     runs-on: ubuntu-latest
