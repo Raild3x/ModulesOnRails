@@ -23,12 +23,12 @@ function Client.GetFunction(
 	assert(rf ~= nil, "Failed to find RemoteFunction: " .. name)
 
 	inboundMiddleware = inboundMiddleware or {}
-	-- assert(inboundMiddleware, "Missing inboundMiddleware")
-	-- assert(outboundMiddleware, "Missing outboundMiddleware")
+	assert(inboundMiddleware, "Missing inboundMiddleware")
 	table.insert(inboundMiddleware, PCM)
 	local hasInbound = type(inboundMiddleware) == "table" and #inboundMiddleware > 0
 	local hasOutbound = type(outboundMiddleware) == "table" and #outboundMiddleware > 0
 	local function ProcessOutbound(args)
+		assert(outboundMiddleware, "Missing outboundMiddleware")
 		for _, middlewareFunc in ipairs(outboundMiddleware) do
 			local middlewareResult = table.pack(middlewareFunc(args))
 			if not middlewareResult[1] then
