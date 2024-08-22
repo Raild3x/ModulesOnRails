@@ -10,8 +10,8 @@ the TableReplicator is not ready yet."><meta data-rh="true" property="og:descrip
 that is guaranteed to exist. This is useful for when you want to access data, that
 may not have replicated yet, immediately. You provide a default schema to use if
 the TableReplicator is not ready yet."><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/TableReplicatorSingleton"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/TableReplicatorSingleton" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/TableReplicatorSingleton" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.1839e2d4.css">
-<link rel="preload" href="/ModulesOnRails/assets/js/runtime~main.389de42b.js" as="script">
-<link rel="preload" href="/ModulesOnRails/assets/js/main.c9913c99.js" as="script">
+<link rel="preload" href="/ModulesOnRails/assets/js/runtime~main.6839d610.js" as="script">
+<link rel="preload" href="/ModulesOnRails/assets/js/main.2e5fcabe.js" as="script">
 </head>
 <body class="navigation-with-keyboard">
 <script>!function(){function e(e){document.documentElement.setAttribute("data-theme",e)}var t=function(){var e=null;try{e=localStorage.getItem("theme")}catch(e){}return e}();null!==t?e(t):window.matchMedia("(prefers-color-scheme: dark)").matches?e("dark"):(window.matchMedia("(prefers-color-scheme: light)").matches,e("light"))}()</script><div id="__docusaurus">
@@ -162,7 +162,7 @@ New <span class="token string">"TextLabel"</span> <span class="token punctuation
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;any?\n&quot;
+                    &quot;lua_type&quot;: &quot;any?\r\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
@@ -189,7 +189,7 @@ New <span class="token string">"TextLabel"</span> <span class="token punctuation
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;() -&gt; ()\n&quot;
+                    &quot;lua_type&quot;: &quot;() -&gt; ()\r\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
@@ -243,7 +243,7 @@ New <span class="token string">"TextLabel"</span> <span class="token punctuation
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;() -&gt; ()\n&quot;
+                    &quot;lua_type&quot;: &quot;() -&gt; ()\r\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
@@ -265,7 +265,7 @@ New <span class="token string">"TextLabel"</span> <span class="token punctuation
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;State&lt;any&gt;\n&quot;
+                    &quot;lua_type&quot;: &quot;State&lt;any&gt;\r\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
@@ -281,7 +281,7 @@ New <span class="token string">"TextLabel"</span> <span class="token punctuation
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;TableManager\n&quot;
+                    &quot;lua_type&quot;: &quot;TableManager\r\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
@@ -297,7 +297,7 @@ New <span class="token string">"TextLabel"</span> <span class="token punctuation
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;ClientTableReplicator\n&quot;
+                    &quot;lua_type&quot;: &quot;ClientTableReplicator\r\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
@@ -345,7 +345,7 @@ New <span class="token string">"TextLabel"</span> <span class="token punctuation
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;boolean\n&quot;
+                    &quot;lua_type&quot;: &quot;boolean\r\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
@@ -409,7 +409,7 @@ New <span class="token string">"TextLabel"</span> <span class="token punctuation
         &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.lua&quot;
     }
 }</pre></details></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#types" class="table-of-contents__link toc-highlight">Types</a><ul><li><a href="#Config" class="table-of-contents__link toc-highlight">Config</a></li></ul></li><li><a href="#properties" class="table-of-contents__link toc-highlight">Properties</a></li><li><a href="#functions" class="table-of-contents__link toc-highlight">Functions</a><ul><li><a href="#Get" class="table-of-contents__link toc-highlight">:Get</a></li><li><a href="#GetTableManager" class="table-of-contents__link toc-highlight">:GetTableManager</a></li><li><a href="#GetTableReplicator" class="table-of-contents__link toc-highlight">:GetTableReplicator</a></li><li><a href="#IsReady" class="table-of-contents__link toc-highlight">:IsReady</a></li><li><a href="#ListenToAnyChange" class="table-of-contents__link toc-highlight">:ListenToAnyChange</a></li><li><a href="#ListenToValueChange" class="table-of-contents__link toc-highlight">:ListenToValueChange</a></li><li><a href="#Observe" class="table-of-contents__link toc-highlight">:Observe</a></li><li><a href="#OnReady" class="table-of-contents__link toc-highlight">:OnReady</a></li><li><a href="#PromiseTableManager" class="table-of-contents__link toc-highlight">:PromiseTableManager</a></li><li><a href="#PromiseTableReplicator" class="table-of-contents__link toc-highlight">:PromiseTableReplicator</a></li><li><a href="#ToFusionState" class="table-of-contents__link toc-highlight">:ToFusionState</a></li><li><a href="#new" class="table-of-contents__link toc-highlight">.new</a></li></ul></li></ul></div></div></div></div></main></div></div><footer class="footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2024 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
-<script src="/ModulesOnRails/assets/js/runtime~main.389de42b.js"></script>
-<script src="/ModulesOnRails/assets/js/main.c9913c99.js"></script>
+<script src="/ModulesOnRails/assets/js/runtime~main.6839d610.js"></script>
+<script src="/ModulesOnRails/assets/js/main.2e5fcabe.js"></script>
 </body>
 </html>
