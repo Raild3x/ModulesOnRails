@@ -1,7 +1,24 @@
 #!/bin/bash
 
-# Go to the root directory
-cd ..
+SRC_DIR="lib"
+
+# Start from the current directory
+current_dir=$(pwd)
+
+# Loop until we find the project root file or reach the root directory
+while [ "$current_dir" != "/" ]; do
+  if [ -f "$current_dir/$SRC_DIR" ]; then
+    echo "Found project root at: $current_dir"
+    break
+  fi
+  current_dir=$(dirname "$current_dir")
+done
+
+# Check if the source directory exists
+if [ ! -d "$SRC_DIR" ]; then
+    echo "Error: Source directory $SRC_DIR does not exist."
+    exit 1
+fi
 
 # Get the remote URL of the repository
 REMOTE_URL=$(git config --get remote.origin.url)
@@ -14,7 +31,7 @@ REPO_NAME=$(echo "$REMOTE_URL" | sed -E 's#https://github.com/[^/]+/([^/]+)\.git
 # Print the repository owner and name
 echo "Repository Owner: $REPO_OWNER"
 echo "Repository Name: $REPO_NAME"
-DOCS_LINK="raild3x.github.io/$REPO_NAME/"
+DOCS_LINK="https://raild3x.github.io/$REPO_NAME/"
 echo "Docs Link: $DOCS_LINK"
 
 # Output README file
@@ -33,7 +50,7 @@ EOF
 echo "Generating README.md..."
 
 # Iterate through each package directory
-for PACKAGE_DIR in lib/*; do
+for PACKAGE_DIR in "$SRC_DIR"/*/ ; do
     # Check if it's a directory
     if [ -d "$PACKAGE_DIR" ]; then
         # Path to the wally.toml file
@@ -41,6 +58,9 @@ for PACKAGE_DIR in lib/*; do
 
         # Check if wally.toml exists
         if [ -f "$WALLY_TOML" ]; then
+
+            echo "Parsing package directory: $PACKAGE_DIR"
+
             # Extract package name, version, and description
             FORMATTED_NAME=$(grep '^formattedName =' "$WALLY_TOML" | cut -d'=' -f2 | xargs)
             PACKAGE_DOCS_LINK=$(grep '^docsLink =' "$WALLY_TOML" | cut -d'=' -f2 | xargs)
@@ -63,6 +83,8 @@ EOF
         else
             echo "Warning: $WALLY_TOML not found"
         fi
+    else
+        echo "Warning: $PACKAGE_DIR is not a directory"
     fi
 done
 

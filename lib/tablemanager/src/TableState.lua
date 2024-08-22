@@ -3,8 +3,11 @@
 --[=[
     @class TableState
 
-    This class is used to observe and modify values in a TableManager easier.
-    It is not feature complete and is subject to change.
+    This class is used to more easily observe and modify values in a TableManager.
+    
+    :::caution
+    TableState is not feature complete and is subject to change.
+    :::
 ]=]
 
 --// Imports //--

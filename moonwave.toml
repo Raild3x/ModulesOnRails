@@ -1,6 +1,7 @@
 gitSourceBranch = "main"
 
 [docusaurus]
+url = "https://raild3x.github.io"
 baseUrl = "/"
 
 [[classOrder]]
