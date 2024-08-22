@@ -6,37 +6,37 @@ on:
       - main
 
 jobs:
-  generate_readme:
-    name: Generate README
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+  # generate_readme:
+  #   name: Generate README
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
 
-      - name: Set up Bash
-        run: sudo apt-get install -y bash
+  #     - name: Set up Bash
+  #       run: sudo apt-get install -y bash
 
-      - name: Set execute permission for script
-        run: chmod +x scripts/generateReadMe.sh
+  #     - name: Set execute permission for script
+  #       run: chmod +x scripts/generateReadMe.sh
 
-      - name: Run generateReadMe.sh
-        run: scripts/generateReadMe.sh
+  #     - name: Run generateReadMe.sh
+  #       run: scripts/generateReadMe.sh
 
-      - name: Debugging
-        run: echo "Repository URL; https://x-access-token:${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${{ github.repository }}.git"
+  #     - name: Debugging
+  #       run: echo "Repository URL; https://x-access-token:${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${{ github.repository }}.git"
 
-      - name: Commit README update
-        run: |
-          git config --global user.email "you@example.com"
-          git config --global user.name "GitHub Actions"
-          git add README.md
-          git commit -m "Update README from GitHub Actions"
-          git push https://x-access-token:${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${{ github.repository }}.git HEAD:main
+  #     - name: Commit README update
+  #       run: |
+  #         git config --global user.email "you@example.com"
+  #         git config --global user.name "GitHub Actions"
+  #         git add README.md
+  #         git commit -m "Update README from GitHub Actions"
+  #         git push https://x-access-token:${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${{ github.repository }}.git HEAD:main
           
   build:
     name: Build and deploy docs
     runs-on: ubuntu-latest
-    needs: generate_readme
+    #needs: generate_readme
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v3
