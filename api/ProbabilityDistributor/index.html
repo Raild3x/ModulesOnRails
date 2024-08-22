@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en" dir="ltr" class="plugin-moonwave plugin-id-moonwave">
+<head>
+<meta charset="UTF-8">
+<meta name="generator" content="Docusaurus v2.3.1">
+<title data-rh="true">ProbabilityDistributor | ModulesOnRails</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:url" content="https://raild3x.github.io/ModulesOnRails/api/ProbabilityDistributor"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docusaurus_tag" content="default"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docsearch:docusaurus_tag" content="default"><meta data-rh="true" property="og:title" content="ProbabilityDistributor | ModulesOnRails"><meta data-rh="true" name="description" content="ProbabilityDistributor is a class that allows you pick a random item from a table of weighted items.
+The given WeightsTable must be in the format of:
+```lua
+{
+	Weight: Weight;
+	Value: any;
+}
+```
+Where `Weight` is a number, NumberRange or a function that returns a number or NumberRange, and Value is any value.
+The Weights are calculated during object construction. Even if the return value of your functions change, the
+weights will not. If you want to take advantage of updated weights, you must create a new ProbabilityDistributor.
+If a NumberRange is detected as a weight, it will generate a random INTEGER between the min and max values of
+the Range. If you need more granular control over the weights, you can pass a function that returns a number/NumberRange.
+
+[Example]
+```lua
+local WeightTable = {
+	{Value = &quot;A&quot;, Weight = 100};
+	{Value = &quot;B&quot;, Weight = 50};
+	{Value = &quot;C&quot;, Weight = 25};
+	{Value = &quot;D&quot;, Weight = 25};
+}
+
+local Distributor: ProbabilityDistributor&lt;string&gt; = ProbabilityDistributor.new(WeightTable)
+
+local randomValue = Distributor:Roll() --// Has a 50% chance of returning &quot;A&quot;, 25% chance of returning &quot;B&quot;, and a 12.5% chance for &quot;C&quot; and &quot;D&quot;.
+print(randomValue)
+```"><meta data-rh="true" property="og:description" content="ProbabilityDistributor is a class that allows you pick a random item from a table of weighted items.
+The given WeightsTable must be in the format of:
+```lua
+{
+	Weight: Weight;
+	Value: any;
+}
+```
+Where `Weight` is a number, NumberRange or a function that returns a number or NumberRange, and Value is any value.
+The Weights are calculated during object construction. Even if the return value of your functions change, the
+weights will not. If you want to take advantage of updated weights, you must create a new ProbabilityDistributor.
+If a NumberRange is detected as a weight, it will generate a random INTEGER between the min and max values of
+the Range. If you need more granular control over the weights, you can pass a function that returns a number/NumberRange.
+
+[Example]
+```lua
+local WeightTable = {
+	{Value = &quot;A&quot;, Weight = 100};
+	{Value = &quot;B&quot;, Weight = 50};
+	{Value = &quot;C&quot;, Weight = 25};
+	{Value = &quot;D&quot;, Weight = 25};
+}
+
+local Distributor: ProbabilityDistributor&lt;string&gt; = ProbabilityDistributor.new(WeightTable)
+
+local randomValue = Distributor:Roll() --// Has a 50% chance of returning &quot;A&quot;, 25% chance of returning &quot;B&quot;, and a 12.5% chance for &quot;C&quot; and &quot;D&quot;.
+print(randomValue)
+```"><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/ProbabilityDistributor"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/ProbabilityDistributor" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/ProbabilityDistributor" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.1839e2d4.css">
+<link rel="preload" href="/ModulesOnRails/assets/js/runtime~main.e45ae276.js" as="script">
+<link rel="preload" href="/ModulesOnRails/assets/js/main.08576ec5.js" as="script">
+</head>
+<body class="navigation-with-keyboard">
+<script>!function(){function e(e){document.documentElement.setAttribute("data-theme",e)}var t=function(){var e=null;try{e=localStorage.getItem("theme")}catch(e){}return e}();null!==t?e(t):window.matchMedia("(prefers-color-scheme: dark)").matches?e("dark"):(window.matchMedia("(prefers-color-scheme: light)").matches,e("light"))}()</script><div id="__docusaurus">
+<div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="navbar navbar--fixed-top"><div class="navbar__inner"><div class="navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-hidden="true" viewBox="0 0 24 24" class="iconExternalLink_nPIU"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"></path></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="Switch between dark and light mode (currently light mode)" aria-label="Switch between dark and light mode (currently light mode)" aria-live="polite"><svg viewBox="0 0 24 24" width="24" height="24" class="lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" class="darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg></button></div><div class="searchBox_ZlJk"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input type="search" id="search_input_react" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="docusaurus_skipToContent_fallback" class="main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject">​Base​Object</a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/TableManager">TableManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/ServerTableReplicator">TableReplicator</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/NetWire">NetWire</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/PlayerProfileManager">PlayerProfileManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/DropletManager">DropletManager</a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PlayerDataService">​Player​Data​Service</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" href="/ModulesOnRails/api/ProbabilityDistributor">​Probability​Distributor</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Roam">​Roam</a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><div class="tocCollapsible_ETCw theme-doc-toc-mobile tocMobile_oUs_"><button type="button" class="clean-btn tocCollapsibleButton_TO0P">On this page</button></div><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">Probability</span><span style="display:inline-block">Distributor</span></h1><div class="luaClassTags_EipM"></div><div>
+<p>
+  ProbabilityDistributor is a class that allows you pick a random item from a table of weighted items.
+  The given WeightsTable must be in the format of:
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token punctuation">{</span>
+	Weight<span class="token punctuation">:</span> Weight<span class="token punctuation">;</span>
+	Value<span class="token punctuation">:</span> any<span class="token punctuation">;</span>
+<span class="token punctuation">}</span>
+</code></pre>
+<p>
+  Where <code>Weight</code> is a number, NumberRange or a function that returns a number or NumberRange, and Value is any value.
+  The Weights are calculated during object construction. Even if the return value of your functions change, the
+  weights will not. If you want to take advantage of updated weights, you must create a new ProbabilityDistributor.
+  If a NumberRange is detected as a weight, it will generate a random INTEGER between the min and max values of
+  the Range. If you need more granular control over the weights, you can pass a function that returns a number/NumberRange.
+</p>
+<p>[Example]</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> WeightTable <span class="token operator">=</span> <span class="token punctuation">{</span>
+	<span class="token punctuation">{</span>Value <span class="token operator">=</span> <span class="token string">"A"</span><span class="token punctuation">,</span> Weight <span class="token operator">=</span> <span class="token number">100</span><span class="token punctuation">}</span><span class="token punctuation">;</span>
+	<span class="token punctuation">{</span>Value <span class="token operator">=</span> <span class="token string">"B"</span><span class="token punctuation">,</span> Weight <span class="token operator">=</span> <span class="token number">50</span><span class="token punctuation">}</span><span class="token punctuation">;</span>
+	<span class="token punctuation">{</span>Value <span class="token operator">=</span> <span class="token string">"C"</span><span class="token punctuation">,</span> Weight <span class="token operator">=</span> <span class="token number">25</span><span class="token punctuation">}</span><span class="token punctuation">;</span>
+	<span class="token punctuation">{</span>Value <span class="token operator">=</span> <span class="token string">"D"</span><span class="token punctuation">,</span> Weight <span class="token operator">=</span> <span class="token number">25</span><span class="token punctuation">}</span><span class="token punctuation">;</span>
+<span class="token punctuation">}</span>
+
+<span class="token keyword">local</span> Distributor<span class="token punctuation">:</span> ProbabilityDistributor<span class="token operator">&#x3C;</span>string<span class="token operator">></span> <span class="token operator">=</span> ProbabilityDistributor<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span>WeightTable<span class="token punctuation">)</span>
+
+<span class="token keyword">local</span> randomValue <span class="token operator">=</span> Distributor<span class="token punctuation">:</span><span class="token function">Roll</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token comment">--// Has a 50% chance of returning "A", 25% chance of returning "B", and a 12.5% chance for "C" and "D".</span>
+<span class="token function">print</span><span class="token punctuation">(</span>randomValue<span class="token punctuation">)</span>
+</code></pre>
+</div></header><h2 class="anchor anchorWithStickyNavbar_LWe7" id="types">Types<a href="#types" class="hash-link" aria-label="Direct link to Types" title="Direct link to Types">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Weight"><code style="text-decoration:none">Weight</code><a href="#Weight" class="hash-link" aria-label="Direct link to Weight" title="Direct link to Weight">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/probabilitydistributor/src/init.lua#L54"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code class="purple_ieR2">type</code> <code>Weight<!-- --> = </code> <code class="blue_P4bS">number</code><code class="op_lSLc"> | </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/NumberRange" target="_blank" rel="noopener noreferrer">NumberRange<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="op_lSLc"> | </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="blue_P4bS">number</code><code class="op_lSLc"> | </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/NumberRange" target="_blank" rel="noopener noreferrer">NumberRange<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="purple_ieR2">)</code></div><div>
+<p>
+  A valid input for the weight of an item in the WeightsTable. Allows for functions
+  to be passed in to generate a weight on the fly. If a NumberRange is given in, it will
+  generate a random INTEGER between the min and max values of the Range.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="WeightedItem&lt;T&gt;"><code style="text-decoration:none">WeightedItem&lt;T&gt;</code><a href="#WeightedItem&lt;T&gt;" class="hash-link" aria-label="Direct link to WeightedItem&lt;T&gt;" title="Direct link to WeightedItem&lt;T&gt;">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/probabilitydistributor/src/init.lua#L63"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code class="purple_ieR2">interface</code> <code>WeightedItem&lt;T&gt;<!-- --> <!-- -->{</code><div class="inset_uKQm"><div><code>Weight<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ProbabilityDistributor#Weight">Weight</a></code></div><div><code>Value<!-- -->: </code><code class="blue_P4bS">T</code></div></div><code>}</code></div><div>
+<p>The format weights and an associated value must be in.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="WeightedArray&lt;T&gt;"><code style="text-decoration:none">WeightedArray&lt;T&gt;</code><a href="#WeightedArray&lt;T&gt;" class="hash-link" aria-label="Direct link to WeightedArray&lt;T&gt;" title="Direct link to WeightedArray&lt;T&gt;">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/probabilitydistributor/src/init.lua#L73"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code class="purple_ieR2">type</code> <code>WeightedArray&lt;T&gt;<!-- --> = </code> <code class="purple_ieR2">{</code><code class="blue_P4bS">WeightedItem</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">T</code><code class="op_lSLc">&gt;</code><code class="purple_ieR2">}</code></div><div>
+<p>A valid input for the WeightsTable.</p>
+</div><h2 class="anchor anchorWithStickyNavbar_LWe7" id="functions">Functions<a href="#functions" class="hash-link" aria-label="Direct link to Functions" title="Direct link to Functions">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="new"><code style="text-decoration:none">new</code><a href="#new" class="hash-link" aria-label="Direct link to new" title="Direct link to new">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/probabilitydistributor/src/init.lua#L106"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ProbabilityDistributor<!-- -->.</code><code class="green_DgR4">new</code><code>(</code><div class="inset_uKQm"><div><code>weights<!-- -->: </code><code class="purple_ieR2">{</code><code class="blue_P4bS">WeightedItem</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">T</code><code class="op_lSLc">&gt;</code><code class="purple_ieR2">}</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
+<p>A table of weights to distribute.</p>
+</span></span></div><div><code>randomOrSeed<!-- -->: </code><code class="purple_ieR2">(</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Random" target="_blank" rel="noopener noreferrer">Random<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="op_lSLc"> | </code><code class="blue_P4bS">number</code><code class="purple_ieR2">)</code><code class="blue_P4bS">?</code><span class="inlineDescription_G7Er">-- <span>
+<p>An optional random number generator to use for the rolls. If a number is passed, it will be used as the seed for a new random number generator. If nothing is passed, it will create a new Random and use the current time as the seed.</p>
+</span></span></div></div><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ProbabilityDistributor">ProbabilityDistributor</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">T</code><code class="op_lSLc">&gt;</code><span class="inlineDescription_G7Er">-- <span>
+<p>A new probability distributor of type T. Where T is the type of the value of the weighted item.</p>
+</span></span></div><div>
+<p>Constructs a new ProbabilityDistributor</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Roll"><code style="text-decoration:none">Roll</code><a href="#Roll" class="hash-link" aria-label="Direct link to Roll" title="Direct link to Roll">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/probabilitydistributor/src/init.lua#L153"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ProbabilityDistributor<!-- -->:</code><code class="green_DgR4">Roll</code><code>(</code><div class="inset_uKQm"><div><code>luck<!-- -->: </code><code class="blue_P4bS">number?</code><span class="inlineDescription_G7Er">-- <span>
+<p>[Optional] A number between 0 and 1 that determines how lucky the roll is. The number acts as a chance that it rerolls the item for a better version. 'Better'ness is determined by the initial order of the weights table.</p>
+</span></span></div></div><code>) → </code><code class="blue_P4bS">T</code><span class="inlineDescription_G7Er">-- <span>
+<p>The value of the item that was rolled.</p>
+</span></span></div><div>
+<p>Rolls the probability distributor for a weighted item.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Clone"><code style="text-decoration:none">Clone</code><a href="#Clone" class="hash-link" aria-label="Direct link to Clone" title="Direct link to Clone">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/probabilitydistributor/src/init.lua#L193"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ProbabilityDistributor<!-- -->:</code><code class="green_DgR4">Clone</code><code>(</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ProbabilityDistributor">ProbabilityDistributor</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">T</code><code class="op_lSLc">&gt;</code><span class="inlineDescription_G7Er">-- <span>
+<p>A new probability distributor of type T. Where T is the type of the value of the weighted item.</p>
+</span></span></div><div>
+<p>Clones the probability distributor.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Sample"><code style="text-decoration:none">Sample</code><a href="#Sample" class="hash-link" aria-label="Direct link to Sample" title="Direct link to Sample">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/probabilitydistributor/src/init.lua#L209"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ProbabilityDistributor<!-- -->:</code><code class="green_DgR4">Sample</code><code>(</code><div class="inset_uKQm"><div><code>numOfSamples<!-- -->: </code><code class="blue_P4bS">number?</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
+<p>The number of samples to take. Defaults to 10,000.</p>
+</span></span></div><div><code>luck<!-- -->: </code><code class="blue_P4bS">number?</code><span class="inlineDescription_G7Er">-- <span>
+<p>The luck to use for the rolls. Defaults to 0.</p>
+</span></span></div></div><code>) → </code><code class="purple_ieR2">{</code><span><code>[</code><code class="blue_P4bS">T</code><code>]</code></span><code>: </code><code class="blue_P4bS">number</code><code class="purple_ieR2">}</code><span class="inlineDescription_G7Er">-- <span>
+<p>A table of the items that were rolled and how many times they were rolled.</p>
+</span></span></div><div>
+<p>Samples the probability distributor to show the distribution of the rolls.</p>
+</div></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
+    &quot;functions&quot;: [
+        {
+            &quot;name&quot;: &quot;new&quot;,
+            &quot;desc&quot;: &quot;Constructs a new ProbabilityDistributor&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;weights&quot;,
+                    &quot;desc&quot;: &quot;A table of weights to distribute.&quot;,
+                    &quot;lua_type&quot;: &quot;{WeightedItem&lt;T&gt;}&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;randomOrSeed&quot;,
+                    &quot;desc&quot;: &quot;An optional random number generator to use for the rolls. If a number is passed, it will be used as the seed for a new random number generator. If nothing is passed, it will create a new Random and use the current time as the seed.&quot;,
+                    &quot;lua_type&quot;: &quot;(Random | number)?&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;A new probability distributor of type T. Where T is the type of the value of the weighted item.&quot;,
+                    &quot;lua_type&quot;: &quot;ProbabilityDistributor&lt;T&gt;&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 106,
+                &quot;path&quot;: &quot;lib/probabilitydistributor/src/init.lua&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;Roll&quot;,
+            &quot;desc&quot;: &quot;Rolls the probability distributor for a weighted item.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;luck&quot;,
+                    &quot;desc&quot;: &quot;[Optional] A number between 0 and 1 that determines how lucky the roll is. The number acts as a chance that it rerolls the item for a better version. &#x27;Better&#x27;ness is determined by the initial order of the weights table.&quot;,
+                    &quot;lua_type&quot;: &quot;number?&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;The value of the item that was rolled.&quot;,
+                    &quot;lua_type&quot;: &quot;T&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 153,
+                &quot;path&quot;: &quot;lib/probabilitydistributor/src/init.lua&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;Clone&quot;,
+            &quot;desc&quot;: &quot;Clones the probability distributor.&quot;,
+            &quot;params&quot;: [],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;A new probability distributor of type T. Where T is the type of the value of the weighted item.&quot;,
+                    &quot;lua_type&quot;: &quot;ProbabilityDistributor&lt;T&gt;&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 193,
+                &quot;path&quot;: &quot;lib/probabilitydistributor/src/init.lua&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;Sample&quot;,
+            &quot;desc&quot;: &quot;Samples the probability distributor to show the distribution of the rolls.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;numOfSamples&quot;,
+                    &quot;desc&quot;: &quot;The number of samples to take. Defaults to 10,000.&quot;,
+                    &quot;lua_type&quot;: &quot;number?&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;luck&quot;,
+                    &quot;desc&quot;: &quot;The luck to use for the rolls. Defaults to 0.&quot;,
+                    &quot;lua_type&quot;: &quot;number?&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;A table of the items that were rolled and how many times they were rolled.&quot;,
+                    &quot;lua_type&quot;: &quot;{[T]: number}&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 209,
+                &quot;path&quot;: &quot;lib/probabilitydistributor/src/init.lua&quot;
+            }
+        }
+    ],
+    &quot;properties&quot;: [],
+    &quot;types&quot;: [
+        {
+            &quot;name&quot;: &quot;Weight&quot;,
+            &quot;desc&quot;: &quot;A valid input for the weight of an item in the WeightsTable. Allows for functions\nto be passed in to generate a weight on the fly. If a NumberRange is given in, it will\ngenerate a random INTEGER between the min and max values of the Range.&quot;,
+            &quot;lua_type&quot;: &quot;number | NumberRange | () -&gt; (number | NumberRange)&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 54,
+                &quot;path&quot;: &quot;lib/probabilitydistributor/src/init.lua&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;WeightedItem&lt;T&gt;&quot;,
+            &quot;desc&quot;: &quot;The format weights and an associated value must be in.&quot;,
+            &quot;fields&quot;: [
+                {
+                    &quot;name&quot;: &quot;Weight&quot;,
+                    &quot;lua_type&quot;: &quot;Weight&quot;,
+                    &quot;desc&quot;: &quot;&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;Value&quot;,
+                    &quot;lua_type&quot;: &quot;T&quot;,
+                    &quot;desc&quot;: &quot;&quot;
+                }
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 63,
+                &quot;path&quot;: &quot;lib/probabilitydistributor/src/init.lua&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;WeightedArray&lt;T&gt;&quot;,
+            &quot;desc&quot;: &quot;A valid input for the WeightsTable.&quot;,
+            &quot;lua_type&quot;: &quot;{WeightedItem&lt;T&gt;}&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 73,
+                &quot;path&quot;: &quot;lib/probabilitydistributor/src/init.lua&quot;
+            }
+        }
+    ],
+    &quot;name&quot;: &quot;ProbabilityDistributor&quot;,
+    &quot;desc&quot;: &quot;ProbabilityDistributor is a class that allows you pick a random item from a table of weighted items.\nThe given WeightsTable must be in the format of:\n```lua\n{\n\tWeight: Weight;\n\tValue: any;\n}\n```\nWhere `Weight` is a number, NumberRange or a function that returns a number or NumberRange, and Value is any value.\nThe Weights are calculated during object construction. Even if the return value of your functions change, the\nweights will not. If you want to take advantage of updated weights, you must create a new ProbabilityDistributor.\nIf a NumberRange is detected as a weight, it will generate a random INTEGER between the min and max values of\nthe Range. If you need more granular control over the weights, you can pass a function that returns a number/NumberRange.\n\n[Example]\n```lua\nlocal WeightTable = {\n\t{Value = \&quot;A\&quot;, Weight = 100};\n\t{Value = \&quot;B\&quot;, Weight = 50};\n\t{Value = \&quot;C\&quot;, Weight = 25};\n\t{Value = \&quot;D\&quot;, Weight = 25};\n}\n\nlocal Distributor: ProbabilityDistributor&lt;string&gt; = ProbabilityDistributor.new(WeightTable)\n\nlocal randomValue = Distributor:Roll() --// Has a 50% chance of returning \&quot;A\&quot;, 25% chance of returning \&quot;B\&quot;, and a 12.5% chance for \&quot;C\&quot; and \&quot;D\&quot;.\nprint(randomValue)\n```&quot;,
+    &quot;source&quot;: {
+        &quot;line&quot;: 38,
+        &quot;path&quot;: &quot;lib/probabilitydistributor/src/init.lua&quot;
+    }
+}</pre></details></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#types" class="table-of-contents__link toc-highlight">Types</a><ul><li><a href="#Weight" class="table-of-contents__link toc-highlight">Weight</a></li><li><a href="#WeightedArray&lt;T&gt;" class="table-of-contents__link toc-highlight">WeightedArray<t></t></a></li><li><a href="#WeightedItem&lt;T&gt;" class="table-of-contents__link toc-highlight">WeightedItem<t></t></a></li></ul></li><li><a href="#properties" class="table-of-contents__link toc-highlight">Properties</a></li><li><a href="#functions" class="table-of-contents__link toc-highlight">Functions</a><ul><li><a href="#Clone" class="table-of-contents__link toc-highlight">:Clone</a></li><li><a href="#Roll" class="table-of-contents__link toc-highlight">:Roll</a></li><li><a href="#Sample" class="table-of-contents__link toc-highlight">:Sample</a></li><li><a href="#new" class="table-of-contents__link toc-highlight">.new</a></li></ul></li></ul></div></div></div></div></main></div></div><footer class="footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2024 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
+<script src="/ModulesOnRails/assets/js/runtime~main.e45ae276.js"></script>
+<script src="/ModulesOnRails/assets/js/main.08576ec5.js"></script>
+</body>
+</html>

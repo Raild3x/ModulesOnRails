@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="en" dir="ltr" class="plugin-moonwave plugin-id-moonwave">
+<head>
+<meta charset="UTF-8">
+<meta name="generator" content="Docusaurus v2.3.1">
+<title data-rh="true">ExampleResourceTypeData | ModulesOnRails</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:url" content="https://raild3x.github.io/ModulesOnRails/api/ExampleResourceTypeData"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docusaurus_tag" content="default"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docsearch:docusaurus_tag" content="default"><meta data-rh="true" property="og:title" content="ExampleResourceTypeData | ModulesOnRails"><meta data-rh="true" name="description" content="An Example ResourceTypeData file. This is used to define the general
+behavior of a droplet type.
+
+```lua
+local GenericPart = Instance.new(&quot;Part&quot;)
+GenericPart.Name = &quot;GenericPart&quot;
+GenericPart.Transparency = 1
+GenericPart.Size = Vector3.one
+GenericPart.Anchored = true
+GenericPart.CanCollide = false
+GenericPart.CanTouch = false
+GenericPart.CanQuery = false
+GenericPart.Massless = true
+
+
+--------------------------------------------------------------------------------
+    --// Data //--
+--------------------------------------------------------------------------------
+
+return {
+    Defaults = {
+        Value = NumberRange.new(0.6, 1.4); -- The value you want the droplet to have. This can be anything.
+        -- Metadata = {}; -- You typically shouldnt default metadata.
+
+        Count = NumberRange.new(2, 5); -- Number of droplets to spawn
+        LifeTime = NumberRange.new(50, 60); -- Time before the droplet dissapears
+        EjectionDuration = 1; -- Time it takes to spew out all the droplets
+        EjectionHorizontalVelocity = NumberRange.new(0, 25);
+        EjectionVerticalVelocity = NumberRange.new(25, 50);
+        CollectorMode = DropletUtil.Enums.CollectorMode.MultiCollector;
+
+        Mass = 1; -- Mass of the droplet (Used in magnitization calculations)
+        MaxForce = math.huge; -- Maximum steering force applied to the droplet when magnitized to a player
+        MaxVelocity = 150; -- Maxiumum velocity of the droplet when magnitized to a player
+        CollectionRadius = 1.5; -- Radius from center of player the droplet must be to be considered &#x27;collected&#x27;
+    };
+
+    --[[
+        Called when a new droplet is created. Use this to setup your visuals and
+        any variables you need to keep track of. All parts within this should be
+        Anchored = false, CanCollide = false, and Massless = true.
+        The return value of this function can be accessed via Droplet:GetSetupData()
+    ]]
+    SetupDroplet = function(droplet: Droplet)
+        local Value = droplet:GetValue() :: number
+
+        local VisualModel = Instance.new(&quot;Model&quot;)
+        VisualModel.Name = &quot;VisualModel&quot;
+
+        local OuterPart = GenericPart:Clone()
+        OuterPart.Name = &quot;Outer&quot;
+        OuterPart.Material = Enum.Material.Glass
+        OuterPart.Transparency = 0.5
+        OuterPart.Color = Color3.fromRGB(16, 206, 16)
+        OuterPart.Size = Vector3.one * Value
+        OuterPart.Anchored = false
+        OuterPart.Parent = VisualModel
+        VisualModel.PrimaryPart = OuterPart
+
+        local NumGen = Random.new()
+
+        local InnerPart = OuterPart:Clone()
+        InnerPart.Material = Enum.Material.Neon
+        InnerPart.Name = &quot;Inner&quot;
+        InnerPart.Color = Color3.fromRGB(219, 189, 18)
+        InnerPart.Transparency = 0
+        InnerPart.CastShadow = false
+        InnerPart.Size *= 0.6 + NumGen:NextNumber(-0.1, 0.1)
+        InnerPart.CFrame = OuterPart.CFrame + Vector3.new(
+            NumGen:NextNumber(-0.1, 0.1),
+            NumGen:NextNumber(-0.1, 0.1),
+            NumGen:NextNumber(-0.1, 0.1)
+        )
+        InnerPart.Parent = VisualModel
+
+        local Weld = Instance.new(&quot;WeldConstraint&quot;)
+        Weld.Part0 = OuterPart
+        Weld.Part1 = InnerPart
+        Weld.Parent = VisualModel
+
+        droplet:AddTask(task.spawn(function()
+            for i = 0.025, 1, 0.025 do
+                VisualModel:ScaleTo(i)
+                task.wait()
+            end
+            VisualModel:ScaleTo(1)
+        end), nil, &quot;GrowThread&quot;)
+        
+        droplet:AttachModel(VisualModel)
+
+        return {
+            VisualModel = VisualModel;
+            SpinDirection = if math.random() &gt; 0.5 then 1 else -1;
+        }
+    end;
+
+    -- Ran when the droplet is within render range of the LocalPlayer&#x27;s Camera
+    OnRenderUpdate = function(droplet: Droplet, rendertimeElapsed: number)
+        local SetupData = droplet:GetSetupData()
+        local OffsetCFrame = CFrame.new()
+
+        do -- Bobbing
+            local AMPLITUDE = 1 -- Studs of vertical movement (+- half of this)
+            local FREQUENCY = 0.25 -- Cycles per second
+        
+            local Y = (AMPLITUDE * 0.5) * -math.cos((rendertimeElapsed*math.pi) * (FREQUENCY))
+            OffsetCFrame *= CFrame.new(0, AMPLITUDE + Y, 0)
+        end
+
+        do -- Rotating
+            local TimeToMakeOneRotation = 4
+            local RotationsPerSecond = 1/TimeToMakeOneRotation
+            OffsetCFrame *= CFrame.Angles(0, (rendertimeElapsed*math.pi) * RotationsPerSecond * SetupData.SpinDirection , 0)
+        end
+
+        return OffsetCFrame
+    end;
+
+    OnDropletTimeout = function(droplet: Droplet)
+        local VisualModel = droplet:GetSetupData().VisualModel
+        droplet:RemoveTask(&quot;GrowThread&quot;)
+        for i = 1, 0.025, -0.025 do
+            VisualModel:ScaleTo(i)
+            task.wait()
+        end
+    end;
+
+    OnClientClaim = function(playerWhoClaimed: Player, droplet: Droplet)
+        -- droplet:Collect(playerWhoClaimed)
+    end;
+
+    --[[
+        Called when the droplet hits the player and is considered collected.
+        This is ran on the client only. It should be used for collection effects
+        and other client side things.
+    ]]
+    OnClientCollect = function(playerWhoCollected: Player, droplet: Droplet)
+        local Value = droplet:GetValue() :: number
+
+        local Part = GenericPart:Clone()
+        Part.CFrame = droplet:GetPivot()
+
+        task.delay(2, function()
+            Part:Destroy()
+        end)
+
+        local CollectionSound = Instance.new(&quot;Sound&quot;)
+        CollectionSound.SoundId = &quot;rbxassetid://402143943&quot;
+        CollectionSound.Volume = 0.25
+        
+        local PitchShift = Instance.new(&quot;PitchShiftSoundEffect&quot;)
+        PitchShift.Octave = 2 - Value/1.5
+
+        PitchShift.Parent = CollectionSound
+        CollectionSound.Parent = Part
+        Part.Parent = workspace
+
+        CollectionSound:Play()
+    end;
+
+    --[[
+        Called once the client informs the server that it has collected the droplet.
+    ]]
+    OnServerCollect = function(playerWhoCollected: Player, value: any, metadata: any)
+        local ExpValue: number = value
+
+        local leaderstats = playerWhoCollected:FindFirstChild(&quot;leaderstats&quot;)
+        if not leaderstats then
+            leaderstats = Instance.new(&quot;Folder&quot;)
+            leaderstats.Name = &quot;leaderstats&quot;
+            leaderstats.Parent = playerWhoCollected
+        end
+
+        local expStat = leaderstats:FindFirstChild(&quot;Exp&quot;)
+        if not expStat then
+            expStat = Instance.new(&quot;NumberValue&quot;)
+            expStat.Name = &quot;Exp&quot;
+            expStat.Parent = leaderstats
+        end
+
+        expStat.Value += ExpValue
+        -- Add the value to the player&#x27;s &quot;exp&quot;. This is just an example.
+    end;
+}
+```"><meta data-rh="true" property="og:description" content="An Example ResourceTypeData file. This is used to define the general
+behavior of a droplet type.
+
+```lua
+local GenericPart = Instance.new(&quot;Part&quot;)
+GenericPart.Name = &quot;GenericPart&quot;
+GenericPart.Transparency = 1
+GenericPart.Size = Vector3.one
+GenericPart.Anchored = true
+GenericPart.CanCollide = false
+GenericPart.CanTouch = false
+GenericPart.CanQuery = false
+GenericPart.Massless = true
+
+
+--------------------------------------------------------------------------------
+    --// Data //--
+--------------------------------------------------------------------------------
+
+return {
+    Defaults = {
+        Value = NumberRange.new(0.6, 1.4); -- The value you want the droplet to have. This can be anything.
+        -- Metadata = {}; -- You typically shouldnt default metadata.
+
+        Count = NumberRange.new(2, 5); -- Number of droplets to spawn
+        LifeTime = NumberRange.new(50, 60); -- Time before the droplet dissapears
+        EjectionDuration = 1; -- Time it takes to spew out all the droplets
+        EjectionHorizontalVelocity = NumberRange.new(0, 25);
+        EjectionVerticalVelocity = NumberRange.new(25, 50);
+        CollectorMode = DropletUtil.Enums.CollectorMode.MultiCollector;
+
+        Mass = 1; -- Mass of the droplet (Used in magnitization calculations)
+        MaxForce = math.huge; -- Maximum steering force applied to the droplet when magnitized to a player
+        MaxVelocity = 150; -- Maxiumum velocity of the droplet when magnitized to a player
+        CollectionRadius = 1.5; -- Radius from center of player the droplet must be to be considered &#x27;collected&#x27;
+    };
+
+    --[[
+        Called when a new droplet is created. Use this to setup your visuals and
+        any variables you need to keep track of. All parts within this should be
+        Anchored = false, CanCollide = false, and Massless = true.
+        The return value of this function can be accessed via Droplet:GetSetupData()
+    ]]
+    SetupDroplet = function(droplet: Droplet)
+        local Value = droplet:GetValue() :: number
+
+        local VisualModel = Instance.new(&quot;Model&quot;)
+        VisualModel.Name = &quot;VisualModel&quot;
+
+        local OuterPart = GenericPart:Clone()
+        OuterPart.Name = &quot;Outer&quot;
+        OuterPart.Material = Enum.Material.Glass
+        OuterPart.Transparency = 0.5
+        OuterPart.Color = Color3.fromRGB(16, 206, 16)
+        OuterPart.Size = Vector3.one * Value
+        OuterPart.Anchored = false
+        OuterPart.Parent = VisualModel
+        VisualModel.PrimaryPart = OuterPart
+
+        local NumGen = Random.new()
+
+        local InnerPart = OuterPart:Clone()
+        InnerPart.Material = Enum.Material.Neon
+        InnerPart.Name = &quot;Inner&quot;
+        InnerPart.Color = Color3.fromRGB(219, 189, 18)
+        InnerPart.Transparency = 0
+        InnerPart.CastShadow = false
+        InnerPart.Size *= 0.6 + NumGen:NextNumber(-0.1, 0.1)
+        InnerPart.CFrame = OuterPart.CFrame + Vector3.new(
+            NumGen:NextNumber(-0.1, 0.1),
+            NumGen:NextNumber(-0.1, 0.1),
+            NumGen:NextNumber(-0.1, 0.1)
+        )
+        InnerPart.Parent = VisualModel
+
+        local Weld = Instance.new(&quot;WeldConstraint&quot;)
+        Weld.Part0 = OuterPart
+        Weld.Part1 = InnerPart
+        Weld.Parent = VisualModel
+
+        droplet:AddTask(task.spawn(function()
+            for i = 0.025, 1, 0.025 do
+                VisualModel:ScaleTo(i)
+                task.wait()
+            end
+            VisualModel:ScaleTo(1)
+        end), nil, &quot;GrowThread&quot;)
+        
+        droplet:AttachModel(VisualModel)
+
+        return {
+            VisualModel = VisualModel;
+            SpinDirection = if math.random() &gt; 0.5 then 1 else -1;
+        }
+    end;
+
+    -- Ran when the droplet is within render range of the LocalPlayer&#x27;s Camera
+    OnRenderUpdate = function(droplet: Droplet, rendertimeElapsed: number)
+        local SetupData = droplet:GetSetupData()
+        local OffsetCFrame = CFrame.new()
+
+        do -- Bobbing
+            local AMPLITUDE = 1 -- Studs of vertical movement (+- half of this)
+            local FREQUENCY = 0.25 -- Cycles per second
+        
+            local Y = (AMPLITUDE * 0.5) * -math.cos((rendertimeElapsed*math.pi) * (FREQUENCY))
+            OffsetCFrame *= CFrame.new(0, AMPLITUDE + Y, 0)
+        end
+
+        do -- Rotating
+            local TimeToMakeOneRotation = 4
+            local RotationsPerSecond = 1/TimeToMakeOneRotation
+            OffsetCFrame *= CFrame.Angles(0, (rendertimeElapsed*math.pi) * RotationsPerSecond * SetupData.SpinDirection , 0)
+        end
+
+        return OffsetCFrame
+    end;
+
+    OnDropletTimeout = function(droplet: Droplet)
+        local VisualModel = droplet:GetSetupData().VisualModel
+        droplet:RemoveTask(&quot;GrowThread&quot;)
+        for i = 1, 0.025, -0.025 do
+            VisualModel:ScaleTo(i)
+            task.wait()
+        end
+    end;
+
+    OnClientClaim = function(playerWhoClaimed: Player, droplet: Droplet)
+        -- droplet:Collect(playerWhoClaimed)
+    end;
+
+    --[[
+        Called when the droplet hits the player and is considered collected.
+        This is ran on the client only. It should be used for collection effects
+        and other client side things.
+    ]]
+    OnClientCollect = function(playerWhoCollected: Player, droplet: Droplet)
+        local Value = droplet:GetValue() :: number
+
+        local Part = GenericPart:Clone()
+        Part.CFrame = droplet:GetPivot()
+
+        task.delay(2, function()
+            Part:Destroy()
+        end)
+
+        local CollectionSound = Instance.new(&quot;Sound&quot;)
+        CollectionSound.SoundId = &quot;rbxassetid://402143943&quot;
+        CollectionSound.Volume = 0.25
+        
+        local PitchShift = Instance.new(&quot;PitchShiftSoundEffect&quot;)
+        PitchShift.Octave = 2 - Value/1.5
+
+        PitchShift.Parent = CollectionSound
+        CollectionSound.Parent = Part
+        Part.Parent = workspace
+
+        CollectionSound:Play()
+    end;
+
+    --[[
+        Called once the client informs the server that it has collected the droplet.
+    ]]
+    OnServerCollect = function(playerWhoCollected: Player, value: any, metadata: any)
+        local ExpValue: number = value
+
+        local leaderstats = playerWhoCollected:FindFirstChild(&quot;leaderstats&quot;)
+        if not leaderstats then
+            leaderstats = Instance.new(&quot;Folder&quot;)
+            leaderstats.Name = &quot;leaderstats&quot;
+            leaderstats.Parent = playerWhoCollected
+        end
+
+        local expStat = leaderstats:FindFirstChild(&quot;Exp&quot;)
+        if not expStat then
+            expStat = Instance.new(&quot;NumberValue&quot;)
+            expStat.Name = &quot;Exp&quot;
+            expStat.Parent = leaderstats
+        end
+
+        expStat.Value += ExpValue
+        -- Add the value to the player&#x27;s &quot;exp&quot;. This is just an example.
+    end;
+}
+```"><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/ExampleResourceTypeData"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/ExampleResourceTypeData" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/ExampleResourceTypeData" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.1839e2d4.css">
+<link rel="preload" href="/ModulesOnRails/assets/js/runtime~main.e45ae276.js" as="script">
+<link rel="preload" href="/ModulesOnRails/assets/js/main.08576ec5.js" as="script">
+</head>
+<body class="navigation-with-keyboard">
+<script>!function(){function e(e){document.documentElement.setAttribute("data-theme",e)}var t=function(){var e=null;try{e=localStorage.getItem("theme")}catch(e){}return e}();null!==t?e(t):window.matchMedia("(prefers-color-scheme: dark)").matches?e("dark"):(window.matchMedia("(prefers-color-scheme: light)").matches,e("light"))}()</script><div id="__docusaurus">
+<div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="navbar navbar--fixed-top"><div class="navbar__inner"><div class="navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-hidden="true" viewBox="0 0 24 24" class="iconExternalLink_nPIU"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"></path></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="Switch between dark and light mode (currently light mode)" aria-label="Switch between dark and light mode (currently light mode)" aria-live="polite"><svg viewBox="0 0 24 24" width="24" height="24" class="lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" class="darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg></button></div><div class="searchBox_ZlJk"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input type="search" id="search_input_react" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="docusaurus_skipToContent_fallback" class="main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject">​Base​Object</a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/TableManager">TableManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/ServerTableReplicator">TableReplicator</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/NetWire">NetWire</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/PlayerProfileManager">PlayerProfileManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" aria-expanded="true" href="/ModulesOnRails/api/DropletManager">DropletManager</a></div><ul style="display:block;overflow:visible;height:auto" class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/DropletManager">​Droplet​Manager</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/DropletServerManager">​Droplet​Server​Manager</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/DropletClientManager">​Droplet​Client​Manager</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/Droplet">​Droplet</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/DropletUtil">​Droplet​Util</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" tabindex="0" href="/ModulesOnRails/api/ExampleResourceTypeData">​Example​Resource​Type​Data</a></li></ul></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PlayerDataService">​Player​Data​Service</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ProbabilityDistributor">​Probability​Distributor</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Roam">​Roam</a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><div class="tocCollapsible_ETCw theme-doc-toc-mobile tocMobile_oUs_"><button type="button" class="clean-btn tocCollapsibleButton_TO0P">On this page</button></div><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">Example</span><span style="display:inline-block">Resource</span><span style="display:inline-block">Type</span><span style="display:inline-block">Data</span></h1><div class="luaClassTags_EipM"></div><div>
+<p>
+  An Example ResourceTypeData file. This is used to define the general
+  behavior of a droplet type.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> GenericPart <span class="token operator">=</span> Instance<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token string">"Part"</span><span class="token punctuation">)</span>
+GenericPart<span class="token punctuation">.</span>Name <span class="token operator">=</span> <span class="token string">"GenericPart"</span>
+GenericPart<span class="token punctuation">.</span>Transparency <span class="token operator">=</span> <span class="token number">1</span>
+GenericPart<span class="token punctuation">.</span>Size <span class="token operator">=</span> Vector3<span class="token punctuation">.</span>one
+GenericPart<span class="token punctuation">.</span>Anchored <span class="token operator">=</span> <span class="token keyword">true</span>
+GenericPart<span class="token punctuation">.</span>CanCollide <span class="token operator">=</span> <span class="token keyword">false</span>
+GenericPart<span class="token punctuation">.</span>CanTouch <span class="token operator">=</span> <span class="token keyword">false</span>
+GenericPart<span class="token punctuation">.</span>CanQuery <span class="token operator">=</span> <span class="token keyword">false</span>
+GenericPart<span class="token punctuation">.</span>Massless <span class="token operator">=</span> <span class="token keyword">true</span>
+
+
+<span class="token comment">--------------------------------------------------------------------------------</span>
+    <span class="token comment">--// Data //--</span>
+<span class="token comment">--------------------------------------------------------------------------------</span>
+
+<span class="token keyword">return</span> <span class="token punctuation">{</span>
+    Defaults <span class="token operator">=</span> <span class="token punctuation">{</span>
+        Value <span class="token operator">=</span> NumberRange<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">0.6</span><span class="token punctuation">,</span> <span class="token number">1.4</span><span class="token punctuation">)</span><span class="token punctuation">;</span> <span class="token comment">-- The value you want the droplet to have. This can be anything.</span>
+        <span class="token comment">-- Metadata = {}; -- You typically shouldnt default metadata.</span>
+
+        Count <span class="token operator">=</span> NumberRange<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">2</span><span class="token punctuation">,</span> <span class="token number">5</span><span class="token punctuation">)</span><span class="token punctuation">;</span> <span class="token comment">-- Number of droplets to spawn</span>
+        LifeTime <span class="token operator">=</span> NumberRange<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">50</span><span class="token punctuation">,</span> <span class="token number">60</span><span class="token punctuation">)</span><span class="token punctuation">;</span> <span class="token comment">-- Time before the droplet dissapears</span>
+        EjectionDuration <span class="token operator">=</span> <span class="token number">1</span><span class="token punctuation">;</span> <span class="token comment">-- Time it takes to spew out all the droplets</span>
+        EjectionHorizontalVelocity <span class="token operator">=</span> NumberRange<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">0</span><span class="token punctuation">,</span> <span class="token number">25</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+        EjectionVerticalVelocity <span class="token operator">=</span> NumberRange<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">25</span><span class="token punctuation">,</span> <span class="token number">50</span><span class="token punctuation">)</span><span class="token punctuation">;</span>
+        CollectorMode <span class="token operator">=</span> DropletUtil<span class="token punctuation">.</span>Enums<span class="token punctuation">.</span>CollectorMode<span class="token punctuation">.</span>MultiCollector<span class="token punctuation">;</span>
+
+        Mass <span class="token operator">=</span> <span class="token number">1</span><span class="token punctuation">;</span> <span class="token comment">-- Mass of the droplet (Used in magnitization calculations)</span>
+        MaxForce <span class="token operator">=</span> math<span class="token punctuation">.</span>huge<span class="token punctuation">;</span> <span class="token comment">-- Maximum steering force applied to the droplet when magnitized to a player</span>
+        MaxVelocity <span class="token operator">=</span> <span class="token number">150</span><span class="token punctuation">;</span> <span class="token comment">-- Maxiumum velocity of the droplet when magnitized to a player</span>
+        CollectionRadius <span class="token operator">=</span> <span class="token number">1.5</span><span class="token punctuation">;</span> <span class="token comment">-- Radius from center of player the droplet must be to be considered 'collected'</span>
+    <span class="token punctuation">}</span><span class="token punctuation">;</span>
+
+    <span class="token comment">--[[
+        Called when a new droplet is created. Use this to setup your visuals and
+        any variables you need to keep track of. All parts within this should be
+        Anchored = false, CanCollide = false, and Massless = true.
+        The return value of this function can be accessed via Droplet:GetSetupData()
+    ]]</span>
+    SetupDroplet <span class="token operator">=</span> <span class="token keyword">function</span><span class="token punctuation">(</span>droplet<span class="token punctuation">:</span> Droplet<span class="token punctuation">)</span>
+        <span class="token keyword">local</span> Value <span class="token operator">=</span> droplet<span class="token punctuation">:</span><span class="token function">GetValue</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token punctuation">::</span> number
+
+        <span class="token keyword">local</span> VisualModel <span class="token operator">=</span> Instance<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token string">"Model"</span><span class="token punctuation">)</span>
+        VisualModel<span class="token punctuation">.</span>Name <span class="token operator">=</span> <span class="token string">"VisualModel"</span>
+
+        <span class="token keyword">local</span> OuterPart <span class="token operator">=</span> GenericPart<span class="token punctuation">:</span><span class="token function">Clone</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+        OuterPart<span class="token punctuation">.</span>Name <span class="token operator">=</span> <span class="token string">"Outer"</span>
+        OuterPart<span class="token punctuation">.</span>Material <span class="token operator">=</span> Enum<span class="token punctuation">.</span>Material<span class="token punctuation">.</span>Glass
+        OuterPart<span class="token punctuation">.</span>Transparency <span class="token operator">=</span> <span class="token number">0.5</span>
+        OuterPart<span class="token punctuation">.</span>Color <span class="token operator">=</span> Color3<span class="token punctuation">.</span><span class="token function">fromRGB</span><span class="token punctuation">(</span><span class="token number">16</span><span class="token punctuation">,</span> <span class="token number">206</span><span class="token punctuation">,</span> <span class="token number">16</span><span class="token punctuation">)</span>
+        OuterPart<span class="token punctuation">.</span>Size <span class="token operator">=</span> Vector3<span class="token punctuation">.</span>one <span class="token operator">*</span> Value
+        OuterPart<span class="token punctuation">.</span>Anchored <span class="token operator">=</span> <span class="token keyword">false</span>
+        OuterPart<span class="token punctuation">.</span>Parent <span class="token operator">=</span> VisualModel
+        VisualModel<span class="token punctuation">.</span>PrimaryPart <span class="token operator">=</span> OuterPart
+
+        <span class="token keyword">local</span> NumGen <span class="token operator">=</span> Random<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+
+        <span class="token keyword">local</span> InnerPart <span class="token operator">=</span> OuterPart<span class="token punctuation">:</span><span class="token function">Clone</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+        InnerPart<span class="token punctuation">.</span>Material <span class="token operator">=</span> Enum<span class="token punctuation">.</span>Material<span class="token punctuation">.</span>Neon
+        InnerPart<span class="token punctuation">.</span>Name <span class="token operator">=</span> <span class="token string">"Inner"</span>
+        InnerPart<span class="token punctuation">.</span>Color <span class="token operator">=</span> Color3<span class="token punctuation">.</span><span class="token function">fromRGB</span><span class="token punctuation">(</span><span class="token number">219</span><span class="token punctuation">,</span> <span class="token number">189</span><span class="token punctuation">,</span> <span class="token number">18</span><span class="token punctuation">)</span>
+        InnerPart<span class="token punctuation">.</span>Transparency <span class="token operator">=</span> <span class="token number">0</span>
+        InnerPart<span class="token punctuation">.</span>CastShadow <span class="token operator">=</span> <span class="token keyword">false</span>
+        InnerPart<span class="token punctuation">.</span>Size <span class="token operator">*</span><span class="token operator">=</span> <span class="token number">0.6</span> <span class="token operator">+</span> NumGen<span class="token punctuation">:</span><span class="token function">NextNumber</span><span class="token punctuation">(</span><span class="token operator">-</span><span class="token number">0.1</span><span class="token punctuation">,</span> <span class="token number">0.1</span><span class="token punctuation">)</span>
+        InnerPart<span class="token punctuation">.</span>CFrame <span class="token operator">=</span> OuterPart<span class="token punctuation">.</span>CFrame <span class="token operator">+</span> Vector3<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span>
+            NumGen<span class="token punctuation">:</span><span class="token function">NextNumber</span><span class="token punctuation">(</span><span class="token operator">-</span><span class="token number">0.1</span><span class="token punctuation">,</span> <span class="token number">0.1</span><span class="token punctuation">)</span><span class="token punctuation">,</span>
+            NumGen<span class="token punctuation">:</span><span class="token function">NextNumber</span><span class="token punctuation">(</span><span class="token operator">-</span><span class="token number">0.1</span><span class="token punctuation">,</span> <span class="token number">0.1</span><span class="token punctuation">)</span><span class="token punctuation">,</span>
+            NumGen<span class="token punctuation">:</span><span class="token function">NextNumber</span><span class="token punctuation">(</span><span class="token operator">-</span><span class="token number">0.1</span><span class="token punctuation">,</span> <span class="token number">0.1</span><span class="token punctuation">)</span>
+        <span class="token punctuation">)</span>
+        InnerPart<span class="token punctuation">.</span>Parent <span class="token operator">=</span> VisualModel
+
+        <span class="token keyword">local</span> Weld <span class="token operator">=</span> Instance<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token string">"WeldConstraint"</span><span class="token punctuation">)</span>
+        Weld<span class="token punctuation">.</span>Part0 <span class="token operator">=</span> OuterPart
+        Weld<span class="token punctuation">.</span>Part1 <span class="token operator">=</span> InnerPart
+        Weld<span class="token punctuation">.</span>Parent <span class="token operator">=</span> VisualModel
+
+        droplet<span class="token punctuation">:</span><span class="token function">AddTask</span><span class="token punctuation">(</span>task<span class="token punctuation">.</span><span class="token function">spawn</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+            <span class="token keyword">for</span> i <span class="token operator">=</span> <span class="token number">0.025</span><span class="token punctuation">,</span> <span class="token number">1</span><span class="token punctuation">,</span> <span class="token number">0.025</span> <span class="token keyword">do</span>
+                VisualModel<span class="token punctuation">:</span><span class="token function">ScaleTo</span><span class="token punctuation">(</span>i<span class="token punctuation">)</span>
+                task<span class="token punctuation">.</span><span class="token function">wait</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+            <span class="token keyword">end</span>
+            VisualModel<span class="token punctuation">:</span><span class="token function">ScaleTo</span><span class="token punctuation">(</span><span class="token number">1</span><span class="token punctuation">)</span>
+        <span class="token keyword">end</span><span class="token punctuation">)</span><span class="token punctuation">,</span> <span class="token keyword">nil</span><span class="token punctuation">,</span> <span class="token string">"GrowThread"</span><span class="token punctuation">)</span>
+        
+        droplet<span class="token punctuation">:</span><span class="token function">AttachModel</span><span class="token punctuation">(</span>VisualModel<span class="token punctuation">)</span>
+
+        <span class="token keyword">return</span> <span class="token punctuation">{</span>
+            VisualModel <span class="token operator">=</span> VisualModel<span class="token punctuation">;</span>
+            SpinDirection <span class="token operator">=</span> <span class="token keyword">if</span> math<span class="token punctuation">.</span><span class="token function">random</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token operator">></span> <span class="token number">0.5</span> <span class="token keyword">then</span> <span class="token number">1</span> <span class="token keyword">else</span> <span class="token operator">-</span><span class="token number">1</span><span class="token punctuation">;</span>
+        <span class="token punctuation">}</span>
+    <span class="token keyword">end</span><span class="token punctuation">;</span>
+
+    <span class="token comment">-- Ran when the droplet is within render range of the LocalPlayer's Camera</span>
+    OnRenderUpdate <span class="token operator">=</span> <span class="token keyword">function</span><span class="token punctuation">(</span>droplet<span class="token punctuation">:</span> Droplet<span class="token punctuation">,</span> rendertimeElapsed<span class="token punctuation">:</span> number<span class="token punctuation">)</span>
+        <span class="token keyword">local</span> SetupData <span class="token operator">=</span> droplet<span class="token punctuation">:</span><span class="token function">GetSetupData</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+        <span class="token keyword">local</span> OffsetCFrame <span class="token operator">=</span> CFrame<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+
+        <span class="token keyword">do</span> <span class="token comment">-- Bobbing</span>
+            <span class="token keyword">local</span> AMPLITUDE <span class="token operator">=</span> <span class="token number">1</span> <span class="token comment">-- Studs of vertical movement (+- half of this)</span>
+            <span class="token keyword">local</span> FREQUENCY <span class="token operator">=</span> <span class="token number">0.25</span> <span class="token comment">-- Cycles per second</span>
+        
+            <span class="token keyword">local</span> Y <span class="token operator">=</span> <span class="token punctuation">(</span>AMPLITUDE <span class="token operator">*</span> <span class="token number">0.5</span><span class="token punctuation">)</span> <span class="token operator">*</span> <span class="token operator">-</span>math<span class="token punctuation">.</span><span class="token function">cos</span><span class="token punctuation">(</span><span class="token punctuation">(</span>rendertimeElapsed<span class="token operator">*</span>math<span class="token punctuation">.</span>pi<span class="token punctuation">)</span> <span class="token operator">*</span> <span class="token punctuation">(</span>FREQUENCY<span class="token punctuation">)</span><span class="token punctuation">)</span>
+            OffsetCFrame <span class="token operator">*</span><span class="token operator">=</span> CFrame<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">0</span><span class="token punctuation">,</span> AMPLITUDE <span class="token operator">+</span> Y<span class="token punctuation">,</span> <span class="token number">0</span><span class="token punctuation">)</span>
+        <span class="token keyword">end</span>
+
+        <span class="token keyword">do</span> <span class="token comment">-- Rotating</span>
+            <span class="token keyword">local</span> TimeToMakeOneRotation <span class="token operator">=</span> <span class="token number">4</span>
+            <span class="token keyword">local</span> RotationsPerSecond <span class="token operator">=</span> <span class="token number">1</span><span class="token operator">/</span>TimeToMakeOneRotation
+            OffsetCFrame <span class="token operator">*</span><span class="token operator">=</span> CFrame<span class="token punctuation">.</span><span class="token function">Angles</span><span class="token punctuation">(</span><span class="token number">0</span><span class="token punctuation">,</span> <span class="token punctuation">(</span>rendertimeElapsed<span class="token operator">*</span>math<span class="token punctuation">.</span>pi<span class="token punctuation">)</span> <span class="token operator">*</span> RotationsPerSecond <span class="token operator">*</span> SetupData<span class="token punctuation">.</span>SpinDirection <span class="token punctuation">,</span> <span class="token number">0</span><span class="token punctuation">)</span>
+        <span class="token keyword">end</span>
+
+        <span class="token keyword">return</span> OffsetCFrame
+    <span class="token keyword">end</span><span class="token punctuation">;</span>
+
+    OnDropletTimeout <span class="token operator">=</span> <span class="token keyword">function</span><span class="token punctuation">(</span>droplet<span class="token punctuation">:</span> Droplet<span class="token punctuation">)</span>
+        <span class="token keyword">local</span> VisualModel <span class="token operator">=</span> droplet<span class="token punctuation">:</span><span class="token function">GetSetupData</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">.</span>VisualModel
+        droplet<span class="token punctuation">:</span><span class="token function">RemoveTask</span><span class="token punctuation">(</span><span class="token string">"GrowThread"</span><span class="token punctuation">)</span>
+        <span class="token keyword">for</span> i <span class="token operator">=</span> <span class="token number">1</span><span class="token punctuation">,</span> <span class="token number">0.025</span><span class="token punctuation">,</span> <span class="token operator">-</span><span class="token number">0.025</span> <span class="token keyword">do</span>
+            VisualModel<span class="token punctuation">:</span><span class="token function">ScaleTo</span><span class="token punctuation">(</span>i<span class="token punctuation">)</span>
+            task<span class="token punctuation">.</span><span class="token function">wait</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+        <span class="token keyword">end</span>
+    <span class="token keyword">end</span><span class="token punctuation">;</span>
+
+    OnClientClaim <span class="token operator">=</span> <span class="token keyword">function</span><span class="token punctuation">(</span>playerWhoClaimed<span class="token punctuation">:</span> Player<span class="token punctuation">,</span> droplet<span class="token punctuation">:</span> Droplet<span class="token punctuation">)</span>
+        <span class="token comment">-- droplet:Collect(playerWhoClaimed)</span>
+    <span class="token keyword">end</span><span class="token punctuation">;</span>
+
+    <span class="token comment">--[[
+        Called when the droplet hits the player and is considered collected.
+        This is ran on the client only. It should be used for collection effects
+        and other client side things.
+    ]]</span>
+    OnClientCollect <span class="token operator">=</span> <span class="token keyword">function</span><span class="token punctuation">(</span>playerWhoCollected<span class="token punctuation">:</span> Player<span class="token punctuation">,</span> droplet<span class="token punctuation">:</span> Droplet<span class="token punctuation">)</span>
+        <span class="token keyword">local</span> Value <span class="token operator">=</span> droplet<span class="token punctuation">:</span><span class="token function">GetValue</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token punctuation">::</span> number
+
+        <span class="token keyword">local</span> Part <span class="token operator">=</span> GenericPart<span class="token punctuation">:</span><span class="token function">Clone</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+        Part<span class="token punctuation">.</span>CFrame <span class="token operator">=</span> droplet<span class="token punctuation">:</span><span class="token function">GetPivot</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+
+        task<span class="token punctuation">.</span><span class="token function">delay</span><span class="token punctuation">(</span><span class="token number">2</span><span class="token punctuation">,</span> <span class="token keyword">function</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+            Part<span class="token punctuation">:</span><span class="token function">Destroy</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+        <span class="token keyword">end</span><span class="token punctuation">)</span>
+
+        <span class="token keyword">local</span> CollectionSound <span class="token operator">=</span> Instance<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token string">"Sound"</span><span class="token punctuation">)</span>
+        CollectionSound<span class="token punctuation">.</span>SoundId <span class="token operator">=</span> <span class="token string">"rbxassetid://402143943"</span>
+        CollectionSound<span class="token punctuation">.</span>Volume <span class="token operator">=</span> <span class="token number">0.25</span>
+        
+        <span class="token keyword">local</span> PitchShift <span class="token operator">=</span> Instance<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token string">"PitchShiftSoundEffect"</span><span class="token punctuation">)</span>
+        PitchShift<span class="token punctuation">.</span>Octave <span class="token operator">=</span> <span class="token number">2</span> <span class="token operator">-</span> Value<span class="token operator">/</span><span class="token number">1.5</span>
+
+        PitchShift<span class="token punctuation">.</span>Parent <span class="token operator">=</span> CollectionSound
+        CollectionSound<span class="token punctuation">.</span>Parent <span class="token operator">=</span> Part
+        Part<span class="token punctuation">.</span>Parent <span class="token operator">=</span> workspace
+
+        CollectionSound<span class="token punctuation">:</span><span class="token function">Play</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+    <span class="token keyword">end</span><span class="token punctuation">;</span>
+
+    <span class="token comment">--[[
+        Called once the client informs the server that it has collected the droplet.
+    ]]</span>
+    OnServerCollect <span class="token operator">=</span> <span class="token keyword">function</span><span class="token punctuation">(</span>playerWhoCollected<span class="token punctuation">:</span> Player<span class="token punctuation">,</span> value<span class="token punctuation">:</span> any<span class="token punctuation">,</span> metadata<span class="token punctuation">:</span> any<span class="token punctuation">)</span>
+        <span class="token keyword">local</span> ExpValue<span class="token punctuation">:</span> number <span class="token operator">=</span> value
+
+        <span class="token keyword">local</span> leaderstats <span class="token operator">=</span> playerWhoCollected<span class="token punctuation">:</span><span class="token function">FindFirstChild</span><span class="token punctuation">(</span><span class="token string">"leaderstats"</span><span class="token punctuation">)</span>
+        <span class="token keyword">if</span> <span class="token keyword">not</span> leaderstats <span class="token keyword">then</span>
+            leaderstats <span class="token operator">=</span> Instance<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token string">"Folder"</span><span class="token punctuation">)</span>
+            leaderstats<span class="token punctuation">.</span>Name <span class="token operator">=</span> <span class="token string">"leaderstats"</span>
+            leaderstats<span class="token punctuation">.</span>Parent <span class="token operator">=</span> playerWhoCollected
+        <span class="token keyword">end</span>
+
+        <span class="token keyword">local</span> expStat <span class="token operator">=</span> leaderstats<span class="token punctuation">:</span><span class="token function">FindFirstChild</span><span class="token punctuation">(</span><span class="token string">"Exp"</span><span class="token punctuation">)</span>
+        <span class="token keyword">if</span> <span class="token keyword">not</span> expStat <span class="token keyword">then</span>
+            expStat <span class="token operator">=</span> Instance<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token string">"NumberValue"</span><span class="token punctuation">)</span>
+            expStat<span class="token punctuation">.</span>Name <span class="token operator">=</span> <span class="token string">"Exp"</span>
+            expStat<span class="token punctuation">.</span>Parent <span class="token operator">=</span> leaderstats
+        <span class="token keyword">end</span>
+
+        expStat<span class="token punctuation">.</span>Value <span class="token operator">+</span><span class="token operator">=</span> ExpValue
+        <span class="token comment">-- Add the value to the player's "exp". This is just an example.</span>
+    <span class="token keyword">end</span><span class="token punctuation">;</span>
+<span class="token punctuation">}</span>
+</code></pre>
+</div></header></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
+    &quot;functions&quot;: [],
+    &quot;properties&quot;: [],
+    &quot;types&quot;: [],
+    &quot;name&quot;: &quot;ExampleResourceTypeData&quot;,
+    &quot;desc&quot;: &quot;An Example ResourceTypeData file. This is used to define the general\nbehavior of a droplet type.\n\n```lua\nlocal GenericPart = Instance.new(\&quot;Part\&quot;)\nGenericPart.Name = \&quot;GenericPart\&quot;\nGenericPart.Transparency = 1\nGenericPart.Size = Vector3.one\nGenericPart.Anchored = true\nGenericPart.CanCollide = false\nGenericPart.CanTouch = false\nGenericPart.CanQuery = false\nGenericPart.Massless = true\n\n\n--------------------------------------------------------------------------------\n    --// Data //--\n--------------------------------------------------------------------------------\n\nreturn {\n    Defaults = {\n        Value = NumberRange.new(0.6, 1.4); -- The value you want the droplet to have. This can be anything.\n        -- Metadata = {}; -- You typically shouldnt default metadata.\n\n        Count = NumberRange.new(2, 5); -- Number of droplets to spawn\n        LifeTime = NumberRange.new(50, 60); -- Time before the droplet dissapears\n        EjectionDuration = 1; -- Time it takes to spew out all the droplets\n        EjectionHorizontalVelocity = NumberRange.new(0, 25);\n        EjectionVerticalVelocity = NumberRange.new(25, 50);\n        CollectorMode = DropletUtil.Enums.CollectorMode.MultiCollector;\n\n        Mass = 1; -- Mass of the droplet (Used in magnitization calculations)\n        MaxForce = math.huge; -- Maximum steering force applied to the droplet when magnitized to a player\n        MaxVelocity = 150; -- Maxiumum velocity of the droplet when magnitized to a player\n        CollectionRadius = 1.5; -- Radius from center of player the droplet must be to be considered &#x27;collected&#x27;\n    };\n\n    --[[\n        Called when a new droplet is created. Use this to setup your visuals and\n        any variables you need to keep track of. All parts within this should be\n        Anchored = false, CanCollide = false, and Massless = true.\n        The return value of this function can be accessed via Droplet:GetSetupData()\n    ]]\n    SetupDroplet = function(droplet: Droplet)\n        local Value = droplet:GetValue() :: number\n\n        local VisualModel = Instance.new(\&quot;Model\&quot;)\n        VisualModel.Name = \&quot;VisualModel\&quot;\n\n        local OuterPart = GenericPart:Clone()\n        OuterPart.Name = \&quot;Outer\&quot;\n        OuterPart.Material = Enum.Material.Glass\n        OuterPart.Transparency = 0.5\n        OuterPart.Color = Color3.fromRGB(16, 206, 16)\n        OuterPart.Size = Vector3.one * Value\n        OuterPart.Anchored = false\n        OuterPart.Parent = VisualModel\n        VisualModel.PrimaryPart = OuterPart\n\n        local NumGen = Random.new()\n\n        local InnerPart = OuterPart:Clone()\n        InnerPart.Material = Enum.Material.Neon\n        InnerPart.Name = \&quot;Inner\&quot;\n        InnerPart.Color = Color3.fromRGB(219, 189, 18)\n        InnerPart.Transparency = 0\n        InnerPart.CastShadow = false\n        InnerPart.Size *= 0.6 + NumGen:NextNumber(-0.1, 0.1)\n        InnerPart.CFrame = OuterPart.CFrame + Vector3.new(\n            NumGen:NextNumber(-0.1, 0.1),\n            NumGen:NextNumber(-0.1, 0.1),\n            NumGen:NextNumber(-0.1, 0.1)\n        )\n        InnerPart.Parent = VisualModel\n\n        local Weld = Instance.new(\&quot;WeldConstraint\&quot;)\n        Weld.Part0 = OuterPart\n        Weld.Part1 = InnerPart\n        Weld.Parent = VisualModel\n\n        droplet:AddTask(task.spawn(function()\n            for i = 0.025, 1, 0.025 do\n                VisualModel:ScaleTo(i)\n                task.wait()\n            end\n            VisualModel:ScaleTo(1)\n        end), nil, \&quot;GrowThread\&quot;)\n        \n        droplet:AttachModel(VisualModel)\n\n        return {\n            VisualModel = VisualModel;\n            SpinDirection = if math.random() &gt; 0.5 then 1 else -1;\n        }\n    end;\n\n    -- Ran when the droplet is within render range of the LocalPlayer&#x27;s Camera\n    OnRenderUpdate = function(droplet: Droplet, rendertimeElapsed: number)\n        local SetupData = droplet:GetSetupData()\n        local OffsetCFrame = CFrame.new()\n\n        do -- Bobbing\n            local AMPLITUDE = 1 -- Studs of vertical movement (+- half of this)\n            local FREQUENCY = 0.25 -- Cycles per second\n        \n            local Y = (AMPLITUDE * 0.5) * -math.cos((rendertimeElapsed*math.pi) * (FREQUENCY))\n            OffsetCFrame *= CFrame.new(0, AMPLITUDE + Y, 0)\n        end\n\n        do -- Rotating\n            local TimeToMakeOneRotation = 4\n            local RotationsPerSecond = 1/TimeToMakeOneRotation\n            OffsetCFrame *= CFrame.Angles(0, (rendertimeElapsed*math.pi) * RotationsPerSecond * SetupData.SpinDirection , 0)\n        end\n\n        return OffsetCFrame\n    end;\n\n    OnDropletTimeout = function(droplet: Droplet)\n        local VisualModel = droplet:GetSetupData().VisualModel\n        droplet:RemoveTask(\&quot;GrowThread\&quot;)\n        for i = 1, 0.025, -0.025 do\n            VisualModel:ScaleTo(i)\n            task.wait()\n        end\n    end;\n\n    OnClientClaim = function(playerWhoClaimed: Player, droplet: Droplet)\n        -- droplet:Collect(playerWhoClaimed)\n    end;\n\n    --[[\n        Called when the droplet hits the player and is considered collected.\n        This is ran on the client only. It should be used for collection effects\n        and other client side things.\n    ]]\n    OnClientCollect = function(playerWhoCollected: Player, droplet: Droplet)\n        local Value = droplet:GetValue() :: number\n\n        local Part = GenericPart:Clone()\n        Part.CFrame = droplet:GetPivot()\n\n        task.delay(2, function()\n            Part:Destroy()\n        end)\n\n        local CollectionSound = Instance.new(\&quot;Sound\&quot;)\n        CollectionSound.SoundId = \&quot;rbxassetid://402143943\&quot;\n        CollectionSound.Volume = 0.25\n        \n        local PitchShift = Instance.new(\&quot;PitchShiftSoundEffect\&quot;)\n        PitchShift.Octave = 2 - Value/1.5\n\n        PitchShift.Parent = CollectionSound\n        CollectionSound.Parent = Part\n        Part.Parent = workspace\n\n        CollectionSound:Play()\n    end;\n\n    --[[\n        Called once the client informs the server that it has collected the droplet.\n    ]]\n    OnServerCollect = function(playerWhoCollected: Player, value: any, metadata: any)\n        local ExpValue: number = value\n\n        local leaderstats = playerWhoCollected:FindFirstChild(\&quot;leaderstats\&quot;)\n        if not leaderstats then\n            leaderstats = Instance.new(\&quot;Folder\&quot;)\n            leaderstats.Name = \&quot;leaderstats\&quot;\n            leaderstats.Parent = playerWhoCollected\n        end\n\n        local expStat = leaderstats:FindFirstChild(\&quot;Exp\&quot;)\n        if not expStat then\n            expStat = Instance.new(\&quot;NumberValue\&quot;)\n            expStat.Name = \&quot;Exp\&quot;\n            expStat.Parent = leaderstats\n        end\n\n        expStat.Value += ExpValue\n        -- Add the value to the player&#x27;s \&quot;exp\&quot;. This is just an example.\n    end;\n}\n```&quot;,
+    &quot;source&quot;: {
+        &quot;line&quot;: 192,
+        &quot;path&quot;: &quot;lib/dropletmanager/src/ExampleResourceTypeData.lua&quot;
+    }
+}</pre></details></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#types" class="table-of-contents__link toc-highlight">Types</a></li><li><a href="#properties" class="table-of-contents__link toc-highlight">Properties</a></li><li><a href="#functions" class="table-of-contents__link toc-highlight">Functions</a></li></ul></div></div></div></div></main></div></div><footer class="footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2024 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
+<script src="/ModulesOnRails/assets/js/runtime~main.e45ae276.js"></script>
+<script src="/ModulesOnRails/assets/js/main.08576ec5.js"></script>
+</body>
+</html>
