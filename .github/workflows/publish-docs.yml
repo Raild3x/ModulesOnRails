@@ -27,6 +27,7 @@ jobs:
 
       - name: Commit README update
         run: |
+          git remote set-url origin https://git:${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git
           git config --global user.email "you@example.com"
           git config --global user.name "GitHub Actions"
           git add README.md
