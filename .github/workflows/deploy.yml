@@ -14,8 +14,11 @@ jobs:
       - name: Set up Bash
         run: sudo apt-get install -y bash
 
+      - name: Set execute permission for script
+        run: chmod +x scripts/generateReadMe.sh
+
       - name: Run generateReadMe.sh
-        run: ./scripts/generateReadMe.sh
+        run: scripts/generateReadMe.sh
 
   lint:
     name: "Selene lint"
