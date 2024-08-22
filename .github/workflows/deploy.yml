@@ -20,6 +20,14 @@ jobs:
       - name: Run generateReadMe.sh
         run: scripts/generateReadMe.sh
 
+      - name: Commit README update
+        run: |
+          git config --global user.email "you@example.com"
+          git config --global user.name "GitHub Actions"
+          git add README.md
+          git commit -m "Update README from GitHub Actions"
+          git push
+
   lint:
     name: "Selene lint"
     runs-on: ubuntu-latest

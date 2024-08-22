@@ -2,7 +2,8 @@ gitSourceBranch = "main"
 
 [docusaurus]
 url = "https://raild3x.github.io"
-baseUrl = "/"
+baseUrl = "/ModulesOnRails"
+
 
 [[classOrder]]
 classes = ["BaseObject"]
