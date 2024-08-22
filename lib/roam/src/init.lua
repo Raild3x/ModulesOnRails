@@ -220,8 +220,7 @@ Roam.Bootstrappers = { -- Generic Bootstrappers for Roam / Orion
 
 --[=[
 	Creates a Service/Table with Roam to be Initialized and Started when Roam starts.
-	Cannot be called after Roam has been started. This is the advised method of creating
-	services over registering them.
+	Cannot be called after Roam has been started.
 
 	```lua
 	local Roam = require(ReplicatedStorage.Roam)
@@ -272,7 +271,9 @@ end
 --[=[
 	Registers a Service/Table with Roam to be Initialized and Started when Roam starts.
 	Cannot be called after Roam has been started. This method was added to allow for easy
-	backporting of existing services to Roam.
+	backporting of existing services to Roam. This is an alternative method to setting up
+	services over using `createService`.
+
 
 	```lua -- MyRegisteredService.lua
 	local MyRegisteredService = {}
@@ -286,11 +287,7 @@ end
 	end
 
 	local Roam = require(ReplicatedStorage.Roam)
-	Roam.registerService(MyRegisteredService, {
-		Name = "MyRegisteredService";
-		StartMethodName = "Start"; -- Overrides default StartMethodName of "RoamStart" [Optional]
-		InitMethodName = "Init"; -- Overrides default InitMethodName of "RoamInit" [Optional]
-	})
+	Roam.registerService(MyRegisteredService, "MyRegisteredService")
 
 	return MyRegisteredService
 	```

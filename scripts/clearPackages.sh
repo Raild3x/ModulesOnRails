@@ -80,59 +80,7 @@ for DIR in "$SRC_DIR"/*/ ; do
         echo "Error: Failed to remove files from $DIR."
         exit 1
     fi
-
-    cd "$DIR"
-
-    # Install the Wally Packages
-    echo "Installing Wally Package Dependencies..."
-    if ! wally install; then
-        echo "Error: Failed to install Wally packages."
-        exit 1
-    fi
-
-    cd -> /dev/null
-    # Ensure a sourcemap exists
-    echo "Generating sourcemap..."
-    if ! rojo sourcemap . -o sourcemap.json; then
-        echo "Error: Failed to generate sourcemap."
-        exit 1
-    fi
-
-    
-    DIR_TO_MOVE="$DIR/Packages"
-    if [ -d "$DIR_TO_MOVE" ]; then
-        # Generate the Wally Package Types
-        echo "Generating Wally Package Types..."
-        if ! wally-package-types --sourcemap sourcemap.json "$DIR"Packages; then
-            echo "Error: Failed to generate Wally package types."
-            exit 1
-        fi
-
-        # Move the generated Wally files out of the Packages dir and into the src dir
-        echo "Moving Wally Packages out of Packages directory..."
-
-        # Move all visible files and directories
-        if ! mv "$DIR_TO_MOVE"/* "$DIR" 2>/dev/null; then
-            echo "Error: Failed to move visible files from $DIR_TO_MOVE to $DIR."
-            exit 1
-        fi
-        echo "Moved visible files."
-
-        # Remove the now-empty original directory
-        echo "Removing original Packages directory..."
-        if ! rmdir "$DIR_TO_MOVE"; then
-            echo "Error: Failed to remove the original Packages directory."
-            exit 1
-        fi
-    fi
 done
 
-# Ensure a sourcemap exists
-echo "Regenerating sourcemap..."
-if ! rojo sourcemap default.project.json -o sourcemap.json; then
-    echo "Error: Failed to generate sourcemap."
-    exit 1
-fi
 
-
-echo "Setup complete!  :D"
+echo "Packages Removed!"
