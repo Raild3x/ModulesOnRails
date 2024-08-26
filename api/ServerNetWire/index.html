@@ -10,8 +10,8 @@ ServerNetWire object. This can be done by calling NetWire.Server, or by calling 
 The following variables are all equivalent as NetWires are memoized by their namespace,
 so creating a new one with the same namespace will return the same object.
 ```lua
-local TestNetWire1 = NetWire.Server.new(&quot;TestNetWire&quot;)
-local TestNetWire2 = NetWire.Server(&quot;TestNetWire&quot;)
+local TestNetWire1 = NetWire.Server.new(&quot;MyNetWire&quot;)
+local TestNetWire2 = NetWire.Server(&quot;MyNetWire&quot;)
 
 print(TestNetWire1 == TestNetWire2) -- true 
 ```
@@ -19,7 +19,7 @@ print(TestNetWire1 == TestNetWire2) -- true
 You can also create a by calling the package directly, but this is not encouraged as it
 obscures the RunContext in which the NetWire is being created.
 ```lua
-local TestNetWire3 = NetWire(&quot;TestNetWire&quot;)
+local TestNetWire3 = NetWire(&quot;MyNetWire&quot;)
 ```
 :::
 
@@ -29,69 +29,15 @@ The following two lines accomplish the same thing.
 TestNetWire:RegisterEvent(&quot;TestEvent&quot;)
 TestNetWire.TestEvent = NetWire.createEvent()
 ```
-
------------------------------------------------------------------
-[EXAMPLES]
------------------------------------------------------------------
-```lua
-local NetWire = require(game:GetService(&quot;ReplicatedStorage&quot;).NetWire)
-
-local myNetWire = NetWire.Server(&quot;MyNetWire&quot;)
-
--- Aliases (These are equivalent. You can use either to create remote events)
-myNetWire.ServerSideEvent = NetWire.createEvent()
-myNetWire:RegisterEvent(&quot;ServerSideEvent&quot;)
-
-
--- Setup a method
-function myNetWire:ServerSideFunction(player: Player, someArg: number)
-    print(someArg)
-    return someArg * 2
-end
-
--- Connect to an event
-myNetWire.ServerSideEvent:Connect(function(plr: Player, someArg)
-    print(someArg)
-end)
-
--- Fire an event
-myNetWire.ServerSideEvent:FireAll(someArg)
-```
------------------------------------------------------------------
-Example using a service
-```lua
-local ExampleService = Roam.createService { Name = &quot;ExampleService&quot; }
-ExampleService.Client = {
-    TestEvent = NetWire.createEvent()
-}
-
--- Make a server exposed method MultNumber
-function ExampleService.Client:MultNumber(plr: Player, num: number): number
-    return num * self.Server:GetMult() -- self.Server is internally set by NetWire when you do .fromService
-end
-
---------------------------------------------------------------------------------
-
-function ExampleService:GetMult(): number
-    return 2
-end
-
-function ExampleService:RoamStart()
-    self.Client.TestEvent:FireAll(&quot;Hello from ExampleService!&quot;) -- send a message to all clients
-end
-
-function ExampleService:RoamInit()
-    self.Client = NetWire.Server.fromService(self) -- Initialize the NetWire
-end
-```"><meta data-rh="true" property="og:description" content="Uses Sleitnick&#x27;s Comm under the hood. Provides a simple to use interface for networking across
+More examples can be found under the respective construction methods."><meta data-rh="true" property="og:description" content="Uses Sleitnick&#x27;s Comm under the hood. Provides a simple to use interface for networking across
 your codebase. This is a server side only module. To begin using it, you must first create a
 ServerNetWire object. This can be done by calling NetWire.Server, or by calling NetWire.Server.new
 
 The following variables are all equivalent as NetWires are memoized by their namespace,
 so creating a new one with the same namespace will return the same object.
 ```lua
-local TestNetWire1 = NetWire.Server.new(&quot;TestNetWire&quot;)
-local TestNetWire2 = NetWire.Server(&quot;TestNetWire&quot;)
+local TestNetWire1 = NetWire.Server.new(&quot;MyNetWire&quot;)
+local TestNetWire2 = NetWire.Server(&quot;MyNetWire&quot;)
 
 print(TestNetWire1 == TestNetWire2) -- true 
 ```
@@ -99,7 +45,7 @@ print(TestNetWire1 == TestNetWire2) -- true
 You can also create a by calling the package directly, but this is not encouraged as it
 obscures the RunContext in which the NetWire is being created.
 ```lua
-local TestNetWire3 = NetWire(&quot;TestNetWire&quot;)
+local TestNetWire3 = NetWire(&quot;MyNetWire&quot;)
 ```
 :::
 
@@ -109,63 +55,9 @@ The following two lines accomplish the same thing.
 TestNetWire:RegisterEvent(&quot;TestEvent&quot;)
 TestNetWire.TestEvent = NetWire.createEvent()
 ```
-
------------------------------------------------------------------
-[EXAMPLES]
------------------------------------------------------------------
-```lua
-local NetWire = require(game:GetService(&quot;ReplicatedStorage&quot;).NetWire)
-
-local myNetWire = NetWire.Server(&quot;MyNetWire&quot;)
-
--- Aliases (These are equivalent. You can use either to create remote events)
-myNetWire.ServerSideEvent = NetWire.createEvent()
-myNetWire:RegisterEvent(&quot;ServerSideEvent&quot;)
-
-
--- Setup a method
-function myNetWire:ServerSideFunction(player: Player, someArg: number)
-    print(someArg)
-    return someArg * 2
-end
-
--- Connect to an event
-myNetWire.ServerSideEvent:Connect(function(plr: Player, someArg)
-    print(someArg)
-end)
-
--- Fire an event
-myNetWire.ServerSideEvent:FireAll(someArg)
-```
------------------------------------------------------------------
-Example using a service
-```lua
-local ExampleService = Roam.createService { Name = &quot;ExampleService&quot; }
-ExampleService.Client = {
-    TestEvent = NetWire.createEvent()
-}
-
--- Make a server exposed method MultNumber
-function ExampleService.Client:MultNumber(plr: Player, num: number): number
-    return num * self.Server:GetMult() -- self.Server is internally set by NetWire when you do .fromService
-end
-
---------------------------------------------------------------------------------
-
-function ExampleService:GetMult(): number
-    return 2
-end
-
-function ExampleService:RoamStart()
-    self.Client.TestEvent:FireAll(&quot;Hello from ExampleService!&quot;) -- send a message to all clients
-end
-
-function ExampleService:RoamInit()
-    self.Client = NetWire.Server.fromService(self) -- Initialize the NetWire
-end
-```"><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/ServerNetWire"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/ServerNetWire" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/ServerNetWire" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.1839e2d4.css">
-<link rel="preload" href="/ModulesOnRails/assets/js/runtime~main.a2ca366d.js" as="script">
-<link rel="preload" href="/ModulesOnRails/assets/js/main.f621edfe.js" as="script">
+More examples can be found under the respective construction methods."><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/ServerNetWire"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/ServerNetWire" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/ServerNetWire" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.1839e2d4.css">
+<link rel="preload" href="/ModulesOnRails/assets/js/runtime~main.9ad1296e.js" as="script">
+<link rel="preload" href="/ModulesOnRails/assets/js/main.3076d21a.js" as="script">
 </head>
 <body class="navigation-with-keyboard">
 <script>!function(){function e(e){document.documentElement.setAttribute("data-theme",e)}var t=function(){var e=null;try{e=localStorage.getItem("theme")}catch(e){}return e}();null!==t?e(t):window.matchMedia("(prefers-color-scheme: dark)").matches?e("dark"):(window.matchMedia("(prefers-color-scheme: light)").matches,e("light"))}()</script><div id="__docusaurus">
@@ -179,8 +71,8 @@ end
   The following variables are all equivalent as NetWires are memoized by their namespace,
   so creating a new one with the same namespace will return the same object.
 </p>
-<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> TestNetWire1 <span class="token operator">=</span> NetWire<span class="token punctuation">.</span>Server<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token string">"TestNetWire"</span><span class="token punctuation">)</span>
-<span class="token keyword">local</span> TestNetWire2 <span class="token operator">=</span> NetWire<span class="token punctuation">.</span><span class="token function">Server</span><span class="token punctuation">(</span><span class="token string">"TestNetWire"</span><span class="token punctuation">)</span>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> TestNetWire1 <span class="token operator">=</span> NetWire<span class="token punctuation">.</span>Server<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token string">"MyNetWire"</span><span class="token punctuation">)</span>
+<span class="token keyword">local</span> TestNetWire2 <span class="token operator">=</span> NetWire<span class="token punctuation">.</span><span class="token function">Server</span><span class="token punctuation">(</span><span class="token string">"MyNetWire"</span><span class="token punctuation">)</span>
 
 <span class="token function">print</span><span class="token punctuation">(</span>TestNetWire1 <span class="token operator">==</span> TestNetWire2<span class="token punctuation">)</span> <span class="token comment">-- true </span>
 </code></pre>
@@ -195,7 +87,7 @@ end
       You can also create a by calling the package directly, but this is not encouraged as it
       obscures the RunContext in which the NetWire is being created.
     </p>
-    <pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> TestNetWire3 <span class="token operator">=</span> <span class="token function">NetWire</span><span class="token punctuation">(</span><span class="token string">"TestNetWire"</span><span class="token punctuation">)</span>
+    <pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> TestNetWire3 <span class="token operator">=</span> <span class="token function">NetWire</span><span class="token punctuation">(</span><span class="token string">"MyNetWire"</span><span class="token punctuation">)</span>
 </code></pre>
   </div>
 </div>
@@ -206,73 +98,34 @@ end
 <pre class="language-lua"><code class="language-lua">TestNetWire<span class="token punctuation">:</span><span class="token function">RegisterEvent</span><span class="token punctuation">(</span><span class="token string">"TestEvent"</span><span class="token punctuation">)</span>
 TestNetWire<span class="token punctuation">.</span>TestEvent <span class="token operator">=</span> NetWire<span class="token punctuation">.</span><span class="token function">createEvent</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
 </code></pre>
-<hr>
-<h2>[EXAMPLES]</h2>
-<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> NetWire <span class="token operator">=</span> <span class="token function">require</span><span class="token punctuation">(</span>game<span class="token punctuation">:</span><span class="token function">GetService</span><span class="token punctuation">(</span><span class="token string">"ReplicatedStorage"</span><span class="token punctuation">)</span><span class="token punctuation">.</span>NetWire<span class="token punctuation">)</span>
-
-<span class="token keyword">local</span> myNetWire <span class="token operator">=</span> NetWire<span class="token punctuation">.</span><span class="token function">Server</span><span class="token punctuation">(</span><span class="token string">"MyNetWire"</span><span class="token punctuation">)</span>
-
-<span class="token comment">-- Aliases (These are equivalent. You can use either to create remote events)</span>
-myNetWire<span class="token punctuation">.</span>ServerSideEvent <span class="token operator">=</span> NetWire<span class="token punctuation">.</span><span class="token function">createEvent</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
-myNetWire<span class="token punctuation">:</span><span class="token function">RegisterEvent</span><span class="token punctuation">(</span><span class="token string">"ServerSideEvent"</span><span class="token punctuation">)</span>
-
-
-<span class="token comment">-- Setup a method</span>
-<span class="token keyword">function</span> myNetWire<span class="token punctuation">:</span><span class="token function">ServerSideFunction</span><span class="token punctuation">(</span>player<span class="token punctuation">:</span> Player<span class="token punctuation">,</span> someArg<span class="token punctuation">:</span> number<span class="token punctuation">)</span>
-    <span class="token function">print</span><span class="token punctuation">(</span>someArg<span class="token punctuation">)</span>
-    <span class="token keyword">return</span> someArg <span class="token operator">*</span> <span class="token number">2</span>
-<span class="token keyword">end</span>
-
-<span class="token comment">-- Connect to an event</span>
-myNetWire<span class="token punctuation">.</span>ServerSideEvent<span class="token punctuation">:</span><span class="token function">Connect</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span>plr<span class="token punctuation">:</span> Player<span class="token punctuation">,</span> someArg<span class="token punctuation">)</span>
-    <span class="token function">print</span><span class="token punctuation">(</span>someArg<span class="token punctuation">)</span>
-<span class="token keyword">end</span><span class="token punctuation">)</span>
-
-<span class="token comment">-- Fire an event</span>
-myNetWire<span class="token punctuation">.</span>ServerSideEvent<span class="token punctuation">:</span><span class="token function">FireAll</span><span class="token punctuation">(</span>someArg<span class="token punctuation">)</span>
-</code></pre>
-<hr>
-<p>Example using a service</p>
-<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> ExampleService <span class="token operator">=</span> Roam<span class="token punctuation">.</span><span class="token function">createService</span> <span class="token punctuation">{</span> Name <span class="token operator">=</span> <span class="token string">"ExampleService"</span> <span class="token punctuation">}</span>
-ExampleService<span class="token punctuation">.</span>Client <span class="token operator">=</span> <span class="token punctuation">{</span>
-    TestEvent <span class="token operator">=</span> NetWire<span class="token punctuation">.</span><span class="token function">createEvent</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
-<span class="token punctuation">}</span>
-
-<span class="token comment">-- Make a server exposed method MultNumber</span>
-<span class="token keyword">function</span> ExampleService<span class="token punctuation">.</span>Client<span class="token punctuation">:</span><span class="token function">MultNumber</span><span class="token punctuation">(</span>plr<span class="token punctuation">:</span> Player<span class="token punctuation">,</span> num<span class="token punctuation">:</span> number<span class="token punctuation">)</span><span class="token punctuation">:</span> number
-    <span class="token keyword">return</span> num <span class="token operator">*</span> self<span class="token punctuation">.</span>Server<span class="token punctuation">:</span><span class="token function">GetMult</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token comment">-- self.Server is internally set by NetWire when you do .fromService</span>
-<span class="token keyword">end</span>
-
-<span class="token comment">--------------------------------------------------------------------------------</span>
-
-<span class="token keyword">function</span> ExampleService<span class="token punctuation">:</span><span class="token function">GetMult</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">:</span> number
-    <span class="token keyword">return</span> <span class="token number">2</span>
-<span class="token keyword">end</span>
-
-<span class="token keyword">function</span> ExampleService<span class="token punctuation">:</span><span class="token function">RoamStart</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
-    self<span class="token punctuation">.</span>Client<span class="token punctuation">.</span>TestEvent<span class="token punctuation">:</span><span class="token function">FireAll</span><span class="token punctuation">(</span><span class="token string">"Hello from ExampleService!"</span><span class="token punctuation">)</span> <span class="token comment">-- send a message to all clients</span>
-<span class="token keyword">end</span>
-
-<span class="token keyword">function</span> ExampleService<span class="token punctuation">:</span><span class="token function">RoamInit</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
-    self<span class="token punctuation">.</span>Client <span class="token operator">=</span> NetWire<span class="token punctuation">.</span>Server<span class="token punctuation">.</span><span class="token function">fromService</span><span class="token punctuation">(</span>self<span class="token punctuation">)</span> <span class="token comment">-- Initialize the NetWire</span>
-<span class="token keyword">end</span>
-</code></pre>
-</div></header><h2 class="anchor anchorWithStickyNavbar_LWe7" id="properties">Properties<a href="#properties" class="hash-link" aria-label="Direct link to Properties" title="Direct link to Properties">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="ClassName"><code style="text-decoration:none">ClassName</code><a href="#ClassName" class="hash-link" aria-label="Direct link to ClassName" title="Direct link to ClassName">​</a></h3><span class="badge_Ba2I" style="color:#e74c3c"><span class="badgeTooltip_cWXP">This item is read only and cannot be modified.</span><span class="badgeToolTipTail_H9D_"><svg xmlns="http://www.w3.org/2000/svg" height="300px" width="300px" fill="#e74c3c" x="0px" y="0px" viewBox="0 0 96 96"><path d="M70.354,15.662h-7.496H25.566c-3.282,0-5.19-0.776-5.728-1.169v-1.456c0.538-0.393,2.445-1.168,5.728-1.168h46.479V8H25.566  c-4.776,0-9.594,1.468-9.594,4.747v61.458C15.972,86.645,20.328,88,37.495,88h42.535V15.662H70.354z"></path></svg> <!-- -->Read Only</span></span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/netwire/src/ServerWire.lua#L185"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerNetWire<!-- -->.<!-- -->ClassName<!-- -->:<!-- --> </code> <code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerNetWire">&quot;ServerNetWire&quot;</a></code></div><div></div><h2 class="anchor anchorWithStickyNavbar_LWe7" id="functions">Functions<a href="#functions" class="hash-link" aria-label="Direct link to Functions" title="Direct link to Functions">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="new"><code style="text-decoration:none">new</code><a href="#new" class="hash-link" aria-label="Direct link to new" title="Direct link to new">​</a></h3><span class="docTag__6UZ" style="border-color:#70cc00;color:#70cc00">constructor</span><span class="docTag__6UZ" style="border-color:#dc0073;color:#dc0073">static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/netwire/src/ServerWire.lua#L194"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerNetWire<!-- -->.</code><code class="green_DgR4">new</code><code>(</code><code>nameSpace<!-- -->: </code><code class="blue_P4bS">string</code><code class="op_lSLc"> | </code><code class="blue_P4bS">Service</code><code>) → </code><code>(</code><code>)</code></div><div>
+<p>More examples can be found under the respective construction methods.</p>
+</div></header><h2 class="anchor anchorWithStickyNavbar_LWe7" id="properties">Properties<a href="#properties" class="hash-link" aria-label="Direct link to Properties" title="Direct link to Properties">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="ClassName"><code style="text-decoration:none">ClassName</code><a href="#ClassName" class="hash-link" aria-label="Direct link to ClassName" title="Direct link to ClassName">​</a></h3><span class="badge_Ba2I" style="color:#e74c3c"><span class="badgeTooltip_cWXP">This item is read only and cannot be modified.</span><span class="badgeToolTipTail_H9D_"><svg xmlns="http://www.w3.org/2000/svg" height="300px" width="300px" fill="#e74c3c" x="0px" y="0px" viewBox="0 0 96 96"><path d="M70.354,15.662h-7.496H25.566c-3.282,0-5.19-0.776-5.728-1.169v-1.456c0.538-0.393,2.445-1.168,5.728-1.168h46.479V8H25.566  c-4.776,0-9.594,1.468-9.594,4.747v61.458C15.972,86.645,20.328,88,37.495,88h42.535V15.662H70.354z"></path></svg> <!-- -->Read Only</span></span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/netwire/src/ServerWire.luau#L165"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerNetWire<!-- -->.<!-- -->ClassName<!-- -->:<!-- --> </code> <code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerNetWire">&quot;ServerNetWire&quot;</a></code></div><div></div><h2 class="anchor anchorWithStickyNavbar_LWe7" id="functions">Functions<a href="#functions" class="hash-link" aria-label="Direct link to Functions" title="Direct link to Functions">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="new"><code style="text-decoration:none">new</code><a href="#new" class="hash-link" aria-label="Direct link to new" title="Direct link to new">​</a></h3><span class="docTag__6UZ" style="border-color:#70cc00;color:#70cc00">constructor</span><span class="docTag__6UZ" style="border-color:#dc0073;color:#dc0073">static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/netwire/src/ServerWire.luau#L174"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerNetWire<!-- -->.</code><code class="green_DgR4">new</code><code>(</code><code>nameSpace<!-- -->: </code><code class="blue_P4bS">string</code><code class="op_lSLc"> | </code><code class="blue_P4bS">Service</code><code>) → </code><code>(</code><code>)</code></div><div>
 <p>Constructs a new ServerNetWire. If a ServerNetWire with the same nameSpace already exists, it will be returned instead.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="setupServiceNetworking"><code style="text-decoration:none">setupServiceNetworking</code><a href="#setupServiceNetworking" class="hash-link" aria-label="Direct link to setupServiceNetworking" title="Direct link to setupServiceNetworking">​</a></h3><span class="docTag__6UZ" style="border-color:#70cc00;color:#70cc00">constructor</span><span class="docTag__6UZ" style="border-color:#dc0073;color:#dc0073">static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/netwire/src/ServerWire.lua#L248"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerNetWire<!-- -->.</code><code class="green_DgR4">setupServiceNetworking</code><code>(</code><code>service<!-- -->: </code><code class="blue_P4bS">Service</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerNetWire">ServerNetWire</a></code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="setupServiceNetworking"><code style="text-decoration:none">setupServiceNetworking</code><a href="#setupServiceNetworking" class="hash-link" aria-label="Direct link to setupServiceNetworking" title="Direct link to setupServiceNetworking">​</a></h3><span class="docTag__6UZ" style="border-color:#70cc00;color:#70cc00">constructor</span><span class="docTag__6UZ" style="border-color:#dc0073;color:#dc0073">static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/netwire/src/ServerWire.luau#L239"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerNetWire<!-- -->.</code><code class="green_DgR4">setupServiceNetworking</code><code>(</code><code>service<!-- -->: </code><code class="blue_P4bS">Service</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerNetWire">ServerNetWire</a></code></div><div>
 <p>
   Creates a ServerNetWire from a Roam Service.
   This method will read the service's Name and Client table to create the NetWire.
   The goal of this function is to recreate the simplicity of Knit's networking features without
   the systems being coupled together.
+  In order to access the service on the client, use <code>NetWire.Client("SERVICE_NAME")</code>.
 </p>
 <pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> ExampleService <span class="token operator">=</span> Roam<span class="token punctuation">.</span><span class="token function">createService</span> <span class="token punctuation">{</span> Name <span class="token operator">=</span> <span class="token string">"ExampleService"</span> <span class="token punctuation">}</span>
 ExampleService<span class="token punctuation">.</span>Client <span class="token operator">=</span> <span class="token punctuation">{</span>
     TestEvent <span class="token operator">=</span> NetWire<span class="token punctuation">.</span><span class="token function">createEvent</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
 <span class="token punctuation">}</span>
 
+<span class="token keyword">function</span> ExampleService<span class="token punctuation">.</span>Client<span class="token punctuation">:</span><span class="token function">Greeting</span><span class="token punctuation">(</span>plr<span class="token punctuation">:</span> Player<span class="token punctuation">,</span> msg<span class="token punctuation">:</span> string<span class="token punctuation">)</span>
+    <span class="token function">print</span><span class="token punctuation">(</span>plr<span class="token punctuation">.</span>Name<span class="token punctuation">,</span> <span class="token string">"said"</span><span class="token punctuation">,</span> msg<span class="token punctuation">)</span> 
+<span class="token keyword">end</span>
+
+<span class="token comment">----------------------------------------------------------------</span>
+
 <span class="token keyword">function</span> ExampleService<span class="token punctuation">:</span><span class="token function">RoamInit</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
     NetWire<span class="token punctuation">.</span>Server<span class="token punctuation">.</span><span class="token function">setupServiceNetworking</span><span class="token punctuation">(</span>self<span class="token punctuation">)</span>
+<span class="token keyword">end</span>
+
+<span class="token keyword">function</span> ExampleService<span class="token punctuation">:</span><span class="token function">RoamStart</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+    self<span class="token punctuation">.</span>Client<span class="token punctuation">.</span>TestEvent<span class="token punctuation">:</span><span class="token function">FireAll</span><span class="token punctuation">(</span><span class="token string">"Hello from ExampleService!"</span><span class="token punctuation">)</span> <span class="token comment">-- send a message to all clients</span>
 <span class="token keyword">end</span>
 </code></pre>
 <div class="admonition admonition-caution alert alert--warning">
@@ -301,9 +154,9 @@ ExampleService<span class="token punctuation">.</span>Client <span class="token 
     </p>
   </div>
 </div>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Destroy"><code style="text-decoration:none">Destroy</code><a href="#Destroy" class="hash-link" aria-label="Direct link to Destroy" title="Direct link to Destroy">​</a></h3><span class="docTag__6UZ" style="border-color:#218c74;color:#218c74">destructor</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/netwire/src/ServerWire.lua#L280"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerNetWire<!-- -->:</code><code class="green_DgR4">Destroy</code><code>(</code><code>) → </code><code>(</code><code>)</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Destroy"><code style="text-decoration:none">Destroy</code><a href="#Destroy" class="hash-link" aria-label="Direct link to Destroy" title="Direct link to Destroy">​</a></h3><span class="docTag__6UZ" style="border-color:#218c74;color:#218c74">destructor</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/netwire/src/ServerWire.luau#L273"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerNetWire<!-- -->:</code><code class="green_DgR4">Destroy</code><code>(</code><code>) → </code><code>(</code><code>)</code></div><div>
 <p>Destroys the NetWire and removes it from the internal cache.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="RegisterEvent"><code style="text-decoration:none">RegisterEvent</code><a href="#RegisterEvent" class="hash-link" aria-label="Direct link to RegisterEvent" title="Direct link to RegisterEvent">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/netwire/src/ServerWire.lua#L358"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerNetWire<!-- -->:</code><code class="green_DgR4">RegisterEvent</code><code>(</code><code>eventName<!-- -->: </code><code class="blue_P4bS">string</code><code>) → </code><code>(</code><code>)</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="RegisterEvent"><code style="text-decoration:none">RegisterEvent</code><a href="#RegisterEvent" class="hash-link" aria-label="Direct link to RegisterEvent" title="Direct link to RegisterEvent">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/netwire/src/ServerWire.luau#L351"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerNetWire<!-- -->:</code><code class="green_DgR4">RegisterEvent</code><code>(</code><code>eventName<!-- -->: </code><code class="blue_P4bS">string</code><code>) → </code><code>(</code><code>)</code></div><div>
 <p>Creates a remote event with the given name.</p>
 <p>Server Documentation: <a href="https://sleitnick.github.io/RbxUtil/api/RemoteSignal" target="_blank">https://sleitnick.github.io/RbxUtil/api/RemoteSignal</a></p>
 <p>Client Documentation: <a href="https://sleitnick.github.io/RbxUtil/api/ClientRemoteSignal" target="_blank">https://sleitnick.github.io/RbxUtil/api/ClientRemoteSignal</a></p>
@@ -328,7 +181,7 @@ myWire<span class="token punctuation">.</span>TestEvent<span class="token punctu
 
 myWire<span class="token punctuation">.</span>TestEvent<span class="token punctuation">:</span><span class="token function">Fire</span><span class="token punctuation">(</span><span class="token string">"Hello from the client!"</span><span class="token punctuation">)</span>
 </code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="RegisterProperty"><code style="text-decoration:none">RegisterProperty</code><a href="#RegisterProperty" class="hash-link" aria-label="Direct link to RegisterProperty" title="Direct link to RegisterProperty">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/netwire/src/ServerWire.lua#L389"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerNetWire<!-- -->:</code><code class="green_DgR4">RegisterProperty</code><code>(</code><div class="inset_uKQm"><div><code>propertyName<!-- -->: </code><code class="blue_P4bS">string</code><code>,</code></div><div><code>initialValue<!-- -->: </code><code class="blue_P4bS">any?</code></div></div><code>) → </code><code>(</code><code>)</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="RegisterProperty"><code style="text-decoration:none">RegisterProperty</code><a href="#RegisterProperty" class="hash-link" aria-label="Direct link to RegisterProperty" title="Direct link to RegisterProperty">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/netwire/src/ServerWire.luau#L382"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerNetWire<!-- -->:</code><code class="green_DgR4">RegisterProperty</code><code>(</code><div class="inset_uKQm"><div><code>propertyName<!-- -->: </code><code class="blue_P4bS">string</code><code>,</code></div><div><code>initialValue<!-- -->: </code><code class="blue_P4bS">any?</code></div></div><code>) → </code><code>(</code><code>)</code></div><div>
 <p>Creates a remote property with the given name.</p>
 <p>Server Documentation: <a href="https://sleitnick.github.io/RbxUtil/api/RemoteProperty" target="_blank">https://sleitnick.github.io/RbxUtil/api/RemoteProperty</a></p>
 <p>Client Documentation: <a href="https://sleitnick.github.io/RbxUtil/api/ClientRemoteProperty" target="_blank">https://sleitnick.github.io/RbxUtil/api/ClientRemoteProperty</a></p>
@@ -345,7 +198,7 @@ myWire<span class="token punctuation">.</span>TestProperty <span class="token op
     <span class="token function">print</span><span class="token punctuation">(</span> myWire<span class="token punctuation">.</span>TestProperty<span class="token punctuation">:</span><span class="token function">Get</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token punctuation">)</span> <span class="token comment">-- "Hello"</span>
 <span class="token keyword">end</span>
 </code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="RegisterMethod"><code style="text-decoration:none">RegisterMethod</code><a href="#RegisterMethod" class="hash-link" aria-label="Direct link to RegisterMethod" title="Direct link to RegisterMethod">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/netwire/src/ServerWire.lua#L420"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerNetWire<!-- -->:</code><code class="green_DgR4">RegisterMethod</code><code>(</code><div class="inset_uKQm"><div><code>functionName<!-- -->: </code><code class="blue_P4bS">string</code><code>,</code></div><div><code>callback<!-- -->: </code><code class="purple_ieR2">(</code><div class="inset_uKQm"><code>self<!-- -->: </code><code class="blue_P4bS">any</code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code>plr<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code class="blue_P4bS">...any</code></div><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="blue_P4bS">...any</code><code class="purple_ieR2">)</code><code>,</code></div><div><code>tbl<!-- -->: </code><code class="purple_ieR2">{</code><code class="purple_ieR2">}</code><code class="blue_P4bS">?</code></div></div><code>) → </code><code>(</code><code>)</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="RegisterMethod"><code style="text-decoration:none">RegisterMethod</code><a href="#RegisterMethod" class="hash-link" aria-label="Direct link to RegisterMethod" title="Direct link to RegisterMethod">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/netwire/src/ServerWire.luau#L413"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerNetWire<!-- -->:</code><code class="green_DgR4">RegisterMethod</code><code>(</code><div class="inset_uKQm"><div><code>functionName<!-- -->: </code><code class="blue_P4bS">string</code><code>,</code></div><div><code>callback<!-- -->: </code><code class="purple_ieR2">(</code><div class="inset_uKQm"><code>self<!-- -->: </code><code class="blue_P4bS">any</code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code>plr<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code class="blue_P4bS">...any</code></div><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="blue_P4bS">...any</code><code class="purple_ieR2">)</code><code>,</code></div><div><code>tbl<!-- -->: </code><code class="purple_ieR2">{</code><code class="purple_ieR2">}</code><code class="blue_P4bS">?</code></div></div><code>) → </code><code>(</code><code>)</code></div><div>
 <p>
   Creates a remote function with the given name. This is not suggested to be used by end users; instead
   you should just append a function to a netwire object and it will properly wrap it for you.
@@ -384,13 +237,13 @@ myWire<span class="token punctuation">:</span><span class="token function">TestM
                 &quot;static&quot;
             ],
             &quot;source&quot;: {
-                &quot;line&quot;: 194,
-                &quot;path&quot;: &quot;lib/netwire/src/ServerWire.lua&quot;
+                &quot;line&quot;: 174,
+                &quot;path&quot;: &quot;lib/netwire/src/ServerWire.luau&quot;
             }
         },
         {
             &quot;name&quot;: &quot;setupServiceNetworking&quot;,
-            &quot;desc&quot;: &quot;Creates a ServerNetWire from a Roam Service.\nThis method will read the service&#x27;s Name and Client table to create the NetWire.\nThe goal of this function is to recreate the simplicity of Knit&#x27;s networking features without\nthe systems being coupled together.\n\n```lua\nlocal ExampleService = Roam.createService { Name = \&quot;ExampleService\&quot; }\nExampleService.Client = {\n    TestEvent = NetWire.createEvent()\n}\n\nfunction ExampleService:RoamInit()\n    NetWire.Server.setupServiceNetworking(self)\nend\n```\n\n:::caution Client Table Overwrite\nCalling this function will overwrite the service&#x27;s `Client` table with the NetWire.\nYou should not store anything aside from supported NetWire objects in the Client table.\n:::\n\n:::info Where to call\nThis function should be called within the init method of the service. This is\nto prevent netwires from being created outside of a running game.\n:::&quot;,
+            &quot;desc&quot;: &quot;Creates a ServerNetWire from a Roam Service.\nThis method will read the service&#x27;s Name and Client table to create the NetWire.\nThe goal of this function is to recreate the simplicity of Knit&#x27;s networking features without\nthe systems being coupled together. \nIn order to access the service on the client, use `NetWire.Client(\&quot;SERVICE_NAME\&quot;)`.\n\n```lua\nlocal ExampleService = Roam.createService { Name = \&quot;ExampleService\&quot; }\nExampleService.Client = {\n    TestEvent = NetWire.createEvent()\n}\n\nfunction ExampleService.Client:Greeting(plr: Player, msg: string)\n    print(plr.Name, \&quot;said\&quot;, msg) \nend\n\n----------------------------------------------------------------\n\nfunction ExampleService:RoamInit()\n    NetWire.Server.setupServiceNetworking(self)\nend\n\nfunction ExampleService:RoamStart()\n    self.Client.TestEvent:FireAll(\&quot;Hello from ExampleService!\&quot;) -- send a message to all clients\nend\n```\n\n:::caution Client Table Overwrite\nCalling this function will overwrite the service&#x27;s `Client` table with the NetWire.\nYou should not store anything aside from supported NetWire objects in the Client table.\n:::\n\n:::info Where to call\nThis function should be called within the init method of the service. This is\nto prevent netwires from being created outside of a running game.\n:::&quot;,
             &quot;params&quot;: [
                 {
                     &quot;name&quot;: &quot;service&quot;,
@@ -410,8 +263,8 @@ myWire<span class="token punctuation">:</span><span class="token function">TestM
                 &quot;static&quot;
             ],
             &quot;source&quot;: {
-                &quot;line&quot;: 248,
-                &quot;path&quot;: &quot;lib/netwire/src/ServerWire.lua&quot;
+                &quot;line&quot;: 239,
+                &quot;path&quot;: &quot;lib/netwire/src/ServerWire.luau&quot;
             }
         },
         {
@@ -424,8 +277,8 @@ myWire<span class="token punctuation">:</span><span class="token function">TestM
                 &quot;destructor&quot;
             ],
             &quot;source&quot;: {
-                &quot;line&quot;: 280,
-                &quot;path&quot;: &quot;lib/netwire/src/ServerWire.lua&quot;
+                &quot;line&quot;: 273,
+                &quot;path&quot;: &quot;lib/netwire/src/ServerWire.luau&quot;
             }
         },
         {
@@ -442,8 +295,8 @@ myWire<span class="token punctuation">:</span><span class="token function">TestM
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;private&quot;: true,
             &quot;source&quot;: {
-                &quot;line&quot;: 290,
-                &quot;path&quot;: &quot;lib/netwire/src/ServerWire.lua&quot;
+                &quot;line&quot;: 283,
+                &quot;path&quot;: &quot;lib/netwire/src/ServerWire.luau&quot;
             }
         },
         {
@@ -464,14 +317,14 @@ myWire<span class="token punctuation">:</span><span class="token function">TestM
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;boolean\r\n&quot;
+                    &quot;lua_type&quot;: &quot;boolean\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;private&quot;: true,
             &quot;source&quot;: {
-                &quot;line&quot;: 304,
-                &quot;path&quot;: &quot;lib/netwire/src/ServerWire.lua&quot;
+                &quot;line&quot;: 297,
+                &quot;path&quot;: &quot;lib/netwire/src/ServerWire.luau&quot;
             }
         },
         {
@@ -488,8 +341,8 @@ myWire<span class="token punctuation">:</span><span class="token function">TestM
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;private&quot;: true,
             &quot;source&quot;: {
-                &quot;line&quot;: 322,
-                &quot;path&quot;: &quot;lib/netwire/src/ServerWire.lua&quot;
+                &quot;line&quot;: 315,
+                &quot;path&quot;: &quot;lib/netwire/src/ServerWire.luau&quot;
             }
         },
         {
@@ -505,8 +358,8 @@ myWire<span class="token punctuation">:</span><span class="token function">TestM
             &quot;returns&quot;: [],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
-                &quot;line&quot;: 358,
-                &quot;path&quot;: &quot;lib/netwire/src/ServerWire.lua&quot;
+                &quot;line&quot;: 351,
+                &quot;path&quot;: &quot;lib/netwire/src/ServerWire.luau&quot;
             }
         },
         {
@@ -527,8 +380,8 @@ myWire<span class="token punctuation">:</span><span class="token function">TestM
             &quot;returns&quot;: [],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
-                &quot;line&quot;: 389,
-                &quot;path&quot;: &quot;lib/netwire/src/ServerWire.lua&quot;
+                &quot;line&quot;: 382,
+                &quot;path&quot;: &quot;lib/netwire/src/ServerWire.luau&quot;
             }
         },
         {
@@ -554,8 +407,8 @@ myWire<span class="token punctuation">:</span><span class="token function">TestM
             &quot;returns&quot;: [],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
-                &quot;line&quot;: 420,
-                &quot;path&quot;: &quot;lib/netwire/src/ServerWire.lua&quot;
+                &quot;line&quot;: 413,
+                &quot;path&quot;: &quot;lib/netwire/src/ServerWire.luau&quot;
             }
         }
     ],
@@ -566,23 +419,23 @@ myWire<span class="token punctuation">:</span><span class="token function">TestM
             &quot;lua_type&quot;: &quot;\&quot;ServerNetWire\&quot;&quot;,
             &quot;readonly&quot;: true,
             &quot;source&quot;: {
-                &quot;line&quot;: 185,
-                &quot;path&quot;: &quot;lib/netwire/src/ServerWire.lua&quot;
+                &quot;line&quot;: 165,
+                &quot;path&quot;: &quot;lib/netwire/src/ServerWire.luau&quot;
             }
         }
     ],
     &quot;types&quot;: [],
     &quot;name&quot;: &quot;ServerNetWire&quot;,
-    &quot;desc&quot;: &quot;Uses Sleitnick&#x27;s Comm under the hood. Provides a simple to use interface for networking across\nyour codebase. This is a server side only module. To begin using it, you must first create a\nServerNetWire object. This can be done by calling NetWire.Server, or by calling NetWire.Server.new\n\nThe following variables are all equivalent as NetWires are memoized by their namespace,\nso creating a new one with the same namespace will return the same object.\n```lua\nlocal TestNetWire1 = NetWire.Server.new(\&quot;TestNetWire\&quot;)\nlocal TestNetWire2 = NetWire.Server(\&quot;TestNetWire\&quot;)\n\nprint(TestNetWire1 == TestNetWire2) -- true \n```\n:::info\nYou can also create a by calling the package directly, but this is not encouraged as it\nobscures the RunContext in which the NetWire is being created.\n```lua\nlocal TestNetWire3 = NetWire(\&quot;TestNetWire\&quot;)\n```\n:::\n\nYou can then create client exposed events by registering them with the method or setting their index:\nThe following two lines accomplish the same thing.\n```lua\nTestNetWire:RegisterEvent(\&quot;TestEvent\&quot;)\nTestNetWire.TestEvent = NetWire.createEvent()\n```\n\n-----------------------------------------------------------------\n[EXAMPLES]\n-----------------------------------------------------------------\n```lua\nlocal NetWire = require(game:GetService(\&quot;ReplicatedStorage\&quot;).NetWire)\n\nlocal myNetWire = NetWire.Server(\&quot;MyNetWire\&quot;)\n\n-- Aliases (These are equivalent. You can use either to create remote events)\nmyNetWire.ServerSideEvent = NetWire.createEvent()\nmyNetWire:RegisterEvent(\&quot;ServerSideEvent\&quot;)\n\n\n-- Setup a method\nfunction myNetWire:ServerSideFunction(player: Player, someArg: number)\n    print(someArg)\n    return someArg * 2\nend\n\n-- Connect to an event\nmyNetWire.ServerSideEvent:Connect(function(plr: Player, someArg)\n    print(someArg)\nend)\n\n-- Fire an event\nmyNetWire.ServerSideEvent:FireAll(someArg)\n```\n-----------------------------------------------------------------\nExample using a service\n```lua\nlocal ExampleService = Roam.createService { Name = \&quot;ExampleService\&quot; }\nExampleService.Client = {\n    TestEvent = NetWire.createEvent()\n}\n\n-- Make a server exposed method MultNumber\nfunction ExampleService.Client:MultNumber(plr: Player, num: number): number\n    return num * self.Server:GetMult() -- self.Server is internally set by NetWire when you do .fromService\nend\n\n--------------------------------------------------------------------------------\n\nfunction ExampleService:GetMult(): number\n    return 2\nend\n\nfunction ExampleService:RoamStart()\n    self.Client.TestEvent:FireAll(\&quot;Hello from ExampleService!\&quot;) -- send a message to all clients\nend\n\nfunction ExampleService:RoamInit()\n    self.Client = NetWire.Server.fromService(self) -- Initialize the NetWire\nend\n```&quot;,
+    &quot;desc&quot;: &quot;Uses Sleitnick&#x27;s Comm under the hood. Provides a simple to use interface for networking across\nyour codebase. This is a server side only module. To begin using it, you must first create a\nServerNetWire object. This can be done by calling NetWire.Server, or by calling NetWire.Server.new\n\nThe following variables are all equivalent as NetWires are memoized by their namespace,\nso creating a new one with the same namespace will return the same object.\n```lua\nlocal TestNetWire1 = NetWire.Server.new(\&quot;MyNetWire\&quot;)\nlocal TestNetWire2 = NetWire.Server(\&quot;MyNetWire\&quot;)\n\nprint(TestNetWire1 == TestNetWire2) -- true \n```\n:::info\nYou can also create a by calling the package directly, but this is not encouraged as it\nobscures the RunContext in which the NetWire is being created.\n```lua\nlocal TestNetWire3 = NetWire(\&quot;MyNetWire\&quot;)\n```\n:::\n\nYou can then create client exposed events by registering them with the method or setting their index:\nThe following two lines accomplish the same thing.\n```lua\nTestNetWire:RegisterEvent(\&quot;TestEvent\&quot;)\nTestNetWire.TestEvent = NetWire.createEvent()\n```\nMore examples can be found under the respective construction methods.&quot;,
     &quot;realm&quot;: [
         &quot;Server&quot;
     ],
     &quot;source&quot;: {
-        &quot;line&quot;: 89,
-        &quot;path&quot;: &quot;lib/netwire/src/ServerWire.lua&quot;
+        &quot;line&quot;: 35,
+        &quot;path&quot;: &quot;lib/netwire/src/ServerWire.luau&quot;
     }
 }</pre></details></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#types" class="table-of-contents__link toc-highlight">Types</a></li><li><a href="#properties" class="table-of-contents__link toc-highlight">Properties</a><ul><li><a href="#ClassName" class="table-of-contents__link toc-highlight">ClassName</a></li></ul></li><li><a href="#functions" class="table-of-contents__link toc-highlight">Functions</a><ul><li><a href="#Destroy" class="table-of-contents__link toc-highlight">:Destroy</a></li><li><a href="#RegisterEvent" class="table-of-contents__link toc-highlight">:RegisterEvent</a></li><li><a href="#RegisterMethod" class="table-of-contents__link toc-highlight">:RegisterMethod</a></li><li><a href="#RegisterProperty" class="table-of-contents__link toc-highlight">:RegisterProperty</a></li><li><a href="#new" class="table-of-contents__link toc-highlight">.new</a></li><li><a href="#setupServiceNetworking" class="table-of-contents__link toc-highlight">.setupServiceNetworking</a></li></ul></li></ul></div></div></div></div></main></div></div><footer class="footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2024 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
-<script src="/ModulesOnRails/assets/js/runtime~main.a2ca366d.js"></script>
-<script src="/ModulesOnRails/assets/js/main.f621edfe.js"></script>
+<script src="/ModulesOnRails/assets/js/runtime~main.9ad1296e.js"></script>
+<script src="/ModulesOnRails/assets/js/main.3076d21a.js"></script>
 </body>
 </html>

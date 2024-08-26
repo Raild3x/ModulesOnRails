@@ -3,23 +3,129 @@
 <head>
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v2.3.1">
-<title data-rh="true">ClientPlayerDataManager | ModulesOnRails</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:url" content="https://raild3x.github.io/ModulesOnRails/api/ClientPlayerDataManager"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docusaurus_tag" content="default"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docsearch:docusaurus_tag" content="default"><meta data-rh="true" property="og:title" content="ClientPlayerDataManager | ModulesOnRails"><meta data-rh="true" name="description" content="UNFINISHED"><meta data-rh="true" property="og:description" content="UNFINISHED"><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/ClientPlayerDataManager"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/ClientPlayerDataManager" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/ClientPlayerDataManager" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.1839e2d4.css">
-<link rel="preload" href="/ModulesOnRails/assets/js/runtime~main.a2ca366d.js" as="script">
-<link rel="preload" href="/ModulesOnRails/assets/js/main.f621edfe.js" as="script">
+<title data-rh="true">ClientPlayerDataManager | ModulesOnRails</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:url" content="https://raild3x.github.io/ModulesOnRails/api/ClientPlayerDataManager"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docusaurus_tag" content="default"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docsearch:docusaurus_tag" content="default"><meta data-rh="true" property="og:title" content="ClientPlayerDataManager | ModulesOnRails"><meta data-rh="true" name="description" content="This class is used to provide a simple unified interface for accessing PlayerData. It requires
+registering what data it should expect and then you can access the data&#x27;s managers once they have replicated.
+
+```lua
+-- this should usually be gotten from a shared module between the server and client
+local ProfileTemplate = {
+    Currency = {
+        Money = 0,
+        Gems = 100,
+    }
+}
+
+local cpdm = ClientPlayerDataManager.new({
+    ProfileSchema = ProfileTemplate
+})
+
+cpdm:RegisterManager(&quot;Currency&quot;)
+
+cpdm:PromiseManager(&quot;Currency&quot;):andThen(function(tm: TableManager)
+
+    tm:Observe(&quot;Money&quot;, function(money)
+        print(&quot;My money is:&quot;, money)
+    end)
+
+end)
+```"><meta data-rh="true" property="og:description" content="This class is used to provide a simple unified interface for accessing PlayerData. It requires
+registering what data it should expect and then you can access the data&#x27;s managers once they have replicated.
+
+```lua
+-- this should usually be gotten from a shared module between the server and client
+local ProfileTemplate = {
+    Currency = {
+        Money = 0,
+        Gems = 100,
+    }
+}
+
+local cpdm = ClientPlayerDataManager.new({
+    ProfileSchema = ProfileTemplate
+})
+
+cpdm:RegisterManager(&quot;Currency&quot;)
+
+cpdm:PromiseManager(&quot;Currency&quot;):andThen(function(tm: TableManager)
+
+    tm:Observe(&quot;Money&quot;, function(money)
+        print(&quot;My money is:&quot;, money)
+    end)
+
+end)
+```"><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/ClientPlayerDataManager"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/ClientPlayerDataManager" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/ClientPlayerDataManager" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.1839e2d4.css">
+<link rel="preload" href="/ModulesOnRails/assets/js/runtime~main.9ad1296e.js" as="script">
+<link rel="preload" href="/ModulesOnRails/assets/js/main.3076d21a.js" as="script">
 </head>
 <body class="navigation-with-keyboard">
 <script>!function(){function e(e){document.documentElement.setAttribute("data-theme",e)}var t=function(){var e=null;try{e=localStorage.getItem("theme")}catch(e){}return e}();null!==t?e(t):window.matchMedia("(prefers-color-scheme: dark)").matches?e("dark"):(window.matchMedia("(prefers-color-scheme: light)").matches,e("light"))}()</script><div id="__docusaurus">
 <div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="navbar navbar--fixed-top"><div class="navbar__inner"><div class="navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-hidden="true" viewBox="0 0 24 24" class="iconExternalLink_nPIU"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"></path></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="Switch between dark and light mode (currently light mode)" aria-label="Switch between dark and light mode (currently light mode)" aria-live="polite"><svg viewBox="0 0 24 24" width="24" height="24" class="lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" class="darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg></button></div><div class="searchBox_ZlJk"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input type="search" id="search_input_react" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="docusaurus_skipToContent_fallback" class="main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject">​Base​Object</a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/TableManager">TableManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/ServerTableReplicator">TableReplicator</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/NetWire">NetWire</a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PlayerProfileManager">​Player​Profile​Manager</a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" aria-expanded="true" href="/ModulesOnRails/api/PlayerDataManager">PlayerDataManager</a></div><ul style="display:block;overflow:visible;height:auto" class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/PlayerDataManager">​Player​Data​Manager</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/ServerPlayerDataManager">​Server​Player​Data​Manager</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" tabindex="0" href="/ModulesOnRails/api/ClientPlayerDataManager">​Client​Player​Data​Manager</a></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/DropletManager">DropletManager</a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ProbabilityDistributor">​Probability​Distributor</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Roam">​Roam</a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><div class="tocCollapsible_ETCw theme-doc-toc-mobile tocMobile_oUs_"><button type="button" class="clean-btn tocCollapsibleButton_TO0P">On this page</button></div><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">Client</span><span style="display:inline-block">Player</span><span style="display:inline-block">Data</span><span style="display:inline-block">Manager</span></h1><div class="luaClassTags_EipM"></div><div>
-<p>UNFINISHED</p>
-</div></header><h2 class="anchor anchorWithStickyNavbar_LWe7" id="properties">Properties<a href="#properties" class="hash-link" aria-label="Direct link to Properties" title="Direct link to Properties">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="DEFAULT_MANAGER_NAME"><code style="text-decoration:none">DEFAULT_MANAGER_NAME</code><a href="#DEFAULT_MANAGER_NAME" class="hash-link" aria-label="Direct link to DEFAULT_MANAGER_NAME" title="Direct link to DEFAULT_MANAGER_NAME">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/playerdatamanager/src/ClientPlayerDataManager.lua#L51"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ClientPlayerDataManager<!-- -->.<!-- -->DEFAULT_MANAGER_NAME<!-- -->:<!-- --> </code> <code class="blue_P4bS">string</code></div><div>
+<p>
+  This class is used to provide a simple unified interface for accessing PlayerData. It requires
+  registering what data it should expect and then you can access the data's managers once they have replicated.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- this should usually be gotten from a shared module between the server and client</span>
+<span class="token keyword">local</span> ProfileTemplate <span class="token operator">=</span> <span class="token punctuation">{</span>
+    Currency <span class="token operator">=</span> <span class="token punctuation">{</span>
+        Money <span class="token operator">=</span> <span class="token number">0</span><span class="token punctuation">,</span>
+        Gems <span class="token operator">=</span> <span class="token number">100</span><span class="token punctuation">,</span>
+    <span class="token punctuation">}</span>
+<span class="token punctuation">}</span>
+
+<span class="token keyword">local</span> cpdm <span class="token operator">=</span> ClientPlayerDataManager<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">{</span>
+    ProfileSchema <span class="token operator">=</span> ProfileTemplate
+<span class="token punctuation">}</span><span class="token punctuation">)</span>
+
+cpdm<span class="token punctuation">:</span><span class="token function">RegisterManager</span><span class="token punctuation">(</span><span class="token string">"Currency"</span><span class="token punctuation">)</span>
+
+cpdm<span class="token punctuation">:</span><span class="token function">PromiseManager</span><span class="token punctuation">(</span><span class="token string">"Currency"</span><span class="token punctuation">)</span><span class="token punctuation">:</span><span class="token function">andThen</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span>tm<span class="token punctuation">:</span> TableManager<span class="token punctuation">)</span>
+
+    tm<span class="token punctuation">:</span><span class="token function">Observe</span><span class="token punctuation">(</span><span class="token string">"Money"</span><span class="token punctuation">,</span> <span class="token keyword">function</span><span class="token punctuation">(</span>money<span class="token punctuation">)</span>
+        <span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"My money is:"</span><span class="token punctuation">,</span> money<span class="token punctuation">)</span>
+    <span class="token keyword">end</span><span class="token punctuation">)</span>
+
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+</code></pre>
+</div></header><h2 class="anchor anchorWithStickyNavbar_LWe7" id="properties">Properties<a href="#properties" class="hash-link" aria-label="Direct link to Properties" title="Direct link to Properties">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="DEFAULT_MANAGER_NAME"><code style="text-decoration:none">DEFAULT_MANAGER_NAME</code><a href="#DEFAULT_MANAGER_NAME" class="hash-link" aria-label="Direct link to DEFAULT_MANAGER_NAME" title="Direct link to DEFAULT_MANAGER_NAME">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/playerdatamanager/src/ClientPlayerDataManager.luau#L77"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ClientPlayerDataManager<!-- -->.<!-- -->DEFAULT_MANAGER_NAME<!-- -->:<!-- --> </code> <code class="blue_P4bS">string</code></div><div>
 <p>The default internal manager name.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="PlayerDataReady"><code style="text-decoration:none">PlayerDataReady</code><a href="#PlayerDataReady" class="hash-link" aria-label="Direct link to PlayerDataReady" title="Direct link to PlayerDataReady">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/playerdatamanager/src/ClientPlayerDataManager.lua#L58"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ClientPlayerDataManager<!-- -->.<!-- -->PlayerDataReady<!-- -->:<!-- --> </code> <code class="blue_P4bS">Signal</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="op_lSLc">&gt;</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="PlayerDataReady"><code style="text-decoration:none">PlayerDataReady</code><a href="#PlayerDataReady" class="hash-link" aria-label="Direct link to PlayerDataReady" title="Direct link to PlayerDataReady">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/playerdatamanager/src/ClientPlayerDataManager.luau#L84"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ClientPlayerDataManager<!-- -->.<!-- -->PlayerDataReady<!-- -->:<!-- --> </code> <code class="blue_P4bS">Signal</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="op_lSLc">&gt;</code></div><div>
 <p>A signal that fires when a Player's data is ready to be used.</p>
-</div><h2 class="anchor anchorWithStickyNavbar_LWe7" id="functions">Functions<a href="#functions" class="hash-link" aria-label="Direct link to Functions" title="Direct link to Functions">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="new"><code style="text-decoration:none">new</code><a href="#new" class="hash-link" aria-label="Direct link to new" title="Direct link to new">​</a></h3><span class="docTag__6UZ" style="border-color:#ff793f;color:#ff793f">Constructor</span><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/playerdatamanager/src/ClientPlayerDataManager.lua#L139"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ClientPlayerDataManager<!-- -->.</code><code class="green_DgR4">new</code><code>(</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/PlayerDataManager#ClientPlayerDataManager">ClientPlayerDataManager</a></code></div><div></div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetImmediate"><code style="text-decoration:none">GetImmediate</code><a href="#GetImmediate" class="hash-link" aria-label="Direct link to GetImmediate" title="Direct link to GetImmediate">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/playerdatamanager/src/ClientPlayerDataManager.lua#L66"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ClientPlayerDataManager<!-- -->:</code><code class="green_DgR4">GetImmediate</code><code>(</code><code>managerName<!-- -->: </code><code class="blue_P4bS">string?</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableReplicatorSingleton">TableReplicatorSingleton?</a></code></div><div></div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetManager"><code style="text-decoration:none">GetManager</code><a href="#GetManager" class="hash-link" aria-label="Direct link to GetManager" title="Direct link to GetManager">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/playerdatamanager/src/ClientPlayerDataManager.lua#L75"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ClientPlayerDataManager<!-- -->:</code><code class="green_DgR4">GetManager</code><code>(</code><code>managerName<!-- -->: </code><code class="blue_P4bS">string?</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableManager">TableManager?</a></code></div><div></div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="PromiseManager"><code style="text-decoration:none">PromiseManager</code><a href="#PromiseManager" class="hash-link" aria-label="Direct link to PromiseManager" title="Direct link to PromiseManager">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/playerdatamanager/src/ClientPlayerDataManager.lua#L88"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ClientPlayerDataManager<!-- -->:</code><code class="green_DgR4">PromiseManager</code><code>(</code><code>managerName<!-- -->: </code><code class="blue_P4bS">string?</code><code>) → </code><code class="blue_P4bS">Promise</code></div><div></div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Register"><code style="text-decoration:none">Register</code><a href="#Register" class="hash-link" aria-label="Direct link to Register" title="Direct link to Register">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/playerdatamanager/src/ClientPlayerDataManager.lua#L99"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ClientPlayerDataManager<!-- -->:</code><code class="green_DgR4">Register</code><code>(</code><code>config<!-- -->: </code><code class="purple_ieR2">{</code><code>Name<!-- -->: </code><code class="blue_P4bS">string;</code><code>DefaultDataSchema<!-- -->: </code><code class="blue_P4bS">table;</code><code>ConditionFn<!-- -->: </code><code class="green_DgR4">(</code><code class="yellow_QJap">(</code><code>replicator<!-- -->: </code><code class="blue_P4bS">TableReplicator</code><code class="yellow_QJap">)</code><code class="yellow_QJap"> → </code><code class="blue_P4bS">boolean</code><code class="green_DgR4">)</code><code class="blue_P4bS">?</code><code class="purple_ieR2">}</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableReplicatorSingleton">TableReplicatorSingleton</a></code></div><div></div></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
+</div><h2 class="anchor anchorWithStickyNavbar_LWe7" id="functions">Functions<a href="#functions" class="hash-link" aria-label="Direct link to Functions" title="Direct link to Functions">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="new"><code style="text-decoration:none">new</code><a href="#new" class="hash-link" aria-label="Direct link to new" title="Direct link to new">​</a></h3><span class="docTag__6UZ" style="border-color:#ff793f;color:#ff793f">Constructor</span><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/playerdatamanager/src/ClientPlayerDataManager.luau#L198"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ClientPlayerDataManager<!-- -->.</code><code class="green_DgR4">new</code><code>(</code><code>config<!-- -->: </code><code class="purple_ieR2">{</code><div class="inset_uKQm"><code>ProfileSchema<!-- -->: </code><code class="blue_P4bS">table</code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"></div><code class="purple_ieR2">}</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/PlayerDataManager#ClientPlayerDataManager">ClientPlayerDataManager</a></code></div><div></div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetImmediate"><code style="text-decoration:none">GetImmediate</code><a href="#GetImmediate" class="hash-link" aria-label="Direct link to GetImmediate" title="Direct link to GetImmediate">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/playerdatamanager/src/ClientPlayerDataManager.luau#L93"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ClientPlayerDataManager<!-- -->:</code><code class="green_DgR4">GetImmediate</code><code>(</code><code>managerName<!-- -->: </code><code class="blue_P4bS">string?</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableReplicatorSingleton">TableReplicatorSingleton</a></code></div><div>
+<p>
+  Gets the TableReplicatorSingleton for this manager so you can get immediate info from
+  it if needed.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetManager"><code style="text-decoration:none">GetManager</code><a href="#GetManager" class="hash-link" aria-label="Direct link to GetManager" title="Direct link to GetManager">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/playerdatamanager/src/ClientPlayerDataManager.luau#L103"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ClientPlayerDataManager<!-- -->:</code><code class="green_DgR4">GetManager</code><code>(</code><code>managerName<!-- -->: </code><code class="blue_P4bS">string?</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableManager">TableManager?</a></code></div><div>
+<p>
+  Gets the TableManager associated with the given name. This method may return <code>nil</code> if the
+  data has not replicated yet.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="PromiseManager"><code style="text-decoration:none">PromiseManager</code><a href="#PromiseManager" class="hash-link" aria-label="Direct link to PromiseManager" title="Direct link to PromiseManager">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/playerdatamanager/src/ClientPlayerDataManager.luau#L113"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ClientPlayerDataManager<!-- -->:</code><code class="green_DgR4">PromiseManager</code><code>(</code><code>managerName<!-- -->: </code><code class="blue_P4bS">string?</code><code>) → </code><code class="blue_P4bS">Promise</code></div><div>
+<p>
+  Promises the TableManager associated with the given name. If it doesnt exist when called then
+  it will wait for it to be replicated and then will resolve.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="RegisterManager"><code style="text-decoration:none">RegisterManager</code><a href="#RegisterManager" class="hash-link" aria-label="Direct link to RegisterManager" title="Direct link to RegisterManager">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/playerdatamanager/src/ClientPlayerDataManager.luau#L141"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ClientPlayerDataManager<!-- -->:</code><code class="green_DgR4">RegisterManager</code><code>(</code><code>config<!-- -->: </code><code class="blue_P4bS">string</code><code class="op_lSLc"> | </code><code class="purple_ieR2">{</code><code>Name<!-- -->: </code><code class="blue_P4bS">string;</code><code>DefaultDataSchema<!-- -->: </code><code class="blue_P4bS">table;</code><code>ConditionFn<!-- -->: </code><code class="green_DgR4">(</code><code class="yellow_QJap">(</code><code>replicator<!-- -->: </code><code class="blue_P4bS">TableReplicator</code><code class="yellow_QJap">)</code><code class="yellow_QJap"> → </code><code class="blue_P4bS">boolean</code><code class="green_DgR4">)</code><code class="blue_P4bS">?</code><code class="purple_ieR2">}</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableReplicatorSingleton">TableReplicatorSingleton</a></code></div><div>
+<p>Registers a tableManager/TableReplicatorSingleton to be watched for on the client.</p>
+<p>Informal registration. Assumes data key in the profile template is the same as the given name.</p>
+<pre class="language-lua"><code class="language-lua">ClientPlayerDataManager<span class="token punctuation">:</span><span class="token function">RegisterManager</span><span class="token punctuation">(</span><span class="token string">"Currency"</span><span class="token punctuation">)</span>
+</code></pre>
+<p>Formal registration. Used for more complex/custom registering of managers</p>
+<pre class="language-lua"><code class="language-lua">ClientPlayerDataManager<span class="token punctuation">:</span><span class="token function">RegisterManager</span><span class="token punctuation">(</span><span class="token punctuation">{</span>
+    Name <span class="token operator">=</span> <span class="token string">"Currency"</span><span class="token punctuation">,</span>
+    DefaultDataSchema <span class="token operator">=</span> profileTemplate<span class="token punctuation">[</span><span class="token string">"Currency"</span><span class="token punctuation">]</span><span class="token punctuation">,</span>
+    ConditionFn <span class="token operator">=</span> <span class="token keyword">function</span><span class="token punctuation">(</span>replicator<span class="token punctuation">)</span>
+        <span class="token keyword">return</span> replicator<span class="token punctuation">:</span><span class="token function">GetTag</span><span class="token punctuation">(</span><span class="token string">"UserId"</span><span class="token punctuation">)</span> <span class="token operator">==</span> LocalPlayer<span class="token punctuation">.</span>UserId
+    <span class="token keyword">end</span><span class="token punctuation">,</span>
+<span class="token punctuation">}</span><span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Start"><code style="text-decoration:none">Start</code><a href="#Start" class="hash-link" aria-label="Direct link to Start" title="Direct link to Start">​</a></h3><div class="repositoryDetailsContainer_BPdw"><span class="releaseVersion_EonW">unreleased</span><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/playerdatamanager/src/ClientPlayerDataManager.luau#L186"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ClientPlayerDataManager<!-- -->:</code><code class="green_DgR4">Start</code><code>(</code><code>) → </code><code>(</code><code>)</code></div><div>
+<p>Marks the CPDM as started. This is not currently neccessary</p>
+</div></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
     &quot;functions&quot;: [
         {
             &quot;name&quot;: &quot;GetImmediate&quot;,
-            &quot;desc&quot;: &quot;    &quot;,
+            &quot;desc&quot;: &quot;Gets the TableReplicatorSingleton for this manager so you can get immediate info from\nit if needed.&quot;,
             &quot;params&quot;: [
                 {
                     &quot;name&quot;: &quot;managerName&quot;,
@@ -30,18 +136,18 @@
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;TableReplicatorSingleton?\r\n&quot;
+                    &quot;lua_type&quot;: &quot;TableReplicatorSingleton\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
-                &quot;line&quot;: 66,
-                &quot;path&quot;: &quot;lib/playerdatamanager/src/ClientPlayerDataManager.lua&quot;
+                &quot;line&quot;: 93,
+                &quot;path&quot;: &quot;lib/playerdatamanager/src/ClientPlayerDataManager.luau&quot;
             }
         },
         {
             &quot;name&quot;: &quot;GetManager&quot;,
-            &quot;desc&quot;: &quot;    &quot;,
+            &quot;desc&quot;: &quot;Gets the TableManager associated with the given name. This method may return `nil` if the\ndata has not replicated yet.&quot;,
             &quot;params&quot;: [
                 {
                     &quot;name&quot;: &quot;managerName&quot;,
@@ -52,18 +158,18 @@
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;TableManager?\r\n&quot;
+                    &quot;lua_type&quot;: &quot;TableManager?\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
-                &quot;line&quot;: 75,
-                &quot;path&quot;: &quot;lib/playerdatamanager/src/ClientPlayerDataManager.lua&quot;
+                &quot;line&quot;: 103,
+                &quot;path&quot;: &quot;lib/playerdatamanager/src/ClientPlayerDataManager.luau&quot;
             }
         },
         {
             &quot;name&quot;: &quot;PromiseManager&quot;,
-            &quot;desc&quot;: &quot;    &quot;,
+            &quot;desc&quot;: &quot;Promises the TableManager associated with the given name. If it doesnt exist when called then\nit will wait for it to be replicated and then will resolve.&quot;,
             &quot;params&quot;: [
                 {
                     &quot;name&quot;: &quot;managerName&quot;,
@@ -74,41 +180,59 @@
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;Promise\r\n&quot;
+                    &quot;lua_type&quot;: &quot;Promise\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
-                &quot;line&quot;: 88,
-                &quot;path&quot;: &quot;lib/playerdatamanager/src/ClientPlayerDataManager.lua&quot;
+                &quot;line&quot;: 113,
+                &quot;path&quot;: &quot;lib/playerdatamanager/src/ClientPlayerDataManager.luau&quot;
             }
         },
         {
-            &quot;name&quot;: &quot;Register&quot;,
-            &quot;desc&quot;: &quot;    &quot;,
+            &quot;name&quot;: &quot;RegisterManager&quot;,
+            &quot;desc&quot;: &quot;Registers a tableManager/TableReplicatorSingleton to be watched for on the client.\n\nInformal registration. Assumes data key in the profile template is the same as the given name.\n```lua\nClientPlayerDataManager:RegisterManager(\&quot;Currency\&quot;)\n```\n\nFormal registration. Used for more complex/custom registering of managers\n```lua\nClientPlayerDataManager:RegisterManager({\n    Name = \&quot;Currency\&quot;,\n    DefaultDataSchema = profileTemplate[\&quot;Currency\&quot;],\n    ConditionFn = function(replicator)\n        return replicator:GetTag(\&quot;UserId\&quot;) == LocalPlayer.UserId\n    end,\n})&quot;,
             &quot;params&quot;: [
                 {
                     &quot;name&quot;: &quot;config&quot;,
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;{\r\n    Name: string;\r\n    DefaultDataSchema: table;\r\n    ConditionFn: ((replicator: TableReplicator) -&gt; boolean)?\r\n}&quot;
+                    &quot;lua_type&quot;: &quot;string | {\n    Name: string;\n    DefaultDataSchema: table;\n    ConditionFn: ((replicator: TableReplicator) -&gt; boolean)?\n}&quot;
                 }
             ],
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;TableReplicatorSingleton\r\n&quot;
+                    &quot;lua_type&quot;: &quot;TableReplicatorSingleton\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
-                &quot;line&quot;: 99,
-                &quot;path&quot;: &quot;lib/playerdatamanager/src/ClientPlayerDataManager.lua&quot;
+                &quot;line&quot;: 141,
+                &quot;path&quot;: &quot;lib/playerdatamanager/src/ClientPlayerDataManager.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;Start&quot;,
+            &quot;desc&quot;: &quot;Marks the CPDM as started. This is not currently neccessary&quot;,
+            &quot;params&quot;: [],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;unreleased&quot;: true,
+            &quot;source&quot;: {
+                &quot;line&quot;: 186,
+                &quot;path&quot;: &quot;lib/playerdatamanager/src/ClientPlayerDataManager.luau&quot;
             }
         },
         {
             &quot;name&quot;: &quot;new&quot;,
             &quot;desc&quot;: &quot;&quot;,
-            &quot;params&quot;: [],
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;config&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{\n    ProfileSchema: table,\n}&quot;
+                }
+            ],
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
@@ -121,8 +245,8 @@
                 &quot;Static&quot;
             ],
             &quot;source&quot;: {
-                &quot;line&quot;: 139,
-                &quot;path&quot;: &quot;lib/playerdatamanager/src/ClientPlayerDataManager.lua&quot;
+                &quot;line&quot;: 198,
+                &quot;path&quot;: &quot;lib/playerdatamanager/src/ClientPlayerDataManager.luau&quot;
             }
         }
     ],
@@ -132,8 +256,8 @@
             &quot;desc&quot;: &quot;The default internal manager name.&quot;,
             &quot;lua_type&quot;: &quot;string&quot;,
             &quot;source&quot;: {
-                &quot;line&quot;: 51,
-                &quot;path&quot;: &quot;lib/playerdatamanager/src/ClientPlayerDataManager.lua&quot;
+                &quot;line&quot;: 77,
+                &quot;path&quot;: &quot;lib/playerdatamanager/src/ClientPlayerDataManager.luau&quot;
             }
         },
         {
@@ -141,20 +265,20 @@
             &quot;desc&quot;: &quot;A signal that fires when a Player&#x27;s data is ready to be used.&quot;,
             &quot;lua_type&quot;: &quot;Signal&lt;Player&gt;&quot;,
             &quot;source&quot;: {
-                &quot;line&quot;: 58,
-                &quot;path&quot;: &quot;lib/playerdatamanager/src/ClientPlayerDataManager.lua&quot;
+                &quot;line&quot;: 84,
+                &quot;path&quot;: &quot;lib/playerdatamanager/src/ClientPlayerDataManager.luau&quot;
             }
         }
     ],
     &quot;types&quot;: [],
     &quot;name&quot;: &quot;ClientPlayerDataManager&quot;,
-    &quot;desc&quot;: &quot;UNFINISHED&quot;,
+    &quot;desc&quot;: &quot;This class is used to provide a simple unified interface for accessing PlayerData. It requires\nregistering what data it should expect and then you can access the data&#x27;s managers once they have replicated.\n\n```lua\n-- this should usually be gotten from a shared module between the server and client\nlocal ProfileTemplate = {\n    Currency = {\n        Money = 0,\n        Gems = 100,\n    }\n}\n\nlocal cpdm = ClientPlayerDataManager.new({\n    ProfileSchema = ProfileTemplate\n})\n\ncpdm:RegisterManager(\&quot;Currency\&quot;)\n\ncpdm:PromiseManager(\&quot;Currency\&quot;):andThen(function(tm: TableManager)\n\n    tm:Observe(\&quot;Money\&quot;, function(money)\n        print(\&quot;My money is:\&quot;, money)\n    end)\n\nend)\n```&quot;,
     &quot;source&quot;: {
-        &quot;line&quot;: 8,
-        &quot;path&quot;: &quot;lib/playerdatamanager/src/ClientPlayerDataManager.lua&quot;
+        &quot;line&quot;: 33,
+        &quot;path&quot;: &quot;lib/playerdatamanager/src/ClientPlayerDataManager.luau&quot;
     }
-}</pre></details></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#types" class="table-of-contents__link toc-highlight">Types</a></li><li><a href="#properties" class="table-of-contents__link toc-highlight">Properties</a><ul><li><a href="#DEFAULT_MANAGER_NAME" class="table-of-contents__link toc-highlight">DEFAULT_MANAGER_NAME</a></li><li><a href="#PlayerDataReady" class="table-of-contents__link toc-highlight">PlayerDataReady</a></li></ul></li><li><a href="#functions" class="table-of-contents__link toc-highlight">Functions</a><ul><li><a href="#GetImmediate" class="table-of-contents__link toc-highlight">:GetImmediate</a></li><li><a href="#GetManager" class="table-of-contents__link toc-highlight">:GetManager</a></li><li><a href="#PromiseManager" class="table-of-contents__link toc-highlight">:PromiseManager</a></li><li><a href="#Register" class="table-of-contents__link toc-highlight">:Register</a></li><li><a href="#new" class="table-of-contents__link toc-highlight">.new</a></li></ul></li></ul></div></div></div></div></main></div></div><footer class="footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2024 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
-<script src="/ModulesOnRails/assets/js/runtime~main.a2ca366d.js"></script>
-<script src="/ModulesOnRails/assets/js/main.f621edfe.js"></script>
+}</pre></details></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#types" class="table-of-contents__link toc-highlight">Types</a></li><li><a href="#properties" class="table-of-contents__link toc-highlight">Properties</a><ul><li><a href="#DEFAULT_MANAGER_NAME" class="table-of-contents__link toc-highlight">DEFAULT_MANAGER_NAME</a></li><li><a href="#PlayerDataReady" class="table-of-contents__link toc-highlight">PlayerDataReady</a></li></ul></li><li><a href="#functions" class="table-of-contents__link toc-highlight">Functions</a><ul><li><a href="#GetImmediate" class="table-of-contents__link toc-highlight">:GetImmediate</a></li><li><a href="#GetManager" class="table-of-contents__link toc-highlight">:GetManager</a></li><li><a href="#PromiseManager" class="table-of-contents__link toc-highlight">:PromiseManager</a></li><li><a href="#RegisterManager" class="table-of-contents__link toc-highlight">:RegisterManager</a></li><li><a href="#Start" class="table-of-contents__link toc-highlight">:Start</a></li><li><a href="#new" class="table-of-contents__link toc-highlight">.new</a></li></ul></li></ul></div></div></div></div></main></div></div><footer class="footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2024 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
+<script src="/ModulesOnRails/assets/js/runtime~main.9ad1296e.js"></script>
+<script src="/ModulesOnRails/assets/js/main.3076d21a.js"></script>
 </body>
 </html>

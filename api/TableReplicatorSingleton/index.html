@@ -10,8 +10,8 @@ the TableReplicator is not ready yet."><meta data-rh="true" property="og:descrip
 that is guaranteed to exist. This is useful for when you want to access data, that
 may not have replicated yet, immediately. You provide a default schema to use if
 the TableReplicator is not ready yet."><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/TableReplicatorSingleton"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/TableReplicatorSingleton" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/TableReplicatorSingleton" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.1839e2d4.css">
-<link rel="preload" href="/ModulesOnRails/assets/js/runtime~main.a2ca366d.js" as="script">
-<link rel="preload" href="/ModulesOnRails/assets/js/main.f621edfe.js" as="script">
+<link rel="preload" href="/ModulesOnRails/assets/js/runtime~main.9ad1296e.js" as="script">
+<link rel="preload" href="/ModulesOnRails/assets/js/main.3076d21a.js" as="script">
 </head>
 <body class="navigation-with-keyboard">
 <script>!function(){function e(e){document.documentElement.setAttribute("data-theme",e)}var t=function(){var e=null;try{e=localStorage.getItem("theme")}catch(e){}return e}();null!==t?e(t):window.matchMedia("(prefers-color-scheme: dark)").matches?e("dark"):(window.matchMedia("(prefers-color-scheme: light)").matches,e("light"))}()</script><div id="__docusaurus">
@@ -22,7 +22,7 @@ the TableReplicator is not ready yet."><link data-rh="true" rel="canonical" href
   may not have replicated yet, immediately. You provide a default schema to use if
   the TableReplicator is not ready yet.
 </p>
-</div></header><h2 class="anchor anchorWithStickyNavbar_LWe7" id="functions">Functions<a href="#functions" class="hash-link" aria-label="Direct link to Functions" title="Direct link to Functions">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="new"><code style="text-decoration:none">new</code><a href="#new" class="hash-link" aria-label="Direct link to new" title="Direct link to new">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Client/TableReplicatorSingleton.lua#L80"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>TableReplicatorSingleton<!-- -->.</code><code class="green_DgR4">new</code><code>(</code><code>config<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableReplicatorSingleton#Config">Config</a></code><code>) → </code><code>(</code><code>)</code></div><h3>Types</h3><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Config"><a href="#Config" class="hash-link" aria-label="Direct link to Config" title="Direct link to Config">​</a></h3><div class="memberString_GwaU"><code class="purple_ieR2">interface</code> <code>Config<!-- --> <!-- -->{</code><div class="inset_uKQm"><div><code>ClassTokenName<!-- -->: </code><code class="blue_P4bS">string</code><span class="inlineDescription_G7Er">-- <span>
+</div></header><h2 class="anchor anchorWithStickyNavbar_LWe7" id="functions">Functions<a href="#functions" class="hash-link" aria-label="Direct link to Functions" title="Direct link to Functions">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="new"><code style="text-decoration:none">new</code><a href="#new" class="hash-link" aria-label="Direct link to new" title="Direct link to new">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Client/TableReplicatorSingleton.luau#L80"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>TableReplicatorSingleton<!-- -->.</code><code class="green_DgR4">new</code><code>(</code><code>config<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableReplicatorSingleton#Config">Config</a></code><code>) → </code><code>(</code><code>)</code></div><h3>Types</h3><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Config"><a href="#Config" class="hash-link" aria-label="Direct link to Config" title="Direct link to Config">​</a></h3><div class="memberString_GwaU"><code class="purple_ieR2">interface</code> <code>Config<!-- --> <!-- -->{</code><div class="inset_uKQm"><div><code>ClassTokenName<!-- -->: </code><code class="blue_P4bS">string</code><span class="inlineDescription_G7Er">-- <span>
 <p>The name of the class token to listen for.</p>
 </span></span></div><div><code>DefaultDataSchema<!-- -->: </code><code class="blue_P4bS">table?</code><span class="inlineDescription_G7Er">-- <span>
 <p>The default schema to use if the replicator is not ready yet.</p>
@@ -40,7 +40,7 @@ the TableReplicator is not ready yet."><link data-rh="true" rel="canonical" href
 
 <span class="token keyword">return</span> ClientPlayerData
 </code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Get"><code style="text-decoration:none">Get</code><a href="#Get" class="hash-link" aria-label="Direct link to Get" title="Direct link to Get">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Client/TableReplicatorSingleton.lua#L135"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>TableReplicatorSingleton<!-- -->:</code><code class="green_DgR4">Get</code><code>(</code><div class="inset_uKQm"><div><code>path<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableManager#Path">Path</a></code><code>,</code></div><div><code>index<!-- -->: </code><code class="blue_P4bS">number?</code></div></div><code>) → </code><code class="blue_P4bS">any?</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Get"><code style="text-decoration:none">Get</code><a href="#Get" class="hash-link" aria-label="Direct link to Get" title="Direct link to Get">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Client/TableReplicatorSingleton.luau#L135"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>TableReplicatorSingleton<!-- -->:</code><code class="green_DgR4">Get</code><code>(</code><div class="inset_uKQm"><div><code>path<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableManager#Path">Path</a></code><code>,</code></div><div><code>index<!-- -->: </code><code class="blue_P4bS">number?</code></div></div><code>) → </code><code class="blue_P4bS">any?</code></div><div>
 <p>
   Fetches the value at the path. An index can be provided to fetch the value at
   that index. If the value is not ready yet, it will return the value rom the
@@ -50,7 +50,7 @@ the TableReplicator is not ready yet."><link data-rh="true" rel="canonical" href
 <pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> coins <span class="token operator">=</span> ClientPlayerData<span class="token punctuation">:</span><span class="token function">Get</span><span class="token punctuation">(</span><span class="token string">"Coins"</span><span class="token punctuation">)</span>
 <span class="token keyword">local</span> thirdItem <span class="token operator">=</span> ClientPlayerData<span class="token punctuation">:</span><span class="token function">Get</span><span class="token punctuation">(</span><span class="token string">"Inventory"</span><span class="token punctuation">,</span> <span class="token number">3</span><span class="token punctuation">)</span> <span class="token comment">-- Equivalent to `ClientPlayerData:Get("Inventory")[3]`</span>
 </code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Observe"><code style="text-decoration:none">Observe</code><a href="#Observe" class="hash-link" aria-label="Direct link to Observe" title="Direct link to Observe">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Client/TableReplicatorSingleton.lua#L164"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>TableReplicatorSingleton<!-- -->:</code><code class="green_DgR4">Observe</code><code>(</code><div class="inset_uKQm"><div><code>path<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableManager#Path">Path</a></code><code>,</code></div><div><code>callback<!-- -->: </code><code class="purple_ieR2">(</code><code>newValue<!-- -->: </code><code class="blue_P4bS">any?</code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code></div></div><code>) → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Observe"><code style="text-decoration:none">Observe</code><a href="#Observe" class="hash-link" aria-label="Direct link to Observe" title="Direct link to Observe">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Client/TableReplicatorSingleton.luau#L164"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>TableReplicatorSingleton<!-- -->:</code><code class="green_DgR4">Observe</code><code>(</code><div class="inset_uKQm"><div><code>path<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableManager#Path">Path</a></code><code>,</code></div><div><code>callback<!-- -->: </code><code class="purple_ieR2">(</code><code>newValue<!-- -->: </code><code class="blue_P4bS">any?</code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code></div></div><code>) → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code></div><div>
 <p>
   Called immediately and then whenever the value at the path changes.
   The callback will be called with the new value.
@@ -59,7 +59,7 @@ the TableReplicator is not ready yet."><link data-rh="true" rel="canonical" href
     <span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Coins changed to"</span><span class="token punctuation">,</span> newValue<span class="token punctuation">)</span>
 <span class="token keyword">end</span><span class="token punctuation">)</span>
 </code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="ListenToValueChange"><code style="text-decoration:none">ListenToValueChange</code><a href="#ListenToValueChange" class="hash-link" aria-label="Direct link to ListenToValueChange" title="Direct link to ListenToValueChange">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Client/TableReplicatorSingleton.lua#L182"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>TableReplicatorSingleton<!-- -->:</code><code class="green_DgR4">ListenToValueChange</code><code>(</code><div class="inset_uKQm"><div><code>path<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableManager#Path">Path</a></code><code>,</code></div><div><code>callback<!-- -->: </code><code class="purple_ieR2">(</code><code class="blue_P4bS">...any</code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code></div></div><code>) → </code><code class="blue_P4bS">function</code><span class="inlineDescription_G7Er">-- <span>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="ListenToValueChange"><code style="text-decoration:none">ListenToValueChange</code><a href="#ListenToValueChange" class="hash-link" aria-label="Direct link to ListenToValueChange" title="Direct link to ListenToValueChange">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Client/TableReplicatorSingleton.luau#L182"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>TableReplicatorSingleton<!-- -->:</code><code class="green_DgR4">ListenToValueChange</code><code>(</code><div class="inset_uKQm"><div><code>path<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableManager#Path">Path</a></code><code>,</code></div><div><code>callback<!-- -->: </code><code class="purple_ieR2">(</code><code class="blue_P4bS">...any</code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code></div></div><code>) → </code><code class="blue_P4bS">function</code><span class="inlineDescription_G7Er">-- <span>
 <p>A function that, when called, will disconnect the listener.</p>
 </span></span></div><div>
 <p>
@@ -70,12 +70,12 @@ the TableReplicator is not ready yet."><link data-rh="true" rel="canonical" href
     <span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Coins changed to"</span><span class="token punctuation">,</span> newValue<span class="token punctuation">)</span>
 <span class="token keyword">end</span><span class="token punctuation">)</span>
 </code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="ListenToAnyChange"><code style="text-decoration:none">ListenToAnyChange</code><a href="#ListenToAnyChange" class="hash-link" aria-label="Direct link to ListenToAnyChange" title="Direct link to ListenToAnyChange">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Client/TableReplicatorSingleton.lua#L204"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>TableReplicatorSingleton<!-- -->:</code><code class="green_DgR4">ListenToAnyChange</code><code>(</code><div class="inset_uKQm"><div><code>path<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableManager#Path">Path</a></code><code>,</code></div><div><code>callback<!-- -->: </code><code class="purple_ieR2">(</code><code class="blue_P4bS">...any</code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code></div></div><code>) → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="ListenToAnyChange"><code style="text-decoration:none">ListenToAnyChange</code><a href="#ListenToAnyChange" class="hash-link" aria-label="Direct link to ListenToAnyChange" title="Direct link to ListenToAnyChange">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Client/TableReplicatorSingleton.luau#L204"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>TableReplicatorSingleton<!-- -->:</code><code class="green_DgR4">ListenToAnyChange</code><code>(</code><div class="inset_uKQm"><div><code>path<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableManager#Path">Path</a></code><code>,</code></div><div><code>callback<!-- -->: </code><code class="purple_ieR2">(</code><code class="blue_P4bS">...any</code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code></div></div><code>) → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code></div><div>
 <p>
   Called when the value at the path is changed through any means.
   This includes if the value is an array and a value in the array is changed, inserted, or removed.
 </p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="ToFusionState"><code style="text-decoration:none">ToFusionState</code><a href="#ToFusionState" class="hash-link" aria-label="Direct link to ToFusionState" title="Direct link to ToFusionState">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Client/TableReplicatorSingleton.lua#L241"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>TableReplicatorSingleton<!-- -->:</code><code class="green_DgR4">ToFusionState</code><code>(</code><code>path<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableManager#Path">Path</a></code><code>) → </code><code class="blue_P4bS">State</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">any</code><code class="op_lSLc">&gt;</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="ToFusionState"><code style="text-decoration:none">ToFusionState</code><a href="#ToFusionState" class="hash-link" aria-label="Direct link to ToFusionState" title="Direct link to ToFusionState">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Client/TableReplicatorSingleton.luau#L241"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>TableReplicatorSingleton<!-- -->:</code><code class="green_DgR4">ToFusionState</code><code>(</code><code>path<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableManager#Path">Path</a></code><code>) → </code><code class="blue_P4bS">State</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">any</code><code class="op_lSLc">&gt;</code></div><div>
 <p>
   Returns a Fusion State object that will automatically update when the value at
   the path changes. This is useful for when you want to use Fusion dependents
@@ -87,39 +87,39 @@ New <span class="token string">"TextLabel"</span> <span class="token punctuation
     Text <span class="token operator">=</span> coinsState<span class="token punctuation">;</span>
 <span class="token punctuation">}</span>
 </code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetTableManager"><code style="text-decoration:none">GetTableManager</code><a href="#GetTableManager" class="hash-link" aria-label="Direct link to GetTableManager" title="Direct link to GetTableManager">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Client/TableReplicatorSingleton.lua#L262"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>TableReplicatorSingleton<!-- -->:</code><code class="green_DgR4">GetTableManager</code><code>(</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableManager">TableManager</a></code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetTableManager"><code style="text-decoration:none">GetTableManager</code><a href="#GetTableManager" class="hash-link" aria-label="Direct link to GetTableManager" title="Direct link to GetTableManager">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Client/TableReplicatorSingleton.luau#L262"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>TableReplicatorSingleton<!-- -->:</code><code class="green_DgR4">GetTableManager</code><code>(</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableManager">TableManager</a></code></div><div>
 <p>
   Gets the TableManager for the TableReplicatorSingleton. This will error if
   the TableManager is not ready yet.
 </p>
 <pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> TM <span class="token operator">=</span> ClientPlayerData<span class="token punctuation">:</span><span class="token function">GetTableManager</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
 </code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetTableReplicator"><code style="text-decoration:none">GetTableReplicator</code><a href="#GetTableReplicator" class="hash-link" aria-label="Direct link to GetTableReplicator" title="Direct link to GetTableReplicator">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Client/TableReplicatorSingleton.lua#L275"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>TableReplicatorSingleton<!-- -->:</code><code class="green_DgR4">GetTableReplicator</code><code>(</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ClientTableReplicator">ClientTableReplicator</a></code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetTableReplicator"><code style="text-decoration:none">GetTableReplicator</code><a href="#GetTableReplicator" class="hash-link" aria-label="Direct link to GetTableReplicator" title="Direct link to GetTableReplicator">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Client/TableReplicatorSingleton.luau#L275"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>TableReplicatorSingleton<!-- -->:</code><code class="green_DgR4">GetTableReplicator</code><code>(</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ClientTableReplicator">ClientTableReplicator</a></code></div><div>
 <p>
   Gets the TableReplicator for the TableReplicatorSingleton. This will error if
   the TableReplicator is not ready yet.
 </p>
 <pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> TR <span class="token operator">=</span> ClientPlayerData<span class="token punctuation">:</span><span class="token function">GetTableReplicator</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
 </code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="PromiseTableManager"><code style="text-decoration:none">PromiseTableManager</code><a href="#PromiseTableManager" class="hash-link" aria-label="Direct link to PromiseTableManager" title="Direct link to PromiseTableManager">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Client/TableReplicatorSingleton.lua#L291"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>TableReplicatorSingleton<!-- -->:</code><code class="green_DgR4">PromiseTableManager</code><code>(</code><code>) → </code><code class="blue_P4bS">Promise</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableManager">TableManager</a></code><code class="op_lSLc">&gt;</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="PromiseTableManager"><code style="text-decoration:none">PromiseTableManager</code><a href="#PromiseTableManager" class="hash-link" aria-label="Direct link to PromiseTableManager" title="Direct link to PromiseTableManager">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Client/TableReplicatorSingleton.luau#L291"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>TableReplicatorSingleton<!-- -->:</code><code class="green_DgR4">PromiseTableManager</code><code>(</code><code>) → </code><code class="blue_P4bS">Promise</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableManager">TableManager</a></code><code class="op_lSLc">&gt;</code></div><div>
 <p>Returns a promise that resolves with the TableManager when it is ready.</p>
 <pre class="language-lua"><code class="language-lua">ClientPlayerData<span class="token punctuation">:</span><span class="token function">PromiseTableManager</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">:</span><span class="token function">andThen</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span>TM<span class="token punctuation">:</span> TableManager<span class="token punctuation">)</span>
     <span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"TableManager is ready!"</span><span class="token punctuation">)</span>
 <span class="token keyword">end</span><span class="token punctuation">)</span>
 </code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="PromiseTableReplicator"><code style="text-decoration:none">PromiseTableReplicator</code><a href="#PromiseTableReplicator" class="hash-link" aria-label="Direct link to PromiseTableReplicator" title="Direct link to PromiseTableReplicator">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Client/TableReplicatorSingleton.lua#L308"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>TableReplicatorSingleton<!-- -->:</code><code class="green_DgR4">PromiseTableReplicator</code><code>(</code><code>) → </code><code class="blue_P4bS">Promise</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ClientTableReplicator">ClientTableReplicator</a></code><code class="op_lSLc">&gt;</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="PromiseTableReplicator"><code style="text-decoration:none">PromiseTableReplicator</code><a href="#PromiseTableReplicator" class="hash-link" aria-label="Direct link to PromiseTableReplicator" title="Direct link to PromiseTableReplicator">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Client/TableReplicatorSingleton.luau#L308"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>TableReplicatorSingleton<!-- -->:</code><code class="green_DgR4">PromiseTableReplicator</code><code>(</code><code>) → </code><code class="blue_P4bS">Promise</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ClientTableReplicator">ClientTableReplicator</a></code><code class="op_lSLc">&gt;</code></div><div>
 <p>Returns a promise that resolves with the TableReplicator when it is ready.</p>
 <pre class="language-lua"><code class="language-lua">ClientPlayerData<span class="token punctuation">:</span><span class="token function">PromiseTableReplicator</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">:</span><span class="token function">andThen</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span>TR<span class="token punctuation">:</span> ClientTableReplicator<span class="token punctuation">)</span>
     <span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"TableReplicator is ready!"</span><span class="token punctuation">)</span>
 <span class="token keyword">end</span><span class="token punctuation">)</span>
 </code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="IsReady"><code style="text-decoration:none">IsReady</code><a href="#IsReady" class="hash-link" aria-label="Direct link to IsReady" title="Direct link to IsReady">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Client/TableReplicatorSingleton.lua#L323"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>TableReplicatorSingleton<!-- -->:</code><code class="green_DgR4">IsReady</code><code>(</code><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="IsReady"><code style="text-decoration:none">IsReady</code><a href="#IsReady" class="hash-link" aria-label="Direct link to IsReady" title="Direct link to IsReady">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Client/TableReplicatorSingleton.luau#L323"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>TableReplicatorSingleton<!-- -->:</code><code class="green_DgR4">IsReady</code><code>(</code><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
 <p>Returns whether or not a valid Replicator has been found and hooked into.</p>
 <pre class="language-lua"><code class="language-lua"><span class="token keyword">if</span> ClientPlayerData<span class="token punctuation">:</span><span class="token function">IsReady</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token keyword">then</span>
     <span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"We have a valid Replicator!"</span><span class="token punctuation">)</span>
 <span class="token keyword">end</span>
 </code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="OnReady"><code style="text-decoration:none">OnReady</code><a href="#OnReady" class="hash-link" aria-label="Direct link to OnReady" title="Direct link to OnReady">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Client/TableReplicatorSingleton.lua#L338"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>TableReplicatorSingleton<!-- -->:</code><code class="green_DgR4">OnReady</code><code>(</code><code>) → </code><code class="blue_P4bS">Promise</code><code class="op_lSLc">&lt;</code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code><code class="op_lSLc">&gt;</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="OnReady"><code style="text-decoration:none">OnReady</code><a href="#OnReady" class="hash-link" aria-label="Direct link to OnReady" title="Direct link to OnReady">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Client/TableReplicatorSingleton.luau#L338"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>TableReplicatorSingleton<!-- -->:</code><code class="green_DgR4">OnReady</code><code>(</code><code>) → </code><code class="blue_P4bS">Promise</code><code class="op_lSLc">&lt;</code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code><code class="op_lSLc">&gt;</code></div><div>
 <p>Returns a promise that resolves when the TableReplicatorSingleton is ready.</p>
 <pre class="language-lua"><code class="language-lua">ClientPlayerData<span class="token punctuation">:</span><span class="token function">OnReady</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">:</span><span class="token function">andThen</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
     <span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Found a valid Replicator!"</span><span class="token punctuation">)</span>
@@ -141,7 +141,7 @@ New <span class="token string">"TextLabel"</span> <span class="token punctuation
             &quot;function_type&quot;: &quot;static&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 80,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.luau&quot;
             }
         },
         {
@@ -162,13 +162,13 @@ New <span class="token string">"TextLabel"</span> <span class="token punctuation
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;any?\r\n&quot;
+                    &quot;lua_type&quot;: &quot;any?\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 135,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.luau&quot;
             }
         },
         {
@@ -189,13 +189,13 @@ New <span class="token string">"TextLabel"</span> <span class="token punctuation
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;() -&gt; ()\r\n&quot;
+                    &quot;lua_type&quot;: &quot;() -&gt; ()\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 164,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.luau&quot;
             }
         },
         {
@@ -222,7 +222,7 @@ New <span class="token string">"TextLabel"</span> <span class="token punctuation
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 182,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.luau&quot;
             }
         },
         {
@@ -243,13 +243,13 @@ New <span class="token string">"TextLabel"</span> <span class="token punctuation
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;() -&gt; ()\r\n&quot;
+                    &quot;lua_type&quot;: &quot;() -&gt; ()\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 204,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.luau&quot;
             }
         },
         {
@@ -265,13 +265,13 @@ New <span class="token string">"TextLabel"</span> <span class="token punctuation
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;State&lt;any&gt;\r\n&quot;
+                    &quot;lua_type&quot;: &quot;State&lt;any&gt;\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 241,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.luau&quot;
             }
         },
         {
@@ -281,13 +281,13 @@ New <span class="token string">"TextLabel"</span> <span class="token punctuation
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;TableManager\r\n&quot;
+                    &quot;lua_type&quot;: &quot;TableManager\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 262,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.luau&quot;
             }
         },
         {
@@ -297,13 +297,13 @@ New <span class="token string">"TextLabel"</span> <span class="token punctuation
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;ClientTableReplicator\r\n&quot;
+                    &quot;lua_type&quot;: &quot;ClientTableReplicator\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 275,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.luau&quot;
             }
         },
         {
@@ -319,7 +319,7 @@ New <span class="token string">"TextLabel"</span> <span class="token punctuation
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 291,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.luau&quot;
             }
         },
         {
@@ -335,7 +335,7 @@ New <span class="token string">"TextLabel"</span> <span class="token punctuation
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 308,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.luau&quot;
             }
         },
         {
@@ -345,13 +345,13 @@ New <span class="token string">"TextLabel"</span> <span class="token punctuation
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;boolean\r\n&quot;
+                    &quot;lua_type&quot;: &quot;boolean\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 323,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.luau&quot;
             }
         },
         {
@@ -367,7 +367,7 @@ New <span class="token string">"TextLabel"</span> <span class="token punctuation
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 338,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.luau&quot;
             }
         }
     ],
@@ -395,7 +395,7 @@ New <span class="token string">"TextLabel"</span> <span class="token punctuation
             ],
             &quot;source&quot;: {
                 &quot;line&quot;: 59,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.luau&quot;
             }
         }
     ],
@@ -406,10 +406,10 @@ New <span class="token string">"TextLabel"</span> <span class="token punctuation
     ],
     &quot;source&quot;: {
         &quot;line&quot;: 12,
-        &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.lua&quot;
+        &quot;path&quot;: &quot;lib/tablereplicator/src/Client/TableReplicatorSingleton.luau&quot;
     }
 }</pre></details></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#types" class="table-of-contents__link toc-highlight">Types</a><ul><li><a href="#Config" class="table-of-contents__link toc-highlight">Config</a></li></ul></li><li><a href="#properties" class="table-of-contents__link toc-highlight">Properties</a></li><li><a href="#functions" class="table-of-contents__link toc-highlight">Functions</a><ul><li><a href="#Get" class="table-of-contents__link toc-highlight">:Get</a></li><li><a href="#GetTableManager" class="table-of-contents__link toc-highlight">:GetTableManager</a></li><li><a href="#GetTableReplicator" class="table-of-contents__link toc-highlight">:GetTableReplicator</a></li><li><a href="#IsReady" class="table-of-contents__link toc-highlight">:IsReady</a></li><li><a href="#ListenToAnyChange" class="table-of-contents__link toc-highlight">:ListenToAnyChange</a></li><li><a href="#ListenToValueChange" class="table-of-contents__link toc-highlight">:ListenToValueChange</a></li><li><a href="#Observe" class="table-of-contents__link toc-highlight">:Observe</a></li><li><a href="#OnReady" class="table-of-contents__link toc-highlight">:OnReady</a></li><li><a href="#PromiseTableManager" class="table-of-contents__link toc-highlight">:PromiseTableManager</a></li><li><a href="#PromiseTableReplicator" class="table-of-contents__link toc-highlight">:PromiseTableReplicator</a></li><li><a href="#ToFusionState" class="table-of-contents__link toc-highlight">:ToFusionState</a></li><li><a href="#new" class="table-of-contents__link toc-highlight">.new</a></li></ul></li></ul></div></div></div></div></main></div></div><footer class="footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2024 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
-<script src="/ModulesOnRails/assets/js/runtime~main.a2ca366d.js"></script>
-<script src="/ModulesOnRails/assets/js/main.f621edfe.js"></script>
+<script src="/ModulesOnRails/assets/js/runtime~main.9ad1296e.js"></script>
+<script src="/ModulesOnRails/assets/js/main.3076d21a.js"></script>
 </body>
 </html>

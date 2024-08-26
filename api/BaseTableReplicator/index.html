@@ -18,8 +18,8 @@ Exposed Object Signals:
 :GetSignal(&quot;ChildAdded&quot;)
 :GetSignal(&quot;ChildRemoved&quot;)
 ```"><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/BaseTableReplicator"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/BaseTableReplicator" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/BaseTableReplicator" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.1839e2d4.css">
-<link rel="preload" href="/ModulesOnRails/assets/js/runtime~main.a2ca366d.js" as="script">
-<link rel="preload" href="/ModulesOnRails/assets/js/main.f621edfe.js" as="script">
+<link rel="preload" href="/ModulesOnRails/assets/js/runtime~main.9ad1296e.js" as="script">
+<link rel="preload" href="/ModulesOnRails/assets/js/main.3076d21a.js" as="script">
 </head>
 <body class="navigation-with-keyboard">
 <script>!function(){function e(e){document.documentElement.setAttribute("data-theme",e)}var t=function(){var e=null;try{e=localStorage.getItem("theme")}catch(e){}return e}();null!==t?e(t):window.matchMedia("(prefers-color-scheme: dark)").matches?e("dark"):(window.matchMedia("(prefers-color-scheme: light)").matches,e("light"))}()</script><div id="__docusaurus">
@@ -30,9 +30,9 @@ Exposed Object Signals:
 <span class="token punctuation">:</span><span class="token function">GetSignal</span><span class="token punctuation">(</span><span class="token string">"ChildAdded"</span><span class="token punctuation">)</span>
 <span class="token punctuation">:</span><span class="token function">GetSignal</span><span class="token punctuation">(</span><span class="token string">"ChildRemoved"</span><span class="token punctuation">)</span>
 </code></pre>
-</div></header><h2 class="anchor anchorWithStickyNavbar_LWe7" id="types">Types<a href="#types" class="hash-link" aria-label="Direct link to Types" title="Direct link to Types">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Id"><code style="text-decoration:none">Id</code><a href="#Id" class="hash-link" aria-label="Direct link to Id" title="Direct link to Id">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.lua#L39"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code class="purple_ieR2">type</code> <code>Id<!-- --> = </code> <code class="blue_P4bS">number</code></div><div>
+</div></header><h2 class="anchor anchorWithStickyNavbar_LWe7" id="types">Types<a href="#types" class="hash-link" aria-label="Direct link to Types" title="Direct link to Types">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Id"><code style="text-decoration:none">Id</code><a href="#Id" class="hash-link" aria-label="Direct link to Id" title="Direct link to Id">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.luau#L39"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code class="purple_ieR2">type</code> <code>Id<!-- --> = </code> <code class="blue_P4bS">number</code></div><div>
 <p>The id of a replicator.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="SearchCondition"><code style="text-decoration:none">SearchCondition</code><a href="#SearchCondition" class="hash-link" aria-label="Direct link to SearchCondition" title="Direct link to SearchCondition">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.lua#L101"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code class="purple_ieR2">type</code> <code>SearchCondition<!-- --> = </code> <code class="blue_P4bS">string</code><code class="op_lSLc"> | </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerTableReplicator#ClassToken">ClassToken</a></code><code class="op_lSLc"> | </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator#Tags">Tags</a></code><code class="op_lSLc"> | </code><code class="purple_ieR2">(</code><div class="inset_uKQm"><code>replicator<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator">BaseTableReplicator</a></code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code>manager<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableManager">TableManager?</a></code></div><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="blue_P4bS">boolean</code><code class="purple_ieR2">)</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="SearchCondition"><code style="text-decoration:none">SearchCondition</code><a href="#SearchCondition" class="hash-link" aria-label="Direct link to SearchCondition" title="Direct link to SearchCondition">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.luau#L101"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code class="purple_ieR2">type</code> <code>SearchCondition<!-- --> = </code> <code class="blue_P4bS">string</code><code class="op_lSLc"> | </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerTableReplicator#ClassToken">ClassToken</a></code><code class="op_lSLc"> | </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator#Tags">Tags</a></code><code class="op_lSLc"> | </code><code class="purple_ieR2">(</code><div class="inset_uKQm"><code>replicator<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator">BaseTableReplicator</a></code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code>manager<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableManager">TableManager?</a></code></div><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="blue_P4bS">boolean</code><code class="purple_ieR2">)</code></div><div>
 <p>
   A condition that can be used to filter replicators.
   The condition can be a <code>function</code>, a <code>ClassToken</code>, a <code>string</code> representing a ClassToken's name, or a <code>Tags</code> dictionary.
@@ -43,7 +43,7 @@ Exposed Object Signals:
   <li>If the condition is a string then it will check if the replicator's class token name matches the given string.</li>
   <li>If the condition is a Tags dictionary then it will check if the replicator's tags are a superset of the given tags.</li>
 </ul>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Tags"><code style="text-decoration:none">Tags</code><a href="#Tags" class="hash-link" aria-label="Direct link to Tags" title="Direct link to Tags">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/TableReplicatorUtil.lua#L20"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code class="purple_ieR2">type</code> <code>Tags<!-- --> = </code> <code class="purple_ieR2">{</code><span><code>[</code><code class="blue_P4bS">string</code><code>]</code></span><code>: </code><code class="blue_P4bS">any</code><code class="purple_ieR2">}</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Tags"><code style="text-decoration:none">Tags</code><a href="#Tags" class="hash-link" aria-label="Direct link to Tags" title="Direct link to Tags">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/TableReplicatorUtil.luau#L20"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code class="purple_ieR2">type</code> <code>Tags<!-- --> = </code> <code class="purple_ieR2">{</code><span><code>[</code><code class="blue_P4bS">string</code><code>]</code></span><code>: </code><code class="blue_P4bS">any</code><code class="purple_ieR2">}</code></div><div>
 <p>
   The valid tag format that can be given to a TableReplicator.
   This table will become locked once given to a TableReplicator.
@@ -54,17 +54,17 @@ Exposed Object Signals:
     ToolType <span class="token operator">=</span> <span class="token string">"Sword"</span><span class="token punctuation">;</span>
 <span class="token punctuation">}</span>
 </code></pre>
-</div><h2 class="anchor anchorWithStickyNavbar_LWe7" id="properties">Properties<a href="#properties" class="hash-link" aria-label="Direct link to Properties" title="Direct link to Properties">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="ReplicatorCreated"><code style="text-decoration:none">ReplicatorCreated</code><a href="#ReplicatorCreated" class="hash-link" aria-label="Direct link to ReplicatorCreated" title="Direct link to ReplicatorCreated">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.lua#L84"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->.<!-- -->ReplicatorCreated<!-- -->:<!-- --> </code> <code class="blue_P4bS">Signal</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator">BaseTableReplicator</a></code><code class="op_lSLc">&gt;</code></div><div>
+</div><h2 class="anchor anchorWithStickyNavbar_LWe7" id="properties">Properties<a href="#properties" class="hash-link" aria-label="Direct link to Properties" title="Direct link to Properties">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="ReplicatorCreated"><code style="text-decoration:none">ReplicatorCreated</code><a href="#ReplicatorCreated" class="hash-link" aria-label="Direct link to ReplicatorCreated" title="Direct link to ReplicatorCreated">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.luau#L84"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->.<!-- -->ReplicatorCreated<!-- -->:<!-- --> </code> <code class="blue_P4bS">Signal</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator">BaseTableReplicator</a></code><code class="op_lSLc">&gt;</code></div><div>
 <p>A signal that fires whenever a new replicator is created.</p>
-</div><h2 class="anchor anchorWithStickyNavbar_LWe7" id="functions">Functions<a href="#functions" class="hash-link" aria-label="Direct link to Functions" title="Direct link to Functions">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="__iter"><span style="font-style:italic">iterating over <!-- -->BaseTableReplicator</span><a href="#__iter" class="hash-link" aria-label="Direct link to __iter" title="Direct link to __iter">​</a></h3><span class="docTag__6UZ" style="border-color:#79b473;color:#79b473">Metamethod</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.lua#L74"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code class="red_AwJO">for</code>  <!-- --> <code class="red_AwJO">in</code>  <code class="green_DgR4">BaseTableReplicator</code>  <code class="red_AwJO">do</code></div><div>
+</div><h2 class="anchor anchorWithStickyNavbar_LWe7" id="functions">Functions<a href="#functions" class="hash-link" aria-label="Direct link to Functions" title="Direct link to Functions">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="__iter"><span style="font-style:italic">iterating over <!-- -->BaseTableReplicator</span><a href="#__iter" class="hash-link" aria-label="Direct link to __iter" title="Direct link to __iter">​</a></h3><span class="docTag__6UZ" style="border-color:#79b473;color:#79b473">Metamethod</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.luau#L74"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code class="red_AwJO">for</code>  <!-- --> <code class="red_AwJO">in</code>  <code class="green_DgR4">BaseTableReplicator</code>  <code class="red_AwJO">do</code></div><div>
 <p>Iterates over all replicators that are currently in memory.</p>
 <pre class="language-lua"><code class="language-lua"><span class="token keyword">for</span> _<span class="token punctuation">,</span> replicator <span class="token keyword">in</span> TableReplicator <span class="token keyword">do</span>
     <span class="token function">print</span><span class="token punctuation">(</span>replicator<span class="token punctuation">:</span><span class="token function">GetServerId</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
 <span class="token keyword">end</span>
 </code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="getFromServerId"><code style="text-decoration:none">getFromServerId</code><a href="#getFromServerId" class="hash-link" aria-label="Direct link to getFromServerId" title="Direct link to getFromServerId">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.lua#L146"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->.</code><code class="green_DgR4">getFromServerId</code><code>(</code><code>id<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator#Id">Id</a></code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator">BaseTableReplicator?</a></code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="getFromServerId"><code style="text-decoration:none">getFromServerId</code><a href="#getFromServerId" class="hash-link" aria-label="Direct link to getFromServerId" title="Direct link to getFromServerId">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.luau#L146"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->.</code><code class="green_DgR4">getFromServerId</code><code>(</code><code>id<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator#Id">Id</a></code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator">BaseTableReplicator?</a></code></div><div>
 <p>Returns the replicator with the given id if one exists.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="forEach"><code style="text-decoration:none">forEach</code><a href="#forEach" class="hash-link" aria-label="Direct link to forEach" title="Direct link to forEach">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.lua#L165"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->.</code><code class="green_DgR4">forEach</code><code>(</code><div class="inset_uKQm"><div><code>condition<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator#SearchCondition">SearchCondition</a></code><code>,</code></div><div><code>fn<!-- -->: </code><code class="purple_ieR2">(</code><div class="inset_uKQm"><code>replicator<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator">BaseTableReplicator</a></code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code>manager<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableManager">TableManager?</a></code></div><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code><code>,</code></div><div><code>allowDestroyedReplicators<!-- -->: </code><code class="blue_P4bS">boolean?</code></div></div><code>) → </code><code>(</code><code>)</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="forEach"><code style="text-decoration:none">forEach</code><a href="#forEach" class="hash-link" aria-label="Direct link to forEach" title="Direct link to forEach">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.luau#L165"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->.</code><code class="green_DgR4">forEach</code><code>(</code><div class="inset_uKQm"><div><code>condition<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator#SearchCondition">SearchCondition</a></code><code>,</code></div><div><code>fn<!-- -->: </code><code class="purple_ieR2">(</code><div class="inset_uKQm"><code>replicator<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator">BaseTableReplicator</a></code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code>manager<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableManager">TableManager?</a></code></div><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code><code>,</code></div><div><code>allowDestroyedReplicators<!-- -->: </code><code class="blue_P4bS">boolean?</code></div></div><code>) → </code><code>(</code><code>)</code></div><div>
 <p>
   forEach is a special function that allows you to run a function on all replicators that currently
   exist or will exist that match the given condition.
@@ -83,7 +83,7 @@ Exposed Object Signals:
     </p>
   </div>
 </div>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="promiseFirstReplicator"><code style="text-decoration:none">promiseFirstReplicator</code><a href="#promiseFirstReplicator" class="hash-link" aria-label="Direct link to promiseFirstReplicator" title="Direct link to promiseFirstReplicator">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.lua#L218"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->.</code><code class="green_DgR4">promiseFirstReplicator</code><code>(</code><div class="inset_uKQm"><div><code>condition<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator#SearchCondition">SearchCondition</a></code><code>,</code></div><div><code>allowDestroyedReplicators<!-- -->: </code><code class="blue_P4bS">boolean?</code></div></div><code>) → </code><code class="blue_P4bS">Promise</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator">BaseTableReplicator,</a></code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableManager">TableManager?</a></code><code class="op_lSLc">&gt;</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="promiseFirstReplicator"><code style="text-decoration:none">promiseFirstReplicator</code><a href="#promiseFirstReplicator" class="hash-link" aria-label="Direct link to promiseFirstReplicator" title="Direct link to promiseFirstReplicator">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.luau#L218"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->.</code><code class="green_DgR4">promiseFirstReplicator</code><code>(</code><div class="inset_uKQm"><div><code>condition<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator#SearchCondition">SearchCondition</a></code><code>,</code></div><div><code>allowDestroyedReplicators<!-- -->: </code><code class="blue_P4bS">boolean?</code></div></div><code>) → </code><code class="blue_P4bS">Promise</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator">BaseTableReplicator,</a></code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableManager">TableManager?</a></code><code class="op_lSLc">&gt;</code></div><div>
 <p>
   promiseFirstReplicator is a special function that allows you to run a function on the first replicator to satisfy
   the given condition. If no replicator currently exists that satisfies the condition then it will wait for one to be created.
@@ -104,35 +104,35 @@ Exposed Object Signals:
 </div>
 <pre class="language-lua"><code class="language-lua">BaseTableReplicator<span class="token punctuation">.</span><span class="token function">promiseFirstReplicator</span><span class="token punctuation">(</span><span class="token string">"Test"</span><span class="token punctuation">)</span>
 </code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="getAll"><code style="text-decoration:none">getAll</code><a href="#getAll" class="hash-link" aria-label="Direct link to getAll" title="Direct link to getAll">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.lua#L251"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->.</code><code class="green_DgR4">getAll</code><code>(</code><code>classTokenName<!-- -->: </code><code class="blue_P4bS">string?</code><code>) → </code><code class="purple_ieR2">{</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator">BaseTableReplicator</a></code><code class="purple_ieR2">}</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="getAll"><code style="text-decoration:none">getAll</code><a href="#getAll" class="hash-link" aria-label="Direct link to getAll" title="Direct link to getAll">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.luau#L251"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->.</code><code class="green_DgR4">getAll</code><code>(</code><code>classTokenName<!-- -->: </code><code class="blue_P4bS">string?</code><code>) → </code><code class="purple_ieR2">{</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator">BaseTableReplicator</a></code><code class="purple_ieR2">}</code></div><div>
 <p>Fetches all replicators that are currently in memory. This is very slow and should be used sparingly.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="listenForNewReplicator"><code style="text-decoration:none">listenForNewReplicator</code><a href="#listenForNewReplicator" class="hash-link" aria-label="Direct link to listenForNewReplicator" title="Direct link to listenForNewReplicator">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.lua#L265"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->.</code><code class="green_DgR4">listenForNewReplicator</code><code>(</code><div class="inset_uKQm"><div><code>classToken<!-- -->: </code><code class="blue_P4bS">CanBeArray</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">string</code><code class="op_lSLc"> | </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerTableReplicator#ClassToken">ClassToken</a></code><code class="op_lSLc">&gt;</code><code>,</code></div><div><code>fn<!-- -->: </code><code class="purple_ieR2">(</code><code>replicator<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator">BaseTableReplicator</a></code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code></div></div><code>) → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="listenForNewReplicator"><code style="text-decoration:none">listenForNewReplicator</code><a href="#listenForNewReplicator" class="hash-link" aria-label="Direct link to listenForNewReplicator" title="Direct link to listenForNewReplicator">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.luau#L265"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->.</code><code class="green_DgR4">listenForNewReplicator</code><code>(</code><div class="inset_uKQm"><div><code>classToken<!-- -->: </code><code class="blue_P4bS">CanBeArray</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">string</code><code class="op_lSLc"> | </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerTableReplicator#ClassToken">ClassToken</a></code><code class="op_lSLc">&gt;</code><code>,</code></div><div><code>fn<!-- -->: </code><code class="purple_ieR2">(</code><code>replicator<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator">BaseTableReplicator</a></code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code></div></div><code>) → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code></div><div>
 <p>Listens for new replicators that are created with the given class token.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetTableManager"><code style="text-decoration:none">GetTableManager</code><a href="#GetTableManager" class="hash-link" aria-label="Direct link to GetTableManager" title="Direct link to GetTableManager">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.lua#L374"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->:</code><code class="green_DgR4">GetTableManager</code><code>(</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableManager">TableManager</a></code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetTableManager"><code style="text-decoration:none">GetTableManager</code><a href="#GetTableManager" class="hash-link" aria-label="Direct link to GetTableManager" title="Direct link to GetTableManager">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.luau#L374"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->:</code><code class="green_DgR4">GetTableManager</code><code>(</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableManager">TableManager</a></code></div><div>
 <p>Gets the TableManager that is being replicated.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetServerId"><code style="text-decoration:none">GetServerId</code><a href="#GetServerId" class="hash-link" aria-label="Direct link to GetServerId" title="Direct link to GetServerId">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.lua#L382"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->:</code><code class="green_DgR4">GetServerId</code><code>(</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator#Id">Id</a></code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetServerId"><code style="text-decoration:none">GetServerId</code><a href="#GetServerId" class="hash-link" aria-label="Direct link to GetServerId" title="Direct link to GetServerId">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.luau#L382"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->:</code><code class="green_DgR4">GetServerId</code><code>(</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator#Id">Id</a></code></div><div>
 <p>
   Returns the server id for this replicator.
   On the Server this is equivalent to :GetId()
 </p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetTokenName"><code style="text-decoration:none">GetTokenName</code><a href="#GetTokenName" class="hash-link" aria-label="Direct link to GetTokenName" title="Direct link to GetTokenName">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.lua#L389"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->:</code><code class="green_DgR4">GetTokenName</code><code>(</code><code>) → </code><code class="blue_P4bS">string</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetTokenName"><code style="text-decoration:none">GetTokenName</code><a href="#GetTokenName" class="hash-link" aria-label="Direct link to GetTokenName" title="Direct link to GetTokenName">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.luau#L389"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->:</code><code class="green_DgR4">GetTokenName</code><code>(</code><code>) → </code><code class="blue_P4bS">string</code></div><div>
 <p>Fetches the name of the class token that this replicator is using.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="IsTopLevel"><code style="text-decoration:none">IsTopLevel</code><a href="#IsTopLevel" class="hash-link" aria-label="Direct link to IsTopLevel" title="Direct link to IsTopLevel">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.lua#L398"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->:</code><code class="green_DgR4">IsTopLevel</code><code>(</code><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="IsTopLevel"><code style="text-decoration:none">IsTopLevel</code><a href="#IsTopLevel" class="hash-link" aria-label="Direct link to IsTopLevel" title="Direct link to IsTopLevel">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.luau#L398"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->:</code><code class="green_DgR4">IsTopLevel</code><code>(</code><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
 <p>
   Returns whether or not this replicator is a top level replicator.
   A top level replicator is a replicator that has no parent.
   Only top level replicators can have their ReplicationTargets set.
 </p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetParent"><code style="text-decoration:none">GetParent</code><a href="#GetParent" class="hash-link" aria-label="Direct link to GetParent" title="Direct link to GetParent">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.lua#L411"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->:</code><code class="green_DgR4">GetParent</code><code>(</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator">BaseTableReplicator?</a></code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetParent"><code style="text-decoration:none">GetParent</code><a href="#GetParent" class="hash-link" aria-label="Direct link to GetParent" title="Direct link to GetParent">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.luau#L411"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->:</code><code class="green_DgR4">GetParent</code><code>(</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator">BaseTableReplicator?</a></code></div><div>
 <p>
   Returns the parent of this replicator if it has one.
   If this replicator is a top level replicator then this will return nil.
 </p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetChildren"><code style="text-decoration:none">GetChildren</code><a href="#GetChildren" class="hash-link" aria-label="Direct link to GetChildren" title="Direct link to GetChildren">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.lua#L418"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->:</code><code class="green_DgR4">GetChildren</code><code>(</code><code>) → </code><code class="purple_ieR2">{</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator">BaseTableReplicator</a></code><code class="purple_ieR2">}</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetChildren"><code style="text-decoration:none">GetChildren</code><a href="#GetChildren" class="hash-link" aria-label="Direct link to GetChildren" title="Direct link to GetChildren">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.luau#L418"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->:</code><code class="green_DgR4">GetChildren</code><code>(</code><code>) → </code><code class="purple_ieR2">{</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator">BaseTableReplicator</a></code><code class="purple_ieR2">}</code></div><div>
 <p>Returns the immediate children of this replicator.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetDescendants"><code style="text-decoration:none">GetDescendants</code><a href="#GetDescendants" class="hash-link" aria-label="Direct link to GetDescendants" title="Direct link to GetDescendants">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.lua#L425"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->:</code><code class="green_DgR4">GetDescendants</code><code>(</code><code>) → </code><code class="purple_ieR2">{</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator">BaseTableReplicator</a></code><code class="purple_ieR2">}</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetDescendants"><code style="text-decoration:none">GetDescendants</code><a href="#GetDescendants" class="hash-link" aria-label="Direct link to GetDescendants" title="Direct link to GetDescendants">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.luau#L425"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->:</code><code class="green_DgR4">GetDescendants</code><code>(</code><code>) → </code><code class="purple_ieR2">{</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator">BaseTableReplicator</a></code><code class="purple_ieR2">}</code></div><div>
 <p>Returns the descendants of this replicator.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="FindFirstChild"><code style="text-decoration:none">FindFirstChild</code><a href="#FindFirstChild" class="hash-link" aria-label="Direct link to FindFirstChild" title="Direct link to FindFirstChild">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.lua#L450"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->:</code><code class="green_DgR4">FindFirstChild</code><code>(</code><div class="inset_uKQm"><div><code>condition<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator#SearchCondition">SearchCondition</a></code><code>,</code></div><div><code>recursive<!-- -->: </code><code class="blue_P4bS">boolean?</code></div></div><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator">BaseTableReplicator?</a></code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="FindFirstChild"><code style="text-decoration:none">FindFirstChild</code><a href="#FindFirstChild" class="hash-link" aria-label="Direct link to FindFirstChild" title="Direct link to FindFirstChild">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.luau#L450"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->:</code><code class="green_DgR4">FindFirstChild</code><code>(</code><div class="inset_uKQm"><div><code>condition<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator#SearchCondition">SearchCondition</a></code><code>,</code></div><div><code>recursive<!-- -->: </code><code class="blue_P4bS">boolean?</code></div></div><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator">BaseTableReplicator?</a></code></div><div>
 <p>
   Finds the first child that satisfies the given condition.
   The condition can be a <code>function</code>, a <code>ClassToken</code>, a <code>string</code> representing a ClassToken's name, or a <code>Tags</code> dictionary.
@@ -143,7 +143,7 @@ Exposed Object Signals:
     <span class="token keyword">return</span> manager<span class="token punctuation">:</span><span class="token function">Get</span><span class="token punctuation">(</span><span class="token string">"Test"</span><span class="token punctuation">)</span> <span class="token operator">==</span> <span class="token number">1</span>
 <span class="token punctuation">}</span><span class="token punctuation">)</span>
 </code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="PromiseFirstChild"><code style="text-decoration:none">PromiseFirstChild</code><a href="#PromiseFirstChild" class="hash-link" aria-label="Direct link to PromiseFirstChild" title="Direct link to PromiseFirstChild">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.lua#L492"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->:</code><code class="green_DgR4">PromiseFirstChild</code><code>(</code><code>condition<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator#SearchCondition">SearchCondition</a></code><code>) → </code><code class="blue_P4bS">Promise</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator">BaseTableReplicator</a></code><code class="op_lSLc">&gt;</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="PromiseFirstChild"><code style="text-decoration:none">PromiseFirstChild</code><a href="#PromiseFirstChild" class="hash-link" aria-label="Direct link to PromiseFirstChild" title="Direct link to PromiseFirstChild">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.luau#L492"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->:</code><code class="green_DgR4">PromiseFirstChild</code><code>(</code><code>condition<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator#SearchCondition">SearchCondition</a></code><code>) → </code><code class="blue_P4bS">Promise</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator">BaseTableReplicator</a></code><code class="op_lSLc">&gt;</code></div><div>
 <p>Returns a promise that resolves when the first child that satisfies the given function is found.</p>
 <pre class="language-lua"><code class="language-lua">tr<span class="token punctuation">:</span><span class="token function">PromiseFirstChild</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span>replicator<span class="token punctuation">)</span>
     <span class="token keyword">local</span> manager <span class="token operator">=</span> replicator<span class="token punctuation">:</span><span class="token function">GetTableManager</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
@@ -160,11 +160,11 @@ tr<span class="token punctuation">:</span><span class="token function">PromiseFi
     <span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Found child with UserId Tag matching 12345!"</span><span class="token punctuation">)</span>
 <span class="token keyword">end</span><span class="token punctuation">)</span>
 </code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetTag"><code style="text-decoration:none">GetTag</code><a href="#GetTag" class="hash-link" aria-label="Direct link to GetTag" title="Direct link to GetTag">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.lua#L511"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->:</code><code class="green_DgR4">GetTag</code><code>(</code><code>tagKey<!-- -->: </code><code class="blue_P4bS">string</code><code>) → </code><code class="blue_P4bS">any</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetTag"><code style="text-decoration:none">GetTag</code><a href="#GetTag" class="hash-link" aria-label="Direct link to GetTag" title="Direct link to GetTag">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.luau#L511"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->:</code><code class="green_DgR4">GetTag</code><code>(</code><code>tagKey<!-- -->: </code><code class="blue_P4bS">string</code><code>) → </code><code class="blue_P4bS">any</code></div><div>
 <p>Returns the value of the given tag for this replicator.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetTags"><code style="text-decoration:none">GetTags</code><a href="#GetTags" class="hash-link" aria-label="Direct link to GetTags" title="Direct link to GetTags">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.lua#L518"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->:</code><code class="green_DgR4">GetTags</code><code>(</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator#Tags">Tags</a></code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetTags"><code style="text-decoration:none">GetTags</code><a href="#GetTags" class="hash-link" aria-label="Direct link to GetTags" title="Direct link to GetTags">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.luau#L518"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->:</code><code class="green_DgR4">GetTags</code><code>(</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator#Tags">Tags</a></code></div><div>
 <p>Returns the tags dictionary for this replicator.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="IsSupersetOfTags"><code style="text-decoration:none">IsSupersetOfTags</code><a href="#IsSupersetOfTags" class="hash-link" aria-label="Direct link to IsSupersetOfTags" title="Direct link to IsSupersetOfTags">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.lua#L543"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->:</code><code class="green_DgR4">IsSupersetOfTags</code><code>(</code><code>tags<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator#Tags">Tags</a></code><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="IsSupersetOfTags"><code style="text-decoration:none">IsSupersetOfTags</code><a href="#IsSupersetOfTags" class="hash-link" aria-label="Direct link to IsSupersetOfTags" title="Direct link to IsSupersetOfTags">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.luau#L543"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->:</code><code class="green_DgR4">IsSupersetOfTags</code><code>(</code><code>tags<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator#Tags">Tags</a></code><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
 <p>
   Checks whether or not the given tags are a subset of this replicator's tags.
   ELI5: Are all the given tags also on this replicator?
@@ -191,7 +191,7 @@ tr<span class="token punctuation">:</span><span class="token function">PromiseFi
   }) -- true
 </p>
 <pre><code></code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="IsSubsetOfTags"><code style="text-decoration:none">IsSubsetOfTags</code><a href="#IsSubsetOfTags" class="hash-link" aria-label="Direct link to IsSubsetOfTags" title="Direct link to IsSubsetOfTags">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.lua#L577"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->:</code><code class="green_DgR4">IsSubsetOfTags</code><code>(</code><code>tags<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator#Tags">Tags</a></code><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="IsSubsetOfTags"><code style="text-decoration:none">IsSubsetOfTags</code><a href="#IsSubsetOfTags" class="hash-link" aria-label="Direct link to IsSubsetOfTags" title="Direct link to IsSubsetOfTags">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseTableReplicator.luau#L577"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseTableReplicator<!-- -->:</code><code class="green_DgR4">IsSubsetOfTags</code><code>(</code><code>tags<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/BaseTableReplicator#Tags">Tags</a></code><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
 <p>
   Checks whether or not this replicator's tags are a subset of the given tags.
   ELI5: Are all the tags on this replicator also on the given tags?
@@ -227,7 +227,7 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             ],
             &quot;source&quot;: {
                 &quot;line&quot;: 74,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.luau&quot;
             }
         },
         {
@@ -243,7 +243,7 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;BaseTableReplicator?\r\n&quot;
+                    &quot;lua_type&quot;: &quot;BaseTableReplicator?\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;static&quot;,
@@ -252,7 +252,7 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             ],
             &quot;source&quot;: {
                 &quot;line&quot;: 146,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.luau&quot;
             }
         },
         {
@@ -272,7 +272,7 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
                 {
                     &quot;name&quot;: &quot;allowDestroyedReplicators&quot;,
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;boolean?\r\n&quot;
+                    &quot;lua_type&quot;: &quot;boolean?\n&quot;
                 }
             ],
             &quot;returns&quot;: [],
@@ -282,7 +282,7 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             ],
             &quot;source&quot;: {
                 &quot;line&quot;: 165,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.luau&quot;
             }
         },
         {
@@ -312,7 +312,7 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             ],
             &quot;source&quot;: {
                 &quot;line&quot;: 218,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.luau&quot;
             }
         },
         {
@@ -328,7 +328,7 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;{BaseTableReplicator}\r\n&quot;
+                    &quot;lua_type&quot;: &quot;{BaseTableReplicator}\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;static&quot;,
@@ -337,7 +337,7 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             ],
             &quot;source&quot;: {
                 &quot;line&quot;: 251,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.luau&quot;
             }
         },
         {
@@ -367,7 +367,7 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             ],
             &quot;source&quot;: {
                 &quot;line&quot;: 265,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.luau&quot;
             }
         },
         {
@@ -377,7 +377,7 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
                 {
                     &quot;name&quot;: &quot;config&quot;,
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;{\r\n    ServerId: Id?;\r\n    Tags: Tags?;\r\n    TableManager: TableManager;\r\n    IsTopLevel: boolean?;\r\n}&quot;
+                    &quot;lua_type&quot;: &quot;{\n    ServerId: Id?;\n    Tags: Tags?;\n    TableManager: TableManager;\n    IsTopLevel: boolean?;\n}&quot;
                 }
             ],
             &quot;returns&quot;: [],
@@ -388,7 +388,7 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             &quot;private&quot;: true,
             &quot;source&quot;: {
                 &quot;line&quot;: 295,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.luau&quot;
             }
         },
         {
@@ -400,7 +400,7 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             &quot;private&quot;: true,
             &quot;source&quot;: {
                 &quot;line&quot;: 333,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.luau&quot;
             }
         },
         {
@@ -412,7 +412,7 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             &quot;private&quot;: true,
             &quot;source&quot;: {
                 &quot;line&quot;: 347,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.luau&quot;
             }
         },
         {
@@ -422,13 +422,13 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;TableManager\r\n&quot;
+                    &quot;lua_type&quot;: &quot;TableManager\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 374,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.luau&quot;
             }
         },
         {
@@ -438,13 +438,13 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;Id\r\n&quot;
+                    &quot;lua_type&quot;: &quot;Id\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 382,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.luau&quot;
             }
         },
         {
@@ -454,13 +454,13 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;string\r\n&quot;
+                    &quot;lua_type&quot;: &quot;string\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 389,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.luau&quot;
             }
         },
         {
@@ -470,13 +470,13 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;boolean\r\n&quot;
+                    &quot;lua_type&quot;: &quot;boolean\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 398,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.luau&quot;
             }
         },
         {
@@ -486,13 +486,13 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;BaseTableReplicator?\r\n&quot;
+                    &quot;lua_type&quot;: &quot;BaseTableReplicator?\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 411,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.luau&quot;
             }
         },
         {
@@ -502,13 +502,13 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;{BaseTableReplicator}\r\n&quot;
+                    &quot;lua_type&quot;: &quot;{BaseTableReplicator}\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 418,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.luau&quot;
             }
         },
         {
@@ -518,13 +518,13 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;{BaseTableReplicator}\r\n&quot;
+                    &quot;lua_type&quot;: &quot;{BaseTableReplicator}\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 425,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.luau&quot;
             }
         },
         {
@@ -545,13 +545,13 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;BaseTableReplicator?\r\n&quot;
+                    &quot;lua_type&quot;: &quot;BaseTableReplicator?\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 450,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.luau&quot;
             }
         },
         {
@@ -573,7 +573,7 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 492,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.luau&quot;
             }
         },
         {
@@ -589,13 +589,13 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;any\r\n&quot;
+                    &quot;lua_type&quot;: &quot;any\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 511,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.luau&quot;
             }
         },
         {
@@ -605,13 +605,13 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;Tags\r\n&quot;
+                    &quot;lua_type&quot;: &quot;Tags\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 518,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.luau&quot;
             }
         },
         {
@@ -627,13 +627,13 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;boolean\r\n&quot;
+                    &quot;lua_type&quot;: &quot;boolean\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 543,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.luau&quot;
             }
         },
         {
@@ -649,13 +649,13 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             &quot;returns&quot;: [
                 {
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;boolean\r\n&quot;
+                    &quot;lua_type&quot;: &quot;boolean\n&quot;
                 }
             ],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 577,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.luau&quot;
             }
         }
     ],
@@ -666,7 +666,7 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             &quot;lua_type&quot;: &quot;Signal&lt;BaseTableReplicator&gt;&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 84,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.luau&quot;
             }
         }
     ],
@@ -677,7 +677,7 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             &quot;lua_type&quot;: &quot;number&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 39,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.luau&quot;
             }
         },
         {
@@ -686,7 +686,7 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             &quot;lua_type&quot;: &quot;string | ClassToken | Tags | (replicator: BaseTableReplicator, manager: TableManager?) -&gt; (boolean)&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 101,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.luau&quot;
             }
         },
         {
@@ -695,7 +695,7 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
             &quot;lua_type&quot;: &quot;{[string]: any}&quot;,
             &quot;source&quot;: {
                 &quot;line&quot;: 20,
-                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/TableReplicatorUtil.lua&quot;
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/TableReplicatorUtil.luau&quot;
             }
         }
     ],
@@ -703,10 +703,10 @@ tr<span class="token punctuation">:</span><span class="token function">IsSubsetO
     &quot;desc&quot;: &quot;Inherits from BaseObject.\n\nExposed Object Signals:\n```lua\n:GetSignal(\&quot;ParentChanged\&quot;)\n:GetSignal(\&quot;ChildAdded\&quot;)\n:GetSignal(\&quot;ChildRemoved\&quot;)\n```&quot;,
     &quot;source&quot;: {
         &quot;line&quot;: 15,
-        &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.lua&quot;
+        &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseTableReplicator.luau&quot;
     }
 }</pre></details></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#types" class="table-of-contents__link toc-highlight">Types</a><ul><li><a href="#Id" class="table-of-contents__link toc-highlight">Id</a></li><li><a href="#SearchCondition" class="table-of-contents__link toc-highlight">SearchCondition</a></li><li><a href="#Tags" class="table-of-contents__link toc-highlight">Tags</a></li></ul></li><li><a href="#properties" class="table-of-contents__link toc-highlight">Properties</a><ul><li><a href="#ReplicatorCreated" class="table-of-contents__link toc-highlight">ReplicatorCreated</a></li></ul></li><li><a href="#functions" class="table-of-contents__link toc-highlight">Functions</a><ul><li><a href="#FindFirstChild" class="table-of-contents__link toc-highlight">:FindFirstChild</a></li><li><a href="#GetChildren" class="table-of-contents__link toc-highlight">:GetChildren</a></li><li><a href="#GetDescendants" class="table-of-contents__link toc-highlight">:GetDescendants</a></li><li><a href="#GetParent" class="table-of-contents__link toc-highlight">:GetParent</a></li><li><a href="#GetServerId" class="table-of-contents__link toc-highlight">:GetServerId</a></li><li><a href="#GetTableManager" class="table-of-contents__link toc-highlight">:GetTableManager</a></li><li><a href="#GetTag" class="table-of-contents__link toc-highlight">:GetTag</a></li><li><a href="#GetTags" class="table-of-contents__link toc-highlight">:GetTags</a></li><li><a href="#GetTokenName" class="table-of-contents__link toc-highlight">:GetTokenName</a></li><li><a href="#IsSubsetOfTags" class="table-of-contents__link toc-highlight">:IsSubsetOfTags</a></li><li><a href="#IsSupersetOfTags" class="table-of-contents__link toc-highlight">:IsSupersetOfTags</a></li><li><a href="#IsTopLevel" class="table-of-contents__link toc-highlight">:IsTopLevel</a></li><li><a href="#PromiseFirstChild" class="table-of-contents__link toc-highlight">:PromiseFirstChild</a></li><li><a href="#__iter" class="table-of-contents__link toc-highlight">.__iter</a></li><li><a href="#forEach" class="table-of-contents__link toc-highlight">.forEach</a></li><li><a href="#getAll" class="table-of-contents__link toc-highlight">.getAll</a></li><li><a href="#getFromServerId" class="table-of-contents__link toc-highlight">.getFromServerId</a></li><li><a href="#listenForNewReplicator" class="table-of-contents__link toc-highlight">.listenForNewReplicator</a></li><li><a href="#promiseFirstReplicator" class="table-of-contents__link toc-highlight">.promiseFirstReplicator</a></li></ul></li></ul></div></div></div></div></main></div></div><footer class="footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2024 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
-<script src="/ModulesOnRails/assets/js/runtime~main.a2ca366d.js"></script>
-<script src="/ModulesOnRails/assets/js/main.f621edfe.js"></script>
+<script src="/ModulesOnRails/assets/js/runtime~main.9ad1296e.js"></script>
+<script src="/ModulesOnRails/assets/js/main.3076d21a.js"></script>
 </body>
 </html>
