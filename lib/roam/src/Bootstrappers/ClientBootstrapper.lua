@@ -8,7 +8,8 @@ local BootstrapperModule = script
 local function StartGame(script)
     if script.Name == "start" then
         script:Destroy()
-        return
+        local Promise = require(BootstrapperModule.Parent.Parent.Parent.Promise)
+        return Promise.reject()
     end
     
     local Roam = require(BootstrapperModule.Parent.Parent)
@@ -38,7 +39,7 @@ local function StartGame(script)
 
 
     -- Start Roam
-    Roam.start():andThen(function()
+    return Roam.start():andThen(function()
         print("[CLIENT] Roam Started!")
     end):catch(function(err)
         warn(err)

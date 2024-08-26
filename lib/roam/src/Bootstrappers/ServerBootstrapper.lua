@@ -29,7 +29,8 @@ end
 local function StartGame(script)
     if script.Name == "start" then
         script:Destroy()
-        return
+        local Promise = require(BootstrapperModule.Parent.Parent.Parent.Promise)
+        return Promise.reject()
     end
     
     local Roam = require(BootstrapperModule.Parent.Parent)
@@ -52,7 +53,7 @@ local function StartGame(script)
     })
 
     -- Start Roam
-    Roam.start():andThen(function()
+    return Roam.start():andThen(function()
         print("[SERVER] Roam Started!")
         workspace:SetAttribute("RoamStarted", true) -- Alert the Client that the Server is ready
     end):catch(function(err)

@@ -15,7 +15,16 @@
     :Update() -- Redirects to :UpdateValue() or :UpdateArray()
     ```
     :::
-    
+    :::info Signals
+    TableManager has Signals you can access if you want to utilize the raw events with libraries
+    that can take advantage of signals like Promises.
+    ```lua
+    :GetSignal("ValueChanged")
+    :GetSignal("ArraySet")
+    :GetSignal("ArrayInsert")
+    :GetSignal("ArrayRemove")
+    ```
+    :::
 ]=]
 
 --// Imports //--

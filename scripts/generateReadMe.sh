@@ -39,7 +39,7 @@ README_FILE="README.md"
 
 # Start the README file with a title and table header
 cat <<EOF > "$README_FILE"
-$REPO_NAME is a collection of Wally packages written by 'Logan Hunt (Raildex)' to streamline Roblox development.
+$REPO_NAME is a collection of Wally packages to streamline Roblox development.
 
 # Packages
 

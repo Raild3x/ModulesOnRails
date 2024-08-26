@@ -1,5 +1,22 @@
 #!/bin/bash
 
+# Define the source directory
+SRC_DIR="lib"
+OG_DIR=$(pwd)
+
+
+# Start from the current directory
+current_dir=$(pwd)
+
+# Loop until we find the project root file or reach the root directory
+while [ "$current_dir" != "/" ]; do
+  if [ -f "$current_dir/$SRC_DIR" ]; then
+    echo "Found project root at: $current_dir"
+    break
+  fi
+  current_dir=$(dirname "$current_dir")
+done
+
 echo "Initializing submodules..."
 
 git submodule init

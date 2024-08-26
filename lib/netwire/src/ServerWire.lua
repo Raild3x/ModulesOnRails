@@ -11,8 +11,8 @@
     The following variables are all equivalent as NetWires are memoized by their namespace,
     so creating a new one with the same namespace will return the same object.
     ```lua
-    local TestNetWire1 = NetWire.Server.new("TestNetWire")
-    local TestNetWire2 = NetWire.Server("TestNetWire")
+    local TestNetWire1 = NetWire.Server.new("MyNetWire")
+    local TestNetWire2 = NetWire.Server("MyNetWire")
 
     print(TestNetWire1 == TestNetWire2) -- true 
     ```
@@ -20,7 +20,7 @@
     You can also create a by calling the package directly, but this is not encouraged as it
     obscures the RunContext in which the NetWire is being created.
     ```lua
-    local TestNetWire3 = NetWire("TestNetWire")
+    local TestNetWire3 = NetWire("MyNetWire")
     ```
     :::
 
@@ -30,61 +30,7 @@
     TestNetWire:RegisterEvent("TestEvent")
     TestNetWire.TestEvent = NetWire.createEvent()
     ```
-
-    -----------------------------------------------------------------
-    [EXAMPLES]
-    -----------------------------------------------------------------
-    ```lua
-    local NetWire = require(game:GetService("ReplicatedStorage").NetWire)
-
-    local myNetWire = NetWire.Server("MyNetWire")
-
-    -- Aliases (These are equivalent. You can use either to create remote events)
-    myNetWire.ServerSideEvent = NetWire.createEvent()
-    myNetWire:RegisterEvent("ServerSideEvent")
-
-
-    -- Setup a method
-    function myNetWire:ServerSideFunction(player: Player, someArg: number)
-        print(someArg)
-        return someArg * 2
-    end
-
-    -- Connect to an event
-    myNetWire.ServerSideEvent:Connect(function(plr: Player, someArg)
-        print(someArg)
-    end)
-
-    -- Fire an event
-    myNetWire.ServerSideEvent:FireAll(someArg)
-    ```
-    -----------------------------------------------------------------
-    Example using a service
-    ```lua
-    local ExampleService = Roam.createService { Name = "ExampleService" }
-    ExampleService.Client = {
-        TestEvent = NetWire.createEvent()
-    }
-
-    -- Make a server exposed method MultNumber
-    function ExampleService.Client:MultNumber(plr: Player, num: number): number
-        return num * self.Server:GetMult() -- self.Server is internally set by NetWire when you do .fromService
-    end
-
-    --------------------------------------------------------------------------------
-
-    function ExampleService:GetMult(): number
-        return 2
-    end
-
-    function ExampleService:RoamStart()
-        self.Client.TestEvent:FireAll("Hello from ExampleService!") -- send a message to all clients
-    end
-
-    function ExampleService:RoamInit()
-        self.Client = NetWire.Server.fromService(self) -- Initialize the NetWire
-    end
-    ```
+    More examples can be found under the respective construction methods.
 ]=]
 
 --[[
@@ -103,9 +49,43 @@
         :RegisterProperty(propertyName: string, initialValue: any?)
         :RegisterMethod(functionName: string, callback: (self: any, plr: Player, ...any) -> (...any), tbl: {}?)
         :Destroy()
+
+    -----------------------------------------------------------------
+    More Examples
+    -----------------------------------------------------------------
+    ```lua
+    local NetWire = require(ReplicatedStorage.NetWire)
+
+    local myNetWire = NetWire.Server("MyNetWire")
+
+    -----------------------------------------------------------------------------
+    -- Setup a method
+    function myNetWire:ServerSideFunction(player: Player, someArg: number)
+        print(someArg)
+        return someArg * 2
+    end
+
+    -----------------------------------------------------------------------------
+    -- Aliases (These are equivalent. You can use either to create remote events)
+    myNetWire.ServerSideEvent = NetWire.createEvent()
+    myNetWire:RegisterEvent("ServerSideEvent")
+
+    -- Connect to an event
+    myNetWire.ServerSideEvent:Connect(function(plr: Player, someArg)
+        print(someArg)
+    end)
+
+    -- Fire an event
+    myNetWire.ServerSideEvent:FireAll(someArg)
+
+    -----------------------------------------------------------------------------
+    -- Properties
+    myNetWire.ServeSideProperty = NetWire.createProperty(0)
+    ```
 ]]
 
 local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local RemotesFolder: Folder = script.Parent:FindFirstChild("Remotes")
 
@@ -222,7 +202,8 @@ end
     Creates a ServerNetWire from a Roam Service.
     This method will read the service's Name and Client table to create the NetWire.
     The goal of this function is to recreate the simplicity of Knit's networking features without
-    the systems being coupled together.
+    the systems being coupled together. 
+    In order to access the service on the client, use `NetWire.Client("SERVICE_NAME")`.
 
     ```lua
     local ExampleService = Roam.createService { Name = "ExampleService" }
@@ -230,8 +211,18 @@ end
         TestEvent = NetWire.createEvent()
     }
 
+    function ExampleService.Client:Greeting(plr: Player, msg: string)
+        print(plr.Name, "said", msg) 
+    end
+
+    ----------------------------------------------------------------
+
     function ExampleService:RoamInit()
         NetWire.Server.setupServiceNetworking(self)
+    end
+
+    function ExampleService:RoamStart()
+        self.Client.TestEvent:FireAll("Hello from ExampleService!") -- send a message to all clients
     end
     ```
 
@@ -251,9 +242,11 @@ function ServerNetWire.setupServiceNetworking(service: Service)
 
     local ServiceName = service.Name
     if not ServiceName then
-        error("Missing Service Name")
-        -- local Roam = Import("Roam")
-        -- ServiceName = Roam.getNameFromService(service)
+        local roam = ReplicatedStorage:FindFirstChild("Roam", true) 
+        if roam then
+            local Roam = require(roam)
+            ServiceName = Roam.getNameFromService(service)
+        end
     end
 
     assert(typeof(ServiceName) == "string", "ServerNetWire.fromService expects a string for the service parameter with a Name key")
@@ -456,9 +449,9 @@ function NetWire.createEvent(): ServerRemoteEvent
     return SIGNAL_MARKER :: ServerRemoteEvent -- override the type for linting purposes
 end
 -- Aliases
-NetWire.newEvent = NetWire.createEvent
-NetWire.createSignal = NetWire.createEvent
-NetWire.newSignal = NetWire.createEvent
+-- NetWire.newEvent = NetWire.createEvent
+-- NetWire.createSignal = NetWire.createEvent
+-- NetWire.newSignal = NetWire.createEvent
 
 --[=[
     @within NetWire

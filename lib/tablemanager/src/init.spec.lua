@@ -12,6 +12,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 --// Imports //--
+local Packages = script.Parent.Parent
 
 local ROOT_TABLE_PATH = {}
 
@@ -29,14 +30,13 @@ end
 --------------------------------------------------------------------------------
 
 return function ()
-    if RunService:IsRunning() then
-        return warn("TableManager.spec is disabled while game is running")
-    end
+    -- if RunService:IsRunning() then
+    --     warn("TableManager.spec is disabled while game is running")
+    --     return
+    -- end
 
-    local Import = require(ReplicatedStorage.Orion.Import)
-
-    local Janitor = Import("Janitor")
-    local TableManager = Import("TableManager")
+    local Janitor = require(Packages.Janitor)
+    local TableManager = require(script.Parent)
 
     local tm: TableManager.TableManager
     local KEY = "KEY"
@@ -715,12 +715,20 @@ return function ()
         end)
     end)
 
+    ------------------------------------------------------------------------------------------------
+
     describe("ToFusionState", function()
-        local Fusion = Import("Fusion")
+        local Fusion = require(Packages.Fusion)
         local peek = Fusion.peek
+
+        local scope = Fusion.scoped({Fusion})
 
         beforeEach(function()
             tm:SetValue(KEY, 0)
+        end)
+
+        afterAll(function()
+            Fusion.doCleanup(scope)
         end)
 
         it("Should return the same fusion state for path", function()
@@ -774,7 +782,7 @@ return function ()
 
             local state = tm:ToFusionState(KEY)
 
-            Fusion.Observer(state):onChange(function()
+            Fusion.Observer(scope, state):onChange(function()
                 passed = true
             end)
 
@@ -796,6 +804,7 @@ return function ()
         -- it("Should set the value in TM if we set the value from the state", function()
             
         -- end)
+        
     end)
     
 

@@ -43,8 +43,13 @@
 	:catch(warn)
 
 	-- Accessing a potential Service
-	Roam.getService("MyService"):DoSomething()
+	Roam.getService("MyService"):DoSomething() -- It is preffered to use standard requires instead of getService in order to get proper linting.
 	```
+	
+	:::tip Networking
+	Roam does not inherently have networking functionality. However, it can easily be added through the use of NetWire's 
+	**[.setupServiceNetworking](https://raild3x.github.io/ModulesOnRails/api/ServerNetWire#setupServiceNetworking)** funtion.
+	:::
 ]=]
 
 --[[
@@ -106,16 +111,6 @@ export type Service = table
 		RequiredServices = {myOtherService},
 	}
 	```
-	:::tip Automatic Service Dependency Resolution (RequiredServices)
-	If you require services to a `global` variable then ROAM will automatically add the service to the RequiredServices table.
-	This will ***NOT*** work if it is required to a `local` variable. If it is localized then you must manually add it to the RequiredServices table
-	if you want it marked as a dependency.
-	```lua
-	myOtherService = require(ReplicatedStorage.MyOtherService) -- services required to global variables are automatically added to RequiredServices
-
-	local MyService = Roam.createService { Name = "MyService" }
-	```
-	:::
 
 	:::caution Deffering RequiredServices
 	Do NOT add services to the RequiredServices after you have created or registered the service. This will cause undefined behavior.
@@ -259,7 +254,7 @@ function Roam.createService(serviceDef: ServiceConfig): Service
 		Name = Name,
 		StartMethodName = serviceDef.StartMethodName,
 		InitMethodName = serviceDef.InitMethodName,
-		ENV = getfenv(2),
+		--ENV = getfenv(2),
 	})
 
 	-- Register Service to Roam
@@ -286,7 +281,7 @@ end
 		print("MyRegisteredService initialized!")
 	end
 
-	local Roam = require(ReplicatedStorage.Roam)
+	local Roam = require(Packages.Roam)
 	Roam.registerService(MyRegisteredService, "MyRegisteredService")
 
 	return MyRegisteredService
@@ -303,12 +298,13 @@ function Roam.registerService(service: Service, serviceConfig: (ServiceConfig | 
 	end
 
 	assert(typeof(serviceConfig) == "table", `ServiceConfig must be a table; got {typeof(serviceConfig)}`)
-	serviceConfig.ENV = getfenv(2)
+	--serviceConfig.ENV = getfenv(2) -- This is no longer supported
 
 	local Name = serviceConfig.Name or service.Name
 	if not Name then
-		Name = serviceConfig.ENV.script.Name
-		warn(`No Service name was given; this is not recommended. Roam will attempt to continue by attempting to infer the ServiceName. [Inferred Service Name: "{Name}"]`)
+		error("No name provided for service")
+		-- Name = serviceConfig.ENV.script.Name
+		-- warn(`No Service name was given; this is not recommended. Roam will attempt to continue by attempting to infer the ServiceName. [Inferred Service Name: "{Name}"]`)
 	end
 
 	assert(
@@ -412,7 +408,9 @@ end
 	Cannot be called until Roam has been started.
 ]=]
 function Roam.getService(serviceName: string): Service
-	assert(started, "Cannot call GetService until Knit has been started")
+	if not started then
+		warn("!Roam has not been started yet! Services are not safe to access before Roam has been started.\n"..debug.traceback())
+	end
 	assert(type(serviceName) == "string", `ServiceName must be a string; got {type(serviceName)}`)
 	return assert(services[serviceName], `Could not find service "{serviceName}"`) :: Service
 end
@@ -475,13 +473,15 @@ function Roam.start(postInitPreStart: (() -> Promise?)?): Promise
 		local adjacencyList = {}
 		for _, service in pairs(services) do
 			adjacencyList[service] = service[KEY_CONFIG].RequiredServices or {}
-			for _, envProp in pairs(service[KEY_CONFIG].ENV) do
-				if typeof(envProp) == "table" and envProp[KEY_CONFIG] then
-					if not table.find(adjacencyList[service], envProp) then
-						table.insert(adjacencyList[service], envProp)
-					end
-				end
-			end
+
+			-- Fetches services dynamically is no longer supported due to de-optimization
+			-- for _, envProp in pairs(service[KEY_CONFIG].ENV) do
+			-- 	if typeof(envProp) == "table" and envProp[KEY_CONFIG] then
+			-- 		if not table.find(adjacencyList[service], envProp) then
+			-- 			table.insert(adjacencyList[service], envProp)
+			-- 		end
+			-- 	end
+			-- end
 		end
 
 		topologicallySortedServices = topologicalSort(adjacencyList)

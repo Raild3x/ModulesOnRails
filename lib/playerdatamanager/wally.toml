@@ -1,0 +1,25 @@
+[package]
+name = "raild3x/playerdatamanager"
+description = "A class for managing player profiles."
+authors = ["Logan Hunt (Raildex)"]
+version = "0.0.5"
+license = "MIT"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+
+[custom]
+# The properly capitalized and spaced name of the library
+formattedName = "PlayerDataManager"
+# The intro page for the documentation
+docsLink = "PlayerDataManager"
+
+[dependencies]
+T = "osyrisrblx/t@3.1.1"
+Promise = "evaera/promise@^4.0.0"
+Signal = "lucasmzreal/fastsignal@^10.2.1"
+Janitor = "howmanysmall/janitor@^1.16.0"
+TableReplicator = "raild3x/tablereplicator@^0"
+TableManager = "raild3x/tablemanager@^0"
+BaseObject = "raild3x/baseobject@^0"
+RailUtil = "raild3x/railutil@^1"
+NetWire = "raild3x/netwire@^0"

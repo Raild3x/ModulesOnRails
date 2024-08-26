@@ -10,7 +10,7 @@
     ```lua
     -- SERVER
     local NetWire = require(Packages.NetWire)
-    local myWire = NetWire("MyWire")
+    local myWire = NetWire("MyNetWire")
 
     myWire.MyEvent = NetWire.createEvent()
 
@@ -21,7 +21,7 @@
     ```lua
     -- CLIENT
     local NetWire = require(Packages.NetWire)
-    local myWire = NetWire("MyWire")
+    local myWire = NetWire("MyNetWire")
 
     myWire.MyEvent:Fire("Hello, world!")
     ```

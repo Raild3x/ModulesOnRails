@@ -62,7 +62,7 @@ function TableState._new(manager: TableManager, Path: Path)
     local self = setmetatable(SuperClass.new(), TableState)
 
     self._Manager = manager
-    self._ArrayPath = TableManager.PathToTable(Path)
+    self._ArrayPath = manager.PathToArray(Path)
 
     self._RawValue = self._Manager:Get(self._ArrayPath)
 

@@ -191,24 +191,27 @@ end
 	```
 
 	```lua
-	local SuperClass = setmetatable({}, BaseObject)
-	SuperClass.__index = SuperClass
-	SuperClass.ClassName = "SuperClass"
+	local SuperClass = BaseObject
 
-	function SuperClass.new()
-		local self = setmetatable(BaseObject.new(), SuperClass)
+	local MyClass = setmetatable({}, SuperClass)
+	MyClass.__index = MyClass
+	MyClass.ClassName = "MyClass"
+
+	function MyClass.new()
+		local self = setmetatable(SuperClass.new(), MyClass)
+		-- Custom logic here
 		return self
 	end
 
-	function SuperClass:Destroy() -- Overwrite the BaseObject Destroy method
-		getmetatable(SuperClass).Destroy(self) -- If you overwrite the BaseObject Destroy method you need to have this line to call the original.
+	function MyClass:Destroy() -- Overwrite the BaseObject Destroy method
+		SuperClass.Destroy(self) -- If you overwrite the BaseObject Destroy method you need to have this line to call the original.
 	end
 
-	function SuperClass:Print()
+	function MyClass:Print()
 		print("Hello, World!")
 	end
 
-	return SuperClass
+	return MyClass
 	```
 ]=]
 function BaseObject.new(tbl: { [any]: any }?): BaseObject
@@ -236,10 +239,10 @@ end
 	the BaseObject, and sets the metatable to nil/a special locked MT.
 	:::caution Overriding
 	If you override this method, you need to make sure you call
-	`getmetatable(self).Destroy(self)` to call the superclass methods.
+	`SuperClass.Destroy(self)` to call the superclass methods.
 	```lua
 	function MyCustomClass:Destroy()
-		getmetatable(SuperClass).Destroy(self) -- calls the superclass method to clean up events, tasks, etc..
+		SuperClass.Destroy(self) -- calls the superclass method to clean up events, tasks, etc..
 	end
 	```
 ]=]

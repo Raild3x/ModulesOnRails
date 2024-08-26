@@ -4,7 +4,10 @@
     @class PlayerProfileManager
     @server
 
-    This class is responsible for managing player profiles. It is a singleton class, so calling
+    This class is responsible for managing player profiles. It provides simple interfaces for handling
+    player profile loading, reconciliation, and data migration.
+    
+    It is a singleton class, so calling
     `PlayerProfileManager.new` multiple times will return the same instance. It is recommended to
     create a `PlayerDataService` to manage this class.
     
@@ -16,13 +19,15 @@ local Players = game:GetService("Players")
 --// Imports //--
 local Packages = script.Parent
 local ProfileTypeDef = require(script.ProfileTypeDef)
-local T = require(Packages.T)
 local ProfileService = require(Packages.ProfileService)
 local RailUtil = require(Packages.RailUtil)
 local Promise = require(Packages.Promise)
 local BaseObject = require(Packages.BaseObject)
+local T = require(Packages.T)
+
 local SuperClass = BaseObject
 
+--// Types //--
 type table = {[any]: any}
 type Promise = typeof(Promise.new())
 export type Profile = ProfileTypeDef.Profile
@@ -33,6 +38,26 @@ export type Profile = ProfileTypeDef.Profile
     .FromVersion string
     .ToVersion string
     .Migrate (profileData: table, profileOwner: Player) -> (table)
+
+    Used to Transform data from one version to another
+    ```lua
+    -- Turn all the deprecated currency 'Candy' into the new currency 'Gems' at a  1:10 rate
+    local migrator = {
+        FromVersion = "0.0.1",
+        ToVersion = "0.0.2"
+        Migrate = function(data: table, plr: Player)
+            if not data.Gems then
+                data.Gems = 0
+            end
+
+            local candy = data.Candy or 0
+            data.Gems += candy * 10
+            data.Candy = nil
+
+            return data
+        end
+    }
+    ```
 ]=]
 type DataVersion = string | number
 export type DataMigrator = {
@@ -49,7 +74,7 @@ local ConfigType = {
     Migrator = T.optional(T.array(T.table)) :: {DataMigrator}?,
     GetPlayerKeyCallback = T.optional(T.callback) :: ((userId: number) -> string)?,
     ReconcileCallback = T.optional(T.callback) :: ((Player, Profile) -> ())?,
-    OnProfileLoadFailure = T.optional(T.callback) :: ((Player, string) -> ())?,
+    OnProfileLoadFailureCallback = T.optional(T.callback) :: ((Player, string) -> ())?,
 
     Debug = T.optional(T.boolean) :: boolean?
 }
@@ -64,10 +89,16 @@ local ConfigInterface = T.interface(ConfigType)
     .Migrator {DataMigrator}
     .GetPlayerKeyCallback ((player: Player) -> (string))?
     .ReconcileCallback ((player: Player, profile: Profile) -> ())?
-    .OnProfileLoadFailure ((player: Player, err: string) -> ())?
+    .OnProfileLoadFailureCallback ((player: Player, err: string) -> ())?
 
-    - **OnProfileLoadFailure** will default to kicking the player if not provided.
-    - **ReconcileCallback** will default to calling Profile:Reconcile if not provided.
+    - **DataStoreKey** is the internal Key used for the PlayerData's DataStore.
+    - **DefaultDataSchema** is a template table that is used for reconciling the player's profile with. It is what new players are given if they dont have existing data.
+    - **UseMock** determines whether or not a Mock ProfileStore will be used.
+    - **Migrator** is a table of DataMigrators that are used to transform data from one version to another.
+
+    - **GetPlayerKeyCallback** is a callback that is used to fetch the Key that each player's data is mapped to.
+    - **ReconcileCallback** is a callback that is called when the system attempts to reconcile the players profile. It will default to calling Profile:Reconcile if not provided.
+    - **OnProfileLoadFailureCallback** is a callback that is called if the player's data fails to load. It will default to kicking the player if not provided.
 ]=]
 export type PPM_Config = typeof(ConfigType)
 
@@ -86,7 +117,8 @@ PlayerProfileManager.__index = PlayerProfileManager
 
 --[=[
     Creates a new PlayerProfileManager. This is a singleton class, so calling this function multiple
-    times will return the same instance. Takes a config table with the following fields.
+    times will return the same instance. Takes a config table, see PPM_Config for more info on the individual
+    fields it supports.
 
     ```lua
     PlayerProfileManager.new({
@@ -117,7 +149,7 @@ function PlayerProfileManager.new(config: PPM_Config): PlayerProfileManager
     self._reconcileCallback = config.ReconcileCallback or function(_: Player, profile)
         profile:Reconcile()
     end
-    self._loadFailureCallback = config.OnProfileLoadFailure or function(player: Player, err: string)
+    self._loadFailureCallback = config.OnProfileLoadFailureCallback or function(player: Player, err: string)
         player:Kick("Something went wrong and we failed to load your player data. Please rejoin the game. If this issue persists, please contact the developer.\n"..tostring(err))
     end
 
