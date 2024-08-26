@@ -2,10 +2,117 @@
     "name": "rail-modules",
     "tree": {
         "$className": "DataModel",
+
+        "Workspace": {
+            "$className": "Workspace",
+            "BasePlate":{
+                "$className": "Part",
+                "$properties": {
+                    "Size": [1024, 4, 1024],
+                    "Position": [0, -2, 0],
+                    "Color": {
+                        "Color3uint8": [91, 91, 91] 
+                    },
+                    "Anchored": true,
+                    "Locked": true,
+                    "TopSurface": "Smooth"
+                },
+
+                "GridTexture": {
+                    "$className": "Texture",
+                    "$properties": {
+                        "Texture": "rbxassetid://6372755229",
+                        "StudsPerTileU": 8,
+                        "StudsPerTileV": 8,
+                        "Color3": [0, 0, 0],
+                        "Transparency": 0.8,
+                        "Face": "Top"
+                    }
+                }
+            }
+        },
+        
         "ReplicatedStorage": {
             "$className": "ReplicatedStorage",
             "src": {
                 "$path": "lib"
+            },
+            "TestEZ": {
+				"$path": "modules/testez/src"
+			},
+			"Stories": {
+				"$path": "Testing/Stories"
+			}
+        },
+
+        "TestService": {
+            "$className": "TestService",
+            "$properties": {
+				"ExecuteWithStudioRun": true
+			},
+            "runTests": {
+                "$path": "Testing/runTests.server.lua"
+            }
+        },
+
+        "Lighting": {
+            "$className": "Lighting",
+            "$properties": {
+                "Ambient": {
+                    "Color3uint8": [70, 70, 70] 
+                },
+                "OutdoorAmbient": {
+                    "Color3uint8": [70, 70, 70] 
+                },
+                "GlobalShadows": true,
+                "Brightness": 3,
+                "ShadowSoftness": 0.2,
+                "EnvironmentSpecularScale": 1,
+                "EnvironmentDiffuseScale": 1,
+                "GeographicLatitude": 0,
+                "ClockTime": 14.5,
+                "Technology": "Future"
+            },
+
+            "Sky": {
+                "$className": "Sky",
+                "$properties": {
+                    "MoonTextureId": "rbxassetid://6444320592",
+                    "SkyboxBk": "rbxassetid://6444884337",
+                    "SkyboxDn": "rbxassetid://6444884785",
+                    "SkyboxFt": "rbxassetid://6444884337",
+                    "SkyboxLf": "rbxassetid://6444884337",
+                    "SkyboxRt": "rbxassetid://6444884337",
+                    "SkyboxUp": "rbxassetid://6412503613",
+                    "CelestialBodiesShown": false,
+                    "StarCount": 3000,
+                    "MoonAngularSize": 11,
+                    "SunAngularSize": 11,
+                    "SunTextureId": "rbxassetid://6196665106"
+                }
+            },
+
+            "Atmopshere": {
+                "$className": "Atmosphere",
+                "$properties": {
+                    "Density": 0.3,
+                    "Offset": 0.25,
+                    "Color": {
+                        "Color3uint8": [199, 199, 199] 
+                    },
+                    "Decay": {
+                        "Color3uint8": [106, 112, 125] 
+                    },
+                    "Glare": 0,
+                    "Haze": 0
+                }
+            }
+        },
+
+        "HttpService": {
+            "$className": "HttpService",
+            "$properties": {
+                "HttpEnabled": true
             }
         }
     }

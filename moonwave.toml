@@ -21,8 +21,11 @@ section = "NetWire"
 classes = ["NetWire", "ServerNetWire", "ClientNetWire"]
 
 [[classOrder]]
-section = "PlayerProfileManager"
 classes = ["PlayerProfileManager"]
+
+[[classOrder]]
+section = "PlayerDataManager"
+classes = ["PlayerDataManager", "ServerPlayerDataManager", "ClientPlayerDataManager"]
 
 [[classOrder]]
 section = "DropletManager"
