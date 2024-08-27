@@ -67,6 +67,12 @@ for PACKAGE_DIR in "$SRC_DIR"/*/ ; do
             PACKAGE_NAME=$(grep '^name =' "$WALLY_TOML" | cut -d'=' -f2 | xargs)
             PACKAGE_VERSION=$(grep '^version =' "$WALLY_TOML" | cut -d'=' -f2 | xargs)
             PACKAGE_DESCRIPTION=$(grep '^description =' "$WALLY_TOML" | cut -d'=' -f2 | xargs)
+            IGNORE=$(grep '^ignore =' "$WALLY_TOML" | cut -d'=' -f2 | xargs)
+
+            if [ "$IGNORE" = "true" ]; then
+                echo "Ignoring package $PACKAGE_NAME"
+                continue
+            fi
 
             PACKAGE_DOCS_LINK="$DOCS_LINK$PACKAGE_DOCS_LINK"
 
