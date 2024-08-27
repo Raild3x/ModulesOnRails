@@ -51,7 +51,7 @@ local Promise = require(Packages.Promise)
 local Janitor = require(Packages.Janitor)
 local Signal = require(Packages.Signal)
 local Symbol = require(Packages.Symbol)
-local Comm = require(script.Parent.Comm).ClientComm
+local Comm = require(Packages.Comm).ClientComm
 local ClientRemoteProxy = require(script.Parent.ClientRemoteProxy)
 
 --// Constants //--
