@@ -1,0 +1,20 @@
+[package]
+name = "raild3x/remotecomponent"
+description = "A component extension to provide easy networking functionality."
+authors = ["Logan Hunt (Raildex)"]
+version = "0.0.2"
+license = "MIT"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+
+[custom]
+# The properly capitalized and spaced name of the library
+formattedName = "RemoteComponent"
+# The intro page for the documentation
+docsLink = "RemoteComponent"
+
+[dependencies]
+Comm = "raild3x/comm@^0"
+Symbol = "sleitnick/symbol@^2.0.1"
+Promise = "evaera/promise@^4.0.0"
+RailUtil = "raild3x/railutil@^1"
