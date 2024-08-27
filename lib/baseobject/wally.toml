@@ -2,7 +2,7 @@
 name = "raild3x/baseobject"
 description = "A base class for creating objects with a lifecycle, janitor, and event system."
 authors = ["Logan Hunt (Raildex)"]
-version = "0.0.4"
+version = "0.0.5"
 license = "MIT"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"

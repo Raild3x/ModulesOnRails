@@ -35,7 +35,7 @@
 local Players = game:GetService("Players")
 
 --// Imports //--
-local Packages = script.Parent
+local Packages = script.Parent.Parent
 local BaseObject = require(Packages.BaseObject)
 local Signal = require(Packages.Signal)
 local Promise = require(Packages.Promise)
@@ -146,7 +146,7 @@ function ClientPlayerDataManager:RegisterManager(config: string | {
     if typeof(config) == "string" then
         config = {
             Name = config,
-            DefaultDataSchema = self._ProfileScehma[config]
+            DefaultDataSchema = self._ProfileSchema[config]
         }
     end
     

@@ -2,7 +2,7 @@
 name = "raild3x/probabilitydistributor"
 description = "A class for distributing probability."
 authors = ["Logan Hunt (Raildex)"]
-version = "1.0.4"
+version = "1.0.5"
 license = "MIT"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"

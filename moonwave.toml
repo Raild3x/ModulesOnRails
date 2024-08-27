@@ -9,6 +9,9 @@ baseUrl = "/ModulesOnRails"
 classes = ["BaseObject"]
 
 [[classOrder]]
+classes = ["Roam"]
+
+[[classOrder]]
 section = "TableManager"
 classes = ["TableManager", "TableState"]
 
@@ -26,6 +29,10 @@ classes = ["PlayerProfileManager"]
 [[classOrder]]
 section = "PlayerDataManager"
 classes = ["PlayerDataManager", "ServerPlayerDataManager", "ClientPlayerDataManager"]
+
+[[classOrder]]
+section = "Instance Component Systems"
+classes = ["Component", "RemoteComponent", "BaseComponent"]
 
 [[classOrder]]
 section = "DropletManager"

@@ -1,21 +1,21 @@
 [package]
-name = "raild3x/netwire"
-description = "A networking library based off of sleitnicks comm library."
+name = "raild3x/basecomponent"
+description = "A fork of Sleitnick's Component class for Roblox."
 authors = ["Logan Hunt (Raildex)"]
-version = "0.1.0"
+version = "0.0.1"
 license = "MIT"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
 
 [custom]
 # The properly capitalized and spaced name of the library
-formattedName = "NetWire"
+formattedName = "BaseComponent"
 # The intro page for the documentation
-docsLink = "NetWire"
+docsLink = "BaseComponent"
 
 [dependencies]
-Promise = "evaera/promise@^4.0.0"
-Janitor = "howmanysmall/janitor@^1.16.0"
 Signal = "lucasmzreal/fastsignal@^10.2.1"
+Janitor = "howmanysmall/janitor@^1.16.0"
+RailUtil = "raild3x/railutil@^1"
 Symbol = "sleitnick/symbol@^2.0.1"
-Comm = "raild3x/comm@^0"
+Fusion = "acecateer/fusion@0.3.1"
