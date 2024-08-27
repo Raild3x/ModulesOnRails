@@ -89,8 +89,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local RemotesFolder: Folder = script.Parent:FindFirstChild("Remotes")
 
-local Comm = require(script.Parent.Comm).ServerComm
-local Symbol = require(script.Parent.Parent.Symbol)
+local Packages = script.Parent.Parent
+local Comm = require(Packages.Comm).ServerComm
+local Symbol = require(Packages.Symbol)
 
 --// Constants //--
 local NAME_KEY = Symbol("NAME")

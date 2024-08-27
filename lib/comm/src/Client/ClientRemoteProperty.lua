@@ -3,7 +3,7 @@
 -- December 20, 2021
 
 local Comm = script.Parent.Parent
-local Packages = Comm.Parent.Parent
+local Packages = Comm.Parent
 
 local Promise = require(Packages.Promise)
 local Signal = require(Packages.commSignal)

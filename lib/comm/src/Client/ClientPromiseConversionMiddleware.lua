@@ -10,7 +10,7 @@
 -- ...: any
 -- )
 
-local Packages = script.Parent.Parent.Parent.Parent
+local Packages = script.Parent.Parent.Parent
 local PromInstance = Packages.Promise
 local Promise = require(PromInstance) ---@module Promise
 

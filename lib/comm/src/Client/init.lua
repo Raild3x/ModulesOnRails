@@ -1,5 +1,5 @@
 local Comm = script.Parent
-local Packages = Comm.Parent.Parent
+local Packages = Comm.Parent
 
 local Util = require(Comm.Util)
 local Types = require(Comm.Types)
