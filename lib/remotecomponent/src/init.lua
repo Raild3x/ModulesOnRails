@@ -79,7 +79,7 @@ local KEY_INTERNALPROMISE = Symbol("InternalPromise")
 local SERVER_REMOTE_COUNT = "SRC"
 local TIMEOUT = 30
 
-Comm = if IS_SERVER then Comm.ServerComm else Comm.ClientComm
+Comm = if IS_SERVER then Comm.ServerComm else Comm.ClientComm :: any
 
 --------------------------------------------------------------------------------
 	--// Extension //--

@@ -37,3 +37,7 @@ classes = ["Component", "RemoteComponent", "BaseComponent"]
 [[classOrder]]
 section = "DropletManager"
 classes = ["DropletManager", "DropletServerManager", "DropletClientManager", "Droplet", "DropletUtil", "ExampleResourceTypeData"]
+
+[[classOrder]]
+section = "Admin Commands [Cmdr]"
+classes = ["CmdrHandler", "CmdrServer", "CmdrClient", "CmdrTypes"]
