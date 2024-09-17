@@ -42,6 +42,7 @@ local DefaultAdmins = {5519161} -- used for testing
 --------------------------------------------------------------------------------
 
 local CmdrServer = {}
+CmdrServer.Name = "CmdrServer"
 CmdrServer.Client = {
     Permissions = NetWire.createProperty({}),
 	PermissionInheritance = NetWire.createProperty({
@@ -413,7 +414,7 @@ function CmdrServer:Init()
         task.spawn(function()
             cmdr.Registry:RegisterDefaultCommands()
 
-			for _, commandModule in script.Parent:FindFirstChild("BuiltInCommands"):GetDescendants() do
+			for _, commandModule in script:FindFirstChild("BuiltInCommands"):GetDescendants() do
 				if commandModule:IsA("ModuleScript") then
 					self:RegisterCommandFromModule(commandModule)
         		end

@@ -30,6 +30,7 @@ local Symbol = require(Packages.Symbol)
 local ComponentJanitorUtil = require(script.ComponentJanitorUtil); ---@module ComponentJanitorUtil
 local ComponentAttributeUtil = require(script.ComponentAttributeUtil); ---@module ComponentAttributeUtil
 local ComponentPropertyUtil = require(script.ComponentPropertyUtil); ---@module ComponentPropertyUtil
+local ComponentFusionUtil = require(script.ComponentFusionUtil); ---@module ComponentFusionUtil
 
 --// Types //--
 type Component = any
@@ -131,6 +132,7 @@ ComponentUtilExtension.Extensions = {
     ComponentJanitorUtil :: any;
     ComponentAttributeUtil;
     ComponentPropertyUtil;
+    ComponentFusionUtil;
 };
 
 --[=[

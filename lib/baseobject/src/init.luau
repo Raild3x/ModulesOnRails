@@ -62,8 +62,8 @@ local Promise = require(script.Parent.Promise)
 
 --// Types //--
 type Janitor = Janitor.Janitor
-type Signal = Signal.Signal
-type Promise = Promise.Promise
+type Signal = Signal.ScriptSignal<any>
+type Promise = typeof(Promise.new())
 
 type genericFn = () -> ()
 type Destructable = Instance | { Destroy: genericFn }
@@ -79,7 +79,7 @@ local DESTROYED_SIGNAL_NAME = "Destroyed"
 
 --// Volatiles //--
 local GLOBAL_ID = if RunService:IsServer() then 0 else 1
-local STORAGE = setmetatable({}, { __mode = "v" }) -- Stores all objects weakly
+local STORAGE = (setmetatable({}, { __mode = "v" }) :: any) :: {[number]: BaseObject}-- Stores all objects weakly
 
 --// Ethans Funky Stuff //--
 -- Create weaktable to store destroyed object stacks
@@ -214,8 +214,9 @@ end
 	return MyClass
 	```
 ]=]
-function BaseObject.new(tbl: { [any]: any }?): BaseObject
-	local self = setmetatable(tbl or {}, BaseObject) :: BaseObject
+function BaseObject.new<T>(tbl: {[any]: any}?)
+	assert(typeof(tbl) == "table" or tbl == nil, "Argument 1 must be a table or nil")
+	local self = setmetatable(tbl or {}, BaseObject)
 
 	self[KEY_SIGNALS] = (nil :: any) :: { [string]: Signal }
 	self[KEY_JANITOR] = Janitor.new() :: Janitor
@@ -225,7 +226,7 @@ function BaseObject.new(tbl: { [any]: any }?): BaseObject
 	GLOBAL_ID += 2
 
 	-- Leave this as nil until destroyed to avoid bloat
-	self.IsDestroyed = nil :: boolean?
+	(self :: any).IsDestroyed = nil :: boolean?
 
 	return self
 end
@@ -265,7 +266,7 @@ function BaseObject:Destroy()
 	end
 
 	-- Mark as destroyed and clean janitor
-	(self[KEY_JANITOR] :: Janitor):Destroy()
+	(self[KEY_JANITOR] :: any):Destroy()
 
 	-- Set metatable to destroyed metatable
 	setmetatable(self, destroyedMetatable)
@@ -486,7 +487,7 @@ end
 	@return Signal
 ]=]
 function BaseObject:GetSignal(signalName: string): Signal
-	local sigtbl = self[KEY_SIGNALS]
+	local sigtbl = (self :: any)[KEY_SIGNALS]
 
 	-- Register signal if it doesn't exist
 	if not sigtbl or not sigtbl[signalName] then
@@ -496,7 +497,7 @@ function BaseObject:GetSignal(signalName: string): Signal
 
 	-- Replace SignalMarker with a new Signal
 	if sigtbl[signalName] == SIGNAL_MARKER then
-		sigtbl[signalName] = self:AddTask(Signal.new(signalName))
+		sigtbl[signalName] = self:AddTask(Signal.new())
 	end
 
 	return sigtbl[signalName] :: Signal

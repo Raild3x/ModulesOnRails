@@ -14,7 +14,7 @@ local function waitForValue(objectValue)
 end
 
 local cmdrCommandId = waitForValue(script:WaitForChild("CmdrCommandId"))
-local commandServiceDefinition = require(waitForValue(script:WaitForChild("CmdrServiceTarget")))
+local commandServiceDefinition = require(waitForValue(script:WaitForChild("CmdrServerTarget")))
 
 return function(...)
 	return commandServiceDefinition:__executeCommand(cmdrCommandId, ...)

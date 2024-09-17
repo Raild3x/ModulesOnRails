@@ -20,9 +20,9 @@ local function RefreshGroupCache(plr: Player)
     task.spawn(function()
         local groups = GroupService:GetGroupsAsync(plr.UserId)
         GroupCache[plr] = groups
-        if RunService:IsStudio() then
-            print("[Cmdr] Cached Groups for ", plr.Name, ":", groups)
-        end
+        -- if RunService:IsStudio() then
+        --     print("[Cmdr] Cached Groups for ", plr.Name, ":", groups)
+        -- end
     end)
 end
 
