@@ -110,7 +110,7 @@ function ProbabilityDistributor.new<T>(weights: {WeightedItem<T>}, randomOrSeed:
 		NumberGenerator = if typeof(randomOrSeed) == "Random" then
 			randomOrSeed
 		else
-			Random.new(randomOrSeed or os.clock());
+			Random.new(randomOrSeed);
 
 		MaxRepetitions = 100;
 		OrderedWeights = {};

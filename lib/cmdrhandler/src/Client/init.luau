@@ -10,7 +10,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
 --// Imports //--
-local Packages = script.Parent.Parent.Parent
+local Packages = script.Parent.Parent
 local Signal = require(Packages.Signal)
 local Promise = require(Packages.Promise)
 local Janitor = require(Packages.Janitor)
@@ -37,6 +37,7 @@ local cmdrProm = Promise.fromEvent(cmdrReadied)
 --------------------------------------------------------------------------------
 
 local CmdrClient = {}
+CmdrClient.Name = "CmdrClient"
 
 --[=[
 	Returns a promise that resolves with the Cmdr instance.
@@ -150,7 +151,7 @@ end
 --------------------------------------------------------------------------------
 
 function CmdrClient:Init()
-	self.Server = NetWire.Client("CmdrService")
+	self.Server = NetWire.Client("CmdrServer")
 	self._Janitor = Janitor.new()
 
 	self.Server.ExecuteCommand:Connect(function(...: string)

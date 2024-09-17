@@ -27,12 +27,12 @@ local Symbol = require(Packages.Symbol)
 
 --// Types //--
 type Component = any
-type Value<T> = Fusion.Value<T>
+type Value<T, S> = Fusion.Value<T, S>
 
 export type Extension = {
     SetAttribute: (self: Extension, attributeName: string, value: any) -> (),
     GetAttribute: (self: Extension, attributeName: string) -> (any | nil),
-    OutAttribute: (self: Extension, attributeName: string) -> (Value<any>),
+    OutAttribute: (self: Extension, attributeName: string) -> (Value<any, any>),
     IncrementAttribute: (self: Extension, attributeName: string, increment: number) -> (number),
     MutateAttribute: <T>(self: Extension, attributeName: string, mutator: (value: any) -> (T)) -> (T),
     ObserveAttribute: (self: Extension, attributeName: string, callback: (newValue: any) -> ()) -> () -> (),
@@ -148,7 +148,7 @@ end
     @param attributeName string -- The name of the attribute to fetch
     @return Value<any> -- The synchronized fusion value of the attribute
 ]=]
-local function OutAttribute(self: Component, attributeName: string): (Value<any>)
+local function OutAttribute(self: Component, attributeName: string): (Value<any, any>)
     if not self[ATTRIBUTE_VALUES][attributeName] then
         local value = Fusion.Value(self[ATTRIBUTE_FUSION_SCOPE], GetAttribute(self, attributeName))
 

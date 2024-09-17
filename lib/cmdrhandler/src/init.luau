@@ -46,4 +46,7 @@ local CmdrHandler = {
     Client = Client
 }
 
+local CmdrTypes = require(script.Shared.CmdrTypes)
+export type CommandModuleData<T> = CmdrTypes.CommandModuleData<T>
+
 return CmdrHandler
