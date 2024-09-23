@@ -85,10 +85,10 @@ function ServerPlayerDataManager:OnReady(player: Player): Promise
     return Promise.fromEvent(self.PlayerDataReady, function(readiedPlayer: Player)
         return readiedPlayer == player
     end)
+    :timeout(DEFAULT_TIMEOUT, `PlayerData failed to become ready in time [{DEFAULT_TIMEOUT} Seconds].`)
     :andThen(function()
         return self._PlayerData[player]
     end)
-    :timeout(DEFAULT_TIMEOUT, `PlayerData failed to become ready in time [{DEFAULT_TIMEOUT} Seconds].`)
 end
 
 --[=[
@@ -98,15 +98,27 @@ function ServerPlayerDataManager:IsReady(player: Player): boolean
     return self._PlayerData and self._PlayerData[player] ~= nil
 end
 
---[[
+--[=[
+    Checks whether or not a given manager is registered. If one is not specified then it will assume the default one.
+]=]
+function ServerPlayerDataManager:IsManagerRegistered(managerName: string?): boolean
+    managerName = managerName or self.DEFAULT_MANAGER_NAME
+    return self._ManagerTemplates[managerName] ~= nil
+end
+
+--[=[
     Fetches one of the given Player's DataManagers. If one is not specified then it will assume the default one. 
-]]
+]=]
 function ServerPlayerDataManager:GetManager(player: Player, managerName: string?): TableManager?
     if not self:IsReady(player) then
         warn("Player data is not ready")
         return nil
     end
     managerName = managerName or self.DEFAULT_MANAGER_NAME
+    if not self._PlayerData[player][managerName] then
+        warn(`Failed to get {player.Name}'s TableManager '{managerName}'. The manager does not exist. Check to ensure it was registered properly. Current Managers: `, RailUtil.Table.Keys(self._ManagerTemplates))
+        return nil
+    end
     return self._PlayerData[player][managerName]:GetTableManager()
 end
 ServerPlayerDataManager.Get = ServerPlayerDataManager.GetManager
@@ -122,20 +134,24 @@ ServerPlayerDataManager.GetTableManager = ServerPlayerDataManager.GetManager
 ]=]
 function ServerPlayerDataManager:PromiseManager(player: Player, managerName: string?): Promise
     return self:OnReady(player):andThen(function()
-        return self:GetManager(player, managerName)
+        local manager = self:GetManager(player, managerName)
+        if not manager then
+            return Promise.reject(`Failed to get {player.Name}'s TableManager '{managerName}'. The manager does not exist. Check to ensure it was registered properly.`)
+        end
+        return manager
     end)
 end
 
---[[
+--[=[
     Runs a function for all existing loaded player data and all future player data.
     ```lua
-    ServerPlayerDataManager:ForEach(function(player)
+    ServerPlayerDataManager:ForEachPlayer(function(player)
         local defaultManager = ServerPlayerDataManager:GetManager(player)
         defaultManager:Set("Volume", 0.5)
     end)
     ```
-]]
-function ServerPlayerDataManager:ForEach(fn: (player: Player, data: any) -> ()): Connection
+]=]
+function ServerPlayerDataManager:ForEachPlayer(fn: (player: Player, data: any) -> ()): Connection
     for player, data in pairs(self._PlayerData) do
         task.spawn(fn, player, data)
     end
@@ -143,6 +159,7 @@ function ServerPlayerDataManager:ForEach(fn: (player: Player, data: any) -> ()):
         fn(player, self._PlayerData[player])
     end)
 end
+ServerPlayerDataManager.ForEach = ServerPlayerDataManager.ForEachPlayer
 
 --[=[
     Returns the TableReplicator for a given player. If a replicatorName is not specified then it will assume the default one.
@@ -163,6 +180,17 @@ end
 --[=[
     Registers a config table for new managers to use for construction.
 
+    ```lua
+    ServerPlayerDataManager:RegisterManager({
+        Name = "Settings",
+        GetData = function(player, profile)
+            return profile.Data.Settings
+        end,
+        ReplicationTargets = "Self",
+        Tags = {UserId = player.UserId},
+    })
+    ```
+
     :::caution Modifying the given table
     DO NOT MODIFY THE TABLE AFTER PASSING IT. Treat it as frozen. Doing so can cause potential
     desyncs between players.
@@ -171,6 +199,10 @@ end
 function ServerPlayerDataManager:RegisterManager(config: {
     Name: string,
     GetData: (player: Player, profile: Profile) -> table,
+    ReplicationTargets: ("All" | "Self" | Player | {Player})?,
+    Tags: table?,
+    Parent: table?,
+    Client: table?,
 } | string)
     if type(config) == "string" then
         config = {Name = config} :: any

@@ -128,7 +128,7 @@ end
     ClientPlayerDataManager:RegisterManager("Currency")
     ```
 
-    Formal registration. Used for more complex/custom registering of managers
+    Formal registration. Used for more complex/custom registering of managers. Equivalent to the above
     ```lua
     ClientPlayerDataManager:RegisterManager({
         Name = "Currency",
