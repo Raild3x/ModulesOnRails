@@ -54,8 +54,8 @@ cpdm:PromiseManager(&quot;Currency&quot;):andThen(function(tm: TableManager)
 
 end)
 ```"><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/ClientPlayerDataManager"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/ClientPlayerDataManager" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/ClientPlayerDataManager" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.1839e2d4.css">
-<link rel="preload" href="/ModulesOnRails/assets/js/runtime~main.5c7d52c5.js" as="script">
-<link rel="preload" href="/ModulesOnRails/assets/js/main.b2e794ed.js" as="script">
+<link rel="preload" href="/ModulesOnRails/assets/js/runtime~main.74a22da7.js" as="script">
+<link rel="preload" href="/ModulesOnRails/assets/js/main.df99f350.js" as="script">
 </head>
 <body class="navigation-with-keyboard">
 <script>!function(){function e(e){document.documentElement.setAttribute("data-theme",e)}var t=function(){var e=null;try{e=localStorage.getItem("theme")}catch(e){}return e}();null!==t?e(t):window.matchMedia("(prefers-color-scheme: dark)").matches?e("dark"):(window.matchMedia("(prefers-color-scheme: light)").matches,e("light"))}()</script><div id="__docusaurus">
@@ -110,7 +110,7 @@ cpdm<span class="token punctuation">:</span><span class="token function">Promise
 <p>Informal registration. Assumes data key in the profile template is the same as the given name.</p>
 <pre class="language-lua"><code class="language-lua">ClientPlayerDataManager<span class="token punctuation">:</span><span class="token function">RegisterManager</span><span class="token punctuation">(</span><span class="token string">"Currency"</span><span class="token punctuation">)</span>
 </code></pre>
-<p>Formal registration. Used for more complex/custom registering of managers</p>
+<p>Formal registration. Used for more complex/custom registering of managers. Equivalent to the above</p>
 <pre class="language-lua"><code class="language-lua">ClientPlayerDataManager<span class="token punctuation">:</span><span class="token function">RegisterManager</span><span class="token punctuation">(</span><span class="token punctuation">{</span>
     Name <span class="token operator">=</span> <span class="token string">"Currency"</span><span class="token punctuation">,</span>
     DefaultDataSchema <span class="token operator">=</span> profileTemplate<span class="token punctuation">[</span><span class="token string">"Currency"</span><span class="token punctuation">]</span><span class="token punctuation">,</span>
@@ -191,7 +191,7 @@ cpdm<span class="token punctuation">:</span><span class="token function">Promise
         },
         {
             &quot;name&quot;: &quot;RegisterManager&quot;,
-            &quot;desc&quot;: &quot;Registers a tableManager/TableReplicatorSingleton to be watched for on the client.\n\nInformal registration. Assumes data key in the profile template is the same as the given name.\n```lua\nClientPlayerDataManager:RegisterManager(\&quot;Currency\&quot;)\n```\n\nFormal registration. Used for more complex/custom registering of managers\n```lua\nClientPlayerDataManager:RegisterManager({\n    Name = \&quot;Currency\&quot;,\n    DefaultDataSchema = profileTemplate[\&quot;Currency\&quot;],\n    ConditionFn = function(replicator)\n        return replicator:GetTag(\&quot;UserId\&quot;) == LocalPlayer.UserId\n    end,\n})&quot;,
+            &quot;desc&quot;: &quot;Registers a tableManager/TableReplicatorSingleton to be watched for on the client.\n\nInformal registration. Assumes data key in the profile template is the same as the given name.\n```lua\nClientPlayerDataManager:RegisterManager(\&quot;Currency\&quot;)\n```\n\nFormal registration. Used for more complex/custom registering of managers. Equivalent to the above\n```lua\nClientPlayerDataManager:RegisterManager({\n    Name = \&quot;Currency\&quot;,\n    DefaultDataSchema = profileTemplate[\&quot;Currency\&quot;],\n    ConditionFn = function(replicator)\n        return replicator:GetTag(\&quot;UserId\&quot;) == LocalPlayer.UserId\n    end,\n})&quot;,
             &quot;params&quot;: [
                 {
                     &quot;name&quot;: &quot;config&quot;,
@@ -278,7 +278,7 @@ cpdm<span class="token punctuation">:</span><span class="token function">Promise
         &quot;path&quot;: &quot;lib/playerdatamanager/src/ClientPlayerDataManager.luau&quot;
     }
 }</pre></details></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#types" class="table-of-contents__link toc-highlight">Types</a></li><li><a href="#properties" class="table-of-contents__link toc-highlight">Properties</a><ul><li><a href="#DEFAULT_MANAGER_NAME" class="table-of-contents__link toc-highlight">DEFAULT_MANAGER_NAME</a></li><li><a href="#PlayerDataReady" class="table-of-contents__link toc-highlight">PlayerDataReady</a></li></ul></li><li><a href="#functions" class="table-of-contents__link toc-highlight">Functions</a><ul><li><a href="#GetImmediate" class="table-of-contents__link toc-highlight">:GetImmediate</a></li><li><a href="#GetManager" class="table-of-contents__link toc-highlight">:GetManager</a></li><li><a href="#PromiseManager" class="table-of-contents__link toc-highlight">:PromiseManager</a></li><li><a href="#RegisterManager" class="table-of-contents__link toc-highlight">:RegisterManager</a></li><li><a href="#Start" class="table-of-contents__link toc-highlight">:Start</a></li><li><a href="#new" class="table-of-contents__link toc-highlight">.new</a></li></ul></li></ul></div></div></div></div></main></div></div><footer class="footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2024 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
-<script src="/ModulesOnRails/assets/js/runtime~main.5c7d52c5.js"></script>
-<script src="/ModulesOnRails/assets/js/main.b2e794ed.js"></script>
+<script src="/ModulesOnRails/assets/js/runtime~main.74a22da7.js"></script>
+<script src="/ModulesOnRails/assets/js/main.df99f350.js"></script>
 </body>
 </html>

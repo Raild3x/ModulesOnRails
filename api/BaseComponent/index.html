@@ -12,8 +12,8 @@ Also adds a way to check if a Component has been destroyed.
 
 Extends **ComponentJanitorUtil** and **ComponentAttributeUtil**.
 Check their documentation for more information."><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/BaseComponent"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/BaseComponent" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/BaseComponent" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.1839e2d4.css">
-<link rel="preload" href="/ModulesOnRails/assets/js/runtime~main.5c7d52c5.js" as="script">
-<link rel="preload" href="/ModulesOnRails/assets/js/main.b2e794ed.js" as="script">
+<link rel="preload" href="/ModulesOnRails/assets/js/runtime~main.74a22da7.js" as="script">
+<link rel="preload" href="/ModulesOnRails/assets/js/main.df99f350.js" as="script">
 </head>
 <body class="navigation-with-keyboard">
 <script>!function(){function e(e){document.documentElement.setAttribute("data-theme",e)}var t=function(){var e=null;try{e=localStorage.getItem("theme")}catch(e){}return e}();null!==t?e(t):window.matchMedia("(prefers-color-scheme: dark)").matches?e("dark"):(window.matchMedia("(prefers-color-scheme: light)").matches,e("light"))}()</script><div id="__docusaurus">
@@ -26,25 +26,7 @@ Check their documentation for more information."><link data-rh="true" rel="canon
   Extends <strong>ComponentJanitorUtil</strong> and <strong>ComponentAttributeUtil</strong>.
   Check their documentation for more information.
 </p>
-</div></header><h2 class="anchor anchorWithStickyNavbar_LWe7" id="functions">Functions<a href="#functions" class="hash-link" aria-label="Direct link to Functions" title="Direct link to Functions">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="RegisterSignal"><code style="text-decoration:none">RegisterSignal</code><a href="#RegisterSignal" class="hash-link" aria-label="Direct link to RegisterSignal" title="Direct link to RegisterSignal">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/init.lua#L65"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">RegisterSignal</code><code>(</code><div class="inset_uKQm"><div><code>signalName<!-- -->: </code><code class="blue_P4bS">string</code><span class="inlineDescription_G7Er">-- <span>
-<p>The name of the signal to register.</p>
-</span></span></div></div><code>) → </code><code class="blue_P4bS">Signal</code><span class="inlineDescription_G7Er">-- <span>
-<p>The signal that was registered.</p>
-</span></span></div><div>
-<p>Registers a signal to the component.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetSignal"><code style="text-decoration:none">GetSignal</code><a href="#GetSignal" class="hash-link" aria-label="Direct link to GetSignal" title="Direct link to GetSignal">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/init.lua#L84"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">GetSignal</code><code>(</code><div class="inset_uKQm"><div><code>signalName<!-- -->: </code><code class="blue_P4bS">string</code><span class="inlineDescription_G7Er">-- <span>
-<p>The name of the signal to get.</p>
-</span></span></div></div><code>) → </code><code class="blue_P4bS">Signal</code><span class="inlineDescription_G7Er">-- <span>
-<p>The signal that was retrieved.</p>
-</span></span></div><div>
-<p>Gets a signal from the component.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="FireSignal"><code style="text-decoration:none">FireSignal</code><a href="#FireSignal" class="hash-link" aria-label="Direct link to FireSignal" title="Direct link to FireSignal">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/init.lua#L103"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">FireSignal</code><code>(</code><div class="inset_uKQm"><div><code>signalName<!-- -->: </code><code class="blue_P4bS">string</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
-<p>The name of the signal to fire.</p>
-</span></span></div><div><code>...<!-- -->: </code><code class="blue_P4bS">any</code><span class="inlineDescription_G7Er">-- <span>
-<p>The arguments to pass to the signal.</p>
-</span></span></div></div><code>) → </code><code>(</code><code>)</code></div><div>
-<p>Fires a signal from the component.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="ObserveProperty"><code style="text-decoration:none">ObserveProperty</code><a href="#ObserveProperty" class="hash-link" aria-label="Direct link to ObserveProperty" title="Direct link to ObserveProperty">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentPropertyUtil.luau#L53"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">ObserveProperty</code><code>(</code><div class="inset_uKQm"><div><code>propertyName<!-- -->: </code><code class="blue_P4bS">string</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
+</div></header><h2 class="anchor anchorWithStickyNavbar_LWe7" id="functions">Functions<a href="#functions" class="hash-link" aria-label="Direct link to Functions" title="Direct link to Functions">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="ObserveProperty"><code style="text-decoration:none">ObserveProperty</code><a href="#ObserveProperty" class="hash-link" aria-label="Direct link to ObserveProperty" title="Direct link to ObserveProperty">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentPropertyUtil.luau#L53"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">ObserveProperty</code><code>(</code><div class="inset_uKQm"><div><code>propertyName<!-- -->: </code><code class="blue_P4bS">string</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
 <p>The name of the property to observe</p>
 </span></span></div><div><code>callback<!-- -->: </code><code class="purple_ieR2">(</code><code class="green_DgR4">(</code><code>newValue<!-- -->: </code><code class="blue_P4bS">any</code><code class="green_DgR4">)</code><code class="green_DgR4"> → </code><code class="green_DgR4">(</code><code class="green_DgR4">)</code><code class="purple_ieR2">)</code><span class="inlineDescription_G7Er">-- <span>
 <p>The function to call when the property changes</p>
@@ -98,6 +80,24 @@ Check their documentation for more information."><link data-rh="true" rel="canon
 <p>The task that was retrieved.</p>
 </span></span></div><div>
 <p>Gets a task from the janitor.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="RegisterSignal"><code style="text-decoration:none">RegisterSignal</code><a href="#RegisterSignal" class="hash-link" aria-label="Direct link to RegisterSignal" title="Direct link to RegisterSignal">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/init.luau#L65"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">RegisterSignal</code><code>(</code><div class="inset_uKQm"><div><code>signalName<!-- -->: </code><code class="blue_P4bS">string</code><span class="inlineDescription_G7Er">-- <span>
+<p>The name of the signal to register.</p>
+</span></span></div></div><code>) → </code><code class="blue_P4bS">Signal</code><span class="inlineDescription_G7Er">-- <span>
+<p>The signal that was registered.</p>
+</span></span></div><div>
+<p>Registers a signal to the component.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetSignal"><code style="text-decoration:none">GetSignal</code><a href="#GetSignal" class="hash-link" aria-label="Direct link to GetSignal" title="Direct link to GetSignal">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/init.luau#L84"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">GetSignal</code><code>(</code><div class="inset_uKQm"><div><code>signalName<!-- -->: </code><code class="blue_P4bS">string</code><span class="inlineDescription_G7Er">-- <span>
+<p>The name of the signal to get.</p>
+</span></span></div></div><code>) → </code><code class="blue_P4bS">Signal</code><span class="inlineDescription_G7Er">-- <span>
+<p>The signal that was retrieved.</p>
+</span></span></div><div>
+<p>Gets a signal from the component.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="FireSignal"><code style="text-decoration:none">FireSignal</code><a href="#FireSignal" class="hash-link" aria-label="Direct link to FireSignal" title="Direct link to FireSignal">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/init.luau#L103"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">FireSignal</code><code>(</code><div class="inset_uKQm"><div><code>signalName<!-- -->: </code><code class="blue_P4bS">string</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
+<p>The name of the signal to fire.</p>
+</span></span></div><div><code>...<!-- -->: </code><code class="blue_P4bS">any</code><span class="inlineDescription_G7Er">-- <span>
+<p>The arguments to pass to the signal.</p>
+</span></span></div></div><code>) → </code><code>(</code><code>)</code></div><div>
+<p>Fires a signal from the component.</p>
 </div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetAttribute"><code style="text-decoration:none">GetAttribute</code><a href="#GetAttribute" class="hash-link" aria-label="Direct link to GetAttribute" title="Direct link to GetAttribute">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentAttributeUtil.luau#L61"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">GetAttribute</code><code>(</code><div class="inset_uKQm"><div><code>attributeName<!-- -->: </code><code class="blue_P4bS">string</code><span class="inlineDescription_G7Er">-- <span>
 <p>The name of the attribute to fetch</p>
 </span></span></div></div><code>) → </code><code class="blue_P4bS">any?</code><span class="inlineDescription_G7Er">-- <span>
@@ -163,108 +163,6 @@ Check their documentation for more information."><link data-rh="true" rel="canon
 </p>
 </div></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
     &quot;functions&quot;: [
-        {
-            &quot;name&quot;: &quot;RegisterSignal&quot;,
-            &quot;desc&quot;: &quot;Registers a signal to the component.&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;signalName&quot;,
-                    &quot;desc&quot;: &quot;The name of the signal to register.&quot;,
-                    &quot;lua_type&quot;: &quot;string&quot;
-                }
-            ],
-            &quot;returns&quot;: [
-                {
-                    &quot;desc&quot;: &quot;The signal that was registered.&quot;,
-                    &quot;lua_type&quot;: &quot;Signal&quot;
-                }
-            ],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 65,
-                &quot;path&quot;: &quot;lib/basecomponent/src/init.lua&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;GetSignal&quot;,
-            &quot;desc&quot;: &quot;Gets a signal from the component.&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;signalName&quot;,
-                    &quot;desc&quot;: &quot;The name of the signal to get.&quot;,
-                    &quot;lua_type&quot;: &quot;string&quot;
-                }
-            ],
-            &quot;returns&quot;: [
-                {
-                    &quot;desc&quot;: &quot;The signal that was retrieved.&quot;,
-                    &quot;lua_type&quot;: &quot;Signal&quot;
-                }
-            ],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 84,
-                &quot;path&quot;: &quot;lib/basecomponent/src/init.lua&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;FireSignal&quot;,
-            &quot;desc&quot;: &quot;Fires a signal from the component.&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;signalName&quot;,
-                    &quot;desc&quot;: &quot;The name of the signal to fire.&quot;,
-                    &quot;lua_type&quot;: &quot;string&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;...&quot;,
-                    &quot;desc&quot;: &quot;The arguments to pass to the signal.&quot;,
-                    &quot;lua_type&quot;: &quot;any&quot;
-                }
-            ],
-            &quot;returns&quot;: [],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 103,
-                &quot;path&quot;: &quot;lib/basecomponent/src/init.lua&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;Constructing&quot;,
-            &quot;desc&quot;: &quot;&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;component&quot;,
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;any&quot;
-                }
-            ],
-            &quot;returns&quot;: [],
-            &quot;function_type&quot;: &quot;static&quot;,
-            &quot;ignore&quot;: true,
-            &quot;source&quot;: {
-                &quot;line&quot;: 143,
-                &quot;path&quot;: &quot;lib/basecomponent/src/init.lua&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;Stopped&quot;,
-            &quot;desc&quot;: &quot;&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;component&quot;,
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;any&quot;
-                }
-            ],
-            &quot;returns&quot;: [],
-            &quot;function_type&quot;: &quot;static&quot;,
-            &quot;ignore&quot;: true,
-            &quot;source&quot;: {
-                &quot;line&quot;: 159,
-                &quot;path&quot;: &quot;lib/basecomponent/src/init.lua&quot;
-            }
-        },
         {
             &quot;name&quot;: &quot;ObserveProperty&quot;,
             &quot;desc&quot;: &quot;Watches for when the property changes and calls the callback. Also calls the callback initially with the current value&quot;,
@@ -475,6 +373,108 @@ Check their documentation for more information."><link data-rh="true" rel="canon
             &quot;source&quot;: {
                 &quot;line&quot;: 106,
                 &quot;path&quot;: &quot;lib/basecomponent/src/ComponentJanitorUtil.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;RegisterSignal&quot;,
+            &quot;desc&quot;: &quot;Registers a signal to the component.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;signalName&quot;,
+                    &quot;desc&quot;: &quot;The name of the signal to register.&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;The signal that was registered.&quot;,
+                    &quot;lua_type&quot;: &quot;Signal&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 65,
+                &quot;path&quot;: &quot;lib/basecomponent/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetSignal&quot;,
+            &quot;desc&quot;: &quot;Gets a signal from the component.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;signalName&quot;,
+                    &quot;desc&quot;: &quot;The name of the signal to get.&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;The signal that was retrieved.&quot;,
+                    &quot;lua_type&quot;: &quot;Signal&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 84,
+                &quot;path&quot;: &quot;lib/basecomponent/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;FireSignal&quot;,
+            &quot;desc&quot;: &quot;Fires a signal from the component.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;signalName&quot;,
+                    &quot;desc&quot;: &quot;The name of the signal to fire.&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;...&quot;,
+                    &quot;desc&quot;: &quot;The arguments to pass to the signal.&quot;,
+                    &quot;lua_type&quot;: &quot;any&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 103,
+                &quot;path&quot;: &quot;lib/basecomponent/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;Constructing&quot;,
+            &quot;desc&quot;: &quot;&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;component&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;any&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;ignore&quot;: true,
+            &quot;source&quot;: {
+                &quot;line&quot;: 143,
+                &quot;path&quot;: &quot;lib/basecomponent/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;Stopped&quot;,
+            &quot;desc&quot;: &quot;&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;component&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;any&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;ignore&quot;: true,
+            &quot;source&quot;: {
+                &quot;line&quot;: 159,
+                &quot;path&quot;: &quot;lib/basecomponent/src/init.luau&quot;
             }
         },
         {
@@ -690,10 +690,10 @@ Check their documentation for more information."><link data-rh="true" rel="canon
     &quot;desc&quot;: &quot;A Component Extension which applies simple Janitor, Attribute, and Signal functionality to a component.\nAlso adds a way to check if a Component has been destroyed.\n\nExtends **ComponentJanitorUtil** and **ComponentAttributeUtil**.\nCheck their documentation for more information.&quot;,
     &quot;source&quot;: {
         &quot;line&quot;: 14,
-        &quot;path&quot;: &quot;lib/basecomponent/src/init.lua&quot;
+        &quot;path&quot;: &quot;lib/basecomponent/src/init.luau&quot;
     }
 }</pre></details></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#types" class="table-of-contents__link toc-highlight">Types</a></li><li><a href="#properties" class="table-of-contents__link toc-highlight">Properties</a></li><li><a href="#functions" class="table-of-contents__link toc-highlight">Functions</a><ul><li><a href="#AddPromise" class="table-of-contents__link toc-highlight">:AddPromise</a></li><li><a href="#AddTask" class="table-of-contents__link toc-highlight">:AddTask</a></li><li><a href="#AttributeChanged" class="table-of-contents__link toc-highlight">:AttributeChanged</a></li><li><a href="#DefaultAttribute" class="table-of-contents__link toc-highlight">:DefaultAttribute</a></li><li><a href="#FireSignal" class="table-of-contents__link toc-highlight">:FireSignal</a></li><li><a href="#GetAttribute" class="table-of-contents__link toc-highlight">:GetAttribute</a></li><li><a href="#GetScope" class="table-of-contents__link toc-highlight">:GetScope</a></li><li><a href="#GetSignal" class="table-of-contents__link toc-highlight">:GetSignal</a></li><li><a href="#GetTask" class="table-of-contents__link toc-highlight">:GetTask</a></li><li><a href="#IncrementAttribute" class="table-of-contents__link toc-highlight">:IncrementAttribute</a></li><li><a href="#ObserveAttribute" class="table-of-contents__link toc-highlight">:ObserveAttribute</a></li><li><a href="#ObserveProperty" class="table-of-contents__link toc-highlight">:ObserveProperty</a></li><li><a href="#OutAttribute" class="table-of-contents__link toc-highlight">:OutAttribute</a></li><li><a href="#OutProperty" class="table-of-contents__link toc-highlight">:OutProperty</a></li><li><a href="#PropertyChanged" class="table-of-contents__link toc-highlight">:PropertyChanged</a></li><li><a href="#RegisterSignal" class="table-of-contents__link toc-highlight">:RegisterSignal</a></li><li><a href="#RemoveTask" class="table-of-contents__link toc-highlight">:RemoveTask</a></li><li><a href="#RemoveTaskNoClean" class="table-of-contents__link toc-highlight">:RemoveTaskNoClean</a></li><li><a href="#SetAttribute" class="table-of-contents__link toc-highlight">:SetAttribute</a></li><li><a href="#UpdateAttribute" class="table-of-contents__link toc-highlight">:UpdateAttribute</a></li></ul></li></ul></div></div></div></div></main></div></div><footer class="footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2024 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
-<script src="/ModulesOnRails/assets/js/runtime~main.5c7d52c5.js"></script>
-<script src="/ModulesOnRails/assets/js/main.b2e794ed.js"></script>
+<script src="/ModulesOnRails/assets/js/runtime~main.74a22da7.js"></script>
+<script src="/ModulesOnRails/assets/js/main.df99f350.js"></script>
 </body>
 </html>
