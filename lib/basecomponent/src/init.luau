@@ -40,6 +40,7 @@ export type Extension = {
 
     RegisterSignal: (self: Extension, SignalName: string) -> Signal;
 	GetSignal: (self: Extension, SignalName: string) -> Signal;
+    FireSignal: (self: Extension, SignalName: string, ...any) -> ();
 
     IsDestroyed: (self: Extension) -> boolean;
 

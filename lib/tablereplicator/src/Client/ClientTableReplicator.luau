@@ -1,3 +1,4 @@
+local RunService = game:GetService("RunService")
 -- Authors: Logan Hunt (Raildex)
 -- January 04, 2024
 --[=[
@@ -463,7 +464,7 @@ end
 do -- This is a reminder for new users to call ClientTableReplicator.requestServerData()
     local WARN_DELAY = 10
     task.delay(WARN_DELAY, function()
-        if not bootProm then
+        if not bootProm and RunService:IsRunning() then
             warn(`ClientTableReplicator has not yet been booted. Please remember to call ClientTableReplicator.requestServerData() in your code.`)
         end
     end)
