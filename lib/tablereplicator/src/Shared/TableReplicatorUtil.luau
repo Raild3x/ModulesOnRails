@@ -25,8 +25,8 @@ export type Tags = {[string]: any}
     @type ClassToken {Name: string}
     A unique symbol that identifies the STR Class.
     This is used to identify the STR Class when it is replicated to the client.
-    Use `.newClassToken` to generate an object of this type. Do NOT manually create
-    the table.
+    Use `.newClassToken` to generate an object of this type. ***Do NOT manually create
+    the table.***
 ]=]
 export type ClassToken = {Name: string} | string
 

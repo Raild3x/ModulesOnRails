@@ -1,22 +1,53 @@
 -- Authors: Logan Hunt (Raildex)
 -- January 05, 2024
+
 --[=[
     @class TableReplicator
 
-    The entry point file for the TableReplicator System. See ServerTableReplicator for more info on usage.
+    TableReplicator is a library that enables the replication of tables between the server and client.
+
+    Basic usage:
+    ```lua
+    -- SERVER
+    local TableManager = require(Packages.TableManager)
+    local TableReplicator = require(Packages.TableReplicator).Server
+
+    local manager = TableManager.new({
+        Age = 18,
+    })
+
+    local replicator = TableReplicator.new({
+        ClassToken = "PlayerData",
+        TableManager = manager,
+        ReplicationTargets = "All",
+    })
+    ```
+    ```lua
+    -- CLIENT
+    local TableReplicator = require(Packages.TableReplicator).Client
+
+    TableReplicator.forEach("PlayerData", function(replicator)
+        local manager = replicator:GetTableManager()
+
+        manager:Observe("Age", function(age)
+            print("Age changed to:", age)
+        end)
+    end)
+
+    TableReplicator.requestServerData()
+    ```
 ]=]
 
 --// Services //--
 local RunService = game:GetService("RunService")
 
+export type TableReplicatorSingleton = typeof(require(script.Client.TableReplicatorSingleton))
 export type ClientTableReplicator = typeof(require(script.Client.ClientTableReplicator))
 export type ServerTableReplicator = typeof(require(script.Server.ServerTableReplicator))
 export type TableReplicator = ClientTableReplicator | ServerTableReplicator
-export type TableReplicatorSingleton = typeof(require(script.Client.TableReplicatorSingleton))
 
 local CTR : ClientTableReplicator = nil :: any
 local STR : ServerTableReplicator = nil :: any
-
 
 local TableReplicator = {}
 TableReplicator.Current = nil :: TableReplicator
@@ -35,7 +66,6 @@ TableReplicator.Client = CTR
 ]=]
 TableReplicator.Server = STR
 
--- Set the current TableReplicator to the correct one
 if RunService:IsClient() then
     TableReplicator.Client = require(script.Client.ClientTableReplicator)
     TableReplicator.Current = TableReplicator.Client
@@ -44,16 +74,8 @@ else
     TableReplicator.Current = TableReplicator.Server
 end
 
--- initialize the metatable redirection
 setmetatable(TableReplicator, {
-    __index = function(t, key)
-        if key == "Client" or key == "Server" then
-            error("TableReplicator." .. key .. " is not availible in RunContext: " .. if RunService:IsClient() then "Server" else "Client")
-        end
-        return t.Current[key]
-    end,
+    __index = TableReplicator.Current
 })
-
-table.freeze(TableReplicator)
 
 return TableReplicator
