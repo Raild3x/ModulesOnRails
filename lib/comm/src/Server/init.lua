@@ -1,10 +1,7 @@
-local Comm = script.Parent
-
-local Util = require(Comm.Util)
-local RemoteSignal = require(script.RemoteSignal)
 local RemoteProperty = require(script.RemoteProperty)
-local PCM = require(script.ServerPromiseConversionMiddleware)
-local Types = require(Comm.Types)
+local RemoteSignal = require(script.RemoteSignal)
+local Types = require(script.Parent.Types)
+local Util = require(script.Parent.Util)
 
 local Server = {}
 
@@ -48,9 +45,6 @@ function Server.BindFunction(
 	local folder = Util.GetCommSubFolder(parent, "RF"):Expect("Failed to get Comm RF folder")
 	local rf = Instance.new("RemoteFunction")
 	rf.Name = name
-
-	local outboundMiddleware = outboundMiddleware or {}
-	table.insert(outboundMiddleware, 1, PCM)
 	local hasInbound = type(inboundMiddleware) == "table" and #inboundMiddleware > 0
 	local hasOutbound = type(outboundMiddleware) == "table" and #outboundMiddleware > 0
 	local function ProcessOutbound(player, ...)
@@ -120,12 +114,13 @@ end
 function Server.CreateSignal(
 	parent: Instance,
 	name: string,
+	reliable: boolean?,
 	inboundMiddleware: Types.ServerMiddleware?,
 	outboundMiddleware: Types.ServerMiddleware?
 )
 	assert(Util.IsServer, "CreateSignal must be called from the server")
 	local folder = Util.GetCommSubFolder(parent, "RE"):Expect("Failed to get Comm RE folder")
-	local rs = RemoteSignal.new(folder, name, inboundMiddleware, outboundMiddleware)
+	local rs = RemoteSignal.new(folder, name, reliable, inboundMiddleware, outboundMiddleware)
 	return rs
 end
 
