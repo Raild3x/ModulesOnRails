@@ -93,7 +93,7 @@ ClientTableReplicator.fromTemplate = TableReplicatorSingleton.new
 --[=[
     @private
     @unreleased
-    Binds the given table to a ClientTableReplicator ClassName.
+    Binds the given table to a ClientTableReplicator ClassName. This method is unfinished ans should not be used.
 ]=]
 function ClientTableReplicator.bind(tblOrStr: table | string): table
     assert(not IsBooted(), "ClientTableReplicator has already booted.")
@@ -178,11 +178,17 @@ end
 
 --[=[
     Listens for a new ClientTableReplicator of the given ClassName.
+
+    :::caution Listening after server data loaded
+    If you call this method after the ClientTableReplicator has already requested and loaded the server data,
+    then this listener may miss the creation of some replicators. It is recommended to call this method before
+    calling `.requestServerData()` or use `.forEach()` instead.
+    :::
 ]=]
 function ClientTableReplicator.listenForNewReplicator(classTokenName: string, fn: (replicator: ClientTableReplicator) -> ()): (() -> ())
-    if bootProm then
-        warn(`.listenForNewReplicator("{classTokenName}") was called after the ClientTableReplicator has already booted.`)
-    end
+    -- if bootProm then
+    --     warn(`.listenForNewReplicator("{classTokenName}") was called after the ClientTableReplicator has already booted.`)
+    -- end
     return BaseTableReplicator.listenForNewReplicator(classTokenName, fn)
 end
 
