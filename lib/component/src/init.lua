@@ -743,6 +743,15 @@ end
 
 --[=[
 	@tag Component Class
+
+	Gets the current valid ancestors of a component class.
+]=]
+function Component:GetAncestors(): {Instance}
+	return table.clone(self[KEY_ANCESTORS])
+end
+
+--[=[
+	@tag Component Class
 	`Construct` is called before the component is started, and should be used
 	to construct the component instance.
 
