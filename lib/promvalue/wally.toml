@@ -1,0 +1,19 @@
+[package]
+name = "raild3x/promvalue"
+description = "An object class that allows for delayed setting"
+authors = ["Logan Hunt (Raildex)"]
+version = "0.1.0"
+license = "MIT"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+
+[custom]
+# The properly capitalized and spaced name of the library
+formattedName = "PromValue"
+# The intro page for the documentation
+docsLink = "PromValue"
+
+[dependencies]
+Symbol = "sleitnick/symbol@^2.0.1"
+Promise = "evaera/promise@^4.0.0"
+BaseObject = "raild3x/baseobject@^0"
