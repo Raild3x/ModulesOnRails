@@ -12,8 +12,8 @@ Also adds a way to check if a Component has been destroyed.
 
 Extends **ComponentJanitorUtil** and **ComponentAttributeUtil**.
 Check their documentation for more information."><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/BaseComponent"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/BaseComponent" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/BaseComponent" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.1839e2d4.css">
-<link rel="preload" href="/ModulesOnRails/assets/js/runtime~main.bc785fc9.js" as="script">
-<link rel="preload" href="/ModulesOnRails/assets/js/main.d2031379.js" as="script">
+<link rel="preload" href="/ModulesOnRails/assets/js/runtime~main.0ce84c16.js" as="script">
+<link rel="preload" href="/ModulesOnRails/assets/js/main.d0091262.js" as="script">
 </head>
 <body class="navigation-with-keyboard">
 <script>!function(){function e(e){document.documentElement.setAttribute("data-theme",e)}var t=function(){var e=null;try{e=localStorage.getItem("theme")}catch(e){}return e}();null!==t?e(t):window.matchMedia("(prefers-color-scheme: dark)").matches?e("dark"):(window.matchMedia("(prefers-color-scheme: light)").matches,e("light"))}()</script><div id="__docusaurus">
@@ -94,6 +94,28 @@ Check their documentation for more information."><link data-rh="true" rel="canon
   Returns a scope associated with the lifecycle of the component.
   Inherits methods from RailUtil.Fusion and Fusion.
 </p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="AddPromise"><code style="text-decoration:none">AddPromise</code><a href="#AddPromise" class="hash-link" aria-label="Direct link to AddPromise" title="Direct link to AddPromise">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentJanitorUtil.luau#L50"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">AddPromise</code><code>(</code><code>promise<!-- -->: </code><code class="blue_P4bS">Promise</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">T</code><code class="op_lSLc">&gt;</code><code>) → </code><code class="blue_P4bS">Promise</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">T</code><code class="op_lSLc">&gt;</code></div><div>
+<p>Adds a promise to the component's janitor. Returns the same promise that was given.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="AddTask"><code style="text-decoration:none">AddTask</code><a href="#AddTask" class="hash-link" aria-label="Direct link to AddTask" title="Direct link to AddTask">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentJanitorUtil.luau#L65"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">AddTask</code><code>(</code><div class="inset_uKQm"><div><code>task<!-- -->: </code><code class="blue_P4bS">T</code><code>,</code></div><div><code>cleanupMethod<!-- -->: </code><code class="purple_ieR2">(</code><code class="blue_P4bS">string</code><code class="op_lSLc"> | </code><code class="blue_P4bS">true</code><code class="purple_ieR2">)</code><code class="blue_P4bS">?</code><code>,</code></div><div><code>index<!-- -->: </code><code class="blue_P4bS">any?</code></div></div><code>) → </code><code class="blue_P4bS">T</code><span class="inlineDescription_G7Er">-- <span>
+<p>The same task that was given</p>
+</span></span></div><div>
+<p>Adds a task to the component's janitor.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="RemoveTaskNoClean"><code style="text-decoration:none">RemoveTaskNoClean</code><a href="#RemoveTaskNoClean" class="hash-link" aria-label="Direct link to RemoveTaskNoClean" title="Direct link to RemoveTaskNoClean">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentJanitorUtil.luau#L77"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">RemoveTaskNoClean</code><code>(</code><div class="inset_uKQm"><div><code>index<!-- -->: </code><code class="blue_P4bS">any</code><span class="inlineDescription_G7Er">-- <span>
+<p>The index of the task to remove.</p>
+</span></span></div></div><code>) → </code><code>(</code><code>)</code></div><div>
+<p>Removes a task from the component's janitor without cleaning it.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="RemoveTask"><code style="text-decoration:none">RemoveTask</code><a href="#RemoveTask" class="hash-link" aria-label="Direct link to RemoveTask" title="Direct link to RemoveTask">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentJanitorUtil.luau#L90"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">RemoveTask</code><code>(</code><div class="inset_uKQm"><div><code>index<!-- -->: </code><code class="blue_P4bS">any</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
+<p>The id of the task to remove.</p>
+</span></span></div><div><code>dontClean<!-- -->: </code><code class="blue_P4bS">boolean?</code><span class="inlineDescription_G7Er">-- <span>
+<p>Optional flag to not clean the task.</p>
+</span></span></div></div><code>) → </code><code>(</code><code>)</code></div><div>
+<p>Removes a task from the component's janitor.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetTask"><code style="text-decoration:none">GetTask</code><a href="#GetTask" class="hash-link" aria-label="Direct link to GetTask" title="Direct link to GetTask">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentJanitorUtil.luau#L106"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">GetTask</code><code>(</code><div class="inset_uKQm"><div><code>index<!-- -->: </code><code class="blue_P4bS">any</code><span class="inlineDescription_G7Er">-- <span>
+<p>The id of the task to get.</p>
+</span></span></div></div><code>) → </code><code class="blue_P4bS">any</code><span class="inlineDescription_G7Er">-- <span>
+<p>The task that was retrieved.</p>
+</span></span></div><div>
+<p>Gets a task from the janitor.</p>
 </div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="ObserveProperty"><code style="text-decoration:none">ObserveProperty</code><a href="#ObserveProperty" class="hash-link" aria-label="Direct link to ObserveProperty" title="Direct link to ObserveProperty">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentPropertyUtil.luau#L53"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">ObserveProperty</code><code>(</code><div class="inset_uKQm"><div><code>propertyName<!-- -->: </code><code class="blue_P4bS">string</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
 <p>The name of the property to observe</p>
 </span></span></div><div><code>callback<!-- -->: </code><code class="purple_ieR2">(</code><code class="green_DgR4">(</code><code>newValue<!-- -->: </code><code class="blue_P4bS">any</code><code class="green_DgR4">)</code><code class="green_DgR4"> → </code><code class="green_DgR4">(</code><code class="green_DgR4">)</code><code class="purple_ieR2">)</code><span class="inlineDescription_G7Er">-- <span>
@@ -139,28 +161,6 @@ Check their documentation for more information."><link data-rh="true" rel="canon
 <p>The arguments to pass to the signal.</p>
 </span></span></div></div><code>) → </code><code>(</code><code>)</code></div><div>
 <p>Fires a signal from the component.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="AddPromise"><code style="text-decoration:none">AddPromise</code><a href="#AddPromise" class="hash-link" aria-label="Direct link to AddPromise" title="Direct link to AddPromise">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentJanitorUtil.luau#L50"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">AddPromise</code><code>(</code><code>promise<!-- -->: </code><code class="blue_P4bS">Promise</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">T</code><code class="op_lSLc">&gt;</code><code>) → </code><code class="blue_P4bS">Promise</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">T</code><code class="op_lSLc">&gt;</code></div><div>
-<p>Adds a promise to the component's janitor. Returns the same promise that was given.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="AddTask"><code style="text-decoration:none">AddTask</code><a href="#AddTask" class="hash-link" aria-label="Direct link to AddTask" title="Direct link to AddTask">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentJanitorUtil.luau#L65"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">AddTask</code><code>(</code><div class="inset_uKQm"><div><code>task<!-- -->: </code><code class="blue_P4bS">T</code><code>,</code></div><div><code>cleanupMethod<!-- -->: </code><code class="purple_ieR2">(</code><code class="blue_P4bS">string</code><code class="op_lSLc"> | </code><code class="blue_P4bS">true</code><code class="purple_ieR2">)</code><code class="blue_P4bS">?</code><code>,</code></div><div><code>index<!-- -->: </code><code class="blue_P4bS">any?</code></div></div><code>) → </code><code class="blue_P4bS">T</code><span class="inlineDescription_G7Er">-- <span>
-<p>The same task that was given</p>
-</span></span></div><div>
-<p>Adds a task to the component's janitor.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="RemoveTaskNoClean"><code style="text-decoration:none">RemoveTaskNoClean</code><a href="#RemoveTaskNoClean" class="hash-link" aria-label="Direct link to RemoveTaskNoClean" title="Direct link to RemoveTaskNoClean">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentJanitorUtil.luau#L77"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">RemoveTaskNoClean</code><code>(</code><div class="inset_uKQm"><div><code>index<!-- -->: </code><code class="blue_P4bS">any</code><span class="inlineDescription_G7Er">-- <span>
-<p>The index of the task to remove.</p>
-</span></span></div></div><code>) → </code><code>(</code><code>)</code></div><div>
-<p>Removes a task from the component's janitor without cleaning it.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="RemoveTask"><code style="text-decoration:none">RemoveTask</code><a href="#RemoveTask" class="hash-link" aria-label="Direct link to RemoveTask" title="Direct link to RemoveTask">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentJanitorUtil.luau#L90"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">RemoveTask</code><code>(</code><div class="inset_uKQm"><div><code>index<!-- -->: </code><code class="blue_P4bS">any</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
-<p>The id of the task to remove.</p>
-</span></span></div><div><code>dontClean<!-- -->: </code><code class="blue_P4bS">boolean?</code><span class="inlineDescription_G7Er">-- <span>
-<p>Optional flag to not clean the task.</p>
-</span></span></div></div><code>) → </code><code>(</code><code>)</code></div><div>
-<p>Removes a task from the component's janitor.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetTask"><code style="text-decoration:none">GetTask</code><a href="#GetTask" class="hash-link" aria-label="Direct link to GetTask" title="Direct link to GetTask">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentJanitorUtil.luau#L106"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">GetTask</code><code>(</code><div class="inset_uKQm"><div><code>index<!-- -->: </code><code class="blue_P4bS">any</code><span class="inlineDescription_G7Er">-- <span>
-<p>The id of the task to get.</p>
-</span></span></div></div><code>) → </code><code class="blue_P4bS">any</code><span class="inlineDescription_G7Er">-- <span>
-<p>The task that was retrieved.</p>
-</span></span></div><div>
-<p>Gets a task from the janitor.</p>
 </div></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
     &quot;functions&quot;: [
         {
@@ -386,6 +386,121 @@ Check their documentation for more information."><link data-rh="true" rel="canon
             }
         },
         {
+            &quot;name&quot;: &quot;AddPromise&quot;,
+            &quot;desc&quot;: &quot;Adds a promise to the component&#x27;s janitor. Returns the same promise that was given.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;promise&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Promise&lt;T&gt;&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Promise&lt;T&gt;&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 50,
+                &quot;path&quot;: &quot;lib/basecomponent/src/ComponentJanitorUtil.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;AddTask&quot;,
+            &quot;desc&quot;: &quot;Adds a task to the component&#x27;s janitor.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;task&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;T&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;cleanupMethod&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;(string | true)?&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;index&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;any?&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;The same task that was given&quot;,
+                    &quot;lua_type&quot;: &quot;T&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 65,
+                &quot;path&quot;: &quot;lib/basecomponent/src/ComponentJanitorUtil.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;RemoveTaskNoClean&quot;,
+            &quot;desc&quot;: &quot;Removes a task from the component&#x27;s janitor without cleaning it.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;index&quot;,
+                    &quot;desc&quot;: &quot;The index of the task to remove.&quot;,
+                    &quot;lua_type&quot;: &quot;any&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 77,
+                &quot;path&quot;: &quot;lib/basecomponent/src/ComponentJanitorUtil.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;RemoveTask&quot;,
+            &quot;desc&quot;: &quot;Removes a task from the component&#x27;s janitor.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;index&quot;,
+                    &quot;desc&quot;: &quot;The id of the task to remove.&quot;,
+                    &quot;lua_type&quot;: &quot;any&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;dontClean&quot;,
+                    &quot;desc&quot;: &quot;Optional flag to not clean the task.&quot;,
+                    &quot;lua_type&quot;: &quot;boolean?&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 90,
+                &quot;path&quot;: &quot;lib/basecomponent/src/ComponentJanitorUtil.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetTask&quot;,
+            &quot;desc&quot;: &quot;Gets a task from the janitor.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;index&quot;,
+                    &quot;desc&quot;: &quot;The id of the task to get.&quot;,
+                    &quot;lua_type&quot;: &quot;any&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;The task that was retrieved.&quot;,
+                    &quot;lua_type&quot;: &quot;any&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 106,
+                &quot;path&quot;: &quot;lib/basecomponent/src/ComponentJanitorUtil.luau&quot;
+            }
+        },
+        {
             &quot;name&quot;: &quot;ObserveProperty&quot;,
             &quot;desc&quot;: &quot;Watches for when the property changes and calls the callback. Also calls the callback initially with the current value&quot;,
             &quot;params&quot;: [
@@ -567,121 +682,6 @@ Check their documentation for more information."><link data-rh="true" rel="canon
                 &quot;line&quot;: 160,
                 &quot;path&quot;: &quot;lib/basecomponent/src/init.luau&quot;
             }
-        },
-        {
-            &quot;name&quot;: &quot;AddPromise&quot;,
-            &quot;desc&quot;: &quot;Adds a promise to the component&#x27;s janitor. Returns the same promise that was given.&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;promise&quot;,
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;Promise&lt;T&gt;&quot;
-                }
-            ],
-            &quot;returns&quot;: [
-                {
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;Promise&lt;T&gt;&quot;
-                }
-            ],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 50,
-                &quot;path&quot;: &quot;lib/basecomponent/src/ComponentJanitorUtil.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;AddTask&quot;,
-            &quot;desc&quot;: &quot;Adds a task to the component&#x27;s janitor.&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;task&quot;,
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;T&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;cleanupMethod&quot;,
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;(string | true)?&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;index&quot;,
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;any?&quot;
-                }
-            ],
-            &quot;returns&quot;: [
-                {
-                    &quot;desc&quot;: &quot;The same task that was given&quot;,
-                    &quot;lua_type&quot;: &quot;T&quot;
-                }
-            ],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 65,
-                &quot;path&quot;: &quot;lib/basecomponent/src/ComponentJanitorUtil.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;RemoveTaskNoClean&quot;,
-            &quot;desc&quot;: &quot;Removes a task from the component&#x27;s janitor without cleaning it.&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;index&quot;,
-                    &quot;desc&quot;: &quot;The index of the task to remove.&quot;,
-                    &quot;lua_type&quot;: &quot;any&quot;
-                }
-            ],
-            &quot;returns&quot;: [],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 77,
-                &quot;path&quot;: &quot;lib/basecomponent/src/ComponentJanitorUtil.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;RemoveTask&quot;,
-            &quot;desc&quot;: &quot;Removes a task from the component&#x27;s janitor.&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;index&quot;,
-                    &quot;desc&quot;: &quot;The id of the task to remove.&quot;,
-                    &quot;lua_type&quot;: &quot;any&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;dontClean&quot;,
-                    &quot;desc&quot;: &quot;Optional flag to not clean the task.&quot;,
-                    &quot;lua_type&quot;: &quot;boolean?&quot;
-                }
-            ],
-            &quot;returns&quot;: [],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 90,
-                &quot;path&quot;: &quot;lib/basecomponent/src/ComponentJanitorUtil.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;GetTask&quot;,
-            &quot;desc&quot;: &quot;Gets a task from the janitor.&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;index&quot;,
-                    &quot;desc&quot;: &quot;The id of the task to get.&quot;,
-                    &quot;lua_type&quot;: &quot;any&quot;
-                }
-            ],
-            &quot;returns&quot;: [
-                {
-                    &quot;desc&quot;: &quot;The task that was retrieved.&quot;,
-                    &quot;lua_type&quot;: &quot;any&quot;
-                }
-            ],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 106,
-                &quot;path&quot;: &quot;lib/basecomponent/src/ComponentJanitorUtil.luau&quot;
-            }
         }
     ],
     &quot;properties&quot;: [],
@@ -693,7 +693,7 @@ Check their documentation for more information."><link data-rh="true" rel="canon
         &quot;path&quot;: &quot;lib/basecomponent/src/init.luau&quot;
     }
 }</pre></details></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#types" class="table-of-contents__link toc-highlight">Types</a></li><li><a href="#properties" class="table-of-contents__link toc-highlight">Properties</a></li><li><a href="#functions" class="table-of-contents__link toc-highlight">Functions</a><ul><li><a href="#AddPromise" class="table-of-contents__link toc-highlight">:AddPromise</a></li><li><a href="#AddTask" class="table-of-contents__link toc-highlight">:AddTask</a></li><li><a href="#AttributeChanged" class="table-of-contents__link toc-highlight">:AttributeChanged</a></li><li><a href="#DefaultAttribute" class="table-of-contents__link toc-highlight">:DefaultAttribute</a></li><li><a href="#FireSignal" class="table-of-contents__link toc-highlight">:FireSignal</a></li><li><a href="#GetAttribute" class="table-of-contents__link toc-highlight">:GetAttribute</a></li><li><a href="#GetScope" class="table-of-contents__link toc-highlight">:GetScope</a></li><li><a href="#GetSignal" class="table-of-contents__link toc-highlight">:GetSignal</a></li><li><a href="#GetTask" class="table-of-contents__link toc-highlight">:GetTask</a></li><li><a href="#IncrementAttribute" class="table-of-contents__link toc-highlight">:IncrementAttribute</a></li><li><a href="#ObserveAttribute" class="table-of-contents__link toc-highlight">:ObserveAttribute</a></li><li><a href="#ObserveProperty" class="table-of-contents__link toc-highlight">:ObserveProperty</a></li><li><a href="#OutAttribute" class="table-of-contents__link toc-highlight">:OutAttribute</a></li><li><a href="#OutProperty" class="table-of-contents__link toc-highlight">:OutProperty</a></li><li><a href="#PropertyChanged" class="table-of-contents__link toc-highlight">:PropertyChanged</a></li><li><a href="#RegisterSignal" class="table-of-contents__link toc-highlight">:RegisterSignal</a></li><li><a href="#RemoveTask" class="table-of-contents__link toc-highlight">:RemoveTask</a></li><li><a href="#RemoveTaskNoClean" class="table-of-contents__link toc-highlight">:RemoveTaskNoClean</a></li><li><a href="#SetAttribute" class="table-of-contents__link toc-highlight">:SetAttribute</a></li><li><a href="#UpdateAttribute" class="table-of-contents__link toc-highlight">:UpdateAttribute</a></li></ul></li></ul></div></div></div></div></main></div></div><footer class="footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2024 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
-<script src="/ModulesOnRails/assets/js/runtime~main.bc785fc9.js"></script>
-<script src="/ModulesOnRails/assets/js/main.d2031379.js"></script>
+<script src="/ModulesOnRails/assets/js/runtime~main.0ce84c16.js"></script>
+<script src="/ModulesOnRails/assets/js/main.d0091262.js"></script>
 </body>
 </html>
