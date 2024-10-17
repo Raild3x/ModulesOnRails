@@ -1,12 +1,8 @@
-local Comm = script.Parent
-local Packages = Comm.Parent
-
-local Util = require(Comm.Util)
-local Types = require(Comm.Types)
-local Promise = require(Packages.Promise)
+local Util = require(script.Parent.Util)
+local Types = require(script.Parent.Types)
+local Promise = require(script.Parent.Parent.Promise)
 local ClientRemoteSignal = require(script.ClientRemoteSignal)
 local ClientRemoteProperty = require(script.ClientRemoteProperty)
-local PCM = require(script.ClientPromiseConversionMiddleware)
 
 local Client = {}
 
@@ -21,14 +17,9 @@ function Client.GetFunction(
 	local folder = Util.GetCommSubFolder(parent, "RF"):Expect("Failed to get Comm RF folder")
 	local rf = folder:WaitForChild(name, Util.WaitForChildTimeout)
 	assert(rf ~= nil, "Failed to find RemoteFunction: " .. name)
-
-	inboundMiddleware = inboundMiddleware or {}
-	assert(inboundMiddleware, "Missing inboundMiddleware")
-	table.insert(inboundMiddleware, PCM)
 	local hasInbound = type(inboundMiddleware) == "table" and #inboundMiddleware > 0
 	local hasOutbound = type(outboundMiddleware) == "table" and #outboundMiddleware > 0
 	local function ProcessOutbound(args)
-		assert(outboundMiddleware, "Missing outboundMiddleware")
 		for _, middlewareFunc in ipairs(outboundMiddleware) do
 			local middlewareResult = table.pack(middlewareFunc(args))
 			if not middlewareResult[1] then
@@ -54,7 +45,7 @@ function Client.GetFunction(
 						for _, middlewareFunc in ipairs(inboundMiddleware) do
 							local middlewareResult = table.pack(middlewareFunc(res))
 							if not middlewareResult[1] then
-								return resolve(table.unpack(middlewareResult, 2, middlewareResult.n))
+								return table.unpack(middlewareResult, 2, middlewareResult.n)
 							end
 							res.n = #res
 						end

@@ -53,6 +53,7 @@ local Signal = require(Packages.Signal)
 local Symbol = require(Packages.Symbol)
 local Comm = require(Packages.Comm).ClientComm
 local ClientRemoteProxy = require(script.Parent.ClientRemoteProxy)
+local ClientPromiseConversionMiddleware = require(script.Parent.ClientPromiseConversionMiddleware)
 
 --// Constants //--
 local NAME_KEY = Symbol("NAME")
@@ -83,6 +84,7 @@ local NewNetWireSignal = Signal.new() -- Signal for when a new wire is created
     @class NetWire
 ]=]
 local NetWire = {}
+NetWire.PromiseConversionMiddleware = ClientPromiseConversionMiddleware
 
 --[=[
     @within NetWire
@@ -92,7 +94,7 @@ local NetWire = {}
 ]=]
 
 --[=[
-    @within NetWire
+    @within ClientNetWire
     @client
 
     @param wireOrName ClientNetWire | string
@@ -116,7 +118,7 @@ end
 NetWire.promiseIndex = NetWire.indexReady
 
 --[=[
-    @within NetWire
+    @within ClientNetWire
     @client
 
     @param clientNetWire ClientNetWire | string
@@ -144,7 +146,7 @@ end
 NetWire.promiseWire = NetWire.onReady
 
 --[=[
-    @within NetWire
+    @within ClientNetWire
     @client
 
     @param clientNetWire ClientNetWire | string
@@ -163,7 +165,7 @@ function NetWire.isReady(clientNetWire: string | ClientNetWire): boolean
 end
 
 --[=[
-    @within NetWire
+    @within ClientNetWire
     @client
 
     @param clientNetWire ClientNetWire
@@ -184,6 +186,7 @@ end
 --[=[
     @within NetWire
     @client
+    @private
 
     @param wireName string
     @return ClientNetWire?
@@ -271,7 +274,11 @@ function ClientNetWire.new(nameSpace: string)
                     if not rf:IsA("RemoteFunction") then
                         return
                     end
-                    local f = newComm:GetFunction(rf.Name)
+
+                    local inboundMiddleware = {}
+                    table.insert(inboundMiddleware, 1, ClientPromiseConversionMiddleware)
+
+                    local f = newComm:GetFunction(rf.Name, inboundMiddleware)
                     local v = function(_self, ...)
                         return f(...)
                     end

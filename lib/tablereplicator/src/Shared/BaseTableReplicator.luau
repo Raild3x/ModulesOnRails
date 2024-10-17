@@ -203,17 +203,17 @@ end
     @tag Static
     promiseFirstReplicator is a special function that allows you to run a function on the first replicator to satisfy
     the given condition. If no replicator currently exists that satisfies the condition then it will wait for one to be created.
+    
+    @return Promise<BaseTableReplicator, TableManager?>
 
+    ```lua
+    BaseTableReplicator.promiseFirstReplicator("Test")
+    ```
     :::caution
     There are rare edge cases where if a Replicator is destroyed soon after it is created and you have deffered events,
     it will be destroyed before the ReplicatorCreated signal fires. In this case you can set allowDestroyedReplicators to true
     to allow destroyed replicators to be returned.
     :::
-
-    ```lua
-    BaseTableReplicator.promiseFirstReplicator("Test")
-    ```
-    @return Promise<BaseTableReplicator, TableManager?>
 ]=]
 function BaseTableReplicator.promiseFirstReplicator(condition: SearchCondition, allowDestroyedReplicators: boolean?): Promise
     local SatisfiesCondition = ReconcileCondition(condition)
@@ -262,7 +262,7 @@ end
     @tag Static
     Listens for new replicators that are created with the given class token.
 ]=]
-function BaseTableReplicator.listenForNewReplicator(classToken: CanBeArray<string | ClassToken>, fn: (replicator: BaseTableReplicator) -> ()): (() -> ())
+function BaseTableReplicator.onNew(classToken: CanBeArray<string | ClassToken>, fn: (replicator: BaseTableReplicator) -> ()): (() -> ())
     if typeof(classToken) == "string" or (classToken :: any).Name then
         classToken = {classToken}
     end
@@ -287,6 +287,7 @@ function BaseTableReplicator.listenForNewReplicator(classToken: CanBeArray<strin
         end
     end
 end
+BaseTableReplicator.listenForNewReplicator = BaseTableReplicator.onNew
 
 --[=[
     @private

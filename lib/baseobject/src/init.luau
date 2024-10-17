@@ -504,6 +504,14 @@ function BaseObject:GetSignal(signalName: string): Signal
 end
 
 --[=[
+	Connects a function to a signal with the given name. Creates the signal JIT.
+	Shorthand for `:GetSignal(signalName):Connect(func)`.
+]=]
+function BaseObject:ConnectSignal(signalName: string, func: (...any) -> ())
+	return self:GetSignal(signalName):Connect(func)
+end
+
+--[=[
 	Returns a signal that fires when the object is destroyed. Creates the signal JIT.
 	Kept for backwards compatibility.
 
