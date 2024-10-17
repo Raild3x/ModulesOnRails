@@ -6,6 +6,27 @@
     A class for managing a table such that you can listen to changes and modify values easily.
     TableManager is designed to provide robust listener functionality at the cost of some performance.
 
+    **EXAMPLE USAGE**
+    ```lua
+    local tbl = {
+        Coins = 0;
+        Inventory = {
+            "Sword";
+            "Shield";
+        };
+    }
+
+    local tblMngr = TableManager.new(tbl)
+
+    tblMngr:SetValue("Coins", 100)
+    tblMngr:IncrementValue("Coins", 55)
+    print(tblMngr:Get("Coins")) -- 155
+
+    tblMngr:ArrayInsert("Inventory", "Potion")
+    tblMngr:ArrayInsert("Inventory", 2, "Bow")
+    print(tblMngr:Get("Inventory")) -- {"Sword", "Bow", "Shield", "Potion"}
+    ```
+
     :::tip
     The TableManager has some methods to combine functionality for both values and arrays.
     It will redirect to the proper method depending on your given arguments.
@@ -314,28 +335,13 @@ TableManager.Enums = table.freeze {
     :::tip Call metamethod
     You can call the `TableManager` class to create a new instance of it.
     `TableManager()` is equivalent to `TableManager.new()`.
-    :::
-
-    
     ```lua
-    local tbl = {
+    local manager = TableManager {
         Coins = 0;
-        Inventory = {
-            "Sword";
-            "Shield";
-        };
+        Title = "Knight";
     }
-
-    local tblMngr = TableManager.new(tbl)
-
-    tblMngr:SetValue("Coins", 100)
-    tblMngr:IncrementValue("Coins", 55)
-    print(tblMngr:Get("Coins")) -- 155
-
-    tblMngr:ArrayInsert("Inventory", "Potion")
-    tblMngr:ArrayInsert("Inventory", 2, "Bow")
-    print(tblMngr:Get("Inventory")) -- {"Sword", "Bow", "Shield", "Potion"}
     ```
+    :::
 ]=]
 function TableManager.new(data: table?): TableManager
     data = data or {}
@@ -348,6 +354,7 @@ function TableManager.new(data: table?): TableManager
 
     local self = setmetatable(SuperClass.new(), TableManager)
 
+    self.Data = data
     self._Data = data
     self._TableStateStorage = {} :: {[string]: any}
 
@@ -378,6 +385,60 @@ end
 function TableManager:Destroy()
     managedTables[self._Data] = nil
     getmetatable(TableManager).Destroy(self)
+end
+
+--------------------------------------------------------------------------------
+    --// Combo Methods //--
+--------------------------------------------------------------------------------
+
+--[=[
+    Fetches the value at the given path.
+    Accepts a string path or an array path.
+    Accepts an optional secondary argument to fetch a value at an index in an array.
+    Aliases: `GetValue`
+
+    ```lua
+    local manager = TableManager.new({
+        Currency = {
+            Coins = 100;
+            Gems = 10;
+        };
+    })
+    
+    -- The following are all equivalent acceptable methods of fetching the value.
+    print(manager:Get("Currency.Coins")) -- 100
+    print(manager:Get({"Currency", "Coins"})) -- 100
+    print(manager:Get().Currency.Coins) -- 100
+    ```
+    :::note Getting the Root Table
+    Calling `:Get()` with no arguments, an empty string,
+    or an empty table will return the root table.
+    :::
+]=]
+function TableManager:Get(path: Path, idx: (number | string)?): any
+    --debug.profilebegin("TM:GetValue")
+    path = PathToArray(path or {})
+
+    local tblData = self._Data
+    for i = 1, #path do
+        local idx = (path :: {})[i]
+        if typeof(tblData) ~= "table" then
+            warn("Unable to reach end of path!", path, idx)
+            return nil
+        end
+        tblData = tblData[idx]
+    end
+
+    if idx then
+        if typeof(tblData) ~= "table" then
+            warn("Unable to reach end of path!", path, idx)
+            return nil
+        end
+        tblData = tblData[idx]
+    end
+
+    --debug.profileend()
+    return tblData
 end
 
 --------------------------------------------------------------------------------
@@ -833,58 +894,11 @@ end
     --// Getters //--
 --------------------------------------------------------------------------------
 
---[=[
-    Fetches the value at the given path.
-    Accepts a string path or an array path.
-    Accepts an optional secondary argument to fetch a value at an index in an array.
-    Aliases: `GetValue`
-
-    ```lua
-    local manager = TableManager.new({
-        Currency = {
-            Coins = 100;
-            Gems = 10;
-        };
-    })
-    
-    -- The following are all equivalent acceptable methods of fetching the value.
-    print(manager:Get("Currency.Coins")) -- 100
-    print(manager:Get({"Currency", "Coins"})) -- 100
-    print(manager:Get().Currency.Coins) -- 100
-    ```
-    :::note Getting the Root Table
-    Calling `:Get()` with no arguments, an empty string,
-    or an empty table will return the root table.
-    :::
-]=]
-function TableManager:Get(path: Path, idx: (number | string)?): any
-    --debug.profilebegin("TM:GetValue")
-    path = PathToArray(path or {})
-
-    local tblData = self._Data
-    for i = 1, #path do
-        local idx = (path :: {})[i]
-        if typeof(tblData) ~= "table" then
-            warn("Unable to reach end of path!", path, idx)
-            return nil
-        end
-        tblData = tblData[idx]
-    end
-
-    if idx then
-        if typeof(tblData) ~= "table" then
-            warn("Unable to reach end of path!", path, idx)
-            return nil
-        end
-        tblData = tblData[idx]
-    end
-
-    --debug.profileend()
-    return tblData
-end
 TableManager.GetValue = TableManager.Get
 
 --[=[
+    @unreleased
+    @private
     Returns a <a href="https://supersocial.github.io/orion/api/TableState">TableState</a> Object for the given path.
     :::warning
     This method is not feature complete and does not work for all edge cases and should be used with caution.
@@ -917,16 +931,6 @@ end
     Returns a Fusion State object that is bound to the value at the given path.
     This method is memoized so calling it repeatedly with the same path will
     return the same State object and quickly.
-    :::caution Deffered Signals
-    The value of the Fusion State object is updated via the ValueChanged listener
-    and thus may be deffered if your signals are deffered.
-    :::
-    :::caution Setting
-    Although this currently returns a Fusion Value object, it is not recommended to set the value
-    as this may be a Computed in the future. Setting the state will not actually change the value
-    in the TableManager.
-    :::
-
     ```lua
     local path = "MyPath.To.Value"
 
@@ -938,6 +942,19 @@ end
     task.wait() -- If your signals are deffered then the state will update on the next frame
     print(peek(state)) -- 200
     ```
+
+    :::caution Deffered Signals
+    The value of the Fusion State object is updated via the ValueChanged listener
+    and thus may be deffered if your signals are deffered.
+    :::
+    :::caution Setting
+    Although this currently returns a Fusion Value object, it is not recommended to set the value
+    as this may be a Computed in the future. Setting the state will not actually change the value
+    in the TableManager.
+    :::
+    :::info Version
+    This method uses Fusion 0.3.0 internally so it may not work with older versions.
+    :::
 ]=]
 function TableManager:ToFusionState(path: Path): FusionState<any>
     local pathArray = PathToArray(path)
@@ -985,8 +1002,6 @@ end
     be the last known non nil value. The binding call of the function is an exception and will give nil as the oldValue.
     This is done so that Observe can be used to execute instructions when a value is percieved as 'ready'.
     :::
-
-    
 
     @param path -- The path to the value to observe.
     @param fn -- The function to call when the value changes.
@@ -1042,7 +1057,7 @@ end
     manager:SetValue("Stats.Mana", 100) -- Mana changed to 100
     ```
 ]=]
-function TableManager:ListenToKeyChange(parentPath: Path?, fn: (keyChanged: any, newValue: any, oldValue: any) -> ())
+function TableManager:OnKeyChange(parentPath: Path?, fn: (keyChanged: any, newValue: any, oldValue: any) -> ())
     AssertPathIsValid(parentPath)
     AssertFnExists(fn)
     
@@ -1089,49 +1104,49 @@ function TableManager:ListenToKeyChange(parentPath: Path?, fn: (keyChanged: any,
         -- end
     end)
 end
+TableManager.ListenToKeyChange = TableManager.OnKeyChange
 
 --[=[
     Listens to when a new key is added (Changed from nil) to a table at a specified path and calls the function.
 ]=]
-function TableManager:ListenToKeyAdd(parentPath: Path?, fn: (newKey: any, newValue: any) -> ()): Connection
+function TableManager:OnKeyAdd(parentPath: Path?, fn: (newKey: any, newValue: any) -> ()): Connection
     return self:ListenToKeyChange(parentPath, function(key, newValue, oldValue)
         if oldValue == nil then
             fn(key, newValue)
         end
     end)
 end
-TableManager.ListenToKeyAdded = TableManager.ListenToKeyAdd
-TableManager.ListenToNewKey = TableManager.ListenToKeyAdd
+TableManager.ListenToKeyAdd = TableManager.OnKeyAdd
 
 --[=[
     Listens to when a key is removed (Set to nil) from a table at a specified path and calls the function.
 ]=]
-function TableManager:ListenToKeyRemove(parentPath: Path?, fn: (removedKey: any, lastValue: any) -> ()): Connection
+function TableManager:OnKeyRemove(parentPath: Path?, fn: (removedKey: any, lastValue: any) -> ()): Connection
     return self:ListenToKeyChange(parentPath, function(key, newValue, _)
         if newValue == nil then
             fn(key, newValue)
         end
     end)
 end
-TableManager.ListenToKeyRemoved = TableManager.ListenToKeyRemove
-TableManager.ListenToRemoveKey = TableManager.ListenToKeyRemove
+TableManager.ListenToKeyRemove = TableManager.OnKeyRemove
 
 --[=[
     Listens to a change at a specified path and calls the function when the value changes.
     This does NOT fire when the value is an array/dictionary and one of its children changes.
     ```lua
-    local connection = manager:ListenToValueChange("MyPath.To.Value", function(newValue, oldValue)
+    local connection = manager:OnValueChange("MyPath.To.Value", function(newValue, oldValue)
         print("Value changed from", oldValue, "to", newValue)
     end)
 
     connection() -- Disconnects the listener
     ```
 ]=]
-function TableManager:ListenToValueChange(path: Path, fn: ValueListenerFn): Connection
+function TableManager:OnValueChange(path: Path, fn: ValueListenerFn): Connection
     AssertPathIsValid(path)
     AssertFnExists(fn)
     return self:_AddToListeners(ListenerTypeEnum.ValueChanged, path, fn)
 end
+TableManager.ListenToValueChange = TableManager.OnValueChange
 
 --[=[
     Listens to when an index is set in an array at a specified path and calls the function.
@@ -1140,30 +1155,32 @@ end
     The array listeners do not fire from changes to parent or child values.
     :::
 ]=]
-function TableManager:ListenToArraySet(path: Path, fn: (changedIndex: number, newValue: any) -> ()): Connection
+function TableManager:OnArraySet(path: Path, fn: (changedIndex: number, newValue: any) -> ()): Connection
     AssertPathIsValid(path)
     AssertFnExists(fn)
     return self:_AddToListeners(ListenerTypeEnum.ArraySet, path, fn)
 end
+TableManager.ListenToArraySet = TableManager.OnArraySet
 
 --[=[
     Listens to when a value is inserted into an array at a specified path and calls the function when the value changes.
 ]=]
-function TableManager:ListenToArrayInsert(path: Path, fn: (changedIndex: number, newValue: any) -> ()): Connection
+function TableManager:OnArrayInsert(path: Path, fn: (changedIndex: number, newValue: any) -> ()): Connection
     AssertPathIsValid(path)
     AssertFnExists(fn)
     return self:_AddToListeners(ListenerTypeEnum.ArrayInsert, path, fn)
 end
-
+TableManager.ListenToArrayInsert = TableManager.OnArrayInsert
 
 --[=[
     Listens to when a value is removed from an array at a specified path and calls the function.
 ]=]
-function TableManager:ListenToArrayRemove(path: Path, fn: (oldIndex: number, oldValue: any) -> ()): Connection
+function TableManager:OnArrayRemove(path: Path, fn: (oldIndex: number, oldValue: any) -> ()): Connection
     AssertPathIsValid(path)
     AssertFnExists(fn)
     return self:_AddToListeners(ListenerTypeEnum.ArrayRemove, path, fn)
 end
+TableManager.ListenToArrayRemove = TableManager.ListenToArrayRemove
 
 
 -- function TableManager:GetValueChangedSignal(path: Path): Signal
