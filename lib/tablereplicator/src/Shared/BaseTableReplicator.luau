@@ -262,7 +262,7 @@ end
     @tag Static
     Listens for new replicators that are created with the given class token.
 ]=]
-function BaseTableReplicator.listenForNewReplicator(classToken: CanBeArray<string | ClassToken>, fn: (replicator: BaseTableReplicator) -> ()): (() -> ())
+function BaseTableReplicator.onNew(classToken: CanBeArray<string | ClassToken>, fn: (replicator: BaseTableReplicator) -> ()): (() -> ())
     if typeof(classToken) == "string" or (classToken :: any).Name then
         classToken = {classToken}
     end
@@ -287,6 +287,7 @@ function BaseTableReplicator.listenForNewReplicator(classToken: CanBeArray<strin
         end
     end
 end
+BaseTableReplicator.listenForNewReplicator = BaseTableReplicator.onNew
 
 --[=[
     @private

@@ -185,12 +185,13 @@ end
     calling `.requestServerData()` or use `.forEach()` instead.
     :::
 ]=]
-function ClientTableReplicator.listenForNewReplicator(classTokenName: string, fn: (replicator: ClientTableReplicator) -> ()): (() -> ())
+function ClientTableReplicator.onNew(classTokenName: string, fn: (replicator: ClientTableReplicator) -> ()): (() -> ())
     -- if bootProm then
     --     warn(`.listenForNewReplicator("{classTokenName}") was called after the ClientTableReplicator has already booted.`)
     -- end
-    return BaseTableReplicator.listenForNewReplicator(classTokenName, fn)
+    return BaseTableReplicator.onNew(classTokenName, fn)
 end
+ClientTableReplicator.listenForNewReplicator = ClientTableReplicator.onNew
 
 --------------------------------------------------------------------------------
     --// Private //--
