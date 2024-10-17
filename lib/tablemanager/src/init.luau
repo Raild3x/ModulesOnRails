@@ -1499,6 +1499,6 @@ function TableManager:_SetValue(path: Path, newValue: any, lastKey: (string)?)
 end
 
 
-export type TableManager = typeof(TableManager.new({}))
+export type TableManager = typeof(TableManager)
 
 return TableManager
