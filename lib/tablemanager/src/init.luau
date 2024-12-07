@@ -187,6 +187,72 @@ local function AssertFnExists(fn: (...any) -> ())
     assert(type(fn) == "function", "Function is required!")
 end
 
+-- a recursive function to check deep equality of a table. Stops if it detects a cyclic reference.
+local function deepEqual(tbl1, tbl2)
+    if type(tbl1) ~= "table" or type(tbl2) ~= "table" then
+        return tbl1 == tbl2
+    end
+
+    local visited = {}
+
+    local function deepEqualRecursive(tbl1, tbl2)
+        if visited[tbl1] or visited[tbl2] then
+            return true
+        end
+
+        visited[tbl1] = true
+        visited[tbl2] = true
+
+        for key, value in pairs(tbl1) do
+            if tbl2[key] ~= value then
+                return false
+            end
+        end
+
+        for key, value in pairs(tbl2) do
+            if tbl1[key] ~= value then
+                return false
+            end
+        end
+
+        for key, value in pairs(tbl1) do
+            if type(value) == "table" and not deepEqualRecursive(value, tbl2[key]) then
+                return false
+            end
+        end
+
+        return true
+    end
+
+    return deepEqualRecursive(tbl1, tbl2)
+end
+
+-- a function that makes a deep copy of a table and warns if it detects a cyclic reference.
+local function DeepCopy(tbl)
+    local visited = {}
+    local function DeepCopyRecursive(tbl)
+        if visited[tbl] then
+            warn("Cyclic reference detected in DeepCopy!")
+            return nil
+        end
+
+        visited[tbl] = true
+
+        local newTbl = {}
+        for key, value in pairs(tbl) do
+            if type(value) == "table" then
+                newTbl[key] = DeepCopyRecursive(value)
+            else
+                newTbl[key] = value
+            end
+        end
+
+        return newTbl
+    end
+
+    return DeepCopyRecursive(tbl)
+end
+
 --[[
     Ensures the given path is a parsable array.
 ]]
@@ -1041,7 +1107,13 @@ end
 
 
 --[=[
+    @unreleased
     Listens to a change at a specified path and calls the function when the value changes.
+
+    :::warning keys with table values
+    This method is not yet fully implemented and may not work as expected when listening to keys with table values or changing
+    data from parent table.
+    :::
 
     ```lua
     manager:Set("Stats", {
@@ -1049,7 +1121,7 @@ end
         Mana = 50;
     })
 
-    local connection = manager:ListenToKeyChange("Stats", function(key, newValue)
+    local connection = manager:OnKeyChange("Stats", function(key, newValue)
         print(`{key} changed to {newValue}`)
     end)
 
@@ -1057,56 +1129,71 @@ end
     manager:SetValue("Stats.Mana", 100) -- Mana changed to 100
     ```
 ]=]
-function TableManager:OnKeyChange(parentPath: Path?, fn: (keyChanged: any, newValue: any, oldValue: any) -> ())
+function TableManager:OnKeyChange(parentPath: Path?, fn: (keyChanged: any, newValue: any, oldValue: any, changeMetadata: ChangeMetadata?) -> ())
     AssertPathIsValid(parentPath)
     AssertFnExists(fn)
     
+    local pathArray = PathToArray(parentPath)
+
     local lastRecorded = self:Get(parentPath)
     if type(lastRecorded) ~= "table" then
+        warn("Attempting to listen to key changes on a non-table value! This may result in incorrect or unexpected behavior.\n"
+        .."Key Path:", PathToString(parentPath), "| Value:", lastRecorded, "\n", debug.traceback())
         lastRecorded = {}
     else
         lastRecorded = table.clone(lastRecorded)
     end
 
-    return self:_AddToListeners(ListenerTypeEnum.ValueChanged, parentPath, function(newTbl, _, _)
-        -- TODO: This should be optimized to only check the keys that may have changed.
+    return self:_AddToListeners(ListenerTypeEnum.ValueChanged, parentPath, function(_, _, metadata)
+
+        -- make a copy for comparison
+        local newTbl = self:Get(parentPath)
         if type(newTbl) ~= "table" then
             newTbl = {}
+        end
+
+        local isDescendantKey = (metadata.SourceDirection == DataChangeSourceEnum.ChildChanged) and (pathArray[#pathArray] == metadata.SourcePath[#pathArray])
+        local isChildKey = isDescendantKey and #metadata.SourcePath == #pathArray
+        
+        if isChildKey then
+            local keyThatChanged = metadata.SourcePath[#pathArray + 1]
+            fn(keyThatChanged, newTbl[keyThatChanged], lastRecorded[keyThatChanged], metadata)
         else
-            newTbl = table.clone(newTbl)
-        end
+            -- TODO: This should be optimized to only check the keys that may have changed.
+            -- TODO: This method is unfinished and may not work as expected. I still need to make it properly detect changes from parent tables
 
-        local diffs = {}
-        for key, newValue in pairs(newTbl) do
-            local oldValue = lastRecorded[key]
-            if oldValue ~= newValue or type(newValue) == "table" then
-                diffs[key] = {newValue, oldValue}
+            warn("TableManager:OnKeyChange is not fully implemented and may not work as expected.")
+            
+            -- print("Checking for diffs", newTbl, metadata, lastRecorded)
+            -- print("Key that was changed", metadata.SourcePath[#metadata.SourcePath])
+
+            local diffs = {}
+            for key, newValue in pairs(newTbl) do
+                local oldValue = lastRecorded[key]
+                if oldValue ~= newValue or (type(newValue) == "table" and not deepEqual(oldValue, newValue)) then
+                    diffs[key] = {newValue, oldValue}
+                end
             end
-        end
 
-        for key, oldValue in pairs(lastRecorded) do
-            local newValue = newTbl[key]
-            if oldValue ~= newValue then
-                diffs[key] = {newValue, oldValue}
+            for key, oldValue in pairs(lastRecorded) do
+                local newValue = newTbl[key]
+                if oldValue ~= newValue or (type(newValue) == "table" and not deepEqual(oldValue, newValue)) then
+                    diffs[key] = {newValue, oldValue}
+                end
             end
-        end
 
-        for key, diff in pairs(diffs) do
-            fn(key, diff[1], diff[2])
+            for key, diff in pairs(diffs) do
+                fn(key, diff[1], diff[2])
+            end
         end
 
         lastRecorded = newTbl
-
-        -- local isChildKey = (metadata.SourceDirection == DataChangeSourceEnum.ChildChanged) and (#pathArray == #metadata.SourcePath - 1)
-        -- if isChildKey then
-        --     local keyThatChanged = metadata.SourcePath[#metadata.SourcePath]
-        --     fn(keyThatChanged, metadata.NewValue, metadata.OldValue)
-        -- end
     end)
 end
 TableManager.ListenToKeyChange = TableManager.OnKeyChange
 
 --[=[
+    @unreleased
     Listens to when a new key is added (Changed from nil) to a table at a specified path and calls the function.
 ]=]
 function TableManager:OnKeyAdd(parentPath: Path?, fn: (newKey: any, newValue: any) -> ()): Connection
@@ -1119,6 +1206,7 @@ end
 TableManager.ListenToKeyAdd = TableManager.OnKeyAdd
 
 --[=[
+    @unreleased
     Listens to when a key is removed (Set to nil) from a table at a specified path and calls the function.
 ]=]
 function TableManager:OnKeyRemove(parentPath: Path?, fn: (removedKey: any, lastValue: any) -> ()): Connection

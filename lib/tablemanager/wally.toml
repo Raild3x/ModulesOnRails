@@ -2,7 +2,7 @@
 name = "raild3x/tablemanager"
 description = "A class for managing and observing data in a table. Includes some additional classes for extending functionality."
 authors = ["Logan Hunt (Raildex)"]
-version = "0.2.1"
+version = "0.2.2"
 license = "MIT"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
