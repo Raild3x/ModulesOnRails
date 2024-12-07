@@ -42,6 +42,7 @@ local USED_CLASS_TOKENS: {string} = {}
 
 local KEY_SELF = Symbol("SelfReference")
 local KEY_REMOTE_SIGNALS = Symbol("RemoteSignals")
+local KEY_REMOTE_FUNCTIONS = Symbol("RemoteFunctions")
 
 
 local ClassTokenMT = table.freeze {
@@ -63,13 +64,17 @@ local ClientMT = table.freeze {
     __newindex = function(t, k, v)
         local self = t[KEY_SELF]
         if self._ClassToken then
-            warn("Avoid adding new remotes to STR after it is fully initialized.")
+            warn("Avoid adding new remotes to STR after it is fully initialized. ", k, v)
         end
-        if v == NetWire.createEvent() then
-            self:RegisterRemoteSignal(k)
-        elseif type(v) == "function" then
-            self:RegisterRemoteFunction(k, v)
-        end
+		if type(v) == "table" and v[1] == NetWire.createEvent()[1] then
+			self:RegisterRemoteSignal(k)
+		elseif type(v) == "table" and v[1] == NetWire.createUnreliableEvent()[1] then
+			self:RegisterRemoteUnreliableSignal(k)
+		elseif type(v) == "function" then
+			self:RegisterRemoteFunction(k, v)
+		else
+			warn("Invalid Client remote data. Expected function or NetWire.createEvent(). ", k, v)
+		end
     end
 }
 
@@ -425,11 +430,12 @@ function ServerTableReplicator.new(config: {
 
     --// Initialize Properties //--
     self[KEY_REMOTE_SIGNALS] = {}
+    self[KEY_REMOTE_FUNCTIONS] = {}
 
     self.Client = setmetatable({
         [KEY_SELF] = self;
     }, ClientMT)
-    -- register the client functions and signals
+	-- register the client functions and signals
     for k, v in pairs(config.Client or {}) do
         self.Client[k] = v
     end
@@ -589,43 +595,53 @@ end
     --// Public Methods //--
 --------------------------------------------------------------------------------
 
--- --[=[
---     @private
---     @unreleased
---     Registers a new reliable remote signal.
--- ]=]
--- function ServerTableReplicator:RegisterRemoteSignal(signalName: string)
---     assert(not self[KEY_REMOTE_SIGNALS][signalName], "Remote signal already registered: "..signalName)
---     self[KEY_REMOTE_SIGNALS][signalName] = self:AddTask(ServerCustomRemote.new(signalName, self))
--- end
+ --[=[
+    @private
+    @unreleased
+    Registers a new reliable remote signal.
+ ]=]
+ function ServerTableReplicator:RegisterRemoteSignal(signalName: string)
+	assert(not self[KEY_REMOTE_SIGNALS][signalName], "Remote signal already registered: "..signalName)
+	local Remote = self:AddTask(ServerCustomRemote.new(signalName, self))
+	self[KEY_REMOTE_SIGNALS][signalName] = Remote
+	rawset(self.Client, signalName, Remote)
+	return Remote
+ end
 
--- --[=[
---     @private
---     @unreleased
---     Registers a new unreliable remote signal.
--- ]=]
--- function ServerTableReplicator:RegisterRemoteUnreliableSignal(signalName: string)
---     assert(not self[KEY_REMOTE_SIGNALS][signalName], "Remote signal already registered: "..signalName)
---     self[KEY_REMOTE_SIGNALS][signalName] = self:AddTask(ServerCustomRemote.new(signalName, self, true))
--- end
+--[=[
+    @private
+    @unreleased
+    Registers a new unreliable remote signal.
+]=]
+function ServerTableReplicator:RegisterRemoteUnreliableSignal(signalName: string)
+    assert(not self[KEY_REMOTE_SIGNALS][signalName], "Remote signal already registered: "..signalName)
+    local Remote = self:AddTask(ServerCustomRemote.new(signalName, self, true))
+	self[KEY_REMOTE_SIGNALS][signalName] = Remote
+	rawset(self.Client, signalName, Remote)
+    return Remote
+end
 
--- --[=[
---     @private
---     @unreleased
---     Gets an existing RemoteSignal by name. Can be either reliable or unreliable.
--- ]=]
--- function ServerTableReplicator:GetRemoteSignal(signalName: string): ServerCustomRemote
---     local remoteSignal = self[KEY_REMOTE_SIGNALS][signalName]
---     assert(remoteSignal, "Remote signal not registered: "..signalName)
---     return remoteSignal :: any
--- end
+--[=[
+    @private
+    @unreleased
+    Gets an existing RemoteSignal by name. Can be either reliable or unreliable.
+]=]
+function ServerTableReplicator:GetRemoteSignal(signalName: string): ServerCustomRemote
+    local remoteSignal = self[KEY_REMOTE_SIGNALS][signalName]
+    assert(remoteSignal, "Remote signal not registered: "..signalName)
+    return remoteSignal :: any
+end
 
--- --[=[
---     @private
---     @unreleased
--- ]=]
--- function ServerTableReplicator:RegisterRemoteFunction(fnName: string, fn: (...any) -> ...any)
--- end
+--[=[
+    @private
+    @unreleased
+]=]
+function ServerTableReplicator:RegisterRemoteFunction(fnName: string, fn: (...any) -> ...any)
+    local remoteFn = self[KEY_REMOTE_FUNCTIONS][fnName]
+    assert(not remoteFn, "Remote function already registered: "..fnName)
+    rawset(self.Client, fnName, fn)
+	return fn
+end
 
 --------------------------------------------------------------------------------
     --// Setters //--

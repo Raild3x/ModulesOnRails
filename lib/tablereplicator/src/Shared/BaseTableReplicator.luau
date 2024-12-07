@@ -233,11 +233,17 @@ function BaseTableReplicator.promiseFirstReplicator(condition: SearchCondition, 
     end
 
     -- Watch for new replicators
+    local traceback = debug.traceback()
     return Promise.fromEvent(ReplicatorCreatedSignal, function(replicator)
         if replicator.IsDestroyed then
             return if allowDestroyedReplicators then SatisfiesCondition(replicator) else false
         else
-            return SatisfiesCondition(replicator, replicator:GetTableManager())
+            local check = SatisfiesCondition(replicator, replicator:GetTableManager())
+            if type(check) ~= "boolean" then
+                warn("Provided condition did not return a boolean value. Expected: 'boolean', Got: '" .. typeof(check) .. "'\n", traceback)
+                return not not check
+            end
+            return check
         end
     end):andThen(function(replicator)
         return replicator, (not replicator.IsDestroyed and replicator:GetTableManager())
