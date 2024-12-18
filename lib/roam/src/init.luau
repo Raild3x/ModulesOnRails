@@ -273,11 +273,11 @@ end
 	```lua -- MyRegisteredService.lua
 	local MyRegisteredService = {}
 
-	function MyRegisteredService:Start()
+	function MyRegisteredService:RoamStart()
 		print("MyRegisteredService started!")
 	end
 
-	function MyRegisteredService:Init()
+	function MyRegisteredService:RoamInit()
 		print("MyRegisteredService initialized!")
 	end
 
