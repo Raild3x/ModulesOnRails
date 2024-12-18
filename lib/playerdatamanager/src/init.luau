@@ -3,31 +3,55 @@
 --[=[
     @class PlayerDataManager
 
-    Central access file for PlayerDataManager
+    Central access file for PlayerDataManager.
 
+    Example Usage:
+
+    ---
+    SERVER
+    ---
     ```lua
-    --// Server
-    local PlayerDataManager = require(Packages.PlayerDataManager)
-    local PlayerProfileManager = -- construct a PlayerProfileManager
+    -- Require Packages
+    local PlayerDataManager = require(Packages.PlayerDataManager).Server
+    local PlayerProfileManager = require(Packages.PlayerProfileManager)
 
-    local pdm = PlayerDataManager.Server.new(PlayerProfileManager)
+    -- Register various managers
+    PlayerDataManager:RegisterManager("Settings", function(player, profile)
+        return {
+            Data = profile.Data.Settings
+            ReplicationTargets = player
+        }
+    end)
+    
+    -- Create the PlayerProfileManager
+    local ppm = PlayerProfileManager.new(someProfileConfig)
 
-    pdm:RegisterManager("Settings")
-
-    pdm:Start()
+    -- Start the PlayerDataManager. Begins listening for player connections and creation of managers
+    PlayerDataManager:Start(ppm)
     ```
     ```lua
-    --// Client
-    local PlayerDataManager = require(Packages.PlayerDataManager)
+    -- Some example usage for the Settings manager
+    PlayerDataManager:ForEachPlayer(function(player: Player)
+        local settings = PlayerDataManager:GetManager(player, "Settings")
 
-    local pdm = PlayerDataManager.Client.new({
-        ProfileSchema = require(Shared.ProfileSchema)
-    })
+        for i = 1, 10 do
+            settings:Increment("Volume", math.random())
+        end
+    end)
+    ```
 
-    pdm:RegisterManager("Settings")
+    CLIENT
+    ---
+    ```lua
+    --// Client //--
+    local PlayerDataManager = require(Packages.PlayerDataManager).Client
 
-    pdm:PromiseManager("Settings"):andThen(function(tm: TableManager)
-        -- handle
+    PlayerDataManager:Start()
+
+    pdm:PromiseManager("Settings"):andThen(function(settings: TableManager)
+        settings:Observe("Volume", function(currentVolume: number)
+            print("Volume is:", newVolume)
+        end)
     end)
     ```
 ]=]
@@ -53,6 +77,9 @@ else
     CurrentContextModule = require(ServerModule)
     Server = CurrentContextModule
 end
+
+local DEFAULT_MANAGER_NAME = "DefaultManager"
+CurrentContextModule.DEFAULT_MANAGER_NAME = DEFAULT_MANAGER_NAME
 
 --------------------------------------------------------------------------------
     --// Class //--

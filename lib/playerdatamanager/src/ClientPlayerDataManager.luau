@@ -7,28 +7,37 @@
     registering what data it should expect and then you can access the data's managers once they have replicated.
 
     ```lua
-    -- this should usually be gotten from a shared module between the server and client
-    local ProfileTemplate = {
-        Currency = {
-            Money = 0,
-            Gems = 100,
-        }
-    }
-    
-    local cpdm = ClientPlayerDataManager.new({
-        ProfileSchema = ProfileTemplate
-    })
+    local PlayerDataManager = require(Packages.PlayerDataManager).Client
 
-    cpdm:RegisterManager("Currency")
+    PlayerDataManager:Start():await() -- wait for all managers to be ready
 
-    cpdm:PromiseManager("Currency"):andThen(function(tm: TableManager)
+    local currencyManager = PlayerDataManager:GetManager("Currency")
 
-        tm:Observe("Money", function(money)
-            print("My money is:", money)
-        end)
-
+    currencyManager:Observe("Robux", function(money)
+        print("My premium currency is:", money)
     end)
     ```
+
+    :::tip Usage with ROAM
+    If you are using ROAM then you can set it up easily with the following format:
+    ```lua
+    local PlayerDataController = require(Packages.PlayerDataManager).Client
+
+    
+    function PlayerDataController:RoamInit()
+        task.wait() -- optional frame delay to allow for other services to register if they need to
+        local startProm = self:Start()
+        startProm:await() -- yield roam to prevent Start until all managers are ready. This is optional, but makes it safer to access managers.
+    end
+    
+    ---------------------------------------------------------------------
+    
+    local Roam = require(Packages.Roam)
+    Roam.registerService(PlayerDataController, "PlayerDataController")
+
+    return PlayerDataController
+    ```
+    :::
 ]=]
 
 --// Services //--
@@ -36,18 +45,15 @@ local Players = game:GetService("Players")
 
 --// Imports //--
 local Packages = script.Parent.Parent
-local BaseObject = require(Packages.BaseObject)
 local Signal = require(Packages.Signal)
-local Promise = require(Packages.Promise)
-local RailUtil = require(Packages.RailUtil)
 local Janitor = require(Packages.Janitor)
+local Promise = require(Packages.Promise)
 local TableManager = require(Packages.TableManager)
 local TableReplicator = require(Packages.TableReplicator)
-local T = require(Packages.T)
 
 --// Types //--
 type table = {[any]: any}
-type Promise = typeof(Promise.new())
+type Promise = typeof(Promise.new(function() end))
 type Janitor = Janitor.Janitor
 type TableManager = TableManager.TableManager
 type TableReplicator = TableReplicator.ClientTableReplicator
@@ -56,168 +62,204 @@ type TableReplicatorSingleton = TableReplicator.TableReplicatorSingleton
 --// Constants //--
 local LocalPlayer = Players.LocalPlayer
 
+--// Volatiles //--
+local Singletons = {}
+local Replicators = {}
+
+-- FLAGS
+local DEBUG = true
+local READY = false
+
+--------------------------------------------------------------------------------
+    --// Util Functions //--
+--------------------------------------------------------------------------------
+
+local function debugPrint(...)
+    if DEBUG then
+        print("[DEBUG]", ...)
+    end
+end
+
 local DEFAULT_CONDITION_FN = function(replicator: TableReplicator): boolean
-    return replicator:GetTag("UserId") == LocalPlayer.UserId
+    return tostring(replicator:GetTag("UserId")) == tostring(LocalPlayer.UserId)
 end
 
 --------------------------------------------------------------------------------
 --// Service Def //--
 --------------------------------------------------------------------------------
 
-local ClientPlayerDataManager = setmetatable({}, BaseObject)
+local ClientPlayerDataManager = {}
 ClientPlayerDataManager.ClassName = "ClientPlayerDataManager"
 ClientPlayerDataManager.__index = ClientPlayerDataManager
-ClientPlayerDataManager.__call = function(t, ...) return t.new(...) end
 
 --[=[
     @within ClientPlayerDataManager
     @prop DEFAULT_MANAGER_NAME string
     The default internal manager name.
 ]=]
-ClientPlayerDataManager.DEFAULT_MANAGER_NAME = "Default"
 
 --[=[
     @within ClientPlayerDataManager
     @prop PlayerDataReady Signal<Player>
     A signal that fires when a Player's data is ready to be used.
 ]=]
-
---------------------------------------------------------------------------------
---// Public Methods //--
---------------------------------------------------------------------------------
+ClientPlayerDataManager.PlayerDataReady = Signal.new()
 
 --[=[
-    Gets the TableReplicatorSingleton for this manager so you can get immediate info from
-    it if needed.
+    @within ClientPlayerDataManager
+    @prop ManagerReady Signal<string, TableManager>
+    A signal that fires when a manager is ready to be used.
 ]=]
-function ClientPlayerDataManager:GetImmediate(managerName: string?): TableReplicatorSingleton
-    local s = self._Singletons[managerName]
-    assert(s, `{managerName} is not a registered singleton.`)
-    return s
+ClientPlayerDataManager.ManagerReady = Signal.new()
+
+--[=[
+    Starts the auto-listening process for server registered managers. If you need custom behavior for fetching managers
+    then you should use `RegisterManager` prior to calling this. Registering new managers after calling this method will
+    result in unexpected behavior.
+]=]
+function ClientPlayerDataManager:Start()
+    self._ServerManagersRegistered = Promise.new(function(resolve)
+        local managersListFolder = script.Parent:WaitForChild("RegisteredServerManagers")
+
+        local managerProms = {}
+
+        for _, managerObj in managersListFolder:GetChildren() do
+            local managerName = managerObj.Name
+            
+            local preregistered = Singletons[managerName]
+            if preregistered then
+                table.insert(managerProms, preregistered:PromiseTableManager():andThen(function(manager)
+                    self.ManagerReady:Fire(managerName, manager)
+                end))
+                continue
+            end
+
+            local prom = TableReplicator.promiseFirstReplicator(function(replicator)
+                return replicator:GetClassToken() == managerName and DEFAULT_CONDITION_FN(replicator)
+            end):andThen(function(replicator)
+                Replicators[managerName] = replicator
+                self.ManagerReady:Fire(managerName, replicator:GetTableManager())
+            end)
+
+            table.insert(managerProms, prom)
+        end
+
+        Promise.all(managerProms):andThen(resolve)
+    end)
+    :andThen(function()
+        READY = true
+        self.PlayerDataReady:Fire()
+    end)
+
+    self.Start = function()
+        warn("ClientPlayerDataManager has already been started.")
+        return self._ServerManagersRegistered
+    end
+
+    return self._ServerManagersRegistered
 end
 
+
+--------------------------------------------------------------------------------
+--// Fetcher Methods //--
+--------------------------------------------------------------------------------
+
 --[=[
-    Gets the TableManager associated with the given name. This method may return `nil` if the
-    data has not replicated yet.
+    Gets the TableManager associated with the given name.
+    ```lua
+    cpdm:Start():await() -- wait for all managers to be ready
+    
+    local currencyManager = cpdm:GetManager("Currency")
+
+    currencyManager:Observe("Robux", function(money)
+        print("My premium currency is:", money)
+    end)
+    ```
+    :::error Calling prior to data being ready
+    This method will error if you attempt to call it before the ClientPlayerDataManager is ready.
+    If you need to fetch a manager in a non-blocking way then you should use `PromiseManager`.
+    :::
 ]=]
-function ClientPlayerDataManager:GetManager(managerName: string?): TableManager?
-    local singleton = self._Singletons[managerName]
-    assert(singleton, `{managerName} has not been registered`)
-    return singleton:GetTableManager()
+function ClientPlayerDataManager:GetManager(managerName: string?): TableManager
+    assert(self:IsReady(), "Don't use GetManager before the data has replicated")
+    local singleton = Singletons[managerName]
+    if singleton then
+        return singleton:GetTableManager()
+    end
+    local replicator = Replicators[managerName]
+    return replicator:GetTableManager()
 end
 
 --[=[
     Promises the TableManager associated with the given name. If it doesnt exist when called then
     it will wait for it to be replicated and then will resolve.
+    @return Promise<TableManager>
+    ```lua
+    ClientPlayerDataManager:PromiseManager("Currency")
+    :andThen(function(manager: TableManager)
+        manager:Observe("Robux", function(money)
+            print("My premium currency is:", money)
+        end)
+    end)
+    ```
 ]=]
 function ClientPlayerDataManager:PromiseManager(managerName: string?): Promise
-    local singleton = self._Singletons[managerName]
-    assert(singleton, `{managerName} has not been registered`)
-    return singleton:PromiseTableManager()
+    local singleton = Singletons[managerName]
+    if singleton then
+        return singleton:PromiseTableManager()
+    end
+    local replicator = Replicators[managerName]
+    if replicator then
+        return replicator:GetTableManager()
+    end
+    return Promise.fromEvent(self.ManagerReady, function(name)
+        return name == managerName
+    end):andThen(function(name, manager)
+        return manager
+    end)
 end
 
---------------------------------------------------------------------------------
---// Private Methods //--
---------------------------------------------------------------------------------
+--[=[
+    Checks if all the managers have replicated and are ready to be used.
+]=]
+function ClientPlayerDataManager:IsReady(): boolean
+    return READY
+end
 
 --[=[
-    Registers a tableManager/TableReplicatorSingleton to be watched for on the client.
-    
-    Informal registration. Assumes data key in the profile template is the same as the given name.
+    Returns a promise that resolves when all player managers have been replicated.
+]=]
+function ClientPlayerDataManager:OnReady(): Promise
+    if self:IsReady() then
+        return Promise.resolve()
+    end
+    return Promise.fromEvent(self.PlayerDataReady)
+end
+
+--[=[
+    `GetImmediate` returns a special manager, in the form of a `TableReplicatorSingleton`, that can be accessed
+    prior to the data being replicated. In order to use this you must pre-registered it with `:RegisterManager()`.
     ```lua
-    ClientPlayerDataManager:RegisterManager("Currency")
+    cpdm:RegisterManager("Currency", {
+        Tickets = 100,
+        Robux = 25
+    })
+    
+    local immediateCurrencyManager = cpdm:GetImmediate("Currency")
+
+    immediateCurrencyManager:Observe("Robux", function(money)
+        print("My premium currency is:", money)
+    end)
     ```
-
-    Formal registration. Used for more complex/custom registering of managers. Equivalent to the above
-    ```lua
-    ClientPlayerDataManager:RegisterManager({
-        Name = "Currency",
-        DefaultDataSchema = profileTemplate["Currency"],
-        ConditionFn = function(replicator)
-            return replicator:GetTag("UserId") == LocalPlayer.UserId
-        end,
-    })
 ]=]
-function ClientPlayerDataManager:RegisterManager(config: string | {
-    Name: string;
-    DefaultDataSchema: table;
-    ConditionFn: ((replicator: TableReplicator) -> boolean)?
-}): TableReplicatorSingleton
-    if typeof(config) == "string" then
-        config = {
-            Name = config,
-            DefaultDataSchema = self._ProfileSchema[config]
-        }
-    end
-    
-    if self._STARTED then
-        warn("It is not reccomended to register managers after Start has been called")    
-    end
-
-    assert(type(config) == "table", "Config must be a table")
-    assert(T.interface({
-        Name = T.string,
-        DefaultDataSchema = T.table,
-        ConditionFn = T.optional(T.callback),
-    }))
-
-    local managerName = config.Name
-
-    if self._Singletons[managerName] then
-        warn("Already Registered Object with name", managerName)
-        return self._Singletons[managerName]
-    end
-
-    -- TODO: Validate managerName?
-    self._Singletons[managerName] = TableReplicator.fromTemplate({
-        ClassTokenName = managerName;
-        DefaultDataSchema = config.DefaultDataSchema;
-        ConditionFn = config.ConditionFn or DEFAULT_CONDITION_FN;
-    })
-
-    return self._Singletons[managerName]
+function ClientPlayerDataManager:GetImmediate(managerName: string?): TableReplicatorSingleton
+    local s = Singletons[managerName]
+    assert(s, `{managerName} is not a registered singleton.`)
+    return s
 end
 
 
---[=[
-    @unreleased
-    Marks the CPDM as started. This is not currently neccessary
-]=]
-function ClientPlayerDataManager:Start()
-    self._STARTED = true
-    self.Start = function()
-        warn("ClientPlayerDataManager has already started.")
-    end
-end
 
---[=[
-    @tag Constructor
-    @tag Static
-    @return ClientPlayerDataManager
-]=]
-function ClientPlayerDataManager.new(config: {
-    ProfileSchema: table,
-})
-    assert(T.interface({
-        ProfileSchema = T.table,
-    }))
-    local self = setmetatable(BaseObject.new(), ClientPlayerDataManager)
-
-    self._Singletons = {}
-    self._ProfileSchema = config.ProfileSchema
-
-    -- FLAGS
-    self._DEBUG = true
-    self._STARTED = false
-
-    self.new = function()
-        warn("ClientPlayerDataManager is a singleton and should not be instantiated multiple times.")
-        return self
-    end
-
-    return self
-end
-
-export type ClientPlayerDataManager = typeof(ClientPlayerDataManager.new())
+export type ClientPlayerDataManager = typeof(ClientPlayerDataManager)
 
 return ClientPlayerDataManager

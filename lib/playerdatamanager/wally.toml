@@ -1,8 +1,8 @@
 [package]
 name = "raild3x/playerdatamanager"
-description = "A class for managing player profiles."
+description = "A class for easily setting up Player data replication from their saved data."
 authors = ["Logan Hunt (Raildex)"]
-version = "0.1.2"
+version = "1.0.0"
 license = "MIT"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
@@ -14,12 +14,10 @@ formattedName = "PlayerDataManager"
 docsLink = "PlayerDataManager"
 
 [dependencies]
-T = "osyrisrblx/t@3.1.1"
 Promise = "evaera/promise@^4.0.0"
 Signal = "lucasmzreal/fastsignal@^10.2.1"
 Janitor = "howmanysmall/janitor@^1.16.0"
 TableReplicator = "raild3x/tablereplicator@^0"
 TableManager = "raild3x/tablemanager@^0"
-BaseObject = "raild3x/baseobject@^0"
 RailUtil = "raild3x/railutil@^1"
 NetWire = "raild3x/netwire@^0"
