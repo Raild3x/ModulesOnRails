@@ -1,0 +1,14 @@
+[package]
+name = "raild3x/heap"
+description = "A generic min/max heap implementation in Luau."
+authors = ["Logan Hunt (Raildex)"]
+version = "1.0.1"
+license = "MIT"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+
+[custom]
+# The properly capitalized and spaced name of the library
+formattedName = "Heap"
+# The intro page for the documentation
+docsLink = "Heap"
