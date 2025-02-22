@@ -204,8 +204,20 @@ function RemoteComponentExtension.Starting(component)
 end
 
 function RemoteComponentExtension.Stopping(component)
-	local target = IS_SERVER and "_serverComm" or "_clientComm"
-	if component[target] then component[target]:Destroy() end
+	local commCore = if IS_SERVER then component._serverComm else component._clientComm
+	if commCore then
+		commCore:Destroy()
+	end
+
+	local commObj = if IS_SERVER then component.Client else component.Server
+	if commObj then
+		for _, remoteObj in commObj do
+			if typeof(remoteObj) == "table" and remoteObj.Destroy and remoteObj ~= component then
+				remoteObj:Destroy()
+			end
+		end
+	end
+
 	if component[KEY_INTERNALPROMISE] then
 		component[KEY_INTERNALPROMISE]:cancel()
 	end

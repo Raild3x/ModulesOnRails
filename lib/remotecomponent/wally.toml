@@ -2,7 +2,7 @@
 name = "raild3x/remotecomponent"
 description = "A component extension to provide easy networking functionality."
 authors = ["Logan Hunt (Raildex)"]
-version = "0.1.0"
+version = "0.1.2"
 license = "MIT"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
