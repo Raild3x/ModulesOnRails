@@ -1,16 +1,19 @@
 -- Author: Logan Hunt (Raild3x)
 --[=[
     @class Heap
-    A generic heap implementation supporting both min-heap, max-heap, and custom comparators.
+    A generic [Heap](https://en.wikipedia.org/wiki/Heap_(data_structure)) implementation supporting both min-heap, max-heap, and custom comparators.
 
-    Heaps are useful datastructures for tracking the smallest or largest element in an array.
-    They are commonly used in algorithms like Dijkstra's shortest path algorithm and Huffman coding.
+    Heaps are an implementation of [Priority Queues](https://en.wikipedia.org/wiki/Priority_queue) that excel at tracking the smallest
+    or largest element in an array. They are commonly used in algorithms like Dijkstra's shortest path algorithm and Huffman coding.
+
+    This implementation supports min, max, and custom comparator heaps.
 
     ```lua
     local minHeap = Heap.min()
     minHeap:Push(5)
     minHeap:Push(2)
     minHeap:Push(8)
+    minHeap:Push(4)
     print(minHeap:Peek()) -- 2
     ```
 
@@ -19,6 +22,7 @@
     maxHeap:Push(5)
     maxHeap:Push(2)
     maxHeap:Push(8)
+    minHeap:Push(4)
     print(maxHeap:Peek()) -- 8
     ```
 
@@ -28,6 +32,7 @@
     - `__len`: Returns the number of elements in the heap. Equivalent to calling `:Size()`.
 ]=]
 
+type Branch<T> = {Value: T, Left: Branch<T>?, Right: Branch<T>?}
 
 export type Heap<T> = {
     ClassName: "Heap",
@@ -48,11 +53,18 @@ export type Heap<T> = {
     Size: (self: Heap<T>) -> number,
 
     --- Removes the first occurrence of a given value from the heap.
-    RemoveFirst: (self: Heap<T>, value: T) -> boolean,
+    RemoveFirstOccurrence: (self: Heap<T>, value: T) -> boolean,
 
     --- Removes all occurrences of a given value from the heap.
-    RemoveAll: (self: Heap<T>, value: T) -> boolean,
+    RemoveAllOccurrences: (self: Heap<T>, value: T) -> boolean,
+
+    --- Converts the heap into a tree structure. Used for debug visualizations
+    ToTree: (self: Heap<T>) -> Branch<T>?,
 }
+
+--------------------------------------------------------------------------------
+    --// Class //--
+--------------------------------------------------------------------------------
 
 
 local Heap = {}
@@ -60,6 +72,13 @@ Heap.__index = Heap
 Heap.ClassName = "Heap"
 
 --[=[
+    @within Heap
+    @tag static
+    @prop ClassName "Heap"
+]=]
+
+--[=[
+    @tag static
     Creates a new heap with a custom comparator.
 
     @param comparator -- A function that defines the heap ordering.
@@ -87,11 +106,13 @@ function Heap.new<T>(comparator: (a: T, b: T) -> boolean): Heap<T>
     assert(typeof(comparator) == "function", "comparator must be a function")
     return setmetatable({
         _Data = {} :: {T},
+        _Size = 0,
         _Comparator = comparator,
     }, Heap) :: any
 end
 
 --[=[
+    @tag static
     Creates a min-heap where the smallest element is always on top.
     @return Heap<T> -- A min-heap instance.
 ]=]
@@ -100,6 +121,7 @@ function Heap.min<T>(): Heap<T>
 end
 
 --[=[
+    @tag static
     Creates a max-heap where the largest element is always on top.
     @return Heap<T> -- A max-heap instance.
 ]=]
@@ -112,6 +134,7 @@ end
 ]=]
 function Heap:Push<T>(value: T)
     table.insert(self._Data, value)
+    self._Size += 1
     self:_heapifyUp(#self._Data)
 end
 
@@ -122,8 +145,10 @@ function Heap:Pop<T>(): T?
     local Data = self._Data
     if #Data == 0 then return nil end
     local root = Data[1]
-    Data[1] = Data[#Data]
-    Data[#Data] = nil
+    local lastIdx = #Data
+    Data[1] = Data[lastIdx]
+    Data[lastIdx] = nil
+    self._Size -= 1
     self:_heapifyDown(1)
     return root
 end
@@ -146,7 +171,7 @@ end
     Returns the number of elements in the heap.
 ]=]
 function Heap:Size(): number
-    return #self._Data
+    return self._Size
 end
 
 --[=[
@@ -154,12 +179,14 @@ end
     Heaps are not optimized for removals, so this method should
     be used sparingly.
 ]=]
-function Heap:RemoveFirst<T>(value: T): boolean
+function Heap:RemoveFirstOccurrence<T>(value: T): boolean
     local Data = self._Data
     for i = 1, #Data do
         if Data[i] == value then
-            Data[i] = Data[#Data]
-            Data[#Data] = nil
+            local lastIdx = #Data
+            Data[i] = Data[lastIdx]
+            Data[lastIdx] = nil
+            self._Size -= 1
             self:_heapifyDown(i)
             self:_heapifyUp(i)
             return true
@@ -169,16 +196,20 @@ function Heap:RemoveFirst<T>(value: T): boolean
 end
 
 --[=[
-    Removes all occurrences of a value from the heap and returns the number of occurrences removed.
+    Removes all occurrences of a value from the heap and returns the
+    number of occurrences removed. Heaps are not optimized for removals,
+    so this method should be used sparingly.
 ]=]
-function Heap:RemoveAll<T>(value: T): number
+function Heap:RemoveAllOccurrences<T>(value: T): number
     local Data = self._Data
     local count = 0
     local i = 1
     while i <= #Data do
         if Data[i] == value then
-            Data[i] = Data[#Data]
-            Data[#Data] = nil
+            local lastIdx = #Data
+            Data[i] = Data[lastIdx]
+            Data[lastIdx] = nil
+            self._Size -= 1
             self:_heapifyDown(i)
             self:_heapifyUp(i)
             count += 1
@@ -190,8 +221,30 @@ function Heap:RemoveAll<T>(value: T): number
 end
 
 --[=[
+    A utility method that converts the heap into a tree structure.
+    This is useful for debugging and visualizing the heap.
+    
+    `type Branch<T> = {Value: T, Left: Branch<T>?, Right: Branch<T>?}`
+
+    @return Branch<T>? -- A tree representation of the heap.
+]=]
+function Heap:ToTree<T>(): Branch<T>?
+    local function buildTree(index, depth)
+        if index > #self._Data then return nil end
+        return {
+            Value = self._Data[index],
+            Left = buildTree(index * 2, depth + 1),
+            Right = buildTree(index * 2 + 1, depth + 1),
+        }
+    end
+    return buildTree(1, 0)
+end
+
+--[=[
     @private
     Restores the heap order by moving a node up.
+
+    -- TODO: Optimize for simplistic min/max heap comparators
 
     @param index number -- The index to adjust.
 ]=]
@@ -211,6 +264,8 @@ end
 --[=[
     @private
     Restores the heap order by moving a node down.
+
+    -- TODO: Optimize for simplistic min/max heap comparators
 
     @param index number -- The index to adjust.
 ]=]
@@ -248,11 +303,20 @@ end
     Attempts to return a string representation of the heap in a tree like display.
 ]=]
 function Heap:__tostring(): string
-    local function buildTree(index, depth)
+    local function buildTree(index, depth, isLeft)
         if index > #self._Data then return "" end
-        local left = buildTree(index * 2, depth + 1)
-        local right = buildTree(index * 2 + 1, depth + 1)
-        return right .. string.rep("  ", depth) .. tostring(self._Data[index]) .. "\n" .. left
+
+        local left = buildTree(index * 2, depth + 1, true)
+        local right = buildTree(index * 2 + 1, depth + 1, false)
+
+        local prefix = string.rep("    ", depth)
+        local branch = isLeft and "\\" or "/"
+
+        if depth == 0 then
+            return tostring(self._Data[index]) .. "\n" .. right .. left
+        end
+
+        return right .. prefix .. branch .. " " .. tostring(self._Data[index]) .. "\n" .. left
     end
     return "Heap:\n" .. buildTree(1, 0)
 end
