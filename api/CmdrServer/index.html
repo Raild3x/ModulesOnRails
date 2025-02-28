@@ -8,20 +8,20 @@ It provides an easier way to interact with Cmdr and autoboots with Roam&#x27;s
 systems."><meta data-rh="true" property="og:description" content="This is a wrapper service for Evaera&#x27;s Cmdr module (https://eryn.io/Cmdr/).
 It provides an easier way to interact with Cmdr and autoboots with Roam&#x27;s
 systems."><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/CmdrServer"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/CmdrServer" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/CmdrServer" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.1839e2d4.css">
-<link rel="preload" href="/ModulesOnRails/assets/js/runtime~main.f04507c3.js" as="script">
-<link rel="preload" href="/ModulesOnRails/assets/js/main.c70c8c8d.js" as="script">
+<link rel="preload" href="/ModulesOnRails/assets/js/runtime~main.6965623a.js" as="script">
+<link rel="preload" href="/ModulesOnRails/assets/js/main.3d2c72c7.js" as="script">
 </head>
 <body class="navigation-with-keyboard">
 <script>!function(){function e(e){document.documentElement.setAttribute("data-theme",e)}var t=function(){var e=null;try{e=localStorage.getItem("theme")}catch(e){}return e}();null!==t?e(t):window.matchMedia("(prefers-color-scheme: dark)").matches?e("dark"):(window.matchMedia("(prefers-color-scheme: light)").matches,e("light"))}()</script><div id="__docusaurus">
-<div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="navbar navbar--fixed-top"><div class="navbar__inner"><div class="navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-hidden="true" viewBox="0 0 24 24" class="iconExternalLink_nPIU"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"></path></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="Switch between dark and light mode (currently light mode)" aria-label="Switch between dark and light mode (currently light mode)" aria-live="polite"><svg viewBox="0 0 24 24" width="24" height="24" class="lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" class="darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg></button></div><div class="searchBox_ZlJk"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input type="search" id="search_input_react" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="docusaurus_skipToContent_fallback" class="main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject">​Base​Object</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Roam">​Roam</a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/TableManager">TableManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/TableReplicator">TableReplicator</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/NetWire">NetWire</a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PlayerProfileManager">​Player​Profile​Manager</a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/PlayerDataManager">PlayerDataManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/Component">Instance Component Systems</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/DropletManager">DropletManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" aria-expanded="true" href="/ModulesOnRails/api/CmdrHandler">Admin Commands [Cmdr]</a></div><ul style="display:block;overflow:visible;height:auto" class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/CmdrHandler">​Cmdr​Handler</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" tabindex="0" href="/ModulesOnRails/api/CmdrServer">​Cmdr​Server</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/CmdrClient">​Cmdr​Client</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/CmdrTypes">​Cmdr​Types</a></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/Queue">Datastructures</a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ObjectCache">​Object​Cache</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ProbabilityDistributor">​Probability​Distributor</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PromValue">​Prom​Value</a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><div class="tocCollapsible_ETCw theme-doc-toc-mobile tocMobile_oUs_"><button type="button" class="clean-btn tocCollapsibleButton_TO0P">On this page</button></div><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">Cmdr</span><span style="display:inline-block">Server</span></h1><div class="luaClassTags_EipM"><span class="badge_Ba2I" style="color:#00CC67"><span class="badgeTooltip_cWXP">This item only works when running on the server.</span><span class="badgeToolTipTail_H9D_"><svg fill="#00CC67" xmlns="http://www.w3.org/2000/svg" version="1.1" x="0px" y="0px" viewBox="0 0 90 90" role="img" aria-label="This item only works when running on the server."><polygon points="6.125,72.421 58.544,88.523 58.544,24.372 6.125,8.269 "></polygon><polygon points="79.818,15.77 79.868,15.755 29.615,1.453 10.328,6.318 60.102,21.609 "></polygon><path d="M61.643,78.738l22.232-6.582V17.801l-22.232,6.584V78.738z M73.811,69.257c-1.174,0-2.125-1.19-2.125-2.659  c0-1.468,0.951-2.658,2.125-2.658c1.172,0,2.123,1.19,2.123,2.658C75.934,68.066,74.982,69.257,73.811,69.257z M64.898,32.121  l16.336-4.41v7.117l-16.336,4.409V32.121z M64.898,41.292l16.336-4.41v7.116l-16.336,4.409V41.292z M64.898,50.463l16.336-4.411  v7.116l-16.336,4.411V50.463z"></path><polygon points="83.875,74.893 61.643,81.477 61.643,88.547 83.875,81.963 "></polygon></svg> <!-- -->Server</span></span></div><label class="privateToggle_lmfE"><span class="privateCheckboxContainer_psRa"><input type="checkbox" class="privateCheckboxInternal_IKP2" name="checkbox"><span class="privateCheckboxControl_Ov8U"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="3" d="M4 11.91l5.37 5.37L19.79 5.59"></path></svg></span></span><span class="privateCheckboxLabel_Vmvs">Show Private</span></label><div>
+<div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="navbar navbar--fixed-top"><div class="navbar__inner"><div class="navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-hidden="true" viewBox="0 0 24 24" class="iconExternalLink_nPIU"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"></path></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="Switch between dark and light mode (currently light mode)" aria-label="Switch between dark and light mode (currently light mode)" aria-live="polite"><svg viewBox="0 0 24 24" width="24" height="24" class="lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" class="darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg></button></div><div class="searchBox_ZlJk"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input type="search" id="search_input_react" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="docusaurus_skipToContent_fallback" class="main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject">​Base​Object</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Roam">​Roam</a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/TableManager">TableManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/TableReplicator">TableReplicator</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/NetWire">NetWire</a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PlayerProfileManager">​Player​Profile​Manager</a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/PlayerDataManager">PlayerDataManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/Component">Instance Component Systems</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/DropletManager">DropletManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" aria-expanded="true" href="/ModulesOnRails/api/CmdrHandler">Admin Commands [Cmdr]</a></div><ul style="display:block;overflow:visible;height:auto" class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/CmdrHandler">​Cmdr​Handler</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" tabindex="0" href="/ModulesOnRails/api/CmdrServer">​Cmdr​Server</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/CmdrClient">​Cmdr​Client</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/CmdrTypes">​Cmdr​Types</a></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/Queue">Data Structures</a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ObjectCache">​Object​Cache</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PermissionsHandler">​Permissions​Handler</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ProbabilityDistributor">​Probability​Distributor</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PromValue">​Prom​Value</a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><div class="tocCollapsible_ETCw theme-doc-toc-mobile tocMobile_oUs_"><button type="button" class="clean-btn tocCollapsibleButton_TO0P">On this page</button></div><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">Cmdr</span><span style="display:inline-block">Server</span></h1><div class="luaClassTags_EipM"><span class="badge_Ba2I" style="color:#00CC67"><span class="badgeTooltip_cWXP">This item only works when running on the server.</span><span class="badgeToolTipTail_H9D_"><svg fill="#00CC67" xmlns="http://www.w3.org/2000/svg" version="1.1" x="0px" y="0px" viewBox="0 0 90 90" role="img" aria-label="This item only works when running on the server."><polygon points="6.125,72.421 58.544,88.523 58.544,24.372 6.125,8.269 "></polygon><polygon points="79.818,15.77 79.868,15.755 29.615,1.453 10.328,6.318 60.102,21.609 "></polygon><path d="M61.643,78.738l22.232-6.582V17.801l-22.232,6.584V78.738z M73.811,69.257c-1.174,0-2.125-1.19-2.125-2.659  c0-1.468,0.951-2.658,2.125-2.658c1.172,0,2.123,1.19,2.123,2.658C75.934,68.066,74.982,69.257,73.811,69.257z M64.898,32.121  l16.336-4.41v7.117l-16.336,4.409V32.121z M64.898,41.292l16.336-4.41v7.116l-16.336,4.409V41.292z M64.898,50.463l16.336-4.411  v7.116l-16.336,4.411V50.463z"></path><polygon points="83.875,74.893 61.643,81.477 61.643,88.547 83.875,81.963 "></polygon></svg> <!-- -->Server</span></span></div><label class="privateToggle_lmfE"><span class="privateCheckboxContainer_psRa"><input type="checkbox" class="privateCheckboxInternal_IKP2" name="checkbox"><span class="privateCheckboxControl_Ov8U"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="3" d="M4 11.91l5.37 5.37L19.79 5.59"></path></svg></span></span><span class="privateCheckboxLabel_Vmvs">Show Private</span></label><div>
 <p>
   This is a wrapper service for Evaera's Cmdr module (<a href="https://eryn.io/Cmdr/" target="_blank">https://eryn.io/Cmdr/</a>).
   It provides an easier way to interact with Cmdr and autoboots with Roam's
   systems.
 </p>
-</div></header><h2 class="anchor anchorWithStickyNavbar_LWe7" id="functions">Functions<a href="#functions" class="hash-link" aria-label="Direct link to Functions" title="Direct link to Functions">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="PromiseCmdr"><code style="text-decoration:none">PromiseCmdr</code><a href="#PromiseCmdr" class="hash-link" aria-label="Direct link to PromiseCmdr" title="Direct link to PromiseCmdr">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/init.luau#L62"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>CmdrServer<!-- -->:</code><code class="green_DgR4">PromiseCmdr</code><code>(</code><code>) → </code><code class="blue_P4bS">Promise</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">Cmdr</code><code class="op_lSLc">&gt;</code></div><div>
+</div></header><h2 class="anchor anchorWithStickyNavbar_LWe7" id="properties">Properties<a href="#properties" class="hash-link" aria-label="Direct link to Properties" title="Direct link to Properties">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="PermissionsHandler"><code style="text-decoration:none">PermissionsHandler</code><a href="#PermissionsHandler" class="hash-link" aria-label="Direct link to PermissionsHandler" title="Direct link to PermissionsHandler">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/init.luau#L49"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>CmdrServer<!-- -->.<!-- -->PermissionsHandler<!-- -->:<!-- --> </code> <code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/PermissionsHandler">PermissionsHandler</a></code></div><div></div><h2 class="anchor anchorWithStickyNavbar_LWe7" id="functions">Functions<a href="#functions" class="hash-link" aria-label="Direct link to Functions" title="Direct link to Functions">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="PromiseCmdr"><code style="text-decoration:none">PromiseCmdr</code><a href="#PromiseCmdr" class="hash-link" aria-label="Direct link to PromiseCmdr" title="Direct link to PromiseCmdr">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/init.luau#L55"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>CmdrServer<!-- -->:</code><code class="green_DgR4">PromiseCmdr</code><code>(</code><code>) → </code><code class="blue_P4bS">Promise</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">Cmdr</code><code class="op_lSLc">&gt;</code></div><div>
 <p>Promise that resolves to the Cmdr module data</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="RegisterCommandFromModule"><code style="text-decoration:none">RegisterCommandFromModule</code><a href="#RegisterCommandFromModule" class="hash-link" aria-label="Direct link to RegisterCommandFromModule" title="Direct link to RegisterCommandFromModule">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/init.luau#L101"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>CmdrServer<!-- -->:</code><code class="green_DgR4">RegisterCommandFromModule</code><code>(</code><div class="inset_uKQm"><div><code>module<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/ModuleScript" target="_blank" rel="noopener noreferrer">ModuleScript<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><span class="inlineDescription_G7Er">-- <span>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="RegisterCommandFromModule"><code style="text-decoration:none">RegisterCommandFromModule</code><a href="#RegisterCommandFromModule" class="hash-link" aria-label="Direct link to RegisterCommandFromModule" title="Direct link to RegisterCommandFromModule">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/init.luau#L94"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>CmdrServer<!-- -->:</code><code class="green_DgR4">RegisterCommandFromModule</code><code>(</code><div class="inset_uKQm"><div><code>module<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/ModuleScript" target="_blank" rel="noopener noreferrer">ModuleScript<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><span class="inlineDescription_G7Er">-- <span>
 <p>The module to register the command from</p>
 </span></span></div></div><code>) → </code><code class="blue_P4bS">Promise</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">nil</code><code class="op_lSLc">&gt;</code></div><div>
 <p>Registers a command from a module with Cmdr. Command modules must return a table of type <code>CommandModuleData</code>.</p>
@@ -30,7 +30,7 @@ systems."><link data-rh="true" rel="canonical" href="https://raild3x.github.io/M
 	Name <span class="token operator">=</span> <span class="token string">"kill"</span><span class="token punctuation">;</span>
 	Aliases <span class="token operator">=</span> <span class="token punctuation">{</span><span class="token string">"slay"</span><span class="token punctuation">}</span><span class="token punctuation">;</span>
 	Description <span class="token operator">=</span> <span class="token string">"Kills a player or set of players."</span><span class="token punctuation">;</span>
-	Group <span class="token operator">=</span> <span class="token string">"DefaultAdmin"</span><span class="token punctuation">;</span> <span class="token comment">-- The permission group required to run this command</span>
+	Group <span class="token operator">=</span> <span class="token string">"Admin"</span><span class="token punctuation">;</span> <span class="token comment">-- The permission group required to run this command</span>
 	Args <span class="token operator">=</span> <span class="token punctuation">{</span>
 		<span class="token punctuation">{</span>
 			Type <span class="token operator">=</span> <span class="token string">"players"</span><span class="token punctuation">;</span>
@@ -41,7 +41,7 @@ systems."><link data-rh="true" rel="canonical" href="https://raild3x.github.io/M
 
 	<span class="token comment">-- Executors</span>
 	ClientRun <span class="token operator">=</span> <span class="token keyword">nil</span><span class="token punctuation">,</span> <span class="token comment">-- No client side needed</span>
-	ServerRun <span class="token operator">=</span> <span class="token keyword">function</span> <span class="token punctuation">(</span>_<span class="token punctuation">,</span> players<span class="token punctuation">)</span>
+	ServerRun <span class="token operator">=</span> <span class="token keyword">function</span> <span class="token punctuation">(</span>context<span class="token punctuation">:</span> CommandContext<span class="token punctuation">,</span> players<span class="token punctuation">:</span> <span class="token punctuation">{</span>Player<span class="token punctuation">}</span><span class="token punctuation">)</span>
 		<span class="token keyword">for</span> _<span class="token punctuation">,</span> player <span class="token keyword">in</span> <span class="token function">pairs</span><span class="token punctuation">(</span>players<span class="token punctuation">)</span> <span class="token keyword">do</span>
 			<span class="token keyword">if</span> player<span class="token punctuation">.</span>Character <span class="token keyword">then</span>
 				player<span class="token punctuation">.</span>Character<span class="token punctuation">:</span><span class="token function">BreakJoints</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
@@ -53,92 +53,21 @@ systems."><link data-rh="true" rel="canonical" href="https://raild3x.github.io/M
 </code></pre>
 <pre class="language-lua"><code class="language-lua">CmdrServer<span class="token punctuation">:</span><span class="token function">RegisterCommandFromModule</span><span class="token punctuation">(</span>script<span class="token punctuation">.</span>Parent<span class="token punctuation">.</span>Commands<span class="token punctuation">.</span>Kill<span class="token punctuation">)</span>
 </code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="ExecuteCommand"><code style="text-decoration:none">ExecuteCommand</code><a href="#ExecuteCommand" class="hash-link" aria-label="Direct link to ExecuteCommand" title="Direct link to ExecuteCommand">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/init.luau#L136"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>CmdrServer<!-- -->:</code><code class="green_DgR4">ExecuteCommand</code><code>(</code><div class="inset_uKQm"><div><code>commandText<!-- -->: </code><code class="blue_P4bS">string</code><code>,</code></div><div><code>executor<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player?<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>,</code></div><div><code>options<!-- -->: </code><code class="purple_ieR2">{</code><div class="inset_uKQm"><code>Data<!-- -->: </code><code class="blue_P4bS">any?</code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code>IsHuman<!-- -->: </code><code class="blue_P4bS">boolean</code></div><code class="purple_ieR2">}</code><code class="blue_P4bS">?</code></div></div><code>) → </code><code class="blue_P4bS">Promise</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">string</code><code class="op_lSLc">&gt;</code></div><div>
-<p>Executes a command with Cmdr from the server</p>
-<pre class="language-lua"><code class="language-lua">CmdrServer<span class="token punctuation">:</span><span class="token function">ExecuteCommand</span><span class="token punctuation">(</span><span class="token string">"kill Raildex"</span><span class="token punctuation">)</span><span class="token punctuation">:</span><span class="token function">andThen</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span>result<span class="token punctuation">)</span>
-	<span class="token function">print</span><span class="token punctuation">(</span>result<span class="token punctuation">)</span>
-<span class="token keyword">end</span><span class="token punctuation">)</span>
-</code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="ExecuteCommandAsClient"><code style="text-decoration:none">ExecuteCommandAsClient</code><a href="#ExecuteCommandAsClient" class="hash-link" aria-label="Direct link to ExecuteCommandAsClient" title="Direct link to ExecuteCommandAsClient">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/init.luau#L150"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>CmdrServer<!-- -->:</code><code class="green_DgR4">ExecuteCommandAsClient</code><code>(</code><div class="inset_uKQm"><div><code>executor<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>,</code></div><div><code>...<!-- -->: </code><code class="blue_P4bS">string</code></div></div><code>) → </code><code>(</code><code>)</code></div><div>
-<p>Executes a command with Cmdr as if it were run by a client</p>
-<pre class="language-lua"><code class="language-lua">CmdrServer<span class="token punctuation">:</span><span class="token function">ExecuteCommandAsClient</span><span class="token punctuation">(</span>Players<span class="token punctuation">.</span>Raildex<span class="token punctuation">,</span> <span class="token string">"kill"</span><span class="token punctuation">,</span> <span class="token string">"*"</span><span class="token punctuation">)</span>
-CmdrServer<span class="token punctuation">:</span><span class="token function">ExecuteCommandAsClient</span><span class="token punctuation">(</span>Players<span class="token punctuation">.</span>Raildex<span class="token punctuation">,</span> <span class="token string">"kill *"</span><span class="token punctuation">)</span>
-</code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="HasPermission"><code style="text-decoration:none">HasPermission</code><a href="#HasPermission" class="hash-link" aria-label="Direct link to HasPermission" title="Direct link to HasPermission">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/init.luau#L159"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>CmdrServer<!-- -->:</code><code class="green_DgR4">HasPermission</code><code>(</code><div class="inset_uKQm"><div><code>plr<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>,</code><span class="inlineDescription_G7Er">-- <span>
-<p>The player to check</p>
-</span></span></div><div><code>commandName<!-- -->: </code><code class="blue_P4bS">string</code><span class="inlineDescription_G7Er">-- <span>
-<p>The name of the command to check</p>
-</span></span></div></div><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
-<p>Checks if a player has permission to run a command</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetPermissions"><code style="text-decoration:none">GetPermissions</code><a href="#GetPermissions" class="hash-link" aria-label="Direct link to GetPermissions" title="Direct link to GetPermissions">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/init.luau#L180"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>CmdrServer<!-- -->:</code><code class="green_DgR4">GetPermissions</code><code>(</code><code>plr<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>) → </code><code class="purple_ieR2">{</code><code class="blue_P4bS">any</code><code class="purple_ieR2">}</code></div><div>
-<p>Gets the permissions for a player</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="SetPermissions"><code style="text-decoration:none">SetPermissions</code><a href="#SetPermissions" class="hash-link" aria-label="Direct link to SetPermissions" title="Direct link to SetPermissions">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/init.luau#L195"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>CmdrServer<!-- -->:</code><code class="green_DgR4">SetPermissions</code><code>(</code><div class="inset_uKQm"><div><code>plr<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>,</code></div><div><code>permissions<!-- -->: </code><code class="blue_P4bS">string</code><code class="op_lSLc"> | </code><code class="purple_ieR2">{</code><code class="blue_P4bS">string</code><code class="purple_ieR2">}</code></div></div><code>) → </code><code>(</code><code>)</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="ExecuteCommand"><code style="text-decoration:none">ExecuteCommand</code><a href="#ExecuteCommand" class="hash-link" aria-label="Direct link to ExecuteCommand" title="Direct link to ExecuteCommand">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/init.luau#L128"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>CmdrServer<!-- -->:</code><code class="green_DgR4">ExecuteCommand</code><code>(</code><div class="inset_uKQm"><div><code>commandText<!-- -->: </code><code class="blue_P4bS">string</code><code>,</code></div><div><code>executor<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>,</code></div><div><code>options<!-- -->: </code><code class="purple_ieR2">{</code><div class="inset_uKQm"><code>Data<!-- -->: </code><code class="blue_P4bS">any?</code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code>IsHuman<!-- -->: </code><code class="blue_P4bS">boolean</code></div><code class="purple_ieR2">}</code><code class="blue_P4bS">?</code></div></div><code>) → </code><code>(</code><code>)</code></div><div>
 <p>
-  Sets the direct permissions for a player.
-  Does not override inherited permissions or group permissions.
+  Executes a command with Cmdr from the server. Requires a player to be given as a source of the command.
+  If <code>Data</code> is given, it will be available on the server with <code>CommandContext.GetData</code>
 </p>
-<pre class="language-lua"><code class="language-lua">CmdrServer<span class="token punctuation">:</span><span class="token function">SetPermissions</span><span class="token punctuation">(</span>Players<span class="token punctuation">.</span>Raildex<span class="token punctuation">,</span> <span class="token string">"Admin"</span><span class="token punctuation">)</span>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> result <span class="token operator">=</span> CmdrServer<span class="token punctuation">:</span><span class="token function">ExecuteCommand</span><span class="token punctuation">(</span><span class="token string">"kill Mophyr"</span><span class="token punctuation">,</span> Players<span class="token punctuation">.</span>Raildex<span class="token punctuation">)</span>
 </code></pre>
-<div class="admonition admonition-info alert alert--info">
-  <div class="admonition-heading">
-    <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="16" viewBox="0 0 14 16">
-          <path d="M7 2.3c3.14 0 5.7 2.56 5.7 5.7s-2.56 5.7-5.7 5.7A5.71 5.71 0 0 1 1.3 8c0-3.14 2.56-5.7 5.7-5.7zM7 1C3.14 1 0 4.14 0 8s3.14 7 7 7 7-3.14 7-7-3.14-7-7-7zm1 3H6v5h2V4zm0 6H6v2h2v-2z"></path>
-        </svg></span>info</h5>
-  </div>
-  <div class="admonition-content">
-    <p>The 'Creator' permission grants all permissions regardless of group inheritance.</p>
-  </div>
-</div>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GivePermissions"><code style="text-decoration:none">GivePermissions</code><a href="#GivePermissions" class="hash-link" aria-label="Direct link to GivePermissions" title="Direct link to GivePermissions">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/init.luau#L210"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>CmdrServer<!-- -->:</code><code class="green_DgR4">GivePermissions</code><code>(</code><div class="inset_uKQm"><div><code>plr<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>,</code><span class="inlineDescription_G7Er">-- <span>
-<p>The player to grant permissions to</p>
-</span></span></div><div><code>permissions<!-- -->: </code><code class="blue_P4bS">string</code><code class="op_lSLc"> | </code><code class="purple_ieR2">{</code><code class="blue_P4bS">string</code><code class="purple_ieR2">}</code><span class="inlineDescription_G7Er">-- <span>
-<p>The permissions to grant</p>
-</span></span></div></div><code>) → </code><code>(</code><code>)</code></div><div>
-<p>Grants a player a permission group(s). Adds the given permissions to the player's current permissions.</p>
-<pre class="language-lua"><code class="language-lua">CmdrServer<span class="token punctuation">:</span><span class="token function">GivePermissions</span><span class="token punctuation">(</span>Players<span class="token punctuation">.</span>Raildex<span class="token punctuation">,</span> <span class="token string">"Admin"</span><span class="token punctuation">)</span>
-</code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetGroupRankPermissions"><code style="text-decoration:none">GetGroupRankPermissions</code><a href="#GetGroupRankPermissions" class="hash-link" aria-label="Direct link to GetGroupRankPermissions" title="Direct link to GetGroupRankPermissions">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/init.luau#L233"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>CmdrServer<!-- -->:</code><code class="green_DgR4">GetGroupRankPermissions</code><code>(</code><div class="inset_uKQm"><div><code>groupId<!-- -->: </code><code class="blue_P4bS">number</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
-<p>The Roblox group id to get permissions for</p>
-</span></span></div><div><code>rank<!-- -->: </code><code class="blue_P4bS">number</code><span class="inlineDescription_G7Er">-- <span>
-<p>The rank to get permissions for</p>
-</span></span></div></div><code>) → </code><code class="purple_ieR2">{</code><code class="blue_P4bS">string</code><code class="purple_ieR2">}</code><span class="inlineDescription_G7Er">-- <span>
-<p>The permissions granted to the rank</p>
-</span></span></div><div>
-<p>Gets the permissions granted to a particular rank in a group.</p>
-<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> permissions <span class="token operator">=</span> CmdrServer<span class="token punctuation">:</span><span class="token function">GetGroupRankPermissions</span><span class="token punctuation">(</span><span class="token number">15905255</span><span class="token punctuation">,</span> <span class="token number">230</span><span class="token punctuation">)</span>
-</code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GiveGroupPermissions"><code style="text-decoration:none">GiveGroupPermissions</code><a href="#GiveGroupPermissions" class="hash-link" aria-label="Direct link to GiveGroupPermissions" title="Direct link to GiveGroupPermissions">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/init.luau#L247"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>CmdrServer<!-- -->:</code><code class="green_DgR4">GiveGroupPermissions</code><code>(</code><div class="inset_uKQm"><div><code>groupId<!-- -->: </code><code class="blue_P4bS">number</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
-<p>The Roblox group id to grant permissions to</p>
-</span></span></div><div><code>ranks<!-- -->: </code><code class="blue_P4bS">number</code><code class="op_lSLc"> | </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/NumberRange" target="_blank" rel="noopener noreferrer">NumberRange<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>,</code><span class="inlineDescription_G7Er">-- <span>
-<p>The ranks to apply the permissions to. Can be a single rank or a range of ranks.</p>
-</span></span></div><div><code>permissions<!-- -->: </code><code class="blue_P4bS">string</code><code class="op_lSLc"> | </code><code class="purple_ieR2">{</code><code class="blue_P4bS">string</code><code class="purple_ieR2">}</code><span class="inlineDescription_G7Er">-- <span>
-<p>The permissions to grant to the group</p>
-</span></span></div></div><code>) → </code><code class="blue_P4bS">function</code><span class="inlineDescription_G7Er">-- <span>
-<p>A function that can be called to remove the permissions</p>
-</span></span></div><div>
-<p>Grants a Roblox group permissions to run a command. Takes the ranks to apply the permissions to, and the permissions to grant.</p>
-<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> revoke <span class="token operator">=</span> CmdrServer<span class="token punctuation">:</span><span class="token function">GiveGroupPermissions</span><span class="token punctuation">(</span><span class="token number">15905255</span><span class="token punctuation">,</span> <span class="token number">230</span><span class="token punctuation">,</span> <span class="token string">"Admin"</span><span class="token punctuation">)</span>
-</code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="SetPermissionInheritance"><code style="text-decoration:none">SetPermissionInheritance</code><a href="#SetPermissionInheritance" class="hash-link" aria-label="Direct link to SetPermissionInheritance" title="Direct link to SetPermissionInheritance">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/init.luau#L295"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>CmdrServer<!-- -->:</code><code class="green_DgR4">SetPermissionInheritance</code><code>(</code><div class="inset_uKQm"><div><code>permissionGroup<!-- -->: </code><code class="blue_P4bS">string</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
-<p>The permission group to set the inheritance for</p>
-</span></span></div><div><code>inheritedGroups<!-- -->: </code><code class="blue_P4bS">string</code><code class="op_lSLc"> | </code><code class="purple_ieR2">{</code><code class="blue_P4bS">string</code><code class="purple_ieR2">}</code><span class="inlineDescription_G7Er">-- <span>
-<p>The groups to inherit permissions from</p>
-</span></span></div></div><code>) → </code><code class="blue_P4bS">nil</code></div><div>
-<p>
-  Sets the permission inheritance for a permission group.
-  This will override any previous inheritance.
-</p>
-<pre class="language-lua"><code class="language-lua">CmdrServer<span class="token punctuation">:</span><span class="token function">SetPermissionInheritance</span><span class="token punctuation">(</span><span class="token string">"Admin"</span><span class="token punctuation">,</span> <span class="token string">"DefaultAdmin"</span><span class="token punctuation">)</span>
-CmdrServer<span class="token punctuation">:</span><span class="token function">SetPermissionInheritance</span><span class="token punctuation">(</span><span class="token string">"Admin"</span><span class="token punctuation">,</span> <span class="token punctuation">{</span><span class="token string">"DefaultAdmin"</span><span class="token punctuation">,</span> <span class="token string">"Moderator"</span><span class="token punctuation">}</span><span class="token punctuation">)</span>
-</code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetPermissionInheritance"><code style="text-decoration:none">GetPermissionInheritance</code><a href="#GetPermissionInheritance" class="hash-link" aria-label="Direct link to GetPermissionInheritance" title="Direct link to GetPermissionInheritance">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/init.luau#L308"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>CmdrServer<!-- -->:</code><code class="green_DgR4">GetPermissionInheritance</code><code>(</code><code>permissionGroup<!-- -->: </code><code class="blue_P4bS">string</code><code>) → </code><code class="purple_ieR2">{</code><code class="blue_P4bS">string</code><code class="purple_ieR2">}</code></div><div>
-<p>Fetches the inherited permission group for a permission group</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="RegisterType"><code style="text-decoration:none">RegisterType</code><a href="#RegisterType" class="hash-link" aria-label="Direct link to RegisterType" title="Direct link to RegisterType">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/init.luau#L319"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>CmdrServer<!-- -->:</code><code class="green_DgR4">RegisterType</code><code>(</code><div class="inset_uKQm"><div><code>name<!-- -->: </code><code class="blue_P4bS">string</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="RegisterType"><code style="text-decoration:none">RegisterType</code><a href="#RegisterType" class="hash-link" aria-label="Direct link to RegisterType" title="Direct link to RegisterType">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/init.luau#L140"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>CmdrServer<!-- -->:</code><code class="green_DgR4">RegisterType</code><code>(</code><div class="inset_uKQm"><div><code>name<!-- -->: </code><code class="blue_P4bS">string</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
 <p>The name of the type</p>
-</span></span></div><div><code>typeData<!-- -->: </code><code class="blue_P4bS">TypeDefinition</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">T</code><code class="op_lSLc">&gt;</code><span class="inlineDescription_G7Er">-- <span>
+</span></span></div><div><code>typeData<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/CmdrTypes#TypeDefinition">TypeDefinition</a></code><span class="inlineDescription_G7Er">-- <span>
 <p>The type data to register</p>
-</span></span></div></div><code>) → </code><code class="blue_P4bS">Promise</code></div><div>
+</span></span></div></div><code>) → </code><code>(</code><code>)</code></div><div>
 <p>Registers a type with Cmdr</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="RoamInit"><code style="text-decoration:none">RoamInit</code><a href="#RoamInit" class="hash-link" aria-label="Direct link to RoamInit" title="Direct link to RoamInit">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/init.luau#L224"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>CmdrServer<!-- -->:</code><code class="green_DgR4">RoamInit</code><code>(</code><code>) → </code><code>(</code><code>)</code></div><div>
+<p>Starts Cmdr on the Server</p>
 </div></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
     &quot;functions&quot;: [
         {
@@ -153,13 +82,13 @@ CmdrServer<span class="token punctuation">:</span><span class="token function">S
             ],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
-                &quot;line&quot;: 62,
+                &quot;line&quot;: 55,
                 &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/init.luau&quot;
             }
         },
         {
             &quot;name&quot;: &quot;RegisterCommandFromModule&quot;,
-            &quot;desc&quot;: &quot;Registers a command from a module with Cmdr. Command modules must return a table of type `CommandModuleData`.\n```lua\n-- Commands/Kill.lua\nreturn {\n\tName = \&quot;kill\&quot;;\n\tAliases = {\&quot;slay\&quot;};\n\tDescription = \&quot;Kills a player or set of players.\&quot;;\n\tGroup = \&quot;DefaultAdmin\&quot;; -- The permission group required to run this command\n\tArgs = {\n\t\t{\n\t\t\tType = \&quot;players\&quot;;\n\t\t\tName = \&quot;victims\&quot;;\n\t\t\tDescription = \&quot;The players to kill.\&quot;;\n\t\t},\n\t};\n\n\t-- Executors\n\tClientRun = nil, -- No client side needed\n\tServerRun = function (_, players)\n\t\tfor _, player in pairs(players) do\n\t\t\tif player.Character then\n\t\t\t\tplayer.Character:BreakJoints()\n\t\t\tend\n\t\tend\n\t\treturn (\&quot;Killed %d players.\&quot;):format(#players)\n\tend\n}\n```\n```lua\nCmdrServer:RegisterCommandFromModule(script.Parent.Commands.Kill)\n```&quot;,
+            &quot;desc&quot;: &quot;Registers a command from a module with Cmdr. Command modules must return a table of type `CommandModuleData`.\n```lua\n-- Commands/Kill.lua\nreturn {\n\tName = \&quot;kill\&quot;;\n\tAliases = {\&quot;slay\&quot;};\n\tDescription = \&quot;Kills a player or set of players.\&quot;;\n\tGroup = \&quot;Admin\&quot;; -- The permission group required to run this command\n\tArgs = {\n\t\t{\n\t\t\tType = \&quot;players\&quot;;\n\t\t\tName = \&quot;victims\&quot;;\n\t\t\tDescription = \&quot;The players to kill.\&quot;;\n\t\t},\n\t};\n\n\t-- Executors\n\tClientRun = nil, -- No client side needed\n\tServerRun = function (context: CommandContext, players: {Player})\n\t\tfor _, player in pairs(players) do\n\t\t\tif player.Character then\n\t\t\t\tplayer.Character:BreakJoints()\n\t\t\tend\n\t\tend\n\t\treturn (\&quot;Killed %d players.\&quot;):format(#players)\n\tend\n}\n```\n```lua\nCmdrServer:RegisterCommandFromModule(script.Parent.Commands.Kill)\n```&quot;,
             &quot;params&quot;: [
                 {
                     &quot;name&quot;: &quot;module&quot;,
@@ -175,13 +104,13 @@ CmdrServer<span class="token punctuation">:</span><span class="token function">S
             ],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
-                &quot;line&quot;: 101,
+                &quot;line&quot;: 94,
                 &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/init.luau&quot;
             }
         },
         {
             &quot;name&quot;: &quot;ExecuteCommand&quot;,
-            &quot;desc&quot;: &quot;Executes a command with Cmdr from the server\n```lua\nCmdrServer:ExecuteCommand(\&quot;kill Raildex\&quot;):andThen(function(result)\n\tprint(result)\nend)\n```&quot;,
+            &quot;desc&quot;: &quot;Executes a command with Cmdr from the server. Requires a player to be given as a source of the command.\nIf `Data` is given, it will be available on the server with `CommandContext.GetData`\n\n```lua\nlocal result = CmdrServer:ExecuteCommand(\&quot;kill Mophyr\&quot;, Players.Raildex)\n```&quot;,
             &quot;params&quot;: [
                 {
                     &quot;name&quot;: &quot;commandText&quot;,
@@ -191,7 +120,7 @@ CmdrServer<span class="token punctuation">:</span><span class="token function">S
                 {
                     &quot;name&quot;: &quot;executor&quot;,
                     &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;Player?&quot;
+                    &quot;lua_type&quot;: &quot;Player&quot;
                 },
                 {
                     &quot;name&quot;: &quot;options&quot;,
@@ -199,238 +128,10 @@ CmdrServer<span class="token punctuation">:</span><span class="token function">S
                     &quot;lua_type&quot;: &quot;{Data: any?, IsHuman: boolean}?&quot;
                 }
             ],
-            &quot;returns&quot;: [
-                {
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;Promise&lt;string&gt;&quot;
-                }
-            ],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 136,
-                &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/init.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;ExecuteCommandAsClient&quot;,
-            &quot;desc&quot;: &quot;Executes a command with Cmdr as if it were run by a client\n```lua\nCmdrServer:ExecuteCommandAsClient(Players.Raildex, \&quot;kill\&quot;, \&quot;*\&quot;)\nCmdrServer:ExecuteCommandAsClient(Players.Raildex, \&quot;kill *\&quot;)\n```&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;executor&quot;,
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;Player&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;...&quot;,
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;string&quot;
-                }
-            ],
             &quot;returns&quot;: [],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
-                &quot;line&quot;: 150,
-                &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/init.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;HasPermission&quot;,
-            &quot;desc&quot;: &quot;Checks if a player has permission to run a command&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;plr&quot;,
-                    &quot;desc&quot;: &quot;The player to check&quot;,
-                    &quot;lua_type&quot;: &quot;Player&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;commandName&quot;,
-                    &quot;desc&quot;: &quot;The name of the command to check&quot;,
-                    &quot;lua_type&quot;: &quot;string&quot;
-                }
-            ],
-            &quot;returns&quot;: [
-                {
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;boolean\r\n&quot;
-                }
-            ],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 159,
-                &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/init.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;GetPermissions&quot;,
-            &quot;desc&quot;: &quot;Gets the permissions for a player&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;plr&quot;,
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;Player&quot;
-                }
-            ],
-            &quot;returns&quot;: [
-                {
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;{any}\r\n&quot;
-                }
-            ],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 180,
-                &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/init.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;SetPermissions&quot;,
-            &quot;desc&quot;: &quot;Sets the direct permissions for a player.\nDoes not override inherited permissions or group permissions.\n```lua\nCmdrServer:SetPermissions(Players.Raildex, \&quot;Admin\&quot;)\n```\n:::info\nThe &#x27;Creator&#x27; permission grants all permissions regardless of group inheritance.\n:::&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;plr&quot;,
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;Player&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;permissions&quot;,
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;string | {string}&quot;
-                }
-            ],
-            &quot;returns&quot;: [],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 195,
-                &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/init.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;GivePermissions&quot;,
-            &quot;desc&quot;: &quot;Grants a player a permission group(s). Adds the given permissions to the player&#x27;s current permissions.\n```lua\nCmdrServer:GivePermissions(Players.Raildex, \&quot;Admin\&quot;)\n```&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;plr&quot;,
-                    &quot;desc&quot;: &quot;The player to grant permissions to&quot;,
-                    &quot;lua_type&quot;: &quot;Player&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;permissions&quot;,
-                    &quot;desc&quot;: &quot;The permissions to grant&quot;,
-                    &quot;lua_type&quot;: &quot;string | {string}&quot;
-                }
-            ],
-            &quot;returns&quot;: [],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 210,
-                &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/init.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;GetGroupRankPermissions&quot;,
-            &quot;desc&quot;: &quot;Gets the permissions granted to a particular rank in a group.\n```lua\nlocal permissions = CmdrServer:GetGroupRankPermissions(15905255, 230)\n```&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;groupId&quot;,
-                    &quot;desc&quot;: &quot;The Roblox group id to get permissions for&quot;,
-                    &quot;lua_type&quot;: &quot;number&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;rank&quot;,
-                    &quot;desc&quot;: &quot;The rank to get permissions for&quot;,
-                    &quot;lua_type&quot;: &quot;number&quot;
-                }
-            ],
-            &quot;returns&quot;: [
-                {
-                    &quot;desc&quot;: &quot;The permissions granted to the rank&quot;,
-                    &quot;lua_type&quot;: &quot;{string}&quot;
-                }
-            ],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 233,
-                &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/init.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;GiveGroupPermissions&quot;,
-            &quot;desc&quot;: &quot;Grants a Roblox group permissions to run a command. Takes the ranks to apply the permissions to, and the permissions to grant.\n```lua\nlocal revoke = CmdrServer:GiveGroupPermissions(15905255, 230, \&quot;Admin\&quot;)\n```&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;groupId&quot;,
-                    &quot;desc&quot;: &quot;The Roblox group id to grant permissions to&quot;,
-                    &quot;lua_type&quot;: &quot;number&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;ranks&quot;,
-                    &quot;desc&quot;: &quot;The ranks to apply the permissions to. Can be a single rank or a range of ranks.&quot;,
-                    &quot;lua_type&quot;: &quot;number | NumberRange&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;permissions&quot;,
-                    &quot;desc&quot;: &quot;The permissions to grant to the group&quot;,
-                    &quot;lua_type&quot;: &quot;string | {string}&quot;
-                }
-            ],
-            &quot;returns&quot;: [
-                {
-                    &quot;desc&quot;: &quot;A function that can be called to remove the permissions&quot;,
-                    &quot;lua_type&quot;: &quot;function&quot;
-                }
-            ],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 247,
-                &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/init.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;SetPermissionInheritance&quot;,
-            &quot;desc&quot;: &quot;Sets the permission inheritance for a permission group.\nThis will override any previous inheritance.\n```lua\nCmdrServer:SetPermissionInheritance(\&quot;Admin\&quot;, \&quot;DefaultAdmin\&quot;)\nCmdrServer:SetPermissionInheritance(\&quot;Admin\&quot;, {\&quot;DefaultAdmin\&quot;, \&quot;Moderator\&quot;})\n```&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;permissionGroup&quot;,
-                    &quot;desc&quot;: &quot;The permission group to set the inheritance for&quot;,
-                    &quot;lua_type&quot;: &quot;string&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;inheritedGroups&quot;,
-                    &quot;desc&quot;: &quot;The groups to inherit permissions from&quot;,
-                    &quot;lua_type&quot;: &quot;string | {string}&quot;
-                }
-            ],
-            &quot;returns&quot;: [
-                {
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;nil&quot;
-                }
-            ],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 295,
-                &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/init.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;GetPermissionInheritance&quot;,
-            &quot;desc&quot;: &quot;Fetches the inherited permission group for a permission group&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;permissionGroup&quot;,
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;string&quot;
-                }
-            ],
-            &quot;returns&quot;: [
-                {
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;{string}\r\n&quot;
-                }
-            ],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 308,
+                &quot;line&quot;: 128,
                 &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/init.luau&quot;
             }
         },
@@ -446,18 +147,13 @@ CmdrServer<span class="token punctuation">:</span><span class="token function">S
                 {
                     &quot;name&quot;: &quot;typeData&quot;,
                     &quot;desc&quot;: &quot;The type data to register&quot;,
-                    &quot;lua_type&quot;: &quot;TypeDefinition&lt;T&gt;&quot;
+                    &quot;lua_type&quot;: &quot;TypeDefinition&quot;
                 }
             ],
-            &quot;returns&quot;: [
-                {
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;Promise\r\n&quot;
-                }
-            ],
+            &quot;returns&quot;: [],
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;source&quot;: {
-                &quot;line&quot;: 319,
+                &quot;line&quot;: 140,
                 &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/init.luau&quot;
             }
         },
@@ -468,7 +164,7 @@ CmdrServer<span class="token punctuation">:</span><span class="token function">S
                 {
                     &quot;name&quot;: &quot;commandData&quot;,
                     &quot;desc&quot;: &quot;The command data to register&quot;,
-                    &quot;lua_type&quot;: &quot;CommandDefinition&lt;T&gt;&quot;
+                    &quot;lua_type&quot;: &quot;CommandDefinition&quot;
                 },
                 {
                     &quot;name&quot;: &quot;commandServerExecutor&quot;,
@@ -481,7 +177,7 @@ CmdrServer<span class="token punctuation">:</span><span class="token function">S
             &quot;private&quot;: true,
             &quot;unreleased&quot;: true,
             &quot;source&quot;: {
-                &quot;line&quot;: 334,
+                &quot;line&quot;: 153,
                 &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/init.luau&quot;
             }
         },
@@ -504,7 +200,7 @@ CmdrServer<span class="token punctuation">:</span><span class="token function">S
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;private&quot;: true,
             &quot;source&quot;: {
-                &quot;line&quot;: 380,
+                &quot;line&quot;: 197,
                 &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/init.luau&quot;
             }
         },
@@ -527,12 +223,33 @@ CmdrServer<span class="token punctuation">:</span><span class="token function">S
             &quot;function_type&quot;: &quot;method&quot;,
             &quot;private&quot;: true,
             &quot;source&quot;: {
-                &quot;line&quot;: 395,
+                &quot;line&quot;: 212,
+                &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;RoamInit&quot;,
+            &quot;desc&quot;: &quot;Starts Cmdr on the Server&quot;,
+            &quot;params&quot;: [],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 224,
                 &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/init.luau&quot;
             }
         }
     ],
-    &quot;properties&quot;: [],
+    &quot;properties&quot;: [
+        {
+            &quot;name&quot;: &quot;PermissionsHandler&quot;,
+            &quot;desc&quot;: &quot;&quot;,
+            &quot;lua_type&quot;: &quot;PermissionsHandler&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 49,
+                &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/init.luau&quot;
+            }
+        }
+    ],
     &quot;types&quot;: [],
     &quot;name&quot;: &quot;CmdrServer&quot;,
     &quot;desc&quot;: &quot;This is a wrapper service for Evaera&#x27;s Cmdr module (https://eryn.io/Cmdr/).\nIt provides an easier way to interact with Cmdr and autoboots with Roam&#x27;s\nsystems.&quot;,
@@ -543,8 +260,8 @@ CmdrServer<span class="token punctuation">:</span><span class="token function">S
         &quot;line&quot;: 11,
         &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/init.luau&quot;
     }
-}</pre></details></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#types" class="table-of-contents__link toc-highlight">Types</a></li><li><a href="#properties" class="table-of-contents__link toc-highlight">Properties</a></li><li><a href="#functions" class="table-of-contents__link toc-highlight">Functions</a><ul><li><a href="#ExecuteCommand" class="table-of-contents__link toc-highlight">:ExecuteCommand</a></li><li><a href="#ExecuteCommandAsClient" class="table-of-contents__link toc-highlight">:ExecuteCommandAsClient</a></li><li><a href="#GetGroupRankPermissions" class="table-of-contents__link toc-highlight">:GetGroupRankPermissions</a></li><li><a href="#GetPermissionInheritance" class="table-of-contents__link toc-highlight">:GetPermissionInheritance</a></li><li><a href="#GetPermissions" class="table-of-contents__link toc-highlight">:GetPermissions</a></li><li><a href="#GiveGroupPermissions" class="table-of-contents__link toc-highlight">:GiveGroupPermissions</a></li><li><a href="#GivePermissions" class="table-of-contents__link toc-highlight">:GivePermissions</a></li><li><a href="#HasPermission" class="table-of-contents__link toc-highlight">:HasPermission</a></li><li><a href="#PromiseCmdr" class="table-of-contents__link toc-highlight">:PromiseCmdr</a></li><li><a href="#RegisterCommandFromModule" class="table-of-contents__link toc-highlight">:RegisterCommandFromModule</a></li><li><a href="#RegisterType" class="table-of-contents__link toc-highlight">:RegisterType</a></li><li><a href="#SetPermissionInheritance" class="table-of-contents__link toc-highlight">:SetPermissionInheritance</a></li><li><a href="#SetPermissions" class="table-of-contents__link toc-highlight">:SetPermissions</a></li></ul></li></ul></div></div></div></div></main></div></div><footer class="footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2025 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
-<script src="/ModulesOnRails/assets/js/runtime~main.f04507c3.js"></script>
-<script src="/ModulesOnRails/assets/js/main.c70c8c8d.js"></script>
+}</pre></details></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#types" class="table-of-contents__link toc-highlight">Types</a></li><li><a href="#properties" class="table-of-contents__link toc-highlight">Properties</a><ul><li><a href="#PermissionsHandler" class="table-of-contents__link toc-highlight">PermissionsHandler</a></li></ul></li><li><a href="#functions" class="table-of-contents__link toc-highlight">Functions</a><ul><li><a href="#ExecuteCommand" class="table-of-contents__link toc-highlight">:ExecuteCommand</a></li><li><a href="#PromiseCmdr" class="table-of-contents__link toc-highlight">:PromiseCmdr</a></li><li><a href="#RegisterCommandFromModule" class="table-of-contents__link toc-highlight">:RegisterCommandFromModule</a></li><li><a href="#RegisterType" class="table-of-contents__link toc-highlight">:RegisterType</a></li><li><a href="#RoamInit" class="table-of-contents__link toc-highlight">:RoamInit</a></li></ul></li></ul></div></div></div></div></main></div></div><footer class="footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2025 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
+<script src="/ModulesOnRails/assets/js/runtime~main.6965623a.js"></script>
+<script src="/ModulesOnRails/assets/js/main.3d2c72c7.js"></script>
 </body>
 </html>

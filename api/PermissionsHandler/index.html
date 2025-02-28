@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en" dir="ltr" class="plugin-moonwave plugin-id-moonwave">
+<head>
+<meta charset="UTF-8">
+<meta name="generator" content="Docusaurus v2.3.1">
+<title data-rh="true">PermissionsHandler | ModulesOnRails</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:url" content="https://raild3x.github.io/ModulesOnRails/api/PermissionsHandler"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docusaurus_tag" content="default"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docsearch:docusaurus_tag" content="default"><meta data-rh="true" property="og:title" content="PermissionsHandler | ModulesOnRails"><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/PermissionsHandler"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/PermissionsHandler" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/PermissionsHandler" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.1839e2d4.css">
+<link rel="preload" href="/ModulesOnRails/assets/js/runtime~main.6965623a.js" as="script">
+<link rel="preload" href="/ModulesOnRails/assets/js/main.3d2c72c7.js" as="script">
+</head>
+<body class="navigation-with-keyboard">
+<script>!function(){function e(e){document.documentElement.setAttribute("data-theme",e)}var t=function(){var e=null;try{e=localStorage.getItem("theme")}catch(e){}return e}();null!==t?e(t):window.matchMedia("(prefers-color-scheme: dark)").matches?e("dark"):(window.matchMedia("(prefers-color-scheme: light)").matches,e("light"))}()</script><div id="__docusaurus">
+<div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="navbar navbar--fixed-top"><div class="navbar__inner"><div class="navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-hidden="true" viewBox="0 0 24 24" class="iconExternalLink_nPIU"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"></path></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="Switch between dark and light mode (currently light mode)" aria-label="Switch between dark and light mode (currently light mode)" aria-live="polite"><svg viewBox="0 0 24 24" width="24" height="24" class="lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" class="darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg></button></div><div class="searchBox_ZlJk"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input type="search" id="search_input_react" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="docusaurus_skipToContent_fallback" class="main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject">​Base​Object</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Roam">​Roam</a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/TableManager">TableManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/TableReplicator">TableReplicator</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/NetWire">NetWire</a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PlayerProfileManager">​Player​Profile​Manager</a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/PlayerDataManager">PlayerDataManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/Component">Instance Component Systems</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/DropletManager">DropletManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/CmdrHandler">Admin Commands [Cmdr]</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/Queue">Data Structures</a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ObjectCache">​Object​Cache</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" href="/ModulesOnRails/api/PermissionsHandler">​Permissions​Handler</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ProbabilityDistributor">​Probability​Distributor</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PromValue">​Prom​Value</a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><div class="tocCollapsible_ETCw theme-doc-toc-mobile tocMobile_oUs_"><button type="button" class="clean-btn tocCollapsibleButton_TO0P">On this page</button></div><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">Permissions</span><span style="display:inline-block">Handler</span></h1><div class="luaClassTags_EipM"></div><div></div></header><h2 class="anchor anchorWithStickyNavbar_LWe7" id="functions">Functions<a href="#functions" class="hash-link" aria-label="Direct link to Functions" title="Direct link to Functions">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="PlayerHasPermissionForCommand"><code style="text-decoration:none">PlayerHasPermissionForCommand</code><a href="#PlayerHasPermissionForCommand" class="hash-link" aria-label="Direct link to PlayerHasPermissionForCommand" title="Direct link to PlayerHasPermissionForCommand">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/PermissionsHandler.luau#L42"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>PermissionsHandler<!-- -->:</code><code class="green_DgR4">PlayerHasPermissionForCommand</code><code>(</code><div class="inset_uKQm"><div><code>plr<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>,</code></div><div><code>commandName<!-- -->: </code><code class="blue_P4bS">string</code></div></div><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
+<p>Checks if a player has permission to run a command</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetPlayerPermissionGroups"><code style="text-decoration:none">GetPlayerPermissionGroups</code><a href="#GetPlayerPermissionGroups" class="hash-link" aria-label="Direct link to GetPlayerPermissionGroups" title="Direct link to GetPlayerPermissionGroups">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/PermissionsHandler.luau#L59"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>PermissionsHandler<!-- -->:</code><code class="green_DgR4">GetPlayerPermissionGroups</code><code>(</code><code>plr<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>) → </code><code class="purple_ieR2">{</code><code class="blue_P4bS">string</code><code class="purple_ieR2">}</code></div><div>
+<p>Gets the permissions groups for a player</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="SetPlayerPermissionGroups"><code style="text-decoration:none">SetPlayerPermissionGroups</code><a href="#SetPlayerPermissionGroups" class="hash-link" aria-label="Direct link to SetPlayerPermissionGroups" title="Direct link to SetPlayerPermissionGroups">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/PermissionsHandler.luau#L74"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>PermissionsHandler<!-- -->:</code><code class="green_DgR4">SetPlayerPermissionGroups</code><code>(</code><div class="inset_uKQm"><div><code>plr<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>,</code></div><div><code>permissions<!-- -->: </code><code class="blue_P4bS">string</code><code class="op_lSLc"> | </code><code class="purple_ieR2">{</code><code class="blue_P4bS">string</code><code class="purple_ieR2">}</code></div></div><code>) → </code><code>(</code><code>)</code></div><div>
+<p>
+  Sets the direct permissions for a player.
+  Does not override inherited permissions or group permissions.
+</p>
+<pre class="language-lua"><code class="language-lua">PermissionsHandler<span class="token punctuation">:</span><span class="token function">SetPlayerPermissionGroups</span><span class="token punctuation">(</span>Players<span class="token punctuation">.</span>Raildex<span class="token punctuation">,</span> <span class="token string">"Admin"</span><span class="token punctuation">)</span>
+</code></pre>
+<div class="admonition admonition-info alert alert--info">
+  <div class="admonition-heading">
+    <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="16" viewBox="0 0 14 16">
+          <path d="M7 2.3c3.14 0 5.7 2.56 5.7 5.7s-2.56 5.7-5.7 5.7A5.71 5.71 0 0 1 1.3 8c0-3.14 2.56-5.7 5.7-5.7zM7 1C3.14 1 0 4.14 0 8s3.14 7 7 7 7-3.14 7-7-3.14-7-7-7zm1 3H6v5h2V4zm0 6H6v2h2v-2z"></path>
+        </svg></span>info</h5>
+  </div>
+  <div class="admonition-content">
+    <p>The <code>Creator</code> permission group grants all permissions regardless of group inheritance.</p>
+  </div>
+</div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GivePlayerPermissionGroups"><code style="text-decoration:none">GivePlayerPermissionGroups</code><a href="#GivePlayerPermissionGroups" class="hash-link" aria-label="Direct link to GivePlayerPermissionGroups" title="Direct link to GivePlayerPermissionGroups">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/PermissionsHandler.luau#L89"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>PermissionsHandler<!-- -->:</code><code class="green_DgR4">GivePlayerPermissionGroups</code><code>(</code><div class="inset_uKQm"><div><code>plr<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>,</code><span class="inlineDescription_G7Er">-- <span>
+<p>The player to grant permissions to</p>
+</span></span></div><div><code>permissionGroups<!-- -->: </code><code class="blue_P4bS">string</code><code class="op_lSLc"> | </code><code class="purple_ieR2">{</code><code class="blue_P4bS">string</code><code class="purple_ieR2">}</code><span class="inlineDescription_G7Er">-- <span>
+<p>The permission groups to grant</p>
+</span></span></div></div><code>) → </code><code>(</code><code>)</code></div><div>
+<p>Grants a player a permission group(s). Adds the given permissions to the player's current permissions.</p>
+<pre class="language-lua"><code class="language-lua">PermissionsHandler<span class="token punctuation">:</span><span class="token function">GivePlayerPermissionGroups</span><span class="token punctuation">(</span>Players<span class="token punctuation">.</span>Raildex<span class="token punctuation">,</span> <span class="token string">"Admin"</span><span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetRobloxGroupRankPermissionGroups"><code style="text-decoration:none">GetRobloxGroupRankPermissionGroups</code><a href="#GetRobloxGroupRankPermissionGroups" class="hash-link" aria-label="Direct link to GetRobloxGroupRankPermissionGroups" title="Direct link to GetRobloxGroupRankPermissionGroups">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/PermissionsHandler.luau#L113"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>PermissionsHandler<!-- -->:</code><code class="green_DgR4">GetRobloxGroupRankPermissionGroups</code><code>(</code><div class="inset_uKQm"><div><code>groupId<!-- -->: </code><code class="blue_P4bS">number</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
+<p>The Roblox group id to get permissions for</p>
+</span></span></div><div><code>rank<!-- -->: </code><code class="blue_P4bS">number</code><span class="inlineDescription_G7Er">-- <span>
+<p>The rank to get permissions for</p>
+</span></span></div></div><code>) → </code><code class="purple_ieR2">{</code><code class="blue_P4bS">string</code><code class="purple_ieR2">}</code><span class="inlineDescription_G7Er">-- <span>
+<p>The permission groups granted to the rank</p>
+</span></span></div><div>
+<p>Gets the permissions granted to a particular rank in a group.</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> permissions <span class="token operator">=</span> PermissionsHandler<span class="token punctuation">:</span><span class="token function">GetGroupRankPermissions</span><span class="token punctuation">(</span><span class="token number">15905255</span><span class="token punctuation">,</span> <span class="token number">230</span><span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GiveRobloxGroupRankPermissionGroups"><code style="text-decoration:none">GiveRobloxGroupRankPermissionGroups</code><a href="#GiveRobloxGroupRankPermissionGroups" class="hash-link" aria-label="Direct link to GiveRobloxGroupRankPermissionGroups" title="Direct link to GiveRobloxGroupRankPermissionGroups">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/PermissionsHandler.luau#L127"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>PermissionsHandler<!-- -->:</code><code class="green_DgR4">GiveRobloxGroupRankPermissionGroups</code><code>(</code><div class="inset_uKQm"><div><code>groupId<!-- -->: </code><code class="blue_P4bS">number</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
+<p>The Roblox group id to grant permissions to</p>
+</span></span></div><div><code>ranks<!-- -->: </code><code class="blue_P4bS">number</code><code class="op_lSLc"> | </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/NumberRange" target="_blank" rel="noopener noreferrer">NumberRange<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>,</code><span class="inlineDescription_G7Er">-- <span>
+<p>The ranks to apply the permissions to. Can be a single rank or a range of ranks.</p>
+</span></span></div><div><code>permissionGroups<!-- -->: </code><code class="blue_P4bS">string</code><code class="op_lSLc"> | </code><code class="purple_ieR2">{</code><code class="blue_P4bS">string</code><code class="purple_ieR2">}</code><span class="inlineDescription_G7Er">-- <span>
+<p>The permissions to grant to the group</p>
+</span></span></div></div><code>) → </code><code class="blue_P4bS">function</code><span class="inlineDescription_G7Er">-- <span>
+<p>A function that can be called to remove the permissions</p>
+</span></span></div><div>
+<p>Grants specified ranks in a Roblox Group permission to use the commands under a given PermissionGroup.</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> revoke <span class="token operator">=</span> PermissionsHandler<span class="token punctuation">:</span><span class="token function">GiveRobloxGroupRankPermissionGroups</span><span class="token punctuation">(</span><span class="token number">15905255</span><span class="token punctuation">,</span> <span class="token number">230</span><span class="token punctuation">,</span> <span class="token string">"Admin"</span><span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GiveRobloxGroupRolePermissionGroups"><code style="text-decoration:none">GiveRobloxGroupRolePermissionGroups</code><a href="#GiveRobloxGroupRolePermissionGroups" class="hash-link" aria-label="Direct link to GiveRobloxGroupRolePermissionGroups" title="Direct link to GiveRobloxGroupRolePermissionGroups">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/PermissionsHandler.luau#L167"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>PermissionsHandler<!-- -->:</code><code class="green_DgR4">GiveRobloxGroupRolePermissionGroups</code><code>(</code><div class="inset_uKQm"><div><code>groupId<!-- -->: </code><code class="blue_P4bS">number</code><code>,</code></div><div><code>role<!-- -->: </code><code class="blue_P4bS">string</code><code>,</code></div><div><code>permissionGroups<!-- -->: </code><code class="blue_P4bS">string</code><code class="op_lSLc"> | </code><code class="purple_ieR2">{</code><code class="blue_P4bS">string</code><code class="purple_ieR2">}</code></div></div><code>) → </code><code>(</code><code>)</code></div><div></div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="SetPermissionGroupInheritance"><code style="text-decoration:none">SetPermissionGroupInheritance</code><a href="#SetPermissionGroupInheritance" class="hash-link" aria-label="Direct link to SetPermissionGroupInheritance" title="Direct link to SetPermissionGroupInheritance">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/PermissionsHandler.luau#L224"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>PermissionsHandler<!-- -->:</code><code class="green_DgR4">SetPermissionGroupInheritance</code><code>(</code><div class="inset_uKQm"><div><code>permissionGroup<!-- -->: </code><code class="blue_P4bS">string</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
+<p>The permission group to set the inheritance for</p>
+</span></span></div><div><code>inheritedGroups<!-- -->: </code><code class="blue_P4bS">string</code><code class="op_lSLc"> | </code><code class="purple_ieR2">{</code><code class="blue_P4bS">string</code><code class="purple_ieR2">}</code><span class="inlineDescription_G7Er">-- <span>
+<p>The group(s) to inherit permissions from</p>
+</span></span></div></div><code>) → </code><code>(</code><code>)</code></div><div>
+<p>
+  Sets the permission inheritance for a permission group.
+  <em>This will override any previous inheritance.</em>
+</p>
+<p>-- TODO: Add conditional inheritance</p>
+<pre class="language-lua"><code class="language-lua">PermissionsHandler<span class="token punctuation">:</span><span class="token function">SetPermissionGroupInheritance</span><span class="token punctuation">(</span><span class="token string">"Tester"</span><span class="token punctuation">,</span> <span class="token punctuation">{</span><span class="token string">"MoneyCommands"</span><span class="token punctuation">,</span> <span class="token string">"InventoryCommands"</span><span class="token punctuation">}</span><span class="token punctuation">)</span>
+PermissionsHandler<span class="token punctuation">:</span><span class="token function">SetPermissionGroupInheritance</span><span class="token punctuation">(</span><span class="token string">"Moderator"</span><span class="token punctuation">,</span> <span class="token punctuation">{</span><span class="token string">"BanCommands"</span><span class="token punctuation">}</span><span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetPermissionInheritance"><code style="text-decoration:none">GetPermissionInheritance</code><a href="#GetPermissionInheritance" class="hash-link" aria-label="Direct link to GetPermissionInheritance" title="Direct link to GetPermissionInheritance">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/PermissionsHandler.luau#L238"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>PermissionsHandler<!-- -->:</code><code class="green_DgR4">GetPermissionInheritance</code><code>(</code><code>permissionGroup<!-- -->: </code><code class="blue_P4bS">string</code><code>) → </code><code class="purple_ieR2">{</code><code class="blue_P4bS">string</code><code class="purple_ieR2">}</code></div><div>
+<p>Fetches the inherited Permission Group(s) for a given Permission Group</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetCommandsAvailableToPermissionGroup"><code style="text-decoration:none">GetCommandsAvailableToPermissionGroup</code><a href="#GetCommandsAvailableToPermissionGroup" class="hash-link" aria-label="Direct link to GetCommandsAvailableToPermissionGroup" title="Direct link to GetCommandsAvailableToPermissionGroup">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/cmdrhandler/src/Server/PermissionsHandler.luau#L247"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>PermissionsHandler<!-- -->:</code><code class="green_DgR4">GetCommandsAvailableToPermissionGroup</code><code>(</code><code>permissionGroup<!-- -->: </code><code class="blue_P4bS">string</code><code>) → </code><code class="purple_ieR2">{</code><code class="blue_P4bS">string</code><code class="purple_ieR2">}</code></div><div>
+<p>TODO: FINISH THIS METHOD</p>
+</div></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
+    &quot;functions&quot;: [
+        {
+            &quot;name&quot;: &quot;PlayerHasPermissionForCommand&quot;,
+            &quot;desc&quot;: &quot;Checks if a player has permission to run a command&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;plr&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Player&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;commandName&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;boolean\r\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 42,
+                &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/PermissionsHandler.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetPlayerPermissionGroups&quot;,
+            &quot;desc&quot;: &quot;Gets the permissions groups for a player&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;plr&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Player&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{string}\r\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 59,
+                &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/PermissionsHandler.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;SetPlayerPermissionGroups&quot;,
+            &quot;desc&quot;: &quot;Sets the direct permissions for a player.\nDoes not override inherited permissions or group permissions.\n```lua\nPermissionsHandler:SetPlayerPermissionGroups(Players.Raildex, \&quot;Admin\&quot;)\n```\n:::info\nThe `Creator` permission group grants all permissions regardless of group inheritance.\n:::&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;plr&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Player&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;permissions&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;string | {string}&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 74,
+                &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/PermissionsHandler.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GivePlayerPermissionGroups&quot;,
+            &quot;desc&quot;: &quot;Grants a player a permission group(s). Adds the given permissions to the player&#x27;s current permissions.\n```lua\nPermissionsHandler:GivePlayerPermissionGroups(Players.Raildex, \&quot;Admin\&quot;)\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;plr&quot;,
+                    &quot;desc&quot;: &quot;The player to grant permissions to&quot;,
+                    &quot;lua_type&quot;: &quot;Player&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;permissionGroups&quot;,
+                    &quot;desc&quot;: &quot;The permission groups to grant&quot;,
+                    &quot;lua_type&quot;: &quot;string | {string}&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 89,
+                &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/PermissionsHandler.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetRobloxGroupRankPermissionGroups&quot;,
+            &quot;desc&quot;: &quot;Gets the permissions granted to a particular rank in a group.\n```lua\nlocal permissions = PermissionsHandler:GetGroupRankPermissions(15905255, 230)\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;groupId&quot;,
+                    &quot;desc&quot;: &quot;The Roblox group id to get permissions for&quot;,
+                    &quot;lua_type&quot;: &quot;number&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;rank&quot;,
+                    &quot;desc&quot;: &quot;The rank to get permissions for&quot;,
+                    &quot;lua_type&quot;: &quot;number&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;The permission groups granted to the rank&quot;,
+                    &quot;lua_type&quot;: &quot;{string}&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 113,
+                &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/PermissionsHandler.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GiveRobloxGroupRankPermissionGroups&quot;,
+            &quot;desc&quot;: &quot;Grants specified ranks in a Roblox Group permission to use the commands under a given PermissionGroup.\n```lua\nlocal revoke = PermissionsHandler:GiveRobloxGroupRankPermissionGroups(15905255, 230, \&quot;Admin\&quot;)\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;groupId&quot;,
+                    &quot;desc&quot;: &quot;The Roblox group id to grant permissions to&quot;,
+                    &quot;lua_type&quot;: &quot;number&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;ranks&quot;,
+                    &quot;desc&quot;: &quot;The ranks to apply the permissions to. Can be a single rank or a range of ranks.&quot;,
+                    &quot;lua_type&quot;: &quot;number | NumberRange&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;permissionGroups&quot;,
+                    &quot;desc&quot;: &quot;The permissions to grant to the group&quot;,
+                    &quot;lua_type&quot;: &quot;string | {string}&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;A function that can be called to remove the permissions&quot;,
+                    &quot;lua_type&quot;: &quot;function&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 127,
+                &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/PermissionsHandler.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GiveRobloxGroupRolePermissionGroups&quot;,
+            &quot;desc&quot;: &quot;\t&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;groupId&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;number&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;role&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;permissionGroups&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;string | {string}&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 167,
+                &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/PermissionsHandler.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;SetPermissionGroupInheritance&quot;,
+            &quot;desc&quot;: &quot;Sets the permission inheritance for a permission group.\n*This will override any previous inheritance.*\n\n-- TODO: Add conditional inheritance\n\n\n```lua\nPermissionsHandler:SetPermissionGroupInheritance(\&quot;Tester\&quot;, {\&quot;MoneyCommands\&quot;, \&quot;InventoryCommands\&quot;})\nPermissionsHandler:SetPermissionGroupInheritance(\&quot;Moderator\&quot;, {\&quot;BanCommands\&quot;})\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;permissionGroup&quot;,
+                    &quot;desc&quot;: &quot;The permission group to set the inheritance for&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;inheritedGroups&quot;,
+                    &quot;desc&quot;: &quot;The group(s) to inherit permissions from&quot;,
+                    &quot;lua_type&quot;: &quot;string | {string}&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 224,
+                &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/PermissionsHandler.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetPermissionInheritance&quot;,
+            &quot;desc&quot;: &quot;Fetches the inherited Permission Group(s) for a given Permission Group&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;permissionGroup&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{string}\r\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 238,
+                &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/PermissionsHandler.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetCommandsAvailableToPermissionGroup&quot;,
+            &quot;desc&quot;: &quot;TODO: FINISH THIS METHOD&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;permissionGroup&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{string}\r\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 247,
+                &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/PermissionsHandler.luau&quot;
+            }
+        }
+    ],
+    &quot;properties&quot;: [],
+    &quot;types&quot;: [],
+    &quot;name&quot;: &quot;PermissionsHandler&quot;,
+    &quot;desc&quot;: &quot;&quot;,
+    &quot;source&quot;: {
+        &quot;line&quot;: 6,
+        &quot;path&quot;: &quot;lib/cmdrhandler/src/Server/PermissionsHandler.luau&quot;
+    }
+}</pre></details></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#types" class="table-of-contents__link toc-highlight">Types</a></li><li><a href="#properties" class="table-of-contents__link toc-highlight">Properties</a></li><li><a href="#functions" class="table-of-contents__link toc-highlight">Functions</a><ul><li><a href="#GetCommandsAvailableToPermissionGroup" class="table-of-contents__link toc-highlight">:GetCommandsAvailableToPermissionGroup</a></li><li><a href="#GetPermissionInheritance" class="table-of-contents__link toc-highlight">:GetPermissionInheritance</a></li><li><a href="#GetPlayerPermissionGroups" class="table-of-contents__link toc-highlight">:GetPlayerPermissionGroups</a></li><li><a href="#GetRobloxGroupRankPermissionGroups" class="table-of-contents__link toc-highlight">:GetRobloxGroupRankPermissionGroups</a></li><li><a href="#GivePlayerPermissionGroups" class="table-of-contents__link toc-highlight">:GivePlayerPermissionGroups</a></li><li><a href="#GiveRobloxGroupRankPermissionGroups" class="table-of-contents__link toc-highlight">:GiveRobloxGroupRankPermissionGroups</a></li><li><a href="#GiveRobloxGroupRolePermissionGroups" class="table-of-contents__link toc-highlight">:GiveRobloxGroupRolePermissionGroups</a></li><li><a href="#PlayerHasPermissionForCommand" class="table-of-contents__link toc-highlight">:PlayerHasPermissionForCommand</a></li><li><a href="#SetPermissionGroupInheritance" class="table-of-contents__link toc-highlight">:SetPermissionGroupInheritance</a></li><li><a href="#SetPlayerPermissionGroups" class="table-of-contents__link toc-highlight">:SetPlayerPermissionGroups</a></li></ul></li></ul></div></div></div></div></main></div></div><footer class="footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2025 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
+<script src="/ModulesOnRails/assets/js/runtime~main.6965623a.js"></script>
+<script src="/ModulesOnRails/assets/js/main.3d2c72c7.js"></script>
+</body>
+</html>
