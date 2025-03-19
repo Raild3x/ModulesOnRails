@@ -44,7 +44,7 @@ local tests = tiniest.collect_tests(function()
 	local describe = tiniest.describe
 
 	local function describe_from_file(name: string)
-		describe(name, function()
+		describe(string.gsub(name, ".luau", ""), function()
 			require(name)(tiniest)
 		end)
 	end
