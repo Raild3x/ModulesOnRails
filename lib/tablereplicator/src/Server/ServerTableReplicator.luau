@@ -275,7 +275,7 @@ end)
 
 --[=[
     Returns a Token Symbol that is used for identifying the ServerTableReplicator Class.
-    We use unique symbols instead of strings to prevent accidental collisions.
+    We use unique symbols instead of strings to prevent accidental collisions on the server.
     
     :::warning
     This may only be called once per unique string. The returned symbol should
@@ -286,9 +286,16 @@ end)
 function ServerTableReplicator.Token(tokenName: string): ReplicationToken
     assert(type(tokenName) == "string", `Invalid token type. Expected: 'string', Got: '{typeof(tokenName)}'`)
     assert(#tokenName > 0, "ReplicationToken name cannot be empty")
-    assert(not table.find(USED_CLASS_TOKENS, tokenName), `Class Token '{tokenName}' already exists.`)
+
+    local existingToken = table.find(USED_CLASS_TOKENS, tokenName)
+    if existingToken then
+        error(`Class Token '{tokenName}' already exists. Created at: \n{existingToken.Creation}`)
+    end
     
-    local token = {Name = tokenName}
+    local token = {
+        Name = tokenName,
+        Creation = debug.traceback(),
+    }
     setmetatable(token, ClassTokenMT)
     table.freeze(token)
 
