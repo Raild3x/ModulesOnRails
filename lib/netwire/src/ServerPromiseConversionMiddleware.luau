@@ -19,7 +19,7 @@ return function (player: Player, args: {any}): (boolean, ...any)
     local potentialPromise = args[1]
     if Promise.is(potentialPromise) then
         if args[2] then
-            warn("Detected multiple return values with a Promise. This is not supported.")
+            warn("Detected multiple return values with a Promise. This is not supported.\n", debug.traceback())
         end
         local promise = potentialPromise
         local results = table.pack(promise:await())

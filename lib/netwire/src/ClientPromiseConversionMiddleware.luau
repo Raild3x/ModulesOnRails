@@ -20,9 +20,9 @@ return function (args: {any}): (boolean, ...any)
         local didServerResolve = args[2]
         local prom
         if not didServerResolve then
-            prom = Promise.reject(table.unpack(args, 3, #args))
+            prom = Promise.reject(table.unpack(args[3]))
         else
-            prom = Promise.resolve(table.unpack(args, 3, #args))
+            prom = Promise.resolve(table.unpack(args[3]))
         end
         table.clear(args)
         args[1] = prom
