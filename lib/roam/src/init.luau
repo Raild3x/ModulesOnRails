@@ -190,8 +190,8 @@ Roam.Debug = false -- Whether or not to print debug messages
 Roam.DEFAULT_SRC_NAME = "src"
 
 Roam.Bootstrappers = { -- Generic Bootstrappers for Roam / Orion
-	Server = require(script:FindFirstChild("Bootstrappers"):FindFirstChild("ServerBootstrapper")) :: (script: Script) -> ();
-	Client = require(script:FindFirstChild("Bootstrappers"):FindFirstChild("ClientBootstrapper")) :: (script: Script) -> ();
+	Server = require(script:FindFirstChild("Bootstrappers"):FindFirstChild("ServerBootstrapper")) :: (script: Script) -> (Promise);
+	Client = require(script:FindFirstChild("Bootstrappers"):FindFirstChild("ClientBootstrapper")) :: (script: Script) -> (Promise);
 }
 
 --[=[
