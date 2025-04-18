@@ -110,7 +110,7 @@ RemoteComponentExtension.createProperty = NetWire.createProperty
 -- Initialize the Remotes prior to 'Start
 function RemoteComponentExtension.Starting(component)
 	local objectInstance = component.Instance
-	local nameSpace = component.RemoteNamespace or component.Tag
+	local nameSpace = component.RemoteNamespace or component.Tag.."_RemoteComponent"
 	if IS_SERVER then
 		local Comm = CommPackage.ServerComm
 		if component.Client then
