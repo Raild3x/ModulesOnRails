@@ -1,0 +1,14 @@
+[package]
+name = "raild3x/pathfinder"
+description = "A generic pathfinder implementation in Luau."
+authors = ["Logan Hunt (Raildex)"]
+version = "0.1.0"
+license = "MIT"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+
+[custom]
+# The properly capitalized and spaced name of the library
+formattedName = "Pathfinder"
+# The intro page for the documentation
+docsLink = "Pathfinder"
