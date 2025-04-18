@@ -41,3 +41,7 @@ classes = ["DropletManager", "DropletServerManager", "DropletClientManager", "Dr
 [[classOrder]]
 section = "Admin Commands [Cmdr]"
 classes = ["CmdrHandler", "CmdrServer", "CmdrClient", "CmdrTypes"]
+
+[[classOrder]]
+section = "Data Structures"
+classes = ["Queue", "Heap"]
