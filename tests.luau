@@ -1,4 +1,3 @@
-
 local fs = require("@lune/fs")
 local io = require("@lune/stdio")
 local process = require("@lune/process")
@@ -8,8 +7,37 @@ local tiniest = require("@tiniest/tiniest_for_lune").configure({
 	save_snapshots = false,
 }) 
 
+local lastPackageFile = "./test/last_tested_package.txt"
+
+-- Function to read the last package name from the file
+local function readLastPackage()
+    if fs.isFile(lastPackageFile) then
+        local content = fs.readFile(lastPackageFile)
+        return content and content:match("^%s*(.-)%s*$") -- Trim whitespace
+    end
+    return nil
+end
+
+-- Function to write the last package name to the file
+local function writeLastPackage(packageName)
+    fs.writeFile(lastPackageFile, packageName)
+end
+
 -- Prompt the user for the directory name
 local dirName = io.prompt("text", "Enter the name of a directory inside lib: ")
+
+-- Handle "last" input
+if not dirName or dirName == "last" or dirName == "" then
+    dirName = readLastPackage()
+    if not dirName or dirName == "" then
+        print("No previous package name found.")
+        process.exit(1)
+    else
+        print("Using last package name: " .. dirName)
+    end
+else
+    writeLastPackage(dirName)
+end
 
 if not dirName or dirName == "" then
     print("Invalid directory name.")
