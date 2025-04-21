@@ -1,381 +1,534 @@
-local Heap = require("./init")
+local LooseTightDoubleGrid = require("./init")
+local LooseCell = require("LooseCell")
+
+local Vector2 = {
+	new = function(x, y)
+		return { X = x, Y = y }
+	end,
+}
 
 local test_suite = function(tiniest)
 	local describe = tiniest.describe
 	local test = tiniest.test
 	local expect = tiniest.expect
 
-	describe("Push", function()
-		test("should insert elements in correct order for minHeap", function()
-			local minHeap = Heap.min()
-			minHeap:Push(5)
-			minHeap:Push(2)
-			minHeap:Push(8)
-			expect(minHeap:Peek()).is(2)
+	describe("LooseTightDoubleGrid", function()
+		describe("Initialization", function()
+			test("should initialize with correct properties", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+				expect(grid.Position).is_shallow_equal(Vector2.new(0, 0))
+				expect(grid.tCols).is(10)
+				expect(grid.tRows).is(10)
+				expect(grid.cWidth).is(2)
+				expect(grid.cHeight).is(2)
+			end)
 		end)
 
-		test("should insert elements in correct order for maxHeap", function()
-			local maxHeap = Heap.max()
-			maxHeap:Push(5)
-			maxHeap:Push(2)
-			maxHeap:Push(8)
-			expect(maxHeap:Peek()).is(8)
-		end)
-	end)
+		describe("Insertion", function()
+			test("should insert a rectangle entity", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+				local id = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+				expect(grid:Has(id)).is(true)
+			end)
 
-	describe("Pop", function()
-		test("should remove and return elements in correct order for minHeap", function()
-			local minHeap = Heap.min()
-			minHeap:Push(3)
-			minHeap:Push(1)
-			minHeap:Push(4)
-			expect(minHeap:Pop()).is(1)
-			expect(minHeap:Pop()).is(3)
-			expect(minHeap:Pop()).is(4)
-		end)
+			test("should insert a circular entity", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+				local id = grid:InsertCircle(Vector2.new(3, 3), 1)
+				expect(grid:Has(id)).is(true)
+			end)
 
-		test("should remove and return elements in correct order for maxHeap", function()
-			local maxHeap = Heap.max()
-			maxHeap:Push(3)
-			maxHeap:Push(1)
-			maxHeap:Push(4)
-			expect(maxHeap:Pop()).is(4)
-			expect(maxHeap:Pop()).is(3)
-			expect(maxHeap:Pop()).is(1)
-		end)
-	end)
-
-	describe("Peek", function()
-		test("should return top element without removing it", function()
-			local minHeap = Heap.min()
-			minHeap:Push(7)
-			minHeap:Push(2)
-			expect(minHeap:Peek()).is(2)
-			expect(#minHeap).is(2)
+			test("should insert a point entity", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+				local id = grid:InsertPoint(Vector2.new(7, 7))
+				expect(grid:Has(id)).is(true)
+			end)
 		end)
 
-		test("equals Pop", function()
-			local minHeap = Heap.min()
-			minHeap:Push(7)
-			minHeap:Push(2)
-			expect(minHeap:Peek()).is(minHeap:Pop())
-			expect(minHeap:Peek() == minHeap:Pop())
-		end)
-	end)
+		describe("Update", function()
+			test("should update a rectangle entity", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(6, 6),
+					CellSize = 2
+				})
+				local id = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+				grid:UpdateRect(id, Vector2.new(6, 6), Vector2.new(3, 3))
+				local entities = grid:QueryRect(Vector2.new(6, 6), Vector2.new(3, 3))
+				expect(entities).has_value(id)
+			end)
 
-	describe("Has", function()
-		test("should return true if value exists in heap", function()
-			local minHeap = Heap.min()
-			minHeap:Push(5)
-			minHeap:Push(3)
-			expect(minHeap:Has(3)).is(true)
-			expect(minHeap:Has(10)).is(false)
-		end)
+			test("should update a circular entity", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+				local id = grid:InsertCircle(Vector2.new(3, 3), 1)
+				grid:UpdateCircle(id, Vector2.new(4, 4), 2)
+				local entities = grid:QueryCircle(Vector2.new(4, 4), 2)
+				expect(entities).has_value(id)
+			end)
 
-		test("should return false for empty heap", function()
-			local minHeap = Heap.min()
-			expect(minHeap:Has(3)).is(false)
-		end)
-
-		test("Should return true if a value exists in a large heap after many values are removed", function()
-			local minHeap = Heap.min()
-			for i = 1, 100000 do
-				minHeap:Push(i)
-			end
-			for i = 1, 99900 do
-				minHeap:Pop()
-			end
-			print(minHeap)
-			expect(minHeap:Has(100000)).is(true)
-		end)
-
-		test("should allow for a cost argument", function()
-			local minHeap = Heap.min()
-			minHeap:Push("B", 5)
-			minHeap:Push("B", 10)
-			minHeap:Push("B", 15)
-			expect(minHeap:Has("B")).is(true)
-			expect(minHeap:Has("B", 5)).is(true)
-			expect(minHeap:Has("B", 10)).is(true)
-			expect(minHeap:Has("B", 15)).is(true)
-			expect(minHeap:Has("B", 20)).is(false)
+			test("should update a point entity", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+				local id = grid:InsertPoint(Vector2.new(7, 7))
+				grid:UpdatePoint(id, Vector2.new(8, 8))
+				local entities = grid:QueryPoint(Vector2.new(8, 8))
+				expect(entities).has_value(id)
+			end)
 		end)
 
-		-- test("Should work with a custom search function", function()
-		-- 	local minHeap = Heap.min()
-		-- 	minHeap:Push(5)
-		-- 	minHeap:Push(3)
-		-- 	expect(minHeap:Has(function(a) return a == 3 end)).is(true)
-		-- 	expect(minHeap:Has(function(a, b) return b > 5  end)).is(false)
-		-- 	expect(minHeap:Has(function(a, b) return a > b end)).is(false)
-		-- end)
-	end)
+		describe("Removal", function()
+			test("should remove an entity", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+				local id = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+				local removed = grid:Remove(id)
+				expect(removed).is(true)
+				expect(grid:Has(id)).is(false)
+			end)
 
-	describe("UpdateCost", function()
-		test("should update the cost of a value", function()
-			local minHeap = Heap.min()
-			minHeap:Push("A", 5)
-			minHeap:Push("B", 3)
-			minHeap:UpdateCost("A", 2)
-			expect(minHeap:GetCost("A")).is(2)
+			test("should return false when removing a non-existent entity", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+				local removed = grid:Remove(999)
+				expect(removed).is(false)
+			end)
 		end)
 
-		test("should not update cost if value does not exist", function()
-			local minHeap = Heap.min()
-			minHeap:Push("A", 5)
-			local didUpdate = minHeap:UpdateCost("B", 3)
-			expect(minHeap:Peek()).is("A")
-			expect(didUpdate).is(false)
-			expect(minHeap:GetCost("B")).is(nil)
-		end)
-
-		test("should maintain heap order after updating cost", function()
-			local minHeap = Heap.min()
-			minHeap:Push(5)
-			minHeap:Push(3)
-			minHeap:UpdateCost(5, 1)
-			local v, c = minHeap:Peek()
-			expect(v).is(5)
-			expect(c).is(1)
-		end)
-
-		test("should allow for a function instead of a value as its search arg", function()
-			local minHeap = Heap.min()
-			minHeap:Push(5)
-			minHeap:Push(3)
-			minHeap:UpdateCost(function(a) return a == 3 end, 1)
-			local v, c = minHeap:Peek()
-			expect(v).is(3)
-			expect(c).is(1)
-		end)
-
-		test("should allow for a function instead of a number as its cost arg", function()
-			local minHeap = Heap.min()
-			minHeap:Push(5)
-			minHeap:Push(3)
-			minHeap:UpdateCost(3, function(a) return a + 1 end)
-			local v, c = minHeap:Peek()
-			expect(v).is(3)
-			expect(c).is(4)
-		end)
-	end)
-
-	describe("GetCost", function()
-		test("should return the cost of a value", function()
-			local minHeap = Heap.min()
-			minHeap:Push("A", 5)
-			minHeap:Push("B", 3)
-			expect(minHeap:GetCost("A")).is(5)
-			expect(minHeap:GetCost("B")).is(3)
-			expect(minHeap:GetCost("C")).is(nil)
-		end)
-
-		test("should return nil for empty heap", function()
-			local minHeap = Heap.min()
-			expect(minHeap:GetCost(3)).is(nil)
-		end)
-	end)
-
-	describe("CountOccurrences", function()
-		test("should count occurrences of a value", function()
-			local minHeap = Heap.min()
-			minHeap:Push(5)
-			minHeap:Push(3)
-			minHeap:Push(8)
-			minHeap:Push(3)
-			expect(minHeap:CountOccurrences(3)).is(2)
-			expect(minHeap:CountOccurrences(5)).is(1)
-			expect(minHeap:CountOccurrences(10)).is(0)
-		end)
-
-		test("should return 0 for empty heap", function()
-			local minHeap = Heap.min()
-			expect(minHeap:CountOccurrences(3)).is(0)
-		end)
-
-		-- test("should ")
-	end)
-
-	describe("RemoveFirstOccurrence", function()
-		test("should remove the first occurrence of a value", function()
-			local minHeap = Heap.min()
-			minHeap:Push(5)
-			minHeap:Push(3)
-			minHeap:Push(8)
-			minHeap:Push(3)
-			expect(minHeap:RemoveFirstOccurrence(3)).is(true)
-			expect(minHeap:RemoveFirstOccurrence(3)).is(true)
-			expect(minHeap:RemoveFirstOccurrence(3)).is(false)
-		end)
-
-		test("should maintain heap order after removals", function()
-			local minHeap = Heap.min()
-			minHeap:Push(5)
-			minHeap:Push(3)
-			minHeap:Push(8)
-			minHeap:Push(3)
-			minHeap:Push(10)
-			minHeap:RemoveFirstOccurrence(3)
-			expect(minHeap:Peek()).is(3)
-			minHeap:RemoveFirstOccurrence(3)
-			expect(minHeap:Peek()).is(5)
-		end)
-	end)
-
-	describe("RemoveAllOccurrences", function()
-		test("should remove all occurrences of a value", function()
-			local minHeap = Heap.min()
-			minHeap:Push(5)
-			minHeap:Push(3)
-			minHeap:Push(8)
-			minHeap:Push(3)
-			minHeap:Push(3)
-			minHeap:Push(10)
-			expect(minHeap:RemoveAllOccurrences(3)).is(3)
-			expect(#minHeap).is(3)
-			expect(minHeap:RemoveAllOccurrences(3)).is(0)
-			expect(#minHeap).is(3)
-		end)
-	end)
-
-	-- describe("ToArray", function() -- ToArray is not supported
-	-- 	test("should return an array representation of the heap", function()
-	-- 		local minHeap = Heap.min()
-	-- 		minHeap:Push(5)
-	-- 		minHeap:Push(3)
-	-- 		minHeap:Push(8)
-	-- 		minHeap:Push(3)
-	-- 		minHeap:Push(3)
-	-- 		minHeap:Push(10)
-	-- 		expect(minHeap:ToArray()).is_shallow_equal({3, 3, 3, 5, 8, 10})
-	-- 	end)
-	-- end)
-
-	describe("__len", function()
-		test("should return correct number of elements", function()
-			local minHeap = Heap.min()
-			minHeap:Push(5)
-			minHeap:Push(10)
-			expect(#minHeap).is(2)
-			minHeap:Pop()
-			expect(#minHeap).is(1)
-			minHeap:Pop()
-			expect(#minHeap).is(0)
-			minHeap:Pop()
-			expect(#minHeap).is(0)
-			minHeap:Push(20)
-			expect(#minHeap).is(1)
-		end)
-	end)
-
-	describe("__tostring", function()
-		test("should return a string representation of the heap", function()
-			local minHeap = Heap.min()
-			for i = 1, 10 do
-				minHeap:Push(math.random(1, 10))
-			end
+		describe("Query Region", function()
+			test("should return entities fully contained within a single loose cell", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
 			
-			local heapStr = tostring(minHeap)
-			expect(heapStr:find("Heap:")).never_is(nil)
-			-- print(heapStr)
-		end)
-	end)
-
-	describe("__iter", function()
-		test("should iterate over the heap", function()
-			local minHeap = Heap.min()
-			local values = {}
-			local costs = {}
-
-			for i = 1, 100 do
-				local cost = math.random(1, 20)
-				local value = string.char(math.random(97, 110))
-				minHeap:Push(value, cost)
-				table.insert(values, value)
-				table.insert(costs, cost)
-			end
+				-- Insert entities into the grid
+				local id1 = grid:InsertRect(Vector2.new(1, 1), Vector2.new(1, 1)) -- Fully within one loose cell
+				local id2 = grid:InsertRect(Vector2.new(3, 3), Vector2.new(1, 1)) -- Outside the query region
 			
-			local i = 0
-			for value, cost in minHeap do
-				i = i + 1
-				local vIdx = table.find(values, value)
-				local cIdx = table.find(costs, cost)
-				expect(vIdx)
-				expect(cIdx)
-				table.remove(values, vIdx)
-				table.remove(costs, cIdx)
-				print(value, cost)
-			end
-			expect(i).is(#minHeap)
-			expect(#values).is(0)
-			expect(#costs).is(0)
-		end)
-		
-		test("should atleast give us the peeked value as the first value", function()
-			local minHeap = Heap.min()
-			minHeap:Push("A", 5)
-			minHeap:Push("B", 2)
-			minHeap:Push("C", 8)
-			minHeap:Push("A", 4)
-			minHeap:Push("D", 10)
-			local peekedValue, peekedCost = minHeap:Peek()
-			for iteratedValue, iteratedCost in minHeap do
-				expect(peekedValue).is(iteratedValue)
-				expect(peekedCost).is(iteratedCost)
-				break
-			end
+				-- Query a region that only overlaps with id1
+				local entities = grid:_QueryRegion(0.5, 0.5, 1.5, 1.5)
+				expect(entities).has_value(id1)
+				expect(entities).never_has_value(id2)
+			end)
+
+			test("should return entities spanning multiple loose cells", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+			
+				-- Insert entities into the grid
+				local id1 = grid:InsertRect(Vector2.new(1, 1), Vector2.new(1, 1)) -- In one cell
+				local id2 = grid:InsertRect(Vector2.new(3, 3), Vector2.new(2, 2)) -- Spans multiple cells
+			
+				-- Query a region that overlaps both entities
+				local entities = grid:_QueryRegion(0, 0, 4, 4)
+				expect(entities).has_value(id1)
+				expect(entities).has_value(id2)
+			end)
+
+			test("should return an empty result when no entities are in the region", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+			
+				-- Insert entities outside the query region
+				grid:InsertRect(Vector2.new(5, 5), Vector2.new(1, 1))
+			
+				-- Query a region with no entities
+				local entities = grid:_QueryRegion(0, 0, 1, 1)
+				expect(#entities).is(0)
+			end)
+
+			test("should return entities when the region touches the edge of a loose cell", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+			
+				-- Insert entities into the grid
+				local id1 = grid:InsertRect(Vector2.new(2, 2), Vector2.new(1, 1)) -- On the edge of a loose cell
+			
+				-- Query a region that touches the edge of the loose cell
+				local entities = grid:_QueryRegion(1.5, 1.5, 2.5, 2.5)
+				expect(entities).has_value(id1)
+			end)
+
+			test("should handle regions larger than the grid", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+			
+				-- Insert entities into the grid
+				local id1 = grid:InsertRect(Vector2.new(5, 5), Vector2.new(1, 1))
+			
+				-- Query a region larger than the grid
+				local entities = grid:_QueryRegion(-10, -10, 20, 20)
+				expect(entities).has_value(id1)
+			end)
 		end)
 
-		-- [We make no guarantees about iteration order]
-		-- test("Iteration order test", function()
-		-- 	local minHeap = Heap.min()
-		-- 	minHeap:Push("A", 5)
-		-- 	minHeap:Push("B", 2)
-		-- 	minHeap:Push("C", 8)
-		-- 	minHeap:Push("A", 4)
-		-- 	minHeap:Push("D", 10)
+		describe("Query", function()
+			test("should query entities in a rectangular region", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(8, 8),
+					CellSize = 2
+				})
+				local id1 = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+				local id2 = grid:InsertRect(Vector2.new(8, 8), Vector2.new(2, 2))
+				local entities = grid:QueryRect(Vector2.new(5, 5), Vector2.new(3, 3))
+				expect(entities).has_value(id1)
+				expect(entities).never_has_value(id2)
+			end)
 
-		-- 	local expectedResults = {
-		-- 		{"B", 2},
-		-- 		{"A", 5},
-		-- 		{"C", 8},
-		-- 		{"A", 4},
-		-- 		{"D", 10}
-		-- 	}
+			test("should query entities in a circular region", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+				local id1 = grid:InsertCircle(Vector2.new(5, 5), 2)
+				local id2 = grid:InsertCircle(Vector2.new(8, 8), 2)
+				local entities = grid:QueryCircle(Vector2.new(5, 5), 2.1)
+				expect(entities).has_value(id1)
+				expect(entities).never_has_value(id2)
+			end)
+
+			test("should query entities at a specific point", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+				local id1 = grid:InsertPoint(Vector2.new(5, 5))
+				local id2 = grid:InsertPoint(Vector2.new(8, 8))
+				local entities = grid:QueryPoint(Vector2.new(5, 5))
+				expect(entities).has_value(id1)
+				expect(entities).never_has_value(id2)
+			end)
+
+			test("QueryPoint should correctly identify point entities at a specific point", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+			
+				-- Insert a point entity
+				local id = grid:InsertPoint(Vector2.new(5, 5))
+			
+				-- Query the exact point
+				local entities = grid:QueryPoint(Vector2.new(5, 5))
+				expect(entities).has_value(id)
+			
+				-- Query a point outside the entity's bounds
+				local emptyEntities = grid:QueryPoint(Vector2.new(6, 6))
+				expect(#emptyEntities).is(0)
+			end)
+	
+			test("QueryRect should correctly identify overlapping entities", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+			
+				-- Insert overlapping entities
+				local id1 = grid:InsertRect(Vector2.new(5, 5), Vector2.new(4, 4))
+				local id2 = grid:InsertRect(Vector2.new(6, 6), Vector2.new(4, 4))
+			
+				-- Query a region that overlaps both entities
+				local entities = grid:QueryRect(Vector2.new(5, 5), Vector2.new(6, 6))
+				expect(entities).has_value(id1)
+				expect(entities).has_value(id2)
+			end)
+		end)
+
+		describe("Circle Queries", function()
+			test("should correctly query entities in a circular region", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+				local id1 = grid:InsertCircle(Vector2.new(5, 5), 2)
+				local id2 = grid:InsertCircle(Vector2.new(8, 8), 2)
+				local entities = grid:QueryCircle(Vector2.new(5, 5), 2.12)
+				expect(entities).has_value(id1)
+				expect(entities).never_has_value(id2)
+			end)
 		
-		-- 	local i = 0
-		-- 	for value: string, cost: number in minHeap do
-		-- 		i = i + 1
-		-- 		expect({value, cost}).is_shallow_equal(expectedResults[i])
-		-- 	end
+			test("should handle circle-rectangle intersections", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+				local id = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+				local entities = grid:QueryCircle(Vector2.new(5, 5), 2)
+				expect(entities).has_value(id)
+			end)
+		
+			test("should handle circle-circle intersections", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+				local id1 = grid:InsertCircle(Vector2.new(5, 5), 2)
+				local id2 = grid:InsertCircle(Vector2.new(6, 6), 2)
+				local entities = grid:QueryCircle(Vector2.new(5, 5), 2.2)
+				expect(entities).has_value(id1)
+				expect(entities).has_value(id2)
+			end)
+		end)
+
+		describe("Edge Cases", function()
+			test("should handle querying an empty grid", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+				local entities = grid:QueryRect(Vector2.new(0, 0), Vector2.new(10, 10))
+				expect(#entities).is(0)
+			end)
+
+			test("should handle updating a non-existent entity", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+				expect(function()
+					grid:UpdateRect(999, Vector2.new(5, 5), Vector2.new(2, 2))
+				end).fails()
+			end)
+		end)
+
+		describe("Performance", function()
+			test("should handle a large number of entities", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+				for i = 1, 10000 do
+					grid:InsertRect(Vector2.new(math.random(0, 20), math.random(0, 20)), Vector2.new(1, 1))
+				end
+				local entities = grid:QueryRect(Vector2.new(10, 10), Vector2.new(5, 5))
+				expect(#entities > 0)
+			end)
+		end)
+
+		describe("GetEntity Methods", function()
+			test("should return the correct position of an entity", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+				local id = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+				local position = grid:GetEntityPosition(id)
+				expect(position).is_shallow_equal(Vector2.new(5, 5))
+			end)
+		
+			test("should return the correct size of an entity", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+				local id = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+				local size = grid:GetEntitySize(id)
+				expect(size).is_shallow_equal(Vector2.new(2, 2))
+			end)
+		
+			test("should return the correct position and size of an entity", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+				local id = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+				local position, size = grid:GetEntityPositionAndSize(id)
+				expect(position).is_shallow_equal(Vector2.new(5, 5))
+				expect(size).is_shallow_equal(Vector2.new(2, 2))
+			end)
+		
+			test("should throw an error when getting position of a non-existent entity", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+				expect(function()
+					grid:GetEntityPosition(999)
+				end).fails()
+			end)
+		
+			test("should throw an error when getting size of a non-existent entity", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+				expect(function()
+					grid:GetEntitySize(999)
+				end).fails()
+			end)
+		
+			test("should throw an error when getting position and size of a non-existent entity", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+				expect(function()
+					grid:GetEntityPositionAndSize(999)
+				end).fails()
+			end)
+		end)
+
+		test("LooseCell:Intersects should correctly identify intersections", function()
+			local looseCell = LooseCell.new(0, 0, 10, 10) -- Loose cell bounds: L=0, B=0, R=10, T=10
+			looseCell.l = 0
+			looseCell.b = 0
+			looseCell.r = 10
+			looseCell.t = 10
+			-- print("LooseCell bounds:", looseCell.l, looseCell.r, looseCell.t, looseCell.b)
+
+			-- Test cases for intersection
+			expect(looseCell:Intersects(5, 5, 15, 15)).is(true) -- Partial overlap
+			expect(looseCell:Intersects(0, 0, 10, 10)).is(true) -- Exact overlap
+			expect(looseCell:Intersects(-5, -5, 5, 5)).is(true) -- Partial overlap
+			expect(looseCell:Intersects(15, 15, 20, 20)).is(false) -- No overlap
+		end)
+
+		-- test("LTDG:_QueryRegion should calculate correct tight grid bounds", function()
+		-- 	local grid = LooseTightDoubleGrid.new({
+		-- 		Position = Vector2.new(0, 0),
+		-- 		Size = Vector2.new(10, 10),
+		-- 		CellSize = 2
+		-- 	})
+		
+		-- 	-- Query a region and verify the calculated bounds
+		-- 	local entities = grid:_QueryRegion(-1, -1, 5, 5) -- Query region: L=-1, B=-1, R=5, T=5
+		-- 	-- Add debug logs or assertions to verify tx1, tx2, ty1, ty2
+		-- 	-- This test is primarily for debugging purposes
+		-- 	expect(entities).is_a("table") -- Ensure it returns a table
 		-- end)
+
+		test("LTDG:_UpdateEntity should throw an error for non-existent entities", function()
+			local grid = LooseTightDoubleGrid.new({
+				Position = Vector2.new(0, 0),
+				Size = Vector2.new(10, 10),
+				CellSize = 2
+			})
+		
+			-- Attempt to update a non-existent entity
+			expect(function()
+				grid:_UpdateEntity(999, Vector2.new(5, 5), 0, 0, 10, 10)
+			end).fails()
+		end)
+
+		describe("Optimized Query Methods", function()
+			test("should handle circle-circle intersections correctly", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+				local id1 = grid:InsertCircle(Vector2.new(5, 5), 2)
+				local id2 = grid:InsertCircle(Vector2.new(6, 6), 2)
+		
+				local entities = grid:QueryCircle(Vector2.new(5, 5), 3)
+				expect(entities).has_value(id1)
+				expect(entities).has_value(id2)
+			end)
+		end)
+
+		describe("QueryCircle", function()
+			test("should correctly query entities in a circular region", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+				local id1 = grid:InsertCircle(Vector2.new(5, 5), 2)
+				local id2 = grid:InsertRect(Vector2.new(8, 8), Vector2.new(2, 2))
+
+				local entities = grid:QueryCircle(Vector2.new(5, 5), 3)
+				expect(entities).has_value(id1)
+				expect(entities).never_has_value(id2)
+			end)
+
+			test("should handle circle-rectangle intersections", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+				local id = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+
+				local entities = grid:QueryCircle(Vector2.new(5, 5), 2)
+				expect(entities).has_value(id)
+			end)
+
+			test("should handle circle-circle intersections", function()
+				local grid = LooseTightDoubleGrid.new({
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 10),
+					CellSize = 2
+				})
+				local id1 = grid:InsertCircle(Vector2.new(5, 5), 2)
+				local id2 = grid:InsertCircle(Vector2.new(6, 6), 2)
+
+				local entities = grid:QueryCircle(Vector2.new(5, 5), 3)
+				expect(entities).has_value(id1)
+				expect(entities).has_value(id2)
+			end)
+		end)
+
 	end)
 
-	describe("Large Dataset Test", function()
-		print("[Beginning Large Dataset Test]")
-		local minHeap = Heap.min()
-		local elementsToInsert = 100000
-		local elementsToRemove = 99900
-
-		test("Insertion: "..elementsToInsert.." Items", function()
-			for i = 1, elementsToInsert do
-				minHeap:Push(i)
-			end
-		end)
-
-		test("Removal of one item", function()
-			local t = os.clock()
-			minHeap:Pop()
-			t = os.clock() - t
-			print("Time taken to remove one item: "..(t*1000).."ms")
-		end)
-
-		test("Removal: "..elementsToRemove.." Items", function()
-			for i = 1, elementsToRemove do
-				minHeap:Pop()
-			end
-		end)
-	end)
+	
 end
 
 return test_suite

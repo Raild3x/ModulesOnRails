@@ -51,11 +51,15 @@
     Entities are stored in the loose grid, and their spatial relationships are managed using axis-aligned bounding boxes (AABBs). 
     The tight grid helps narrow down the search space during queries, improving performance.
     :::
+    :::tip Vector2
+    Although the documentation specifies `Vector2` for positions and sizes,
+    the system will take any table with `X` and `Y` properties.
+    :::
 ]=]
 
 --// Imports //--
-local LooseCell = require(script.LooseCell)
-local TightCell = require(script.TightCell)
+local LooseCell = require("./LooseCell")
+local TightCell = require("./TightCell")
 
 --// Types //--
 -- Enum for shape types 
@@ -64,8 +68,16 @@ local SHAPE_TYPE_CIRCLE = "c"
 local SHAPE_TYPE_RECT = "r"
 local SHAPE_TYPE_POINT = "p"
 
+if not Vector2 then -- This is for testing on a non roblox platform
+    Vector2 = {
+        new = function(x, y)
+            return { X = x, Y = y }
+        end,
+    }
+end
+
 type LooseCell = LooseCell.LooseCell
-export type AABB = LooseCell.AABB
+export type AABB = LooseCell.AABB -- Stored in the order of {L,B,R,T} (Liberty!), can also be anvisioned as a ccw rotation of the sides.
 export type EntityId = LooseCell.EntityId
 --[=[
     @within LooseTightDoubleGrid
@@ -78,7 +90,7 @@ export type EntityId = LooseCell.EntityId
     --// Util Functions //--
 --------------------------------------------------------------------------------
 
-local function CheckCollision(left1, bottom1, right1, top1, left2, bottom2, right2, top2)
+local function CheckRectRectIntersection(left1, bottom1, right1, top1, left2, bottom2, right2, top2)
     -- Check if the two rectangles overlap
     local noOverlap = 
         right1 <= left2 or -- Rectangle 1 is completely to the left of Rectangle 2
@@ -89,12 +101,55 @@ local function CheckCollision(left1, bottom1, right1, top1, left2, bottom2, righ
     return not noOverlap -- If there is no overlap, return false; otherwise, return true
 end
 
+local function CheckCircleRectIntersection(circleX, circleY, circleRadius, rectLeft, rectBottom, rectRight, rectTop)
+    -- Calculate the rectangle's center and half dimensions
+    local rectCenterX = (rectLeft + rectRight)
+    local rectCenterY = (rectBottom + rectTop)
+    local rectWidth = (rectRight - rectLeft)
+    local rectHeight = (rectTop - rectBottom)
+
+    -- Calculate the distance between the circle's center and the rectangle's center
+    local distanceX = math.abs(circleX * 2 - rectCenterX)
+    local distanceY = math.abs(circleY * 2 - rectCenterY)
+
+    -- Check if the circle is too far from the rectangle to intersect
+    if distanceX > (rectWidth + circleRadius * 2) then return false end
+    if distanceY > (rectHeight + circleRadius * 2) then return false end
+
+    -- Check if the circle is close enough to intersect the rectangle's edges
+    if distanceX <= rectWidth then return true end
+    if distanceY <= rectHeight then return true end
+
+    -- Check if the circle intersects the rectangle's corners
+    local cornerDistanceSquared = (distanceX - rectWidth) * (distanceX - rectWidth) +
+                                  (distanceY - rectHeight) * (distanceY - rectHeight)
+
+    return cornerDistanceSquared <= (circleRadius * circleRadius)
+end
+
+local function CheckCircleCircleIntersection(cx1, cy1, radius1, cx2, cy2, radius2)
+    -- Calculate the squared distance between the two circle centers
+    local dx = cx1 - cx2
+    local dy = cy1 - cy2
+    local distanceSquared = dx * dx + dy * dy
+
+    -- Check if the distance is less than the sum of the radii
+    local combinedRadius = radius1 + radius2
+    return distanceSquared <= (combinedRadius * combinedRadius)
+end
+
 local function getNextId(self: LTDG): EntityId
     local id = self.NextId
     self.NextId += 1
     return id
 end
 
+if not debug or not debug.profilebegin then -- This is a workaround for the debug library not being available in some environments.
+    debug = {
+        profilebegin = function() end,
+        profileend = function() end,
+    }
+end
 --------------------------------------------------------------------------------
     --// Class //--
 --------------------------------------------------------------------------------
@@ -130,7 +185,6 @@ function LTDG.new(config: {
     local width = size.X
     local height = size.Y
 
-    assert(typeof(origin) == "Vector2", "Position must be a Vector2")
     assert(cellSize > 0, "Cell size must be greater than 0")
     assert(width % 1 == 0, "Width must be an integer")
     assert(height % 1 == 0, "Height must be an integer")
@@ -140,24 +194,25 @@ function LTDG.new(config: {
     -- potential support for unnatural cell size?
     local cellWidth = cellSize
     local cellHeight = cellSize
-    local bottomCorner = origin - cellSize*size / 2
+    local bottomCornerX = origin.X - cellSize*width / 2
+    local bottomCornerY = origin.Y - cellSize*height / 2
 
     local TG = table.create(width*height);
     local LG = table.create(width*height);
     for i = 1, height*width do
         TG[i] = TightCell.new(i);
         --LN[i] = Node.new();
-        local l = bottomCorner.X + (i-1)%width*cellWidth
-        local b = bottomCorner.Y + ((math.floor((i-1)/height))%height)*cellHeight
-        LG[i] = LooseCell.new(l, l+cellWidth, b, b+cellHeight);
+        local l = bottomCornerX + (i-1)%width*cellWidth
+        local b = bottomCornerY + ((math.floor((i-1)/height))%height)*cellHeight
+        LG[i] = LooseCell.new(l, b, l+cellWidth, b+cellHeight);
         --if i%20==0 then print() end
     end
 
     local self = setmetatable({
         NextId = 1,
         Position = origin,
-        BottomCornerY = bottomCorner.Y, -- I store these to provide slightly faster access
-        BottomCornerX = bottomCorner.X,
+        BottomCornerY = bottomCornerY, -- I store these to provide slightly faster access
+        BottomCornerX = bottomCornerX,
         TightGrid = TG,
         LooseGrid = LG,
         tCols = width,
@@ -243,12 +298,13 @@ end
 ]=]
 function LTDG:InsertRect(position: Vector2, size: Vector2): EntityId
     debug.profilebegin("LTDG:InsertRect")
-    local halfSize = size * 0.5
-    local aabb: AABB = {
-        L = position.X - halfSize.X,
-        R = position.X + halfSize.X,
-        T = position.Y + halfSize.Y,
-        B = position.Y - halfSize.Y,
+    local halfSizeX = size.X * 0.5
+    local halfSizeY = size.Y * 0.5
+    local aabb: AABB = { 
+        position.X - halfSizeX, -- L
+        position.Y - halfSizeY, -- B
+        position.X + halfSizeX, -- R
+        position.Y + halfSizeY  -- T
     }
 
     local id = getNextId(self)
@@ -279,11 +335,11 @@ end
 ]=]
 function LTDG:InsertCircle(position: Vector2, radius: number): EntityId
     debug.profilebegin("LTDG:InsertCircle")
-    local aabb: AABB = {
-        L = position.X - radius,
-        R = position.X + radius,
-        T = position.Y + radius,
-        B = position.Y - radius,
+    local aabb: AABB = { 
+        position.X - radius, -- L
+        position.Y - radius, -- B
+        position.X + radius, -- R
+        position.Y + radius  -- T
     }
 
     local id = getNextId(self)
@@ -314,10 +370,10 @@ end
 function LTDG:InsertPoint(position: Vector2): EntityId
     debug.profilebegin("LTDG:InsertPoint")
     local aabb: AABB = {
-        L = position.X,
-        R = position.X,
-        T = position.Y,
-        B = position.Y,
+        position.X,
+        position.Y,
+        position.X,
+        position.Y,
     }
 
     local id = getNextId(self)
@@ -358,12 +414,7 @@ function LTDG:_UpdateEntity(entityId: EntityId, newPos: Vector2, L: number, B: n
     if newIndex ~= looseCellIdx then
         looseCell:Remove(entityId) -- remove from old cell
         local newLooseCell = self.LooseGrid[newIndex]
-        newLooseCell:Insert(entityId, {
-            L = L,
-            B = B,
-            R = R,
-            T = T,
-        })
+        newLooseCell:Insert(entityId, {L, B, R, T})
         self.EntityIdToLooseCellIdx[entityId] = newIndex
         self.DirtyLooseCells[newLooseCell] = newIndex
     else
@@ -387,12 +438,13 @@ function LTDG:UpdateRect(entityId: EntityId, newPosition: Vector2, newSize: Vect
         self.ShapeMap[entityId] = SHAPE_TYPE_RECT -- force it to be a rectangle
     end
 
-    local halfSize = newSize * 0.5
+    local halfSizeX = newSize.X * 0.5
+    local halfSizeY = newSize.Y * 0.5
     self:_UpdateEntity(entityId, newPosition, 
-        newPosition.X - halfSize.X, -- L
-        newPosition.Y - halfSize.Y, -- B
-        newPosition.X + halfSize.X, -- R
-        newPosition.Y + halfSize.Y  -- T
+        newPosition.X - halfSizeX, -- L
+        newPosition.Y - halfSizeY, -- B
+        newPosition.X + halfSizeX, -- R
+        newPosition.Y + halfSizeY  -- T
     )
     debug.profileend()
 end
@@ -413,7 +465,7 @@ function LTDG:UpdateCircle(entityId: EntityId, newPosition: Vector2, newRadius: 
         self.ShapeMap[entityId] = SHAPE_TYPE_CIRCLE -- force it to be a circle
     end
 
-    self:_UpdateEntity(entityId, newPosition,
+    self:_UpdateEntity(entityId, newPosition, 
         newPosition.X - newRadius, -- L
         newPosition.Y - newRadius, -- B
         newPosition.X + newRadius, -- R
@@ -485,6 +537,73 @@ function LTDG:Has(entityId: EntityId): boolean
     return self.EntityIdToLooseCellIdx[entityId] ~= nil
 end
 
+--[=[
+    @within LooseTightDoubleGrid
+    Returns the size of an entity.
+    Errors if no entity with the id is in the grid.
+
+    ```lua
+    local size = grid:GetEntitySize(entityId)
+    print("Entity Size:", size)
+    ```
+]=]
+function LTDG:GetEntitySize(id: EntityId): Vector2
+    local looseCellIdx = self.EntityIdToLooseCellIdx[id]
+    if not looseCellIdx then 
+        error("Entity not found: " .. tostring(id))
+    end -- entity not found
+
+    local looseCell = self.LooseGrid[looseCellIdx]
+    local aabb: AABB = looseCell.AABBs[id]
+
+    return Vector2.new(aabb[3] - aabb[1], aabb[4] - aabb[2]) :: any
+end
+
+--[=[
+    @within LooseTightDoubleGrid
+    Returns the position of an entity.
+    Errors if no entity with the id is in the grid..
+
+    ```lua
+    local position = grid:GetEntityPosition(entityId)
+    print
+]=]
+function LTDG:GetEntityPosition(id: EntityId): Vector2
+    local looseCellIdx = self.EntityIdToLooseCellIdx[id]
+    if not looseCellIdx then 
+        error("Entity not found: " .. tostring(id))
+    end -- entity not found
+
+    local looseCell = self.LooseGrid[looseCellIdx]
+    local aabb: AABB = looseCell.AABBs[id]
+
+    return Vector2.new((aabb[1] + aabb[3]) / 2, (aabb[2] + aabb[4]) / 2) :: any
+end
+
+--[=[
+    @within LooseTightDoubleGrid
+    Gets the position and size of an entity.
+    Faster than calling `GetEntityPosition` and `GetEntitySize` separately.
+    Errors if no entity with the id is in the grid.
+
+    ```lua
+    local position, size = grid:GetEntityPositionAndSize(entityId)
+    print("Entity Position:", position, "Size:", size)
+    ```
+]=]
+function LTDG:GetEntityPositionAndSize(id: EntityId): (Vector2, Vector2)
+    local looseCellIdx = self.EntityIdToLooseCellIdx[id]
+    if not looseCellIdx then 
+        error("Entity not found: " .. tostring(id))
+    end -- entity not found
+
+    local looseCell = self.LooseGrid[looseCellIdx]
+    local aabb: AABB = looseCell.AABBs[id]
+
+    return Vector2.new((aabb[1] + aabb[3]) / 2, (aabb[2] + aabb[4]) / 2) :: any,
+        Vector2.new(aabb[3] - aabb[1], aabb[4] - aabb[2]) :: any
+end
+
 --------------------------------------------------------------------------------
     --// Query Methods //--
 --------------------------------------------------------------------------------
@@ -494,15 +613,16 @@ end
     @private
     Queries entities within a specified rectangular region bounds.
 ]=]
-function LTDG:_QueryRegion(qL: number, qB: number, qR: number, qT: number): { EntityId }
+function LTDG:_QueryRegion(qL: number, qB: number, qR: number, qT: number, queryShapeType: ShapeType?): { EntityId }
     debug.profilebegin("LTDG:_QueryRegion")
+    queryShapeType = queryShapeType or SHAPE_TYPE_RECT -- Default to rectangle if not specified
+    
     debug.profilebegin("Calculate Cols and Rows")
     local tx1 = self:GetCol(qL)
     local tx2 = self:GetCol(qR)
     local ty1 = self:GetRow(qB)
     local ty2 = self:GetRow(qT)
     debug.profileend()
-    -- print(min, max, "LeftCol:",tx1, "RightCol:",tx2, "BottomRow:",ty1, "TopRow:", ty2)
 
     debug.profilebegin("Update Loose Cell Extents")
     for looseCell, looseCellIdx in self.DirtyLooseCells do
@@ -511,22 +631,63 @@ function LTDG:_QueryRegion(qL: number, qB: number, qR: number, qT: number): { En
     end
     debug.profileend()
 
-    local intersectingEntities: {EntityId} = {};
+    local intersectingEntities: { EntityId } = {}
 
     local ShapeMap = self.ShapeMap;
-    local function checkLooseCell(looseCell: LooseCell)
-        debug.profilebegin("Check LooseCell")
+    local qCenterX = (qL + qR) * 0.5
+    local qCenterY = (qB + qT) * 0.5
+    local qRadius = (qR - qL) * 0.5
+
+    local function checkLooseCellAgainstCircle(looseCell: LooseCell)
+        debug.profilebegin("Check LooseCell Against Circle")
         for entityId, aabb: AABB in looseCell.AABBs do
-            if CheckCollision(aabb.L, aabb.B, aabb.R, aabb.T, qL, qB, qR, qT) then
+            local l, b, r, t = aabb[1], aabb[2], aabb[3], aabb[4]
+            if CheckRectRectIntersection(l, b, r, t, qL, qB, qR, qT) then
                 if ShapeMap[entityId] == SHAPE_TYPE_CIRCLE then
-                    -- TODO: Add circle intersection check here?
+                    local cx = (l + r) * 0.5
+                    local cy = (b + t) * 0.5
+                    local entityRadius = (r - l) * 0.5
+                    if CheckCircleCircleIntersection(
+                        qCenterX, qCenterY, qRadius,
+                        cx, cy, entityRadius
+                    ) then
+                        table.insert(intersectingEntities, entityId)-- add entity to query results
+                    end
+                elseif CheckCircleRectIntersection(
+                    qCenterX, qCenterY, qRadius,
+                    l, b, r, t
+                ) then
+                    table.insert(intersectingEntities, entityId)-- add entity to query results
                 end
-                -- print("Found entity:", entityId, "in LooseCell:", looseCell, "with AABB:", aabb.Min, aabb.Max)
-                table.insert(intersectingEntities, entityId)-- add entity to query results
             end
         end
         debug.profileend()
     end
+
+    local function checkLooseCellAgainstRect(looseCell: LooseCell)
+        debug.profilebegin("Check LooseCell Against Rect")
+        for entityId, aabb: AABB in looseCell.AABBs do
+            local l, b, r, t = aabb[1], aabb[2], aabb[3], aabb[4]
+            if CheckRectRectIntersection(l, b, r, t, qL, qB, qR, qT) then
+                if ShapeMap[entityId] == SHAPE_TYPE_CIRCLE then
+                    local cx = (l + r) * 0.5
+                    local cy = (b + t) * 0.5
+                    local entityRadius = (r - l) * 0.5
+                    if CheckCircleRectIntersection(
+                        cx, cy, entityRadius,
+                        qL, qB, qR, qT
+                    ) then
+                        table.insert(intersectingEntities, entityId)-- add entity to query results
+                    end
+                else
+                    table.insert(intersectingEntities, entityId)-- add entity to query results
+                end
+            end
+        end
+        debug.profileend()
+    end
+
+    local checkLooseCell = if queryShapeType == SHAPE_TYPE_CIRCLE then checkLooseCellAgainstCircle else checkLooseCellAgainstRect
 
     local TightGrid = self.TightGrid;
     local LooseGrid = self.LooseGrid;
@@ -568,12 +729,13 @@ end
     ```
 ]=]
 function LTDG:QueryRect(pos: Vector2, size: Vector2): { EntityId }
-    local halfSize = size * 0.5
+    local halfSizeX = size.X * 0.5
+    local halfSizeY = size.Y * 0.5
     return self:_QueryRegion(
-        pos.X - halfSize.X, -- L
-        pos.Y + halfSize.Y, -- B
-        pos.X + halfSize.X, -- R
-        pos.Y - halfSize.Y  -- T
+        pos.X - halfSizeX, -- L
+        pos.Y - halfSizeY, -- B
+        pos.X + halfSizeX, -- R
+        pos.Y + halfSizeY  -- T
     )
 end
 
@@ -587,12 +749,9 @@ end
     ```
 ]=]
 function LTDG:QueryCircle(pos: Vector2, radius: number): { EntityId }
-    return self:_QueryRegion(
-        pos.X - radius, -- L
-        pos.Y - radius, -- B
-        pos.X + radius, -- R
-        pos.Y + radius  -- T
-    )
+    local qL, qB, qR, qT = pos.X - radius, pos.Y - radius, pos.X + radius, pos.Y + radius
+    local candidates = self:_QueryRegion(qL, qB, qR, qT, SHAPE_TYPE_CIRCLE)
+    return candidates
 end
 
 --[=[
@@ -613,7 +772,7 @@ function LTDG:QueryPoint(pos: Vector2): { EntityId }
 
     local intersectingEntities = {}
     for entityId, aabb: AABB in looseCell.AABBs do
-        if pos.X >= aabb.L and pos.X <= aabb.R and pos.Y >= aabb.B and pos.Y <= aabb.T then
+        if pos.X >= aabb[1] and pos.X <= aabb[3] and pos.Y >= aabb[2] and pos.Y <= aabb[4] then
             table.insert(intersectingEntities, entityId)
         end
     end
@@ -641,8 +800,8 @@ function LTDG:QueryClosestToPoint(pos: Vector2): EntityId?
     local cY = self:GetRow(pos.Y)
 
     local function calculateDistanceSquared(aabb: AABB, point: Vector2): number
-        local centerX = (aabb.L + aabb.R) / 2
-        local centerY = (aabb.B + aabb.T) / 2
+        local centerX = (aabb[1] + aabb[3]) / 2
+        local centerY = (aabb[2] + aabb[4]) / 2
         local dx = point.X - centerX
         local dy = point.Y - centerY
         return dx * dx + dy * dy
@@ -817,11 +976,11 @@ function LTDG:Draw(): Instance
             for id, aabb: AABB in cell.AABBs do
                 local aabbPart = looseCellPart:Clone()
                 aabbPart.Name = "AABB_"..id
-                aabbPart.Size = Vector3.new(aabb.R - aabb.L, 0.1, aabb.T - aabb.B)
+                aabbPart.Size = Vector3.new(aabb[3] - aabb[1], 0.1, aabb[4] - aabb[2])
                 aabbPart.Position = Vector3.new(
-                    (aabb.R + aabb.L)/2, 
+                    (aabb[3] + aabb[1])/2, 
                     1.5, 
-                    (aabb.T + aabb.B)/2
+                    (aabb[4] + aabb[2])/2
                 )
                 aabbPart.Transparency = 0.75
                 aabbPart.Color = Color3.fromRGB(255, 0, 0)
@@ -836,4 +995,4 @@ end
 
 export type LTDG = typeof(LTDG.new({}))
 
-return LTDG;
+return table.freeze(LTDG)
