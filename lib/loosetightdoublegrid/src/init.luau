@@ -577,7 +577,7 @@ function LTDG:GetEntityPosition(id: EntityId): Vector2
     local looseCell = self.LooseGrid[looseCellIdx]
     local aabb: AABB = looseCell.AABBs[id]
 
-    return Vector2.new((aabb[1] + aabb[3]) / 2, (aabb[2] + aabb[4]) / 2) :: any
+    return Vector2.new((aabb[1] + aabb[3]) * 0.5, (aabb[2] + aabb[4]) * 0.5) :: any
 end
 
 --[=[
