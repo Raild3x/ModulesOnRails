@@ -1,6 +1,6 @@
 [package]
 name = "raild3x/loosetightdoublegrid"
-description = "A "
+description = "A spatial partitioning system to query varied size entities in 2d space."
 authors = ["Logan Hunt (Raildex)"]
 version = "1.0.0"
 license = "MIT"

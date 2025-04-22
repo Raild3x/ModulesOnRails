@@ -58,8 +58,8 @@
 ]=]
 
 --// Imports //--
-local LooseCell = require("./LooseCell")
-local TightCell = require("./TightCell")
+local LooseCell = require(script.LooseCell)
+local TightCell = require(script.TightCell)
 
 --// Types //--
 -- Enum for shape types 
@@ -808,11 +808,11 @@ function LTDG:QueryClosestToPoint(point: Vector2): EntityId?
         local centerY = (b + t) * 0.5
         local dx = point.X - centerX
         local dy = point.Y - centerY
+        local distanceSquaredToCenter = dx * dx + dy * dy
 
         if shapeType == SHAPE_TYPE_CIRCLE then
             -- For circles, calculate the squared distance to the edge
             local radius = (r - l) * 0.5
-            local distanceSquaredToCenter = dx * dx + dy * dy
             local radiusSquared = radius * radius
 
             if distanceSquaredToCenter <= radiusSquared then
@@ -832,15 +832,13 @@ function LTDG:QueryClosestToPoint(point: Vector2): EntityId?
 
             if distanceSquaredToEdge == 0 then
                 -- Point is inside the rectangle; return 0 for edge distance and distance to center as secondary metric
-                return 0, dx * dx + dy * dy
+                return 0, distanceSquaredToCenter
             else
                 -- Point is outside the rectangle; return distance to the edge and distance to the center
-                return distanceSquaredToEdge, dx * dx + dy * dy
+                return distanceSquaredToEdge, distanceSquaredToCenter
             end
         elseif shapeType == SHAPE_TYPE_POINT then
-            -- For points, the distance to the edge is always 0 if the query point matches the point
-            local distanceSquaredToPoint = dx * dx + dy * dy
-            return distanceSquaredToPoint, distanceSquaredToPoint
+            return distanceSquaredToCenter, distanceSquaredToCenter
         else
             error("Unknown shape type: " .. tostring(shapeType))
         end
@@ -852,8 +850,6 @@ function LTDG:QueryClosestToPoint(point: Vector2): EntityId?
     local closestDistanceSquared = math.huge
     local closestDistanceToCenter = math.huge
 
-    print("QueryClosestToPoint: Searching for closest entity to point:", point)
-
     -- Function to check all entities in a loose cell
     local function checkLooseCell(looseCell: LooseCell)
         local didFind = false
@@ -861,7 +857,7 @@ function LTDG:QueryClosestToPoint(point: Vector2): EntityId?
             didFind = true
             local shapeType = ShapeMap[entityId]
             local distanceSquaredToEdge, distanceSquaredToCenter = calculateDistanceSquaredToShape(aabb, shapeType)
-            print("Entity ID:", entityId, "Distance to edge:", distanceSquaredToEdge, "Distance to center:", distanceSquaredToCenter)
+            
             -- Compare based on primary metric (edge distance), then secondary metric (center distance)
             if distanceSquaredToEdge < closestDistanceSquared or (
                 distanceSquaredToEdge == closestDistanceSquared and 
@@ -900,6 +896,7 @@ function LTDG:QueryClosestToPoint(point: Vector2): EntityId?
         local endY = math.min(tRows, cY + radius)
 
         -- Check the outermost layer of tight cells for the current radius
+        -- I use multiple loops to avoid checking through the same cells multiple times
         for x = startX, endX do
             -- Top row
             if startY > 0 then
@@ -934,6 +931,7 @@ function LTDG:QueryClosestToPoint(point: Vector2): EntityId?
             end
         end
 
+        -- shift start and end to not include corner cells
         for y = startY + 1, endY - 1 do
             -- Left column
             if startX > 0 then
@@ -968,13 +966,13 @@ function LTDG:QueryClosestToPoint(point: Vector2): EntityId?
             end
         end
 
-        for i = 1, #tightCellXIndicesToCheck do
+        for i = 1, tightCellIndexCount do
             local tcX, tcY = tightCellXIndicesToCheck[i], tightCellYIndicesToCheck[i]
-            for x = -1, 1 do
-                for y = -1, 1 do
+            for y = -1, 1 do
+                for x = -1, 1 do
                     local nx = tcX + x
                     local ny = tcY + y
-                    if nx < 1 or nx > tCols or ny < 1 or ny > tRows then
+                    if nx < 1 or nx > tCols or ny < 1 or ny > tRows or (x == 0 and y == 0) then
                         continue -- skip out of bounds cells
                     end
                     local tightCellIndex = (ny - 1) * tCols + nx
