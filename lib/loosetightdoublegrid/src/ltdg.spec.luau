@@ -2,11 +2,47 @@ local LooseTightDoubleGrid = require("./init")
 local LooseCell = require("LooseCell")
 
 if not Vector2 then
-	Vector2 = {
-		new = function(x, y)
-			return { X = x, Y = y }
-		end,
-	}
+	local vector2 = {}
+	vector2.__index = function(self, key)
+		if key == "Magnitude" then
+			return math.sqrt(self.X * self.X + self.Y * self.Y)
+		elseif key == "Unit" then
+			local mag = self.Magnitude
+			if mag > 0 then
+				return vector2.new(self.X / mag, self.Y / mag)
+			else
+				return vector2.new(0, 0)
+			end
+		end
+		return rawget(vector2, key)
+	end
+	
+	function vector2.new(x, y)
+		return setmetatable(
+			{ X = x or 0, Y = y or 0 },
+			vector2
+		)
+	end
+
+	function vector2:__add(other)
+		return vector2.new(self.X + other.X, self.Y + other.Y)
+	end
+
+	function vector2:__sub(other)
+		return vector2.new(self.X - other.X, self.Y - other.Y)
+	end
+
+	function vector2:__mul(scalar)
+		return vector2.new(self.X * scalar, self.Y * scalar)
+	end
+
+	function vector2:Dot(other)
+		return self.X * other.X + self.Y * other.Y
+	end
+
+	vector2.zero = vector2.new(0, 0)
+
+	Vector2 = vector2
 end
 
 if not debug or not debug.profilebegin then -- This is a workaround for the debug library not being available in the vscode env.
@@ -14,6 +50,15 @@ if not debug or not debug.profilebegin then -- This is a workaround for the debu
         profilebegin = function() end,
         profileend = function() end,
     }
+end
+
+if not Enum then
+	Enum = {
+		RaycastFilterType = {
+			Include = 1,
+			Exclude = 2,
+		},
+	}
 end
 
 local test_suite = function(tiniest)
@@ -276,7 +321,6 @@ local test_suite = function(tiniest)
 		
 				test("should return the closest point entity when multiple points are present", function()
 					local grid = createGenericGrid()
-					print("FOCUSING ON THIS")
 					local pointId1 = grid:InsertPoint(Vector2.new(5, 5))
 					local pointId2 = grid:InsertPoint(Vector2.new(7.1, 7))
 					local closestEntityId = grid:QueryClosestToPoint(Vector2.new(6, 6))
@@ -328,6 +372,144 @@ local test_suite = function(tiniest)
 					local closestEntityId = grid:QueryClosestToPoint(Vector2.new(7, 5))
 					expect(closestEntityId).is(rectId)
 				end)
+			end)
+		end)
+
+		describe("Raycast", function()
+			test("should return nil when no entities are intersected", function()
+				local grid = createGenericGrid()
+				local hit = grid:Raycast(Vector2.new(0, 0), Vector2.new(1, 0))
+				expect(hit).is(nil)
+			end)
+
+			test("should return the closest intersected rectangle entity", function()
+				local grid = createGenericGrid()
+				local id1 = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+				local id2 = grid:InsertRect(Vector2.new(8, 5), Vector2.new(2, 2))
+				local hit = grid:Raycast(Vector2.new(0, 5), Vector2.new(10, 0))
+				expect(hit).is_not(nil)
+				expect(hit.EntityId).is(id1)
+			end)
+
+			test("should return the closest intersected circle entity", function()
+				local grid = createGenericGrid()
+				local id1 = grid:InsertCircle(Vector2.new(5, 5), 2)
+				local id2 = grid:InsertCircle(Vector2.new(8, 5), 2)
+				local hit = grid:Raycast(Vector2.new(0, 5), Vector2.new(10, 0))
+				expect(hit).is_not(nil)
+				expect(hit.EntityId).is(id1)
+			end)
+
+			test("should return the closest intersected point entity", function()
+				local grid = createGenericGrid()
+				local id1 = grid:InsertPoint(Vector2.new(5, 5))
+				local id2 = grid:InsertPoint(Vector2.new(8, 5))
+				local hit = grid:Raycast(Vector2.new(0, 5), Vector2.new(10, 0))
+				expect(hit).is_not(nil)
+				expect(hit.EntityId).is(id1)
+			end)
+
+			test("should handle mixed entity types and return the closest intersection", function()
+				local grid = createGenericGrid()
+				local rectId = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+				local circleId = grid:InsertCircle(Vector2.new(8, 5), 2)
+				local pointId = grid:InsertPoint(Vector2.new(10, 5))
+				local hit = grid:Raycast(Vector2.new(0, 5), Vector2.new(10, 0))
+				expect(hit).is_not(nil)
+				expect(hit.EntityId).is(rectId)
+			end)
+
+			test("should respect the filter list and exclude entities", function()
+				local grid = createGenericGrid()
+				local id1 = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+				local id2 = grid:InsertRect(Vector2.new(8, 5), Vector2.new(2, 2))
+				local hit = grid:Raycast(Vector2.new(0, 5), Vector2.new(10, 0), {
+					FilterList = { id1 },
+					FilterType = Enum.RaycastFilterType.Exclude,
+				})
+				expect(hit).is_not(nil)
+				expect(hit.EntityId).is(id2)
+			end)
+
+			test("should respect the filter list and include only specified entities", function()
+				local grid = createGenericGrid()
+				local id1 = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+				local id2 = grid:InsertRect(Vector2.new(8, 5), Vector2.new(2, 2))
+				local hit = grid:Raycast(Vector2.new(0, 5), Vector2.new(10, 0), {
+					FilterList = { id2 },
+					FilterType = Enum.RaycastFilterType.Include,
+				})
+				expect(hit).is_not(nil)
+				expect(hit.EntityId).is(id2)
+			end)
+
+			test("should respect a custom filter function", function()
+				local grid = createGenericGrid()
+				local id1 = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+				local id2 = grid:InsertRect(Vector2.new(8, 5), Vector2.new(2, 2))
+				local hit = grid:Raycast(Vector2.new(0, 5), Vector2.new(10, 0), {
+					FilterType = Enum.RaycastFilterType.Include,
+					CustomFilter = function(entityId)
+						return entityId == id2
+					end,
+				})
+				expect(hit).is_not(nil)
+				expect(hit.EntityId).is(id2)
+			end)
+
+			test("should handle rays that start inside an entity", function()
+				local grid = createGenericGrid()
+				local id = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+				local hit = grid:Raycast(Vector2.new(5, 5), Vector2.new(10, 0))
+				expect(hit).is_not(nil)
+				expect(hit.EntityId).is(id)
+			end)
+
+			test("should handle rays that miss all entities", function()
+				local grid = createGenericGrid()
+				grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+				local hit = grid:Raycast(Vector2.new(0, 0), Vector2.new(10, 1))
+				expect(hit).is(nil)
+			end)
+
+			test("should handle rays that intersect multiple entities and return the closest one", function()
+				local grid = createGenericGrid()
+				local id1 = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+				local id2 = grid:InsertRect(Vector2.new(8, 5), Vector2.new(2, 2))
+				local hit = grid:Raycast(Vector2.new(0, 5), Vector2.new(10, 0))
+				expect(hit).is_not(nil)
+				expect(hit.EntityId).is(id1)
+			end)
+
+			test("should respect the maximum distance of the ray", function()
+				local grid = createGenericGrid()
+				local id1 = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+				local id2 = grid:InsertRect(Vector2.new(10, 5), Vector2.new(2, 2))
+				local hit = grid:Raycast(Vector2.new(0, 5), Vector2.new(6, 0)) -- Ray ends before reaching id2
+				expect(hit).is_not(nil)
+				expect(hit.EntityId).is(id1)
+			end)
+
+			test("should return nil if no entities are within the ray's maximum distance", function()
+				local grid = createGenericGrid()
+				grid:InsertRect(Vector2.new(10, 5), Vector2.new(2, 2))
+				local hit = grid:Raycast(Vector2.new(0, 5), Vector2.new(5, 0)) -- Ray ends before reaching any entity
+				expect(hit).is(nil)
+			end)
+
+			test("should handle rays starting outside the grid bounds and intersecting entities", function()
+				local grid = createGenericGrid()
+				local id = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+				local hit = grid:Raycast(Vector2.new(-200, 5), Vector2.new(400, 0)) -- Starts outside the grid
+				expect(hit).is_not(nil)
+				expect(hit.EntityId).is(id)
+			end)
+
+			test("should return nil for rays starting outside the grid bounds and missing all entities", function()
+				local grid = createGenericGrid()
+				grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+				local hit = grid:Raycast(Vector2.new(-10, -10), Vector2.new(5, 5)) -- Starts outside and misses
+				expect(hit).is(nil)
 			end)
 		end)
 

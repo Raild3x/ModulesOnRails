@@ -58,8 +58,8 @@
 ]=]
 
 --// Imports //--
-local LooseCell = require(script.LooseCell)
-local TightCell = require(script.TightCell)
+local LooseCell = require("LooseCell")
+local TightCell = require("TightCell")
 
 --// Types //--
 -- Enum for shape types 
@@ -999,6 +999,289 @@ function LTDG:QueryClosestToPoint(point: Vector2): EntityId?
 
     debug.profileend()
     return closestEntityId
+end
+
+--[=[
+    @within LooseTightDoubleGrid
+    Performs a raycast through the grid, checking for intersections with entities.
+    The ray starts at `origin` and travels in the `direction`. The magnitude of
+    the direction vector determines the length of the ray.
+    
+    The `rayParams` table can include a `FilterList` of entity IDs to include or exclude, 
+    and a `FilterType` to specify whether the filter is inclusive or exclusive.
+
+    Returns the closest intersection, including the hit position, normal, distance,
+    and the intersected entity ID.
+
+    ```lua
+    local id1 = grid:InsertRect(Vector2.new(5, 0), Vector2.new(2, 2))
+    local id2 = grid:InsertCircle(Vector2.new(8, 0), 1)
+
+    local hit = grid:Raycast(Vector2.new(0, 0), Vector2.new(10, 0), {
+        FilterList = {id1}, -- ignore the rect
+        FilterType = Enum.RaycastFilterType.Exclude,
+    })
+    if hit then
+        print("Hit entity:", hit.EntityId)
+    end
+    ```
+]=]
+function LTDG:Raycast(origin: Vector2, direction: Vector2, _rayParams: {
+        FilterList: { EntityId }?,
+        FilterType: Enum.RaycastFilterType?,
+        CustomFilter: ((EntityId) -> boolean)?,
+    }?): {
+        Normal: Vector2,
+        Position: Vector2,
+        Distance: number,
+        EntityId: EntityId,
+    }?
+    debug.profilebegin("LTDG:Raycast")
+
+    local FILTER_TYPE_INCLUDE = Enum.RaycastFilterType.Include
+
+    local skipFilter = not _rayParams or (not _rayParams.FilterList and not _rayParams.CustomFilter)
+    local filterList = _rayParams and _rayParams.FilterList
+    local customFilter = _rayParams and _rayParams.CustomFilter
+    local filterType = _rayParams and _rayParams.FilterType or FILTER_TYPE_INCLUDE
+
+    -- Helper function to determine if an entity is filtered out of potential results
+    local function isFilteredOut(entityId: EntityId): boolean
+        local isFiltered = false
+        if customFilter then
+            isFiltered = customFilter(entityId)
+        elseif filterList then
+            isFiltered = table.find(filterList, entityId) ~= nil
+        end
+        if filterType == FILTER_TYPE_INCLUDE then
+            return not isFiltered -- Include only if the filter is not found
+        else
+            return isFiltered -- Exclude if the filter is found
+        end
+    end
+
+    -- Initialize variables for tracking the closest hit
+    local closestHit = nil
+    local closestDistance = math.huge
+
+    -- Localize frequently accessed properties for performance
+    local tCols = self.tCols
+    local tRows = self.tRows
+    local LooseGrid = self.LooseGrid
+    local TightGrid = self.TightGrid
+    local cWidth = self.cWidth
+    local cHeight = self.cHeight
+    local ShapeMap = self.ShapeMap
+
+    -- Calculate the maximum distance of the ray
+    local maxDistance = direction.Magnitude
+    local directionUnit = direction.Unit
+    if maxDistance <= 0 then
+        warn("Ray direction has zero magnitude. This may result in unexpected behavior!")
+    end
+
+    -- Track checked loose cells to avoid redundant checks
+    local checkedLooseCells = {}
+
+    -- Grid traversal algorithm to find intersected tight cells
+    local function traverseGrid(origin, directionUnit)
+        local col, row = self:GetCol(origin.X), self:GetRow(origin.Y)
+
+        -- If the ray starts outside the grid bounds, calculate the first intersection point within the grid
+        if col < 1 or col > tCols or row < 1 or row > tRows then
+            local tMinX, tMinY = -math.huge, -math.huge
+            if directionUnit.X ~= 0 then
+                if directionUnit.X > 0 then
+                    tMinX = ((1 - 1) * cWidth - origin.X) / directionUnit.X
+                else
+                    tMinX = ((tCols - 1) * cWidth + cWidth - origin.X) / directionUnit.X
+                end
+            end
+            if directionUnit.Y ~= 0 then
+                if directionUnit.Y > 0 then
+                    tMinY = ((1 - 1) * cHeight - origin.Y) / directionUnit.Y
+                else
+                    tMinY = ((tRows - 1) * cHeight + cHeight - origin.Y) / directionUnit.Y
+                end
+            end
+
+            local tMin = math.max(tMinX, tMinY)
+            if tMin < 0 or tMin > maxDistance then
+                return function() return nil end -- No valid starting point within the grid
+            end
+
+            origin = origin + directionUnit * tMin
+            col, row = self:GetCol(origin.X), self:GetRow(origin.Y)
+        end
+
+        local endPoint = origin + direction
+        local endCol = self:GetCol(endPoint.X)
+        local endRow = self:GetRow(endPoint.Y)
+
+        -- Determine the step direction (+1 or -1) for X and Y
+        local stepX = if directionUnit.X > 0 then 1 else -1
+        local stepY = if directionUnit.Y > 0 then 1 else -1
+
+        -- Calculate tDeltaX and tDeltaY (distance to cross one cell in X and Y)
+        -- Calculate tDeltaX and tDeltaY (distance to cross one cell in X and Y)
+        local tDeltaX = if directionUnit.X ~= 0 then math.abs(cWidth / directionUnit.X) else math.huge
+        local tDeltaY = if directionUnit.Y ~= 0 then math.abs(cHeight / directionUnit.Y) else math.huge
+
+        -- Calculate tMaxX and tMaxY (time to first grid boundary in X and Y)
+        local tMaxX = if directionUnit.X > 0 then ((col - 1) * cWidth + cWidth - origin.X) / directionUnit.X else (origin.X - (col - 1) * cWidth) / -directionUnit.X
+        local tMaxY = if directionUnit.Y > 0 then ((row - 1) * cHeight + cHeight - origin.Y) / directionUnit.Y else (origin.Y - (row - 1) * cHeight) / -directionUnit.Y
+
+        local lastIteration = false
+        return function()
+            if col < 1 or col > tCols or row < 1 or row > tRows or lastIteration then
+                return nil
+            end
+
+            if col == endCol and row == endRow then
+                lastIteration = true -- Mark as last iteration if we hit the end cell
+            end
+
+            local tightCellIndex = (row - 1) * tCols + col
+
+            -- Move to the next cell based on which boundary is closer
+            if tMaxX < tMaxY then
+                col += stepX
+                tMaxX += tDeltaX
+            else
+                row += stepY
+                tMaxY += tDeltaY
+            end
+            return tightCellIndex
+        end
+    end
+
+    -- Iterate through tight cells along the ray
+    for tightCellIndex in traverseGrid(origin, directionUnit) do
+        local tightCell = TightGrid[tightCellIndex]
+        for _, looseCellIndex in tightCell do
+            if checkedLooseCells[looseCellIndex] then
+                continue -- Skip already checked loose cells
+            end
+            checkedLooseCells[looseCellIndex] = true -- Mark loose cell as checked
+
+            local looseCell = LooseGrid[looseCellIndex]
+
+            -- Check each entity in the loose cell for ray intersection
+            for entityId, aabb: AABB in looseCell.AABBs do
+                if not skipFilter and isFilteredOut(entityId) then continue end
+
+                local shapeType = ShapeMap[entityId]
+                local hit, hitPos, normal = false, nil, nil
+
+                if shapeType == SHAPE_TYPE_RECT then
+                    hit, hitPos, normal = self:_RayAABBIntersection(origin, directionUnit, aabb[1], aabb[2], aabb[3], aabb[4])
+                elseif shapeType == SHAPE_TYPE_CIRCLE then
+                    hit, hitPos, normal = self:_RayCircleIntersection(origin, directionUnit, aabb)
+                elseif shapeType == SHAPE_TYPE_POINT then
+                    hit, hitPos, normal = self:_RayPointIntersection(origin, directionUnit, aabb)
+                else
+                    warn(entityId, "Unknown shape type: " .. tostring(shapeType))
+                end
+
+                if hit then
+                    local distance = (hitPos - origin).Magnitude
+                    if distance <= maxDistance and distance < closestDistance then
+                        closestDistance = distance
+                        closestHit = table.freeze {
+                            Normal = normal,
+                            Position = hitPos,
+                            Distance = distance,
+                            EntityId = entityId,
+                        }
+                    end
+                end
+            end
+        end
+
+        if closestHit then
+            break -- Stop searching if we found a hit in the current cell
+        end
+    end
+
+    debug.profileend()
+    return closestHit
+end
+
+-- Helper function to calculate ray-AABB intersection
+function LTDG:_RayAABBIntersection(origin: Vector2, direction: Vector2, l: number, b: number, r: number, t: number): (boolean, Vector2?, Vector2?)
+    local invDirX = 1 / direction.X
+    local invDirY = 1 / direction.Y
+
+    local t1 = (l - origin.X) * invDirX
+    local t2 = (r - origin.X) * invDirX
+    local t3 = (b - origin.Y) * invDirY
+    local t4 = (t - origin.Y) * invDirY
+
+    local tMin = math.max(math.min(t1, t2), math.min(t3, t4))
+    local tMax = math.min(math.max(t1, t2), math.max(t3, t4))
+
+    if tMax < 0 or tMin > tMax then
+        return false, nil, nil
+    end
+
+    local hitPos = origin + direction.Unit * tMin
+    local normal = Vector2.zero
+    if tMin == t1 then normal = Vector2.new(-1, 0)
+    elseif tMin == t2 then normal = Vector2.new(1, 0)
+    elseif tMin == t3 then normal = Vector2.new(0, -1)
+    elseif tMin == t4 then normal = Vector2.new(0, 1) end
+
+    return true, hitPos, normal
+end
+
+-- Helper function to calculate ray-circle intersection
+function LTDG:_RayCircleIntersection(origin: Vector2, direction: Vector2, aabb: AABB): (boolean, Vector2?, Vector2?)
+    local cx = (aabb[1] + aabb[3]) * 0.5
+    local cy = (aabb[2] + aabb[4]) * 0.5
+    local radius = (aabb[3] - aabb[1]) * 0.5
+
+    local oc = Vector2.new(origin.X - cx, origin.Y - cy)
+    local a = direction:Dot(direction)
+    local b = 2 * oc:Dot(direction)
+    local c = oc:Dot(oc) - radius * radius
+
+    local discriminant = b * b - 4 * a * c
+    if discriminant < 0 then
+        return false, nil, nil
+    end
+
+    local t = (-b - math.sqrt(discriminant)) / (2 * a)
+    if t < 0 then
+        return false, nil, nil
+    end
+
+    local hitPos = origin + direction.Unit * t
+    local normal = (hitPos - Vector2.new(cx, cy)).Unit
+    return true, hitPos, normal
+end
+
+-- Helper function to calculate ray-point intersection
+function LTDG:_RayPointIntersection(origin: Vector2, direction: Vector2, aabb: AABB): (boolean, Vector2?, Vector2?)
+    local px, py = aabb[1], aabb[2] -- Point coordinates
+
+    -- Vector from ray origin to the point
+    local toPointX = px - origin.X
+    local toPointY = py - origin.Y
+
+    -- Cross product to check if the point lies on the ray's line
+    local cross = toPointX * direction.Y - toPointY * direction.X
+    if cross ~= 0 then
+        return false, nil, nil -- Point is not on the ray's line
+    end
+
+    -- Dot product to ensure the point is in the correct direction
+    local dot = toPointX * direction.X + toPointY * direction.Y
+    if dot < 0 then
+        return false, nil, nil -- Point is behind the ray's origin
+    end
+
+    -- If both checks pass, the point lies on the ray
+    return true, Vector2.new(px, py), Vector2.zero
 end
 
 --[=[
