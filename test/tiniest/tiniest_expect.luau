@@ -70,6 +70,12 @@ function tiniest_expect.expect(
 		return if a == b then tests else fail(`Got '{tiniest_quote(a)}' but expected it to be '{tiniest_quote(b)}'`)
 	end
 
+	function tests.is_not(
+		b: any
+	)
+		return if a ~= b then tests else fail(`Got '{tiniest_quote(a)}' but expected it to not be '{tiniest_quote(b)}'`)
+	end
+
 	function tests.never_is(
 		b: any
 	)
