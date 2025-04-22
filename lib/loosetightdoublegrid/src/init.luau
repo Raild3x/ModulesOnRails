@@ -40,7 +40,7 @@
 
     -- Remove the rectangle
     local success = grid:Remove(rectId)
-    print("Rectangle removed:", success)
+    print("Did find and remove?", success)
     ```
 
     :::info How it works - (Info for Nerds)
@@ -67,14 +67,6 @@ type ShapeType = "c" | "r" | "p"
 local SHAPE_TYPE_CIRCLE = "c"
 local SHAPE_TYPE_RECT = "r"
 local SHAPE_TYPE_POINT = "p"
-
-if not Vector2 then -- This is for testing on a non roblox platform
-    Vector2 = {
-        new = function(x, y)
-            return { X = x, Y = y }
-        end,
-    }
-end
 
 type LooseCell = LooseCell.LooseCell
 export type AABB = LooseCell.AABB -- Stored in the order of {L,B,R,T} (Liberty!), can also be anvisioned as a ccw rotation of the sides.
@@ -782,87 +774,225 @@ end
 
 --[=[
     @within LooseTightDoubleGrid
-    @unreleased
-    Queries the closest entity to a given point.
+    Queries the closest entity to a given point. Closeness is determined by the distance to the edge of the entity's shape.
 
-    This method is not finished and does not return a perfect result.
-    It currently gets *one* of the closest entities, but does not compare
-    against the AABBs.
+    This method searches for the entity that is closest to the specified point in the grid. 
+    It considers all shapes (circles, rectangles, and points) and uses a two-tier comparison:
+    - **Primary Metric**: Distance to the edge of the shape.
+    - **Secondary Metric**: Distance to the center of the shape (used to break ties when the point is inside multiple shapes).
+    
+    Under this two-tier metric, the method will return an entity if the point is inside the entity, even if another
+    entities's center is technically closer to the point. `Point` entities are treated as circles with a radius of 0.
+
+    The method uses an expanding search algorithm, starting from the tight cell containing the point and gradually expanding outward until the closest entity is found.
+
+    ```lua
+    -- Insert some entities
+    local rectId = grid:InsertRect(Vector2.new(10, 10), Vector2.new(5, 5))
+    local circleId = grid:InsertCircle(Vector2.new(15, 15), 3)
+    local pointId = grid:InsertPoint(Vector2.new(20, 20))
+
+    -- Query the closest entity to a point
+    local closestEntityId = grid:QueryClosestToPoint(Vector2.new(12, 12))
+    print("Closest Entity ID:", closestEntityId)
+    ```
 ]=]
-function LTDG:QueryClosestToPoint(pos: Vector2): EntityId?
+function LTDG:QueryClosestToPoint(point: Vector2): EntityId?
     debug.profilebegin("LTDG:QueryClosestToPoint")
 
-    local closestEntityId = nil
-    local closestDistanceSquared = math.huge
-
-    -- Get the initial tight cell coordinates
-    local cX = self:GetCol(pos.X)
-    local cY = self:GetRow(pos.Y)
-
-    local function calculateDistanceSquared(aabb: AABB, point: Vector2): number
-        local centerX = (aabb[1] + aabb[3]) / 2
-        local centerY = (aabb[2] + aabb[4]) / 2
+    -- Utility function to calculate the squared distance from a point to a shape
+    local function calculateDistanceSquaredToShape(aabb: AABB, shapeType: ShapeType): (number, number)
+        local l, b, r, t = aabb[1], aabb[2], aabb[3], aabb[4]
+        -- Center of the AABB
+        local centerX = (l + r) * 0.5
+        local centerY = (b + t) * 0.5
         local dx = point.X - centerX
         local dy = point.Y - centerY
-        return dx * dx + dy * dy
+
+        if shapeType == SHAPE_TYPE_CIRCLE then
+            -- For circles, calculate the squared distance to the edge
+            local radius = (r - l) * 0.5
+            local distanceSquaredToCenter = dx * dx + dy * dy
+            local radiusSquared = radius * radius
+
+            if distanceSquaredToCenter <= radiusSquared then
+                -- Point is inside the circle; return 0 for edge distance and distance to center as secondary metric
+                return 0, distanceSquaredToCenter
+            else
+                -- Point is outside the circle; return distance to the edge and distance to the center
+                return distanceSquaredToCenter - radiusSquared, distanceSquaredToCenter
+            end
+        elseif shapeType == SHAPE_TYPE_RECT then
+            -- For rectangles, clamp the point to the rectangle's bounds
+            local clampedX = math.clamp(point.X, l, r)
+            local clampedY = math.clamp(point.Y, b, t)
+            local clampedDx = point.X - clampedX
+            local clampedDy = point.Y - clampedY
+            local distanceSquaredToEdge = clampedDx * clampedDx + clampedDy * clampedDy
+
+            if distanceSquaredToEdge == 0 then
+                -- Point is inside the rectangle; return 0 for edge distance and distance to center as secondary metric
+                return 0, dx * dx + dy * dy
+            else
+                -- Point is outside the rectangle; return distance to the edge and distance to the center
+                return distanceSquaredToEdge, dx * dx + dy * dy
+            end
+        elseif shapeType == SHAPE_TYPE_POINT then
+            -- For points, the distance to the edge is always 0 if the query point matches the point
+            local distanceSquaredToPoint = dx * dx + dy * dy
+            return distanceSquaredToPoint, distanceSquaredToPoint
+        else
+            error("Unknown shape type: " .. tostring(shapeType))
+        end
     end
 
+    -- Track the closest entity and its distance metrics
+    local ShapeMap = self.ShapeMap
+    local closestEntityId = nil
+    local closestDistanceSquared = math.huge
+    local closestDistanceToCenter = math.huge
+
+    print("QueryClosestToPoint: Searching for closest entity to point:", point)
+
+    -- Function to check all entities in a loose cell
     local function checkLooseCell(looseCell: LooseCell)
+        local didFind = false
         for entityId, aabb: AABB in looseCell.AABBs do
-            local distanceSquared = calculateDistanceSquared(aabb, pos)
-            if distanceSquared < closestDistanceSquared then
-                closestDistanceSquared = distanceSquared
+            didFind = true
+            local shapeType = ShapeMap[entityId]
+            local distanceSquaredToEdge, distanceSquaredToCenter = calculateDistanceSquaredToShape(aabb, shapeType)
+            print("Entity ID:", entityId, "Distance to edge:", distanceSquaredToEdge, "Distance to center:", distanceSquaredToCenter)
+            -- Compare based on primary metric (edge distance), then secondary metric (center distance)
+            if distanceSquaredToEdge < closestDistanceSquared or (
+                distanceSquaredToEdge == closestDistanceSquared and 
+                distanceSquaredToCenter < closestDistanceToCenter
+            ) then
+                closestDistanceSquared = distanceSquaredToEdge
+                closestDistanceToCenter = distanceSquaredToCenter
                 closestEntityId = entityId
             end
         end
+        return didFind
     end
 
+    -- Get the initial tight cell coordinates
+    local cX = self:GetCol(point.X)
+    local cY = self:GetRow(point.Y)
+
+    local tCols = self.tCols
+    local tRows = self.tRows
+    local LooseGrid = self.LooseGrid
+    local TightGrid = self.TightGrid
+
     -- Expanding search algorithm
+    local checkedLooseCells = {}
+    local checkedTightCells = {}
+
+    local tightCellIndexCount = 0
+    local tightCellXIndicesToCheck = table.create(4)
+    local tightCellYIndicesToCheck = table.create(4)
+
     local radius = 0
     while true do
         local startX = math.max(1, cX - radius)
-        local endX = math.min(self.tCols, cX + radius)
+        local endX = math.min(tCols, cX + radius)
         local startY = math.max(1, cY - radius)
-        local endY = math.min(self.tRows, cY + radius)
+        local endY = math.min(tRows, cY + radius)
 
-        -- Check the top row (excluding the last corner)
-        for x = startX, endX - 1 do
-            local index = (startY - 1) * self.tCols + x
-            local looseCell = self.LooseGrid[index]
-            if looseCell then
-                checkLooseCell(looseCell)
+        -- Check the outermost layer of tight cells for the current radius
+        for x = startX, endX do
+            -- Top row
+            if startY > 0 then
+                local tightCellIndex = (startY - 1) * tCols + x
+                checkedTightCells[tightCellIndex] = true -- mark tight cell as checked
+                for _, looseCellIndex in TightGrid[tightCellIndex] do
+                    if not checkedLooseCells[looseCellIndex] then
+                        checkedLooseCells[looseCellIndex] = true -- mark loose cell as checked
+                        if checkLooseCell(LooseGrid[looseCellIndex]) then
+                            tightCellIndexCount += 1
+                            tightCellYIndicesToCheck[tightCellIndexCount] = startY -- mark tight cell as checked
+                            tightCellXIndicesToCheck[tightCellIndexCount] = x
+                        end
+                    end
+                end
+            end
+
+            -- Bottom row
+            if endY <= tRows then
+                local tightCellIndex = (endY - 1) * tCols + x
+                checkedTightCells[tightCellIndex] = true -- mark tight cell as checked
+                for _, looseCellIndex in TightGrid[tightCellIndex] do
+                    if not checkedLooseCells[looseCellIndex] then
+                        checkedLooseCells[looseCellIndex] = true -- mark loose cell as checked
+                        if checkLooseCell(LooseGrid[looseCellIndex]) then
+                            tightCellIndexCount += 1
+                            tightCellYIndicesToCheck[tightCellIndexCount] = endY -- mark tight cell as checked
+                            tightCellXIndicesToCheck[tightCellIndexCount] = x
+                        end
+                    end
+                end
             end
         end
 
-        -- Check the right column (excluding the last corner)
-        for y = startY, endY - 1 do
-            local index = (y - 1) * self.tCols + endX
-            local looseCell = self.LooseGrid[index]
-            if looseCell then
-                checkLooseCell(looseCell)
+        for y = startY + 1, endY - 1 do
+            -- Left column
+            if startX > 0 then
+                local tightCellIndex = (y - 1) * tCols + startX
+                checkedTightCells[tightCellIndex] = true -- mark tight cell as checked
+                for _, looseCellIndex in TightGrid[tightCellIndex] do
+                    if not checkedLooseCells[looseCellIndex] then
+                        checkedLooseCells[looseCellIndex] = true -- mark loose cell as checked
+                        if checkLooseCell(LooseGrid[looseCellIndex]) then
+                            tightCellIndexCount += 1
+                            tightCellYIndicesToCheck[tightCellIndexCount] = y -- mark tight cell as checked
+                            tightCellXIndicesToCheck[tightCellIndexCount] = startX -- mark tight cell as checked
+                        end
+                    end
+                end
+            end
+
+            -- Right column
+            if endX <= tCols then
+                local tightCellIndex = (y - 1) * tCols + endX
+                checkedTightCells[tightCellIndex] = true -- mark tight cell as checked
+                for _, looseCellIndex in TightGrid[tightCellIndex] do
+                    if not checkedLooseCells[looseCellIndex] then
+                        checkedLooseCells[looseCellIndex] = true -- mark loose cell as checked
+                        if checkLooseCell(LooseGrid[looseCellIndex]) then
+                            tightCellIndexCount += 1
+                            tightCellYIndicesToCheck[tightCellIndexCount] = y -- mark tight cell as checked
+                            tightCellXIndicesToCheck[tightCellIndexCount] = endX -- mark tight cell as checked
+                        end
+                    end
+                end
             end
         end
 
-        -- Check the bottom row (excluding the last corner)
-        for x = endX, startX + 1, -1 do
-            local index = (endY - 1) * self.tCols + x
-            local looseCell = self.LooseGrid[index]
-            if looseCell then
-                checkLooseCell(looseCell)
-            end
-        end
-
-        -- Check the left column (excluding the last corner)
-        for y = endY, startY + 1, -1 do
-            local index = (y - 1) * self.tCols + startX
-            local looseCell = self.LooseGrid[index]
-            if looseCell then
-                checkLooseCell(looseCell)
+        for i = 1, #tightCellXIndicesToCheck do
+            local tcX, tcY = tightCellXIndicesToCheck[i], tightCellYIndicesToCheck[i]
+            for x = -1, 1 do
+                for y = -1, 1 do
+                    local nx = tcX + x
+                    local ny = tcY + y
+                    if nx < 1 or nx > tCols or ny < 1 or ny > tRows then
+                        continue -- skip out of bounds cells
+                    end
+                    local tightCellIndex = (ny - 1) * tCols + nx
+                    if not checkedTightCells[tightCellIndex] then
+                        checkedTightCells[tightCellIndex] = true -- mark tight cell as checked
+                        for _, looseCellIndex in TightGrid[tightCellIndex] do
+                            if not checkedLooseCells[looseCellIndex] then
+                                checkedLooseCells[looseCellIndex] = true -- mark loose cell as checked
+                                checkLooseCell(LooseGrid[looseCellIndex])
+                            end
+                        end
+                    end
+                end 
             end
         end
 
         -- Stop if we found an entity or if the search exceeds the grid bounds
-        if closestEntityId or radius > math.max(self.tCols, self.tRows) then
+        if closestEntityId or radius > math.max(tCols, tRows) then
             break
         end
 
@@ -875,6 +1005,7 @@ end
 
 --[=[
     @within LooseTightDoubleGrid
+    @private
     @unreleased
     @error Not implemented.
     Gets all the entities that overlap with a rotated rectangular region.
@@ -889,6 +1020,7 @@ end
 
 --[=[
     @within LooseTightDoubleGrid
+    @private
     @unreleased
     @error Not implemented.
     
