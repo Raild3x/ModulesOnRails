@@ -58,8 +58,8 @@
 ]=]
 
 --// Imports //--
-local LooseCell = require("LooseCell")
-local TightCell = require("TightCell")
+local LooseCell = require(script.LooseCell)
+local TightCell = require(script.TightCell)
 
 --// Types //--
 -- Enum for shape types 
