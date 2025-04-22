@@ -67,13 +67,13 @@ function tiniest_expect.expect(
 	function tests.is(
 		b: any
 	)
-		return if a == b then tests else fail()
+		return if a == b then tests else fail(`Got '{tiniest_quote(a)}' but expected it to be '{tiniest_quote(b)}'`)
 	end
 
 	function tests.never_is(
 		b: any
 	)
-		return if a ~= b then tests else fail()
+		return if a ~= b then tests else fail(`Got '{tiniest_quote(a)}' but expected it to not be '{tiniest_quote(b)}'`)
 	end
 
 	function tests.is_shallow_equal(
@@ -85,13 +85,13 @@ function tiniest_expect.expect(
 		local checkedKeys = {}
 		for k, v in a do
 			if b[k] ~= v then
-				table.insert(failureReasons, `Key [{tostring(k)}] is not equivalent. Got {tostring(v)} and {tostring(b[k])}.`)
+				table.insert(failureReasons, `Key [{tiniest_quote(k)}] is not equivalent. Got {tiniest_quote(v)} and {tiniest_quote(b[k])}.`)
 			end
 			checkedKeys[k] = true
 		end
 		for k, v in b do
 			if a[k] ~= v and checkedKeys[k] ~= true then
-				table.insert(failureReasons, `Key [{tostring(k)}] is not equivalent. Got {tostring(a[k])} and {tostring(v)}.`)
+				table.insert(failureReasons, `Key [{tiniest_quote(k)}] is not equivalent. Got {tiniest_quote(a[k])} and {tiniest_quote(v)}.`)
 			end
 		end
 		return if #failureReasons == 0 then tests else fail(table.concat(failureReasons, "\n"))
@@ -106,19 +106,19 @@ function tiniest_expect.expect(
 		local checkedKeys = {}
 		local function deep_check(a: any, b: any, path: string)
 			for k, v in a do
-				local new_path = path .. "[" .. tostring(k) .. "]"
+				local new_path = path .. "[" .. tiniest_quote(k) .. "]"
 				checkedKeys[new_path] = true
 	
 				if typeof(v) == "table" and typeof(b[k]) == "table" then
 					deep_check(v, b[k], new_path)
 				elseif b[k] ~= v then
-					table.insert(failureReasons, `Key {new_path} is not equivalent. Got {tostring(v)} and {tostring(b[k])}.`)
+					table.insert(failureReasons, `Key {new_path} is not equivalent. Got {tiniest_quote(v)} and {tiniest_quote(b[k])}.`)
 				end
 			end
 			for k, v in b do
-				local new_path = path .. "[" .. tostring(k) .. "]"
+				local new_path = path .. "[" .. tiniest_quote(k) .. "]"
 				if checkedKeys[new_path] ~= true and a[k] ~= v then
-					table.insert(failureReasons, `Key {new_path} is not equivalent. Got {tostring(a[k])} and {tostring(v)}.`)
+					table.insert(failureReasons, `Key {new_path} is not equivalent. Got {tiniest_quote(a[k])} and {tiniest_quote(v)}.`)
 				end
 			end
 		end
@@ -140,13 +140,13 @@ function tiniest_expect.expect(
 	function tests.is_a(
 		b: string
 	)
-		return if typeof(a) == b then tests else fail()
+		return if typeof(a) == b then tests else fail(`Expected '{tiniest_quote(a)}' to be type of '{tiniest_quote(b)}'. Got typeof '{tiniest_quote(a)}' instead.`)
 	end
 
 	function tests.never_is_a(
 		b: string
 	)
-		return if typeof(a) ~= b then tests else fail()
+		return if typeof(a) ~= b then tests else fail(`Expected '{tiniest_quote(a)}' to not be type of '{tiniest_quote(b)}'`)
 	end
 
 	function tests.has_key(
@@ -179,7 +179,7 @@ function tiniest_expect.expect(
 		check(typeof(a) == "table", "expect() value must be table")
 		check(b ~= nil, "value cannot be nil")
 		local index = table.find(a, b)
-		return if index ~= nil then tests else fail(`Found at index {index}`)
+		return if index == nil then tests else fail(`Found at index {tiniest_quote(index)}`)
 	end
 
 	function tests.fails()
