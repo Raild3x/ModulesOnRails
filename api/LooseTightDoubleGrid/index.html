@@ -1,0 +1,965 @@
+<!doctype html>
+<html lang="en" dir="ltr" class="plugin-moonwave plugin-id-moonwave">
+<head>
+<meta charset="UTF-8">
+<meta name="generator" content="Docusaurus v2.3.1">
+<title data-rh="true">LooseTightDoubleGrid | ModulesOnRails</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:url" content="https://raild3x.github.io/ModulesOnRails/api/LooseTightDoubleGrid"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docusaurus_tag" content="default"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docsearch:docusaurus_tag" content="default"><meta data-rh="true" property="og:title" content="LooseTightDoubleGrid | ModulesOnRails"><meta data-rh="true" name="description" content="The `LooseTightDoubleGrid` is a spatial partitioning structure designed to efficiently manage and query entities in a 2D space. 
+It is particularly useful for scenarios where entities with highly dynamic sizes need to be inserted, updated, removed, or queried based on their spatial 
+relationships, such as in games, simulations, or physics engines.
+
+## Features
+- **Insertion**: Supports inserting circular, rectangular, and point entities into the grid.
+- **Updates**: Allows updating the position and size of entities.
+- **Removal**: Entities can be removed from the grid.
+- **Queries**: Supports querying entities within rectangular, circular, and point regions. 
+  Additional query methods for rotated rectangles and polygons are planned but not yet implemented.
+- **Debugging**: Includes a `Draw` method to visualize the grid and its entities in the 3D workspace.
+
+## Scenarios
+The `LooseTightDoubleGrid` is ideal for:
+- **Collision Detection**: Quickly finding potential collisions between entities in a 2D space.
+- **Spatial Queries**: Efficiently retrieving entities within a specific region.
+- **Dynamic Environments**: Managing entities that frequently move or change size.
+
+## Example Usage
+```lua
+local grid = LooseTightDoubleGrid.new({
+    Position = Vector2.new(0, 0),
+    Size = Vector2.new(32, 32),
+    CellSize = 4
+})
+
+-- Insert a rectangle
+local rectId = grid:InsertRect(Vector2.new(10, 10), Vector2.new(5, 5))
+
+-- Query entities in a region
+local entities = grid:QueryRect(Vector2.new(10, 10), Vector2.new(6, 6))
+print(&quot;Entities in region:&quot;, entities)
+
+-- Update the rectangle&#x27;s position
+grid:UpdateRect(rectId, Vector2.new(15, 15), Vector2.new(5, 5))
+
+-- Remove the rectangle
+local success = grid:Remove(rectId)
+print(&quot;Did find and remove?&quot;, success)
+```
+
+:::info How it works - (Info for Nerds)
+Internally the grid is divided into two layers:
+- **Tight Grid**: A fixed grid where each cell contains references to overlapping loose cells.
+- **Loose Grid**: A grid where each cell has a larger boundary than the corresponding tight cell, allowing entities to span multiple cells.
+
+Entities are stored in the loose grid, and their spatial relationships are managed using axis-aligned bounding boxes (AABBs). 
+The tight grid helps narrow down the search space during queries, improving performance.
+:::
+:::tip Vector2
+Although the documentation specifies `Vector2` for positions and sizes,
+the system will take any table with `X` and `Y` properties.
+:::"><meta data-rh="true" property="og:description" content="The `LooseTightDoubleGrid` is a spatial partitioning structure designed to efficiently manage and query entities in a 2D space. 
+It is particularly useful for scenarios where entities with highly dynamic sizes need to be inserted, updated, removed, or queried based on their spatial 
+relationships, such as in games, simulations, or physics engines.
+
+## Features
+- **Insertion**: Supports inserting circular, rectangular, and point entities into the grid.
+- **Updates**: Allows updating the position and size of entities.
+- **Removal**: Entities can be removed from the grid.
+- **Queries**: Supports querying entities within rectangular, circular, and point regions. 
+  Additional query methods for rotated rectangles and polygons are planned but not yet implemented.
+- **Debugging**: Includes a `Draw` method to visualize the grid and its entities in the 3D workspace.
+
+## Scenarios
+The `LooseTightDoubleGrid` is ideal for:
+- **Collision Detection**: Quickly finding potential collisions between entities in a 2D space.
+- **Spatial Queries**: Efficiently retrieving entities within a specific region.
+- **Dynamic Environments**: Managing entities that frequently move or change size.
+
+## Example Usage
+```lua
+local grid = LooseTightDoubleGrid.new({
+    Position = Vector2.new(0, 0),
+    Size = Vector2.new(32, 32),
+    CellSize = 4
+})
+
+-- Insert a rectangle
+local rectId = grid:InsertRect(Vector2.new(10, 10), Vector2.new(5, 5))
+
+-- Query entities in a region
+local entities = grid:QueryRect(Vector2.new(10, 10), Vector2.new(6, 6))
+print(&quot;Entities in region:&quot;, entities)
+
+-- Update the rectangle&#x27;s position
+grid:UpdateRect(rectId, Vector2.new(15, 15), Vector2.new(5, 5))
+
+-- Remove the rectangle
+local success = grid:Remove(rectId)
+print(&quot;Did find and remove?&quot;, success)
+```
+
+:::info How it works - (Info for Nerds)
+Internally the grid is divided into two layers:
+- **Tight Grid**: A fixed grid where each cell contains references to overlapping loose cells.
+- **Loose Grid**: A grid where each cell has a larger boundary than the corresponding tight cell, allowing entities to span multiple cells.
+
+Entities are stored in the loose grid, and their spatial relationships are managed using axis-aligned bounding boxes (AABBs). 
+The tight grid helps narrow down the search space during queries, improving performance.
+:::
+:::tip Vector2
+Although the documentation specifies `Vector2` for positions and sizes,
+the system will take any table with `X` and `Y` properties.
+:::"><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/LooseTightDoubleGrid"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/LooseTightDoubleGrid" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/LooseTightDoubleGrid" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.1839e2d4.css">
+<link rel="preload" href="/ModulesOnRails/assets/js/runtime~main.9ee1009c.js" as="script">
+<link rel="preload" href="/ModulesOnRails/assets/js/main.fed60581.js" as="script">
+</head>
+<body class="navigation-with-keyboard">
+<script>!function(){function e(e){document.documentElement.setAttribute("data-theme",e)}var t=function(){var e=null;try{e=localStorage.getItem("theme")}catch(e){}return e}();null!==t?e(t):window.matchMedia("(prefers-color-scheme: dark)").matches?e("dark"):(window.matchMedia("(prefers-color-scheme: light)").matches,e("light"))}()</script><div id="__docusaurus">
+<div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="navbar navbar--fixed-top"><div class="navbar__inner"><div class="navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-hidden="true" viewBox="0 0 24 24" class="iconExternalLink_nPIU"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"></path></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="Switch between dark and light mode (currently light mode)" aria-label="Switch between dark and light mode (currently light mode)" aria-live="polite"><svg viewBox="0 0 24 24" width="24" height="24" class="lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" class="darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg></button></div><div class="searchBox_ZlJk"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input type="search" id="search_input_react" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="docusaurus_skipToContent_fallback" class="main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject">​Base​Object</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Roam">​Roam</a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/TableManager">TableManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/TableReplicator">TableReplicator</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/NetWire">NetWire</a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PlayerProfileManager">​Player​Profile​Manager</a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/PlayerDataManager">PlayerDataManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/Component">Instance Component Systems</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/DropletManager">DropletManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/CmdrHandler">Admin Commands [Cmdr]</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" aria-expanded="true" href="/ModulesOnRails/api/Queue">Data Structures</a></div><ul style="display:block;overflow:visible;height:auto" class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/Queue">​Queue</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/Heap">​Heap</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" tabindex="0" href="/ModulesOnRails/api/LooseTightDoubleGrid">​Loose​Tight​Double​Grid</a></li></ul></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ObjectCache">​Object​Cache</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ProbabilityDistributor">​Probability​Distributor</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PromValue">​Prom​Value</a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><div class="tocCollapsible_ETCw theme-doc-toc-mobile tocMobile_oUs_"><button type="button" class="clean-btn tocCollapsibleButton_TO0P">On this page</button></div><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">Loose</span><span style="display:inline-block">Tight</span><span style="display:inline-block">Double</span><span style="display:inline-block">Grid</span></h1><div class="luaClassTags_EipM"></div><label class="privateToggle_lmfE"><span class="privateCheckboxContainer_psRa"><input type="checkbox" class="privateCheckboxInternal_IKP2" name="checkbox"><span class="privateCheckboxControl_Ov8U"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="3" d="M4 11.91l5.37 5.37L19.79 5.59"></path></svg></span></span><span class="privateCheckboxLabel_Vmvs">Show Private</span></label><div>
+<p>
+  The <code>LooseTightDoubleGrid</code> is a spatial partitioning structure designed to efficiently manage and query entities in a 2D space.
+  It is particularly useful for scenarios where entities with highly dynamic sizes need to be inserted, updated, removed, or queried based on their spatial
+  relationships, such as in games, simulations, or physics engines.
+</p>
+<h2>Features</h2>
+<ul>
+  <li><strong>Insertion</strong>: Supports inserting circular, rectangular, and point entities into the grid.</li>
+  <li><strong>Updates</strong>: Allows updating the position and size of entities.</li>
+  <li><strong>Removal</strong>: Entities can be removed from the grid.</li>
+  <li>
+    <strong>Queries</strong>: Supports querying entities within rectangular, circular, and point regions.
+    Additional query methods for rotated rectangles and polygons are planned but not yet implemented.
+  </li>
+  <li><strong>Debugging</strong>: Includes a <code>Draw</code> method to visualize the grid and its entities in the 3D workspace.</li>
+</ul>
+<h2>Scenarios</h2>
+<p>The <code>LooseTightDoubleGrid</code> is ideal for:</p>
+<ul>
+  <li><strong>Collision Detection</strong>: Quickly finding potential collisions between entities in a 2D space.</li>
+  <li><strong>Spatial Queries</strong>: Efficiently retrieving entities within a specific region.</li>
+  <li><strong>Dynamic Environments</strong>: Managing entities that frequently move or change size.</li>
+</ul>
+<h2>Example Usage</h2>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> grid <span class="token operator">=</span> LooseTightDoubleGrid<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">{</span>
+    Position <span class="token operator">=</span> Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">0</span><span class="token punctuation">,</span> <span class="token number">0</span><span class="token punctuation">)</span><span class="token punctuation">,</span>
+    Size <span class="token operator">=</span> Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">32</span><span class="token punctuation">,</span> <span class="token number">32</span><span class="token punctuation">)</span><span class="token punctuation">,</span>
+    CellSize <span class="token operator">=</span> <span class="token number">4</span>
+<span class="token punctuation">}</span><span class="token punctuation">)</span>
+
+<span class="token comment">-- Insert a rectangle</span>
+<span class="token keyword">local</span> rectId <span class="token operator">=</span> grid<span class="token punctuation">:</span><span class="token function">InsertRect</span><span class="token punctuation">(</span>Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">10</span><span class="token punctuation">,</span> <span class="token number">10</span><span class="token punctuation">)</span><span class="token punctuation">,</span> Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">5</span><span class="token punctuation">,</span> <span class="token number">5</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token comment">-- Query entities in a region</span>
+<span class="token keyword">local</span> entities <span class="token operator">=</span> grid<span class="token punctuation">:</span><span class="token function">QueryRect</span><span class="token punctuation">(</span>Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">10</span><span class="token punctuation">,</span> <span class="token number">10</span><span class="token punctuation">)</span><span class="token punctuation">,</span> Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">6</span><span class="token punctuation">,</span> <span class="token number">6</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Entities in region:"</span><span class="token punctuation">,</span> entities<span class="token punctuation">)</span>
+
+<span class="token comment">-- Update the rectangle's position</span>
+grid<span class="token punctuation">:</span><span class="token function">UpdateRect</span><span class="token punctuation">(</span>rectId<span class="token punctuation">,</span> Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">15</span><span class="token punctuation">,</span> <span class="token number">15</span><span class="token punctuation">)</span><span class="token punctuation">,</span> Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">5</span><span class="token punctuation">,</span> <span class="token number">5</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token comment">-- Remove the rectangle</span>
+<span class="token keyword">local</span> success <span class="token operator">=</span> grid<span class="token punctuation">:</span><span class="token function">Remove</span><span class="token punctuation">(</span>rectId<span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Did find and remove?"</span><span class="token punctuation">,</span> success<span class="token punctuation">)</span>
+</code></pre>
+<div class="admonition admonition-info alert alert--info">
+  <div class="admonition-heading">
+    <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="16" viewBox="0 0 14 16">
+          <path d="M7 2.3c3.14 0 5.7 2.56 5.7 5.7s-2.56 5.7-5.7 5.7A5.71 5.71 0 0 1 1.3 8c0-3.14 2.56-5.7 5.7-5.7zM7 1C3.14 1 0 4.14 0 8s3.14 7 7 7 7-3.14 7-7-3.14-7-7-7zm1 3H6v5h2V4zm0 6H6v2h2v-2z"></path>
+        </svg></span>How it works - (Info for Nerds)</h5>
+  </div>
+  <div class="admonition-content">
+    <p>Internally the grid is divided into two layers:</p>
+    <ul>
+      <li><strong>Tight Grid</strong>: A fixed grid where each cell contains references to overlapping loose cells.</li>
+      <li><strong>Loose Grid</strong>: A grid where each cell has a larger boundary than the corresponding tight cell, allowing entities to span multiple cells.</li>
+    </ul>
+    <p>
+      Entities are stored in the loose grid, and their spatial relationships are managed using axis-aligned bounding boxes (AABBs).
+      The tight grid helps narrow down the search space during queries, improving performance.
+    </p>
+  </div>
+</div>
+<div class="admonition admonition-tip alert alert--success">
+  <div class="admonition-heading">
+    <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="16" viewBox="0 0 12 16">
+          <path d="M6.5 0C3.48 0 1 2.19 1 5c0 .92.55 2.25 1 3 1.34 2.25 1.78 2.78 2 4v1h5v-1c.22-1.22.66-1.75 2-4 .45-.75 1-2.08 1-3 0-2.81-2.48-5-5.5-5zm3.64 7.48c-.25.44-.47.8-.67 1.11-.86 1.41-1.25 2.06-1.45 3.23-.02.05-.02.11-.02.17H5c0-.06 0-.13-.02-.17-.2-1.17-.59-1.83-1.45-3.23-.2-.31-.42-.67-.67-1.11C2.44 6.78 2 5.65 2 5c0-2.2 2.02-4 4.5-4 1.22 0 2.36.42 3.22 1.19C10.55 2.94 11 3.94 11 5c0 .66-.44 1.78-.86 2.48zM4 14h5c-.23 1.14-1.3 2-2.5 2s-2.27-.86-2.5-2z"></path>
+        </svg></span>Vector2</h5>
+  </div>
+  <div class="admonition-content">
+    <p>
+      Although the documentation specifies <code>Vector2</code> for positions and sizes,
+      the system will take any table with <code>X</code> and <code>Y</code> properties.
+    </p>
+  </div>
+</div>
+</div></header><h2 class="anchor anchorWithStickyNavbar_LWe7" id="types">Types<a href="#types" class="hash-link" aria-label="Direct link to Types" title="Direct link to Types">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="EntityId"><code style="text-decoration:none">EntityId</code><a href="#EntityId" class="hash-link" aria-label="Direct link to EntityId" title="Direct link to EntityId">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/loosetightdoublegrid/src/init.luau#L80"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code class="purple_ieR2">type</code> <code>EntityId<!-- --> = </code> <code class="blue_P4bS">number</code></div><div>
+<p>
+  An identifier for an entity in the grid. This is a unique number assigned to each entity upon insertion into the grid.
+  Ids are not unique between different grids, so they should be used only within the context of a single grid instance.
+</p>
+</div><h2 class="anchor anchorWithStickyNavbar_LWe7" id="functions">Functions<a href="#functions" class="hash-link" aria-label="Direct link to Functions" title="Direct link to Functions">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="new"><code style="text-decoration:none">new</code><a href="#new" class="hash-link" aria-label="Direct link to new" title="Direct link to new">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/loosetightdoublegrid/src/init.luau#L169"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>LooseTightDoubleGrid<!-- -->.</code><code class="green_DgR4">new</code><code>(</code><code>config<!-- -->: </code><code class="purple_ieR2">{</code><div class="inset_uKQm"><code>Position<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Vector2" target="_blank" rel="noopener noreferrer">Vector2?<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code>Size<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Vector2" target="_blank" rel="noopener noreferrer">Vector2?<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code>CellSize<!-- -->: </code><code class="blue_P4bS">number?</code></div><code class="purple_ieR2">}</code><code>) → </code><code class="blue_P4bS">LTDG</code></div><div>
+<p>Creates a new instance of LooseTightDoubleGrid with the given configuration.</p>
+<ul>
+  <li><strong>Position</strong> is the center origin of the grid. <em>(Default: <code>Vector2.new(0, 0)</code>)</em></li>
+  <li><strong>Size</strong> is the number of cells in the x and y directions. <em>(Default: <code>Vector2.new(32, 32)</code>)</em></li>
+  <li><strong>CellSize</strong> is the size of each cell in studs. Adjust this number based on the average sizes of your provided entities in order to optimize performance. <em>(Default: <code>4</code>)</em></li>
+</ul>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> grid <span class="token operator">=</span> LooseTightDoubleGrid<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">{</span>
+    Position <span class="token operator">=</span> Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">0</span><span class="token punctuation">,</span> <span class="token number">0</span><span class="token punctuation">)</span><span class="token punctuation">,</span>
+    Size <span class="token operator">=</span> Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">32</span><span class="token punctuation">,</span> <span class="token number">32</span><span class="token punctuation">)</span><span class="token punctuation">,</span>
+    CellSize <span class="token operator">=</span> <span class="token number">4</span>
+<span class="token punctuation">}</span><span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="InsertRect"><code style="text-decoration:none">InsertRect</code><a href="#InsertRect" class="hash-link" aria-label="Direct link to InsertRect" title="Direct link to InsertRect">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/loosetightdoublegrid/src/init.luau#L291"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>LooseTightDoubleGrid<!-- -->:</code><code class="green_DgR4">InsertRect</code><code>(</code><div class="inset_uKQm"><div><code>position<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Vector2" target="_blank" rel="noopener noreferrer">Vector2<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>,</code></div><div><code>size<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Vector2" target="_blank" rel="noopener noreferrer">Vector2<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code></div></div><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/LooseTightDoubleGrid#EntityId">EntityId</a></code></div><div>
+<p>Inserts a rectangular entity into the grid.</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- Example Code for generating some parts and registering them in the grid</span>
+<span class="token keyword">local</span> <span class="token keyword">function</span> <span class="token function">V3ToV2</span><span class="token punctuation">(</span>v3<span class="token punctuation">:</span> Vector3<span class="token punctuation">)</span><span class="token punctuation">:</span> Vector2
+    <span class="token keyword">return</span> Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span>v3<span class="token punctuation">.</span>X<span class="token punctuation">,</span> v3<span class="token punctuation">.</span>Z<span class="token punctuation">)</span>
+<span class="token keyword">end</span>
+
+<span class="token keyword">local</span> IdToPart <span class="token operator">=</span> <span class="token punctuation">{</span><span class="token punctuation">}</span>
+<span class="token keyword">for</span> i <span class="token operator">=</span> <span class="token number">1</span><span class="token punctuation">,</span> <span class="token number">10</span> <span class="token keyword">do</span>
+    <span class="token keyword">local</span> part <span class="token operator">=</span> Instance<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token string">"Part"</span><span class="token punctuation">)</span>
+    part<span class="token punctuation">.</span>Size <span class="token operator">=</span> Vector3<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span>math<span class="token punctuation">.</span><span class="token function">random</span><span class="token punctuation">(</span><span class="token number">1</span><span class="token punctuation">,</span> <span class="token number">5</span><span class="token punctuation">)</span><span class="token punctuation">,</span> <span class="token number">1</span><span class="token punctuation">,</span> math<span class="token punctuation">.</span><span class="token function">random</span><span class="token punctuation">(</span><span class="token number">1</span><span class="token punctuation">,</span> <span class="token number">5</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+    part<span class="token punctuation">.</span>Position <span class="token operator">=</span> Vector3<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span>math<span class="token punctuation">.</span><span class="token function">random</span><span class="token punctuation">(</span><span class="token operator">-</span><span class="token number">20</span><span class="token punctuation">,</span> <span class="token number">20</span><span class="token punctuation">)</span><span class="token punctuation">,</span> <span class="token number">1</span><span class="token punctuation">,</span> math<span class="token punctuation">.</span><span class="token function">random</span><span class="token punctuation">(</span><span class="token operator">-</span><span class="token number">20</span><span class="token punctuation">,</span> <span class="token number">20</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+    part<span class="token punctuation">.</span>Anchored <span class="token operator">=</span> <span class="token keyword">true</span>
+    part<span class="token punctuation">.</span>Parent <span class="token operator">=</span> workspace
+
+    <span class="token keyword">local</span> entityId <span class="token operator">=</span> grid<span class="token punctuation">:</span><span class="token function">InsertRect</span><span class="token punctuation">(</span><span class="token function">V3ToV2</span><span class="token punctuation">(</span>part<span class="token punctuation">.</span>Position<span class="token punctuation">)</span><span class="token punctuation">,</span> <span class="token function">V3ToV2</span><span class="token punctuation">(</span>part<span class="token punctuation">.</span>Size<span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+    <span class="token comment">-- Some potential ways you could identify the connection between the part and the entityId:</span>
+    IdToPart<span class="token punctuation">[</span>entityId<span class="token punctuation">]</span> <span class="token operator">=</span> part <span class="token comment">-- A: store the part in a table for later reference</span>
+    part<span class="token punctuation">:</span><span class="token function">SetAttribute</span><span class="token punctuation">(</span><span class="token string">"EntityId"</span><span class="token punctuation">,</span> entityId<span class="token punctuation">)</span> <span class="token comment">-- B: store the entity ID in the part's attribute for lookup</span>
+
+    <span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Inserted Rect Entity ID:"</span><span class="token punctuation">,</span> entityId<span class="token punctuation">)</span>
+<span class="token keyword">end</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="InsertCircle"><code style="text-decoration:none">InsertCircle</code><a href="#InsertCircle" class="hash-link" aria-label="Direct link to InsertCircle" title="Direct link to InsertCircle">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/loosetightdoublegrid/src/init.luau#L328"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>LooseTightDoubleGrid<!-- -->:</code><code class="green_DgR4">InsertCircle</code><code>(</code><div class="inset_uKQm"><div><code>position<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Vector2" target="_blank" rel="noopener noreferrer">Vector2<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>,</code></div><div><code>radius<!-- -->: </code><code class="blue_P4bS">number</code></div></div><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/LooseTightDoubleGrid#EntityId">EntityId</a></code></div><div>
+<p>Inserts a circular entity into the grid.</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> entityId <span class="token operator">=</span> grid<span class="token punctuation">:</span><span class="token function">InsertCircle</span><span class="token punctuation">(</span>Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">5</span><span class="token punctuation">,</span> <span class="token number">5</span><span class="token punctuation">)</span><span class="token punctuation">,</span> <span class="token number">2</span><span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Inserted Circle Entity ID:"</span><span class="token punctuation">,</span> entityId<span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="InsertPoint"><code style="text-decoration:none">InsertPoint</code><a href="#InsertPoint" class="hash-link" aria-label="Direct link to InsertPoint" title="Direct link to InsertPoint">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/loosetightdoublegrid/src/init.luau#L362"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>LooseTightDoubleGrid<!-- -->:</code><code class="green_DgR4">InsertPoint</code><code>(</code><code>position<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Vector2" target="_blank" rel="noopener noreferrer">Vector2<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/LooseTightDoubleGrid#EntityId">EntityId</a></code></div><div>
+<p>Inserts a point entity into the grid.</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> entityId <span class="token operator">=</span> grid<span class="token punctuation">:</span><span class="token function">InsertPoint</span><span class="token punctuation">(</span>Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">10</span><span class="token punctuation">,</span> <span class="token number">10</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Inserted Point Entity ID:"</span><span class="token punctuation">,</span> entityId<span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="UpdateRect"><code style="text-decoration:none">UpdateRect</code><a href="#UpdateRect" class="hash-link" aria-label="Direct link to UpdateRect" title="Direct link to UpdateRect">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/loosetightdoublegrid/src/init.luau#L426"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>LooseTightDoubleGrid<!-- -->:</code><code class="green_DgR4">UpdateRect</code><code>(</code><div class="inset_uKQm"><div><code>entityId<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/LooseTightDoubleGrid#EntityId">EntityId</a></code><code>,</code></div><div><code>newPosition<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Vector2" target="_blank" rel="noopener noreferrer">Vector2<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>,</code></div><div><code>newSize<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Vector2" target="_blank" rel="noopener noreferrer">Vector2<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code></div></div><code>) → </code><code>(</code><code>)</code></div><div>
+<p>Updates the position and size of a rectangular entity.</p>
+<pre class="language-lua"><code class="language-lua">grid<span class="token punctuation">:</span><span class="token function">UpdateRect</span><span class="token punctuation">(</span>entityId<span class="token punctuation">,</span> Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">12</span><span class="token punctuation">,</span> <span class="token number">12</span><span class="token punctuation">)</span><span class="token punctuation">,</span> Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">5</span><span class="token punctuation">,</span> <span class="token number">7</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Updated Rect Entity ID:"</span><span class="token punctuation">,</span> entityId<span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="UpdateCircle"><code style="text-decoration:none">UpdateCircle</code><a href="#UpdateCircle" class="hash-link" aria-label="Direct link to UpdateCircle" title="Direct link to UpdateCircle">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/loosetightdoublegrid/src/init.luau#L453"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>LooseTightDoubleGrid<!-- -->:</code><code class="green_DgR4">UpdateCircle</code><code>(</code><div class="inset_uKQm"><div><code>entityId<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/LooseTightDoubleGrid#EntityId">EntityId</a></code><code>,</code></div><div><code>newPosition<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Vector2" target="_blank" rel="noopener noreferrer">Vector2<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>,</code></div><div><code>newRadius<!-- -->: </code><code class="blue_P4bS">number</code></div></div><code>) → </code><code>(</code><code>)</code></div><div>
+<p>Updates the position and radius of a circular entity.</p>
+<pre class="language-lua"><code class="language-lua">grid<span class="token punctuation">:</span><span class="token function">UpdateCircle</span><span class="token punctuation">(</span>entityId<span class="token punctuation">,</span> Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">8</span><span class="token punctuation">,</span> <span class="token number">8</span><span class="token punctuation">)</span><span class="token punctuation">,</span> <span class="token number">3</span><span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Updated Circle Entity ID:"</span><span class="token punctuation">,</span> entityId<span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="UpdatePoint"><code style="text-decoration:none">UpdatePoint</code><a href="#UpdatePoint" class="hash-link" aria-label="Direct link to UpdatePoint" title="Direct link to UpdatePoint">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/loosetightdoublegrid/src/init.luau#L478"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>LooseTightDoubleGrid<!-- -->:</code><code class="green_DgR4">UpdatePoint</code><code>(</code><div class="inset_uKQm"><div><code>entityId<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/LooseTightDoubleGrid#EntityId">EntityId</a></code><code>,</code></div><div><code>newPosition<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Vector2" target="_blank" rel="noopener noreferrer">Vector2<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code></div></div><code>) → </code><code>(</code><code>)</code></div><div>
+<p>Updates the position of a point entity.</p>
+<pre class="language-lua"><code class="language-lua">grid<span class="token punctuation">:</span><span class="token function">UpdatePoint</span><span class="token punctuation">(</span>entityId<span class="token punctuation">,</span> Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">15</span><span class="token punctuation">,</span> <span class="token number">15</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Updated Point Entity ID:"</span><span class="token punctuation">,</span> entityId<span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Remove"><code style="text-decoration:none">Remove</code><a href="#Remove" class="hash-link" aria-label="Direct link to Remove" title="Direct link to Remove">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/loosetightdoublegrid/src/init.luau#L506"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>LooseTightDoubleGrid<!-- -->:</code><code class="green_DgR4">Remove</code><code>(</code><code>entityId<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/LooseTightDoubleGrid#EntityId">EntityId</a></code><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
+<p>
+  Removes an entity from the grid.
+  Return true if the entity was found and removed.
+  Return false if the entity was not found.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> entityId <span class="token operator">=</span> grid<span class="token punctuation">:</span><span class="token function">InsertRect</span><span class="token punctuation">(</span>Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">10</span><span class="token punctuation">,</span> <span class="token number">10</span><span class="token punctuation">)</span><span class="token punctuation">,</span> Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">5</span><span class="token punctuation">,</span> <span class="token number">5</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token keyword">local</span> didRemove <span class="token operator">=</span> grid<span class="token punctuation">:</span><span class="token function">Remove</span><span class="token punctuation">(</span>entityId<span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Has"><code style="text-decoration:none">Has</code><a href="#Has" class="hash-link" aria-label="Direct link to Has" title="Direct link to Has">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/loosetightdoublegrid/src/init.luau#L528"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>LooseTightDoubleGrid<!-- -->:</code><code class="green_DgR4">Has</code><code>(</code><code>entityId<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/LooseTightDoubleGrid#EntityId">EntityId</a></code><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
+<p>Checks if an entity exists in the grid.</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> exists <span class="token operator">=</span> grid<span class="token punctuation">:</span><span class="token function">Has</span><span class="token punctuation">(</span>entityId<span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Entity exists:"</span><span class="token punctuation">,</span> exists<span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetEntitySize"><code style="text-decoration:none">GetEntitySize</code><a href="#GetEntitySize" class="hash-link" aria-label="Direct link to GetEntitySize" title="Direct link to GetEntitySize">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/loosetightdoublegrid/src/init.luau#L542"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>LooseTightDoubleGrid<!-- -->:</code><code class="green_DgR4">GetEntitySize</code><code>(</code><code>id<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/LooseTightDoubleGrid#EntityId">EntityId</a></code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Vector2" target="_blank" rel="noopener noreferrer">Vector2<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code></div><div>
+<p>
+  Returns the size of an entity.
+  Errors if no entity with the id is in the grid.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> size <span class="token operator">=</span> grid<span class="token punctuation">:</span><span class="token function">GetEntitySize</span><span class="token punctuation">(</span>entityId<span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Entity Size:"</span><span class="token punctuation">,</span> size<span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetEntityPosition"><code style="text-decoration:none">GetEntityPosition</code><a href="#GetEntityPosition" class="hash-link" aria-label="Direct link to GetEntityPosition" title="Direct link to GetEntityPosition">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/loosetightdoublegrid/src/init.luau#L563"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>LooseTightDoubleGrid<!-- -->:</code><code class="green_DgR4">GetEntityPosition</code><code>(</code><code>id<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/LooseTightDoubleGrid#EntityId">EntityId</a></code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Vector2" target="_blank" rel="noopener noreferrer">Vector2<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code></div><div>
+<p>
+  Returns the position of an entity.
+  Errors if no entity with the id is in the grid..
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> position <span class="token operator">=</span> grid<span class="token punctuation">:</span><span class="token function">GetEntityPosition</span><span class="token punctuation">(</span>entityId<span class="token punctuation">)</span>
+print
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetEntityPositionAndSize"><code style="text-decoration:none">GetEntityPositionAndSize</code><a href="#GetEntityPositionAndSize" class="hash-link" aria-label="Direct link to GetEntityPositionAndSize" title="Direct link to GetEntityPositionAndSize">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/loosetightdoublegrid/src/init.luau#L586"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>LooseTightDoubleGrid<!-- -->:</code><code class="green_DgR4">GetEntityPositionAndSize</code><code>(</code><code>id<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/LooseTightDoubleGrid#EntityId">EntityId</a></code><code>) → </code><code>(</code><div class="inset_uKQm"><div><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Vector2" target="_blank" rel="noopener noreferrer">Vector2<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>,</code></div><div><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Vector2" target="_blank" rel="noopener noreferrer">Vector2<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code></div></div><code>)</code></div><div>
+<p>
+  Gets the position and size of an entity.
+  Faster than calling <code>GetEntityPosition</code> and <code>GetEntitySize</code> separately.
+  Errors if no entity with the id is in the grid.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> position<span class="token punctuation">,</span> size <span class="token operator">=</span> grid<span class="token punctuation">:</span><span class="token function">GetEntityPositionAndSize</span><span class="token punctuation">(</span>entityId<span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Entity Position:"</span><span class="token punctuation">,</span> position<span class="token punctuation">,</span> <span class="token string">"Size:"</span><span class="token punctuation">,</span> size<span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="QueryRect"><code style="text-decoration:none">QueryRect</code><a href="#QueryRect" class="hash-link" aria-label="Direct link to QueryRect" title="Direct link to QueryRect">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/loosetightdoublegrid/src/init.luau#L723"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>LooseTightDoubleGrid<!-- -->:</code><code class="green_DgR4">QueryRect</code><code>(</code><div class="inset_uKQm"><div><code>pos<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Vector2" target="_blank" rel="noopener noreferrer">Vector2<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>,</code></div><div><code>size<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Vector2" target="_blank" rel="noopener noreferrer">Vector2<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code></div></div><code>) → </code><code class="purple_ieR2">{</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/LooseTightDoubleGrid#EntityId">EntityId</a></code><code class="purple_ieR2">}</code></div><div>
+<p>Queries entities within a rectangular region.</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> entityIds <span class="token operator">=</span> grid<span class="token punctuation">:</span><span class="token function">QueryRect</span><span class="token punctuation">(</span>Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">10</span><span class="token punctuation">,</span> <span class="token number">10</span><span class="token punctuation">)</span><span class="token punctuation">,</span> Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">6</span><span class="token punctuation">,</span> <span class="token number">6</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Entities in Rect:"</span><span class="token punctuation">,</span> entityIds<span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="QueryCircle"><code style="text-decoration:none">QueryCircle</code><a href="#QueryCircle" class="hash-link" aria-label="Direct link to QueryCircle" title="Direct link to QueryCircle">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/loosetightdoublegrid/src/init.luau#L743"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>LooseTightDoubleGrid<!-- -->:</code><code class="green_DgR4">QueryCircle</code><code>(</code><div class="inset_uKQm"><div><code>pos<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Vector2" target="_blank" rel="noopener noreferrer">Vector2<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>,</code></div><div><code>radius<!-- -->: </code><code class="blue_P4bS">number</code></div></div><code>) → </code><code class="purple_ieR2">{</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/LooseTightDoubleGrid#EntityId">EntityId</a></code><code class="purple_ieR2">}</code></div><div>
+<p>Queries entities within a circular region.</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> entities <span class="token operator">=</span> grid<span class="token punctuation">:</span><span class="token function">QueryCircle</span><span class="token punctuation">(</span>Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">15</span><span class="token punctuation">,</span> <span class="token number">15</span><span class="token punctuation">)</span><span class="token punctuation">,</span> <span class="token number">5</span><span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Entities in Circle:"</span><span class="token punctuation">,</span> entities<span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="QueryPoint"><code style="text-decoration:none">QueryPoint</code><a href="#QueryPoint" class="hash-link" aria-label="Direct link to QueryPoint" title="Direct link to QueryPoint">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/loosetightdoublegrid/src/init.luau#L758"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>LooseTightDoubleGrid<!-- -->:</code><code class="green_DgR4">QueryPoint</code><code>(</code><code>pos<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Vector2" target="_blank" rel="noopener noreferrer">Vector2<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>) → </code><code class="purple_ieR2">{</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/LooseTightDoubleGrid#EntityId">EntityId</a></code><code class="purple_ieR2">}</code></div><div>
+<p>Queries entities at a specific point.</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> entitiesIds <span class="token operator">=</span> grid<span class="token punctuation">:</span><span class="token function">QueryPoint</span><span class="token punctuation">(</span>Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">20</span><span class="token punctuation">,</span> <span class="token number">20</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Entities at Point:"</span><span class="token punctuation">,</span> entitiesIds<span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="QueryClosestToPoint"><code style="text-decoration:none">QueryClosestToPoint</code><a href="#QueryClosestToPoint" class="hash-link" aria-label="Direct link to QueryClosestToPoint" title="Direct link to QueryClosestToPoint">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/loosetightdoublegrid/src/init.luau#L800"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>LooseTightDoubleGrid<!-- -->:</code><code class="green_DgR4">QueryClosestToPoint</code><code>(</code><code>point<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Vector2" target="_blank" rel="noopener noreferrer">Vector2<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/LooseTightDoubleGrid#EntityId">EntityId?</a></code></div><div>
+<p>Queries the closest entity to a given point. Closeness is determined by the distance to the edge of the entity's shape.</p>
+<p>
+  This method searches for the entity that is closest to the specified point in the grid.
+  It considers all shapes (circles, rectangles, and points) and uses a two-tier comparison:
+</p>
+<ul>
+  <li><strong>Primary Metric</strong>: Distance to the edge of the shape.</li>
+  <li><strong>Secondary Metric</strong>: Distance to the center of the shape (used to break ties when the point is inside multiple shapes).</li>
+</ul>
+<p>
+  Under this two-tier metric, the method will return an entity if the point is inside the entity, even if another
+  entities's center is technically closer to the point. <code>Point</code> entities are treated as circles with a radius of 0.
+</p>
+<p>The method uses an expanding search algorithm, starting from the tight cell containing the point and gradually expanding outward until the closest entity is found.</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- Insert some entities</span>
+<span class="token keyword">local</span> rectId <span class="token operator">=</span> grid<span class="token punctuation">:</span><span class="token function">InsertRect</span><span class="token punctuation">(</span>Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">10</span><span class="token punctuation">,</span> <span class="token number">10</span><span class="token punctuation">)</span><span class="token punctuation">,</span> Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">5</span><span class="token punctuation">,</span> <span class="token number">5</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+<span class="token keyword">local</span> circleId <span class="token operator">=</span> grid<span class="token punctuation">:</span><span class="token function">InsertCircle</span><span class="token punctuation">(</span>Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">15</span><span class="token punctuation">,</span> <span class="token number">15</span><span class="token punctuation">)</span><span class="token punctuation">,</span> <span class="token number">3</span><span class="token punctuation">)</span>
+<span class="token keyword">local</span> pointId <span class="token operator">=</span> grid<span class="token punctuation">:</span><span class="token function">InsertPoint</span><span class="token punctuation">(</span>Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">20</span><span class="token punctuation">,</span> <span class="token number">20</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token comment">-- Query the closest entity to a point</span>
+<span class="token keyword">local</span> closestEntityId <span class="token operator">=</span> grid<span class="token punctuation">:</span><span class="token function">QueryClosestToPoint</span><span class="token punctuation">(</span>Vector2<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token number">12</span><span class="token punctuation">,</span> <span class="token number">12</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Closest Entity ID:"</span><span class="token punctuation">,</span> closestEntityId<span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Draw"><code style="text-decoration:none">Draw</code><a href="#Draw" class="hash-link" aria-label="Direct link to Draw" title="Direct link to Draw">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/loosetightdoublegrid/src/init.luau#L1050"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>LooseTightDoubleGrid<!-- -->:</code><code class="green_DgR4">Draw</code><code>(</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Instance" target="_blank" rel="noopener noreferrer">Instance<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code></div><div>
+<p>
+  Renders the grid and its entities for debugging purposes.
+  Subsequent calls will destroy the previous render model.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> renderModel <span class="token operator">=</span> grid<span class="token punctuation">:</span><span class="token function">Draw</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Render Model:"</span><span class="token punctuation">,</span> renderModel<span class="token punctuation">)</span>
+</code></pre>
+</div></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
+    &quot;functions&quot;: [
+        {
+            &quot;name&quot;: &quot;new&quot;,
+            &quot;desc&quot;: &quot;Creates a new instance of LooseTightDoubleGrid with the given configuration.\n\n- **Position** is the center origin of the grid. *(Default: `Vector2.new(0, 0)`)*\n- **Size** is the number of cells in the x and y directions. *(Default: `Vector2.new(32, 32)`)*\n- **CellSize** is the size of each cell in studs. Adjust this number based on the average sizes of your provided entities in order to optimize performance. *(Default: `4`)*\n\n```lua\nlocal grid = LooseTightDoubleGrid.new({\n    Position = Vector2.new(0, 0),\n    Size = Vector2.new(32, 32),\n    CellSize = 4\n})\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;config&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{\r\n    Position: Vector2?,\r\n    Size: Vector2?,\r\n    CellSize: number?\r\n}&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;LTDG\r\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 169,
+                &quot;path&quot;: &quot;lib/loosetightdoublegrid/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetRow&quot;,
+            &quot;desc&quot;: &quot;Gets the row index from a given world y-coordinate.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;y&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;number&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;private&quot;: true,
+            &quot;source&quot;: {
+                &quot;line&quot;: 229,
+                &quot;path&quot;: &quot;lib/loosetightdoublegrid/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetCol&quot;,
+            &quot;desc&quot;: &quot;Gets the column index from a given world x-coordinate.\n\n```lua\nlocal col = grid:GetCol(15)\nprint(\&quot;Column:\&quot;, col)\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;x&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;number&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;private&quot;: true,
+            &quot;source&quot;: {
+                &quot;line&quot;: 249,
+                &quot;path&quot;: &quot;lib/loosetightdoublegrid/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;InsertRect&quot;,
+            &quot;desc&quot;: &quot;Inserts a rectangular entity into the grid.\n\n```lua\n-- Example Code for generating some parts and registering them in the grid\nlocal function V3ToV2(v3: Vector3): Vector2\n    return Vector2.new(v3.X, v3.Z)\nend\n\nlocal IdToPart = {}\nfor i = 1, 10 do\n    local part = Instance.new(\&quot;Part\&quot;)\n    part.Size = Vector3.new(math.random(1, 5), 1, math.random(1, 5))\n    part.Position = Vector3.new(math.random(-20, 20), 1, math.random(-20, 20))\n    part.Anchored = true\n    part.Parent = workspace\n\n    local entityId = grid:InsertRect(V3ToV2(part.Position), V3ToV2(part.Size))\n\n    -- Some potential ways you could identify the connection between the part and the entityId:\n    IdToPart[entityId] = part -- A: store the part in a table for later reference\n    part:SetAttribute(\&quot;EntityId\&quot;, entityId) -- B: store the entity ID in the part&#x27;s attribute for lookup\n\n    print(\&quot;Inserted Rect Entity ID:\&quot;, entityId)\nend\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;position&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Vector2&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;size&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Vector2&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;EntityId\r\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 291,
+                &quot;path&quot;: &quot;lib/loosetightdoublegrid/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;InsertCircle&quot;,
+            &quot;desc&quot;: &quot;Inserts a circular entity into the grid.\n\n```lua\nlocal entityId = grid:InsertCircle(Vector2.new(5, 5), 2)\nprint(\&quot;Inserted Circle Entity ID:\&quot;, entityId)\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;position&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Vector2&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;radius&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;number&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;EntityId\r\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 328,
+                &quot;path&quot;: &quot;lib/loosetightdoublegrid/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;InsertPoint&quot;,
+            &quot;desc&quot;: &quot;Inserts a point entity into the grid.\n\n```lua\nlocal entityId = grid:InsertPoint(Vector2.new(10, 10))\nprint(\&quot;Inserted Point Entity ID:\&quot;, entityId)\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;position&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Vector2&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;EntityId\r\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 362,
+                &quot;path&quot;: &quot;lib/loosetightdoublegrid/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;_UpdateEntity&quot;,
+            &quot;desc&quot;: &quot;Updates an entity&#x27;s position and bounding box in the grid.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;entityId&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;EntityId&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;newPos&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Vector2&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;L&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;number&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;B&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;number&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;R&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;number&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;T&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;number&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;private&quot;: true,
+            &quot;source&quot;: {
+                &quot;line&quot;: 393,
+                &quot;path&quot;: &quot;lib/loosetightdoublegrid/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;UpdateRect&quot;,
+            &quot;desc&quot;: &quot;Updates the position and size of a rectangular entity.\n\n```lua\ngrid:UpdateRect(entityId, Vector2.new(12, 12), Vector2.new(5, 7))\nprint(\&quot;Updated Rect Entity ID:\&quot;, entityId)\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;entityId&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;EntityId&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;newPosition&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Vector2&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;newSize&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Vector2&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 426,
+                &quot;path&quot;: &quot;lib/loosetightdoublegrid/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;UpdateCircle&quot;,
+            &quot;desc&quot;: &quot;Updates the position and radius of a circular entity.\n\n```lua\ngrid:UpdateCircle(entityId, Vector2.new(8, 8), 3)\nprint(\&quot;Updated Circle Entity ID:\&quot;, entityId)\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;entityId&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;EntityId&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;newPosition&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Vector2&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;newRadius&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;number&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 453,
+                &quot;path&quot;: &quot;lib/loosetightdoublegrid/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;UpdatePoint&quot;,
+            &quot;desc&quot;: &quot;Updates the position of a point entity.\n\n```lua\ngrid:UpdatePoint(entityId, Vector2.new(15, 15))\nprint(\&quot;Updated Point Entity ID:\&quot;, entityId)\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;entityId&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;EntityId&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;newPosition&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Vector2&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 478,
+                &quot;path&quot;: &quot;lib/loosetightdoublegrid/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;Remove&quot;,
+            &quot;desc&quot;: &quot;Removes an entity from the grid.\nReturn true if the entity was found and removed.\nReturn false if the entity was not found.\n\n```lua\nlocal entityId = grid:InsertRect(Vector2.new(10, 10), Vector2.new(5, 5))\n\nlocal didRemove = grid:Remove(entityId)\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;entityId&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;EntityId&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;boolean\r\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 506,
+                &quot;path&quot;: &quot;lib/loosetightdoublegrid/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;Has&quot;,
+            &quot;desc&quot;: &quot;Checks if an entity exists in the grid.\n\n```lua\nlocal exists = grid:Has(entityId)\nprint(\&quot;Entity exists:\&quot;, exists)\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;entityId&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;EntityId&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;boolean\r\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 528,
+                &quot;path&quot;: &quot;lib/loosetightdoublegrid/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetEntitySize&quot;,
+            &quot;desc&quot;: &quot;Returns the size of an entity.\nErrors if no entity with the id is in the grid.\n\n```lua\nlocal size = grid:GetEntitySize(entityId)\nprint(\&quot;Entity Size:\&quot;, size)\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;id&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;EntityId&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Vector2\r\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 542,
+                &quot;path&quot;: &quot;lib/loosetightdoublegrid/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetEntityPosition&quot;,
+            &quot;desc&quot;: &quot;Returns the position of an entity.\nErrors if no entity with the id is in the grid..\n\n```lua\nlocal position = grid:GetEntityPosition(entityId)\nprint&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;id&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;EntityId&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Vector2\r\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 563,
+                &quot;path&quot;: &quot;lib/loosetightdoublegrid/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetEntityPositionAndSize&quot;,
+            &quot;desc&quot;: &quot;Gets the position and size of an entity.\nFaster than calling `GetEntityPosition` and `GetEntitySize` separately.\nErrors if no entity with the id is in the grid.\n\n```lua\nlocal position, size = grid:GetEntityPositionAndSize(entityId)\nprint(\&quot;Entity Position:\&quot;, position, \&quot;Size:\&quot;, size)\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;id&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;EntityId&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Vector2&quot;
+                },
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Vector2&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 586,
+                &quot;path&quot;: &quot;lib/loosetightdoublegrid/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;_QueryRegion&quot;,
+            &quot;desc&quot;: &quot;Queries entities within a specified rectangular region bounds.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;qL&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;number&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;qB&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;number&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;qR&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;number&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;qT&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;number&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;queryShapeType&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;ShapeType?&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{ EntityId }\r\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;private&quot;: true,
+            &quot;source&quot;: {
+                &quot;line&quot;: 608,
+                &quot;path&quot;: &quot;lib/loosetightdoublegrid/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;QueryRect&quot;,
+            &quot;desc&quot;: &quot;Queries entities within a rectangular region.\n\n```lua\nlocal entityIds = grid:QueryRect(Vector2.new(10, 10), Vector2.new(6, 6))\nprint(\&quot;Entities in Rect:\&quot;, entityIds)\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;pos&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Vector2&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;size&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Vector2&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{ EntityId }\r\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 723,
+                &quot;path&quot;: &quot;lib/loosetightdoublegrid/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;QueryCircle&quot;,
+            &quot;desc&quot;: &quot;Queries entities within a circular region.\n\n```lua\nlocal entities = grid:QueryCircle(Vector2.new(15, 15), 5)\nprint(\&quot;Entities in Circle:\&quot;, entities)\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;pos&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Vector2&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;radius&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;number&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{ EntityId }\r\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 743,
+                &quot;path&quot;: &quot;lib/loosetightdoublegrid/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;QueryPoint&quot;,
+            &quot;desc&quot;: &quot;Queries entities at a specific point.\n\n```lua\nlocal entitiesIds = grid:QueryPoint(Vector2.new(20, 20))\nprint(\&quot;Entities at Point:\&quot;, entitiesIds)\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;pos&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Vector2&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{ EntityId }\r\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 758,
+                &quot;path&quot;: &quot;lib/loosetightdoublegrid/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;QueryClosestToPoint&quot;,
+            &quot;desc&quot;: &quot;Queries the closest entity to a given point. Closeness is determined by the distance to the edge of the entity&#x27;s shape.\n\nThis method searches for the entity that is closest to the specified point in the grid. \nIt considers all shapes (circles, rectangles, and points) and uses a two-tier comparison:\n- **Primary Metric**: Distance to the edge of the shape.\n- **Secondary Metric**: Distance to the center of the shape (used to break ties when the point is inside multiple shapes).\n\nUnder this two-tier metric, the method will return an entity if the point is inside the entity, even if another\nentities&#x27;s center is technically closer to the point. `Point` entities are treated as circles with a radius of 0.\n\nThe method uses an expanding search algorithm, starting from the tight cell containing the point and gradually expanding outward until the closest entity is found.\n\n```lua\n-- Insert some entities\nlocal rectId = grid:InsertRect(Vector2.new(10, 10), Vector2.new(5, 5))\nlocal circleId = grid:InsertCircle(Vector2.new(15, 15), 3)\nlocal pointId = grid:InsertPoint(Vector2.new(20, 20))\n\n-- Query the closest entity to a point\nlocal closestEntityId = grid:QueryClosestToPoint(Vector2.new(12, 12))\nprint(\&quot;Closest Entity ID:\&quot;, closestEntityId)\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;point&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Vector2&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;EntityId?\r\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 800,
+                &quot;path&quot;: &quot;lib/loosetightdoublegrid/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;QueryRotatedRect&quot;,
+            &quot;desc&quot;: &quot;Gets all the entities that overlap with a rotated rectangular region.\n\n```lua\ngrid:QueryRotatedRect(Vector2.new(30, 30), Vector2.new(10, 5), 45)\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;pos&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Vector2&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;size&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Vector2&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;angle&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;number&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{ EntityId }\r\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;errors&quot;: [
+                {
+                    &quot;lua_type&quot;: &quot;Not implemented.&quot;,
+                    &quot;desc&quot;: &quot;&quot;
+                }
+            ],
+            &quot;private&quot;: true,
+            &quot;unreleased&quot;: true,
+            &quot;source&quot;: {
+                &quot;line&quot;: 1015,
+                &quot;path&quot;: &quot;lib/loosetightdoublegrid/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;QueryPolygon&quot;,
+            &quot;desc&quot;: &quot;Queries entities within a polygonal region. The given polygon must be an array of Vector2 points\nthat define the vertices of the polygon in **counter clockwise order**.\n\n```lua\ngrid:QueryPolygon({Vector2.new(0, 0), Vector2.new(0, 10), Vector2.new(5, 5)})\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;polygon&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{Vector2}&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{ EntityId }\r\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;errors&quot;: [
+                {
+                    &quot;lua_type&quot;: &quot;Not implemented.&quot;,
+                    &quot;desc&quot;: &quot;&quot;
+                }
+            ],
+            &quot;private&quot;: true,
+            &quot;unreleased&quot;: true,
+            &quot;source&quot;: {
+                &quot;line&quot;: 1032,
+                &quot;path&quot;: &quot;lib/loosetightdoublegrid/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;Draw&quot;,
+            &quot;desc&quot;: &quot;Renders the grid and its entities for debugging purposes.\nSubsequent calls will destroy the previous render model.\n\n```lua\nlocal renderModel = grid:Draw()\nprint(\&quot;Render Model:\&quot;, renderModel)\n```&quot;,
+            &quot;params&quot;: [],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Instance\r\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 1050,
+                &quot;path&quot;: &quot;lib/loosetightdoublegrid/src/init.luau&quot;
+            }
+        }
+    ],
+    &quot;properties&quot;: [],
+    &quot;types&quot;: [
+        {
+            &quot;name&quot;: &quot;EntityId&quot;,
+            &quot;desc&quot;: &quot;An identifier for an entity in the grid. This is a unique number assigned to each entity upon insertion into the grid.\nIds are not unique between different grids, so they should be used only within the context of a single grid instance.&quot;,
+            &quot;lua_type&quot;: &quot;number&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 80,
+                &quot;path&quot;: &quot;lib/loosetightdoublegrid/src/init.luau&quot;
+            }
+        }
+    ],
+    &quot;name&quot;: &quot;LooseTightDoubleGrid&quot;,
+    &quot;desc&quot;: &quot;The `LooseTightDoubleGrid` is a spatial partitioning structure designed to efficiently manage and query entities in a 2D space. \nIt is particularly useful for scenarios where entities with highly dynamic sizes need to be inserted, updated, removed, or queried based on their spatial \nrelationships, such as in games, simulations, or physics engines.\n\n## Features\n- **Insertion**: Supports inserting circular, rectangular, and point entities into the grid.\n- **Updates**: Allows updating the position and size of entities.\n- **Removal**: Entities can be removed from the grid.\n- **Queries**: Supports querying entities within rectangular, circular, and point regions. \n  Additional query methods for rotated rectangles and polygons are planned but not yet implemented.\n- **Debugging**: Includes a `Draw` method to visualize the grid and its entities in the 3D workspace.\n\n## Scenarios\nThe `LooseTightDoubleGrid` is ideal for:\n- **Collision Detection**: Quickly finding potential collisions between entities in a 2D space.\n- **Spatial Queries**: Efficiently retrieving entities within a specific region.\n- **Dynamic Environments**: Managing entities that frequently move or change size.\n\n## Example Usage\n```lua\nlocal grid = LooseTightDoubleGrid.new({\n    Position = Vector2.new(0, 0),\n    Size = Vector2.new(32, 32),\n    CellSize = 4\n})\n\n-- Insert a rectangle\nlocal rectId = grid:InsertRect(Vector2.new(10, 10), Vector2.new(5, 5))\n\n-- Query entities in a region\nlocal entities = grid:QueryRect(Vector2.new(10, 10), Vector2.new(6, 6))\nprint(\&quot;Entities in region:\&quot;, entities)\n\n-- Update the rectangle&#x27;s position\ngrid:UpdateRect(rectId, Vector2.new(15, 15), Vector2.new(5, 5))\n\n-- Remove the rectangle\nlocal success = grid:Remove(rectId)\nprint(\&quot;Did find and remove?\&quot;, success)\n```\n\n:::info How it works - (Info for Nerds)\nInternally the grid is divided into two layers:\n- **Tight Grid**: A fixed grid where each cell contains references to overlapping loose cells.\n- **Loose Grid**: A grid where each cell has a larger boundary than the corresponding tight cell, allowing entities to span multiple cells.\n\nEntities are stored in the loose grid, and their spatial relationships are managed using axis-aligned bounding boxes (AABBs). \nThe tight grid helps narrow down the search space during queries, improving performance.\n:::\n:::tip Vector2\nAlthough the documentation specifies `Vector2` for positions and sizes,\nthe system will take any table with `X` and `Y` properties.\n:::&quot;,
+    &quot;source&quot;: {
+        &quot;line&quot;: 59,
+        &quot;path&quot;: &quot;lib/loosetightdoublegrid/src/init.luau&quot;
+    }
+}</pre></details></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#types" class="table-of-contents__link toc-highlight">Types</a><ul><li><a href="#EntityId" class="table-of-contents__link toc-highlight">EntityId</a></li></ul></li><li><a href="#properties" class="table-of-contents__link toc-highlight">Properties</a></li><li><a href="#functions" class="table-of-contents__link toc-highlight">Functions</a><ul><li><a href="#Draw" class="table-of-contents__link toc-highlight">:Draw</a></li><li><a href="#GetEntityPosition" class="table-of-contents__link toc-highlight">:GetEntityPosition</a></li><li><a href="#GetEntityPositionAndSize" class="table-of-contents__link toc-highlight">:GetEntityPositionAndSize</a></li><li><a href="#GetEntitySize" class="table-of-contents__link toc-highlight">:GetEntitySize</a></li><li><a href="#Has" class="table-of-contents__link toc-highlight">:Has</a></li><li><a href="#InsertCircle" class="table-of-contents__link toc-highlight">:InsertCircle</a></li><li><a href="#InsertPoint" class="table-of-contents__link toc-highlight">:InsertPoint</a></li><li><a href="#InsertRect" class="table-of-contents__link toc-highlight">:InsertRect</a></li><li><a href="#QueryCircle" class="table-of-contents__link toc-highlight">:QueryCircle</a></li><li><a href="#QueryClosestToPoint" class="table-of-contents__link toc-highlight">:QueryClosestToPoint</a></li><li><a href="#QueryPoint" class="table-of-contents__link toc-highlight">:QueryPoint</a></li><li><a href="#QueryRect" class="table-of-contents__link toc-highlight">:QueryRect</a></li><li><a href="#Remove" class="table-of-contents__link toc-highlight">:Remove</a></li><li><a href="#UpdateCircle" class="table-of-contents__link toc-highlight">:UpdateCircle</a></li><li><a href="#UpdatePoint" class="table-of-contents__link toc-highlight">:UpdatePoint</a></li><li><a href="#UpdateRect" class="table-of-contents__link toc-highlight">:UpdateRect</a></li><li><a href="#new" class="table-of-contents__link toc-highlight">.new</a></li></ul></li></ul></div></div></div></div></main></div></div><footer class="footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2025 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
+<script src="/ModulesOnRails/assets/js/runtime~main.9ee1009c.js"></script>
+<script src="/ModulesOnRails/assets/js/main.fed60581.js"></script>
+</body>
+</html>
