@@ -62,12 +62,6 @@ local LooseCell = require(script.LooseCell)
 local TightCell = require(script.TightCell)
 
 --// Types //--
--- Enum for shape types 
-type ShapeType = "c" | "r" | "p"
-local SHAPE_TYPE_CIRCLE = "c"
-local SHAPE_TYPE_RECT = "r"
-local SHAPE_TYPE_POINT = "p"
-
 type LooseCell = LooseCell.LooseCell
 export type AABB = LooseCell.AABB -- Stored in the order of {L,B,R,T} (Liberty!), can also be anvisioned as a ccw rotation of the sides.
 export type EntityId = LooseCell.EntityId
@@ -78,9 +72,63 @@ export type EntityId = LooseCell.EntityId
     Ids are not unique between different grids, so they should be used only within the context of a single grid instance.
 ]=]
 
+--[=[
+    @within LooseTightDoubleGrid
+    @type ShapeType string
+    The type of shape for an entity in the grid.
+    Use the ShapeType enum for comparisions as the raw values are subject to change.
+]=]
+export type ShapeType = "c" | "r" | "p"
+local SHAPE_TYPE_CIRCLE = "c"
+local SHAPE_TYPE_RECT = "r"
+local SHAPE_TYPE_POINT = "p"
+
+--[=[
+    @within LooseTightDoubleGrid
+    @interface FilterParams
+    .FilterList { EntityId }?
+    .CustomFilter ((EntityId) -> boolean)?
+    .FilterType Enum.RaycastFilterType?
+
+    Controls the filtering of entities during queries.
+    You can use either a list of entity IDs or a custom filter function to specify which entities to include or exclude from the query results.
+
+    The `FilterType` determines whether the filter is inclusive or exclusive. Uses RaycastFilterType for consistency with Roblox's raycasting system.
+]=]
+export type FilterParams = {
+    FilterList: { EntityId },
+    CustomFilter: ((EntityId) -> boolean)?,
+    FilterType: Enum.RaycastFilterType?
+}
+
 --------------------------------------------------------------------------------
     --// Util Functions //--
 --------------------------------------------------------------------------------
+
+local function generateFilter(filterParams: FilterParams?): (boolean, (EntityId) -> boolean)
+    local FILTER_TYPE_INCLUDE = Enum.RaycastFilterType.Include
+
+    local skipFilter = not filterParams or (not filterParams.FilterList and not filterParams.CustomFilter)
+    local filterList = filterParams and filterParams.FilterList
+    local customFilter = filterParams and filterParams.CustomFilter
+    local filterType = filterParams and filterParams.FilterType or FILTER_TYPE_INCLUDE
+
+    local function isFilteredOut(entityId: EntityId): boolean
+        local isFiltered = false
+        if customFilter then
+            isFiltered = customFilter(entityId)
+        elseif filterList then
+            isFiltered = table.find(filterList, entityId) ~= nil
+        end
+        if filterType == FILTER_TYPE_INCLUDE then
+            return not isFiltered -- Include only if the filter is not found
+        else
+            return isFiltered -- Exclude if the filter is found
+        end
+    end
+
+    return skipFilter, isFilteredOut
+end
 
 local function CheckRectRectIntersection(left1, bottom1, right1, top1, left2, bottom2, right2, top2)
     -- Check if the two rectangles overlap
@@ -152,6 +200,38 @@ LTDG.__index = LTDG
 
 --[=[
     @within LooseTightDoubleGrid
+    @method __iter
+    @return id: EntityId
+    Iterates over the entities in the grid.
+    ```lua
+    local grid = LooseTightDoubleGrid.new()
+
+    grid:InsertRect(Vector2.new(10, 10), Vector2.new(5, 5))
+
+    for id in grid do
+        print(grid:GetPosition(id)) -- Prints the position of each entity in the grid
+    end
+    ```
+]=]
+LTDG.__iter = function(self: LTDG)
+    return next, self.ShapeMap
+end
+
+--[=[
+    @within LooseTightDoubleGrid
+    @prop ShapeType {Circle: ShapeType, Rect: ShapeType, Point: ShapeType}
+    - **Circle**: Represents a circular entity.
+    - **Rect**: Represents a rectangular entity.
+    - **Point**: Represents a point entity.
+]=]
+LTDG.ShapeType = {
+    Circle = SHAPE_TYPE_CIRCLE,
+    Rect = SHAPE_TYPE_RECT,
+    Point = SHAPE_TYPE_POINT,
+}
+
+--[=[
+    @within LooseTightDoubleGrid
     Creates a new instance of LooseTightDoubleGrid with the given configuration.
 
     - **Position** is the center origin of the grid. *(Default: `Vector2.new(0, 0)`)*
@@ -219,6 +299,20 @@ function LTDG.new(config: {
     }, LTDG);
 
     return self
+end
+
+--[=[
+    @within LooseTightDoubleGrid
+    Gets an array of all currently registered entity IDs in the grid.
+
+    If you need to iterate over the grid then you should use the `__iter` metamethod instead.
+]=]
+function LTDG:GetEntities(): {EntityId}
+    local entities = {}
+    for id in self.ShapeMap do
+        table.insert(entities, id)
+    end
+    return entities
 end
 
 --[=[
@@ -596,6 +690,20 @@ function LTDG:GetEntityPositionAndSize(id: EntityId): (Vector2, Vector2)
         Vector2.new(aabb[3] - aabb[1], aabb[4] - aabb[2]) :: any
 end
 
+--[=[
+    @within LooseTightDoubleGrid
+    Returns the shape type of an entity.
+    Errors if no entity with the id is in the grid.
+
+    ```lua
+    local shapeType = grid:GetEntityShape(entityId)
+    print("Entity Shape Type:", shapeType)
+    ```
+]=]
+function LTDG:GetEntityShape(id: EntityId): ShapeType
+    return self.ShapeMap[id]
+end
+
 --------------------------------------------------------------------------------
     --// Query Methods //--
 --------------------------------------------------------------------------------
@@ -605,7 +713,7 @@ end
     @private
     Queries entities within a specified rectangular region bounds.
 ]=]
-function LTDG:_QueryRegion(qL: number, qB: number, qR: number, qT: number, queryShapeType: ShapeType?): { EntityId }
+function LTDG:_QueryRegion(qL: number, qB: number, qR: number, qT: number, queryShapeType: ShapeType?, filterParams: FilterParams?): { EntityId }
     debug.profilebegin("LTDG:_QueryRegion")
     queryShapeType = queryShapeType or SHAPE_TYPE_RECT -- Default to rectangle if not specified
     
@@ -630,9 +738,15 @@ function LTDG:_QueryRegion(qL: number, qB: number, qR: number, qT: number, query
     local qCenterY = (qB + qT) * 0.5
     local qRadius = (qR - qL) * 0.5
 
+    local skipFilter, isFilteredOut = generateFilter(filterParams)
+
     local function checkLooseCellAgainstCircle(looseCell: LooseCell)
         debug.profilebegin("Check LooseCell Against Circle")
         for entityId, aabb: AABB in looseCell.AABBs do
+            if not skipFilter and isFilteredOut(entityId) then
+                continue -- skip filtered entities
+            end
+
             local l, b, r, t = aabb[1], aabb[2], aabb[3], aabb[4]
             if CheckRectRectIntersection(l, b, r, t, qL, qB, qR, qT) then
                 if ShapeMap[entityId] == SHAPE_TYPE_CIRCLE then
@@ -659,6 +773,10 @@ function LTDG:_QueryRegion(qL: number, qB: number, qR: number, qT: number, query
     local function checkLooseCellAgainstRect(looseCell: LooseCell)
         debug.profilebegin("Check LooseCell Against Rect")
         for entityId, aabb: AABB in looseCell.AABBs do
+            if not skipFilter and isFilteredOut(entityId) then
+                continue -- skip filtered entities
+            end
+
             local l, b, r, t = aabb[1], aabb[2], aabb[3], aabb[4]
             if CheckRectRectIntersection(l, b, r, t, qL, qB, qR, qT) then
                 if ShapeMap[entityId] == SHAPE_TYPE_CIRCLE then
@@ -720,14 +838,16 @@ end
     print("Entities in Rect:", entityIds)
     ```
 ]=]
-function LTDG:QueryRect(pos: Vector2, size: Vector2): { EntityId }
+function LTDG:QueryRect(pos: Vector2, size: Vector2, filterParams: FilterParams?): { EntityId }
     local halfSizeX = size.X * 0.5
     local halfSizeY = size.Y * 0.5
     return self:_QueryRegion(
         pos.X - halfSizeX, -- L
         pos.Y - halfSizeY, -- B
         pos.X + halfSizeX, -- R
-        pos.Y + halfSizeY  -- T
+        pos.Y + halfSizeY, -- T
+        SHAPE_TYPE_RECT,
+        filterParams
     )
 end
 
@@ -740,10 +860,9 @@ end
     print("Entities in Circle:", entities)
     ```
 ]=]
-function LTDG:QueryCircle(pos: Vector2, radius: number): { EntityId }
+function LTDG:QueryCircle(pos: Vector2, radius: number, filterParams: FilterParams?): { EntityId }
     local qL, qB, qR, qT = pos.X - radius, pos.Y - radius, pos.X + radius, pos.Y + radius
-    local candidates = self:_QueryRegion(qL, qB, qR, qT, SHAPE_TYPE_CIRCLE)
-    return candidates
+    return self:_QueryRegion(qL, qB, qR, qT, SHAPE_TYPE_CIRCLE, filterParams)
 end
 
 --[=[
@@ -755,7 +874,7 @@ end
     print("Entities at Point:", entitiesIds)
     ```
 ]=]
-function LTDG:QueryPoint(pos: Vector2): { EntityId }
+function LTDG:QueryPoint(pos: Vector2, filterParams: FilterParams?): { EntityId }
     debug.profilebegin("LTDG:QueryPoint")
     local cX = self:GetCol(pos.X)
     local cY = self:GetRow(pos.Y)
@@ -763,7 +882,12 @@ function LTDG:QueryPoint(pos: Vector2): { EntityId }
     local looseCell = self.LooseGrid[index]
 
     local intersectingEntities = {}
+    local skipFilter, isFilteredOut = generateFilter(filterParams)
+
     for entityId, aabb: AABB in looseCell.AABBs do
+        if not skipFilter and isFilteredOut(entityId) then
+            continue
+        end
         if pos.X >= aabb[1] and pos.X <= aabb[3] and pos.Y >= aabb[2] and pos.Y <= aabb[4] then
             table.insert(intersectingEntities, entityId)
         end
@@ -797,7 +921,7 @@ end
     print("Closest Entity ID:", closestEntityId)
     ```
 ]=]
-function LTDG:QueryClosestToPoint(point: Vector2): EntityId?
+function LTDG:QueryClosestToPoint(point: Vector2, filterParams: FilterParams?): EntityId?
     debug.profilebegin("LTDG:QueryClosestToPoint")
 
     -- Utility function to calculate the squared distance from a point to a shape
@@ -850,10 +974,16 @@ function LTDG:QueryClosestToPoint(point: Vector2): EntityId?
     local closestDistanceSquared = math.huge
     local closestDistanceToCenter = math.huge
 
+    local skipFilter, isFilteredOut = generateFilter(filterParams)
+
     -- Function to check all entities in a loose cell
     local function checkLooseCell(looseCell: LooseCell)
         local didFind = false
         for entityId, aabb: AABB in looseCell.AABBs do
+            if not skipFilter and isFilteredOut(entityId) then
+                continue -- Skip filtered entities
+            end
+
             didFind = true
             local shapeType = ShapeMap[entityId]
             local distanceSquaredToEdge, distanceSquaredToCenter = calculateDistanceSquaredToShape(aabb, shapeType)
@@ -1006,12 +1136,9 @@ end
     Performs a raycast through the grid, checking for intersections with entities.
     The ray starts at `origin` and travels in the `direction`. The magnitude of
     the direction vector determines the length of the ray.
-    
-    The `rayParams` table can include a `FilterList` of entity IDs to include or exclude, 
-    and a `FilterType` to specify whether the filter is inclusive or exclusive.
 
     Returns the closest intersection, including the hit position, normal, distance,
-    and the intersected entity ID.
+    and the intersected entity ID. If nothing was hit then it returns `nil`.
 
     ```lua
     local id1 = grid:InsertRect(Vector2.new(5, 0), Vector2.new(2, 2))
@@ -1026,11 +1153,7 @@ end
     end
     ```
 ]=]
-function LTDG:Raycast(origin: Vector2, direction: Vector2, _rayParams: {
-        FilterList: { EntityId }?,
-        FilterType: Enum.RaycastFilterType?,
-        CustomFilter: ((EntityId) -> boolean)?,
-    }?): {
+function LTDG:Raycast(origin: Vector2, direction: Vector2, filterParams: FilterParams?): {
         Normal: Vector2,
         Position: Vector2,
         Distance: number,
@@ -1038,27 +1161,7 @@ function LTDG:Raycast(origin: Vector2, direction: Vector2, _rayParams: {
     }?
     debug.profilebegin("LTDG:Raycast")
 
-    local FILTER_TYPE_INCLUDE = Enum.RaycastFilterType.Include
-
-    local skipFilter = not _rayParams or (not _rayParams.FilterList and not _rayParams.CustomFilter)
-    local filterList = _rayParams and _rayParams.FilterList
-    local customFilter = _rayParams and _rayParams.CustomFilter
-    local filterType = _rayParams and _rayParams.FilterType or FILTER_TYPE_INCLUDE
-
-    -- Helper function to determine if an entity is filtered out of potential results
-    local function isFilteredOut(entityId: EntityId): boolean
-        local isFiltered = false
-        if customFilter then
-            isFiltered = customFilter(entityId)
-        elseif filterList then
-            isFiltered = table.find(filterList, entityId) ~= nil
-        end
-        if filterType == FILTER_TYPE_INCLUDE then
-            return not isFiltered -- Include only if the filter is not found
-        else
-            return isFiltered -- Exclude if the filter is found
-        end
-    end
+    local skipFilter, isFilteredOut = generateFilter(filterParams)
 
     -- Initialize variables for tracking the closest hit
     local closestHit = nil
@@ -1295,7 +1398,7 @@ end
     grid:QueryRotatedRect(Vector2.new(30, 30), Vector2.new(10, 5), 45)
     ```
 ]=]
-function LTDG:QueryRotatedRect(pos: Vector2, size: Vector2, angle: number): { EntityId }
+function LTDG:QueryRotatedRect(pos: Vector2, size: Vector2, angle: number, filterParams: FilterParams?): { EntityId }
     error("GetEntitiesOnRotatedRect not implemented")
 end
 
@@ -1312,7 +1415,7 @@ end
     grid:QueryPolygon({Vector2.new(0, 0), Vector2.new(0, 10), Vector2.new(5, 5)})
     ```
 ]=]
-function LTDG:QueryPolygon(polygon: {Vector2}): { EntityId }
+function LTDG:QueryPolygon(polygon: {Vector2}, filterParams: FilterParams?): { EntityId }
     error("GetEntitiesOnPolygon not implemented")
 end
 
@@ -1322,6 +1425,7 @@ end
 
 --[=[
     @within LooseTightDoubleGrid
+    @tag debug
     Renders the grid and its entities for debugging purposes.
     Subsequent calls will destroy the previous render model.
 

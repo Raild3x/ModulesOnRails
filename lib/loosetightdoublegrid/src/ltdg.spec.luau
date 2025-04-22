@@ -611,6 +611,63 @@ local test_suite = function(tiniest)
 				end).fails()
 			end)
 		end)
+
+		describe("Filtering", function()
+			test("should filter entities using FilterList with Include", function()
+				local grid = createGenericGrid()
+				local id1 = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+				local id2 = grid:InsertRect(Vector2.new(8, 8), Vector2.new(2, 2))
+				local entities = grid:QueryRect(Vector2.new(5, 5), Vector2.new(10, 10), {
+					FilterList = { id1 },
+					FilterType = Enum.RaycastFilterType.Include,
+				})
+				expect(entities).has_value(id1)
+				expect(entities).never_has_value(id2)
+			end)
+
+			test("should filter entities using FilterList with Exclude", function()
+				local grid = createGenericGrid()
+				local id1 = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+				local id2 = grid:InsertRect(Vector2.new(8, 8), Vector2.new(2, 2))
+				local entities = grid:QueryRect(Vector2.new(5, 5), Vector2.new(10, 10), {
+					FilterList = { id1 },
+					FilterType = Enum.RaycastFilterType.Exclude,
+				})
+				expect(entities).never_has_value(id1)
+				expect(entities).has_value(id2)
+			end)
+
+			test("should filter entities using a custom filter function", function()
+				local grid = createGenericGrid()
+				local id1 = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+				local id2 = grid:InsertRect(Vector2.new(8, 8), Vector2.new(2, 2))
+				local entities = grid:QueryRect(Vector2.new(5, 5), Vector2.new(10, 10), {
+					CustomFilter = function(entityId)
+						return entityId == id2
+					end,
+				})
+				expect(entities).never_has_value(id1)
+				expect(entities).has_value(id2)
+			end)
+		end)
+
+		describe("__iter Metamethod", function()
+			test("should iterate over all entities in the grid", function()
+				local grid = createGenericGrid()
+				local id1 = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+				local id2 = grid:InsertCircle(Vector2.new(8, 8), 2)
+				local id3 = grid:InsertPoint(Vector2.new(10, 10))
+
+				local iteratedEntities = {}
+				for entityId, shapeType in grid do
+					iteratedEntities[entityId] = shapeType
+				end
+
+				expect(iteratedEntities[id1]).is("r")
+				expect(iteratedEntities[id2]).is("c")
+				expect(iteratedEntities[id3]).is("p")
+			end)
+		end)
 	end)
 end
 
