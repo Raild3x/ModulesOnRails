@@ -743,6 +743,15 @@ end
 
 --[=[
 	@tag Component Class
+
+	Gets the current valid ancestors of a component class.
+]=]
+function Component:GetAncestors(): {Instance}
+	return table.clone(self[KEY_ANCESTORS])
+end
+
+--[=[
+	@tag Component Class
 	`Construct` is called before the component is started, and should be used
 	to construct the component instance.
 
@@ -831,7 +840,7 @@ end
 	local MyComponent = Component.new({Tag = "MyComponent"})
 
 	function MyComponent:Start()
-		self:ForEachSibling(AnotherComponent, function(sibling, jani)
+		self:WhileHasComponent(AnotherComponent, function(sibling, jani)
 			print(sibling.SomeProperty)
 			
 			jani:Add(function()
@@ -841,7 +850,7 @@ end
 	end
 	```
 ]=]
-function Component:ForEachSibling(componentClass: ComponentClass, fn: (component: Component, jani: Janitor) -> ())
+function Component:WhileHasComponent(componentClass: ComponentClass, fn: (component: Component, jani: Janitor) -> ())
 	local bindJani = Janitor.new()
 
 	local connProxy = {}
@@ -883,6 +892,12 @@ function Component:ForEachSibling(componentClass: ComponentClass, fn: (component
 	end
 
 	return connProxy
+end
+
+-- DEPRECATED: Use WhileHasComponent instead. Kept for backwards compat
+function Component:ForEachSibling(...)
+	warn("ForEachSibling is deprecated. Use WhileHasComponent instead.")
+	return self:WhileHasComponent(...)
 end
 
 
