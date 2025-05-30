@@ -13,7 +13,7 @@ local IS_SERVER = RunService:IsServer()
 --// Types //--
 type Janitor = Janitor.Janitor
 type Promise = typeof(Promise.new(function() end))
-type ActionType = AdjustableTimer.ActionType | "Initialize" | "Disconnect"
+type ActionType = AdjustableTimer.ActionType | "Initialize" | "Disconnect" | "Sync"
 export type AdjustableTimer = AdjustableTimer.AdjustableTimer
 
 --[=[
@@ -57,6 +57,7 @@ local NEXT_ID = 1
 
 local TimerRegisteredSignal = Signal.new()
 local TimerDisconnectedSignal = Signal.new()
+local TimerSyncedSignal = Signal.new()
 
 --------------------------------------------------------------------------------
 --// Private Functions //--
@@ -105,7 +106,6 @@ end
 
 -- @client
 local function handleRemoteAction(id: TimerId, actionType: ActionType, ...)
-	print("Received remote action:", id, actionType, ...)
 	local timer = IdToTimer[id]
 	if actionType == "Initialize" then
 		local snapshot, tags = ...
@@ -128,6 +128,16 @@ local function handleRemoteAction(id: TimerId, actionType: ActionType, ...)
 	elseif actionType == "ChangeStartTime" then
 		local newStartTime = ...
 		timer:SetStartTime(newStartTime)
+	elseif actionType == "Sync" then
+		local snapshot = ...
+		if not timer then
+			warn("Timer not found for ID:", id)
+			return
+		end
+		for key, value in pairs(snapshot) do
+			timer[key] = value
+		end
+		TimerSyncedSignal:Fire(id, snapshot)
 	elseif actionType == "Disconnect" then
 		if not timer then
 			warn("Unable to disconnect; Timer not found for ID:", id)
@@ -209,7 +219,7 @@ end
 		-- do something with the timer
 	end
 
-	for _, timer in ipairs(manager:GetAllReplicatedTimers()) do
+	for _, timer in manager:GetAllReplicatedTimers() do
 		task.spawn(watchTimer, timer)
 	end
 	manager.TimerRegistered:Connect(function(timer, id)
@@ -270,6 +280,19 @@ function AdjustableTimerManager:Start()
 		for _, player in ipairs(Players:GetPlayers()) do
 			replicateAllToPlayer(player)
 		end
+
+		RemoteEvent.OnServerEvent:Connect(function(player, id: TimerId, actionType: ActionType, ...)
+			if not table.find(ConnectedClients, player) then
+				warn("Player not connected:", player)
+				return
+			end
+			if actionType == "Sync" then
+				-- Sync request from client
+				AdjustableTimerManager:SyncTimer(id, player)
+			else
+				warn("Received unsupported action type from client:", actionType, player)
+			end
+		end)
 	else
 		RemoteEvent.OnClientEvent:Connect(function(id: TimerId, actionType: ActionType, ...)
 			handleRemoteAction(id, actionType, ...)
@@ -470,6 +493,49 @@ function AdjustableTimerManager:GetAllReplicatedTimers(): { AdjustableTimer }
 		table.insert(timers, timer)
 	end
 	return timers
+end
+
+--[=[
+	@within AdjustableTimerManager
+	@method SyncTimer
+	@param timer TimerId | AdjustableTimer -- The timer or ID of the timer to sync.
+	@param player Player? -- Optional player to sync the timer with. If not provided, syncs with all clients. (SERVER ONLY)
+	@return Promise<TimerId, SerializedAdjustableTimer> -- A promise that resolves with the timer ID and its serialized state.
+
+	If called on the client, it will request the server to sync the timer so that their states match.
+
+	If called on the server, it will sync the timer with all clients or a specific player.
+
+	This method should only need to be used if you perform some manual changes to the timer on the client side, such
+	as pausing it. You will need to call this to resync the timer state with the server.
+
+	```lua
+	AdjustableTimerManager:SyncTimer(timerId):andThen(function(timerId, snapshot)
+		print("Timer synced:", timerId, snapshot)
+	end)
+	```
+]=]
+function AdjustableTimerManager:SyncTimer(timer: TimerId | AdjustableTimer, player: Player?)
+	local timerId = if typeof(timer) == "table" then TimerToId[timer] else timer
+	if IS_SERVER then
+		local snapshot = IdToTimer[timerId]:Serialize()
+		if player then
+			local players = if typeof(player) == "table" then player else { player }
+			for _, p in players do
+				RemoteEvent:FireClient(player, timerId, "Sync", snapshot)
+			end
+		else
+			replicateAction(timerId, "Sync", snapshot)
+		end
+		TimerSyncedSignal:Fire(timerId, snapshot)
+		return Promise.resolve(timerId, snapshot)
+	else
+		assert(not player, "Player parameter is not supported on the client")
+		RemoteEvent:FireServer(timerId, "Sync")
+		return Promise.fromEvent(TimerSyncedSignal, function(id, _)
+			return id == timerId
+		end)
+	end
 end
 
 AdjustableTimerManager:Start()

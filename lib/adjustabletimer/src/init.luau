@@ -1,17 +1,17 @@
 -- May 23, 2025
 --[=[
-@class AdjustableTimer
-The AdjustableTimer class provides a flexible timer system that allows for pausing, resuming, adjusting time scales, and tracking elapsed time. 
-It is designed to be serialized and unserialized for replication and storage across systems. Use in conjunction with the `AdjustableTimerManager` for
-easy replication of timers from server to clients.
+	@class AdjustableTimer
+	The AdjustableTimer class provides a flexible timer system that allows for pausing, resuming, adjusting time scales, and tracking elapsed time. 
+	It is designed to be serialized and unserialized for replication and storage across systems. Use in conjunction with the `AdjustableTimerManager` for
+	easy replication of timers from server to clients.
 
-### Example Usage
-```lua
-local timer = AdjustableTimer.new()
-timer:Resume() -- Start the timer
-task.wait(5) -- Simulate some elapsed time
-print(timer:GetElapsedTime())
-```
+	### Example Usage
+	```lua
+	local timer = AdjustableTimer.new()
+	timer:Resume() -- Start the timer
+	task.wait(5) -- Simulate some elapsed time
+	print(timer:GetElapsedTime())
+	```
 ]=]
 
 --// Imports //--
@@ -21,11 +21,11 @@ end
 
 export type ActionType = "ChangeProgressRate" | "Pause" | "Resume" | "ChangeStartTime"
 type SerializedAdjustableTimer = {
-	startTime: number,
-	timeScale: number,
-	paused: boolean,
-	pauseTime: number?,
-	totalPausedDuration: number,
+	_StartTime: number,
+	_TimeScale: number,
+	_Paused: boolean,
+	_PauseTime: number?,
+	_TotalPausedDuration: number,
 }
 
 local function notifyChanged(self, actionType: ActionType, ...)
@@ -84,11 +84,11 @@ end
 ]=]
 function AdjustableTimer:Serialize(): SerializedAdjustableTimer
 	return {
-		startTime = self._StartTime,
-		timeScale = self._TimeScale,
-		paused = self._Paused,
-		pauseTime = self._PauseTime,
-		totalPausedDuration = self._TotalPausedDuration,
+		_StartTime = self._StartTime,
+		_TimeScale = self._TimeScale,
+		_Paused = self._Paused,
+		_PauseTime = self._PauseTime,
+		_TotalPausedDuration = self._TotalPausedDuration,
 	}
 end
 
@@ -101,11 +101,11 @@ end
 function AdjustableTimer.Unserialize(data: SerializedAdjustableTimer): AdjustableTimer
 	local self = setmetatable({}, AdjustableTimer)
 
-	self._TimeScale = data.timeScale
-	self._StartTime = data.startTime
-	self._Paused = data.paused
-	self._PauseTime = data.pauseTime
-	self._TotalPausedDuration = data.totalPausedDuration
+	self._TimeScale = data._TimeScale
+	self._StartTime = data._StartTime
+	self._Paused = data._Paused
+	self._PauseTime = data._PauseTime
+	self._TotalPausedDuration = data._TotalPausedDuration
 
 	self._OnChangedFns = {}
 
