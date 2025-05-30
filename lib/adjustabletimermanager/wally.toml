@@ -2,7 +2,7 @@
 name = "raild3x/adjustabletimermanager"
 description = "A replication manager for AdjustableTimer that allows for easy synchronization across clients in a Roblox game. It handles the replication of timer states and adjustments, ensuring that all clients have a consistent view of the timer's status."
 authors = ["Logan Hunt (Raildex)"]
-version = "1.0.0"
+version = "1.0.1"
 license = "MIT"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
