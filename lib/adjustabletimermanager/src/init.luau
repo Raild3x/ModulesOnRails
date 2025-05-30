@@ -6,7 +6,7 @@ local Promise = require(script.Parent.Promise)
 local Signal = require(script.Parent.Signal)
 local AdjustableTimer = require(script.Parent.AdjustableTimer)
 
-local RemoteEvent: RemoteEvent = script.Parent.AdjustableTimerActionRemoteEvent
+local RemoteEvent: RemoteEvent = script:FindFirstChild("AdjustableTimerActionRemoteEvent", true)
 
 local IS_SERVER = RunService:IsServer()
 
