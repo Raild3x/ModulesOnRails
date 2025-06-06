@@ -163,39 +163,38 @@ end
     :::
 ]=]
 function BaseTableReplicator.forEach(
-    condition: SearchCondition,
-    fn: (replicator: BaseTableReplicator, manager: TableManager?) -> (),
-    allowDestroyedReplicators: boolean?
+	condition: SearchCondition,
+	fn: (replicator: BaseTableReplicator, manager: TableManager?) -> (),
+	allowDestroyedReplicators: boolean?
 )
-    local SatisfiesCondition = ReconcileCondition(condition)
+	local SatisfiesCondition = ReconcileCondition(condition)
 
-    -- Iterate over all current replicators
-    for _, replicator in pairs(STORAGE) do
-        if replicator.IsDestroyed then
-            if allowDestroyedReplicators and SatisfiesCondition(replicator) then
-                fn(replicator, nil)
-            end
-        else
-            local manager = replicator:GetTableManager()
-            if SatisfiesCondition(replicator, manager) then
-                fn(replicator, manager)
-            end
-        end
-    end
+	local RegisteredReplicators = RailUtil.Table.Weak {} -- Track registered replicators, we need to do this to account for deffered event edge cases
+	local function tryAddReplicator(replicator: BaseTableReplicator)
+		if table.find(RegisteredReplicators, replicator) then
+			return -- Already added
+		end
+		table.insert(RegisteredReplicators, replicator)
+		if replicator.IsDestroyed then
+			if allowDestroyedReplicators and SatisfiesCondition(replicator) then
+				fn(replicator, nil)
+			end
+		else
+			local manager = replicator:GetTableManager()
+			if SatisfiesCondition(replicator, manager) then
+				fn(replicator, manager)
+			end
+		end
+		return
+	end
 
-    -- Watch for new replicators
-    return ReplicatorCreatedSignal:Connect(function(replicator)
-        if replicator.IsDestroyed then
-            if allowDestroyedReplicators and SatisfiesCondition(replicator) then
-                fn(replicator, nil)
-            end
-        else
-            local manager = replicator:GetTableManager()
-            if SatisfiesCondition(replicator, manager) then
-                fn(replicator, manager)
-            end
-        end
-    end)
+	-- Iterate over all current replicators
+	for _, replicator in pairs(STORAGE) do
+		task.spawn(tryAddReplicator, replicator)
+	end
+
+	-- Watch for new replicators
+	return ReplicatorCreatedSignal:Connect(tryAddReplicator)
 end
 
 
