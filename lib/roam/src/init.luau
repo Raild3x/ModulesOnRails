@@ -1,33 +1,37 @@
 --!strict
 -- Logan Hunt (Raildex)
 -- September 12, 2022
+-- DOCUMENTATION LINK: https://raild3x.github.io/ModulesOnRails/api/Roam
 --[=[
 	@class Roam
 
-	Roam follows a design pattern similar to Knit, but is more lightweight (Shoutout
-	to Stephen Leitnick [Sleitnick]). It removes all networking and replication
-	functionality, and instead focuses on providing a simple method to easily
-	initialize Services given to it and provide global accessors.
+	Roam is a systems bootstrapping tool for Roblox luau projects, designed to make it easy to
+	initialize and start services in a topologically sorted manner without the need to
+	manually order and start services.
+	
+	Roam follows a design pattern similar to [Knit](https://sleitnick.github.io/Knit/), but is more lightweight. It removes all networking and replication
+	functionality, and instead focuses on providing a simple methodology to easily
+	initialize Services given to it.
 
 	Roam gathers a collection of specified services and initializes 'syncronously'.
 	Once all services have been fully initialized, it then starts them 'asyncronously' by
 	spawning their 'RoamStart' method in a new thread.
 
-	Roam enforces contracts to ensure that only the Services that you intend are
-	initialized. By following the contracts of service construction/registration,
-	Roam is able to ensure that nothing that isnt intended to be initialized doesnt
-	cause any issues during the loading or start process.
+	Roam is RunContext agnostic, meaning it can be used on both the server and client in the same manner.
+	It makes no distinction between the two, and instead focuses on providing a simple
+	interface for initializing and starting services. This means you could create a service and register it on 
+	both the server and client, and it will be initialized and started on both ends. 
 
-	[CONTRACTS]
+	**[CONTRACTS]**
 	- Services must be created/registered before Roam is started.
 	- Services must be created/registered with a unique name.
 	- Services with `RoamInit` and `RoamStart` methods will have those methods
 	  called when Roam is started at the appropriate time. (Names are configurable)
-	- All Services are guaranteed safe to access in RoamStart.
-	- Only StaticMethods are safe to call prior to RoamStart.
+	- `RequiredServices` boot in proper topological order if specified in the ServiceConfig.
+	- Roam functions the same regardless of RunContext (Server/Client).
 
-	[EXAMPLE USAGE]
-	```lua -- init.Server.lua
+	**[EXAMPLE STARTUP]**
+	```lua -- ServerBootstrapper.Server.lua
 	local Roam = require(ReplicatedStorage.Roam)
 
 	-- Just iterates through all the children of the given parents
@@ -41,42 +45,22 @@
 	Roam.start()
 	:andThenCall(print, "Roam started!")
 	:catch(warn)
-
-	-- Accessing a potential Service
-	Roam.getService("MyService"):DoSomething() -- It is preffered to use standard requires instead of getService in order to get proper linting.
 	```
+
+	:::info Setting up Services
+	Services can be set up in a variety of ways. The most common way is to create a ModuleScript
+	that returns a table with the methods you want to define, and then register it with Roam just prior
+	to the final module's return.
+
+	See [Roam.registerService](Roam#registerService) for more information on setting up a new service.
+	:::
 	
 	:::tip Networking
 	Roam does not inherently have networking functionality. However, it can easily be added through the use of NetWire's 
-	**[.setupServiceNetworking](https://raild3x.github.io/ModulesOnRails/api/ServerNetWire#setupServiceNetworking)** funtion.
+	**[.setupServiceNetworking](https://raild3x.github.io/ModulesOnRails/api/ServerNetWire/#setupServiceNetworking)** funtion.
 	:::
 ]=]
 
---[[
-	[API]
-	[PROPERTIES]
-	.ClassName: "Roam"
-	.Services: { [string]: Service }
-	.Debug: boolean
-
-	[FUNCTIONS]
-	.createService(serviceDef: ServiceConfig): Service
-	.registerService(service: Service, serviceConfig: (string | ServiceConfig)?): Service
-
-	.getService(serviceName: string): Service
-	.requireModules(
-		parent: Instance,
-		config: {
-			DeepSearch: boolean?,
-			RequirePredicate: ((obj: ModuleScript) -> boolean)?,
-			IgnoreDescendantsPredicate: ((obj: Instance) -> boolean)?
-		}?
-	): { Service }
-
-	.start(): Promise
-	.onStart(): Promise
-	.isReady(): boolean
-]]
 
 local RunService = game:GetService("RunService")
 
@@ -106,10 +90,23 @@ export type Service = table
 	```lua
 	local myOtherService = require(ReplicatedStorage.MyOtherService)
 
-	local MyService = Roam.createService {
+	-------------------------------------------------
+
+	local MyService = {}
+
+	function MyService:CustomStartMethod()
+		print("MyService started!")
+	end
+
+	-------------------------------------------------
+
+	Roam.registerService(MyService, {
 		Name = "MyService",
 		RequiredServices = {myOtherService},
-	}
+		StartMethodName = "CustomStartMethod",
+	})
+
+	return MyService
 	```
 
 	:::caution Deffering RequiredServices
@@ -195,7 +192,9 @@ Roam.Bootstrappers = { -- Generic Bootstrappers for Roam / Orion
 }
 
 --[=[
+	@private
 	@within Roam
+	@tag ReadOnly
 	@prop ClassName "Roam"
 	The ClassName of the Roam module.
 ]=]
@@ -209,13 +208,81 @@ Roam.Bootstrappers = { -- Generic Bootstrappers for Roam / Orion
 --[=[
 	@within Roam
 	@prop Bootstrappers {Server: (script: Script) -> (), Client: (script: Script) -> ()}
-	A table of generic bootstrappers for Roam / Orion.
+	A table of generic bootstrappers for Roam that you can use to quickly setup new projects.
+	```lua
+	local Roam = require(Packages.Roam)
+
+	Roam.Bootstrappers.Server(script)
+	:andThenCall(print, "Roam Server Bootstrapped!")
+	```
 ]=]
 
+--[=[
+	Registers a Service/Table with Roam to be Initialized and Started when Roam starts.
+	Cannot be called after Roam has been started.
+
+	```lua -- MyRegisteredService.lua
+	local MyRegisteredService = {}
+
+	function MyRegisteredService:RoamStart()
+		print("MyRegisteredService started!")
+	end
+
+	function MyRegisteredService:RoamInit()
+		print("MyRegisteredService initialized!")
+	end
+
+	----------------------------------------------------------------
+
+	local Roam = require(Packages.Roam)
+	Roam.registerService(MyRegisteredService, "MyRegisteredService")
+
+	return MyRegisteredService
+	```
+]=]
+function Roam.registerService(service: Service, serviceConfig: (ServiceConfig | string)?): Service
+	assert(not started, "Cannot register Services after Roam has been started")
+	assert(type(service) == "table", `Service must be a table; got {type(service)}`)
+
+	if typeof(serviceConfig) == "string" then
+		serviceConfig = { Name = serviceConfig }
+	elseif not serviceConfig then
+		serviceConfig = {} :: any
+	end
+
+	assert(typeof(serviceConfig) == "table", `ServiceConfig must be a table; got {typeof(serviceConfig)}`)
+	--serviceConfig.ENV = getfenv(2) -- This is no longer supported
+
+	local Name = serviceConfig.Name or service.Name
+	if not Name then
+		error("No name provided for service")
+		-- Name = serviceConfig.ENV.script.Name
+		-- warn(`No Service name was given; this is not recommended. Roam will attempt to continue by attempting to infer the ServiceName. [Inferred Service Name: "{Name}"]`)
+	end
+
+	assert(
+		not serviceConfig or type(serviceConfig) == "table",
+		`ServiceConfig must be a table; got {type(serviceConfig)}`
+	)
+	assert(type(Name) == "string", `Service.Name must be a string; got {type(Name)}`)
+	assert(#Name > 0, "Service.Name must be a non-empty string")
+	assert(not DoesServiceExist(Name), `Service "{Name}" already exists`)
+
+	service[KEY_CONFIG] = table.freeze(Reconcile(serviceConfig :: any, {
+		Name = Name,
+	}))
+	services[Name] = service
+
+	return service
+end
 
 --[=[
+	@deprecated 0.1.5
+	@private
 	Creates a Service/Table with Roam to be Initialized and Started when Roam starts.
 	Cannot be called after Roam has been started.
+
+	This is an alternative method to setting up services over using `registerService`.
 
 	```lua
 	local Roam = require(ReplicatedStorage.Roam)
@@ -264,175 +331,29 @@ function Roam.createService(serviceDef: ServiceConfig): Service
 end
 
 --[=[
-	Registers a Service/Table with Roam to be Initialized and Started when Roam starts.
-	Cannot be called after Roam has been started. This method was added to allow for easy
-	backporting of existing services to Roam. This is an alternative method to setting up
-	services over using `createService`.
-
-
-	```lua -- MyRegisteredService.lua
-	local MyRegisteredService = {}
-
-	function MyRegisteredService:RoamStart()
-		print("MyRegisteredService started!")
-	end
-
-	function MyRegisteredService:RoamInit()
-		print("MyRegisteredService initialized!")
-	end
-
-	local Roam = require(Packages.Roam)
-	Roam.registerService(MyRegisteredService, "MyRegisteredService")
-
-	return MyRegisteredService
-	```
-]=]
-function Roam.registerService(service: Service, serviceConfig: (ServiceConfig | string)?): Service
-	assert(not started, "Cannot register Services after Roam has been started")
-	assert(type(service) == "table", `Service must be a table; got {type(service)}`)
-
-	if typeof(serviceConfig) == "string" then
-		serviceConfig = { Name = serviceConfig }
-	elseif not serviceConfig then
-		serviceConfig = {} :: any
-	end
-
-	assert(typeof(serviceConfig) == "table", `ServiceConfig must be a table; got {typeof(serviceConfig)}`)
-	--serviceConfig.ENV = getfenv(2) -- This is no longer supported
-
-	local Name = serviceConfig.Name or service.Name
-	if not Name then
-		error("No name provided for service")
-		-- Name = serviceConfig.ENV.script.Name
-		-- warn(`No Service name was given; this is not recommended. Roam will attempt to continue by attempting to infer the ServiceName. [Inferred Service Name: "{Name}"]`)
-	end
-
-	assert(
-		not serviceConfig or type(serviceConfig) == "table",
-		`ServiceConfig must be a table; got {type(serviceConfig)}`
-	)
-	assert(type(Name) == "string", `Service.Name must be a string; got {type(Name)}`)
-	assert(#Name > 0, "Service.Name must be a non-empty string")
-	assert(not DoesServiceExist(Name), `Service "{Name}" already exists`)
-
-	service[KEY_CONFIG] = table.freeze(Reconcile(serviceConfig :: any, {
-		Name = Name,
-	}))
-	services[Name] = service
-
-	return service
-end
-
---[=[
-	Requires all the modules that are children of the given parent. This is an easy
-	way to quickly load all services that might be in a folder. Takes an optional predicate
-	function to filter which modules are loaded. Services collected this way must not yield.
-	- `DeepSearch` -> whether it checks descendants or just children
-	- `RequirePredicate` -> a predicate function that determines whether a module should be required
-	- `IgnoreDescendantsPredicate` -> A Predicate for whether the Descendants of the Module should be Searched (Only matters if DeepSearch is true)
-
-	```lua
-	local pred = function(obj: ModuleScript): boolean
-		return obj.Name:match("Service$") ~= nil
-	end
-
-	Roam.requireModules(ReplicatedStorage.Shared, {
-		DeepSearch = true,
-		RequirePredicate = pred,
-		IgnoreDescendantsPredicate = function(obj: Instance): boolean
-			return obj.Name == "Ignore"
-		end,
-	})
-	```
-]=]
-function Roam.requireModules(
-	parents: Instance | { Instance },
-	config: {
-		DeepSearch: boolean?,
-		RequirePredicate: ((obj: ModuleScript) -> boolean)?,
-		IgnoreDescendantsPredicate: ((obj: Instance) -> boolean)?,
-	}?
-): { Service }
-	if typeof(parents) == "Instance" then
-		parents = { parents }
-	end
-
-	config = config or {}
-	assert(typeof(config) == "table", `config must be a table; got {typeof(config)}`)
-	local deepSearch = config.DeepSearch or false
-	local predicate = config.RequirePredicate
-	local ignoreDescendantsPredicate = config.IgnoreDescendantsPredicate
-
-	local addedServices = {}
-	local function SearchInstance(obj: Instance | {Instance})
-		if typeof(obj) == "table" then
-			for _, v in ipairs(obj) do
-				SearchInstance(v)
-			end
-			return
-		end
-
-		assert(typeof(obj) == "Instance", "Expected Instance or table of Instances. Got:"..tostring(obj))
-		if obj:IsA("ModuleScript") and (not predicate or predicate(obj)) then
-			local service = EnsureUnyieldingRequire(obj)
-			if table.find(addedServices, service) then
-				warn("Already added service '" .. service[KEY_CONFIG].Name .. "' | " .. obj:GetFullName())
-				return
-			end
-
-			table.insert(addedServices, service)
-		end
-
-		if deepSearch and (not ignoreDescendantsPredicate or not ignoreDescendantsPredicate(obj)) then
-			SearchInstance(obj:GetChildren())
-		end
-	end
-	
-	assert(typeof(parents) == "table", "Parents must be an Instance or table of Instances")
-	for _, parent in ipairs(parents) do
-		SearchInstance(parent:GetChildren())
-	end
-
-	return addedServices
-end
-
---[=[
-	Fetches the name of a registered Service.
-]=]
-function Roam.getNameFromService(service: Service): string
-	return service[KEY_CONFIG].Name
-end
-
---[=[
-	Fetches a registered Service by name.
-	Cannot be called until Roam has been started.
-]=]
-function Roam.getService(serviceName: string): Service
-	if not started then
-		warn("!Roam has not been started yet! Services are not safe to access before Roam has been started.\n"..debug.traceback())
-	end
-	assert(type(serviceName) == "string", `ServiceName must be a string; got {type(serviceName)}`)
-	return assert(services[serviceName], `Could not find service "{serviceName}"`) :: Service
-end
-
---[=[
 	@param postInitPreStart (() -> (Promise?))?
 	@return Promise
 
-	Starts Roam. Should only be called once.
+	Starts Roam. Should only be called once. Calling multiple times will result in a promise rejection.
+	
 	Optional argument `postInitPreStart` is a function that is called
 	after all services have been initialized, but before they are started.
-
-	:::caution
-	Be sure that all services have been created _before_
-	calling `Start`. Services cannot be added later.
-	:::
 
 	```lua
 	Roam.start()
 	:andThenCall(print, "Roam started!")
 	:catch(warn)
 	```
+
+	:::caution
+	Be sure that all services have been created _before_
+	calling `Start`. Services cannot be added later.
+	:::
+
+	:::tip Bootstrapping
+	You can use the [Roam.Bootstrappers](Roam#Bootstrappers) table/methods to quickly bootstrap Roam in your project.
+	This is reccomended as it will provide a consistent starting point for your projects.
+	:::
 ]=]
 function Roam.start(postInitPreStart: (() -> Promise?)?): Promise
 	if started then
@@ -589,6 +510,100 @@ end
 ]=]
 function Roam.isReady(): boolean
 	return startedComplete
+end
+
+--[=[
+	Requires all the modules that are children of the given parent. This is an easy
+	way to quickly load all services that might be in a folder. Takes an optional predicate
+	function to filter which modules are loaded. Services collected this way must not yield.
+	- `DeepSearch` -> whether it checks descendants or just children
+	- `RequirePredicate` -> a predicate function that determines whether a module should be required
+	- `IgnoreDescendantsPredicate` -> A Predicate for whether the Descendants of the Module should be Searched (Only matters if DeepSearch is true)
+
+	```lua
+	local pred = function(obj: ModuleScript): boolean
+		return obj.Name:match("Service$") ~= nil
+	end
+
+	Roam.requireModules(ReplicatedStorage.Shared, {
+		DeepSearch = true,
+		RequirePredicate = pred,
+		IgnoreDescendantsPredicate = function(obj: Instance): boolean
+			return obj.Name == "Ignore"
+		end,
+	})
+	```
+]=]
+function Roam.requireModules(
+	parents: Instance | { Instance },
+	config: {
+		DeepSearch: boolean?,
+		RequirePredicate: ((obj: ModuleScript) -> boolean)?,
+		IgnoreDescendantsPredicate: ((obj: Instance) -> boolean)?,
+	}?
+): { Service }
+	if typeof(parents) == "Instance" then
+		parents = { parents }
+	end
+
+	config = config or {}
+	assert(typeof(config) == "table", `config must be a table; got {typeof(config)}`)
+	local deepSearch = config.DeepSearch or false
+	local predicate = config.RequirePredicate
+	local ignoreDescendantsPredicate = config.IgnoreDescendantsPredicate
+
+	local addedServices = {}
+	local function SearchInstance(obj: Instance | {Instance})
+		if typeof(obj) == "table" then
+			for _, v in ipairs(obj) do
+				SearchInstance(v)
+			end
+			return
+		end
+
+		assert(typeof(obj) == "Instance", "Expected Instance or table of Instances. Got:"..tostring(obj))
+		if obj:IsA("ModuleScript") and (not predicate or predicate(obj)) then
+			local service = EnsureUnyieldingRequire(obj)
+			if table.find(addedServices, service) then
+				warn("Already added service '" .. service[KEY_CONFIG].Name .. "' | " .. obj:GetFullName())
+				return
+			end
+
+			table.insert(addedServices, service)
+		end
+
+		if deepSearch and (not ignoreDescendantsPredicate or not ignoreDescendantsPredicate(obj)) then
+			SearchInstance(obj:GetChildren())
+		end
+	end
+	
+	assert(typeof(parents) == "table", "Parents must be an Instance or table of Instances")
+	for _, parent in ipairs(parents) do
+		SearchInstance(parent:GetChildren())
+	end
+
+	return addedServices
+end
+
+--[=[
+	Fetches the name of a registered Service.
+]=]
+function Roam.getNameFromService(service: Service): string
+	return service[KEY_CONFIG].Name
+end
+
+--[=[
+	@deprecated 0.1.5
+	@private
+	Fetches a registered Service by name.
+	Cannot be called until Roam has been started.
+]=]
+function Roam.getService(serviceName: string): Service
+	if not started then
+		warn("!Roam has not been started yet! Services are not safe to access before Roam has been started.\n"..debug.traceback())
+	end
+	assert(type(serviceName) == "string", `ServiceName must be a string; got {type(serviceName)}`)
+	return assert(services[serviceName], `Could not find service "{serviceName}"`) :: Service
 end
 
 return Roam
