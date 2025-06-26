@@ -3,30 +3,33 @@
 <head>
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v2.3.1">
-<title data-rh="true">Roam | ModulesOnRails</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:url" content="https://raild3x.github.io/ModulesOnRails/api/Roam"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docusaurus_tag" content="default"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docsearch:docusaurus_tag" content="default"><meta data-rh="true" property="og:title" content="Roam | ModulesOnRails"><meta data-rh="true" name="description" content="Roam follows a design pattern similar to Knit, but is more lightweight (Shoutout
-to Stephen Leitnick [Sleitnick]). It removes all networking and replication
-functionality, and instead focuses on providing a simple method to easily
-initialize Services given to it and provide global accessors.
+<title data-rh="true">Roam | ModulesOnRails</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:url" content="https://raild3x.github.io/ModulesOnRails/api/Roam"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docusaurus_tag" content="default"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docsearch:docusaurus_tag" content="default"><meta data-rh="true" property="og:title" content="Roam | ModulesOnRails"><meta data-rh="true" name="description" content="Roam is a systems bootstrapping tool for Roblox luau projects, designed to make it easy to
+initialize and start services in a topologically sorted manner without the need to
+manually order and start services.
+
+Roam follows a design pattern similar to [Knit](https://sleitnick.github.io/Knit/), but is more lightweight. It removes all networking and replication
+functionality, and instead focuses on providing a simple methodology to easily
+initialize Services given to it.
 
 Roam gathers a collection of specified services and initializes &#x27;syncronously&#x27;.
 Once all services have been fully initialized, it then starts them &#x27;asyncronously&#x27; by
 spawning their &#x27;RoamStart&#x27; method in a new thread.
 
-Roam enforces contracts to ensure that only the Services that you intend are
-initialized. By following the contracts of service construction/registration,
-Roam is able to ensure that nothing that isnt intended to be initialized doesnt
-cause any issues during the loading or start process.
+Roam is RunContext agnostic, meaning it can be used on both the server and client in the same manner.
+It makes no distinction between the two, and instead focuses on providing a simple
+interface for initializing and starting services. This means you could create a service and register it on 
+both the server and client, and it will be initialized and started on both ends. 
 
-[CONTRACTS]
+**[CONTRACTS]**
 - Services must be created/registered before Roam is started.
 - Services must be created/registered with a unique name.
 - Services with `RoamInit` and `RoamStart` methods will have those methods
   called when Roam is started at the appropriate time. (Names are configurable)
-- All Services are guaranteed safe to access in RoamStart.
-- Only StaticMethods are safe to call prior to RoamStart.
+- `RequiredServices` boot in proper topological order if specified in the ServiceConfig.
+- Roam functions the same regardless of RunContext (Server/Client).
 
-[EXAMPLE USAGE]
-```lua -- init.Server.lua
+**[EXAMPLE STARTUP]**
+```lua -- ServerBootstrapper.Server.lua
 local Roam = require(ReplicatedStorage.Roam)
 
 -- Just iterates through all the children of the given parents
@@ -40,38 +43,46 @@ Roam.requireModules({
 Roam.start()
 :andThenCall(print, &quot;Roam started!&quot;)
 :catch(warn)
-
--- Accessing a potential Service
-Roam.getService(&quot;MyService&quot;):DoSomething() -- It is preffered to use standard requires instead of getService in order to get proper linting.
 ```
+
+:::info Setting up Services
+Services can be set up in a variety of ways. The most common way is to create a ModuleScript
+that returns a table with the methods you want to define, and then register it with Roam just prior
+to the final module&#x27;s return.
+
+See [Roam.registerService](Roam#registerService) for more information on setting up a new service.
+:::
 
 :::tip Networking
 Roam does not inherently have networking functionality. However, it can easily be added through the use of NetWire&#x27;s 
-**[.setupServiceNetworking](https://raild3x.github.io/ModulesOnRails/api/ServerNetWire#setupServiceNetworking)** funtion.
-:::"><meta data-rh="true" property="og:description" content="Roam follows a design pattern similar to Knit, but is more lightweight (Shoutout
-to Stephen Leitnick [Sleitnick]). It removes all networking and replication
-functionality, and instead focuses on providing a simple method to easily
-initialize Services given to it and provide global accessors.
+**[.setupServiceNetworking](ServerNetWire#setupServiceNetworking)** funtion.
+:::"><meta data-rh="true" property="og:description" content="Roam is a systems bootstrapping tool for Roblox luau projects, designed to make it easy to
+initialize and start services in a topologically sorted manner without the need to
+manually order and start services.
+
+Roam follows a design pattern similar to [Knit](https://sleitnick.github.io/Knit/), but is more lightweight. It removes all networking and replication
+functionality, and instead focuses on providing a simple methodology to easily
+initialize Services given to it.
 
 Roam gathers a collection of specified services and initializes &#x27;syncronously&#x27;.
 Once all services have been fully initialized, it then starts them &#x27;asyncronously&#x27; by
 spawning their &#x27;RoamStart&#x27; method in a new thread.
 
-Roam enforces contracts to ensure that only the Services that you intend are
-initialized. By following the contracts of service construction/registration,
-Roam is able to ensure that nothing that isnt intended to be initialized doesnt
-cause any issues during the loading or start process.
+Roam is RunContext agnostic, meaning it can be used on both the server and client in the same manner.
+It makes no distinction between the two, and instead focuses on providing a simple
+interface for initializing and starting services. This means you could create a service and register it on 
+both the server and client, and it will be initialized and started on both ends. 
 
-[CONTRACTS]
+**[CONTRACTS]**
 - Services must be created/registered before Roam is started.
 - Services must be created/registered with a unique name.
 - Services with `RoamInit` and `RoamStart` methods will have those methods
   called when Roam is started at the appropriate time. (Names are configurable)
-- All Services are guaranteed safe to access in RoamStart.
-- Only StaticMethods are safe to call prior to RoamStart.
+- `RequiredServices` boot in proper topological order if specified in the ServiceConfig.
+- Roam functions the same regardless of RunContext (Server/Client).
 
-[EXAMPLE USAGE]
-```lua -- init.Server.lua
+**[EXAMPLE STARTUP]**
+```lua -- ServerBootstrapper.Server.lua
 local Roam = require(ReplicatedStorage.Roam)
 
 -- Just iterates through all the children of the given parents
@@ -85,26 +96,35 @@ Roam.requireModules({
 Roam.start()
 :andThenCall(print, &quot;Roam started!&quot;)
 :catch(warn)
-
--- Accessing a potential Service
-Roam.getService(&quot;MyService&quot;):DoSomething() -- It is preffered to use standard requires instead of getService in order to get proper linting.
 ```
+
+:::info Setting up Services
+Services can be set up in a variety of ways. The most common way is to create a ModuleScript
+that returns a table with the methods you want to define, and then register it with Roam just prior
+to the final module&#x27;s return.
+
+See [Roam.registerService](Roam#registerService) for more information on setting up a new service.
+:::
 
 :::tip Networking
 Roam does not inherently have networking functionality. However, it can easily be added through the use of NetWire&#x27;s 
-**[.setupServiceNetworking](https://raild3x.github.io/ModulesOnRails/api/ServerNetWire#setupServiceNetworking)** funtion.
+**[.setupServiceNetworking](ServerNetWire#setupServiceNetworking)** funtion.
 :::"><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/Roam"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/Roam" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/Roam" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.1839e2d4.css">
-<link rel="preload" href="/ModulesOnRails/assets/js/runtime~main.4fd4db58.js" as="script">
-<link rel="preload" href="/ModulesOnRails/assets/js/main.96a76860.js" as="script">
+<link rel="preload" href="/ModulesOnRails/assets/js/runtime~main.a56c701b.js" as="script">
+<link rel="preload" href="/ModulesOnRails/assets/js/main.00358d7c.js" as="script">
 </head>
 <body class="navigation-with-keyboard">
 <script>!function(){function e(e){document.documentElement.setAttribute("data-theme",e)}var t=function(){var e=null;try{e=localStorage.getItem("theme")}catch(e){}return e}();null!==t?e(t):window.matchMedia("(prefers-color-scheme: dark)").matches?e("dark"):(window.matchMedia("(prefers-color-scheme: light)").matches,e("light"))}()</script><div id="__docusaurus">
-<div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="navbar navbar--fixed-top"><div class="navbar__inner"><div class="navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-hidden="true" viewBox="0 0 24 24" class="iconExternalLink_nPIU"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"></path></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="Switch between dark and light mode (currently light mode)" aria-label="Switch between dark and light mode (currently light mode)" aria-live="polite"><svg viewBox="0 0 24 24" width="24" height="24" class="lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" class="darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg></button></div><div class="searchBox_ZlJk"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input type="search" id="search_input_react" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="docusaurus_skipToContent_fallback" class="main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject">​Base​Object</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" href="/ModulesOnRails/api/Roam">​Roam</a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/TableManager">TableManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/TableReplicator">TableReplicator</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/NetWire">NetWire</a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PlayerProfileManager">​Player​Profile​Manager</a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/PlayerDataManager">PlayerDataManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/Component">Instance Component Systems</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/DropletManager">DropletManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/AdjustableTimer">AdjustableTimer</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/CmdrHandler">Admin Commands [Cmdr]</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/Queue">Data Structures</a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ObjectCache">​Object​Cache</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ProbabilityDistributor">​Probability​Distributor</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PromValue">​Prom​Value</a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><div class="tocCollapsible_ETCw theme-doc-toc-mobile tocMobile_oUs_"><button type="button" class="clean-btn tocCollapsibleButton_TO0P">On this page</button></div><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">Roam</span></h1><div class="luaClassTags_EipM"></div><div>
+<div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="navbar navbar--fixed-top"><div class="navbar__inner"><div class="navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-hidden="true" viewBox="0 0 24 24" class="iconExternalLink_nPIU"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"></path></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="Switch between dark and light mode (currently light mode)" aria-label="Switch between dark and light mode (currently light mode)" aria-live="polite"><svg viewBox="0 0 24 24" width="24" height="24" class="lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" class="darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg></button></div><div class="searchBox_ZlJk"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input type="search" id="search_input_react" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="docusaurus_skipToContent_fallback" class="main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject">​Base​Object</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" href="/ModulesOnRails/api/Roam">​Roam</a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/TableManager">TableManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/TableReplicator">TableReplicator</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/NetWire">NetWire</a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PlayerProfileManager">​Player​Profile​Manager</a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/PlayerDataManager">PlayerDataManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/Component">Instance Component Systems</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/DropletManager">DropletManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/AdjustableTimer">AdjustableTimer</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/CmdrHandler">Admin Commands [Cmdr]</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/Queue">Data Structures</a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ObjectCache">​Object​Cache</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ProbabilityDistributor">​Probability​Distributor</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PromValue">​Prom​Value</a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><div class="tocCollapsible_ETCw theme-doc-toc-mobile tocMobile_oUs_"><button type="button" class="clean-btn tocCollapsibleButton_TO0P">On this page</button></div><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">Roam</span></h1><div class="luaClassTags_EipM"></div><label class="privateToggle_lmfE"><span class="privateCheckboxContainer_psRa"><input type="checkbox" class="privateCheckboxInternal_IKP2" name="checkbox"><span class="privateCheckboxControl_Ov8U"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="3" d="M4 11.91l5.37 5.37L19.79 5.59"></path></svg></span></span><span class="privateCheckboxLabel_Vmvs">Show Private</span></label><div>
 <p>
-  Roam follows a design pattern similar to Knit, but is more lightweight (Shoutout
-  to Stephen Leitnick [Sleitnick]). It removes all networking and replication
-  functionality, and instead focuses on providing a simple method to easily
-  initialize Services given to it and provide global accessors.
+  Roam is a systems bootstrapping tool for Roblox luau projects, designed to make it easy to
+  initialize and start services in a topologically sorted manner without the need to
+  manually order and start services.
+</p>
+<p>
+  Roam follows a design pattern similar to <a href="https://sleitnick.github.io/Knit/" target="_blank">Knit</a>, but is more lightweight. It removes all networking and replication
+  functionality, and instead focuses on providing a simple methodology to easily
+  initialize Services given to it.
 </p>
 <p>
   Roam gathers a collection of specified services and initializes 'syncronously'.
@@ -112,12 +132,12 @@ Roam does not inherently have networking functionality. However, it can easily b
   spawning their 'RoamStart' method in a new thread.
 </p>
 <p>
-  Roam enforces contracts to ensure that only the Services that you intend are
-  initialized. By following the contracts of service construction/registration,
-  Roam is able to ensure that nothing that isnt intended to be initialized doesnt
-  cause any issues during the loading or start process.
+  Roam is RunContext agnostic, meaning it can be used on both the server and client in the same manner.
+  It makes no distinction between the two, and instead focuses on providing a simple
+  interface for initializing and starting services. This means you could create a service and register it on
+  both the server and client, and it will be initialized and started on both ends.
 </p>
-<p>[CONTRACTS]</p>
+<p><strong>[CONTRACTS]</strong></p>
 <ul>
   <li>Services must be created/registered before Roam is started.</li>
   <li>Services must be created/registered with a unique name.</li>
@@ -125,10 +145,10 @@ Roam does not inherently have networking functionality. However, it can easily b
     Services with <code>RoamInit</code> and <code>RoamStart</code> methods will have those methods
     called when Roam is started at the appropriate time. (Names are configurable)
   </li>
-  <li>All Services are guaranteed safe to access in RoamStart.</li>
-  <li>Only StaticMethods are safe to call prior to RoamStart.</li>
+  <li><code>RequiredServices</code> boot in proper topological order if specified in the ServiceConfig.</li>
+  <li>Roam functions the same regardless of RunContext (Server/Client).</li>
 </ul>
-<p>[EXAMPLE USAGE]</p>
+<p><strong>[EXAMPLE STARTUP]</strong></p>
 <pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> Roam <span class="token operator">=</span> <span class="token function">require</span><span class="token punctuation">(</span>ReplicatedStorage<span class="token punctuation">.</span>Roam<span class="token punctuation">)</span>
 
 <span class="token comment">-- Just iterates through all the children of the given parents</span>
@@ -142,10 +162,22 @@ Roam<span class="token punctuation">.</span><span class="token function">require
 Roam<span class="token punctuation">.</span><span class="token function">start</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
 <span class="token punctuation">:</span><span class="token function">andThenCall</span><span class="token punctuation">(</span>print<span class="token punctuation">,</span> <span class="token string">"Roam started!"</span><span class="token punctuation">)</span>
 <span class="token punctuation">:</span><span class="token function">catch</span><span class="token punctuation">(</span>warn<span class="token punctuation">)</span>
-
-<span class="token comment">-- Accessing a potential Service</span>
-Roam<span class="token punctuation">.</span><span class="token function">getService</span><span class="token punctuation">(</span><span class="token string">"MyService"</span><span class="token punctuation">)</span><span class="token punctuation">:</span><span class="token function">DoSomething</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token comment">-- It is preffered to use standard requires instead of getService in order to get proper linting.</span>
 </code></pre>
+<div class="admonition admonition-info alert alert--info">
+  <div class="admonition-heading">
+    <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="16" viewBox="0 0 14 16">
+          <path d="M7 2.3c3.14 0 5.7 2.56 5.7 5.7s-2.56 5.7-5.7 5.7A5.71 5.71 0 0 1 1.3 8c0-3.14 2.56-5.7 5.7-5.7zM7 1C3.14 1 0 4.14 0 8s3.14 7 7 7 7-3.14 7-7-3.14-7-7-7zm1 3H6v5h2V4zm0 6H6v2h2v-2z"></path>
+        </svg></span>Setting up Services</h5>
+  </div>
+  <div class="admonition-content">
+    <p>
+      Services can be set up in a variety of ways. The most common way is to create a ModuleScript
+      that returns a table with the methods you want to define, and then register it with Roam just prior
+      to the final module's return.
+    </p>
+    <p>See <a href="Roam#registerService">Roam.registerService</a> for more information on setting up a new service.</p>
+  </div>
+</div>
 <div class="admonition admonition-tip alert alert--success">
   <div class="admonition-heading">
     <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="16" viewBox="0 0 12 16">
@@ -155,11 +187,11 @@ Roam<span class="token punctuation">.</span><span class="token function">getServ
   <div class="admonition-content">
     <p>
       Roam does not inherently have networking functionality. However, it can easily be added through the use of NetWire's
-      <strong><a href="https://raild3x.github.io/ModulesOnRails/api/ServerNetWire#setupServiceNetworking" target="_blank">.setupServiceNetworking</a></strong> funtion.
+      <strong><a href="ServerNetWire#setupServiceNetworking">.setupServiceNetworking</a></strong> funtion.
     </p>
   </div>
 </div>
-</div></header><h2 class="anchor anchorWithStickyNavbar_LWe7" id="types">Types<a href="#types" class="hash-link" aria-label="Direct link to Types" title="Direct link to Types">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="ServiceConfig"><code style="text-decoration:none">ServiceConfig</code><a href="#ServiceConfig" class="hash-link" aria-label="Direct link to ServiceConfig" title="Direct link to ServiceConfig">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/roam/src/init.luau#L119"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code class="purple_ieR2">interface</code> <code>ServiceConfig<!-- --> <!-- -->{</code><div class="inset_uKQm"><div><code>Name<!-- -->: </code><code class="blue_P4bS">string</code><span class="inlineDescription_G7Er">-- <span>
+</div></header><h2 class="anchor anchorWithStickyNavbar_LWe7" id="types">Types<a href="#types" class="hash-link" aria-label="Direct link to Types" title="Direct link to Types">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="ServiceConfig"><code style="text-decoration:none">ServiceConfig</code><a href="#ServiceConfig" class="hash-link" aria-label="Direct link to ServiceConfig" title="Direct link to ServiceConfig">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/roam/src/init.luau#L115"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code class="purple_ieR2">interface</code> <code>ServiceConfig<!-- --> <!-- -->{</code><div class="inset_uKQm"><div><code>Name<!-- -->: </code><code class="blue_P4bS">string</code><span class="inlineDescription_G7Er">-- <span>
 <p>Name of the Service. Must be unique. Used when accessing via .getService</p>
 </span></span></div><div><code>RequiredServices<!-- -->: </code><code class="purple_ieR2">{</code><code class="blue_P4bS">Service</code><code class="purple_ieR2">}</code><code class="blue_P4bS">?</code><span class="inlineDescription_G7Er">-- <span>
 <p>The Services that this Service depends on. Roam will ensure that these Services are initialized before this Service.</p>
@@ -170,10 +202,23 @@ Roam<span class="token punctuation">.</span><span class="token function">getServ
 </span></span></div></div><code>}</code></div><div>
 <pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> myOtherService <span class="token operator">=</span> <span class="token function">require</span><span class="token punctuation">(</span>ReplicatedStorage<span class="token punctuation">.</span>MyOtherService<span class="token punctuation">)</span>
 
-<span class="token keyword">local</span> MyService <span class="token operator">=</span> Roam<span class="token punctuation">.</span><span class="token function">createService</span> <span class="token punctuation">{</span>
+<span class="token comment">-------------------------------------------------</span>
+
+<span class="token keyword">local</span> MyService <span class="token operator">=</span> <span class="token punctuation">{</span><span class="token punctuation">}</span>
+
+<span class="token keyword">function</span> MyService<span class="token punctuation">:</span><span class="token function">CustomStartMethod</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+	<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"MyService started!"</span><span class="token punctuation">)</span>
+<span class="token keyword">end</span>
+
+<span class="token comment">-------------------------------------------------</span>
+
+Roam<span class="token punctuation">.</span><span class="token function">registerService</span><span class="token punctuation">(</span>MyService<span class="token punctuation">,</span> <span class="token punctuation">{</span>
 	Name <span class="token operator">=</span> <span class="token string">"MyService"</span><span class="token punctuation">,</span>
 	RequiredServices <span class="token operator">=</span> <span class="token punctuation">{</span>myOtherService<span class="token punctuation">}</span><span class="token punctuation">,</span>
-<span class="token punctuation">}</span>
+	StartMethodName <span class="token operator">=</span> <span class="token string">"CustomStartMethod"</span><span class="token punctuation">,</span>
+<span class="token punctuation">}</span><span class="token punctuation">)</span>
+
+<span class="token keyword">return</span> MyService
 </code></pre>
 <div class="admonition admonition-caution alert alert--warning">
   <div class="admonition-heading">
@@ -185,44 +230,19 @@ Roam<span class="token punctuation">.</span><span class="token function">getServ
     <p>Do NOT add services to the RequiredServices after you have created or registered the service. This will cause undefined behavior.</p>
   </div>
 </div>
-</div><h2 class="anchor anchorWithStickyNavbar_LWe7" id="properties">Properties<a href="#properties" class="hash-link" aria-label="Direct link to Properties" title="Direct link to Properties">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="ClassName"><code style="text-decoration:none">ClassName</code><a href="#ClassName" class="hash-link" aria-label="Direct link to ClassName" title="Direct link to ClassName">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/roam/src/init.luau#L202"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Roam<!-- -->.<!-- -->ClassName<!-- -->:<!-- --> </code> <code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/Roam">&quot;Roam&quot;</a></code></div><div>
-<p>The ClassName of the Roam module.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Debug"><code style="text-decoration:none">Debug</code><a href="#Debug" class="hash-link" aria-label="Direct link to Debug" title="Direct link to Debug">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/roam/src/init.luau#L208"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Roam<!-- -->.<!-- -->Debug<!-- -->:<!-- --> </code> <code class="blue_P4bS">boolean</code></div><div>
+</div><h2 class="anchor anchorWithStickyNavbar_LWe7" id="properties">Properties<a href="#properties" class="hash-link" aria-label="Direct link to Properties" title="Direct link to Properties">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Debug"><code style="text-decoration:none">Debug</code><a href="#Debug" class="hash-link" aria-label="Direct link to Debug" title="Direct link to Debug">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/roam/src/init.luau#L206"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Roam<!-- -->.<!-- -->Debug<!-- -->:<!-- --> </code> <code class="blue_P4bS">boolean</code></div><div>
 <p>Whether or not to print debug messages. Default is false.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Bootstrappers"><code style="text-decoration:none">Bootstrappers</code><a href="#Bootstrappers" class="hash-link" aria-label="Direct link to Bootstrappers" title="Direct link to Bootstrappers">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/roam/src/init.luau#L214"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Roam<!-- -->.<!-- -->Bootstrappers<!-- -->:<!-- --> </code> <code class="purple_ieR2">{</code><div class="inset_uKQm"><code>Server<!-- -->: </code><code class="green_DgR4">(</code><code>script<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Script" target="_blank" rel="noopener noreferrer">Script<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="green_DgR4">)</code><code class="green_DgR4"> → </code><code class="green_DgR4">(</code><code class="green_DgR4">)</code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code>Client<!-- -->: </code><code class="green_DgR4">(</code><code>script<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Script" target="_blank" rel="noopener noreferrer">Script<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="green_DgR4">)</code><code class="green_DgR4"> → </code><code class="green_DgR4">(</code><code class="green_DgR4">)</code></div><code class="purple_ieR2">}</code></div><div>
-<p>A table of generic bootstrappers for Roam / Orion.</p>
-</div><h2 class="anchor anchorWithStickyNavbar_LWe7" id="functions">Functions<a href="#functions" class="hash-link" aria-label="Direct link to Functions" title="Direct link to Functions">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="createService"><code style="text-decoration:none">createService</code><a href="#createService" class="hash-link" aria-label="Direct link to createService" title="Direct link to createService">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/roam/src/init.luau#L243"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Roam<!-- -->.</code><code class="green_DgR4">createService</code><code>(</code><code>serviceDef<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/Roam#ServiceConfig">ServiceConfig</a></code><code>) → </code><code class="blue_P4bS">Service</code></div><div>
-<p>
-  Creates a Service/Table with Roam to be Initialized and Started when Roam starts.
-  Cannot be called after Roam has been started.
-</p>
-<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> Roam <span class="token operator">=</span> <span class="token function">require</span><span class="token punctuation">(</span>ReplicatedStorage<span class="token punctuation">.</span>Roam<span class="token punctuation">)</span>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Bootstrappers"><code style="text-decoration:none">Bootstrappers</code><a href="#Bootstrappers" class="hash-link" aria-label="Direct link to Bootstrappers" title="Direct link to Bootstrappers">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/roam/src/init.luau#L218"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Roam<!-- -->.<!-- -->Bootstrappers<!-- -->:<!-- --> </code> <code class="purple_ieR2">{</code><div class="inset_uKQm"><code>Server<!-- -->: </code><code class="green_DgR4">(</code><code>script<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Script" target="_blank" rel="noopener noreferrer">Script<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="green_DgR4">)</code><code class="green_DgR4"> → </code><code class="green_DgR4">(</code><code class="green_DgR4">)</code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code>Client<!-- -->: </code><code class="green_DgR4">(</code><code>script<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Script" target="_blank" rel="noopener noreferrer">Script<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="green_DgR4">)</code><code class="green_DgR4"> → </code><code class="green_DgR4">(</code><code class="green_DgR4">)</code></div><code class="purple_ieR2">}</code></div><div>
+<p>A table of generic bootstrappers for Roam that you can use to quickly setup new projects.</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> Roam <span class="token operator">=</span> <span class="token function">require</span><span class="token punctuation">(</span>Packages<span class="token punctuation">.</span>Roam<span class="token punctuation">)</span>
 
-<span class="token keyword">local</span> MyService <span class="token operator">=</span> Roam<span class="token punctuation">.</span><span class="token function">createService</span> <span class="token punctuation">{</span> Name <span class="token operator">=</span> <span class="token string">"MyService"</span> <span class="token punctuation">}</span>
-
-<span class="token keyword">function</span> MyService<span class="token punctuation">:</span><span class="token function">DoSomething</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
-	<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"yeee haw!"</span><span class="token punctuation">)</span>
-<span class="token keyword">end</span>
-
-<span class="token comment">-- Default StartMethodName is "RoamStart" (Can be overriden in service creation config)</span>
-<span class="token keyword">function</span> MyService<span class="token punctuation">:</span><span class="token function">RoamStart</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
-	<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"MyService started!"</span><span class="token punctuation">)</span>
-	self<span class="token punctuation">:</span><span class="token function">DoSomething</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
-<span class="token keyword">end</span>
-
-<span class="token comment">-- Default InitMethodName is "RoamInit" (Can be overriden in service creation config)</span>
-<span class="token keyword">function</span> MyService<span class="token punctuation">:</span><span class="token function">RoamInit</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
-	<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"MyService initialized!"</span><span class="token punctuation">)</span>
-<span class="token keyword">end</span>
-
-<span class="token keyword">return</span> MyService
+Roam<span class="token punctuation">.</span>Bootstrappers<span class="token punctuation">.</span><span class="token function">Server</span><span class="token punctuation">(</span>script<span class="token punctuation">)</span>
+<span class="token punctuation">:</span><span class="token function">andThenCall</span><span class="token punctuation">(</span>print<span class="token punctuation">,</span> <span class="token string">"Roam Server Bootstrapped!"</span><span class="token punctuation">)</span>
 </code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="registerService"><code style="text-decoration:none">registerService</code><a href="#registerService" class="hash-link" aria-label="Direct link to registerService" title="Direct link to registerService">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/roam/src/init.luau#L290"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Roam<!-- -->.</code><code class="green_DgR4">registerService</code><code>(</code><div class="inset_uKQm"><div><code>service<!-- -->: </code><code class="blue_P4bS">Service</code><code>,</code></div><div><code>serviceConfig<!-- -->: </code><code class="purple_ieR2">(</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/Roam#ServiceConfig">ServiceConfig</a></code><code class="op_lSLc"> | </code><code class="blue_P4bS">string</code><code class="purple_ieR2">)</code><code class="blue_P4bS">?</code></div></div><code>) → </code><code class="blue_P4bS">Service</code></div><div>
+</div><h2 class="anchor anchorWithStickyNavbar_LWe7" id="functions">Functions<a href="#functions" class="hash-link" aria-label="Direct link to Functions" title="Direct link to Functions">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="registerService"><code style="text-decoration:none">registerService</code><a href="#registerService" class="hash-link" aria-label="Direct link to registerService" title="Direct link to registerService">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/roam/src/init.luau#L242"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Roam<!-- -->.</code><code class="green_DgR4">registerService</code><code>(</code><div class="inset_uKQm"><div><code>service<!-- -->: </code><code class="blue_P4bS">Service</code><code>,</code></div><div><code>serviceConfig<!-- -->: </code><code class="purple_ieR2">(</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/Roam#ServiceConfig">ServiceConfig</a></code><code class="op_lSLc"> | </code><code class="blue_P4bS">string</code><code class="purple_ieR2">)</code><code class="blue_P4bS">?</code></div></div><code>) → </code><code class="blue_P4bS">Service</code></div><div>
 <p>
   Registers a Service/Table with Roam to be Initialized and Started when Roam starts.
-  Cannot be called after Roam has been started. This method was added to allow for easy
-  backporting of existing services to Roam. This is an alternative method to setting up
-  services over using <code>createService</code>.
+  Cannot be called after Roam has been started.
 </p>
 <pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> MyRegisteredService <span class="token operator">=</span> <span class="token punctuation">{</span><span class="token punctuation">}</span>
 
@@ -234,12 +254,63 @@ Roam<span class="token punctuation">.</span><span class="token function">getServ
 	<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"MyRegisteredService initialized!"</span><span class="token punctuation">)</span>
 <span class="token keyword">end</span>
 
+<span class="token comment">----------------------------------------------------------------</span>
+
 <span class="token keyword">local</span> Roam <span class="token operator">=</span> <span class="token function">require</span><span class="token punctuation">(</span>Packages<span class="token punctuation">.</span>Roam<span class="token punctuation">)</span>
 Roam<span class="token punctuation">.</span><span class="token function">registerService</span><span class="token punctuation">(</span>MyRegisteredService<span class="token punctuation">,</span> <span class="token string">"MyRegisteredService"</span><span class="token punctuation">)</span>
 
 <span class="token keyword">return</span> MyRegisteredService
 </code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="requireModules"><code style="text-decoration:none">requireModules</code><a href="#requireModules" class="hash-link" aria-label="Direct link to requireModules" title="Direct link to requireModules">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/roam/src/init.luau#L348"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Roam<!-- -->.</code><code class="green_DgR4">requireModules</code><code>(</code><div class="inset_uKQm"><div><code>parents<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Instance" target="_blank" rel="noopener noreferrer">Instance<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="op_lSLc"> | </code><code class="purple_ieR2">{</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Instance" target="_blank" rel="noopener noreferrer">Instance<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="purple_ieR2">}</code><code>,</code></div><div><code>config<!-- -->: </code><code class="purple_ieR2">{</code><div class="inset_uKQm"><code>DeepSearch<!-- -->: </code><code class="blue_P4bS">boolean?</code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code>RequirePredicate<!-- -->: </code><code class="green_DgR4">(</code><code class="yellow_QJap">(</code><code>obj<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/ModuleScript" target="_blank" rel="noopener noreferrer">ModuleScript<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="yellow_QJap">)</code><code class="yellow_QJap"> → </code><code class="blue_P4bS">boolean</code><code class="green_DgR4">)</code><code class="blue_P4bS">?</code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code>IgnoreDescendantsPredicate<!-- -->: </code><code class="green_DgR4">(</code><code class="yellow_QJap">(</code><code>obj<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Instance" target="_blank" rel="noopener noreferrer">Instance<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="yellow_QJap">)</code><code class="yellow_QJap"> → </code><code class="blue_P4bS">boolean</code><code class="green_DgR4">)</code><code class="blue_P4bS">?</code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"></div><code class="purple_ieR2">}</code><code class="blue_P4bS">?</code></div></div><code>) → </code><code class="purple_ieR2">{</code><code class="blue_P4bS">Service</code><code class="purple_ieR2">}</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="start"><code style="text-decoration:none">start</code><a href="#start" class="hash-link" aria-label="Direct link to start" title="Direct link to start">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/roam/src/init.luau#L357"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Roam<!-- -->.</code><code class="green_DgR4">start</code><code>(</code><code>postInitPreStart<!-- -->: </code><code class="purple_ieR2">(</code><code class="green_DgR4">(</code><code class="green_DgR4">)</code><code class="green_DgR4"> → </code><code class="green_DgR4">(</code><code class="blue_P4bS">Promise?</code><code class="green_DgR4">)</code><code class="purple_ieR2">)</code><code class="blue_P4bS">?</code><code>) → </code><code class="blue_P4bS">Promise</code></div><div>
+<p>Starts Roam. Should only be called once. Calling multiple times will result in a promise rejection.</p>
+<p>
+  Optional argument <code>postInitPreStart</code> is a function that is called
+  after all services have been initialized, but before they are started.
+</p>
+<pre class="language-lua"><code class="language-lua">Roam<span class="token punctuation">.</span><span class="token function">start</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+<span class="token punctuation">:</span><span class="token function">andThenCall</span><span class="token punctuation">(</span>print<span class="token punctuation">,</span> <span class="token string">"Roam started!"</span><span class="token punctuation">)</span>
+<span class="token punctuation">:</span><span class="token function">catch</span><span class="token punctuation">(</span>warn<span class="token punctuation">)</span>
+</code></pre>
+<div class="admonition admonition-caution alert alert--warning">
+  <div class="admonition-heading">
+    <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+          <path d="M8.893 1.5c-.183-.31-.52-.5-.887-.5s-.703.19-.886.5L.138 13.499a.98.98 0 0 0 0 1.001c.193.31.53.501.886.501h13.964c.367 0 .704-.19.877-.5a1.03 1.03 0 0 0 .01-1.002L8.893 1.5zm.133 11.497H6.987v-2.003h2.039v2.003zm0-3.004H6.987V5.987h2.039v4.006z"></path>
+        </svg></span>caution</h5>
+  </div>
+  <div class="admonition-content">
+    <p>
+      Be sure that all services have been created <em>before</em>
+      calling <code>Start</code>. Services cannot be added later.
+    </p>
+  </div>
+</div>
+<div class="admonition admonition-tip alert alert--success">
+  <div class="admonition-heading">
+    <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="16" viewBox="0 0 12 16">
+          <path d="M6.5 0C3.48 0 1 2.19 1 5c0 .92.55 2.25 1 3 1.34 2.25 1.78 2.78 2 4v1h5v-1c.22-1.22.66-1.75 2-4 .45-.75 1-2.08 1-3 0-2.81-2.48-5-5.5-5zm3.64 7.48c-.25.44-.47.8-.67 1.11-.86 1.41-1.25 2.06-1.45 3.23-.02.05-.02.11-.02.17H5c0-.06 0-.13-.02-.17-.2-1.17-.59-1.83-1.45-3.23-.2-.31-.42-.67-.67-1.11C2.44 6.78 2 5.65 2 5c0-2.2 2.02-4 4.5-4 1.22 0 2.36.42 3.22 1.19C10.55 2.94 11 3.94 11 5c0 .66-.44 1.78-.86 2.48zM4 14h5c-.23 1.14-1.3 2-2.5 2s-2.27-.86-2.5-2z"></path>
+        </svg></span>Bootstrapping</h5>
+  </div>
+  <div class="admonition-content">
+    <p>
+      You can use the <a href="Roam#Bootstrappers">Roam.Bootstrappers</a> table/methods to quickly bootstrap Roam in your project.
+      This is reccomended as it will provide a consistent starting point for your projects.
+    </p>
+  </div>
+</div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="onStart"><code style="text-decoration:none">onStart</code><a href="#onStart" class="hash-link" aria-label="Direct link to onStart" title="Direct link to onStart">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/roam/src/init.luau#L499"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Roam<!-- -->.</code><code class="green_DgR4">onStart</code><code>(</code><code>) → </code><code class="blue_P4bS">Promise</code></div><div>
+<p>
+  Returns a promise that is resolved once Roam has started. This is useful
+  for any code that needs to tie into Roam services but is not the script
+  that called <code>Start</code>.
+</p>
+<pre class="language-lua"><code class="language-lua">Roam<span class="token punctuation">.</span><span class="token function">onStart</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">:</span><span class="token function">andThen</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+	<span class="token keyword">local</span> MyService <span class="token operator">=</span> Roam<span class="token punctuation">.</span>Services<span class="token punctuation">.</span>MyService
+	MyService<span class="token punctuation">:</span><span class="token function">DoSomething</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span><span class="token punctuation">:</span><span class="token function">catch</span><span class="token punctuation">(</span>warn<span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="isReady"><code style="text-decoration:none">isReady</code><a href="#isReady" class="hash-link" aria-label="Direct link to isReady" title="Direct link to isReady">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/roam/src/init.luau#L510"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Roam<!-- -->.</code><code class="green_DgR4">isReady</code><code>(</code><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
+<p>Returns whether or not Roam has been successfully started and is ready for external access.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="requireModules"><code style="text-decoration:none">requireModules</code><a href="#requireModules" class="hash-link" aria-label="Direct link to requireModules" title="Direct link to requireModules">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/roam/src/init.luau#L536"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Roam<!-- -->.</code><code class="green_DgR4">requireModules</code><code>(</code><div class="inset_uKQm"><div><code>parents<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Instance" target="_blank" rel="noopener noreferrer">Instance<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="op_lSLc"> | </code><code class="purple_ieR2">{</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Instance" target="_blank" rel="noopener noreferrer">Instance<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="purple_ieR2">}</code><code>,</code></div><div><code>config<!-- -->: </code><code class="purple_ieR2">{</code><div class="inset_uKQm"><code>DeepSearch<!-- -->: </code><code class="blue_P4bS">boolean?</code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code>RequirePredicate<!-- -->: </code><code class="green_DgR4">(</code><code class="yellow_QJap">(</code><code>obj<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/ModuleScript" target="_blank" rel="noopener noreferrer">ModuleScript<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="yellow_QJap">)</code><code class="yellow_QJap"> → </code><code class="blue_P4bS">boolean</code><code class="green_DgR4">)</code><code class="blue_P4bS">?</code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code>IgnoreDescendantsPredicate<!-- -->: </code><code class="green_DgR4">(</code><code class="yellow_QJap">(</code><code>obj<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Instance" target="_blank" rel="noopener noreferrer">Instance<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="yellow_QJap">)</code><code class="yellow_QJap"> → </code><code class="blue_P4bS">boolean</code><code class="green_DgR4">)</code><code class="blue_P4bS">?</code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"></div><code class="purple_ieR2">}</code><code class="blue_P4bS">?</code></div></div><code>) → </code><code class="purple_ieR2">{</code><code class="blue_P4bS">Service</code><code class="purple_ieR2">}</code></div><div>
 <p>
   Requires all the modules that are children of the given parent. This is an easy
   way to quickly load all services that might be in a folder. Takes an optional predicate
@@ -262,76 +333,13 @@ Roam<span class="token punctuation">.</span><span class="token function">require
 	<span class="token keyword">end</span><span class="token punctuation">,</span>
 <span class="token punctuation">}</span><span class="token punctuation">)</span>
 </code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="getNameFromService"><code style="text-decoration:none">getNameFromService</code><a href="#getNameFromService" class="hash-link" aria-label="Direct link to getNameFromService" title="Direct link to getNameFromService">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/roam/src/init.luau#L402"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Roam<!-- -->.</code><code class="green_DgR4">getNameFromService</code><code>(</code><code>service<!-- -->: </code><code class="blue_P4bS">Service</code><code>) → </code><code class="blue_P4bS">string</code></div><div>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="getNameFromService"><code style="text-decoration:none">getNameFromService</code><a href="#getNameFromService" class="hash-link" aria-label="Direct link to getNameFromService" title="Direct link to getNameFromService">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/roam/src/init.luau#L590"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Roam<!-- -->.</code><code class="green_DgR4">getNameFromService</code><code>(</code><code>service<!-- -->: </code><code class="blue_P4bS">Service</code><code>) → </code><code class="blue_P4bS">string</code></div><div>
 <p>Fetches the name of a registered Service.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="getService"><code style="text-decoration:none">getService</code><a href="#getService" class="hash-link" aria-label="Direct link to getService" title="Direct link to getService">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/roam/src/init.luau#L410"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Roam<!-- -->.</code><code class="green_DgR4">getService</code><code>(</code><code>serviceName<!-- -->: </code><code class="blue_P4bS">string</code><code>) → </code><code class="blue_P4bS">Service</code></div><div>
-<p>
-  Fetches a registered Service by name.
-  Cannot be called until Roam has been started.
-</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="start"><code style="text-decoration:none">start</code><a href="#start" class="hash-link" aria-label="Direct link to start" title="Direct link to start">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/roam/src/init.luau#L437"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Roam<!-- -->.</code><code class="green_DgR4">start</code><code>(</code><code>postInitPreStart<!-- -->: </code><code class="purple_ieR2">(</code><code class="green_DgR4">(</code><code class="green_DgR4">)</code><code class="green_DgR4"> → </code><code class="green_DgR4">(</code><code class="blue_P4bS">Promise?</code><code class="green_DgR4">)</code><code class="purple_ieR2">)</code><code class="blue_P4bS">?</code><code>) → </code><code class="blue_P4bS">Promise</code></div><div>
-<p>
-  Starts Roam. Should only be called once.
-  Optional argument <code>postInitPreStart</code> is a function that is called
-  after all services have been initialized, but before they are started.
-</p>
-<div class="admonition admonition-caution alert alert--warning">
-  <div class="admonition-heading">
-    <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-          <path d="M8.893 1.5c-.183-.31-.52-.5-.887-.5s-.703.19-.886.5L.138 13.499a.98.98 0 0 0 0 1.001c.193.31.53.501.886.501h13.964c.367 0 .704-.19.877-.5a1.03 1.03 0 0 0 .01-1.002L8.893 1.5zm.133 11.497H6.987v-2.003h2.039v2.003zm0-3.004H6.987V5.987h2.039v4.006z"></path>
-        </svg></span>caution</h5>
-  </div>
-  <div class="admonition-content">
-    <p>
-      Be sure that all services have been created <em>before</em>
-      calling <code>Start</code>. Services cannot be added later.
-    </p>
-  </div>
-</div>
-<pre class="language-lua"><code class="language-lua">Roam<span class="token punctuation">.</span><span class="token function">start</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
-<span class="token punctuation">:</span><span class="token function">andThenCall</span><span class="token punctuation">(</span>print<span class="token punctuation">,</span> <span class="token string">"Roam started!"</span><span class="token punctuation">)</span>
-<span class="token punctuation">:</span><span class="token function">catch</span><span class="token punctuation">(</span>warn<span class="token punctuation">)</span>
-</code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="onStart"><code style="text-decoration:none">onStart</code><a href="#onStart" class="hash-link" aria-label="Direct link to onStart" title="Direct link to onStart">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/roam/src/init.luau#L579"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Roam<!-- -->.</code><code class="green_DgR4">onStart</code><code>(</code><code>) → </code><code class="blue_P4bS">Promise</code></div><div>
-<p>
-  Returns a promise that is resolved once Roam has started. This is useful
-  for any code that needs to tie into Roam services but is not the script
-  that called <code>Start</code>.
-</p>
-<pre class="language-lua"><code class="language-lua">Roam<span class="token punctuation">.</span><span class="token function">onStart</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">:</span><span class="token function">andThen</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
-	<span class="token keyword">local</span> MyService <span class="token operator">=</span> Roam<span class="token punctuation">.</span>Services<span class="token punctuation">.</span>MyService
-	MyService<span class="token punctuation">:</span><span class="token function">DoSomething</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
-<span class="token keyword">end</span><span class="token punctuation">)</span><span class="token punctuation">:</span><span class="token function">catch</span><span class="token punctuation">(</span>warn<span class="token punctuation">)</span>
-</code></pre>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="isReady"><code style="text-decoration:none">isReady</code><a href="#isReady" class="hash-link" aria-label="Direct link to isReady" title="Direct link to isReady">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/roam/src/init.luau#L590"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Roam<!-- -->.</code><code class="green_DgR4">isReady</code><code>(</code><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
-<p>Returns whether or not Roam has been successfully started and is ready for external access.</p>
 </div></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
     &quot;functions&quot;: [
         {
-            &quot;name&quot;: &quot;createService&quot;,
-            &quot;desc&quot;: &quot;Creates a Service/Table with Roam to be Initialized and Started when Roam starts.\nCannot be called after Roam has been started.\n\n```lua\nlocal Roam = require(ReplicatedStorage.Roam)\n\nlocal MyService = Roam.createService { Name = \&quot;MyService\&quot; }\n\nfunction MyService:DoSomething()\n\tprint(\&quot;yeee haw!\&quot;)\nend\n\n-- Default StartMethodName is \&quot;RoamStart\&quot; (Can be overriden in service creation config)\nfunction MyService:RoamStart()\n\tprint(\&quot;MyService started!\&quot;)\n\tself:DoSomething()\nend\n\n-- Default InitMethodName is \&quot;RoamInit\&quot; (Can be overriden in service creation config)\nfunction MyService:RoamInit()\n\tprint(\&quot;MyService initialized!\&quot;)\nend\n\nreturn MyService\n```&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;serviceDef&quot;,
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;ServiceConfig&quot;
-                }
-            ],
-            &quot;returns&quot;: [
-                {
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;Service\r\n&quot;
-                }
-            ],
-            &quot;function_type&quot;: &quot;static&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 243,
-                &quot;path&quot;: &quot;lib/roam/src/init.luau&quot;
-            }
-        },
-        {
             &quot;name&quot;: &quot;registerService&quot;,
-            &quot;desc&quot;: &quot;Registers a Service/Table with Roam to be Initialized and Started when Roam starts.\nCannot be called after Roam has been started. This method was added to allow for easy\nbackporting of existing services to Roam. This is an alternative method to setting up\nservices over using `createService`.\n\n\n```lua -- MyRegisteredService.lua\nlocal MyRegisteredService = {}\n\nfunction MyRegisteredService:RoamStart()\n\tprint(\&quot;MyRegisteredService started!\&quot;)\nend\n\nfunction MyRegisteredService:RoamInit()\n\tprint(\&quot;MyRegisteredService initialized!\&quot;)\nend\n\nlocal Roam = require(Packages.Roam)\nRoam.registerService(MyRegisteredService, \&quot;MyRegisteredService\&quot;)\n\nreturn MyRegisteredService\n```&quot;,
+            &quot;desc&quot;: &quot;Registers a Service/Table with Roam to be Initialized and Started when Roam starts.\nCannot be called after Roam has been started.\n\n```lua -- MyRegisteredService.lua\nlocal MyRegisteredService = {}\n\nfunction MyRegisteredService:RoamStart()\n\tprint(\&quot;MyRegisteredService started!\&quot;)\nend\n\nfunction MyRegisteredService:RoamInit()\n\tprint(\&quot;MyRegisteredService initialized!\&quot;)\nend\n\n----------------------------------------------------------------\n\nlocal Roam = require(Packages.Roam)\nRoam.registerService(MyRegisteredService, \&quot;MyRegisteredService\&quot;)\n\nreturn MyRegisteredService\n```&quot;,
             &quot;params&quot;: [
                 {
                     &quot;name&quot;: &quot;service&quot;,
@@ -352,7 +360,88 @@ Roam<span class="token punctuation">.</span><span class="token function">require
             ],
             &quot;function_type&quot;: &quot;static&quot;,
             &quot;source&quot;: {
-                &quot;line&quot;: 290,
+                &quot;line&quot;: 242,
+                &quot;path&quot;: &quot;lib/roam/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;createService&quot;,
+            &quot;desc&quot;: &quot;Creates a Service/Table with Roam to be Initialized and Started when Roam starts.\nCannot be called after Roam has been started.\n\nThis is an alternative method to setting up services over using `registerService`.\n\n```lua\nlocal Roam = require(ReplicatedStorage.Roam)\n\nlocal MyService = Roam.createService { Name = \&quot;MyService\&quot; }\n\nfunction MyService:DoSomething()\n\tprint(\&quot;yeee haw!\&quot;)\nend\n\n-- Default StartMethodName is \&quot;RoamStart\&quot; (Can be overriden in service creation config)\nfunction MyService:RoamStart()\n\tprint(\&quot;MyService started!\&quot;)\n\tself:DoSomething()\nend\n\n-- Default InitMethodName is \&quot;RoamInit\&quot; (Can be overriden in service creation config)\nfunction MyService:RoamInit()\n\tprint(\&quot;MyService initialized!\&quot;)\nend\n\nreturn MyService\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;serviceDef&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;ServiceConfig&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Service\r\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;deprecated&quot;: {
+                &quot;version&quot;: &quot;0.1.5&quot;,
+                &quot;desc&quot;: null
+            },
+            &quot;private&quot;: true,
+            &quot;source&quot;: {
+                &quot;line&quot;: 309,
+                &quot;path&quot;: &quot;lib/roam/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;start&quot;,
+            &quot;desc&quot;: &quot;Starts Roam. Should only be called once. Calling multiple times will result in a promise rejection.\n\nOptional argument `postInitPreStart` is a function that is called\nafter all services have been initialized, but before they are started.\n\n```lua\nRoam.start()\n:andThenCall(print, \&quot;Roam started!\&quot;)\n:catch(warn)\n```\n\n:::caution\nBe sure that all services have been created _before_\ncalling `Start`. Services cannot be added later.\n:::\n\n:::tip Bootstrapping\nYou can use the [Roam.Bootstrappers](Roam#Bootstrappers) table/methods to quickly bootstrap Roam in your project.\nThis is reccomended as it will provide a consistent starting point for your projects.\n:::&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;postInitPreStart&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;(() -&gt; (Promise?))?&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Promise&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 357,
+                &quot;path&quot;: &quot;lib/roam/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;onStart&quot;,
+            &quot;desc&quot;: &quot;Returns a promise that is resolved once Roam has started. This is useful\nfor any code that needs to tie into Roam services but is not the script\nthat called `Start`.\n```lua\nRoam.onStart():andThen(function()\n\tlocal MyService = Roam.Services.MyService\n\tMyService:DoSomething()\nend):catch(warn)\n```&quot;,
+            &quot;params&quot;: [],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Promise&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 499,
+                &quot;path&quot;: &quot;lib/roam/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;isReady&quot;,
+            &quot;desc&quot;: &quot;Returns whether or not Roam has been successfully started and is ready for external access.&quot;,
+            &quot;params&quot;: [],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;boolean\r\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 510,
                 &quot;path&quot;: &quot;lib/roam/src/init.luau&quot;
             }
         },
@@ -379,7 +468,7 @@ Roam<span class="token punctuation">.</span><span class="token function">require
             ],
             &quot;function_type&quot;: &quot;static&quot;,
             &quot;source&quot;: {
-                &quot;line&quot;: 348,
+                &quot;line&quot;: 536,
                 &quot;path&quot;: &quot;lib/roam/src/init.luau&quot;
             }
         },
@@ -401,7 +490,7 @@ Roam<span class="token punctuation">.</span><span class="token function">require
             ],
             &quot;function_type&quot;: &quot;static&quot;,
             &quot;source&quot;: {
-                &quot;line&quot;: 402,
+                &quot;line&quot;: 590,
                 &quot;path&quot;: &quot;lib/roam/src/init.luau&quot;
             }
         },
@@ -422,62 +511,13 @@ Roam<span class="token punctuation">.</span><span class="token function">require
                 }
             ],
             &quot;function_type&quot;: &quot;static&quot;,
+            &quot;deprecated&quot;: {
+                &quot;version&quot;: &quot;0.1.5&quot;,
+                &quot;desc&quot;: null
+            },
+            &quot;private&quot;: true,
             &quot;source&quot;: {
-                &quot;line&quot;: 410,
-                &quot;path&quot;: &quot;lib/roam/src/init.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;start&quot;,
-            &quot;desc&quot;: &quot;Starts Roam. Should only be called once.\nOptional argument `postInitPreStart` is a function that is called\nafter all services have been initialized, but before they are started.\n\n:::caution\nBe sure that all services have been created _before_\ncalling `Start`. Services cannot be added later.\n:::\n\n```lua\nRoam.start()\n:andThenCall(print, \&quot;Roam started!\&quot;)\n:catch(warn)\n```&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;postInitPreStart&quot;,
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;(() -&gt; (Promise?))?&quot;
-                }
-            ],
-            &quot;returns&quot;: [
-                {
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;Promise&quot;
-                }
-            ],
-            &quot;function_type&quot;: &quot;static&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 437,
-                &quot;path&quot;: &quot;lib/roam/src/init.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;onStart&quot;,
-            &quot;desc&quot;: &quot;Returns a promise that is resolved once Roam has started. This is useful\nfor any code that needs to tie into Roam services but is not the script\nthat called `Start`.\n```lua\nRoam.onStart():andThen(function()\n\tlocal MyService = Roam.Services.MyService\n\tMyService:DoSomething()\nend):catch(warn)\n```&quot;,
-            &quot;params&quot;: [],
-            &quot;returns&quot;: [
-                {
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;Promise&quot;
-                }
-            ],
-            &quot;function_type&quot;: &quot;static&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 579,
-                &quot;path&quot;: &quot;lib/roam/src/init.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;isReady&quot;,
-            &quot;desc&quot;: &quot;Returns whether or not Roam has been successfully started and is ready for external access.&quot;,
-            &quot;params&quot;: [],
-            &quot;returns&quot;: [
-                {
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;boolean\r\n&quot;
-                }
-            ],
-            &quot;function_type&quot;: &quot;static&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 590,
+                &quot;line&quot;: 600,
                 &quot;path&quot;: &quot;lib/roam/src/init.luau&quot;
             }
         }
@@ -487,8 +527,12 @@ Roam<span class="token punctuation">.</span><span class="token function">require
             &quot;name&quot;: &quot;ClassName&quot;,
             &quot;desc&quot;: &quot;The ClassName of the Roam module.&quot;,
             &quot;lua_type&quot;: &quot;\&quot;Roam\&quot;&quot;,
+            &quot;tags&quot;: [
+                &quot;ReadOnly&quot;
+            ],
+            &quot;private&quot;: true,
             &quot;source&quot;: {
-                &quot;line&quot;: 202,
+                &quot;line&quot;: 200,
                 &quot;path&quot;: &quot;lib/roam/src/init.luau&quot;
             }
         },
@@ -497,16 +541,16 @@ Roam<span class="token punctuation">.</span><span class="token function">require
             &quot;desc&quot;: &quot;Whether or not to print debug messages. Default is false.&quot;,
             &quot;lua_type&quot;: &quot;boolean&quot;,
             &quot;source&quot;: {
-                &quot;line&quot;: 208,
+                &quot;line&quot;: 206,
                 &quot;path&quot;: &quot;lib/roam/src/init.luau&quot;
             }
         },
         {
             &quot;name&quot;: &quot;Bootstrappers&quot;,
-            &quot;desc&quot;: &quot;A table of generic bootstrappers for Roam / Orion.&quot;,
+            &quot;desc&quot;: &quot;A table of generic bootstrappers for Roam that you can use to quickly setup new projects.\n```lua\nlocal Roam = require(Packages.Roam)\n\nRoam.Bootstrappers.Server(script)\n:andThenCall(print, \&quot;Roam Server Bootstrapped!\&quot;)\n```&quot;,
             &quot;lua_type&quot;: &quot;{Server: (script: Script) -&gt; (), Client: (script: Script) -&gt; ()}&quot;,
             &quot;source&quot;: {
-                &quot;line&quot;: 214,
+                &quot;line&quot;: 218,
                 &quot;path&quot;: &quot;lib/roam/src/init.luau&quot;
             }
         }
@@ -514,7 +558,7 @@ Roam<span class="token punctuation">.</span><span class="token function">require
     &quot;types&quot;: [
         {
             &quot;name&quot;: &quot;ServiceConfig&quot;,
-            &quot;desc&quot;: &quot;```lua\nlocal myOtherService = require(ReplicatedStorage.MyOtherService)\n\nlocal MyService = Roam.createService {\n\tName = \&quot;MyService\&quot;,\n\tRequiredServices = {myOtherService},\n}\n```\n\n:::caution Deffering RequiredServices\nDo NOT add services to the RequiredServices after you have created or registered the service. This will cause undefined behavior.\n:::&quot;,
+            &quot;desc&quot;: &quot;```lua\nlocal myOtherService = require(ReplicatedStorage.MyOtherService)\n\n-------------------------------------------------\n\nlocal MyService = {}\n\nfunction MyService:CustomStartMethod()\n\tprint(\&quot;MyService started!\&quot;)\nend\n\n-------------------------------------------------\n\nRoam.registerService(MyService, {\n\tName = \&quot;MyService\&quot;,\n\tRequiredServices = {myOtherService},\n\tStartMethodName = \&quot;CustomStartMethod\&quot;,\n})\n\nreturn MyService\n```\n\n:::caution Deffering RequiredServices\nDo NOT add services to the RequiredServices after you have created or registered the service. This will cause undefined behavior.\n:::&quot;,
             &quot;fields&quot;: [
                 {
                     &quot;name&quot;: &quot;Name&quot;,
@@ -538,19 +582,19 @@ Roam<span class="token punctuation">.</span><span class="token function">require
                 }
             ],
             &quot;source&quot;: {
-                &quot;line&quot;: 119,
+                &quot;line&quot;: 115,
                 &quot;path&quot;: &quot;lib/roam/src/init.luau&quot;
             }
         }
     ],
     &quot;name&quot;: &quot;Roam&quot;,
-    &quot;desc&quot;: &quot;Roam follows a design pattern similar to Knit, but is more lightweight (Shoutout\nto Stephen Leitnick [Sleitnick]). It removes all networking and replication\nfunctionality, and instead focuses on providing a simple method to easily\ninitialize Services given to it and provide global accessors.\n\nRoam gathers a collection of specified services and initializes &#x27;syncronously&#x27;.\nOnce all services have been fully initialized, it then starts them &#x27;asyncronously&#x27; by\nspawning their &#x27;RoamStart&#x27; method in a new thread.\n\nRoam enforces contracts to ensure that only the Services that you intend are\ninitialized. By following the contracts of service construction/registration,\nRoam is able to ensure that nothing that isnt intended to be initialized doesnt\ncause any issues during the loading or start process.\n\n[CONTRACTS]\n- Services must be created/registered before Roam is started.\n- Services must be created/registered with a unique name.\n- Services with `RoamInit` and `RoamStart` methods will have those methods\n  called when Roam is started at the appropriate time. (Names are configurable)\n- All Services are guaranteed safe to access in RoamStart.\n- Only StaticMethods are safe to call prior to RoamStart.\n\n[EXAMPLE USAGE]\n```lua -- init.Server.lua\nlocal Roam = require(ReplicatedStorage.Roam)\n\n-- Just iterates through all the children of the given parents\n-- and requires any module scripts that match the given predicate\nRoam.requireModules({\n\tReplicatedStorage.Shared;\n\tServerScriptService.Server;\n})\n\n-- Start Roam\nRoam.start()\n:andThenCall(print, \&quot;Roam started!\&quot;)\n:catch(warn)\n\n-- Accessing a potential Service\nRoam.getService(\&quot;MyService\&quot;):DoSomething() -- It is preffered to use standard requires instead of getService in order to get proper linting.\n```\n\n:::tip Networking\nRoam does not inherently have networking functionality. However, it can easily be added through the use of NetWire&#x27;s \n**[.setupServiceNetworking](https://raild3x.github.io/ModulesOnRails/api/ServerNetWire#setupServiceNetworking)** funtion.\n:::&quot;,
+    &quot;desc&quot;: &quot;Roam is a systems bootstrapping tool for Roblox luau projects, designed to make it easy to\ninitialize and start services in a topologically sorted manner without the need to\nmanually order and start services.\n\nRoam follows a design pattern similar to [Knit](https://sleitnick.github.io/Knit/), but is more lightweight. It removes all networking and replication\nfunctionality, and instead focuses on providing a simple methodology to easily\ninitialize Services given to it.\n\nRoam gathers a collection of specified services and initializes &#x27;syncronously&#x27;.\nOnce all services have been fully initialized, it then starts them &#x27;asyncronously&#x27; by\nspawning their &#x27;RoamStart&#x27; method in a new thread.\n\nRoam is RunContext agnostic, meaning it can be used on both the server and client in the same manner.\nIt makes no distinction between the two, and instead focuses on providing a simple\ninterface for initializing and starting services. This means you could create a service and register it on \nboth the server and client, and it will be initialized and started on both ends. \n\n**[CONTRACTS]**\n- Services must be created/registered before Roam is started.\n- Services must be created/registered with a unique name.\n- Services with `RoamInit` and `RoamStart` methods will have those methods\n  called when Roam is started at the appropriate time. (Names are configurable)\n- `RequiredServices` boot in proper topological order if specified in the ServiceConfig.\n- Roam functions the same regardless of RunContext (Server/Client).\n\n**[EXAMPLE STARTUP]**\n```lua -- ServerBootstrapper.Server.lua\nlocal Roam = require(ReplicatedStorage.Roam)\n\n-- Just iterates through all the children of the given parents\n-- and requires any module scripts that match the given predicate\nRoam.requireModules({\n\tReplicatedStorage.Shared;\n\tServerScriptService.Server;\n})\n\n-- Start Roam\nRoam.start()\n:andThenCall(print, \&quot;Roam started!\&quot;)\n:catch(warn)\n```\n\n:::info Setting up Services\nServices can be set up in a variety of ways. The most common way is to create a ModuleScript\nthat returns a table with the methods you want to define, and then register it with Roam just prior\nto the final module&#x27;s return.\n\nSee [Roam.registerService](Roam#registerService) for more information on setting up a new service.\n:::\n\n:::tip Networking\nRoam does not inherently have networking functionality. However, it can easily be added through the use of NetWire&#x27;s \n**[.setupServiceNetworking](ServerNetWire#setupServiceNetworking)** funtion.\n:::&quot;,
     &quot;source&quot;: {
-        &quot;line&quot;: 54,
+        &quot;line&quot;: 62,
         &quot;path&quot;: &quot;lib/roam/src/init.luau&quot;
     }
-}</pre></details></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#types" class="table-of-contents__link toc-highlight">Types</a><ul><li><a href="#ServiceConfig" class="table-of-contents__link toc-highlight">ServiceConfig</a></li></ul></li><li><a href="#properties" class="table-of-contents__link toc-highlight">Properties</a><ul><li><a href="#Bootstrappers" class="table-of-contents__link toc-highlight">Bootstrappers</a></li><li><a href="#ClassName" class="table-of-contents__link toc-highlight">ClassName</a></li><li><a href="#Debug" class="table-of-contents__link toc-highlight">Debug</a></li></ul></li><li><a href="#functions" class="table-of-contents__link toc-highlight">Functions</a><ul><li><a href="#createService" class="table-of-contents__link toc-highlight">.createService</a></li><li><a href="#getNameFromService" class="table-of-contents__link toc-highlight">.getNameFromService</a></li><li><a href="#getService" class="table-of-contents__link toc-highlight">.getService</a></li><li><a href="#isReady" class="table-of-contents__link toc-highlight">.isReady</a></li><li><a href="#onStart" class="table-of-contents__link toc-highlight">.onStart</a></li><li><a href="#registerService" class="table-of-contents__link toc-highlight">.registerService</a></li><li><a href="#requireModules" class="table-of-contents__link toc-highlight">.requireModules</a></li><li><a href="#start" class="table-of-contents__link toc-highlight">.start</a></li></ul></li></ul></div></div></div></div></main></div></div><footer class="footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2025 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
-<script src="/ModulesOnRails/assets/js/runtime~main.4fd4db58.js"></script>
-<script src="/ModulesOnRails/assets/js/main.96a76860.js"></script>
+}</pre></details></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#types" class="table-of-contents__link toc-highlight">Types</a><ul><li><a href="#ServiceConfig" class="table-of-contents__link toc-highlight">ServiceConfig</a></li></ul></li><li><a href="#properties" class="table-of-contents__link toc-highlight">Properties</a><ul><li><a href="#Bootstrappers" class="table-of-contents__link toc-highlight">Bootstrappers</a></li><li><a href="#Debug" class="table-of-contents__link toc-highlight">Debug</a></li></ul></li><li><a href="#functions" class="table-of-contents__link toc-highlight">Functions</a><ul><li><a href="#getNameFromService" class="table-of-contents__link toc-highlight">.getNameFromService</a></li><li><a href="#isReady" class="table-of-contents__link toc-highlight">.isReady</a></li><li><a href="#onStart" class="table-of-contents__link toc-highlight">.onStart</a></li><li><a href="#registerService" class="table-of-contents__link toc-highlight">.registerService</a></li><li><a href="#requireModules" class="table-of-contents__link toc-highlight">.requireModules</a></li><li><a href="#start" class="table-of-contents__link toc-highlight">.start</a></li></ul></li></ul></div></div></div></div></main></div></div><footer class="footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2025 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
+<script src="/ModulesOnRails/assets/js/runtime~main.a56c701b.js"></script>
+<script src="/ModulesOnRails/assets/js/main.00358d7c.js"></script>
 </body>
 </html>
