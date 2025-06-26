@@ -150,6 +150,7 @@ type Extension = {
 	.Tag string -- CollectionService tag to use
 	.Ancestors {Instance}? -- Optional array of ancestors in which components will be started
 	.Extensions {Extension}? -- Optional array of extension objects
+	.DelaySetup boolean? -- Optional flag to delay the setup of the component until a later specified time. If true, `:_setup()` must be called manually.
 
 	Component configuration passed to `Component.new`.
 
@@ -160,6 +161,7 @@ type ComponentConfig = {
 	Tag: string,
 	Ancestors: AncestorList?,
 	Extensions: { Extension }?,
+	DelaySetup: boolean?,
 }
 
 --[=[
@@ -193,9 +195,9 @@ type ComponentConfig = {
 ]=]
 
 --[=[
-	@tag Component Instance
 	@within Component
 	@prop Instance Instance
+	@tag Component Instance
 	
 	A reference back to the _Roblox_ instance from within a _component_ instance. When
 	a component instance is created, it is bound to a specific Roblox instance, which
@@ -210,7 +212,6 @@ type ComponentConfig = {
 ]=]
 
 --// Services //--
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
 local RunService = game:GetService("RunService")
 
@@ -231,6 +232,7 @@ type ComponentClass = table
 local IS_SERVER = RunService:IsServer()
 local DEFAULT_ANCESTORS = { workspace, game:GetService("Players") }
 local DEFAULT_TIMEOUT = 60
+local UNSETUP_COMPONENTS = {}
 
 -- Symbol keys:
 local KEY_ANCESTORS = Symbol("Ancestors")
@@ -355,6 +357,40 @@ local Component = {}
 Component.__index = Component
 
 --[=[
+	@within Component
+	@prop DelaySetup boolean
+	@tag Component
+
+	Controls the global default for whether or not components should delay their setup. Overridden by the `DelaySetup` 
+	property if set in the component configuration table passed to `Component.new`. This is useful for when you want
+	to ensure some other systems that the components may utilize are set up before the components themselves.
+
+	This value is initialized to the `DelaySetup` attribute of the script, which defaults to `false`.
+
+	:::caution
+	When set to `true`, the component class will not automatically call `:_setup()` when created and expects
+	you to call it when desired. Failing to do so will result in the component never starting to listen
+	for tagged instances and thus never starting any component instances.
+	:::
+]=]
+Component.DelaySetup = script:GetAttribute("DelaySetup") or false
+
+--[=[
+	@tag Component
+	@within Component
+	@prop Tag string
+
+	The tag used to identify the component class. This is used with CollectionService to bind component instances
+	to Roblox instances.
+
+	```lua
+	local MyComponent = Component.new({Tag = "MyComponent"})
+	print(MyComponent.Tag) -- "MyComponent"
+	```
+]=]
+
+
+--[=[
 	@tag Component
 	@param config ComponentConfig
 	@return ComponentClass
@@ -405,9 +441,9 @@ Component.__index = Component
 function Component.new(config: ComponentConfig)
 	local customComponent = {}
 	customComponent.__index = customComponent
-	customComponent.__tostring = function()
-		return "Component<" .. config.Tag .. ">"
-	end
+	-- customComponent.__tostring = function()
+	-- 	return "Component<" .. config.Tag .. ">"
+	-- end
 	customComponent[KEY_ANCESTORS] = config.Ancestors or DEFAULT_ANCESTORS
 	customComponent[KEY_INST_TO_COMPONENTS] = {}
 	customComponent[KEY_COMPONENTS] = {}
@@ -420,9 +456,38 @@ function Component.new(config: ComponentConfig)
 	customComponent.Started = customComponent[KEY_TROVE]:Construct(Signal)
 	customComponent.Stopped = customComponent[KEY_TROVE]:Construct(Signal)
 	setmetatable(customComponent, Component)
-	customComponent:_setup()
+
+	table.insert(UNSETUP_COMPONENTS, customComponent)
+	local delaySetup = if config.DelaySetup then config.DelaySetup else customComponent.DelaySetup
+	if not delaySetup then
+		Component._setup(customComponent)
+	else
+		task.delay(30, function()
+			if table.find(UNSETUP_COMPONENTS, customComponent) then
+				warn(customComponent, "Component:_setup() was not called within 30 seconds of instantiation.")
+			end
+		end)
+	end
 	return customComponent
 end
+
+--[=[
+	@tag Component
+	@return {ComponentClass}
+
+	Gets a table array of all unsetup component classes. This allows you to call `:_setup()` on them later.
+
+	```lua
+	local unsetupComponents = Component.getUnsetupComponents()
+	for _, componentClass in unsetupComponents do
+		Component._setup(componentClass)
+	end
+	```
+]=]
+function Component.getUnsetupComponents(): {ComponentClass}
+	return table.clone(UNSETUP_COMPONENTS) :: any
+end
+
 
 function Component:_instantiate(instance: Instance)
 	local component = setmetatable({}, self)
@@ -446,7 +511,24 @@ function Component:_instantiate(instance: Instance)
 	return component
 end
 
+--[=[
+	@tag Component Class
+	@within Component
+	@method _setup
+
+	This is an internal method that is called to set up the component class.
+	It is automatically called when the component class is created, unless the
+	`DelaySetup` option is set to `true` in the component configuration.
+	If `DelaySetup` is `true`, then this method must be called manually.
+]=]
 function Component:_setup()
+	local idx = table.find(UNSETUP_COMPONENTS, self)
+	if idx then
+		table.remove(UNSETUP_COMPONENTS, idx)
+	else
+		warn(self, ":_setup was already called for this component.")
+	end
+	
 	local watchingInstances = {}
 
 	self[KEY_CLASS_ACTIVE_EXTENSIONS] = GetActiveExtensions(self, self[KEY_EXTENSIONS], {}, true)
@@ -835,13 +917,13 @@ end
 	you may make within it. The Janitor is cleaned up whenever either compenent is stopped.
 
 	```lua
-	local AnotherComponent = require(somewhere.AnotherComponent)
+	local AnotherComponentClass = require(somewhere.AnotherComponent)
 
 	local MyComponent = Component.new({Tag = "MyComponent"})
 
 	function MyComponent:Start()
-		self:WhileHasComponent(AnotherComponent, function(sibling, jani)
-			print(sibling.SomeProperty)
+		self:WhileHasComponent(AnotherComponentClass, function(siblingComponent, jani)
+			print(siblingComponent.SomeProperty)
 			
 			jani:Add(function()
 				print("Sibling component stopped")
@@ -850,7 +932,7 @@ end
 	end
 	```
 ]=]
-function Component:WhileHasComponent(componentClass: ComponentClass, fn: (component: Component, jani: Janitor) -> ())
+function Component:WhileHasComponent(componentClassOrClasses: ComponentClass | {ComponentClass}, fn: (components: Component | {Component}, jani: Janitor) -> ())
 	local bindJani = Janitor.new()
 
 	local connProxy = {}
@@ -872,24 +954,64 @@ function Component:WhileHasComponent(componentClass: ComponentClass, fn: (compon
 	bindJani:AddPromise(Promise.fromEvent(self.Stopped, function(c)
 		return c.Instance == self.Instance
 	end):andThen(connProxy.Destroy))
-	
 
-	local function Setup(component)
-		if self.Instance ~= component.Instance then return end
-		local currentJani = bindJani:Add(Janitor.new(), "Destroy", component)
-		currentJani:Add(task.spawn(fn, component, currentJani))
-		currentJani:AddPromise(Promise.fromEvent(component.Stopped, function(c)
-			return c.Instance == self.Instance
-		end):andThen(function()
-			currentJani:Destroy()
+	assert(typeof(componentClassOrClasses) == "table", "Component:WhileHasComponent() expects a component class or an array of component classes.")
+	local isSingleComponentClass = if (componentClassOrClasses :: any).Tag == nil then true else false
+	-- Normalize to array of classes
+	local componentClasses = if isSingleComponentClass then componentClassOrClasses else {componentClassOrClasses}
+
+	-- Helper to get all component instances for self.Instance
+	local function getAllComponents()
+		local components = {}
+		for i, class in ipairs(componentClasses) do
+			local inst = self:GetComponent(class)
+			if not inst then
+				return nil
+			end
+			components[i] = inst
+		end
+		return components
+	end
+
+	-- Track janitors for each set of components
+	local activeJanitors = {}
+
+	local function SetupIfAllPresent()
+		local components = getAllComponents()
+		if not components then return end
+		-- Prevent duplicate setups for the same set
+		if activeJanitors[self.Instance] then return end
+		local currentJani = bindJani:Add(Janitor.new(), "Destroy", self.Instance)
+		activeJanitors[self.Instance] = currentJani
+
+		if isSingleComponentClass then
+			-- If only one component class, just pass it directly to maintain backwards compatibility
+			components = table.unpack(components)
+		end
+		currentJani:Add(task.spawn(fn, components, currentJani))
+
+		-- If any component stops, destroy janitor
+		for i, class in ipairs(componentClasses) do
+			currentJani:AddPromise(Promise.fromEvent(class.Stopped, function(c)
+				return c.Instance == self.Instance
+			end):andThen(function()
+				currentJani:Destroy()
+				activeJanitors[self.Instance] = nil
+			end))
+		end
+	end
+
+	-- Listen for all component start events
+	for _, class in ipairs(componentClasses) do
+		bindJani:Add(class.Started:Connect(function(component)
+			if component.Instance == self.Instance then
+				SetupIfAllPresent()
+			end
 		end))
 	end
 
-	bindJani:Add(componentClass.Started:Connect(Setup))
-	local component	= self:GetComponent(componentClass)
-	if component then
-		Setup(component)
-	end
+	-- Initial check in case all are already present
+	SetupIfAllPresent()
 
 	return connProxy
 end
@@ -983,6 +1105,10 @@ end
 ]=]
 
 function Component:Destroy()
+	local idx = table.find(UNSETUP_COMPONENTS, self)
+	if idx then
+		table.remove(UNSETUP_COMPONENTS, idx)
+	end
 	self[KEY_TROVE]:Destroy()
 end
 
