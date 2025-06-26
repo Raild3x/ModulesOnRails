@@ -4,9 +4,40 @@
 	RemoteComponent is a component extension that allows you to easily give
 	networking capabilities to your components.
 
-	You can access the server-side component from the client by using the .Server index
+	You can access the server-side component from the client by using the `.Server` index
 	on the component. You can access the client-side component from the server by using
-	the .Client index on the component.
+	the `.Client` index on the component.
+
+	```lua
+	-- MyComponent.server.lua
+	local MyComponent = Component.new {
+		Tag = "MyComponent",
+		Ancestors = {workspace},
+		Extensions = {RemoteComponent},
+	}
+
+	MyComponent.Client = {
+		TestProperty = RemoteComponent.createProperty(0),
+		TestSignal = RemoteComponent.createEvent(),
+	}
+
+	function MyComponent.Client:TestMethod(player: Player)
+		return ("Hello from the server!")
+	end
+	```
+
+	```lua
+	-- MyComponent.client.lua
+	local MyComponent = Component.new {
+		Tag = "MyComponent",
+		Ancestors = {workspace},
+		Extensions = {RemoteComponent},
+	}
+
+	function MyComponent:Start()
+		self.Server:TestMethod():andThen(print)
+	end
+	```
 
 	:::caution Fast tagging and untagging
 	You can encounter issues if you untag and then retag again quickly or unparent and
@@ -30,48 +61,18 @@
 --[=[
 	@interface RemoteComponent
 	@within RemoteComponent
-	.Client table? -- Only availible on the server. Set this to a table to expose it to the client.
-	.Server table? -- Only availible on the client. The indices of this are inferred from the server.
-
-	```lua
-	-- MyComponent.server.lua
-	local MyComponent = Component.new {
-		Tag = "MyComponent",
-		Ancestors = {workspace},
-		Extensions = {RemoteComponent},
-	}
-
-	MyComponent.Client = {
-		TestProperty = NetWire.createProperty(0),
-		TestSignal = NetWire.createEvent(),
-	}
-
-	function MyComponent.Client:TestMethod(player: Player)
-		return ("Hello from the server!")
-	end
-	```
-
-	```lua
-	-- MyComponent.client.lua
-	local MyComponent = Component.new {
-		Tag = "MyComponent",
-		Ancestors = {workspace},
-		Extensions = {RemoteComponent},
-	}
-
-	function MyComponent:Start()
-		self.Server:TestMethod():andThen(print)
-	end
-	```
+	.Client table? -- Only available on the server. Set this to a table to expose it to the client.
+	.Server table? -- Only available on the client. The indices of this are inferred from the server.
 ]=]
 
 local IS_SERVER = game:GetService("RunService"):IsServer()
 
 --// Imports //--
 local Packages = script.Parent
-local Comm = require(Packages.Comm)
+local CommPackage = require(Packages.Comm)
 local Symbol = require(Packages.Symbol)
 local Promise = require(Packages.Promise)
+local NetWire = require(Packages.NetWire)
 local TableUtil = require(Packages.RailUtil).Table
 
 --// Constants //--
@@ -79,17 +80,39 @@ local KEY_INTERNALPROMISE = Symbol("InternalPromise")
 local SERVER_REMOTE_COUNT = "SRC"
 local TIMEOUT = 30
 
-Comm = if IS_SERVER then Comm.ServerComm else Comm.ClientComm :: any
-
 --------------------------------------------------------------------------------
 	--// Extension //--
 --------------------------------------------------------------------------------
 local RemoteComponentExtension = {}
 
+--[=[
+	@within RemoteComponent
+	@function createEvent () -> MARKER
+	Redirects to NetWire.createEvent
+]=]
+RemoteComponentExtension.createEvent = NetWire.createEvent
+
+--[=[
+	@within RemoteComponent
+	@function createUnreliableEvent () -> MARKER
+	Redirects to NetWire.createUnreliableEvent
+]=]
+RemoteComponentExtension.createUnreliableEvent = NetWire.createUnreliableEvent
+
+--[=[
+	@within RemoteComponent
+	@function createProperty (initialValue: any) -> MARKER
+	Redirects to NetWire.createProperty
+]=]
+RemoteComponentExtension.createProperty = NetWire.createProperty
+
+
+-- Initialize the Remotes prior to 'Start
 function RemoteComponentExtension.Starting(component)
 	local objectInstance = component.Instance
-	local nameSpace = component.RemoteNamespace or component.Tag
+	local nameSpace = component.RemoteNamespace or component.Tag.."_RemoteComponent"
 	if IS_SERVER then
+		local Comm = CommPackage.ServerComm
 		if component.Client then
 			component.Client = TableUtil.Copy(component.Client, true) -- Makes a deep copy of the Client table
 
@@ -103,11 +126,16 @@ function RemoteComponentExtension.Starting(component)
 			for k, v in pairs(component.Client) do
 				totalRemotes += 1
 				if type(v) == "function" then
-					component._serverComm:WrapMethod(component.Client, k)
-				elseif tostring(v):find("SIGNAL_MARKER") then -- Allow Wire.createSignal()
-					component.Client[k] = component._serverComm:CreateSignal(k)
-				elseif type(v) == "table" and tostring(v[1]):find("PROPERTY_MARKER") then  -- Allow Wire.createProperty()
-					component.Client[k] = component._serverComm:CreateProperty(k, v[2])
+					component._serverComm:WrapMethod(component.Client, k, nil, {NetWire.PromiseConversionMiddleware})
+				elseif type(v) == "table" then
+					local vType = tostring(v[1])
+					if vType:find("UNRELIABLE_SIGNAL_MARKER") then
+						component.Client[k] = component._serverComm:CreateSignal(k, true, table.unpack(v, 2))
+					elseif vType:find("SIGNAL_MARKER") then
+						component.Client[k] = component._serverComm:CreateSignal(k, false, table.unpack(v, 2))
+					elseif vType:find("PROPERTY_MARKER") then
+						component.Client[k] = component._serverComm:CreateProperty(k, table.unpack(v, 2))
+					end
 				end
 			end
 			component.Client.Server = component
@@ -118,6 +146,7 @@ function RemoteComponentExtension.Starting(component)
 		end
 
 	else
+		local Comm = CommPackage.ClientComm
 		-- if objectInstance:FindFirstChild(nameSpace) then
 		-- 	assert(not objectInstance:FindFirstChild(nameSpace):GetAttribute("ClientComponentReady"), "Client Component already initialized!")
 		-- end
@@ -159,7 +188,9 @@ function RemoteComponentExtension.Starting(component)
 			local usePromises = if component.UsePromisesForMethods == nil then true else component.UsePromisesForMethods
 			local clientComm = Comm.new(objectInstance, usePromises, nameSpace)
 			component._clientComm = clientComm
-			component.Server = clientComm:BuildObject()
+
+			local inboundMiddleware = {NetWire.PromiseConversionMiddleware}
+			component.Server = clientComm:BuildObject(inboundMiddleware)
 		end)
 		:timeout(TIMEOUT, "[TimeOut] Failed to initialize RemoteComponent "..nameSpace)
 		
@@ -173,8 +204,20 @@ function RemoteComponentExtension.Starting(component)
 end
 
 function RemoteComponentExtension.Stopping(component)
-	local target = IS_SERVER and "_serverComm" or "_clientComm"
-	if component[target] then component[target]:Destroy() end
+	local commCore = if IS_SERVER then component._serverComm else component._clientComm
+	if commCore then
+		commCore:Destroy()
+	end
+
+	local commObj = if IS_SERVER then component.Client else component.Server
+	if commObj then
+		for _, remoteObj in commObj do
+			if typeof(remoteObj) == "table" and remoteObj.Destroy and remoteObj ~= component then
+				remoteObj:Destroy()
+			end
+		end
+	end
+
 	if component[KEY_INTERNALPROMISE] then
 		component[KEY_INTERNALPROMISE]:cancel()
 	end

@@ -9,9 +9,11 @@ realm = "shared"
 
 [custom]
 # The properly capitalized and spaced name of the library
-formattedName = "Component"
+formattedName = "Comm"
 # The intro page for the documentation
-docsLink = "Component"
+docsLink = "Comm"
+
+ignore = true
 
 [dependencies]
 Promise = "evaera/promise@^4"

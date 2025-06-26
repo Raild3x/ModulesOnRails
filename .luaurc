@@ -1,0 +1,17 @@
+{
+	"aliases": {
+		"lune": "~/.lune/.typedefs/0.8.0",
+		"tiniest": "test/tiniest"
+	},
+
+	"globals": [
+		"beforeEach",
+		"afterEach",
+		"beforeAll",
+		"afterAll",
+		"describe",
+		"expect",
+		"it"
+	]
+
+}

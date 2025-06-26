@@ -28,7 +28,7 @@ local BaseTableReplicator = require(script.Parent.Parent.Shared.BaseTableReplica
 
 type ServerCustomRemote = ServerCustomRemote.ServerCustomRemote
 type TableManager = TableManager.TableManager
-type ClassToken = TableReplicatorUtil.ClassToken
+type ReplicationToken = TableReplicatorUtil.ReplicationToken
 type TRPacket = TableReplicatorUtil.TRPacket
 type Tags = TableReplicatorUtil.Tags
 type Id = BaseTableReplicator.Id
@@ -40,15 +40,14 @@ type CanBeArray<T> = T | {T}
 
 local USED_CLASS_TOKENS: {string} = {}
 
-local REMOTE_SIGNAL_PREFIX = "RemoteSignal_"
-
 local KEY_SELF = Symbol("SelfReference")
 local KEY_REMOTE_SIGNALS = Symbol("RemoteSignals")
+local KEY_REMOTE_FUNCTIONS = Symbol("RemoteFunctions")
 
 
 local ClassTokenMT = table.freeze {
     __tostring = function(self)
-        return `ClassToken<{self.Name}>`
+        return `ReplicationToken<{self.Name}>`
     end;
 }
 
@@ -65,13 +64,17 @@ local ClientMT = table.freeze {
     __newindex = function(t, k, v)
         local self = t[KEY_SELF]
         if self._ClassToken then
-            warn("Avoid adding new remotes to STR after it is fully initialized.")
+            warn("Avoid adding new remotes to STR after it is fully initialized. ", k, v)
         end
-        if v == NetWire.createEvent() then
-            self:RegisterRemoteSignal(k)
-        elseif type(v) == "function" then
-            self:RegisterRemoteFunction(k, v)
-        end
+		if type(v) == "table" and v[1] == NetWire.createEvent()[1] then
+			self:RegisterRemoteSignal(k)
+		elseif type(v) == "table" and v[1] == NetWire.createUnreliableEvent()[1] then
+			self:RegisterRemoteUnreliableSignal(k)
+		elseif type(v) == "function" then
+			self:RegisterRemoteFunction(k, v)
+		else
+			warn("Invalid Client remote data. Expected function or NetWire.createEvent(). ", k, v)
+		end
     end
 }
 
@@ -94,9 +97,9 @@ export type ReplicationTargets = "All" | Player | {Player}
 
 local SwapRemoveFirstValue = RailUtil.Table.SwapRemoveFirstValue
 
-local function FormatRemoteSignalName(signalName: string): string
-    return REMOTE_SIGNAL_PREFIX..signalName
-end
+-- local function FormatRemoteSignalName(signalName: string): string
+--     return REMOTE_SIGNAL_PREFIX..signalName
+-- end
 
 -- Runs a function on a STR and all of its descendant STRs
 local function ParseBranch(STR, fn)
@@ -271,8 +274,8 @@ end)
 --------------------------------------------------------------------------------
 
 --[=[
-    Returns a ClassToken Symbol that is used for identifying the STR Class.
-    We use unique symbols instead of strings to prevent accidental collisions.
+    Returns a Token Symbol that is used for identifying the ServerTableReplicator Class.
+    We use unique symbols instead of strings to prevent accidental collisions on the server.
     
     :::warning
     This may only be called once per unique string. The returned symbol should
@@ -280,23 +283,32 @@ end)
     function again with the same string will result in an error.
     :::
 ]=]
-function ServerTableReplicator.newClassToken(tokenName: string): ClassToken
+function ServerTableReplicator.Token(tokenName: string): ReplicationToken
     assert(type(tokenName) == "string", `Invalid token type. Expected: 'string', Got: '{typeof(tokenName)}'`)
-    assert(#tokenName > 0, "Class token name cannot be empty")
-    assert(not table.find(USED_CLASS_TOKENS, tokenName), `Class token '{tokenName}' already exists.`)
+    assert(#tokenName > 0, "ReplicationToken name cannot be empty")
+
+    local existingToken = table.find(USED_CLASS_TOKENS, tokenName)
+    if existingToken then
+        error(`Class Token '{tokenName}' already exists. Created at: \n{existingToken.Creation}`)
+    end
     
-    local token = {Name = tokenName}
+    local token = {
+        Name = tokenName,
+        Creation = debug.traceback(),
+    }
     setmetatable(token, ClassTokenMT)
     table.freeze(token)
 
     table.insert(USED_CLASS_TOKENS, tokenName)
     return token :: any
 end
-ServerTableReplicator.createClassToken = ServerTableReplicator.newClassToken -- alias
+-- Deprecated Aliases. Kept for backwards compat
+ServerTableReplicator.newClassToken = ServerTableReplicator.Token
+ServerTableReplicator.createClassToken = ServerTableReplicator.Token
 
 --[=[
     Creates a new ServerTableReplicator instance.
-    The config must be given a TableManager instance and a ClassToken Symbol.
+    The config must be given a TableManager instance and a Token Symbol.
 
     A list of replication targets can be provided to specify which
     players the STR should replicate to immediately. If no replication targets
@@ -311,7 +323,7 @@ ServerTableReplicator.createClassToken = ServerTableReplicator.newClassToken -- 
     EXAMPLE:
     ```lua
     -- Some Server Script
-    local token = ServerTableReplicator.newClassToken("PlayerData")
+    local token = ServerTableReplicator.Token("PlayerData")
 
     Players.PlayerAdded:Connect(function(player)
         local manager = TableManager.new({
@@ -320,7 +332,7 @@ ServerTableReplicator.createClassToken = ServerTableReplicator.newClassToken -- 
 
         local replicator = ServerTableReplicator.new({
             TableManager = manager,
-            ClassToken = token,
+            Token = token,
             ReplicationTargets = "All",
             Tags = {UserId = player.UserId},
         })
@@ -328,7 +340,7 @@ ServerTableReplicator.createClassToken = ServerTableReplicator.newClassToken -- 
     ```
     ```lua
     -- Some Client Script
-    ClientTableReplicator.listenToNewReplicator("PlayerData", function(replicator)
+    ClientTableReplicator.onNew("PlayerData", function(replicator)
         print("New PlayerData STR: ", replicator:GetTag("UserId"))
         print("Money: ", replicator:GetTableManager():Get("Money"))
     end)
@@ -346,7 +358,7 @@ ServerTableReplicator.createClassToken = ServerTableReplicator.newClassToken -- 
     :::
 ]=]
 function ServerTableReplicator.new(config: {
-    ClassToken: ClassToken,
+    Token: ReplicationToken,
     TableManager: TableManager,
     ReplicationTargets: ReplicationTargets?,
     Parent: ServerTableReplicator?,
@@ -355,12 +367,12 @@ function ServerTableReplicator.new(config: {
 })
 
     --// Validate Config //--
-    local cToken = config.ClassToken
+    local cToken = config.Token or (config :: any).ClassToken
     if type(cToken) == "string" then
-        warn(`ClassToken '{cToken :: string}' given as string. To silence, use 'ServerTableReplicator.newClassToken' to provide a ClassToken Symbol`)
+        warn(`ClassToken '{cToken :: string}' given as string. To silence, use 'ServerTableReplicator.Token' to provide a ClassToken Symbol`)
         if not table.find(USED_CLASS_TOKENS, cToken) then
             warn(`Registering ClassToken '{cToken :: string}' . . .`)
-            cToken = ServerTableReplicator.newClassToken(cToken :: string)
+            cToken = ServerTableReplicator.Token(cToken :: string)
         else
             error("ClassToken already registered. Expected ClassToken Symbol, Got: "..tostring(cToken))
         end
@@ -425,11 +437,12 @@ function ServerTableReplicator.new(config: {
 
     --// Initialize Properties //--
     self[KEY_REMOTE_SIGNALS] = {}
+    self[KEY_REMOTE_FUNCTIONS] = {}
 
     self.Client = setmetatable({
         [KEY_SELF] = self;
     }, ClientMT)
-    -- register the client functions and signals
+	-- register the client functions and signals
     for k, v in pairs(config.Client or {}) do
         self.Client[k] = v
     end
@@ -494,25 +507,25 @@ function ServerTableReplicator:_InitListeners()
     end
 
     ConnectToSignal("ValueChanged", function(path, newValue, _)
-        for _, target in pairs(self:GetActiveReplicationTargets()) do
+        for _, target in self:GetActiveReplicationTargets() do
             TR_Wire.ValueChanged:Fire(target, self:GetId(), path, newValue)
         end
     end)
 
     ConnectToSignal("ArraySet", function(path, index: number, newValue: any, _)
-        for _, target in pairs(self:GetActiveReplicationTargets()) do
+        for _, target in self:GetActiveReplicationTargets() do
             TR_Wire.ArraySet:Fire(target, self:GetId(), path, index, newValue)
         end
     end)
 
     ConnectToSignal("ArrayInsert", function(path, index: number, insertedValue: any, _)
-        for _, target in pairs(self:GetActiveReplicationTargets()) do
+        for _, target in self:GetActiveReplicationTargets() do
             TR_Wire.ArrayInsert:Fire(target, self:GetId(), path, index, insertedValue)
         end
     end)
 
     ConnectToSignal("ArrayRemove", function(path, index: number, _, _)
-        for _, target in pairs(self:GetActiveReplicationTargets()) do
+        for _, target in self:GetActiveReplicationTargets() do
             TR_Wire.ArrayRemove:Fire(target, self:GetId(), path, index)
         end
     end)
@@ -589,15 +602,18 @@ end
     --// Public Methods //--
 --------------------------------------------------------------------------------
 
---[=[
+ --[=[
     @private
     @unreleased
     Registers a new reliable remote signal.
-]=]
-function ServerTableReplicator:RegisterRemoteSignal(signalName: string)
-    assert(not self[KEY_REMOTE_SIGNALS][signalName], "Remote signal already registered: "..signalName)
-    self[KEY_REMOTE_SIGNALS][signalName] = self:AddTask(ServerCustomRemote.new(signalName, self))
-end
+ ]=]
+ function ServerTableReplicator:RegisterRemoteSignal(signalName: string)
+	assert(not self[KEY_REMOTE_SIGNALS][signalName], "Remote signal already registered: "..signalName)
+	local Remote = self:AddTask(ServerCustomRemote.new(signalName, self))
+	self[KEY_REMOTE_SIGNALS][signalName] = Remote
+	rawset(self.Client, signalName, Remote)
+	return Remote
+ end
 
 --[=[
     @private
@@ -606,7 +622,10 @@ end
 ]=]
 function ServerTableReplicator:RegisterRemoteUnreliableSignal(signalName: string)
     assert(not self[KEY_REMOTE_SIGNALS][signalName], "Remote signal already registered: "..signalName)
-    self[KEY_REMOTE_SIGNALS][signalName] = self:AddTask(ServerCustomRemote.new(signalName, self, true))
+    local Remote = self:AddTask(ServerCustomRemote.new(signalName, self, true))
+	self[KEY_REMOTE_SIGNALS][signalName] = Remote
+	rawset(self.Client, signalName, Remote)
+    return Remote
 end
 
 --[=[
@@ -625,24 +644,143 @@ end
     @unreleased
 ]=]
 function ServerTableReplicator:RegisterRemoteFunction(fnName: string, fn: (...any) -> ...any)
+    local remoteFn = self[KEY_REMOTE_FUNCTIONS][fnName]
+    assert(not remoteFn, "Remote function already registered: "..fnName)
+    rawset(self.Client, fnName, fn)
+	return fn
 end
+
+--------------------------------------------------------------------------------
+    --// Setters //--
+--------------------------------------------------------------------------------
+
+--[=[
+    Adds a player or list of players to the replication targets.
+]=]
+function ServerTableReplicator:Subscribe(targets: ReplicationTargets)
+    if typeof(targets) == "Instance" then
+        if self:IsReplicationTarget(targets) then
+            warn("No Change") -- No change
+            return
+        end
+    end
+
+    if not self:IsReplicatingToAll() then
+        if targets == "All" then
+            -- warn("Use :SetReplicationTargets(\"All\") instead of :ReplicateFor(\"All\")")
+            self:SetReplicationTargets("All")
+        else
+            local targetsArray = TargetsToArray(AssertReplicationTargets(targets))
+
+            local newTargets = self:GetReplicationTargets()
+            for _, target in pairs(targetsArray) do
+                if not table.find(newTargets, target) then
+                    table.insert(newTargets, target)
+                end
+            end
+
+            self:SetReplicationTargets(newTargets)
+        end
+    else
+        if targets ~= "All" then
+            error("Don't selectively replicate for clients when STR is replicated to 'All' - :DestroyFor(\"All\") first")
+        end
+    end
+end
+ServerTableReplicator.ReplicateFor = ServerTableReplicator.Subscribe
+
+--[=[
+    Removes a player or list of players from the replication targets.
+]=]
+function ServerTableReplicator:Unsubscribe(targets: ReplicationTargets)
+    if typeof(targets) == "Instance" then
+        if not self:IsReplicationTarget(targets) then
+            warn("No Change")-- No change
+            return 
+        end
+    end
+
+    if not self:IsReplicatingToAll() then
+        if targets == "All" then
+            --warn("Use :SetReplicationTargets({}) instead of :DestroyFor(\"All\")")
+            self:SetReplicationTargets({})
+        else
+            local targetsArray = TargetsToArray(AssertReplicationTargets(targets))
+
+            local newTargets = self:GetReplicationTargets()
+            for _, target in pairs(targetsArray) do
+                RailUtil.Table.SwapRemoveFirstValue(newTargets, target)
+            end
+
+            self:SetReplicationTargets(newTargets)
+        end
+
+    else -- if we are currently replicating to all players
+        if targets ~= "All" then -- we request to destroy for a specific player[s]
+            error("Don't selectively destroy for clients when STR is replicated to 'All' - use :DestroyFor(\"All\") first")
+        end
+
+        self:SetReplicationTargets({})
+    end
+end
+ServerTableReplicator.DestroyFor = ServerTableReplicator.Unsubscribe
+
+--[=[
+    Overwrites the current replication targets with the new targets.
+]=]
+function ServerTableReplicator:SetSubscribers(targets: ReplicationTargets)
+    assert(self:IsTopLevel(), "Cannot set replication targets on a child STR")
+    if typeof(targets) == "nil" then
+        warn("Please pass an empty array instead of nil to remove all replication targets")
+        targets = {}
+    end
+
+
+    local goalTargets: {Player} = TargetsToArray(targets)
+    local currentTargets: {Player} = self:GetReplicationTargets() -- TODO: Optimize this into a dictionary
+
+    if targets == "All" then
+        if self:IsReplicatingToAll() then
+            return -- No change
+        else
+            self._Replication.All = true
+        end
+    else
+        self._Replication.All = nil
+    end
+
+    local targetsToAdd = {}
+    local targetsToRemove = {}
+
+    for _, target in pairs(goalTargets) do
+        if not table.find(currentTargets, target) then
+            table.insert(targetsToAdd, target)
+        end
+    end
+
+    for _, target in pairs(currentTargets) do
+        if not table.find(goalTargets, target) then
+            table.insert(targetsToRemove, target)
+        end
+    end
+
+    self:_StartReplicatingToTargets(targetsToAdd)
+    self:_StopReplicatingToTargets(targetsToRemove)
+
+    --print(self:GetTokenName(), "Replication Targets Changed", targetsToAdd, targetsToRemove)
+    self:FireSignal("ReplicationTargetsChanged", targets)
+end
+ServerTableReplicator.SetReplicationTargets = ServerTableReplicator.SetSubscribers
 
 --------------------------------------------------------------------------------
     --// Getters //--
 --------------------------------------------------------------------------------
 
 --[=[
-    Returns whether or not this STR is replicating to all current and future players.
-]=]
-function ServerTableReplicator:IsReplicatingToAll(): boolean
-    return self._Replication.All == true
-end
-
---[=[
     Checks whether the player is a valid target for replication.
     Not whether the player is currently being replicated to.
 ]=]
-function ServerTableReplicator:IsReplicationTarget(player: Player): boolean
+function ServerTableReplicator:IsSubscribed(player: Player): boolean
     if self:IsReplicatingToAll() then
         return true
     elseif self._Replication.Active[player] then
@@ -652,11 +790,20 @@ function ServerTableReplicator:IsReplicationTarget(player: Player): boolean
     end
     return false
 end
+ServerTableReplicator.IsReplicationTarget = ServerTableReplicator.IsSubscribed
+
+--[=[
+    Returns whether or not this STR is replicating to all current and future players.
+]=]
+function ServerTableReplicator:IsSubscribedToAll(): boolean
+    return self._Replication.All == true
+end
+ServerTableReplicator.IsReplicatingToAll = ServerTableReplicator.IsSubscribedToAll
 
 --[=[
     Gets the list of Players that this Replicator is attempting to replicate to.
 ]=]
-function ServerTableReplicator:GetReplicationTargets(): {Player}
+function ServerTableReplicator:GetSubscribers(): {Player}
     if self:IsReplicatingToAll() then
         return Players:GetPlayers()
     end
@@ -668,30 +815,24 @@ function ServerTableReplicator:GetReplicationTargets(): {Player}
 
     return targets
 end
+ServerTableReplicator.GetReplicationTargets = ServerTableReplicator.GetSubscribers
 
 --[=[
     Gets the list of Players that this Replicator is *currently* replicating to.
     This is different from GetReplicationTargets as it does not include pending replication targets.
 ]=]
-function ServerTableReplicator:GetActiveReplicationTargets(): {Player}
+function ServerTableReplicator:GetActiveSubscribers(): {Player}
     local players = {}
     for player in pairs(self._Replication.Active) do
         table.insert(players, player)
     end
     return players
 end
+ServerTableReplicator.GetActiveReplicationTargets = ServerTableReplicator.GetActiveSubscribers
 
 --------------------------------------------------------------------------------
-    --// Setters //--
+    --// Misc. Setters //--
 --------------------------------------------------------------------------------
-
---[=[
-    @private
-    Shortcut to set a value in the TableManager.
-]=]
-function ServerTableReplicator:Set(...: any)
-    return self:GetTableManager():Set(...)
-end
 
 --[=[
     Sets the Parent of this STR to the given STR.
@@ -815,120 +956,16 @@ function ServerTableReplicator:SetParent(newParent: ServerTableReplicator)
 end
 
 
---[=[
-    Removes a player or list of players from the replication targets.
-]=]
-function ServerTableReplicator:DestroyFor(targets: ReplicationTargets)
-    if typeof(targets) == "Instance" then
-        if not self:IsReplicationTarget(targets) then
-            warn("No Change")-- No change
-            return 
-        end
-    end
-
-    if not self:IsReplicatingToAll() then
-        if targets == "All" then
-            --warn("Use :SetReplicationTargets({}) instead of :DestroyFor(\"All\")")
-            self:SetReplicationTargets({})
-        else
-            local targetsArray = TargetsToArray(AssertReplicationTargets(targets))
-
-            local newTargets = self:GetReplicationTargets()
-            for _, target in pairs(targetsArray) do
-                RailUtil.Table.SwapRemoveFirstValue(newTargets, target)
-            end
-
-            self:SetReplicationTargets(newTargets)
-        end
-
-    else -- if we are currently replicating to all players
-        if targets ~= "All" then -- we request to destroy for a specific player[s]
-            error("Don't selectively destroy for clients when STR is replicated to 'All' - use :DestroyFor(\"All\") first")
-        end
-
-        self:SetReplicationTargets({})
-    end
-end
+--------------------------------------------------------------------------------
+    --// TableManager Passthrough //--
+--------------------------------------------------------------------------------
 
 --[=[
-    Adds a player or list of players to the replication targets.
+    @private
+    Shortcut to set a value in the TableManager.
 ]=]
-function ServerTableReplicator:ReplicateFor(targets: ReplicationTargets)
-    if typeof(targets) == "Instance" then
-        if self:IsReplicationTarget(targets) then
-            warn("No Change") -- No change
-            return
-        end
-    end
-
-    if not self:IsReplicatingToAll() then
-        if targets == "All" then
-            -- warn("Use :SetReplicationTargets(\"All\") instead of :ReplicateFor(\"All\")")
-            self:SetReplicationTargets("All")
-        else
-            local targetsArray = TargetsToArray(AssertReplicationTargets(targets))
-
-            local newTargets = self:GetReplicationTargets()
-            for _, target in pairs(targetsArray) do
-                if not table.find(newTargets, target) then
-                    table.insert(newTargets, target)
-                end
-            end
-
-            self:SetReplicationTargets(newTargets)
-        end
-    else
-        if targets ~= "All" then
-            error("Don't selectively replicate for clients when STR is replicated to 'All' - :DestroyFor(\"All\") first")
-        end
-    end
-end
-
-
---[=[
-    Overwrites the current replication targets with the new targets.
-]=]
-function ServerTableReplicator:SetReplicationTargets(targets: ReplicationTargets)
-    assert(self:IsTopLevel(), "Cannot set replication targets on a child STR")
-    if typeof(targets) == "nil" then
-        warn("Please pass an empty array instead of nil to remove all replication targets")
-        targets = {}
-    end
-
-
-    local goalTargets: {Player} = TargetsToArray(targets)
-    local currentTargets: {Player} = self:GetReplicationTargets() -- TODO: Optimize this into a dictionary
-
-    if targets == "All" then
-        if self:IsReplicatingToAll() then
-            return -- No change
-        else
-            self._Replication.All = true
-        end
-    else
-        self._Replication.All = nil
-    end
-
-    local targetsToAdd = {}
-    local targetsToRemove = {}
-
-    for _, target in pairs(goalTargets) do
-        if not table.find(currentTargets, target) then
-            table.insert(targetsToAdd, target)
-        end
-    end
-
-    for _, target in pairs(currentTargets) do
-        if not table.find(goalTargets, target) then
-            table.insert(targetsToRemove, target)
-        end
-    end
-
-    self:_StartReplicatingToTargets(targetsToAdd)
-    self:_StopReplicatingToTargets(targetsToRemove)
-
-    --print(self:GetTokenName(), "Replication Targets Changed", targetsToAdd, targetsToRemove)
-    self:FireSignal("ReplicationTargetsChanged", targets)
+function ServerTableReplicator:Set(...: any)
+    return self:GetTableManager():Set(...)
 end
 
 --------------------------------------------------------------------------------
@@ -936,8 +973,8 @@ end
 --------------------------------------------------------------------------------
 
 -- Useful common TopLevel Replicators
-local serverToken = ServerTableReplicator.newClassToken("Server")
-local allToken = ServerTableReplicator.newClassToken("All")
+local serverToken = ServerTableReplicator.Token("Server")
+local allToken = ServerTableReplicator.Token("All")
 
 --[=[
     @within ServerTableReplicator

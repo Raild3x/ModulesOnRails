@@ -92,17 +92,20 @@ local RemotesFolder: Folder = script.Parent:FindFirstChild("Remotes")
 local Packages = script.Parent.Parent
 local Comm = require(Packages.Comm).ServerComm
 local Symbol = require(Packages.Symbol)
+local ServerPromiseConversionMiddleware = require(script.Parent.ServerPromiseConversionMiddleware)
 
 --// Constants //--
 local NAME_KEY = Symbol("NAME")
 local COMM_KEY = Symbol("COMM")
 local SIGNAL_MARKER = Symbol("SIGNAL_MARKER")
+local UNRELIABLE_SIGNAL_MARKER = Symbol("UNRELIABLE_SIGNAL_MARKER")
 local PROPERTY_MARKER = Symbol("PROPERTY_MARKER")
 
 --// Types //--
 type SignalMarker = typeof(SIGNAL_MARKER)
+type UnreliableSignalMarker = typeof(UNRELIABLE_SIGNAL_MARKER)
 type PropertyMarker = typeof(PROPERTY_MARKER)
-type Marker = SignalMarker | PropertyMarker
+type Marker = SignalMarker | PropertyMarker | UnreliableSignalMarker
 type ParsableValue = Marker | (self: ServerNetWire, ...any) -> (...any)
 
 type table = {[any]: any}
@@ -119,6 +122,26 @@ type Connection = {
     Connected: boolean;
 }
 
+--[=[
+    @within ServerNetWire
+    @type ServerRemoteEvent RemoteSignal
+    https://sleitnick.github.io/RbxUtil/api/RemoteSignal
+]=]
+type ServerRemoteEvent = {
+    Connect: (self: ServerRemoteEvent, callback: (self: ServerRemoteEvent, plr: Player, ...any) -> ()) -> Connection;
+    Fire: (self: ServerRemoteEvent, plr: Player, ...any) -> ();
+    FireFor: (self: ServerRemoteEvent, plrs: {Player}, ...any) -> ();
+    FireAll: (self: ServerRemoteEvent, ...any) -> ();
+    FireExcept: (self: ServerRemoteEvent, plr: Player, ...any) -> ();
+    FireFilter: (self: ServerRemoteEvent, predicate: (plr: Player, ...any) -> boolean, ...any) -> ();
+    IsUnreliable: (self: ServerRemoteEvent) -> boolean;
+}
+
+--[=[
+    @within ServerNetWire
+    @type ServerRemoteProperty RemoteProperty
+    https://sleitnick.github.io/RbxUtil/api/RemoteProperty
+]=]
 type ServerRemoteProperty = {
     Set: (self: ServerRemoteProperty, value: any) -> ();
     SetTop: (self: ServerRemoteProperty, value: any) -> ();
@@ -132,14 +155,11 @@ type ServerRemoteProperty = {
     GetFor: (self: ServerRemoteProperty, plr: Player) -> any;
 }
 
-type ServerRemoteEvent = {
-    Connect: (self: ServerRemoteEvent, callback: (self: ServerRemoteEvent, plr: Player, ...any) -> ()) -> Connection;
-    Fire: (self: ServerRemoteEvent, plr: Player, ...any) -> ();
-    FireFor: (self: ServerRemoteEvent, plrs: {Player}, ...any) -> ();
-    FireAll: (self: ServerRemoteEvent, ...any) -> ();
-    FireExcept: (self: ServerRemoteEvent, plr: Player, ...any) -> ();
-    FireFilter: (self: ServerRemoteEvent, predicate: (plr: Player, ...any) -> boolean, ...any) -> ();
-}
+--[=[
+    @within ServerNetWire
+    @type ServerMiddleware (player: Player, args: {any}) -> (shouldContinue: boolean, ...any)
+]=]
+type ServerMiddleware = (player: Player, args: {any}) -> (boolean, ...any)
 
 --// Volatiles //--
 local NetWireCache = {} -- Cache of all Wires
@@ -298,10 +318,17 @@ end
 function ServerNetWire:AutoRegister(k: string, v: ParsableValue): boolean
     if type(v) == "function" then
         self:RegisterMethod(k, v)
-    elseif v == SIGNAL_MARKER then
-        self:RegisterEvent(k)
-    elseif type(v) == "table" and v[1] == PROPERTY_MARKER then
-        self:RegisterProperty(k, v[2])
+    elseif type(v) == "table" then
+        local vType = v[1]
+        if vType == SIGNAL_MARKER then
+            self:RegisterEvent(k, false, table.unpack(v, 2))
+        elseif vType == UNRELIABLE_SIGNAL_MARKER then
+            self:RegisterEvent(k, true, table.unpack(v, 2))
+        elseif vType == PROPERTY_MARKER then
+            self:RegisterProperty(k, table.unpack(v, 2))
+        else
+            return false
+        end
     else
         return false
     end
@@ -349,11 +376,11 @@ end
     myWire.TestEvent:Fire("Hello from the client!")
     ```
 ]=]
-function ServerNetWire:RegisterEvent(eventName: string)
+function ServerNetWire:RegisterEvent(eventName: string, isUnreliable: boolean?, inboundMiddleware: {ServerMiddleware}?, outboundMiddleware: {ServerMiddleware}?)
     assert(type(eventName) == "string", "ServerNetWire:RegisterEvent expects a string for the eventName parameter")
     assert(not rawget(self, eventName), "ServerNetWire:RegisterEvent expects the eventName to not already exist")
 
-    rawset(self, eventName, self[COMM_KEY]:CreateSignal(eventName))
+    rawset(self, eventName, self[COMM_KEY]:CreateSignal(eventName, isUnreliable, inboundMiddleware, outboundMiddleware))
 end
 
 --[=[
@@ -380,7 +407,7 @@ end
     end
     ```
 ]=]
-function ServerNetWire:RegisterProperty(propertyName: string, initialValue: any?)
+function ServerNetWire:RegisterProperty(propertyName: string, initialValue: any?, inboundMiddleware: {ServerMiddleware}?, outboundMiddleware: {ServerMiddleware}?)
     assert(type(propertyName) == "string", "ServerNetWire:RegisterProperty expects a string for the propertyName parameter")
     assert(not rawget(self, propertyName), "ServerNetWire:RegisterProperty expects the propertyName to not already exist")
 
@@ -411,24 +438,36 @@ end
     end)
     ```
 ]=]
-function ServerNetWire:RegisterMethod(functionName: string, callback: (self: any, plr: Player, ...any) -> (...any), tbl: {}?)
+function ServerNetWire:RegisterMethod(functionName: string, callback: (self: any, plr: Player, ...any) -> (...any), tbl: {}?, inboundMiddleware: {ServerMiddleware}?, outboundMiddleware: {ServerMiddleware}?)
     assert(type(functionName) == "string", "ServerNetWire:RegisterFunction expects a string for the functionName parameter")
     assert(type(callback) == "function", "ServerNetWire:RegisterFunction expects a function for the callback parameter")
     assert(not rawget(self, functionName), "ServerNetWire:RegisterFunction expects the functionName to not already exist")
 
     local s = tbl or self
     rawset(s, functionName, callback)
-    self[COMM_KEY]:WrapMethod(s, functionName)
+
+    outboundMiddleware = outboundMiddleware or {}
+    assert(typeof(outboundMiddleware) == "table", "ServerNetWire:RegisterFunction expects a table for the outboundMiddleware parameter")
+    table.insert(outboundMiddleware, ServerPromiseConversionMiddleware)
+
+    self[COMM_KEY]:WrapMethod(s, functionName, inboundMiddleware, outboundMiddleware)
 end
 
 --------------------------------------------------------
 
 NetWire.Server = ServerNetWire
+NetWire.PromiseConversionMiddleware = ServerPromiseConversionMiddleware
 NetWire.setupServiceNetworking = ServerNetWire.setupServiceNetworking
 NetWire.__call = function(_, ...)
     return ServerNetWire.new(...)
 end
 setmetatable(ServerNetWire, NetWire)
+
+local MARKER_MT = {
+    __index = function(self, k: string)
+        error("Attempted to access an uninitialized NetWire object with key: " .. tostring(k) ..". | Ensure you have initialized the NetWire object prior to accessing this.")
+    end
+}
 
 --[=[
     @within NetWire
@@ -445,9 +484,18 @@ setmetatable(ServerNetWire, NetWire)
     Returns an EventMarker that is used to mark where a remoteSignal should be created.
     Calls ServerNetWire:RegisterEvent() when set to the index of a ServerNetWire.
     See ServerNetWire:RegisterEvent for more information.
+
+    ```lua
+    local MyWire = NetWire.Server("MyWire")
+    MyWire.MyEvent = NetWire.createEvent()
+
+    MyWire.MyEvent:Connect(function(plr: Player, msg: string)
+        print(plr, "said:", msg)
+    end)
+    ```
 ]=]
-function NetWire.createEvent(): ServerRemoteEvent
-    return SIGNAL_MARKER :: ServerRemoteEvent -- override the type for linting purposes
+function NetWire.createEvent(inboundMiddleware: {ServerMiddleware}?, outboundMiddleware: {ServerMiddleware}?): ServerRemoteEvent
+    return setmetatable({ SIGNAL_MARKER, inboundMiddleware, outboundMiddleware }, MARKER_MT) :: any
 end
 -- Aliases
 -- NetWire.newEvent = NetWire.createEvent
@@ -458,17 +506,45 @@ end
     @within NetWire
     @server
 
-    Returns an PropertyMarker that is used to mark where a remoteProperty should be created.
-    Calls ServerNetWire:RegisterProperty() when set to the index of a ServerNetWire.
-    See ServerNetWire:RegisterProperty for more information.
+    Returns an EventMarker that is used to mark where a remoteSignal should be created.
+    Calls ServerNetWire:RegisterEvent() when set to the index of a ServerNetWire.
+    See ServerNetWire:RegisterEvent for more information.
+
+    ```lua
+    local MyWire = NetWire.Server("MyWire")
+    MyWire.MyEvent = NetWire.createUnreliableEvent()
+
+    MyWire.MyEvent:FireAll("Hello, world!")
+    ```
 ]=]
-function NetWire.createProperty(initialValue: any?): ServerRemoteProperty
-    return { PROPERTY_MARKER, initialValue } :: ServerRemoteProperty -- override the type for linting purposes
+function NetWire.createUnreliableEvent(inboundMiddleware: {ServerMiddleware}?, outboundMiddleware: {ServerMiddleware}?): ServerRemoteEvent
+    return setmetatable({ UNRELIABLE_SIGNAL_MARKER, inboundMiddleware, outboundMiddleware }, MARKER_MT) :: any
 end
 
 --[=[
     @within NetWire
     @server
+
+    Returns an PropertyMarker that is used to mark where a remoteProperty should be created.
+    Calls ServerNetWire:RegisterProperty() when set to the index of a ServerNetWire.
+    See ServerNetWire:RegisterProperty for more information.
+
+    ```lua
+    local MyWire = NetWire.Server("MyWire")
+
+    MyWire.MyProperty = NetWire.createProperty(0)
+
+    print(MyWire.MyProperty:Get()) -- 0
+    ```
+]=]
+function NetWire.createProperty(initialValue: any?, inboundMiddleware: {ServerMiddleware}?, outboundMiddleware: {ServerMiddleware}?): ServerRemoteProperty
+    return setmetatable({ PROPERTY_MARKER, initialValue, inboundMiddleware, outboundMiddleware }, MARKER_MT) :: any
+end
+
+--[=[
+    @within NetWire
+    @server
+    @private
 
     @param wireName string
     @return ServerNetWire?

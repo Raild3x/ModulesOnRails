@@ -13,7 +13,7 @@ formattedName = "Component"
 # The intro page for the documentation
 docsLink = "Component"
 # Whether or not to ignore this package in the readme
-ignore = true
+
 
 [dependencies]
 Promise = "evaera/promise@^4.0.0"

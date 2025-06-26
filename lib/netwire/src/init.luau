@@ -23,7 +23,7 @@
     local NetWire = require(Packages.NetWire)
     local myWire = NetWire("MyNetWire")
 
-    myWire.MyEvent:Fire("Hello, world!")
+    myWire.MyEvent:FireAll("Hello, world!")
     ```
 ]=]
 
