@@ -415,40 +415,66 @@ function Roam.start(postInitPreStart: (() -> Promise?)?): Promise
 		-- Init:
 		local totalInitTime = 0
 		local promisesInitServices = {}
+		local servicesThatFailedToInit = {}
+
 		for _, service in topologicallySortedServices do
 			local ServiceConfig = service[KEY_CONFIG]
 			local InitMethodName = ServiceConfig.InitMethodName or Roam_INIT_METHOD_NAME
 			if type(service[InitMethodName]) == "function" then
 				table.insert(
 					promisesInitServices,
-					Promise.new(function(r)
+					Promise.new(function(resolveService, reject)
 						if Roam.Debug then
 							print(`[{RunContext}] Initializing {ServiceConfig.Name}`)
 						end
 						local t = os.clock()
-						debug.setmemorycategory(ServiceConfig.Name)
-						service[InitMethodName](service)
+						
+						local serviceInitFn = service[InitMethodName]
 						service[InitMethodName] = function()
 							error(`{ServiceConfig.Name} | Cannot call Init method after service has been initialized`)
 						end
+
+						local successfullyInitialized = false
+						local initThread = task.spawn(function()
+							debug.setmemorycategory(ServiceConfig.Name)
+							serviceInitFn(service)
+							successfullyInitialized = true
+						end)
+						while coroutine.status(initThread) ~= "dead" do
+							task.wait() -- Yield until the coroutine is dead
+						end
+						if not successfullyInitialized then
+							table.insert(servicesThatFailedToInit, ServiceConfig.Name)
+							reject(`Failed to initialize {ServiceConfig.Name}`)
+							return
+						end
+
 						t = os.clock() - t
 						totalInitTime += t
 						if Roam.Debug then
-							print(`[{RunContext}] Initialized {ServiceConfig.Name} in {t} seconds.`)
+							print(`[ROAM {RunContext}] Initialized {ServiceConfig.Name} in {t} seconds.`)
 						end
-						r()
-					end)
+						resolveService()
+					end):timeout(120, `Service {ServiceConfig.Name} took too long to initialize.`)
 				)
 			end
 		end
 
 		Roam.Services = services
 
-		resolve(Promise.all(promisesInitServices):tap(function()
-			if Roam.Debug then
-				print(`[{RunContext}] ROAM Initialized all services in {totalInitTime} seconds.`)
-			end
-		end))
+		local InitProm = Promise.all(promisesInitServices)
+			:tap(function()
+				if Roam.Debug then
+					print(`[{RunContext}] ROAM Initialized all services in {totalInitTime} seconds.`)
+				end
+			end)
+			:catch(function()
+				task.wait()
+				local err = `ROAM failed to initialize services: ` .. table.concat(servicesThatFailedToInit, ", ")
+				return Promise.reject(err)
+			end)
+
+		resolve(InitProm)
 	end)
 	:andThen(function()
 		if postInitPreStart then
@@ -467,10 +493,11 @@ function Roam.start(postInitPreStart: (() -> Promise?)?): Promise
 						print(`[{RunContext}] Starting {ServiceConfig.Name}`)
 					end
 					debug.setmemorycategory(ServiceConfig.Name)
-					service[StartMethodName](service)
+					local serviceStartFn = service[StartMethodName]
 					service[StartMethodName] = function()
 						error(`{ServiceConfig.Name} | Cannot call Start method after service has been initialized`)
 					end
+					serviceStartFn(service)
 				end)
 			end
 		end
