@@ -21,7 +21,7 @@ classes = ["TableReplicator", "ServerTableReplicator", "ClientTableReplicator", 
 
 [[classOrder]]
 section = "NetWire"
-classes = ["NetWire", "ServerNetWire", "ClientNetWire"]
+classes = ["NetWire", "ServerNetWire", "ClientNetWire", "----------------", "ServerRemoteEvent", "ServerRemoteProperty", "ClientRemoteEvent", "ClientRemoteProperty"]
 
 [[classOrder]]
 classes = ["PlayerProfileManager"]
