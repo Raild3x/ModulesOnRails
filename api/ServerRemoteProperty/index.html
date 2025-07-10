@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en" dir="ltr" class="plugin-moonwave plugin-id-moonwave">
+<head>
+<meta charset="UTF-8">
+<meta name="generator" content="Docusaurus v2.3.1">
+<title data-rh="true">ServerRemoteProperty | ModulesOnRails</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:url" content="https://raild3x.github.io/ModulesOnRails/api/ServerRemoteProperty"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docusaurus_tag" content="default"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docsearch:docusaurus_tag" content="default"><meta data-rh="true" property="og:title" content="ServerRemoteProperty | ModulesOnRails"><meta data-rh="true" name="description" content="Server-side remote property class with per-player state management.
+Based on Sleitnick&#x27;s Comm RemoteProperty implementation.
+
+Values set can be anything that can pass through a
+[RemoteEvent](https://developer.roblox.com/en-us/articles/Remote-Functions-and-Events#parameter-limitations).
+
+Here is a cheat-sheet for the below methods:
+- Setting data
+	- `Set`: Set &quot;top&quot; value for all current and future players. Overrides any custom-set data per player.
+	- `SetTop`: Set the &quot;top&quot; value for all players, but does _not_ override any custom-set data per player.
+	- `SetFor`: Set custom data for the given player. Overrides the &quot;top&quot; value. (_Can be nil_)
+	- `SetForList`: Same as `SetFor`, but accepts a list of players.
+	- `SetFilter`: Accepts a predicate function which checks for which players to set.
+- Clearing data
+	- `ClearFor`: Clears the custom data set for a given player. Player will start using the &quot;top&quot; level value instead.
+	- `ClearForList`: Same as `ClearFor`, but accepts a list of players.
+	- `ClearFilter`: Accepts a predicate function which checks for which players to clear.
+- Getting data
+	- `Get`: Retrieves the &quot;top&quot; value
+	- `GetFor`: Gets the current value for the given player. If cleared, returns the top value.
+
+:::caution Network Usage
+Calling any of the data setter methods (e.g. `Set()`) will
+fire the underlying RemoteEvent to replicate data to the
+clients. Therefore, setting data should only occur when it
+is necessary to change the data that the clients receive.
+:::
+
+:::caution Tables
+Tables _can_ be used with RemoteProperties. However, the
+RemoteProperty object will _not_ watch for changes within
+the table. Therefore, anytime changes are made to the table,
+the data must be set again using one of the setter methods.
+:::"><meta data-rh="true" property="og:description" content="Server-side remote property class with per-player state management.
+Based on Sleitnick&#x27;s Comm RemoteProperty implementation.
+
+Values set can be anything that can pass through a
+[RemoteEvent](https://developer.roblox.com/en-us/articles/Remote-Functions-and-Events#parameter-limitations).
+
+Here is a cheat-sheet for the below methods:
+- Setting data
+	- `Set`: Set &quot;top&quot; value for all current and future players. Overrides any custom-set data per player.
+	- `SetTop`: Set the &quot;top&quot; value for all players, but does _not_ override any custom-set data per player.
+	- `SetFor`: Set custom data for the given player. Overrides the &quot;top&quot; value. (_Can be nil_)
+	- `SetForList`: Same as `SetFor`, but accepts a list of players.
+	- `SetFilter`: Accepts a predicate function which checks for which players to set.
+- Clearing data
+	- `ClearFor`: Clears the custom data set for a given player. Player will start using the &quot;top&quot; level value instead.
+	- `ClearForList`: Same as `ClearFor`, but accepts a list of players.
+	- `ClearFilter`: Accepts a predicate function which checks for which players to clear.
+- Getting data
+	- `Get`: Retrieves the &quot;top&quot; value
+	- `GetFor`: Gets the current value for the given player. If cleared, returns the top value.
+
+:::caution Network Usage
+Calling any of the data setter methods (e.g. `Set()`) will
+fire the underlying RemoteEvent to replicate data to the
+clients. Therefore, setting data should only occur when it
+is necessary to change the data that the clients receive.
+:::
+
+:::caution Tables
+Tables _can_ be used with RemoteProperties. However, the
+RemoteProperty object will _not_ watch for changes within
+the table. Therefore, anytime changes are made to the table,
+the data must be set again using one of the setter methods.
+:::"><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/ServerRemoteProperty"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/ServerRemoteProperty" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/ServerRemoteProperty" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.1839e2d4.css">
+<link rel="preload" href="/ModulesOnRails/assets/js/runtime~main.2b4ad6ae.js" as="script">
+<link rel="preload" href="/ModulesOnRails/assets/js/main.0dcc8515.js" as="script">
+</head>
+<body class="navigation-with-keyboard">
+<script>!function(){function e(e){document.documentElement.setAttribute("data-theme",e)}var t=function(){var e=null;try{e=localStorage.getItem("theme")}catch(e){}return e}();null!==t?e(t):window.matchMedia("(prefers-color-scheme: dark)").matches?e("dark"):(window.matchMedia("(prefers-color-scheme: light)").matches,e("light"))}()</script><div id="__docusaurus">
+<div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="navbar navbar--fixed-top"><div class="navbar__inner"><div class="navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-hidden="true" viewBox="0 0 24 24" class="iconExternalLink_nPIU"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"></path></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="Switch between dark and light mode (currently light mode)" aria-label="Switch between dark and light mode (currently light mode)" aria-live="polite"><svg viewBox="0 0 24 24" width="24" height="24" class="lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" class="darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg></button></div><div class="searchBox_ZlJk"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input type="search" id="search_input_react" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="docusaurus_skipToContent_fallback" class="main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject">​Base​Object</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Roam">​Roam</a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/TableManager">TableManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/TableReplicator">TableReplicator</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" aria-expanded="true" href="/ModulesOnRails/api/NetWire">NetWire</a></div><ul style="display:block;overflow:visible;height:auto" class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/NetWire">​Net​Wire</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/ServerNetWire">​Server​Net​Wire</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/ClientNetWire">​Client​Net​Wire</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/----------------">----------------</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/ServerRemoteEvent">​Server​Remote​Event</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" tabindex="0" href="/ModulesOnRails/api/ServerRemoteProperty">​Server​Remote​Property</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/ClientRemoteEvent">​Client​Remote​Event</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/ClientRemoteProperty">​Client​Remote​Property</a></li></ul></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PlayerProfileManager">​Player​Profile​Manager</a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/PlayerDataManager">PlayerDataManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/Component">Instance Component Systems</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/DropletManager">DropletManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/AdjustableTimer">AdjustableTimer</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/CmdrHandler">Admin Commands [Cmdr]</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" aria-expanded="false" href="/ModulesOnRails/api/Queue">Data Structures</a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ClientComm">​Client​Comm</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ClientRemoteSignal">​Client​Remote​Signal</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Comm">​Comm</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Error">​Error</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Janitor">​Janitor</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ObjectCache">​Object​Cache</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Option">​Option</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ProbabilityDistributor">​Probability​Distributor</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Promise">​Promise</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PromValue">​Prom​Value</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/RemoteProperty">​Remote​Property</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/RemoteSignal">​Remote​Signal</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ScriptConnection">​Script​Connection</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ScriptSignal">​Script​Signal</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ServerComm">​Server​Comm</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Signal">​Signal</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Symbol">​Symbol</a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><div class="tocCollapsible_ETCw theme-doc-toc-mobile tocMobile_oUs_"><button type="button" class="clean-btn tocCollapsibleButton_TO0P">On this page</button></div><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">Server</span><span style="display:inline-block">Remote</span><span style="display:inline-block">Property</span></h1><div class="luaClassTags_EipM"><span class="badge_Ba2I" style="color:#00CC67"><span class="badgeTooltip_cWXP">This item only works when running on the server.</span><span class="badgeToolTipTail_H9D_"><svg fill="#00CC67" xmlns="http://www.w3.org/2000/svg" version="1.1" x="0px" y="0px" viewBox="0 0 90 90" role="img" aria-label="This item only works when running on the server."><polygon points="6.125,72.421 58.544,88.523 58.544,24.372 6.125,8.269 "></polygon><polygon points="79.818,15.77 79.868,15.755 29.615,1.453 10.328,6.318 60.102,21.609 "></polygon><path d="M61.643,78.738l22.232-6.582V17.801l-22.232,6.584V78.738z M73.811,69.257c-1.174,0-2.125-1.19-2.125-2.659  c0-1.468,0.951-2.658,2.125-2.658c1.172,0,2.123,1.19,2.123,2.658C75.934,68.066,74.982,69.257,73.811,69.257z M64.898,32.121  l16.336-4.41v7.117l-16.336,4.409V32.121z M64.898,41.292l16.336-4.41v7.116l-16.336,4.409V41.292z M64.898,50.463l16.336-4.411  v7.116l-16.336,4.411V50.463z"></path><polygon points="83.875,74.893 61.643,81.477 61.643,88.547 83.875,81.963 "></polygon></svg> <!-- -->Server</span></span></div><div>
+<p>
+  Server-side remote property class with per-player state management.
+  Based on Sleitnick's Comm RemoteProperty implementation.
+</p>
+<p>
+  Values set can be anything that can pass through a
+  <a href="https://developer.roblox.com/en-us/articles/Remote-Functions-and-Events#parameter-limitations" target="_blank">RemoteEvent</a>.
+</p>
+<p>Here is a cheat-sheet for the below methods:</p>
+<ul>
+  <li>Setting data
+    <ul>
+      <li><code>Set</code>: Set "top" value for all current and future players. Overrides any custom-set data per player.</li>
+      <li><code>SetTop</code>: Set the "top" value for all players, but does <em>not</em> override any custom-set data per player.</li>
+      <li><code>SetFor</code>: Set custom data for the given player. Overrides the "top" value. (<em>Can be nil</em>)</li>
+      <li><code>SetForList</code>: Same as <code>SetFor</code>, but accepts a list of players.</li>
+      <li><code>SetFilter</code>: Accepts a predicate function which checks for which players to set.</li>
+    </ul>
+  </li>
+  <li>Clearing data
+    <ul>
+      <li><code>ClearFor</code>: Clears the custom data set for a given player. Player will start using the "top" level value instead.</li>
+      <li><code>ClearForList</code>: Same as <code>ClearFor</code>, but accepts a list of players.</li>
+      <li><code>ClearFilter</code>: Accepts a predicate function which checks for which players to clear.</li>
+    </ul>
+  </li>
+  <li>Getting data
+    <ul>
+      <li><code>Get</code>: Retrieves the "top" value</li>
+      <li><code>GetFor</code>: Gets the current value for the given player. If cleared, returns the top value.</li>
+    </ul>
+  </li>
+</ul>
+<div class="admonition admonition-caution alert alert--warning">
+  <div class="admonition-heading">
+    <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+          <path d="M8.893 1.5c-.183-.31-.52-.5-.887-.5s-.703.19-.886.5L.138 13.499a.98.98 0 0 0 0 1.001c.193.31.53.501.886.501h13.964c.367 0 .704-.19.877-.5a1.03 1.03 0 0 0 .01-1.002L8.893 1.5zm.133 11.497H6.987v-2.003h2.039v2.003zm0-3.004H6.987V5.987h2.039v4.006z"></path>
+        </svg></span>Network Usage</h5>
+  </div>
+  <div class="admonition-content">
+    <p>
+      Calling any of the data setter methods (e.g. <code>Set()</code>) will
+      fire the underlying RemoteEvent to replicate data to the
+      clients. Therefore, setting data should only occur when it
+      is necessary to change the data that the clients receive.
+    </p>
+  </div>
+</div>
+<div class="admonition admonition-caution alert alert--warning">
+  <div class="admonition-heading">
+    <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+          <path d="M8.893 1.5c-.183-.31-.52-.5-.887-.5s-.703.19-.886.5L.138 13.499a.98.98 0 0 0 0 1.001c.193.31.53.501.886.501h13.964c.367 0 .704-.19.877-.5a1.03 1.03 0 0 0 .01-1.002L8.893 1.5zm.133 11.497H6.987v-2.003h2.039v2.003zm0-3.004H6.987V5.987h2.039v4.006z"></path>
+        </svg></span>Tables</h5>
+  </div>
+  <div class="admonition-content">
+    <p>
+      Tables <em>can</em> be used with RemoteProperties. However, the
+      RemoteProperty object will <em>not</em> watch for changes within
+      the table. Therefore, anytime changes are made to the table,
+      the data must be set again using one of the setter methods.
+    </p>
+  </div>
+</div>
+</div></header><h2 class="anchor anchorWithStickyNavbar_LWe7" id="functions">Functions<a href="#functions" class="hash-link" aria-label="Direct link to Functions" title="Direct link to Functions">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Set"><code style="text-decoration:none">Set</code><a href="#Set" class="hash-link" aria-label="Direct link to Set" title="Direct link to Set">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/netwire/src/NetWireTypes.luau#L308"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerRemoteProperty<!-- -->:</code><code class="green_DgR4">Set</code><code>(</code><code>value<!-- -->: </code><code class="blue_P4bS">any</code><code>) → </code><code>(</code><code>)</code></div><div>
+<p>Sets the top-level value of all clients to the same value.</p>
+<div class="admonition admonition-note alert alert--secondary">
+  <div class="admonition-heading">
+    <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="16" viewBox="0 0 14 16">
+          <path d="M6.3 5.69a.942.942 0 0 1-.28-.7c0-.28.09-.52.28-.7.19-.18.42-.28.7-.28.28 0 .52.09.7.28.18.19.28.42.28.7 0 .28-.09.52-.28.7a1 1 0 0 1-.7.3c-.28 0-.52-.11-.7-.3zM8 7.99c-.02-.25-.11-.48-.31-.69-.2-.19-.42-.3-.69-.31H6c-.27.02-.48.13-.69.31-.2.2-.3.44-.31.69h1v3c.02.27.11.5.31.69.2.2.42.31.69.31h1c.27 0 .48-.11.69-.31.2-.19.3-.42.31-.69H8V7.98v.01zM7 2.3c-3.14 0-5.7 2.54-5.7 5.68 0 3.14 2.56 5.7 5.7 5.7s5.7-2.55 5.7-5.7c0-3.15-2.56-5.69-5.7-5.69v.01zM7 .98c3.86 0 7 3.14 7 7s-3.14 7-7 7-7-3.12-7-7 3.14-7 7-7z"></path>
+        </svg></span>Override Per-Player Data</h5>
+  </div>
+  <div class="admonition-content">
+    <p>
+      This will override any per-player data that was set using
+      <code>SetFor</code> or <code>SetFilter</code>. To avoid overriding this data,
+      <code>SetTop</code> can be used instead.
+    </p>
+  </div>
+</div>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- Examples</span>
+remoteProperty<span class="token punctuation">:</span><span class="token function">Set</span><span class="token punctuation">(</span><span class="token number">10</span><span class="token punctuation">)</span>
+remoteProperty<span class="token punctuation">:</span><span class="token function">Set</span><span class="token punctuation">(</span><span class="token punctuation">{</span>SomeData <span class="token operator">=</span> <span class="token number">32</span><span class="token punctuation">}</span><span class="token punctuation">)</span>
+remoteProperty<span class="token punctuation">:</span><span class="token function">Set</span><span class="token punctuation">(</span><span class="token string">"HelloWorld"</span><span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="SetTop"><code style="text-decoration:none">SetTop</code><a href="#SetTop" class="hash-link" aria-label="Direct link to SetTop" title="Direct link to SetTop">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/netwire/src/NetWireTypes.luau#L334"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerRemoteProperty<!-- -->:</code><code class="green_DgR4">SetTop</code><code>(</code><code>value<!-- -->: </code><code class="blue_P4bS">any</code><code>) → </code><code>(</code><code>)</code></div><div>
+<p>
+  Set the top-level value of the property, but does not override
+  any per-player data (e.g. set with <code>SetFor</code> or <code>SetFilter</code>).
+  Any player without custom-set data will receive this new data.
+</p>
+<p>
+  This is useful if certain players have specific values that
+  should not be changed, but all other players should receive
+  the same new value.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- Using just 'Set' overrides per-player data:</span>
+remoteProperty<span class="token punctuation">:</span><span class="token function">SetFor</span><span class="token punctuation">(</span>somePlayer<span class="token punctuation">,</span> <span class="token string">"CustomData"</span><span class="token punctuation">)</span>
+remoteProperty<span class="token punctuation">:</span><span class="token function">Set</span><span class="token punctuation">(</span><span class="token string">"Data"</span><span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span>remoteProperty<span class="token punctuation">:</span><span class="token function">GetFor</span><span class="token punctuation">(</span>somePlayer<span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token comment">--> "Data"</span>
+
+<span class="token comment">-- Using 'SetTop' does not override:</span>
+remoteProperty<span class="token punctuation">:</span><span class="token function">SetFor</span><span class="token punctuation">(</span>somePlayer<span class="token punctuation">,</span> <span class="token string">"CustomData"</span><span class="token punctuation">)</span>
+remoteProperty<span class="token punctuation">:</span><span class="token function">SetTop</span><span class="token punctuation">(</span><span class="token string">"Data"</span><span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span>remoteProperty<span class="token punctuation">:</span><span class="token function">GetFor</span><span class="token punctuation">(</span>somePlayer<span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token comment">--> "CustomData"</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="SetFor"><code style="text-decoration:none">SetFor</code><a href="#SetFor" class="hash-link" aria-label="Direct link to SetFor" title="Direct link to SetFor">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/netwire/src/NetWireTypes.luau#L354"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerRemoteProperty<!-- -->:</code><code class="green_DgR4">SetFor</code><code>(</code><div class="inset_uKQm"><div><code>player<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>,</code></div><div><code>value<!-- -->: </code><code class="blue_P4bS">any</code></div></div><code>) → </code><code>(</code><code>)</code></div><div>
+<p>
+  Set the value of the property for a specific player. This
+  will override the value used by <code>Set</code> (and the initial value
+  set for the property when created).
+</p>
+<p>
+  This value <em>can</em> be <code>nil</code>. In order to reset the value for a
+  given player and let the player use the top-level value held
+  by this property, either use <code>Set</code> to set all players' data,
+  or use <code>ClearFor</code>.
+</p>
+<pre class="language-lua"><code class="language-lua">remoteProperty<span class="token punctuation">:</span><span class="token function">SetFor</span><span class="token punctuation">(</span>somePlayer<span class="token punctuation">,</span> <span class="token string">"CustomData"</span><span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="SetForList"><code style="text-decoration:none">SetForList</code><a href="#SetForList" class="hash-link" aria-label="Direct link to SetForList" title="Direct link to SetForList">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/netwire/src/NetWireTypes.luau#L369"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerRemoteProperty<!-- -->:</code><code class="green_DgR4">SetForList</code><code>(</code><div class="inset_uKQm"><div><code>players<!-- -->: </code><code class="purple_ieR2">{</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="purple_ieR2">}</code><code>,</code></div><div><code>value<!-- -->: </code><code class="blue_P4bS">any</code></div></div><code>) → </code><code>(</code><code>)</code></div><div>
+<p>
+  Set the value of the property for specific players. This just
+  loops through the players given and calls <code>SetFor</code>.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> players <span class="token operator">=</span> <span class="token punctuation">{</span>player1<span class="token punctuation">,</span> player2<span class="token punctuation">,</span> player3<span class="token punctuation">}</span>
+remoteProperty<span class="token punctuation">:</span><span class="token function">SetForList</span><span class="token punctuation">(</span>players<span class="token punctuation">,</span> <span class="token string">"CustomData"</span><span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="SetFilter"><code style="text-decoration:none">SetFilter</code><a href="#SetFilter" class="hash-link" aria-label="Direct link to SetFilter" title="Direct link to SetFilter">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/netwire/src/NetWireTypes.luau#L388"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerRemoteProperty<!-- -->:</code><code class="green_DgR4">SetFilter</code><code>(</code><div class="inset_uKQm"><div><code>predicate<!-- -->: </code><code class="purple_ieR2">(</code><div class="inset_uKQm"><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code class="blue_P4bS">any</code></div><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="blue_P4bS">boolean</code><code>,</code></div><div><code>value<!-- -->: </code><code class="blue_P4bS">any</code><span class="inlineDescription_G7Er">-- <span>
+<p>Value to set for the clients (and to the predicate)</p>
+</span></span></div></div><code>) → </code><code>(</code><code>)</code></div><div>
+<p>
+  Sets the value for specific clients that pass the <code>predicate</code>
+  function test. This can be used to finely set the values
+  based on more control logic (e.g. setting certain values
+  per team).
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- Set the value of "NewValue" to players with a name longer than 10 characters:</span>
+remoteProperty<span class="token punctuation">:</span><span class="token function">SetFilter</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span>player<span class="token punctuation">)</span>
+	<span class="token keyword">return</span> <span class="token operator">#</span>player<span class="token punctuation">.</span>Name <span class="token operator">></span> <span class="token number">10</span>
+<span class="token keyword">end</span><span class="token punctuation">,</span> <span class="token string">"NewValue"</span><span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="ClearFor"><code style="text-decoration:none">ClearFor</code><a href="#ClearFor" class="hash-link" aria-label="Direct link to ClearFor" title="Direct link to ClearFor">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/netwire/src/NetWireTypes.luau#L414"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerRemoteProperty<!-- -->:</code><code class="green_DgR4">ClearFor</code><code>(</code><code>player<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>) → </code><code>(</code><code>)</code></div><div>
+<p>
+  Clears the custom property value for the given player. When
+  this occurs, the player will reset to use the top-level
+  value held by this property (either the value set when the
+  property was created, or the last value set by <code>Set</code>).
+</p>
+<pre class="language-lua"><code class="language-lua">remoteProperty<span class="token punctuation">:</span><span class="token function">Set</span><span class="token punctuation">(</span><span class="token string">"DATA"</span><span class="token punctuation">)</span>
+
+remoteProperty<span class="token punctuation">:</span><span class="token function">SetFor</span><span class="token punctuation">(</span>somePlayer<span class="token punctuation">,</span> <span class="token string">"CUSTOM_DATA"</span><span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span>remoteProperty<span class="token punctuation">:</span><span class="token function">GetFor</span><span class="token punctuation">(</span>somePlayer<span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token comment">--> "CUSTOM_DATA"</span>
+
+<span class="token comment">-- DOES NOT CLEAR, JUST SETS CUSTOM DATA TO NIL:</span>
+remoteProperty<span class="token punctuation">:</span><span class="token function">SetFor</span><span class="token punctuation">(</span>somePlayer<span class="token punctuation">,</span> <span class="token keyword">nil</span><span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span>remoteProperty<span class="token punctuation">:</span><span class="token function">GetFor</span><span class="token punctuation">(</span>somePlayer<span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token comment">--> nil</span>
+
+<span class="token comment">-- CLEAR:</span>
+remoteProperty<span class="token punctuation">:</span><span class="token function">ClearFor</span><span class="token punctuation">(</span>somePlayer<span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span>remoteProperty<span class="token punctuation">:</span><span class="token function">GetFor</span><span class="token punctuation">(</span>somePlayer<span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token comment">--> "DATA"</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="ClearForList"><code style="text-decoration:none">ClearForList</code><a href="#ClearForList" class="hash-link" aria-label="Direct link to ClearForList" title="Direct link to ClearForList">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/netwire/src/NetWireTypes.luau#L424"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerRemoteProperty<!-- -->:</code><code class="green_DgR4">ClearForList</code><code>(</code><code>players<!-- -->: </code><code class="purple_ieR2">{</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="purple_ieR2">}</code><code>) → </code><code>(</code><code>)</code></div><div>
+<p>
+  Clears the custom value for the given players. This
+  just loops through the list of players and calls
+  the <code>ClearFor</code> method for each player.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="ClearFilter"><code style="text-decoration:none">ClearFilter</code><a href="#ClearFilter" class="hash-link" aria-label="Direct link to ClearFilter" title="Direct link to ClearFilter">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/netwire/src/NetWireTypes.luau#L433"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerRemoteProperty<!-- -->:</code><code class="green_DgR4">ClearFilter</code><code>(</code><code>predicate<!-- -->: </code><code class="purple_ieR2">(</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="blue_P4bS">boolean</code><code>) → </code><code>(</code><code>)</code></div><div>
+<p>
+  The same as <code>SetFilter</code>, except clears the custom value
+  for any player that passes the predicate.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="Get"><code style="text-decoration:none">Get</code><a href="#Get" class="hash-link" aria-label="Direct link to Get" title="Direct link to Get">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/netwire/src/NetWireTypes.luau#L448"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerRemoteProperty<!-- -->:</code><code class="green_DgR4">Get</code><code>(</code><code>) → </code><code class="blue_P4bS">any</code></div><div>
+<p>
+  Returns the top-level value held by the property. This will
+  either be the initial value set, or the last value set
+  with <code>Set()</code>.
+</p>
+<pre class="language-lua"><code class="language-lua">remoteProperty<span class="token punctuation">:</span><span class="token function">Set</span><span class="token punctuation">(</span><span class="token string">"Data"</span><span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span>remoteProperty<span class="token punctuation">:</span><span class="token function">Get</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token comment">--> "Data"</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetFor"><code style="text-decoration:none">GetFor</code><a href="#GetFor" class="hash-link" aria-label="Direct link to GetFor" title="Direct link to GetFor">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/netwire/src/NetWireTypes.luau#L484"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerRemoteProperty<!-- -->:</code><code class="green_DgR4">GetFor</code><code>(</code><code>player<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>) → </code><code class="blue_P4bS">any</code></div><div>
+<p>
+  Returns the current value for the given player. This value
+  will depend on if <code>SetFor</code> or <code>SetFilter</code> has affected the
+  custom value for the player. If so, that custom value will
+  be returned. Otherwise, the top-level value will be used
+  (e.g. value from <code>Set</code>).
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- Set top level data:</span>
+remoteProperty<span class="token punctuation">:</span><span class="token function">Set</span><span class="token punctuation">(</span><span class="token string">"Data"</span><span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span>remoteProperty<span class="token punctuation">:</span><span class="token function">GetFor</span><span class="token punctuation">(</span>somePlayer<span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token comment">--> "Data"</span>
+
+<span class="token comment">-- Set custom data:</span>
+remoteProperty<span class="token punctuation">:</span><span class="token function">SetFor</span><span class="token punctuation">(</span>somePlayer<span class="token punctuation">,</span> <span class="token string">"CustomData"</span><span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span>remoteProperty<span class="token punctuation">:</span><span class="token function">GetFor</span><span class="token punctuation">(</span>somePlayer<span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token comment">--> "CustomData"</span>
+
+<span class="token comment">-- Set top level again, overriding custom data:</span>
+remoteProperty<span class="token punctuation">:</span><span class="token function">Set</span><span class="token punctuation">(</span><span class="token string">"NewData"</span><span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span>remoteProperty<span class="token punctuation">:</span><span class="token function">GetFor</span><span class="token punctuation">(</span>somePlayer<span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token comment">--> "NewData"</span>
+
+<span class="token comment">-- Set custom data again, and set top level without overriding:</span>
+remoteProperty<span class="token punctuation">:</span><span class="token function">SetFor</span><span class="token punctuation">(</span>somePlayer<span class="token punctuation">,</span> <span class="token string">"CustomData"</span><span class="token punctuation">)</span>
+remoteProperty<span class="token punctuation">:</span><span class="token function">SetTop</span><span class="token punctuation">(</span><span class="token string">"Data"</span><span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span>remoteProperty<span class="token punctuation">:</span><span class="token function">GetFor</span><span class="token punctuation">(</span>somePlayer<span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token comment">--> "CustomData"</span>
+
+<span class="token comment">-- Clear custom data to use top level data:</span>
+remoteProperty<span class="token punctuation">:</span><span class="token function">ClearFor</span><span class="token punctuation">(</span>somePlayer<span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span>remoteProperty<span class="token punctuation">:</span><span class="token function">GetFor</span><span class="token punctuation">(</span>somePlayer<span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token comment">--> "Data"</span>
+</code></pre>
+</div></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
+    &quot;functions&quot;: [
+        {
+            &quot;name&quot;: &quot;Set&quot;,
+            &quot;desc&quot;: &quot;Sets the top-level value of all clients to the same value.\n\n:::note Override Per-Player Data\nThis will override any per-player data that was set using\n`SetFor` or `SetFilter`. To avoid overriding this data,\n`SetTop` can be used instead.\n:::\n\n```lua\n-- Examples\nremoteProperty:Set(10)\nremoteProperty:Set({SomeData = 32})\nremoteProperty:Set(\&quot;HelloWorld\&quot;)\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;value&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;any&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 308,
+                &quot;path&quot;: &quot;lib/netwire/src/NetWireTypes.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;SetTop&quot;,
+            &quot;desc&quot;: &quot;Set the top-level value of the property, but does not override\nany per-player data (e.g. set with `SetFor` or `SetFilter`).\nAny player without custom-set data will receive this new data.\n\nThis is useful if certain players have specific values that\nshould not be changed, but all other players should receive\nthe same new value.\n\n```lua\n-- Using just &#x27;Set&#x27; overrides per-player data:\nremoteProperty:SetFor(somePlayer, \&quot;CustomData\&quot;)\nremoteProperty:Set(\&quot;Data\&quot;)\nprint(remoteProperty:GetFor(somePlayer)) --&gt; \&quot;Data\&quot;\n\n-- Using &#x27;SetTop&#x27; does not override:\nremoteProperty:SetFor(somePlayer, \&quot;CustomData\&quot;)\nremoteProperty:SetTop(\&quot;Data\&quot;)\nprint(remoteProperty:GetFor(somePlayer)) --&gt; \&quot;CustomData\&quot;\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;value&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;any&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 334,
+                &quot;path&quot;: &quot;lib/netwire/src/NetWireTypes.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;SetFor&quot;,
+            &quot;desc&quot;: &quot;Set the value of the property for a specific player. This\nwill override the value used by `Set` (and the initial value\nset for the property when created).\n\nThis value _can_ be `nil`. In order to reset the value for a\ngiven player and let the player use the top-level value held\nby this property, either use `Set` to set all players&#x27; data,\nor use `ClearFor`.\n\n```lua\nremoteProperty:SetFor(somePlayer, \&quot;CustomData\&quot;)\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;player&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Player&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;value&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;any&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 354,
+                &quot;path&quot;: &quot;lib/netwire/src/NetWireTypes.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;SetForList&quot;,
+            &quot;desc&quot;: &quot;Set the value of the property for specific players. This just\nloops through the players given and calls `SetFor`.\n\n```lua\nlocal players = {player1, player2, player3}\nremoteProperty:SetForList(players, \&quot;CustomData\&quot;)\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;players&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{Player}&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;value&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;any&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 369,
+                &quot;path&quot;: &quot;lib/netwire/src/NetWireTypes.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;SetFilter&quot;,
+            &quot;desc&quot;: &quot;Sets the value for specific clients that pass the `predicate`\nfunction test. This can be used to finely set the values\nbased on more control logic (e.g. setting certain values\nper team).\n\n```lua\n-- Set the value of \&quot;NewValue\&quot; to players with a name longer than 10 characters:\nremoteProperty:SetFilter(function(player)\n\treturn #player.Name &gt; 10\nend, \&quot;NewValue\&quot;)\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;predicate&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;(Player, any) -&gt; boolean&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;value&quot;,
+                    &quot;desc&quot;: &quot;Value to set for the clients (and to the predicate)&quot;,
+                    &quot;lua_type&quot;: &quot;any&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 388,
+                &quot;path&quot;: &quot;lib/netwire/src/NetWireTypes.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;ClearFor&quot;,
+            &quot;desc&quot;: &quot;Clears the custom property value for the given player. When\nthis occurs, the player will reset to use the top-level\nvalue held by this property (either the value set when the\nproperty was created, or the last value set by `Set`).\n\n```lua\nremoteProperty:Set(\&quot;DATA\&quot;)\n\nremoteProperty:SetFor(somePlayer, \&quot;CUSTOM_DATA\&quot;)\nprint(remoteProperty:GetFor(somePlayer)) --&gt; \&quot;CUSTOM_DATA\&quot;\n\n-- DOES NOT CLEAR, JUST SETS CUSTOM DATA TO NIL:\nremoteProperty:SetFor(somePlayer, nil)\nprint(remoteProperty:GetFor(somePlayer)) --&gt; nil\n\n-- CLEAR:\nremoteProperty:ClearFor(somePlayer)\nprint(remoteProperty:GetFor(somePlayer)) --&gt; \&quot;DATA\&quot;\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;player&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Player&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 414,
+                &quot;path&quot;: &quot;lib/netwire/src/NetWireTypes.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;ClearForList&quot;,
+            &quot;desc&quot;: &quot;Clears the custom value for the given players. This\njust loops through the list of players and calls\nthe `ClearFor` method for each player.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;players&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{Player}&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 424,
+                &quot;path&quot;: &quot;lib/netwire/src/NetWireTypes.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;ClearFilter&quot;,
+            &quot;desc&quot;: &quot;The same as `SetFilter`, except clears the custom value\nfor any player that passes the predicate.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;predicate&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;(Player) -&gt; boolean&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 433,
+                &quot;path&quot;: &quot;lib/netwire/src/NetWireTypes.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;Get&quot;,
+            &quot;desc&quot;: &quot;Returns the top-level value held by the property. This will\neither be the initial value set, or the last value set\nwith `Set()`.\n\n```lua\nremoteProperty:Set(\&quot;Data\&quot;)\nprint(remoteProperty:Get()) --&gt; \&quot;Data\&quot;\n```&quot;,
+            &quot;params&quot;: [],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;any&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 448,
+                &quot;path&quot;: &quot;lib/netwire/src/NetWireTypes.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetFor&quot;,
+            &quot;desc&quot;: &quot;Returns the current value for the given player. This value\nwill depend on if `SetFor` or `SetFilter` has affected the\ncustom value for the player. If so, that custom value will\nbe returned. Otherwise, the top-level value will be used\n(e.g. value from `Set`).\n\n```lua\n-- Set top level data:\nremoteProperty:Set(\&quot;Data\&quot;)\nprint(remoteProperty:GetFor(somePlayer)) --&gt; \&quot;Data\&quot;\n\n-- Set custom data:\nremoteProperty:SetFor(somePlayer, \&quot;CustomData\&quot;)\nprint(remoteProperty:GetFor(somePlayer)) --&gt; \&quot;CustomData\&quot;\n\n-- Set top level again, overriding custom data:\nremoteProperty:Set(\&quot;NewData\&quot;)\nprint(remoteProperty:GetFor(somePlayer)) --&gt; \&quot;NewData\&quot;\n\n-- Set custom data again, and set top level without overriding:\nremoteProperty:SetFor(somePlayer, \&quot;CustomData\&quot;)\nremoteProperty:SetTop(\&quot;Data\&quot;)\nprint(remoteProperty:GetFor(somePlayer)) --&gt; \&quot;CustomData\&quot;\n\n-- Clear custom data to use top level data:\nremoteProperty:ClearFor(somePlayer)\nprint(remoteProperty:GetFor(somePlayer)) --&gt; \&quot;Data\&quot;\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;player&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Player&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;any&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 484,
+                &quot;path&quot;: &quot;lib/netwire/src/NetWireTypes.luau&quot;
+            }
+        }
+    ],
+    &quot;properties&quot;: [],
+    &quot;types&quot;: [],
+    &quot;name&quot;: &quot;ServerRemoteProperty&quot;,
+    &quot;desc&quot;: &quot;Server-side remote property class with per-player state management.\nBased on Sleitnick&#x27;s Comm RemoteProperty implementation.\n\nValues set can be anything that can pass through a\n[RemoteEvent](https://developer.roblox.com/en-us/articles/Remote-Functions-and-Events#parameter-limitations).\n\nHere is a cheat-sheet for the below methods:\n- Setting data\n\t- `Set`: Set \&quot;top\&quot; value for all current and future players. Overrides any custom-set data per player.\n\t- `SetTop`: Set the \&quot;top\&quot; value for all players, but does _not_ override any custom-set data per player.\n\t- `SetFor`: Set custom data for the given player. Overrides the \&quot;top\&quot; value. (_Can be nil_)\n\t- `SetForList`: Same as `SetFor`, but accepts a list of players.\n\t- `SetFilter`: Accepts a predicate function which checks for which players to set.\n- Clearing data\n\t- `ClearFor`: Clears the custom data set for a given player. Player will start using the \&quot;top\&quot; level value instead.\n\t- `ClearForList`: Same as `ClearFor`, but accepts a list of players.\n\t- `ClearFilter`: Accepts a predicate function which checks for which players to clear.\n- Getting data\n\t- `Get`: Retrieves the \&quot;top\&quot; value\n\t- `GetFor`: Gets the current value for the given player. If cleared, returns the top value.\n\n:::caution Network Usage\nCalling any of the data setter methods (e.g. `Set()`) will\nfire the underlying RemoteEvent to replicate data to the\nclients. Therefore, setting data should only occur when it\nis necessary to change the data that the clients receive.\n:::\n\n:::caution Tables\nTables _can_ be used with RemoteProperties. However, the\nRemoteProperty object will _not_ watch for changes within\nthe table. Therefore, anytime changes are made to the table,\nthe data must be set again using one of the setter methods.\n:::&quot;,
+    &quot;realm&quot;: [
+        &quot;Server&quot;
+    ],
+    &quot;source&quot;: {
+        &quot;line&quot;: 287,
+        &quot;path&quot;: &quot;lib/netwire/src/NetWireTypes.luau&quot;
+    }
+}</pre></details></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#types" class="table-of-contents__link toc-highlight">Types</a></li><li><a href="#properties" class="table-of-contents__link toc-highlight">Properties</a></li><li><a href="#functions" class="table-of-contents__link toc-highlight">Functions</a><ul><li><a href="#ClearFilter" class="table-of-contents__link toc-highlight">:ClearFilter</a></li><li><a href="#ClearFor" class="table-of-contents__link toc-highlight">:ClearFor</a></li><li><a href="#ClearForList" class="table-of-contents__link toc-highlight">:ClearForList</a></li><li><a href="#Get" class="table-of-contents__link toc-highlight">:Get</a></li><li><a href="#GetFor" class="table-of-contents__link toc-highlight">:GetFor</a></li><li><a href="#Set" class="table-of-contents__link toc-highlight">:Set</a></li><li><a href="#SetFilter" class="table-of-contents__link toc-highlight">:SetFilter</a></li><li><a href="#SetFor" class="table-of-contents__link toc-highlight">:SetFor</a></li><li><a href="#SetForList" class="table-of-contents__link toc-highlight">:SetForList</a></li><li><a href="#SetTop" class="table-of-contents__link toc-highlight">:SetTop</a></li></ul></li></ul></div></div></div></div></main></div></div><footer class="footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2025 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
+<script src="/ModulesOnRails/assets/js/runtime~main.2b4ad6ae.js"></script>
+<script src="/ModulesOnRails/assets/js/main.0dcc8515.js"></script>
+</body>
+</html>
