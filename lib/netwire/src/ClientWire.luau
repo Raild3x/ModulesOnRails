@@ -392,10 +392,8 @@ ClientNetWireClass.Client = setmetatable({}, {
 	__metatable = ClientNetWireClass, -- Prevents modification of the metatable
 })
 
-table.freeze(ClientNetWireClass.Client)
-
-
-table.freeze(ClientNetWireClass)
+-- table.freeze(ClientNetWireClass.Client)
+-- table.freeze(ClientNetWireClass)
 
 export type ClientNetWire = typeof(ClientNetWireClass.new(""))
 

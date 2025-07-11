@@ -572,7 +572,7 @@ ServerNetWireClass.Server = setmetatable({}, {
 	__metatable = ServerNetWireClass, -- Prevents modification of the metatable
 })
 
-table.freeze(ServerNetWireClass.Server)
-table.freeze(ServerNetWireClass)
+-- table.freeze(ServerNetWireClass.Server)
+-- table.freeze(ServerNetWireClass)
 
 return ServerNetWireClass
