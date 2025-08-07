@@ -7,18 +7,20 @@
     A Component Extension which applies simple Janitor, Attribute, and Signal functionality to a component.
     Also adds a way to check if a Component has been destroyed.
 
-    Extends **ComponentJanitorUtil** and **ComponentAttributeUtil**.
+    Extends **ComponentJanitorUtil**, **ComponentAttributeUtil**, and **ComponentPropertyUtil**.
     Check their documentation for more information.
 
 ]=]
 
 --[[ API
-    .Signals: {
+    Signals: {
         Destroyed: Signal;
     }
 
     :RegisterSignal(SignalName: string) -> Signal
     :GetSignal(SignalName: string) -> Signal
+    :FireSignal(SignalName: string, ...any) -> ()
+    :ConnectSignal(SignalName: string, callback: (...any) -> ()) -> RBXScriptConnection
     :IsDestroyed() -> boolean
 ]]
 
@@ -41,6 +43,7 @@ export type Extension = {
     RegisterSignal: (self: Extension, SignalName: string) -> Signal;
 	GetSignal: (self: Extension, SignalName: string) -> Signal;
     FireSignal: (self: Extension, SignalName: string, ...any) -> ();
+    ConnectSignal: (self: Extension, SignalName: string, callback: (...any) -> ()) -> RBXScriptConnection;
 
     IsDestroyed: (self: Extension) -> boolean;
 
@@ -106,6 +109,21 @@ local function FireSignal(self, signalName: string, ...)
     signal:Fire(...)
 end
 
+--[=[
+    @within BaseComponent
+    @method ConnectSignal
+
+    Connects a callback to a signal.
+
+    @param signalName string -- The name of the signal to connect to.
+    @param callback (...any) -> () -- The callback to call when the signal is fired.
+    @return RBXScriptConnection -- The connection object.
+]=]
+local function ConnectSignal(self, signalName: string, callback: (...any) -> ()): RBXScriptConnection
+    local signal = self:GetSignal(signalName)
+    return signal:Connect(callback)
+end
+
 
 local function IsDestroyed(self): boolean
     return self[KEY_IS_DESTROYED] == true
@@ -115,6 +133,7 @@ local UtilMethods = {
     RegisterSignal = RegisterSignal,
 	GetSignal = GetSignal,
     FireSignal = FireSignal,
+    ConnectSignal = ConnectSignal,
     --IsDestroyed = IsDestroyed,
 
 }
