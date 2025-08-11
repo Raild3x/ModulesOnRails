@@ -225,7 +225,7 @@ function ClientNetWireClass.new(nameSpace: string)
 				end
 			elseif _folder.Name == "RE" then
 				fn = function(re)
-					if not re:IsA("RemoteEvent") then
+					if not (re:IsA("RemoteEvent") or re:IsA("UnreliableRemoteEvent")) then
 						return
 					end
 					local v = newComm:GetSignal(re.Name)
