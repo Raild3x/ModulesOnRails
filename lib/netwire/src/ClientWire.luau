@@ -102,6 +102,11 @@ type Promise<T...> = NetWireTypes.Promise<T...>
 type Connection = NetWireTypes.Connection
 type ClientRemoteProperty = NetWireTypes.ClientRemoteProperty
 type ClientRemoteEvent = NetWireTypes.ClientRemoteEvent
+type Remote = (<T...>(self: ClientNetWire, ...any) -> Promise<T...>) & ClientRemoteEvent & ClientRemoteProperty
+
+export type ClientNetWire = {
+	[string]: Remote, -- Dynamic remote access
+}
 
 --------------------------------------------------------------------------------
 -- MODULE STATE
@@ -135,9 +140,8 @@ ClientNetWireClass.ClassName = "ClientNetWire"
     Instance methods for ClientNetWire objects.
     These methods are available on created ClientNetWire instances.
 ]=]
-type Remote = (<T...>(self: ClientNetWire, ...any) -> Promise<T...>) & ClientRemoteEvent & ClientRemoteProperty
 local ClientNetWireMT = {}
-ClientNetWireMT.__index = function(t, k): any
+ClientNetWireMT.__index = function(t, k): Remote
 	if not ClientNetWireClass.isReady(t) then
 		warn(
 			`Attempted to index '{k}' in a ClientNetWire that is not ready or does not exist. Ensure the server side is actually being setup.`
@@ -155,8 +159,6 @@ ClientNetWireMT.__newindex = function(_, k, v)
 	error(`Attempted to set index '{k}' to '{v}' in a ClientNetWire. ClientNetWires are read-only.`)
 end
 
-
-
 --------------------------------------------------------------------------------
 -- CONSTRUCTOR AND INSTANCE CREATION
 --------------------------------------------------------------------------------
@@ -168,7 +170,7 @@ end
     @return ClientNetWire
     Creates a new ClientNetWire. If a ClientNetWire with the same nameSpace already exists, it will be returned instead.
 ]=]
-function ClientNetWireClass.new(nameSpace: string)
+function ClientNetWireClass.new(nameSpace: string): ClientNetWire
 	assert(RunService:IsClient(), "ClientNetWire.new can only be called from the client")
 	assert(type(nameSpace) == "string", "ClientNetWire.new expects a string for the nameSpace parameter")
 
@@ -265,9 +267,8 @@ function ClientNetWireClass.new(nameSpace: string)
 
 	NewNetWireSignal:Fire(self)
 
-	return self
+	return self :: any
 end
-
 
 --------------------------------------------------------------------------------
 -- STATIC UTILITY METHODS
@@ -349,15 +350,16 @@ ClientNetWireClass.promiseIndex = ClientNetWireClass.indexReady
 	Destroys a ClientNetWire, removing it from the cache.
 ]=]
 function ClientNetWireClass.destroy(clientNetWire: ClientNetWire)
-	if not NetWireCache[clientNetWire[NAME_KEY]] then
+	local self = clientNetWire :: any
+	if not NetWireCache[self[NAME_KEY]] then
 		warn("Attempted to destroy an uncached ClientNetWire")
 		return
 	end
-	NetWireCache[clientNetWire[NAME_KEY]] = nil
-	clientNetWire[JANI_KEY]:Destroy()
-	clientNetWire[JANI_KEY] = nil
-	clientNetWire[COMM_KEY] = nil
-	warn("Clearing NetWire cache for " .. clientNetWire[NAME_KEY] :: string)
+	NetWireCache[self[NAME_KEY]] = nil
+	self[JANI_KEY]:Destroy()
+	self[JANI_KEY] = nil
+	self[COMM_KEY] = nil
+	warn("Clearing NetWire cache for " .. self[NAME_KEY] :: string)
 end
 
 --------------------------------------------------------
@@ -394,7 +396,5 @@ ClientNetWireClass.Client = setmetatable({}, {
 
 -- table.freeze(ClientNetWireClass.Client)
 -- table.freeze(ClientNetWireClass)
-
-export type ClientNetWire = typeof(ClientNetWireClass.new(""))
 
 return ClientNetWireClass
