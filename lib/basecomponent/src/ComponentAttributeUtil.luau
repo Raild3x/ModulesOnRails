@@ -27,12 +27,12 @@ local Symbol = require(Packages.Symbol)
 
 --// Types //--
 type Component = any
-type Value<T, S> = Fusion.Value<T, S>
+type Value<T> = Fusion.Value<T, T>
 
 export type Extension = {
     SetAttribute: (self: Extension, attributeName: string, value: any) -> (),
     GetAttribute: (self: Extension, attributeName: string) -> (any | nil),
-    OutAttribute: (self: Extension, attributeName: string) -> (Value<any, any>),
+    OutAttribute: (self: Extension, attributeName: string) -> (Value<any>),
     IncrementAttribute: (self: Extension, attributeName: string, increment: number) -> (number),
     MutateAttribute: <T>(self: Extension, attributeName: string, mutator: (value: any) -> (T)) -> (T),
     ObserveAttribute: (self: Extension, attributeName: string, callback: (newValue: any) -> ()) -> () -> (),
@@ -130,7 +130,6 @@ local function ObserveAttribute(self: Component, attributeName: string, callback
     callback(GetAttribute(self, attributeName))
     return function()
         if not connection.Connected then
-            warn(`ObserveAttribute: "{attributeName}" has already been disconnected!`)
             return
         end
 
