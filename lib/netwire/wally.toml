@@ -2,7 +2,7 @@
 name = "raild3x/netwire"
 description = "A networking library based off of sleitnicks comm library."
 authors = ["Logan Hunt (Raildex)"]
-version = "0.2.1"
+version = "0.3.4"
 license = "MIT"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
@@ -14,7 +14,7 @@ formattedName = "NetWire"
 docsLink = "NetWire"
 
 [dependencies]
-Promise = "evaera/promise@^4.0.0"
+Promise = "howmanysmall/typed-promise@4.0.3"
 Janitor = "howmanysmall/janitor@^1.16.0"
 Signal = "lucasmzreal/fastsignal@^10.2.1"
 Symbol = "sleitnick/symbol@^2.0.1"

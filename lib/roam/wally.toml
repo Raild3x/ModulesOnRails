@@ -2,7 +2,7 @@
 name = "raild3x/roam"
 description = "Roam is a service initialization framework for Roblox."
 authors = ["Logan Hunt (Raildex)"]
-version = "0.1.4"
+version = "0.1.6"
 license = "MIT"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"

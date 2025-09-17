@@ -1,10 +1,25 @@
 -- Logan Hunt [Raildex]
 -- Sep 17, 2023
+-- Reorganized for better linting support
 --[=[
     @class ClientNetWire
     @client
 
-    Uses Sleitnick's Comm under the hood.
+    Client-side NetWire implementation using Sleitnick's Comm under the hood.
+    Provides a clean interface for consuming server-exposed networking APIs.
+
+    **Structure:**
+    - `ClientNetWireClass`: Contains static methods (utilities, promises, etc.)
+    - `ClientNetWire`: Contains instance methods and constructor
+    
+    This separation ensures better linting support and prevents static methods from appearing 
+    in instance method suggestions.
+
+    **Key Features:**
+    - **Promise-based readiness**: Wait for server APIs to become available
+    - **Automatic proxy creation**: Seamless access to server methods and events
+    - **Type safety**: Full typing support with proper metatable integration
+    - **Middleware support**: Promise conversion and other transformations
 
     :::caution
     Wire indices may not always be ready for use immediately after creating a ClientNetWire.
@@ -35,12 +50,18 @@
         .getClient(wireName: string) -> ClientNetWire?
         .destroy(clientNetWire: ClientNetWire)
         .isReady(wireOrName: ClientNetWire | string) -> boolean
-        .promiseIndex(wireOrName: ClientNetWire | string, idx: string) -> Promise<any>
-        .promiseReady(clientNetWire: ClientNetWire | string) -> Promise<ClientNetWire>
+        .indexReady(wireOrName: ClientNetWire | string, idx: string) -> Promise<...any>
+        .onReady(clientNetWire: ClientNetWire | string) -> Promise<ClientNetWire>
+        .promiseIndex(wireOrName: ClientNetWire | string, idx: string) -> Promise<...any>
+        .promiseWire(clientNetWire: ClientNetWire | string) -> Promise<ClientNetWire>
 
     [CLIENT NETWIRE CLASS]
         .new(nameSpace: string) -> ClientNetWire
 ]]
+
+--------------------------------------------------------------------------------
+-- IMPORTS
+--------------------------------------------------------------------------------
 
 local RunService = game:GetService("RunService")
 
@@ -50,292 +71,330 @@ local Packages = script.Parent.Parent
 local Promise = require(Packages.Promise)
 local Janitor = require(Packages.Janitor)
 local Signal = require(Packages.Signal)
-local Symbol = require(Packages.Symbol)
 local Comm = require(Packages.Comm).ClientComm
-local ClientRemoteProxy = require(script.Parent.ClientRemoteProxy)
-local ClientPromiseConversionMiddleware = require(script.Parent.ClientPromiseConversionMiddleware)
+local NetWireTypes = require(script.Parent.NetWireTypes)
+local Shared = require(script.Parent.Shared)
+local ClientRemoteProxy = require(script.Parent.Utils.ClientRemoteProxy)
+local ClientPromiseConversionMiddleware = require(script.Parent.Utils.ClientPromiseConversionMiddleware)
 
---// Constants //--
-local NAME_KEY = Symbol("NAME")
-local COMM_KEY = Symbol("COMM")
-local JANI_KEY = Symbol("JANITOR")
-local SIG_KEY = Symbol("NEW_IDX_SIG")
+--------------------------------------------------------------------------------
+-- CONSTANTS
+--------------------------------------------------------------------------------
+
+-- Import shared symbols
+local NAME_KEY = Shared.NAME_KEY
+local COMM_KEY = Shared.COMM_KEY
+local JANI_KEY = Shared.JANI_KEY
+local SIG_KEY = Shared.SIG_KEY
 
 local RemoteTypes = {
-    Function = "RF";
-    Event = "RE";
-    Property = "RP";
+	Function = "RF",
+	Event = "RE",
+	Property = "RP",
 }
 
---// Types //--
-type Promise = typeof(Promise.new())
-type Connection = {Disconnect: (...any) -> ()}
-type ClientNetWire = {}
+--------------------------------------------------------------------------------
+-- TYPE DEFINITIONS
+--------------------------------------------------------------------------------
 
---// Volatiles //--
+--// Types //--
+type Promise<T...> = NetWireTypes.Promise<T...>
+type Connection = NetWireTypes.Connection
+type ClientRemoteProperty = NetWireTypes.ClientRemoteProperty
+type ClientRemoteEvent = NetWireTypes.ClientRemoteEvent
+type Remote = (<T...>(self: ClientNetWire, ...any) -> Promise<T...>) & ClientRemoteEvent & ClientRemoteProperty
+
+export type ClientNetWire = {
+	[string]: Remote, -- Dynamic remote access
+}
+
+--------------------------------------------------------------------------------
+-- MODULE STATE
+--------------------------------------------------------------------------------
+
+--// Module State //--
 local NetWireCache = {} -- Cache of all Wires
 local NewNetWireSignal = Signal.new() -- Signal for when a new wire is created
 
 --------------------------------------------------------------------------------
---// NetWire //--
+-- CLIENT NETWIRE CLASS (STATIC METHODS)
 --------------------------------------------------------------------------------
 
---[=[
-    @class NetWire
-]=]
-local NetWire = {}
-NetWire.PromiseConversionMiddleware = ClientPromiseConversionMiddleware
+local ClientNetWireClass = {}
+-- ClientNetWireClass.PromiseConversionMiddleware = ClientPromiseConversionMiddleware
 
 --[=[
-    @within NetWire
+	@within ClientNetWire
+	@prop ClassName "ClientNetWire"
+	@private
+	@readonly
+]=]
+ClientNetWireClass.ClassName = "ClientNetWire"
+
+--// ClientNetWire Instance Methods Class //--
+
+--[=[
+    @class ClientNetWire
     @client
-
-    @prop Client ClientNetWire
+    
+    Instance methods for ClientNetWire objects.
+    These methods are available on created ClientNetWire instances.
 ]=]
-
---[=[
-    @within ClientNetWire
-    @client
-
-    @param wireOrName ClientNetWire | string
-    @param idx string -- The index to wait for existence of
-    @return Promise
-    Returns a promise that resolves when the ClientNetWire is ready for use and the index exists.
-    The resolved value is the value of the index.
-]=]
-function NetWire.indexReady(wireOrName: string | ClientNetWire, idx: string): Promise
-    return NetWire.onReady(wireOrName):andThen(function(wire)
-        if rawget(wire, idx) then
-            return rawget(wire, idx)
-        end
-        return Promise.fromEvent(wire[SIG_KEY], function(idxName, rType, v)
-            return idxName == idx
-        end):andThen(function(idxName, rType, v)
-            return v
-        end)
-    end)
+local ClientNetWireMT = {}
+ClientNetWireMT.__index = function(t, k): Remote
+	if not ClientNetWireClass.isReady(t) then
+		warn(
+			`Attempted to index '{k}' in a ClientNetWire that is not ready or does not exist. Ensure the server side is actually being setup.`
+		)
+	else
+		warn(
+			`Index '{k}' is not yet initialized in this ClientNetWire. Use NetWire.promiseIndex to wait for the index.`
+		)
+	end
+	local proxy = ClientRemoteProxy.new()
+	rawset(t, k, proxy)
+	return proxy
 end
-NetWire.promiseIndex = NetWire.indexReady
-
---[=[
-    @within ClientNetWire
-    @client
-
-    @param clientNetWire ClientNetWire | string
-    @return Promise
-    Returns a promise that resolves when the ClientNetWire is ready for use.
-]=]
-function NetWire.onReady(clientNetWire: string | ClientNetWire): Promise
-    return Promise.new(function(resolve)
-        if typeof(clientNetWire) == "string" then
-            clientNetWire = NetWireCache[clientNetWire]
-        end
-        if not clientNetWire then
-            resolve(Promise.fromEvent(NewNetWireSignal, function(wire)
-                return wire[NAME_KEY] == clientNetWire
-            end))
-        end
-        resolve(clientNetWire)
-    end):andThen(function(wire)
-        if NetWire.isReady(wire) then
-            return wire
-        end
-        return (wire[COMM_KEY] :: Promise):andThenReturn(wire)
-    end)
-end
-NetWire.promiseWire = NetWire.onReady
-
---[=[
-    @within ClientNetWire
-    @client
-
-    @param clientNetWire ClientNetWire | string
-    @return boolean
-    Can be used to check if a clientNetWire is ready for use.
-]=]
-function NetWire.isReady(clientNetWire: string | ClientNetWire): boolean
-    if typeof(clientNetWire) == "string" then
-        clientNetWire = NetWireCache[clientNetWire]
-        if not clientNetWire then -- If NetWire is not cached, it is not ready
-            return false
-        end
-    end
-    assert(typeof(clientNetWire) == "table", "ClientNetWire must be a table")
-    return not Promise.is(clientNetWire[COMM_KEY])
-end
-
---[=[
-    @within ClientNetWire
-    @client
-
-    @param clientNetWire ClientNetWire
-    Destroys a ClientNetWire, removing it from the cache.
-]=]
-function NetWire.destroy(clientNetWire: ClientNetWire)
-    if not NetWireCache[clientNetWire[NAME_KEY]] then
-        warn("Attempted to destroy an uncached ClientNetWire")
-        return
-    end
-    NetWireCache[clientNetWire[NAME_KEY]] = nil
-    clientNetWire[JANI_KEY]:Destroy()
-    clientNetWire[JANI_KEY] = nil
-    clientNetWire[COMM_KEY] = nil
-    warn("Clearing NetWire cache for " .. clientNetWire[NAME_KEY] :: string)
-end
-
---[=[
-    @within NetWire
-    @client
-    @private
-
-    @param wireName string
-    @return ClientNetWire?
-    Returns a ClientNetWire from the cache, if it exists.
-]=]
-function NetWire.getClient(wireName: string): ClientNetWire?
-    return NetWireCache[wireName]
+ClientNetWireMT.__newindex = function(_, k, v)
+	error(`Attempted to set index '{k}' to '{v}' in a ClientNetWire. ClientNetWires are read-only.`)
 end
 
 --------------------------------------------------------------------------------
---// ClientNetWire //--
+-- CONSTRUCTOR AND INSTANCE CREATION
 --------------------------------------------------------------------------------
 
-local ClientNetWire = {}
-ClientNetWire.ClassName = "ClientNetWire";
-ClientNetWire.__index = function(t, k)
-    if not NetWire.isReady(t) then
-        warn(`Attempted to index '{k}' in a ClientNetWire that is not ready. Use NetWire.promiseWire to wait for the ClientNetWire to be ready. Also ensure the server side is actually being setup.`)
-    else
-        warn(`Index '{k}' is not yet initialized in this ClientNetWire. Use NetWire.promiseIndex to wait for the index.`)
-    end
-    local proxy = ClientRemoteProxy.new()
-    rawset(t, k, proxy)
-    return proxy
-end;
-ClientNetWire.__newindex = function(_, k, v)
-    error(`Attempted to set index '{k}' to '{v}' in a ClientNetWire. ClientNetWires are read-only.`)
-end;
-
 --[=[
-    @within ClientNetWire
-    @prop ClassName "ClientNetWire"
-    @readonly
-]=]
-
---[=[
-    @tag constructor
-    @tag static
     @within ClientNetWire
 
     @param nameSpace string
     @return ClientNetWire
     Creates a new ClientNetWire. If a ClientNetWire with the same nameSpace already exists, it will be returned instead.
 ]=]
-function ClientNetWire.new(nameSpace: string)
-    assert(RunService:IsClient(), "ClientNetWire.new can only be called from the client")
-    assert(type(nameSpace) == "string", "ClientNetWire.new expects a string for the nameSpace parameter")
+function ClientNetWireClass.new(nameSpace: string): ClientNetWire
+	assert(RunService:IsClient(), "ClientNetWire.new can only be called from the client")
+	assert(type(nameSpace) == "string", "ClientNetWire.new expects a string for the nameSpace parameter")
 
-    if NetWireCache[nameSpace] then
-        return NetWireCache[nameSpace]
-    end
+	if NetWireCache[nameSpace] then
+		return NetWireCache[nameSpace]
+	end
 
-    local self = {}
-    self[NAME_KEY] = nameSpace
-    self[JANI_KEY] = Janitor.new()
-    self[SIG_KEY] = Signal.new()
+	local self = {}
+	self["" :: string] = (nil :: any) :: Remote
 
-    self[COMM_KEY] = self[JANI_KEY]:AddPromise(Promise.new(function(resolve, reject)
-        if not RunService:IsRunning() then
-            reject("ClientNetWire.new can only be called from a running server")
-        end
+	self[NAME_KEY] = nameSpace
+	self[JANI_KEY] = Janitor.new()
+	self[SIG_KEY] = Signal.new()
 
-        local newComm = Comm.new(RemotesFolder, true, nameSpace)
-        local folder = newComm._instancesFolder
+	self[COMM_KEY] = self[JANI_KEY]:AddPromise(Promise.new(function(resolve, reject)
+		if not RunService:IsRunning() then
+			reject("ClientNetWire.new can only be called from a running server")
+		end
 
-        self[JANI_KEY]:Add(newComm)
-        self[JANI_KEY]:LinkToInstance(folder)
+		local newComm = Comm.new(RemotesFolder, true, nameSpace)
+		local folder = newComm._instancesFolder
 
-        local function SetIndex(name, type, v)
-            if ClientRemoteProxy.is(rawget(self, name)) then
-                rawget(self, name):_SetRemote(v, type)
-            end
-            rawset(self, name, v)
-            self[SIG_KEY]:Fire(name, type, v)
-        end
+		self[JANI_KEY]:Add(newComm)
+		self[JANI_KEY]:LinkToInstance(folder)
 
-        local function LoadFolder(_folder: Folder?)
-            if not _folder then
-                return
-            end
+		local function SetIndex(name, type, v)
+			if ClientRemoteProxy.is(rawget(self, name)) then
+				rawget(self, name):_SetRemote(v, type)
+			end
+			rawset(self, name, v)
+			self[SIG_KEY]:Fire(name, type, v)
+		end
 
-            local fn
-            if _folder.Name == "RF" then
-                fn = function(rf)
-                    if not rf:IsA("RemoteFunction") then
-                        return
-                    end
+		local function LoadFolder(_folder: Folder?)
+			if not _folder then
+				return
+			end
 
-                    local inboundMiddleware = {}
-                    table.insert(inboundMiddleware, 1, ClientPromiseConversionMiddleware)
+			local fn
+			if _folder.Name == "RF" then
+				fn = function(rf)
+					if not rf:IsA("RemoteFunction") then
+						return
+					end
 
-                    local f = newComm:GetFunction(rf.Name, inboundMiddleware)
-                    local v = function(_self, ...)
-                        return f(...)
-                    end
-                    SetIndex(rf.Name, RemoteTypes.Function, v)
-                end
-            elseif _folder.Name == "RE" then
-                fn = function(re)
-                    if not re:IsA("RemoteEvent") then
-                        return
-                    end
-                    local v = newComm:GetSignal(re.Name)
-                    SetIndex(re.Name, RemoteTypes.Event, v)
-                end
-            elseif _folder.Name == "RP" then
-                fn = function(rp)
-                    if not rp:IsA("RemoteEvent") then
-                        return
-                    end
-                    local v = newComm:GetProperty(rp.Name)
-                    SetIndex(rp.Name, RemoteTypes.Property, v)
-                end
-            end
+					local inboundMiddleware = {}
+					table.insert(inboundMiddleware, 1, ClientPromiseConversionMiddleware)
 
-            for _, r in ipairs(_folder:GetChildren()) do
-                fn(r)
-            end
-            _folder.ChildAdded:Connect(fn)
-        end
+					local f = newComm:GetFunction(rf.Name, inboundMiddleware)
+					local v = function(_self, ...)
+						return f(...)
+					end
+					SetIndex(rf.Name, RemoteTypes.Function, v)
+				end
+			elseif _folder.Name == "RE" then
+				fn = function(re)
+					if not (re:IsA("RemoteEvent") or re:IsA("UnreliableRemoteEvent")) then
+						return
+					end
+					local v = newComm:GetSignal(re.Name)
+					SetIndex(re.Name, RemoteTypes.Event, v)
+				end
+			elseif _folder.Name == "RP" then
+				fn = function(rp)
+					if not rp:IsA("RemoteEvent") then
+						return
+					end
+					local v = newComm:GetProperty(rp.Name)
+					SetIndex(rp.Name, RemoteTypes.Property, v)
+				end
+			end
 
-        self[JANI_KEY]:Add(folder.ChildAdded:Connect(LoadFolder))
-        LoadFolder(folder:FindFirstChild("RF"))
-        LoadFolder(folder:FindFirstChild("RE"))
-        LoadFolder(folder:FindFirstChild("RP"))
+			for _, r in ipairs(_folder:GetChildren()) do
+				fn(r)
+			end
+			_folder.ChildAdded:Connect(fn)
+		end
 
-        self[COMM_KEY] = newComm
-        resolve(newComm)
-    end))
+		self[JANI_KEY]:Add(folder.ChildAdded:Connect(LoadFolder))
+		LoadFolder(folder:FindFirstChild("RF"))
+		LoadFolder(folder:FindFirstChild("RE"))
+		LoadFolder(folder:FindFirstChild("RP"))
 
-    setmetatable(self, ClientNetWire)
+		self[COMM_KEY] = newComm
+		resolve(newComm)
+	end))
 
-    NetWireCache[nameSpace] = self
-    self[JANI_KEY]:Add(function()
-        NetWireCache[nameSpace] = nil
-    end)
+	setmetatable(self, ClientNetWireMT)
 
-    NewNetWireSignal:Fire(self)
+	NetWireCache[nameSpace] = self
+	self[JANI_KEY]:Add(function()
+		NetWireCache[nameSpace] = nil
+	end)
 
-    return self
+	NewNetWireSignal:Fire(self)
+
+	return self :: any
+end
+
+--------------------------------------------------------------------------------
+-- STATIC UTILITY METHODS
+--------------------------------------------------------------------------------
+
+--[=[
+    @within ClientNetWire
+
+    Returns a promise that resolves when the ClientNetWire is ready for use.
+]=]
+function ClientNetWireClass.onReady(clientNetWire: string | ClientNetWire): Promise<ClientNetWire>
+	return Promise.new(function(resolve)
+		if typeof(clientNetWire) == "string" then
+			clientNetWire = NetWireCache[clientNetWire]
+		end
+		if not clientNetWire then
+			resolve(Promise.fromEvent(NewNetWireSignal, function(wire)
+				return wire[NAME_KEY] == clientNetWire
+			end))
+		end
+		resolve(clientNetWire)
+	end):andThen(function(wire)
+		if ClientNetWireClass.isReady(wire) then
+			return wire
+		end
+		return (wire[COMM_KEY] :: Promise<...any>):andThenReturn(wire)
+	end)
+end
+ClientNetWireClass.promiseWire = ClientNetWireClass.onReady
+
+--[=[
+	@within ClientNetWire
+
+	@param clientNetWire ClientNetWire | string
+	@return boolean
+	Can be used to check if a clientNetWire is ready for use.
+	Accepts either a ClientNetWire instance or a string name of the wire.
+	Returns `true` if the ClientNetWire is ready, `false` otherwise.
+]=]
+function ClientNetWireClass.isReady(clientNetWire: string | ClientNetWire): boolean
+	if typeof(clientNetWire) == "string" then
+		clientNetWire = NetWireCache[clientNetWire]
+		if not clientNetWire then -- If NetWire is not cached, it is not ready
+			return false
+		end
+	end
+	assert(typeof(clientNetWire) == "table", "ClientNetWire must be a table")
+	return not Promise.is(clientNetWire[COMM_KEY])
+end
+
+--[=[
+    @within ClientNetWire
+
+    @param wireOrName ClientNetWire | string
+    @param idx string -- The index to wait for existence of
+
+    Returns a promise that resolves when the ClientNetWire is ready for use and the index exists.
+    The resolved value is the value of the index.
+]=]
+function ClientNetWireClass.indexReady(wireOrName: string | ClientNetWire, idx: string): Promise<...any>
+	return ClientNetWireClass.onReady(wireOrName):andThen(function(wire)
+		if rawget(wire, idx) then
+			return rawget(wire, idx)
+		end
+		return Promise.fromEvent(wire[SIG_KEY], function(idxName, _rType, _v)
+			return idxName == idx
+		end):andThen(function(_idxName, _rType, v)
+			return v
+		end)
+	end)
+end
+ClientNetWireClass.promiseIndex = ClientNetWireClass.indexReady
+
+--[=[
+	@within ClientNetWire
+	@private
+
+	@param clientNetWire ClientNetWire
+	Destroys a ClientNetWire, removing it from the cache.
+]=]
+function ClientNetWireClass.destroy(clientNetWire: ClientNetWire)
+	local self = clientNetWire :: any
+	if not NetWireCache[self[NAME_KEY]] then
+		warn("Attempted to destroy an uncached ClientNetWire")
+		return
+	end
+	NetWireCache[self[NAME_KEY]] = nil
+	self[JANI_KEY]:Destroy()
+	self[JANI_KEY] = nil
+	self[COMM_KEY] = nil
+	warn("Clearing NetWire cache for " .. self[NAME_KEY] :: string)
 end
 
 --------------------------------------------------------
 
-NetWire.Client = ClientNetWire
-NetWire.__call = function(_, ...)
-    return ClientNetWire.new(...)
-end
-ClientNetWire = setmetatable(ClientNetWire, NetWire)
+local CallMT = {
+	__call = function(_, ...)
+		return ClientNetWireClass.new(...)
+	end,
+	__metatable = ClientNetWireClass, -- Prevents modification of the metatable
+}
+setmetatable(ClientNetWireClass, CallMT)
 
+--------------------------------------------------------------------------------
+-- MODULE EXPORTS AND METAMETHODS
+--------------------------------------------------------------------------------
 
-return NetWire
+--[=[
+	@within ClientNetWire
+	@client
+	@private
+
+	@prop Client ClientNetWire
+]=]
+-- Export the class with static methods
+-- Create a proper Client proxy that inherits the __call metamethod
+-- Allows refined linting in places where runcontext is ambiguous
+ClientNetWireClass.Client = setmetatable({}, {
+	__call = function(_, ...)
+		return ClientNetWireClass.new(...)
+	end,
+	__index = ClientNetWireClass,
+	__metatable = ClientNetWireClass, -- Prevents modification of the metatable
+})
+
+-- table.freeze(ClientNetWireClass.Client)
+-- table.freeze(ClientNetWireClass)
+
+return ClientNetWireClass

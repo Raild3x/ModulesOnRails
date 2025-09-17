@@ -39,9 +39,6 @@
             },
             "TestEZ": {
 				"$path": "modules/testez/src"
-			},
-			"Stories": {
-				"$path": "Testing/Stories"
 			}
         },
 
@@ -51,7 +48,7 @@
 				"ExecuteWithStudioRun": true
 			},
             "runTests": {
-                "$path": "Testing/runTests.server.lua"
+                "$path": "test/runTestEZ.server.lua"
             }
         },
 
