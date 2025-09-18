@@ -160,6 +160,10 @@ local ServerTableReplicator = setmetatable({}, BaseTableReplicator)
 ServerTableReplicator.ClassName = "ServerTableReplicator"
 ServerTableReplicator.__index = ServerTableReplicator
 
+ServerTableReplicator.createRemoteEvent = NetWire.createEvent
+ServerTableReplicator.createRemoteProperty = NetWire.createProperty
+
+
 --[=[
     @within ServerTableReplicator
     @prop AddedActivePlayer Signal<Player>

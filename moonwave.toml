@@ -24,13 +24,6 @@ section = "NetWire"
 classes = ["NetWire", "ServerNetWire", "ClientNetWire", "----------------", "ServerRemoteEvent", "ServerRemoteProperty", "ClientRemoteEvent", "ClientRemoteProperty"]
 
 [[classOrder]]
-classes = ["PlayerProfileManager"]
-
-[[classOrder]]
-section = "PlayerDataManager"
-classes = ["PlayerDataManager", "ServerPlayerDataManager", "ClientPlayerDataManager"]
-
-[[classOrder]]
 section = "Instance Component Systems"
 classes = ["Component", "RemoteComponent", "BaseComponent"]
 
@@ -39,8 +32,14 @@ section = "DropletManager"
 classes = ["DropletManager", "DropletServerManager", "DropletClientManager", "Droplet", "DropletUtil", "ExampleResourceTypeData"]
 
 [[classOrder]]
-section = "AdjustableTimer"
+section = "AdjustableTimer [Unreleased]"
 classes = ["AdjustableTimer", "AdjustableTimerManager"]
+
+
+[[classOrder]]
+section = "PlayerDataManagement [Unreleased]"
+classes = ["PlayerProfileManager", "PlayerDataManager", "ServerPlayerDataManager", "ClientPlayerDataManager"]
+
 
 [[classOrder]]
 section = "Admin Commands [Cmdr]"
