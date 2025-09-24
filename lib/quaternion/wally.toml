@@ -1,0 +1,18 @@
+[package]
+name = "raild3x/quaternion"
+description = "A fork of Egomoose's Quaternion class. Updated with proper type annotations, better performance, and new features."
+authors = ["Logan Hunt (Raildex)", "Egomoose"]
+version = "0.1.0"
+license = "MIT"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+
+[custom]
+# The properly capitalized and spaced name of the library
+formattedName = "Quaternion"
+# The intro page for the documentation
+docsLink = "Quaternion"
+# Whether or not to ignore this package in the readme
+
+
+[dependencies]
