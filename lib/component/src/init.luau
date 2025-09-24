@@ -914,7 +914,7 @@ end
 	Ties a function to the lifecycle of the calling component and the equivalent component of the given
 	`componentClass`. The function is run whenever a component of the given class is started. The given
 	function passes the sibling component of the given class and a janitor to handle any connections
-	you may make within it. The Janitor is cleaned up whenever either compenent is stopped.
+	you may make within it. The Janitor is cleaned up whenever either component is stopped.
 
 	```lua
 	local AnotherComponentClass = require(somewhere.AnotherComponent)
@@ -932,7 +932,7 @@ end
 	end
 	```
 ]=]
-function Component:WhileHasComponent(componentClassOrClasses: ComponentClass | {ComponentClass}, fn: (components: Component | {Component}, jani: Janitor) -> ())
+function Component:WhileHasComponent(componentClass: ComponentClass, fn: (component: Component, jani: Janitor) -> ())
 	local bindJani = Janitor.new()
 
 	local connProxy = {}
@@ -955,10 +955,94 @@ function Component:WhileHasComponent(componentClassOrClasses: ComponentClass | {
 		return c.Instance == self.Instance
 	end):andThen(connProxy.Destroy))
 
-	assert(typeof(componentClassOrClasses) == "table", "Component:WhileHasComponent() expects a component class or an array of component classes.")
-	local isSingleComponentClass = if (componentClassOrClasses :: any).Tag == nil then true else false
-	-- Normalize to array of classes
-	local componentClasses = if isSingleComponentClass then componentClassOrClasses else {componentClassOrClasses}
+	assert(typeof(componentClass) == "table" and componentClass.Tag, "Component:WhileHasComponent() expects a component class.")
+
+	-- Track janitor for the component
+	local activeJanitor = nil
+
+	local function SetupIfPresent()
+		local component = self:GetComponent(componentClass)
+		if not component or activeJanitor then return end
+		
+		activeJanitor = bindJani:Add(Janitor.new(), "Destroy")
+		activeJanitor:Add(task.spawn(fn, component, activeJanitor))
+
+		-- If the component stops, destroy janitor
+		activeJanitor:AddPromise(Promise.fromEvent(componentClass.Stopped, function(c)
+			return c.Instance == self.Instance
+		end):andThen(function()
+			if activeJanitor then
+				activeJanitor:Destroy()
+				activeJanitor = nil
+			end
+		end))
+	end
+
+	-- Listen for component start events
+	bindJani:Add(componentClass.Started:Connect(function(component)
+		if component.Instance == self.Instance then
+			SetupIfPresent()
+		end
+	end))
+
+	-- Initial check in case component is already present
+	SetupIfPresent()
+
+	return connProxy
+end
+
+--[=[
+	@tag Component Instance
+	@return Connection
+
+	Ties a function to the lifecycle of the calling component and the equivalent components of the given
+	array of `componentClasses`. The function is run whenever all components of the given classes are started.
+	The given function passes an array of sibling components of the given classes and a janitor to handle any 
+	connections you may make within it. The Janitor is cleaned up whenever any of the components is stopped.
+
+	```lua
+	local AnotherComponentClass = require(somewhere.AnotherComponent)
+	local ThirdComponentClass = require(somewhere.ThirdComponent)
+
+	local MyComponent = Component.new({Tag = "MyComponent"})
+
+	function MyComponent:Start()
+		self:WhileHasComponents({AnotherComponentClass, ThirdComponentClass}, function(siblingComponents, jani)
+			local anotherComponent = siblingComponents[1]
+			local thirdComponent = siblingComponents[2]
+			print(anotherComponent.SomeProperty, thirdComponent.AnotherProperty)
+			
+			jani:Add(function()
+				print("One or more sibling components stopped")
+			end)
+		end)
+	end
+	```
+]=]
+function Component:WhileHasComponents(componentClasses: {ComponentClass}, fn: (components: {Component}, jani: Janitor) -> ())
+	local bindJani = Janitor.new()
+
+	local connProxy = {}
+	connProxy.IsConnected = true
+	connProxy.Disconnect = function()
+		if connProxy.IsConnected then
+			connProxy.IsConnected = false
+			bindJani:Destroy()
+		end
+	end
+	connProxy.Destroy = connProxy.Disconnect
+	setmetatable(connProxy, {
+		__call = function(t, ...)
+			return t.Destroy(...)
+		end
+	})
+
+	bindJani:Add(connProxy)
+	bindJani:AddPromise(Promise.fromEvent(self.Stopped, function(c)
+		return c.Instance == self.Instance
+	end):andThen(connProxy.Destroy))
+
+	assert(typeof(componentClasses) == "table", "Component:WhileHasComponents() expects an array of component classes.")
 
 	-- Helper to get all component instances for self.Instance
 	local function getAllComponents()
@@ -973,30 +1057,25 @@ function Component:WhileHasComponent(componentClassOrClasses: ComponentClass | {
 		return components
 	end
 
-	-- Track janitors for each set of components
-	local activeJanitors = {}
+	-- Track janitor for the set of components
+	local activeJanitor = nil
 
 	local function SetupIfAllPresent()
 		local components = getAllComponents()
-		if not components then return end
-		-- Prevent duplicate setups for the same set
-		if activeJanitors[self.Instance] then return end
-		local currentJani = bindJani:Add(Janitor.new(), "Destroy", self.Instance)
-		activeJanitors[self.Instance] = currentJani
-
-		if isSingleComponentClass then
-			-- If only one component class, just pass it directly to maintain backwards compatibility
-			components = table.unpack(components)
-		end
-		currentJani:Add(task.spawn(fn, components, currentJani))
+		if not components or activeJanitor then return end
+		
+		activeJanitor = bindJani:Add(Janitor.new(), "Destroy")
+		activeJanitor:Add(task.spawn(fn, components, activeJanitor))
 
 		-- If any component stops, destroy janitor
-		for i, class in ipairs(componentClasses) do
-			currentJani:AddPromise(Promise.fromEvent(class.Stopped, function(c)
+		for _, class in ipairs(componentClasses) do
+			activeJanitor:AddPromise(Promise.fromEvent(class.Stopped, function(c)
 				return c.Instance == self.Instance
 			end):andThen(function()
-				currentJani:Destroy()
-				activeJanitors[self.Instance] = nil
+				if activeJanitor then
+					activeJanitor:Destroy()
+					activeJanitor = nil
+				end
 			end))
 		end
 	end
@@ -1016,10 +1095,16 @@ function Component:WhileHasComponent(componentClassOrClasses: ComponentClass | {
 	return connProxy
 end
 
--- DEPRECATED: Use WhileHasComponent instead. Kept for backwards compat
+-- DEPRECATED: Use WhileHasComponent or WhileHasComponents instead. Kept for backwards compat
 function Component:ForEachSibling(...)
-	warn("ForEachSibling is deprecated. Use WhileHasComponent instead.")
-	return self:WhileHasComponent(...)
+	warn("ForEachSibling is deprecated. Use WhileHasComponent for single components or WhileHasComponents for multiple components instead.")
+	-- For backwards compatibility, try to detect if it's multiple components and route appropriately
+	local componentClassOrClasses = ...
+	if componentClassOrClasses and typeof(componentClassOrClasses) == "table" and not componentClassOrClasses.Tag then
+		return self:WhileHasComponents(...)
+	else
+		return self:WhileHasComponent(...)
+	end
 end
 
 
