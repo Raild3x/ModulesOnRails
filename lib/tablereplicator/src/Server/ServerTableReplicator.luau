@@ -485,7 +485,9 @@ end
     Destroys the Replicator on both the Server and any replicated Clients
 ]=]
 function ServerTableReplicator:Destroy()
-    self:SetReplicationTargets({})
+    if self:IsTopLevel() then
+        self:SetReplicationTargets({})
+    end
     getmetatable(ServerTableReplicator).Destroy(self)
 end
 
@@ -534,8 +536,6 @@ function ServerTableReplicator:_InitListeners()
         end
     end)
 end
-
-
 
 --[=[
     @private
