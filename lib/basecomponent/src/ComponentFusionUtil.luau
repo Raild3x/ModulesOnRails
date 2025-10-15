@@ -21,6 +21,7 @@ local Packages = script.Parent.Parent
 local RailUtil = require(Packages.RailUtil)
 local Symbol = require(Packages.Symbol)
 local Fusion = require(Packages.Fusion)
+local ComponentJanitorUtil = require(script.Parent.ComponentJanitorUtil); ---@module ComponentJanitorUtil
 
 --// Constants //--
 local KEY_SCOPE = Symbol("Fusion Scope")
@@ -56,16 +57,17 @@ local UtilMethods = {
     --// Extension //--
 --------------------------------------------------------------------------------
 
-local ComponentJanitorUtilExtension = {}
-ComponentJanitorUtilExtension.ClassName = "ComponentFusionUtil"
-ComponentJanitorUtilExtension.Methods = UtilMethods
+local ComponentFusionUtilExtension = {}
+ComponentFusionUtilExtension.ClassName = "ComponentFusionUtil"
+ComponentFusionUtilExtension.Methods = UtilMethods
+ComponentFusionUtilExtension.Extensions = {}
 
 --[=[
     @within ComponentFusionUtil
     @ignore
     @param component any
 ]=]
-function ComponentJanitorUtilExtension.Constructing(component)
+function ComponentFusionUtilExtension.Constructing(component)
     component[KEY_SCOPE] = RailUtil.Fusion.scoped()
     component.Scope = component[KEY_SCOPE]
 end
@@ -75,11 +77,12 @@ end
     @ignore
     @param component any
 ]=]
-function ComponentJanitorUtilExtension.Stopped(component)
+function ComponentFusionUtilExtension.Stopped(component)
+    ComponentJanitorUtil.Stopped(component) -- Ensure janitor cleans first
     component[KEY_SCOPE]:doCleanup()
     component[KEY_SCOPE] = nil
 end
 
 
 
-return ComponentJanitorUtilExtension
+return ComponentFusionUtilExtension

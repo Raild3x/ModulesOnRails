@@ -2,7 +2,7 @@
 name = "raild3x/basecomponent"
 description = "A utility extension to provide helpers for working with signals, janitors, attributes, and properties. *Only works with my Component fork.*"
 authors = ["Logan Hunt (Raildex)"]
-version = "0.1.1"
+version = "0.1.2"
 license = "MIT"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
