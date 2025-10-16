@@ -2,7 +2,7 @@
 name = "raild3x/objectcache"
 description = "A fork of Pyseph's ObjectCache module, with some additional features."
 authors = ["Logan Hunt (Raildex)"]
-version = "0.0.1"
+version = "0.0.2"
 license = "MIT"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
