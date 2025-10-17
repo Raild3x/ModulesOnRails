@@ -21,6 +21,66 @@ local test_suite = function(tiniest)
 			maxHeap:Push(8)
 			expect(maxHeap:Peek()).is(8)
 		end)
+
+		test("should maintain heap property with ascending insertions", function()
+			local minHeap = Heap.min()
+			for i = 1, 10 do
+				minHeap:Push(i)
+				expect(minHeap:Peek()).is(1) -- Min should always be 1
+			end
+			expect(#minHeap).is(10)
+		end)
+
+		test("should maintain heap property with descending insertions", function()
+			local maxHeap = Heap.max()
+			for i = 10, 1, -1 do
+				maxHeap:Push(i)
+				expect(maxHeap:Peek()).is(10) -- Max should always be 10
+			end
+			expect(#maxHeap).is(10)
+		end)
+
+		test("should handle duplicate values correctly", function()
+			local minHeap = Heap.min()
+			minHeap:Push(5)
+			minHeap:Push(5)
+			minHeap:Push(5)
+			expect(#minHeap).is(3)
+			expect(minHeap:Pop()).is(5)
+			expect(minHeap:Pop()).is(5)
+			expect(minHeap:Pop()).is(5)
+		end)
+
+		test("should handle random insertion order", function()
+			local minHeap = Heap.min()
+			local values = {7, 3, 9, 1, 5, 8, 2, 4, 6}
+			for _, v in ipairs(values) do
+				minHeap:Push(v)
+			end
+			expect(minHeap:Peek()).is(1)
+			expect(#minHeap).is(9)
+		end)
+
+		test("should handle pushing with custom costs", function()
+			local minHeap = Heap.min()
+			minHeap:Push("High", 100)
+			minHeap:Push("Low", 1)
+			minHeap:Push("Medium", 50)
+			
+			local val, cost = minHeap:Peek()
+			expect(val).is("Low")
+			expect(cost).is(1)
+		end)
+
+		test("should handle negative values", function()
+			local minHeap = Heap.min()
+			minHeap:Push(-5)
+			minHeap:Push(0)
+			minHeap:Push(-10)
+			minHeap:Push(5)
+			
+			expect(minHeap:Peek()).is(-10)
+		end)
 	end)
 
 	describe("Pop", function()
@@ -42,6 +102,349 @@ local test_suite = function(tiniest)
 			expect(maxHeap:Pop()).is(4)
 			expect(maxHeap:Pop()).is(3)
 			expect(maxHeap:Pop()).is(1)
+		end)
+
+		test("should return nil when popping from empty heap", function()
+			local minHeap = Heap.min()
+			local val, cost = minHeap:Pop()
+			expect(val).is(nil)
+			expect(cost).is(nil)
+		end)
+
+		test("should maintain correct size after pops", function()
+			local minHeap = Heap.min()
+			for i = 1, 5 do
+				minHeap:Push(i)
+			end
+			expect(#minHeap).is(5)
+			
+			minHeap:Pop()
+			expect(#minHeap).is(4)
+			minHeap:Pop()
+			expect(#minHeap).is(3)
+			minHeap:Pop()
+			minHeap:Pop()
+			minHeap:Pop()
+			expect(#minHeap).is(0)
+		end)
+
+		test("should handle alternating push and pop", function()
+			local minHeap = Heap.min()
+			minHeap:Push(5)
+			minHeap:Push(3)
+			expect(minHeap:Pop()).is(3)
+			
+			minHeap:Push(1)
+			minHeap:Push(7)
+			expect(minHeap:Pop()).is(1)
+			expect(minHeap:Pop()).is(5)
+			expect(minHeap:Pop()).is(7)
+			expect(#minHeap).is(0)
+		end)
+
+		test("should maintain heap property after multiple pops", function()
+			local minHeap = Heap.min()
+			local values = {50, 30, 70, 20, 40, 60, 80, 10}
+			for _, v in ipairs(values) do
+				minHeap:Push(v)
+			end
+			
+			-- Pop and verify each element comes out in sorted order
+			expect(minHeap:Pop()).is(10)
+			expect(minHeap:Pop()).is(20)
+			expect(minHeap:Pop()).is(30)
+			expect(minHeap:Pop()).is(40)
+			expect(minHeap:Pop()).is(50)
+			expect(minHeap:Pop()).is(60)
+			expect(minHeap:Pop()).is(70)
+			expect(minHeap:Pop()).is(80)
+		end)
+
+		test("should handle complex push/pop sequences", function()
+			local maxHeap = Heap.max()
+			
+			-- Build up heap
+			maxHeap:Push(5)
+			maxHeap:Push(3)
+			maxHeap:Push(7)
+			expect(maxHeap:Peek()).is(7)
+			
+			-- Pop one
+			expect(maxHeap:Pop()).is(7)
+			expect(maxHeap:Peek()).is(5)
+			
+			-- Add more
+			maxHeap:Push(9)
+			maxHeap:Push(2)
+			maxHeap:Push(8)
+			expect(maxHeap:Peek()).is(9)
+			
+			-- Pop several
+			expect(maxHeap:Pop()).is(9)
+			expect(maxHeap:Pop()).is(8)
+			expect(maxHeap:Peek()).is(5)
+		end)
+
+		test("should return both value and cost correctly", function()
+			local minHeap = Heap.min()
+			minHeap:Push("First", 10)
+			minHeap:Push("Second", 5)
+			minHeap:Push("Third", 15)
+			
+			local val1, cost1 = minHeap:Pop()
+			expect(val1).is("Second")
+			expect(cost1).is(5)
+			
+			local val2, cost2 = minHeap:Pop()
+			expect(val2).is("First")
+			expect(cost2).is(10)
+			
+			local val3, cost3 = minHeap:Pop()
+			expect(val3).is("Third")
+			expect(cost3).is(15)
+		end)
+
+		test("should handle popping all elements then pushing new ones", function()
+			local minHeap = Heap.min()
+			
+			-- First batch
+			minHeap:Push(5)
+			minHeap:Push(3)
+			minHeap:Push(7)
+			
+			-- Pop all
+			minHeap:Pop()
+			minHeap:Pop()
+			minHeap:Pop()
+			expect(#minHeap).is(0)
+			
+			-- Second batch
+			minHeap:Push(2)
+			minHeap:Push(6)
+			minHeap:Push(4)
+			
+			expect(minHeap:Peek()).is(2)
+			expect(#minHeap).is(3)
+		end)
+
+		test("should handle large number of pops in sorted order", function()
+			local minHeap = Heap.min()
+			local n = 100
+			
+			-- Insert random values
+			local inserted = {}
+			for i = 1, n do
+				local val = math.random(1, 1000)
+				minHeap:Push(val)
+				table.insert(inserted, val)
+			end
+			table.sort(inserted)
+			
+			-- Pop all and verify sorted order
+			local prev = -math.huge
+			for i = 1, n do
+				local val = minHeap:Pop()
+				expect(val >= prev).is(true) -- Each value should be >= previous
+				expect(val).is(inserted[i])
+				prev = val
+			end
+		end)
+	end)
+
+	describe("Complex Sequences", function()
+		test("should handle stress test with mixed operations", function()
+			local minHeap = Heap.min()
+			
+			-- Build initial heap
+			for i = 1, 20 do
+				minHeap:Push(i * 2)
+			end
+			expect(#minHeap).is(20)
+			
+			-- Remove half
+			for i = 1, 10 do
+				minHeap:Pop()
+			end
+			expect(#minHeap).is(10)
+			
+			-- Add more
+			for i = 1, 15 do
+				minHeap:Push(i * 3)
+			end
+			expect(#minHeap).is(25)
+			
+			-- Verify heap property is maintained
+			local prev = -math.huge
+			for i = 1, 25 do
+				local val = minHeap:Pop()
+				expect(val >= prev).is(true)
+				prev = val
+			end
+		end)
+
+		test("should handle pattern of push-push-pop", function()
+			local maxHeap = Heap.max()
+			local expected = {}
+			
+			for round = 1, 10 do
+				local val1 = round * 10
+				local val2 = round * 10 + 5
+				maxHeap:Push(val1)
+				maxHeap:Push(val2)
+				table.insert(expected, val1)
+				table.insert(expected, val2)
+				
+				local popped = maxHeap:Pop()
+				-- Remove the popped value from expected
+				for i, v in ipairs(expected) do
+					if v == popped then
+						table.remove(expected, i)
+						break
+					end
+				end
+			end
+			
+			-- Verify remaining elements
+			table.sort(expected, function(a, b) return a > b end)
+			for _, expectedVal in ipairs(expected) do
+				expect(maxHeap:Pop()).is(expectedVal)
+			end
+		end)
+
+		test("should maintain correctness with interleaved operations", function()
+			local minHeap = Heap.min()
+			
+			minHeap:Push(10)
+			expect(minHeap:Peek()).is(10)
+			
+			minHeap:Push(5)
+			expect(minHeap:Peek()).is(5)
+			
+			minHeap:Push(15)
+			expect(minHeap:Peek()).is(5)
+			
+			expect(minHeap:Pop()).is(5)
+			expect(minHeap:Peek()).is(10)
+			
+			minHeap:Push(3)
+			expect(minHeap:Peek()).is(3)
+			
+			minHeap:Push(20)
+			minHeap:Push(1)
+			expect(minHeap:Peek()).is(1)
+			
+			expect(minHeap:Pop()).is(1)
+			expect(minHeap:Pop()).is(3)
+			expect(minHeap:Peek()).is(10)
+		end)
+
+		test("should handle emptying and refilling multiple times", function()
+			local minHeap = Heap.min()
+			
+			for cycle = 1, 5 do
+				-- Fill
+				for i = 1, 10 do
+					minHeap:Push(i + (cycle * 100))
+				end
+				expect(#minHeap).is(10)
+				
+				-- Verify min
+				expect(minHeap:Peek()).is(1 + (cycle * 100))
+				
+				-- Empty
+				for i = 1, 10 do
+					minHeap:Pop()
+				end
+				expect(#minHeap).is(0)
+			end
+		end)
+
+		test("should handle priority queue simulation", function()
+			local taskQueue = Heap.min() -- Min heap for task priorities (lower = higher priority)
+			
+			-- Add tasks with different priorities
+			taskQueue:Push("Critical Bug", 1)
+			taskQueue:Push("Feature Request", 5)
+			taskQueue:Push("Documentation", 8)
+			taskQueue:Push("Urgent Fix", 2)
+			taskQueue:Push("Code Review", 4)
+			
+			-- Process tasks in priority order
+			local task1, priority1 = taskQueue:Pop()
+			expect(task1).is("Critical Bug")
+			expect(priority1).is(1)
+			
+			local task2, priority2 = taskQueue:Pop()
+			expect(task2).is("Urgent Fix")
+			expect(priority2).is(2)
+			
+			-- Add new high priority task
+			taskQueue:Push("Security Issue", 0)
+			
+			local task3, priority3 = taskQueue:Pop()
+			expect(task3).is("Security Issue")
+			expect(priority3).is(0)
+		end)
+
+		test("should maintain heap invariant with zig-zag pattern", function()
+			local minHeap = Heap.min()
+			
+			-- Zig-zag: high, low, high, low, etc.
+			local values = {100, 1, 99, 2, 98, 3, 97, 4}
+			for _, v in ipairs(values) do
+				minHeap:Push(v)
+			end
+			
+			-- Should come out in sorted order
+			expect(minHeap:Pop()).is(1)
+			expect(minHeap:Pop()).is(2)
+			expect(minHeap:Pop()).is(3)
+			expect(minHeap:Pop()).is(4)
+		end)
+
+		test("should handle mixed value types with costs", function()
+			local minHeap = Heap.min()
+			
+			minHeap:Push({id = "A"}, 5)
+			minHeap:Push({id = "B"}, 2)
+			minHeap:Push({id = "C"}, 8)
+			minHeap:Push({id = "D"}, 2) -- Duplicate cost
+			
+			local val1, cost1 = minHeap:Pop()
+			expect(cost1).is(2)
+			expect(val1.id == "B" or val1.id == "D").is(true)
+			
+			local val2, cost2 = minHeap:Pop()
+			expect(cost2).is(2)
+			expect(val2.id == "B" or val2.id == "D").is(true)
+			
+			local val3, cost3 = minHeap:Pop()
+			expect(val3.id).is("A")
+			expect(cost3).is(5)
+		end)
+
+		test("should handle partial sorting scenario", function()
+			local minHeap = Heap.min()
+			
+			-- Insert unsorted data
+			local data = {45, 12, 78, 23, 56, 89, 34, 67, 90, 11}
+			for _, v in ipairs(data) do
+				minHeap:Push(v)
+			end
+			
+			-- Extract top 3 smallest
+			local first = minHeap:Pop()
+			local second = minHeap:Pop()
+			local third = minHeap:Pop()
+			
+			expect(first).is(11)
+			expect(second).is(12)
+			expect(third).is(23)
+			
+			-- Rest should still be in heap
+			expect(#minHeap).is(7)
+			local nextVal = minHeap:Peek()
+			expect(nextVal).is(34)
 		end)
 	end)
 
@@ -157,6 +560,199 @@ local test_suite = function(tiniest)
 			local v, c = minHeap:Peek()
 			expect(v).is(3)
 			expect(c).is(4)
+		end)
+
+		test("should pass value and oldCost correctly to cost function", function()
+			local minHeap = Heap.min()
+			minHeap:Push("A", 10)
+			minHeap:Push("B", 5)
+			
+			-- Update "A" with a function that uses both value and oldCost
+			-- Expected signature: function(value, oldCost)
+			minHeap:UpdateCost("A", function(value, oldCost)
+				expect(value).is("A") -- First param should be the value
+				expect(oldCost).is(10) -- Second param should be the old cost
+				return oldCost + 5 -- New cost should be 15
+			end)
+			
+			local cost = minHeap:GetCost("A")
+			expect(cost).is(15)
+		end)
+
+		test("should pass correct parameters when value and cost are different types", function()
+			local minHeap = Heap.min()
+			minHeap:Push(100, 1) -- number value, number cost (different values)
+			minHeap:Push(200, 2)
+			
+			minHeap:UpdateCost(100, function(value, oldCost)
+				expect(value).is(100) -- Value should be 100
+				expect(oldCost).is(1) -- Cost should be 1
+				return oldCost * 10 -- New cost should be 10
+			end)
+			
+			expect(minHeap:GetCost(100)).is(10)
+		end)
+
+		test("should update multiple occurrences when updateAll is true", function()
+			local minHeap = Heap.min()
+			minHeap:Push("A", 5)
+			minHeap:Push("A", 10)
+			minHeap:Push("A", 15)
+			minHeap:Push("B", 3)
+			
+			local updateCount = 0
+			minHeap:UpdateCost("A", function(value, oldCost)
+				updateCount += 1
+				return oldCost + 1
+			end, true) -- updateAll = true
+			
+			expect(updateCount).is(3) -- Should have updated all 3 "A" values
+			
+			-- Verify all costs were updated
+			local foundCosts = {}
+			for value, cost in minHeap do
+				if value == "A" then
+					table.insert(foundCosts, cost)
+				end
+			end
+			table.sort(foundCosts)
+			expect(foundCosts[1]).is(6)  -- 5 + 1
+			expect(foundCosts[2]).is(11) -- 10 + 1
+			expect(foundCosts[3]).is(16) -- 15 + 1
+		end)
+
+		test("should only update first occurrence when updateAll is false", function()
+			local minHeap = Heap.min()
+			minHeap:Push("A", 5)
+			minHeap:Push("A", 10)
+			minHeap:Push("A", 15)
+			
+			local updateCount = 0
+			minHeap:UpdateCost("A", function(value, oldCost)
+				updateCount += 1
+				return 1 -- Set to 1
+			end, false) -- updateAll = false
+			
+			expect(updateCount).is(1) -- Should have updated only 1 "A" value
+		end)
+
+		test("should work with function selector and function cost", function()
+			local minHeap = Heap.min()
+			minHeap:Push(5, 50)
+			minHeap:Push(10, 100)
+			minHeap:Push(15, 150)
+			
+			minHeap:UpdateCost(
+				function(value) return value > 7 end, -- Select values > 7
+				function(value, oldCost)
+					expect(value >= 10).is(true) -- Should only match 10 or 15
+					return oldCost / 10 -- Divide cost by 10
+				end,
+				true -- Update all matches
+			)
+			
+			-- Values 10 and 15 should have updated costs
+			expect(minHeap:GetCost(5)).is(50)  -- Unchanged
+			expect(minHeap:GetCost(10)).is(10) -- 100 / 10
+			expect(minHeap:GetCost(15)).is(15) -- 150 / 10
+		end)
+
+		test("should maintain heap order after cost function update", function()
+			local maxHeap = Heap.max()
+			maxHeap:Push("A", 5)
+			maxHeap:Push("B", 10)
+			maxHeap:Push("C", 15)
+			
+			-- Make A have the highest cost
+			maxHeap:UpdateCost("A", function(value, oldCost)
+				return 20
+			end)
+			
+			local topValue, topCost = maxHeap:Peek()
+			expect(topValue).is("A")
+			expect(topCost).is(20)
+		end)
+
+		test("should not update if cost function returns same cost", function()
+			local minHeap = Heap.min()
+			minHeap:Push("A", 10)
+			minHeap:Push("B", 5)
+			
+			local didUpdate = minHeap:UpdateCost("A", function(value, oldCost)
+				return oldCost -- Return the same cost
+			end)
+			
+			expect(didUpdate).is(false) -- Should return false since cost didn't change
+			expect(minHeap:GetCost("A")).is(10)
+		end)
+
+		test("should handle cost function with complex calculations", function()
+			local minHeap = Heap.min()
+			minHeap:Push({name = "Alice", age = 30}, 100)
+			minHeap:Push({name = "Bob", age = 25}, 200)
+			
+			minHeap:UpdateCost(
+				function(value) return value.name == "Alice" end,
+				function(value, oldCost)
+					-- Complex calculation using both params
+					return oldCost + value.age * 2
+				end
+			)
+			
+			local aliceEntry = nil
+			for value, cost in minHeap do
+				if value.name == "Alice" then
+					aliceEntry = {value, cost}
+					break
+				end
+			end
+			
+			expect(aliceEntry[2]).is(160) -- 100 + 30 * 2
+		end)
+
+		test("should handle updating in max heap correctly", function()
+			local maxHeap = Heap.max()
+			maxHeap:Push("X", 50)
+			maxHeap:Push("Y", 30)
+			maxHeap:Push("Z", 40)
+			
+			-- Before update, X should be on top
+			local topValue, topCost = maxHeap:Peek()
+			expect(topValue).is("X")
+			expect(topCost).is(50)
+			
+			maxHeap:UpdateCost("Y", function(value, oldCost)
+				expect(value).is("Y")
+				expect(oldCost).is(30)
+				return 60 -- Make Y the new maximum
+			end)
+			
+			-- After update, Y should be on top
+			topValue, topCost = maxHeap:Peek()
+			expect(topValue).is("Y")
+			expect(topCost).is(60)
+		end)
+
+		test("should handle edge case where all values match selector", function()
+			local minHeap = Heap.min()
+			minHeap:Push("A", 10)
+			minHeap:Push("A", 20)
+			minHeap:Push("A", 30)
+			
+			local callCount = 0
+			minHeap:UpdateCost(
+				function(value) return value == "A" end,
+				function(value, oldCost)
+					callCount += 1
+					return oldCost + 5
+				end,
+				true
+			)
+			
+			expect(callCount).is(3)
+			local topValue, topCost = minHeap:Peek()
+			expect(topValue).is("A")
+			expect(topCost).is(15) -- 10 + 5 should be minimum
 		end)
 	end)
 
