@@ -4,6 +4,13 @@ local test_suite = function(tiniest)
 	local describe = tiniest.describe
 	local test = tiniest.test
 	local expect = tiniest.expect
+	
+	-- Utility function for efficient array removal (swap with last element)
+	local function swapRemove(array, index)
+		local lastIdx = #array
+		array[index] = array[lastIdx]
+		array[lastIdx] = nil
+	end
 
 	describe("Push", function()
 		test("should insert elements in correct order for minHeap", function()
@@ -945,6 +952,428 @@ local test_suite = function(tiniest)
 		-- 		expect({value, cost}).is_shallow_equal(expectedResults[i])
 		-- 	end
 		-- end)
+	end)
+
+	describe("Performance Benchmarks", function()
+		test("Compare heap vs array for finding minimum", function()
+			local sizes = {10, 50, 100, 500, 1000}
+			print("\n=== Heap vs Array Performance Comparison ===")
+			print("Finding minimum element repeatedly:\n")
+			
+			for _, n in ipairs(sizes) do
+				-- Generate random data
+				local data = {}
+				for i = 1, n do
+					table.insert(data, math.random(1, 10000))
+				end
+				
+				-- Test Heap Performance
+				local heapTime = 0
+				local minHeap = Heap.min()
+				
+				-- Build heap
+				for _, v in ipairs(data) do
+					minHeap:Push(v)
+				end
+				
+				-- Extract all minimums
+				local startExtract = os.clock()
+				for i = 1, n do
+					minHeap:Pop()
+				end
+				heapTime = os.clock() - startExtract
+				
+				-- Test Array Performance
+				local arrayTime = 0
+				local arrayData = {}
+				for _, v in ipairs(data) do
+					table.insert(arrayData, v)
+				end
+				
+				-- Extract all minimums (find min, remove with swap removal)
+				local startArray = os.clock()
+				for i = 1, n do
+					local minIdx = 1
+					local minVal = arrayData[1]
+					for j = 2, #arrayData do
+						if arrayData[j] < minVal then
+							minVal = arrayData[j]
+							minIdx = j
+						end
+					end
+					swapRemove(arrayData, minIdx)
+				end
+				arrayTime = os.clock() - startArray
+				
+				local speedup = arrayTime / heapTime
+				local heapMs = heapTime * 1000
+				local arrayMs = arrayTime * 1000
+				
+				print(string.format("n=%4d: Heap=%6.3fms, Array=%7.3fms, Speedup=%.3fx", 
+					n, heapMs, arrayMs, speedup))
+			end
+			
+			print("\n=== Analysis ===")
+			print("Heap Operations: O(n log n) total")
+			print("Array Operations: O(n²) total")
+			print("Heap becomes significantly faster as n grows")
+			print("(Note: Performance can vary based on system load)")
+		end)
+
+		test("Compare heap vs sorted array for priority queue operations", function()
+			local initialSize = 100
+			local operations = 500
+			print("\n=== Priority Queue: Heap vs Sorted Array ===")
+			print(string.format("Testing with %d initial items + %d mixed operations:\n", initialSize, operations))
+			
+			-- Generate random data for consistent comparison
+			local initialData = {}
+			for i = 1, initialSize do
+				table.insert(initialData, math.random(1, 1000))
+			end
+			local operationData = {}
+			for i = 1, operations do
+				table.insert(operationData, math.random(1, 1000))
+			end
+			
+			-- Test Heap
+			local minHeap = Heap.min()
+			local heapStart = os.clock()
+			-- Build initial queue
+			for _, v in ipairs(initialData) do
+				minHeap:Push(v)
+			end
+			-- Mixed push/pop operations
+			for i = 1, operations do
+				if i % 3 == 0 then
+					minHeap:Pop() -- Pop every 3rd operation
+				else
+					minHeap:Push(operationData[i]) -- Push otherwise
+				end
+			end
+			local heapTime = (os.clock() - heapStart) * 1000
+			
+			-- Test Sorted Array (always keep sorted)
+			local sortedArray = {}
+			local arrayStart = os.clock()
+			-- Build initial queue
+			for _, v in ipairs(initialData) do
+				table.insert(sortedArray, v)
+			end
+			table.sort(sortedArray)
+			-- Mixed push/pop operations
+			for i = 1, operations do
+				if i % 3 == 0 then
+					-- Remove minimum (first element)
+					if #sortedArray > 0 then
+						table.remove(sortedArray, 1)
+					end
+				else
+					-- Insert and maintain sorted order
+					local val = operationData[i]
+					-- Binary search insert would be optimal, but using simple insertion
+					local inserted = false
+					for j = 1, #sortedArray do
+						if val < sortedArray[j] then
+							table.insert(sortedArray, j, val)
+							inserted = true
+							break
+						end
+					end
+					if not inserted then
+						table.insert(sortedArray, val)
+					end
+				end
+			end
+			local arrayTime = (os.clock() - arrayStart) * 1000
+			
+			local speedup = arrayTime / heapTime
+			
+			print(string.format("Heap:         %.3fms", heapTime))
+			print(string.format("Sorted Array: %.3fms", arrayTime))
+			print(string.format("Speedup:      %.3fx", speedup))
+			print(string.format("Final sizes:  Heap=%d, Array=%d", minHeap:Size(), #sortedArray))
+			print("\nHeap should be faster for mixed push/pop operations")
+			print("(Note: Actual performance can vary based on system load)")
+		end)
+
+		test("Heap efficiency for top-K elements", function()
+			local n = 1000
+			local k = 10
+			print(string.format("\n=== Finding top %d elements from %d items ===\n", k, n))
+			
+			local data = {}
+			for i = 1, n do
+				table.insert(data, math.random(1, 10000))
+			end
+			
+			-- Using Heap (optimal approach)
+			local heapStart = os.clock()
+			local minHeap = Heap.min()
+			for _, v in ipairs(data) do
+				if minHeap:Size() < k then
+					minHeap:Push(v)
+				else
+					local minVal = minHeap:Peek()
+					if v > minVal then
+						minHeap:Pop()
+						minHeap:Push(v)
+					end
+				end
+			end
+			local heapTime = (os.clock() - heapStart) * 1000
+			
+			-- Using Full Sort
+			local sortStart = os.clock()
+			local sortedData = {}
+			for _, v in ipairs(data) do
+				table.insert(sortedData, v)
+			end
+			table.sort(sortedData, function(a, b) return a > b end)
+			local topK = {}
+			for i = 1, k do
+				table.insert(topK, sortedData[i])
+			end
+			local sortTime = (os.clock() - sortStart) * 1000
+			
+			local speedup = sortTime / heapTime
+			
+			print(string.format("Heap approach:  %.3fms (O(n log k))", heapTime))
+			print(string.format("Full sort:      %.3fms (O(n log n))", sortTime))
+			print(string.format("Speedup:        %.3fx", speedup))
+			print(string.format("\nFor k << n, heap approach is more efficient (%.2fx faster)", speedup))
+			print("(Note: Actual performance can vary based on system load)")
+		end)
+
+		test("Heap vs array for dynamic priority changes", function()
+			local n = 200
+			print(string.format("\n=== Dynamic Priority Updates (%d items) ===\n", n))
+			
+			-- Using Heap with UpdateCost
+			local heapStart = os.clock()
+			local minHeap = Heap.min()
+			
+			-- Initial insertion
+			for i = 1, n do
+				minHeap:Push(i, math.random(1, 100))
+			end
+			
+			-- Update priorities
+			for i = 1, n // 2 do
+				local target = math.random(1, n)
+				minHeap:UpdateCost(target, math.random(1, 100))
+			end
+			
+			-- Extract all
+			for i = 1, n do
+				minHeap:Pop()
+			end
+			local heapTime = (os.clock() - heapStart) * 1000
+			
+			-- Using Array (rebuild sort after each update)
+			local arrayStart = os.clock()
+			local array = {}
+			
+			-- Initial insertion
+			for i = 1, n do
+				table.insert(array, {val = i, cost = math.random(1, 100)})
+			end
+			table.sort(array, function(a, b) return a.cost < b.cost end)
+			
+			-- Update priorities (re-sort after each)
+			for i = 1, n // 2 do
+				local target = math.random(1, #array)
+				array[target].cost = math.random(1, 100)
+				table.sort(array, function(a, b) return a.cost < b.cost end)
+			end
+			
+			-- Extract all
+			array = {}
+			local arrayTime = (os.clock() - arrayStart) * 1000
+			
+			local speedup = arrayTime / heapTime
+			
+			print(string.format("Heap:  %.3fms (O(log n) per update)", heapTime))
+			print(string.format("Array: %.3fms (O(n log n) per update)", arrayTime))
+			print(string.format("Speedup: %.2fx", speedup))
+			print("\nHeap excels at dynamic priority updates (should be significantly faster)")
+			print("(Note: Actual performance can vary based on system load)")
+		end)
+
+		test("Break-even point analysis: Push + Pop operations", function()
+			print("\n=== Break-even Point Analysis: Push + Pop ===")
+			print("Finding where heap becomes faster than array:\n")
+			
+			local heapFaster = nil
+			
+			for n = 5, 100, 5 do
+				local data = {}
+				for i = 1, n do
+					table.insert(data, math.random(1, 1000))
+				end
+				
+				-- Heap
+				local heapStart = os.clock()
+				local minHeap = Heap.min()
+				for _, v in ipairs(data) do
+					minHeap:Push(v)
+				end
+				for i = 1, n do
+					minHeap:Pop()
+				end
+				local heapTime = os.clock() - heapStart
+				
+				-- Array
+				local arrayStart = os.clock()
+				local arr = {}
+				for _, v in ipairs(data) do
+					table.insert(arr, v)
+				end
+				for i = 1, n do
+					local minIdx = 1
+					for j = 2, #arr do
+						if arr[j] < arr[minIdx] then
+							minIdx = j
+						end
+					end
+					swapRemove(arr, minIdx)
+				end
+				local arrayTime = os.clock() - arrayStart
+				
+				if heapTime < arrayTime and heapFaster == nil then
+					heapFaster = n
+					print(string.format("n=%d: Heap becomes faster! (%.3fms vs %.3fms)", 
+						n, heapTime * 1000, arrayTime * 1000))
+					break
+				end
+			end
+			
+			if heapFaster then
+				print(string.format("\nBreak-even point: ~%d elements", heapFaster))
+				print("Use array for: n < " .. heapFaster)
+				print("Use heap for:  n >= " .. heapFaster)
+			else
+				print("\nNo clear break-even point found in tested range")
+				print("For this workload (push all + pop all), heap scales better")
+				print("But array may be faster for very small n (< 5)")
+			end
+		end)
+
+		test("Break-even point analysis: Push only", function()
+			print("\n=== Break-even Point Analysis: Push Only ===")
+			print("Comparing heap building vs maintaining sorted array:\n")
+			
+			local heapFaster = nil
+			
+			for n = 10, 200, 10 do
+				local data = {}
+				for i = 1, n do
+					table.insert(data, math.random(1, 1000))
+				end
+				
+				-- Heap: O(n log n) - heapify on each insert
+				local heapStart = os.clock()
+				local minHeap = Heap.min()
+				for _, v in ipairs(data) do
+					minHeap:Push(v)
+				end
+				local heapTime = os.clock() - heapStart
+				
+				-- Sorted Array: O(n²) - insertion sort
+				local arrayStart = os.clock()
+				local sortedArray = {}
+				for _, v in ipairs(data) do
+					local inserted = false
+					for j = 1, #sortedArray do
+						if v < sortedArray[j] then
+							table.insert(sortedArray, j, v)
+							inserted = true
+							break
+						end
+					end
+					if not inserted then
+						table.insert(sortedArray, v)
+					end
+				end
+				local arrayTime = os.clock() - arrayStart
+				
+				if heapTime < arrayTime and heapFaster == nil then
+					heapFaster = n
+					print(string.format("n=%d: Heap becomes faster! (%.3fms vs %.3fms)", 
+						n, heapTime * 1000, arrayTime * 1000))
+					break
+				end
+			end
+			
+			if heapFaster then
+				print(string.format("\nBreak-even point for push: ~%d elements", heapFaster))
+				print("Heap Push: O(log n), Sorted Array Insert: O(n)")
+			else
+				print("\nHeap is consistently faster even for small n")
+			end
+		end)
+
+		test("Break-even point analysis: Pop only", function()
+			print("\n=== Break-even Point Analysis: Pop Only ===")
+			print("Pre-built structures, comparing extraction performance:\n")
+			
+			local heapFaster = nil
+			
+			for n = 5, 100, 5 do
+				local data = {}
+				for i = 1, n do
+					table.insert(data, math.random(1, 1000))
+				end
+				
+				-- Pre-build heap
+				local minHeap = Heap.min()
+				for _, v in ipairs(data) do
+					minHeap:Push(v)
+				end
+				
+				-- Pre-build sorted array
+				local sortedArray = {}
+				for _, v in ipairs(data) do
+					table.insert(sortedArray, v)
+				end
+				table.sort(sortedArray)
+				
+				-- Heap: O(n log n) total for n pops
+				local heapStart = os.clock()
+				for i = 1, n do
+					minHeap:Pop()
+				end
+				local heapTime = os.clock() - heapStart
+				
+				-- Sorted Array: O(n) total - just remove from front
+				local arrayStart = os.clock()
+				for i = 1, n do
+					table.remove(sortedArray, 1)
+				end
+				local arrayTime = os.clock() - arrayStart
+				
+				local heapMs = heapTime * 1000
+				local arrayMs = arrayTime * 1000
+				
+				-- For pop-only from sorted array, results may vary
+				-- This test shows the actual performance comparison
+				if n == 5 or n % 20 == 0 then
+					local ratio = heapMs / arrayMs
+					print(string.format("n=%3d: Heap=%.3fms, Array=%.3fms (Heap/Array=%.2fx)", 
+						n, heapMs, arrayMs, ratio))
+				end
+			end
+			
+			print("\n=== Analysis ===")
+			print("For Pop-only operations on pre-built structures:")
+			print("- Heap: O(log n) per pop")
+			print("- Sorted Array: O(n) per pop via table.remove(array, 1)")
+			print("Surprisingly, the array implementation can be competitive due to:")
+			print("  * LuaJIT optimization of table.remove at index 1")
+			print("  * Lower constant factors for simple removal")
+			print("For this specific case, array performance may beat heap for small n")
+			print("But combining build + pop operations, heap wins overall")
+		end)
 	end)
 
 	describe("Large Dataset Test", function()
