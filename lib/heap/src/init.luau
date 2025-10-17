@@ -351,7 +351,7 @@ end
     Using `updateAll` can be expensive as it may need to perform a large resorting of the heap to ensure proper ordering.
     :::
     @param valueToUpdate -- The value to update the cost of.
-    @param newCost -- The new cost to assign to the value. Can also be a function that takes the old cost and returns a new cost.
+    @param newCost -- The new cost to assign to the value. Can also be a function that takes the value and old cost and returns a new cost.
     @param updateAll -- If true, all occurrences of the value will be updated. Defaults to false.
     @return boolean -- True if the cost was updated, false otherwise.
 
@@ -383,43 +383,39 @@ function Heap:UpdateCost<T>(
 	newCost: number | (value: T, oldCost: number) -> number,
 	updateAll: boolean?
 ): boolean
-	local Values, Costs, HeapIndex, Size = self._Values, self._Costs, self._HeapIndex, self._Size
-	local updated = 0
-	local updatedIdx = nil -- used to track the index of the updated value (used only when updating a single value)
+    local Values, Costs, HeapIndex, Size = self._Values, self._Costs, self._HeapIndex, self._Size
+    local updated = 0
+    local updatedHeapIdx = nil -- used to track the heap index of the updated value (used only when updating a single value)
 
-	-- First pass: Update costs in place
-	if type(valueToUpdate) == "function" then -- I split this up intentionally to reduce the number of comparisons made
-		for _realIdx, refIdx in pairs(HeapIndex) do
-			if valueToUpdate(Values[refIdx]) then
-				local oldCost = Costs[refIdx]
-				local computedNewCost = if type(newCost) == "function"
-					then newCost(Values[refIdx], oldCost)
-					else newCost
+    local newCostIsFn = type(newCost) == "function"
 
-				if oldCost ~= computedNewCost then
-					Costs[refIdx] = computedNewCost
-					updatedIdx = refIdx
-					updated += 1
-				end
+    -- First pass: Update costs in place
+    if type(valueToUpdate) == "function" then -- I split this up intentionally to reduce the number of comparisons made
+        for realIdx, refIdx in pairs(HeapIndex) do
+            if valueToUpdate(Values[refIdx]) then
+                local oldCost = Costs[refIdx]
+                local computedNewCost: number = if newCostIsFn then (newCost :: any)(Values[refIdx], oldCost) else newCost
 
-				if not updateAll then
-					break
-				end
-			end
-		end
-	else
-		for _realIdx, refIdx in pairs(HeapIndex) do
-			if Values[refIdx] == valueToUpdate then
-				local oldCost = Costs[refIdx]
-				local computedNewCost = if type(newCost) == "function"
-					then newCost(oldCost, Values[refIdx])
-					else newCost
+                if oldCost ~= computedNewCost then
+                    Costs[refIdx] = computedNewCost
+                    updatedHeapIdx = realIdx -- Store the heap position, not the ref index
+                    updated += 1
+                end
 
-				if oldCost ~= computedNewCost then
-					Costs[refIdx] = computedNewCost
-					updatedIdx = refIdx
-					updated += 1
-				end
+                if not updateAll then break end
+            end
+        end
+    else
+        for realIdx, refIdx in pairs(HeapIndex) do
+            if Values[refIdx] == valueToUpdate then
+                local oldCost = Costs[refIdx]
+                local computedNewCost: number = if newCostIsFn then (newCost :: any)(Values[refIdx], oldCost) else newCost
+
+                if oldCost ~= computedNewCost then
+                    Costs[refIdx] = computedNewCost
+                    updatedHeapIdx = realIdx -- Store the heap position, not the ref index
+                    updated += 1
+                end
 
 				if not updateAll then
 					break
@@ -428,15 +424,19 @@ function Heap:UpdateCost<T>(
 		end
 	end
 
-	if updated == 1 then
-		-- Only heapify down once if a single value was updated
-		self:_heapifyDown(updatedIdx)
-	elseif updated > 1 then
-		-- If we made multiple updates, we need to perform a more robust heapify
-		for i = math.floor(Size / 2), 1, -1 do
-			self:_heapifyDown(i)
-		end
-	end
+    if updated == 1 then
+         -- Only heapify once if a single value was updated
+         -- Try heapifying up first (in case cost decreased for min-heap or increased for max-heap)
+         -- then heapify down (in case cost increased for min-heap or decreased for max-heap)
+        self:_heapifyUp(updatedHeapIdx)
+        self:_heapifyDown(updatedHeapIdx)
+    elseif updated > 1 then
+        -- If we made multiple updates, we need to perform a more robust heapify
+        -- Rebuild the heap from the bottom up
+        for i = math.floor(Size / 2), 1, -1 do
+            self:_heapifyDown(i)
+        end
+    end
 
 	return if updated > 0 then true else false
 end
