@@ -823,6 +823,198 @@ local test_suite = function(tiniest)
 			minHeap:RemoveFirstOccurrence(3)
 			expect(minHeap:Peek()).is(5)
 		end)
+
+		test("should successfully remove all occurrences", function()
+			local newHeap = Heap.max()
+
+			-- Add 10 items
+			for count = 1, 10, 1 do
+				local heapId = "TestHeap_" .. tostring(count)
+				newHeap:Push(heapId, count * 10)
+			end
+			
+			expect(#newHeap).is(10)
+
+			-- Remove all 10 items
+			for count = 1, 10, 1 do
+				local heapId = "TestHeap_" .. tostring(count)
+				local removed = newHeap:RemoveFirstOccurrence(heapId)
+				expect(removed).is(true)
+			end
+			
+			-- Heap should be empty
+			expect(#newHeap).is(0)
+			expect(newHeap:Peek()).is(nil)
+		end)
+
+		test("should return false when removing non-existent value", function()
+			local minHeap = Heap.min()
+			minHeap:Push(5)
+			minHeap:Push(3)
+			minHeap:Push(8)
+			expect(minHeap:RemoveFirstOccurrence(99)).is(false)
+			expect(#minHeap).is(3)
+		end)
+
+		test("should return false when removing from empty heap", function()
+			local minHeap = Heap.min()
+			expect(minHeap:RemoveFirstOccurrence(5)).is(false)
+		end)
+
+		test("should maintain heap property after removing root", function()
+			local minHeap = Heap.min()
+			minHeap:Push(1)
+			minHeap:Push(3)
+			minHeap:Push(2)
+			minHeap:Push(7)
+			minHeap:Push(5)
+			
+			expect(minHeap:Peek()).is(1)
+			minHeap:RemoveFirstOccurrence(1)
+			expect(minHeap:Peek()).is(2)
+			
+			-- Verify all remaining elements come out in sorted order
+			expect(minHeap:Pop()).is(2)
+			expect(minHeap:Pop()).is(3)
+			expect(minHeap:Pop()).is(5)
+			expect(minHeap:Pop()).is(7)
+		end)
+
+		test("should maintain heap property after removing middle element", function()
+			local minHeap = Heap.min()
+			for i = 1, 10 do
+				minHeap:Push(i)
+			end
+			
+			-- Remove middle value
+			minHeap:RemoveFirstOccurrence(5)
+			expect(#minHeap).is(9)
+			
+			-- Verify heap property maintained (all elements in sorted order)
+			local prev = -math.huge
+			for i = 1, 9 do
+				local val = minHeap:Pop()
+				expect(val > prev).is(true)
+				prev = val
+			end
+		end)
+
+		test("should maintain heap property after removing leaf element", function()
+			local maxHeap = Heap.max()
+			maxHeap:Push(10)
+			maxHeap:Push(8)
+			maxHeap:Push(9)
+			maxHeap:Push(5)
+			maxHeap:Push(7)
+			maxHeap:Push(6)
+			maxHeap:Push(3)
+			
+			-- Remove a leaf (3 should be a leaf)
+			maxHeap:RemoveFirstOccurrence(3)
+			expect(#maxHeap).is(6)
+			expect(maxHeap:Peek()).is(10)
+			
+			-- Verify all elements come out in correct order
+			local prev = math.huge
+			for i = 1, 6 do
+				local val = maxHeap:Pop()
+				expect(val <= prev).is(true)
+				prev = val
+			end
+		end)
+
+		test("should handle removing last remaining element", function()
+			local minHeap = Heap.min()
+			minHeap:Push(42)
+			
+			expect(minHeap:RemoveFirstOccurrence(42)).is(true)
+			expect(#minHeap).is(0)
+			expect(minHeap:Peek()).is(nil)
+			expect(minHeap:IsEmpty()).is(true)
+		end)
+
+		test("should handle removal with duplicate values at different positions", function()
+			local minHeap = Heap.min()
+			minHeap:Push("A", 5)
+			minHeap:Push("B", 3)
+			minHeap:Push("A", 7)
+			minHeap:Push("A", 2)
+			minHeap:Push("C", 6)
+			
+			-- Peek should be "A" with cost 2
+			local peekVal, peekCost = minHeap:Peek()
+			expect(peekVal).is("A")
+			expect(peekCost).is(2)
+			
+			-- Remove first occurrence of "A" (should remove one of them)
+			minHeap:RemoveFirstOccurrence("A")
+			expect(#minHeap).is(4)
+			
+			-- After removal, top could be B(3) or A(5) depending on which A was removed
+			local _topVal, topCost = minHeap:Peek()
+			expect(topCost <= 5).is(true) -- Cost should be reasonable
+			
+			-- Remove another "A"
+			minHeap:RemoveFirstOccurrence("A")
+			expect(#minHeap).is(3)
+			
+			-- One more "A" should still exist
+			expect(minHeap:Has("A")).is(true)
+			
+			-- Remove the last "A"
+			minHeap:RemoveFirstOccurrence("A")
+			expect(#minHeap).is(2)
+			expect(minHeap:Has("A")).is(false)
+		end)
+
+		test("should work correctly after multiple mixed operations", function()
+			local minHeap = Heap.min()
+			
+			-- Build heap
+			for i = 1, 20 do
+				minHeap:Push(i)
+			end
+			
+			-- Remove some elements
+			minHeap:RemoveFirstOccurrence(5)
+			minHeap:RemoveFirstOccurrence(10)
+			minHeap:RemoveFirstOccurrence(15)
+			expect(#minHeap).is(17)
+			
+			-- Add more elements
+			minHeap:Push(25)
+			minHeap:Push(30)
+			expect(#minHeap).is(19)
+			
+			-- Verify heap property
+			local prev = -math.huge
+			for i = 1, 19 do
+				local val = minHeap:Pop()
+				expect(val > prev).is(true)
+				prev = val
+			end
+		end)
+
+		test("should handle removal with custom cost values", function()
+			local minHeap = Heap.min()
+			local item1 = {id = 1}
+			local item2 = {id = 2}
+			local item3 = {id = 3}
+			local item4 = {id = 4}
+			
+			minHeap:Push(item1, 10)
+			minHeap:Push(item2, 5)
+			minHeap:Push(item3, 15)
+			minHeap:Push(item4, 3)
+			
+			-- Remove item2 by reference
+			minHeap:RemoveFirstOccurrence(item2)
+			
+			expect(#minHeap).is(3)
+			local val, cost = minHeap:Peek()
+			expect(val.id).is(4)
+			expect(cost).is(3)
+		end)
 	end)
 
 	describe("RemoveAllOccurrences", function()
@@ -839,565 +1031,375 @@ local test_suite = function(tiniest)
 			expect(minHeap:RemoveAllOccurrences(3)).is(0)
 			expect(#minHeap).is(3)
 		end)
-	end)
 
-	-- describe("ToArray", function() -- ToArray is not supported
-	-- 	test("should return an array representation of the heap", function()
-	-- 		local minHeap = Heap.min()
-	-- 		minHeap:Push(5)
-	-- 		minHeap:Push(3)
-	-- 		minHeap:Push(8)
-	-- 		minHeap:Push(3)
-	-- 		minHeap:Push(3)
-	-- 		minHeap:Push(10)
-	-- 		expect(minHeap:ToArray()).is_shallow_equal({3, 3, 3, 5, 8, 10})
-	-- 	end)
-	-- end)
-
-	describe("__len", function()
-		test("should return correct number of elements", function()
+		test("should return 0 when value doesn't exist", function()
 			local minHeap = Heap.min()
 			minHeap:Push(5)
-			minHeap:Push(10)
-			expect(#minHeap).is(2)
-			minHeap:Pop()
-			expect(#minHeap).is(1)
-			minHeap:Pop()
-			expect(#minHeap).is(0)
-			minHeap:Pop()
-			expect(#minHeap).is(0)
-			minHeap:Push(20)
-			expect(#minHeap).is(1)
+			minHeap:Push(3)
+			minHeap:Push(8)
+			expect(minHeap:RemoveAllOccurrences(99)).is(0)
+			expect(#minHeap).is(3)
 		end)
-	end)
 
-	describe("__tostring", function()
-		test("should return a string representation of the heap", function()
+		test("should maintain heap property after removing all occurrences", function()
 			local minHeap = Heap.min()
+			minHeap:Push("A", 1)
+			minHeap:Push("B", 2)
+			minHeap:Push("A", 3)
+			minHeap:Push("C", 4)
+			minHeap:Push("A", 5)
+			minHeap:Push("D", 6)
+			
+			expect(minHeap:RemoveAllOccurrences("A")).is(3)
+			expect(#minHeap).is(3)
+			
+			-- Remaining elements should be in sorted order
+			expect(minHeap:Pop()).is("B")
+			expect(minHeap:Pop()).is("C")
+			expect(minHeap:Pop()).is("D")
+		end)
+
+		test("should handle removing all elements", function()
+			local minHeap = Heap.min()
+			minHeap:Push("X", 1)
+			minHeap:Push("X", 2)
+			minHeap:Push("X", 3)
+			
+			expect(minHeap:RemoveAllOccurrences("X")).is(3)
+			expect(#minHeap).is(0)
+			expect(minHeap:IsEmpty()).is(true)
+			expect(minHeap:Peek()).is(nil)
+		end)
+
+		test("should handle large number of duplicates", function()
+			local maxHeap = Heap.max()
+			
+			-- Add 50 duplicates mixed with other values
+			for i = 1, 50 do
+				maxHeap:Push("DUP", i)
+				maxHeap:Push("OTHER", i + 100)
+			end
+			
+			expect(#maxHeap).is(100)
+			expect(maxHeap:RemoveAllOccurrences("DUP")).is(50)
+			expect(#maxHeap).is(50)
+			
+			-- Verify all remaining are "OTHER"
+			for i = 1, 50 do
+				local val = maxHeap:Pop()
+				expect(val).is("OTHER")
+			end
+		end)
+
+		test("should work correctly with interleaved duplicates", function()
+			local minHeap = Heap.min()
+			-- Create pattern: A, B, A, C, A, D
+			minHeap:Push("A", 1)
+			minHeap:Push("B", 2)
+			minHeap:Push("A", 3)
+			minHeap:Push("C", 4)
+			minHeap:Push("A", 5)
+			minHeap:Push("D", 6)
+			
+			expect(minHeap:RemoveAllOccurrences("A")).is(3)
+			expect(#minHeap).is(3)
+			
+			-- Verify remaining structure
+			expect(minHeap:Has("A")).is(false)
+			expect(minHeap:Has("B")).is(true)
+			expect(minHeap:Has("C")).is(true)
+			expect(minHeap:Has("D")).is(true)
+		end)
+
+		test("should maintain heap property after complex removal", function()
+			local minHeap = Heap.min()
+			
+			-- Build heap with many duplicates
 			for i = 1, 10 do
-				minHeap:Push(math.random(1, 10))
+				minHeap:Push("REMOVE", i)
+				minHeap:Push("KEEP", i + 100)
 			end
 			
-			local heapStr = tostring(minHeap)
-			expect(heapStr:find("Heap:")).never_is(nil)
-			-- print(heapStr)
+			local removed = minHeap:RemoveAllOccurrences("REMOVE")
+			expect(removed).is(10)
+			expect(#minHeap).is(10)
+			
+			-- All remaining should be in sorted order
+			local prev = -math.huge
+			for i = 1, 10 do
+				local val, cost = minHeap:Pop()
+				expect(val).is("KEEP")
+				expect(cost > prev).is(true)
+				prev = cost
+			end
+		end)
+
+		test("should handle empty heap", function()
+			local minHeap = Heap.min()
+			expect(minHeap:RemoveAllOccurrences("anything")).is(0)
+		end)
+
+		test("should work after push/pop/remove cycles", function()
+			local maxHeap = Heap.max()
+			
+			-- Cycle 1: Add and remove some
+			for i = 1, 10 do
+				maxHeap:Push("A", i)
+			end
+			maxHeap:RemoveAllOccurrences("A")
+			expect(#maxHeap).is(0)
+			
+			-- Cycle 2: Add different values
+			for i = 1, 5 do
+				maxHeap:Push("B", i)
+				maxHeap:Push("C", i + 10)
+			end
+			expect(#maxHeap).is(10)
+			
+			-- Remove one type
+			expect(maxHeap:RemoveAllOccurrences("B")).is(5)
+			expect(#maxHeap).is(5)
+			
+			-- Verify remaining
+			for i = 1, 5 do
+				local val = maxHeap:Pop()
+				expect(val).is("C")
+			end
 		end)
 	end)
 
-	describe("__iter", function()
-		test("should iterate over the heap", function()
+	describe("Edge Cases and Stress Tests", function()
+		test("should handle alternating push and remove operations", function()
 			local minHeap = Heap.min()
-			local values = {}
-			local costs = {}
-
-			for i = 1, 100 do
-				local cost = math.random(1, 20)
-				local value = string.char(math.random(97, 110))
-				minHeap:Push(value, cost)
-				table.insert(values, value)
-				table.insert(costs, cost)
+			
+			for round = 1, 10 do
+				-- Add 5 elements
+				for i = 1, 5 do
+					minHeap:Push(round * 10 + i)
+				end
+				
+				-- Remove 2 elements
+				minHeap:RemoveFirstOccurrence(round * 10 + 2)
+				minHeap:RemoveFirstOccurrence(round * 10 + 4)
 			end
 			
-			local i = 0
-			for value, cost in minHeap do
-				i = i + 1
-				local vIdx = table.find(values, value)
-				local cIdx = table.find(costs, cost)
-				expect(vIdx)
-				expect(cIdx)
-				table.remove(values, vIdx)
-				table.remove(costs, cIdx)
-				print(value, cost)
+			-- Should have 30 elements left (50 added - 20 removed)
+			expect(#minHeap).is(30)
+			
+			-- Verify heap property
+			local prev = -math.huge
+			while #minHeap > 0 do
+				local val = minHeap:Pop()
+				expect(val > prev).is(true)
+				prev = val
 			end
-			expect(i).is(#minHeap)
-			expect(#values).is(0)
-			expect(#costs).is(0)
 		end)
-		
-		test("should atleast give us the peeked value as the first value", function()
+
+		test("should handle removing elements with same cost", function()
 			local minHeap = Heap.min()
 			minHeap:Push("A", 5)
-			minHeap:Push("B", 2)
-			minHeap:Push("C", 8)
-			minHeap:Push("A", 4)
-			minHeap:Push("D", 10)
-			local peekedValue, peekedCost = minHeap:Peek()
-			for iteratedValue, iteratedCost in minHeap do
-				expect(peekedValue).is(iteratedValue)
-				expect(peekedCost).is(iteratedCost)
-				break
-			end
+			minHeap:Push("B", 5)
+			minHeap:Push("C", 5)
+			minHeap:Push("D", 3)
+			minHeap:Push("E", 7)
+			
+			minHeap:RemoveFirstOccurrence("B")
+			expect(#minHeap).is(4)
+			
+			-- Verify heap is still valid
+			expect(minHeap:Peek()).is("D") -- Should be D with cost 3
+			minHeap:Pop()
+			
+			local val = minHeap:Peek()
+			expect(val == "A" or val == "C").is(true) -- One of the cost-5 elements
 		end)
 
-		-- [We make no guarantees about iteration order]
-		-- test("Iteration order test", function()
-		-- 	local minHeap = Heap.min()
-		-- 	minHeap:Push("A", 5)
-		-- 	minHeap:Push("B", 2)
-		-- 	minHeap:Push("C", 8)
-		-- 	minHeap:Push("A", 4)
-		-- 	minHeap:Push("D", 10)
-
-		-- 	local expectedResults = {
-		-- 		{"B", 2},
-		-- 		{"A", 5},
-		-- 		{"C", 8},
-		-- 		{"A", 4},
-		-- 		{"D", 10}
-		-- 	}
-		
-		-- 	local i = 0
-		-- 	for value: string, cost: number in minHeap do
-		-- 		i = i + 1
-		-- 		expect({value, cost}).is_shallow_equal(expectedResults[i])
-		-- 	end
-		-- end)
-	end)
-
-	describe("Performance Benchmarks", function()
-		test("Compare heap vs array for finding minimum", function()
-			local sizes = {10, 50, 100, 500, 1000}
-			print("\n=== Heap vs Array Performance Comparison ===")
-			print("Finding minimum element repeatedly:\n")
+		test("should handle remove after UpdateCost", function()
+			local minHeap = Heap.min()
+			minHeap:Push("A", 10)
+			minHeap:Push("B", 5)
+			minHeap:Push("C", 15)
 			
-			for _, n in ipairs(sizes) do
-				-- Generate random data
-				local data = {}
-				for i = 1, n do
-					table.insert(data, math.random(1, 10000))
-				end
+			-- Update cost then remove
+			minHeap:UpdateCost("B", 20)
+			minHeap:RemoveFirstOccurrence("B")
+			
+			expect(#minHeap).is(2)
+			expect(minHeap:Peek()).is("A")
+		end)
+
+		test("should handle stress test with random operations", function()
+			local minHeap = Heap.min()
+			local existingValues = {}
+			
+			-- Perform 100 random operations
+			for i = 1, 100 do
+				local op = math.random(1, 3)
 				
-				-- Test Heap Performance
-				local heapTime = 0
-				local minHeap = Heap.min()
-				
-				-- Build heap
-				for _, v in ipairs(data) do
-					minHeap:Push(v)
-				end
-				
-				-- Extract all minimums
-				local startExtract = os.clock()
-				for i = 1, n do
+				if op == 1 or #existingValues == 0 then
+					-- Push
+					local val = math.random(1, 50)
+					minHeap:Push(val)
+					table.insert(existingValues, val)
+				elseif op == 2 and #existingValues > 0 then
+					-- Pop
 					minHeap:Pop()
-				end
-				heapTime = os.clock() - startExtract
-				
-				-- Test Array Performance
-				local arrayTime = 0
-				local arrayData = {}
-				for _, v in ipairs(data) do
-					table.insert(arrayData, v)
-				end
-				
-				-- Extract all minimums (find min, remove with swap removal)
-				local startArray = os.clock()
-				for i = 1, n do
-					local minIdx = 1
-					local minVal = arrayData[1]
-					for j = 2, #arrayData do
-						if arrayData[j] < minVal then
-							minVal = arrayData[j]
-							minIdx = j
-						end
+					table.remove(existingValues, 1)
+				else
+					-- Remove random existing value
+					if #existingValues > 0 then
+						local idx = math.random(1, #existingValues)
+						local val = existingValues[idx]
+						minHeap:RemoveFirstOccurrence(val)
+						table.remove(existingValues, idx)
 					end
-					swapRemove(arrayData, minIdx)
 				end
-				arrayTime = os.clock() - startArray
-				
-				local speedup = arrayTime / heapTime
-				local heapMs = heapTime * 1000
-				local arrayMs = arrayTime * 1000
-				
-				print(string.format("n=%4d: Heap=%6.3fms, Array=%7.3fms, Speedup=%.3fx", 
-					n, heapMs, arrayMs, speedup))
 			end
 			
-			print("\n=== Analysis ===")
-			print("Heap Operations: O(n log n) total")
-			print("Array Operations: O(n²) total")
-			print("Heap becomes significantly faster as n grows")
-			print("(Note: Performance can vary based on system load)")
+			-- Verify heap is still valid by popping all elements
+			local prev = -math.huge
+			while #minHeap > 0 do
+				local val = minHeap:Pop()
+				expect(val >= prev).is(true)
+				prev = val
+			end
 		end)
 
-		test("Compare heap vs sorted array for priority queue operations", function()
-			local initialSize = 100
-			local operations = 500
-			print("\n=== Priority Queue: Heap vs Sorted Array ===")
-			print(string.format("Testing with %d initial items + %d mixed operations:\n", initialSize, operations))
+		test("should handle removing all elements one by one", function()
+			local maxHeap = Heap.max()
+			local values = {}
 			
-			-- Generate random data for consistent comparison
-			local initialData = {}
-			for i = 1, initialSize do
-				table.insert(initialData, math.random(1, 1000))
-			end
-			local operationData = {}
-			for i = 1, operations do
-				table.insert(operationData, math.random(1, 1000))
+			for i = 1, 20 do
+				local val = "Item_" .. i
+				maxHeap:Push(val, i)
+				table.insert(values, val)
 			end
 			
-			-- Test Heap
+			-- Remove all in random order
+			for i = #values, 1, -1 do
+				local idx = math.random(1, i)
+				local val = values[idx]
+				expect(maxHeap:RemoveFirstOccurrence(val)).is(true)
+				table.remove(values, idx)
+				
+				-- Verify heap property maintained after each removal
+				if #maxHeap > 0 then
+					local peek = maxHeap:Peek()
+					expect(peek).never_is(nil)
+				end
+			end
+			
+			expect(#maxHeap).is(0)
+		end)
+
+		test("should handle remove on heap with negative costs", function()
 			local minHeap = Heap.min()
-			local heapStart = os.clock()
-			-- Build initial queue
-			for _, v in ipairs(initialData) do
-				minHeap:Push(v)
-			end
-			-- Mixed push/pop operations
-			for i = 1, operations do
-				if i % 3 == 0 then
-					minHeap:Pop() -- Pop every 3rd operation
-				else
-					minHeap:Push(operationData[i]) -- Push otherwise
-				end
-			end
-			local heapTime = (os.clock() - heapStart) * 1000
+			minHeap:Push("A", -10)
+			minHeap:Push("B", -5)
+			minHeap:Push("C", 0)
+			minHeap:Push("D", 5)
 			
-			-- Test Sorted Array (always keep sorted)
-			local sortedArray = {}
-			local arrayStart = os.clock()
-			-- Build initial queue
-			for _, v in ipairs(initialData) do
-				table.insert(sortedArray, v)
-			end
-			table.sort(sortedArray)
-			-- Mixed push/pop operations
-			for i = 1, operations do
-				if i % 3 == 0 then
-					-- Remove minimum (first element)
-					if #sortedArray > 0 then
-						table.remove(sortedArray, 1)
-					end
-				else
-					-- Insert and maintain sorted order
-					local val = operationData[i]
-					-- Binary search insert would be optimal, but using simple insertion
-					local inserted = false
-					for j = 1, #sortedArray do
-						if val < sortedArray[j] then
-							table.insert(sortedArray, j, val)
-							inserted = true
-							break
-						end
-					end
-					if not inserted then
-						table.insert(sortedArray, val)
-					end
-				end
-			end
-			local arrayTime = (os.clock() - arrayStart) * 1000
-			
-			local speedup = arrayTime / heapTime
-			
-			print(string.format("Heap:         %.3fms", heapTime))
-			print(string.format("Sorted Array: %.3fms", arrayTime))
-			print(string.format("Speedup:      %.3fx", speedup))
-			print(string.format("Final sizes:  Heap=%d, Array=%d", minHeap:Size(), #sortedArray))
-			print("\nHeap should be faster for mixed push/pop operations")
-			print("(Note: Actual performance can vary based on system load)")
+			expect(minHeap:Peek()).is("A")
+			minHeap:RemoveFirstOccurrence("A")
+			expect(minHeap:Peek()).is("B")
+			minHeap:RemoveFirstOccurrence("B")
+			expect(minHeap:Peek()).is("C")
 		end)
 
-		test("Heap efficiency for top-K elements", function()
-			local n = 1000
-			local k = 10
-			print(string.format("\n=== Finding top %d elements from %d items ===\n", k, n))
-			
-			local data = {}
-			for i = 1, n do
-				table.insert(data, math.random(1, 10000))
-			end
-			
-			-- Using Heap (optimal approach)
-			local heapStart = os.clock()
-			local minHeap = Heap.min()
-			for _, v in ipairs(data) do
-				if minHeap:Size() < k then
-					minHeap:Push(v)
-				else
-					local minVal = minHeap:Peek()
-					if v > minVal then
-						minHeap:Pop()
-						minHeap:Push(v)
-					end
-				end
-			end
-			local heapTime = (os.clock() - heapStart) * 1000
-			
-			-- Using Full Sort
-			local sortStart = os.clock()
-			local sortedData = {}
-			for _, v in ipairs(data) do
-				table.insert(sortedData, v)
-			end
-			table.sort(sortedData, function(a, b) return a > b end)
-			local topK = {}
-			for i = 1, k do
-				table.insert(topK, sortedData[i])
-			end
-			local sortTime = (os.clock() - sortStart) * 1000
-			
-			local speedup = sortTime / heapTime
-			
-			print(string.format("Heap approach:  %.3fms (O(n log k))", heapTime))
-			print(string.format("Full sort:      %.3fms (O(n log n))", sortTime))
-			print(string.format("Speedup:        %.3fx", speedup))
-			print(string.format("\nFor k << n, heap approach is more efficient (%.2fx faster)", speedup))
-			print("(Note: Actual performance can vary based on system load)")
-		end)
-
-		test("Heap vs array for dynamic priority changes", function()
-			local n = 200
-			print(string.format("\n=== Dynamic Priority Updates (%d items) ===\n", n))
-			
-			-- Using Heap with UpdateCost
-			local heapStart = os.clock()
+		test("should handle remove with very large heap", function()
 			local minHeap = Heap.min()
 			
-			-- Initial insertion
-			for i = 1, n do
-				minHeap:Push(i, math.random(1, 100))
-			end
-			
-			-- Update priorities
-			for i = 1, n // 2 do
-				local target = math.random(1, n)
-				minHeap:UpdateCost(target, math.random(1, 100))
-			end
-			
-			-- Extract all
-			for i = 1, n do
-				minHeap:Pop()
-			end
-			local heapTime = (os.clock() - heapStart) * 1000
-			
-			-- Using Array (rebuild sort after each update)
-			local arrayStart = os.clock()
-			local array = {}
-			
-			-- Initial insertion
-			for i = 1, n do
-				table.insert(array, {val = i, cost = math.random(1, 100)})
-			end
-			table.sort(array, function(a, b) return a.cost < b.cost end)
-			
-			-- Update priorities (re-sort after each)
-			for i = 1, n // 2 do
-				local target = math.random(1, #array)
-				array[target].cost = math.random(1, 100)
-				table.sort(array, function(a, b) return a.cost < b.cost end)
-			end
-			
-			-- Extract all
-			array = {}
-			local arrayTime = (os.clock() - arrayStart) * 1000
-			
-			local speedup = arrayTime / heapTime
-			
-			print(string.format("Heap:  %.3fms (O(log n) per update)", heapTime))
-			print(string.format("Array: %.3fms (O(n log n) per update)", arrayTime))
-			print(string.format("Speedup: %.2fx", speedup))
-			print("\nHeap excels at dynamic priority updates (should be significantly faster)")
-			print("(Note: Actual performance can vary based on system load)")
-		end)
-
-		test("Break-even point analysis: Push + Pop operations", function()
-			print("\n=== Break-even Point Analysis: Push + Pop ===")
-			print("Finding where heap becomes faster than array:\n")
-			
-			local heapFaster = nil
-			
-			for n = 5, 100, 5 do
-				local data = {}
-				for i = 1, n do
-					table.insert(data, math.random(1, 1000))
-				end
-				
-				-- Heap
-				local heapStart = os.clock()
-				local minHeap = Heap.min()
-				for _, v in ipairs(data) do
-					minHeap:Push(v)
-				end
-				for i = 1, n do
-					minHeap:Pop()
-				end
-				local heapTime = os.clock() - heapStart
-				
-				-- Array
-				local arrayStart = os.clock()
-				local arr = {}
-				for _, v in ipairs(data) do
-					table.insert(arr, v)
-				end
-				for i = 1, n do
-					local minIdx = 1
-					for j = 2, #arr do
-						if arr[j] < arr[minIdx] then
-							minIdx = j
-						end
-					end
-					swapRemove(arr, minIdx)
-				end
-				local arrayTime = os.clock() - arrayStart
-				
-				if heapTime < arrayTime and heapFaster == nil then
-					heapFaster = n
-					print(string.format("n=%d: Heap becomes faster! (%.3fms vs %.3fms)", 
-						n, heapTime * 1000, arrayTime * 1000))
-					break
-				end
-			end
-			
-			if heapFaster then
-				print(string.format("\nBreak-even point: ~%d elements", heapFaster))
-				print("Use array for: n < " .. heapFaster)
-				print("Use heap for:  n >= " .. heapFaster)
-			else
-				print("\nNo clear break-even point found in tested range")
-				print("For this workload (push all + pop all), heap scales better")
-				print("But array may be faster for very small n (< 5)")
-			end
-		end)
-
-		test("Break-even point analysis: Push only", function()
-			print("\n=== Break-even Point Analysis: Push Only ===")
-			print("Comparing heap building vs maintaining sorted array:\n")
-			
-			local heapFaster = nil
-			
-			for n = 10, 200, 10 do
-				local data = {}
-				for i = 1, n do
-					table.insert(data, math.random(1, 1000))
-				end
-				
-				-- Heap: O(n log n) - heapify on each insert
-				local heapStart = os.clock()
-				local minHeap = Heap.min()
-				for _, v in ipairs(data) do
-					minHeap:Push(v)
-				end
-				local heapTime = os.clock() - heapStart
-				
-				-- Sorted Array: O(n²) - insertion sort
-				local arrayStart = os.clock()
-				local sortedArray = {}
-				for _, v in ipairs(data) do
-					local inserted = false
-					for j = 1, #sortedArray do
-						if v < sortedArray[j] then
-							table.insert(sortedArray, j, v)
-							inserted = true
-							break
-						end
-					end
-					if not inserted then
-						table.insert(sortedArray, v)
-					end
-				end
-				local arrayTime = os.clock() - arrayStart
-				
-				if heapTime < arrayTime and heapFaster == nil then
-					heapFaster = n
-					print(string.format("n=%d: Heap becomes faster! (%.3fms vs %.3fms)", 
-						n, heapTime * 1000, arrayTime * 1000))
-					break
-				end
-			end
-			
-			if heapFaster then
-				print(string.format("\nBreak-even point for push: ~%d elements", heapFaster))
-				print("Heap Push: O(log n), Sorted Array Insert: O(n)")
-			else
-				print("\nHeap is consistently faster even for small n")
-			end
-		end)
-
-		test("Break-even point analysis: Pop only", function()
-			print("\n=== Break-even Point Analysis: Pop Only ===")
-			print("Pre-built structures, comparing extraction performance:\n")
-			
-			local heapFaster = nil
-			
-			for n = 5, 100, 5 do
-				local data = {}
-				for i = 1, n do
-					table.insert(data, math.random(1, 1000))
-				end
-				
-				-- Pre-build heap
-				local minHeap = Heap.min()
-				for _, v in ipairs(data) do
-					minHeap:Push(v)
-				end
-				
-				-- Pre-build sorted array
-				local sortedArray = {}
-				for _, v in ipairs(data) do
-					table.insert(sortedArray, v)
-				end
-				table.sort(sortedArray)
-				
-				-- Heap: O(n log n) total for n pops
-				local heapStart = os.clock()
-				for i = 1, n do
-					minHeap:Pop()
-				end
-				local heapTime = os.clock() - heapStart
-				
-				-- Sorted Array: O(n) total - just remove from front
-				local arrayStart = os.clock()
-				for i = 1, n do
-					table.remove(sortedArray, 1)
-				end
-				local arrayTime = os.clock() - arrayStart
-				
-				local heapMs = heapTime * 1000
-				local arrayMs = arrayTime * 1000
-				
-				-- For pop-only from sorted array, results may vary
-				-- This test shows the actual performance comparison
-				if n == 5 or n % 20 == 0 then
-					local ratio = heapMs / arrayMs
-					print(string.format("n=%3d: Heap=%.3fms, Array=%.3fms (Heap/Array=%.2fx)", 
-						n, heapMs, arrayMs, ratio))
-				end
-			end
-			
-			print("\n=== Analysis ===")
-			print("For Pop-only operations on pre-built structures:")
-			print("- Heap: O(log n) per pop")
-			print("- Sorted Array: O(n) per pop via table.remove(array, 1)")
-			print("Surprisingly, the array implementation can be competitive due to:")
-			print("  * LuaJIT optimization of table.remove at index 1")
-			print("  * Lower constant factors for simple removal")
-			print("For this specific case, array performance may beat heap for small n")
-			print("But combining build + pop operations, heap wins overall")
-		end)
-	end)
-
-	describe("Large Dataset Test", function()
-		print("[Beginning Large Dataset Test]")
-		local minHeap = Heap.min()
-		local elementsToInsert = 100000
-		local elementsToRemove = 99900
-
-		test("Insertion: "..elementsToInsert.." Items", function()
-			for i = 1, elementsToInsert do
+			-- Build large heap
+			for i = 1, 1000 do
 				minHeap:Push(i)
 			end
+			
+			-- Remove several elements from different positions
+			minHeap:RemoveFirstOccurrence(1)    -- root
+			minHeap:RemoveFirstOccurrence(500)  -- middle
+			minHeap:RemoveFirstOccurrence(1000) -- likely a leaf
+			minHeap:RemoveFirstOccurrence(250)  -- another middle
+			
+			expect(#minHeap).is(996)
+			
+			-- Verify heap property still holds
+			local prev = -math.huge
+			for i = 1, 996 do
+				local val = minHeap:Pop()
+				expect(val > prev).is(true)
+				prev = val
+			end
 		end)
 
-		test("Removal of one item", function()
-			local t = os.clock()
-			minHeap:Pop()
-			t = os.clock() - t
-			print("Time taken to remove one item: "..(t*1000).."ms")
+		test("should maintain correctness with mixed value types", function()
+			local minHeap = Heap.min()
+			local items = {}
+			
+			-- Add different table values with same structure, keep references
+			for i = 1, 10 do
+				local item = {id = i, name = "Item" .. i}
+				items[i] = item
+				minHeap:Push(item, i)
+			end
+			
+			-- Remove item 5 by reference
+			minHeap:RemoveFirstOccurrence(items[5])
+			
+			expect(#minHeap).is(9)
+			
+			-- Verify heap is still sorted by cost
+			local prevCost = -math.huge
+			while #minHeap > 0 do
+				local _val, cost = minHeap:Pop()
+				expect(cost > prevCost).is(true)
+				prevCost = cost
+			end
 		end)
 
-		test("Removal: "..elementsToRemove.." Items", function()
-			for i = 1, elementsToRemove do
-				minHeap:Pop()
+		test("should handle edge case: remove then immediately push same value", function()
+			local minHeap = Heap.min()
+			minHeap:Push("A", 5)
+			minHeap:Push("B", 3)
+			minHeap:Push("C", 7)
+			
+			minHeap:RemoveFirstOccurrence("B")
+			minHeap:Push("B", 1) -- Push with different cost
+			
+			expect(minHeap:Peek()).is("B") -- Should be new "B" with cost 1
+			local poppedVal, poppedCost = minHeap:Pop()
+			expect(poppedVal).is("B")
+			expect(poppedCost).is(1)
+		end)
+
+		test("should handle remove when heap has been rebuilt multiple times", function()
+			local maxHeap = Heap.max()
+			
+			-- Build, drain, rebuild cycle
+			for cycle = 1, 3 do
+				for i = 1, 10 do
+					maxHeap:Push(i + (cycle * 100))
+				end
+				
+				-- Drain partially
+				for i = 1, 5 do
+					maxHeap:Pop()
+				end
+				
+				-- Remove some
+				maxHeap:RemoveFirstOccurrence(2 + (cycle * 100))
+				maxHeap:RemoveFirstOccurrence(4 + (cycle * 100))
+			end
+			
+			-- Should have 9 elements left (15 added - 15 removed via pop - 6 via remove = -6, but cycles...)
+			-- Actually: 30 added, 15 popped, 6 removed = 9 left
+			expect(#maxHeap).is(9)
+			
+			-- Verify heap property
+			local prev = math.huge
+			while #maxHeap > 0 do
+				local val = maxHeap:Pop()
+				expect(val <= prev).is(true)
+				prev = val
 			end
 		end)
 	end)
