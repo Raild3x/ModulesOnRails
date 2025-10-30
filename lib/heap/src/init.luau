@@ -489,11 +489,19 @@ end
     Removes the first occurrence of a given value from the heap.
     Heaps are not optimized for search removals, so this method should
     be used sparingly.
+    
+    :::note Performance
+    This operation requires O(n) search time to locate the element, followed by O(log n) heapify.
+    A reverse mapping (refIdx → heapPos) could reduce this to O(log n), but would add memory overhead
+    and complexity to maintain across all heap operations. For typical use cases where Push/Pop
+    dominate, the current approach favors simplicity and lower memory usage.
+    :::
 ]=]
 function Heap:RemoveFirstOccurrence<T>(valueToRemove: T): boolean
 	for refIdx, value in pairs(self._Values) do
 		if value == valueToRemove then
-			-- Find the heap position where this refIdx is located
+			-- Find the heap position where this refIdx is located (O(n) search)
+			-- Note: Could be optimized to O(1) with a reverse mapping at cost of extra memory
 			local heapPos = nil
 			for i = 1, self._Size do
 				if self._HeapIndex[i] == refIdx then
@@ -527,10 +535,27 @@ function Heap:RemoveFirstOccurrence<T>(valueToRemove: T): boolean
 			self._HeapIndex[self._Size] = nil
 			self._Size -= 1
 
-			-- Heapify from the position (may need to go up or down)
+			-- Heapify from the position (determine direction based on heap property)
 			if self._Size > 0 then
-				self:_heapifyDown(heapPos)
-				self:_heapifyUp(heapPos)
+				-- Only heapify in one direction based on comparison with parent
+				if heapPos > 1 then
+					local parent = math.floor(heapPos / 2)
+					local movedCost = self._Costs[lastRefIdx]
+					local parentCost = self._Costs[self._HeapIndex[parent]]
+					
+					-- Check if moved element violates heap property with parent
+					local needsHeapifyUp = (self._isMinHeap and movedCost < parentCost)
+						or (not self._isMinHeap and movedCost > parentCost)
+					
+					if needsHeapifyUp then
+						self:_heapifyUp(heapPos)
+					else
+						self:_heapifyDown(heapPos)
+					end
+				else
+					-- At root, can only heapify down
+					self:_heapifyDown(heapPos)
+				end
 			end
 
 			return true
@@ -584,10 +609,27 @@ function Heap:RemoveAllOccurrences<T>(valueToRemove: T): number
 				self._HeapIndex[self._Size] = nil
 				self._Size -= 1
 
-				-- Heapify from the position (may need to go up or down)
+				-- Heapify from the position (determine direction based on heap property)
 				if self._Size > 0 then
-					self:_heapifyDown(heapPos)
-					self:_heapifyUp(heapPos)
+					-- Only heapify in one direction based on comparison with parent
+					if heapPos > 1 then
+						local parent = math.floor(heapPos / 2)
+						local movedCost = self._Costs[lastRefIdx]
+						local parentCost = self._Costs[self._HeapIndex[parent]]
+						
+						-- Check if moved element violates heap property with parent
+						local needsHeapifyUp = (self._isMinHeap and movedCost < parentCost)
+							or (not self._isMinHeap and movedCost > parentCost)
+						
+						if needsHeapifyUp then
+							self:_heapifyUp(heapPos)
+						else
+							self:_heapifyDown(heapPos)
+						end
+					else
+						-- At root, can only heapify down
+						self:_heapifyDown(heapPos)
+					end
 				end
 			end
 			
