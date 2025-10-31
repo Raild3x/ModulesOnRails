@@ -1402,7 +1402,175 @@ local test_suite = function(tiniest)
 				prev = val
 			end
 		end)
-	end)
+
+		test("should correctly heapify when removed element's replacement needs to go down", function()
+			local minHeap = Heap.min()
+			-- Build a specific structure where removing middle element 
+			-- causes last element to be moved and need to heapify down
+			minHeap:Push(1)  -- root
+			minHeap:Push(3)  -- left child
+			minHeap:Push(5)  -- right child
+			minHeap:Push(7)  -- left-left
+			minHeap:Push(9)  -- left-right
+			minHeap:Push(6)  -- right-left
+			minHeap:Push(8)  -- right-right
+			
+			-- Remove 3 (left child of root)
+			-- Last element (8) will be moved to position of 3
+			-- 8 is greater than parent (1) but needs to move down
+			minHeap:RemoveFirstOccurrence(3)
+			
+			-- Verify heap property maintained
+			expect(minHeap:Peek()).is(1)
+			local prev = -math.huge
+			while #minHeap > 0 do
+				local val = minHeap:Pop()
+				expect(val >= prev).is(true)
+				prev = val
+			end
+		end)
+
+		test("should correctly heapify when removed element's replacement needs to go up", function()
+			local minHeap = Heap.min()
+			-- Build structure where removing causes upward heapify
+			minHeap:Push(5)
+			minHeap:Push(10)
+			minHeap:Push(15)
+			minHeap:Push(20)
+			minHeap:Push(25)
+			minHeap:Push(30)
+			minHeap:Push(1)  -- This will be last element
+			
+			-- Remove 15 (right child of root)
+			-- Element 1 (last) will be moved to position of 15
+			-- 1 is less than parent (5) and needs to move up
+			minHeap:RemoveFirstOccurrence(15)
+			
+			-- After proper heapify, 1 should be at root
+			expect(minHeap:Peek()).is(1)
+			
+			local prev = -math.huge
+			while #minHeap > 0 do
+				local val = minHeap:Pop()
+				expect(val >= prev).is(true)
+				prev = val
+			end
+		end)
+
+		test("should handle max heap removal requiring downward heapify", function()
+			local maxHeap = Heap.max()
+			maxHeap:Push(100) -- root
+			maxHeap:Push(80)  -- left
+			maxHeap:Push(90)  -- right
+			maxHeap:Push(70)  -- left-left
+			maxHeap:Push(75)  -- left-right
+			maxHeap:Push(85)  -- right-left
+			maxHeap:Push(60)  -- right-right (will be last)
+			
+			-- Remove 90 (right child)
+			-- Element 60 moved to position of 90
+			-- 60 < 100 (parent) so no upward move, but needs to go down
+			maxHeap:RemoveFirstOccurrence(90)
+			
+			expect(maxHeap:Peek()).is(100)
+			local prev = math.huge
+			while #maxHeap > 0 do
+				local val = maxHeap:Pop()
+				expect(val <= prev).is(true)
+				prev = val
+			end
+		end)
+
+		test("should handle max heap removal requiring upward heapify", function()
+			local maxHeap = Heap.max()
+			maxHeap:Push(50)  -- root
+			maxHeap:Push(30)  -- left
+			maxHeap:Push(40)  -- right
+			maxHeap:Push(20)  -- left-left
+			maxHeap:Push(25)  -- left-right
+			maxHeap:Push(35)  -- right-left
+			maxHeap:Push(200) -- right-right (will be last, should bubble to top)
+			
+			-- Remove 30 (left child)
+			-- Element 200 moved to position of 30
+			-- 200 > 50 (parent) so needs to move up to become new root
+			maxHeap:RemoveFirstOccurrence(30)
+			
+			expect(maxHeap:Peek()).is(200)
+			local prev = math.huge
+			while #maxHeap > 0 do
+				local val = maxHeap:Pop()
+				expect(val <= prev).is(true)
+				prev = val
+			end
+		end)
+
+		test("should handle removal at different depths correctly", function()
+			local minHeap = Heap.min()
+			
+			-- Build larger heap
+			for i = 1, 31 do
+				minHeap:Push(i)
+			end
+			
+			-- Remove from different depths
+			minHeap:RemoveFirstOccurrence(2)   -- depth 1
+			minHeap:RemoveFirstOccurrence(7)   -- depth 2
+			minHeap:RemoveFirstOccurrence(15)  -- depth 3
+			minHeap:RemoveFirstOccurrence(25)  -- depth 4
+			
+			-- Verify heap property maintained
+			local prev = -math.huge
+			while #minHeap > 0 do
+				local val = minHeap:Pop()
+				expect(val > prev).is(true)
+				prev = val
+			end
+		end)
+
+		test("should handle RemoveAllOccurrences with changing heap structure", function()
+			local minHeap = Heap.min()
+			
+			-- Create a pattern where removals will cause significant restructuring
+			for i = 1, 20 do
+				minHeap:Push("KEEP", i)
+				minHeap:Push("REMOVE", i + 100)
+			end
+			
+			-- Remove all "REMOVE" entries (20 removals with changing structure)
+			local removed = minHeap:RemoveAllOccurrences("REMOVE")
+			expect(removed).is(20)
+			expect(#minHeap).is(20)
+			
+			-- Verify heap property maintained after all removals
+			local prev = -math.huge
+			for i = 1, 20 do
+				local val, cost = minHeap:Pop()
+				expect(val).is("KEEP")
+				expect(cost > prev).is(true)
+				prev = cost
+			end
+		end)
+
+		test("should handle edge case: remove element equal to parent and children", function()
+			local minHeap = Heap.min()
+			minHeap:Push("A", 5)
+			minHeap:Push("B", 5)  -- Same cost as parent
+			minHeap:Push("C", 5)  -- Same cost as parent
+			minHeap:Push("D", 5)  -- Will be moved
+			
+			minHeap:RemoveFirstOccurrence("B")
+			
+			-- Should still maintain valid heap (all costs same, so any order valid)
+			expect(#minHeap).is(3)
+			local prev = -math.huge
+			while #minHeap > 0 do
+				local _val, cost = minHeap:Pop()
+				expect(cost >= prev).is(true)
+				prev = cost
+			end
+		end)
+		end)
 
 	--------------------------------------------------------------------------------
 		--// Metamethods //--

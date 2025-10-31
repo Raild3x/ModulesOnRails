@@ -537,7 +537,11 @@ function Heap:RemoveFirstOccurrence<T>(valueToRemove: T): boolean
 
 			-- Heapify from the position (determine direction based on heap property)
 			if self._Size > 0 then
-				-- Only heapify in one direction based on comparison with parent
+				-- Optimization: Only heapify in ONE direction by checking parent
+				-- Logic: If element violates heap property with parent, it MUST go up
+				--        If element satisfies heap property with parent, it CAN'T go up,
+				--        so we check if it needs to go down (heapifyDown checks children)
+				-- This avoids calling both heapifyUp AND heapifyDown unnecessarily
 				if heapPos > 1 then
 					local parent = math.floor(heapPos / 2)
 					local movedCost = self._Costs[lastRefIdx]
@@ -611,7 +615,7 @@ function Heap:RemoveAllOccurrences<T>(valueToRemove: T): number
 
 				-- Heapify from the position (determine direction based on heap property)
 				if self._Size > 0 then
-					-- Only heapify in one direction based on comparison with parent
+					-- Optimization: Only heapify in ONE direction (see RemoveFirstOccurrence for details)
 					if heapPos > 1 then
 						local parent = math.floor(heapPos / 2)
 						local movedCost = self._Costs[lastRefIdx]
