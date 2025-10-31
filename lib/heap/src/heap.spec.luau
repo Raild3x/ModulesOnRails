@@ -823,6 +823,198 @@ local test_suite = function(tiniest)
 			minHeap:RemoveFirstOccurrence(3)
 			expect(minHeap:Peek()).is(5)
 		end)
+
+		test("should successfully remove all occurrences", function()
+			local newHeap = Heap.max()
+
+			-- Add 10 items
+			for count = 1, 10, 1 do
+				local heapId = "TestHeap_" .. tostring(count)
+				newHeap:Push(heapId, count * 10)
+			end
+			
+			expect(#newHeap).is(10)
+
+			-- Remove all 10 items
+			for count = 1, 10, 1 do
+				local heapId = "TestHeap_" .. tostring(count)
+				local removed = newHeap:RemoveFirstOccurrence(heapId)
+				expect(removed).is(true)
+			end
+			
+			-- Heap should be empty
+			expect(#newHeap).is(0)
+			expect(newHeap:Peek()).is(nil)
+		end)
+
+		test("should return false when removing non-existent value", function()
+			local minHeap = Heap.min()
+			minHeap:Push(5)
+			minHeap:Push(3)
+			minHeap:Push(8)
+			expect(minHeap:RemoveFirstOccurrence(99)).is(false)
+			expect(#minHeap).is(3)
+		end)
+
+		test("should return false when removing from empty heap", function()
+			local minHeap = Heap.min()
+			expect(minHeap:RemoveFirstOccurrence(5)).is(false)
+		end)
+
+		test("should maintain heap property after removing root", function()
+			local minHeap = Heap.min()
+			minHeap:Push(1)
+			minHeap:Push(3)
+			minHeap:Push(2)
+			minHeap:Push(7)
+			minHeap:Push(5)
+			
+			expect(minHeap:Peek()).is(1)
+			minHeap:RemoveFirstOccurrence(1)
+			expect(minHeap:Peek()).is(2)
+			
+			-- Verify all remaining elements come out in sorted order
+			expect(minHeap:Pop()).is(2)
+			expect(minHeap:Pop()).is(3)
+			expect(minHeap:Pop()).is(5)
+			expect(minHeap:Pop()).is(7)
+		end)
+
+		test("should maintain heap property after removing middle element", function()
+			local minHeap = Heap.min()
+			for i = 1, 10 do
+				minHeap:Push(i)
+			end
+			
+			-- Remove middle value
+			minHeap:RemoveFirstOccurrence(5)
+			expect(#minHeap).is(9)
+			
+			-- Verify heap property maintained (all elements in sorted order)
+			local prev = -math.huge
+			for i = 1, 9 do
+				local val = minHeap:Pop()
+				expect(val > prev).is(true)
+				prev = val
+			end
+		end)
+
+		test("should maintain heap property after removing leaf element", function()
+			local maxHeap = Heap.max()
+			maxHeap:Push(10)
+			maxHeap:Push(8)
+			maxHeap:Push(9)
+			maxHeap:Push(5)
+			maxHeap:Push(7)
+			maxHeap:Push(6)
+			maxHeap:Push(3)
+			
+			-- Remove a leaf (3 should be a leaf)
+			maxHeap:RemoveFirstOccurrence(3)
+			expect(#maxHeap).is(6)
+			expect(maxHeap:Peek()).is(10)
+			
+			-- Verify all elements come out in correct order
+			local prev = math.huge
+			for i = 1, 6 do
+				local val = maxHeap:Pop()
+				expect(val <= prev).is(true)
+				prev = val
+			end
+		end)
+
+		test("should handle removing last remaining element", function()
+			local minHeap = Heap.min()
+			minHeap:Push(42)
+			
+			expect(minHeap:RemoveFirstOccurrence(42)).is(true)
+			expect(#minHeap).is(0)
+			expect(minHeap:Peek()).is(nil)
+			expect(minHeap:IsEmpty()).is(true)
+		end)
+
+		test("should handle removal with duplicate values at different positions", function()
+			local minHeap = Heap.min()
+			minHeap:Push("A", 5)
+			minHeap:Push("B", 3)
+			minHeap:Push("A", 7)
+			minHeap:Push("A", 2)
+			minHeap:Push("C", 6)
+			
+			-- Peek should be "A" with cost 2
+			local peekVal, peekCost = minHeap:Peek()
+			expect(peekVal).is("A")
+			expect(peekCost).is(2)
+			
+			-- Remove first occurrence of "A" (should remove one of them)
+			minHeap:RemoveFirstOccurrence("A")
+			expect(#minHeap).is(4)
+			
+			-- After removal, top could be B(3) or A(5) depending on which A was removed
+			local _topVal, topCost = minHeap:Peek()
+			expect(topCost <= 5).is(true) -- Cost should be reasonable
+			
+			-- Remove another "A"
+			minHeap:RemoveFirstOccurrence("A")
+			expect(#minHeap).is(3)
+			
+			-- One more "A" should still exist
+			expect(minHeap:Has("A")).is(true)
+			
+			-- Remove the last "A"
+			minHeap:RemoveFirstOccurrence("A")
+			expect(#minHeap).is(2)
+			expect(minHeap:Has("A")).is(false)
+		end)
+
+		test("should work correctly after multiple mixed operations", function()
+			local minHeap = Heap.min()
+			
+			-- Build heap
+			for i = 1, 20 do
+				minHeap:Push(i)
+			end
+			
+			-- Remove some elements
+			minHeap:RemoveFirstOccurrence(5)
+			minHeap:RemoveFirstOccurrence(10)
+			minHeap:RemoveFirstOccurrence(15)
+			expect(#minHeap).is(17)
+			
+			-- Add more elements
+			minHeap:Push(25)
+			minHeap:Push(30)
+			expect(#minHeap).is(19)
+			
+			-- Verify heap property
+			local prev = -math.huge
+			for i = 1, 19 do
+				local val = minHeap:Pop()
+				expect(val > prev).is(true)
+				prev = val
+			end
+		end)
+
+		test("should handle removal with custom cost values", function()
+			local minHeap = Heap.min()
+			local item1 = {id = 1}
+			local item2 = {id = 2}
+			local item3 = {id = 3}
+			local item4 = {id = 4}
+			
+			minHeap:Push(item1, 10)
+			minHeap:Push(item2, 5)
+			minHeap:Push(item3, 15)
+			minHeap:Push(item4, 3)
+			
+			-- Remove item2 by reference
+			minHeap:RemoveFirstOccurrence(item2)
+			
+			expect(#minHeap).is(3)
+			local val, cost = minHeap:Peek()
+			expect(val.id).is(4)
+			expect(cost).is(3)
+		end)
 	end)
 
 	describe("RemoveAllOccurrences", function()
@@ -839,21 +1031,551 @@ local test_suite = function(tiniest)
 			expect(minHeap:RemoveAllOccurrences(3)).is(0)
 			expect(#minHeap).is(3)
 		end)
+
+		test("should return 0 when value doesn't exist", function()
+			local minHeap = Heap.min()
+			minHeap:Push(5)
+			minHeap:Push(3)
+			minHeap:Push(8)
+			expect(minHeap:RemoveAllOccurrences(99)).is(0)
+			expect(#minHeap).is(3)
+		end)
+
+		test("should maintain heap property after removing all occurrences", function()
+			local minHeap = Heap.min()
+			minHeap:Push("A", 1)
+			minHeap:Push("B", 2)
+			minHeap:Push("A", 3)
+			minHeap:Push("C", 4)
+			minHeap:Push("A", 5)
+			minHeap:Push("D", 6)
+			
+			expect(minHeap:RemoveAllOccurrences("A")).is(3)
+			expect(#minHeap).is(3)
+			
+			-- Remaining elements should be in sorted order
+			expect(minHeap:Pop()).is("B")
+			expect(minHeap:Pop()).is("C")
+			expect(minHeap:Pop()).is("D")
+		end)
+
+		test("should handle removing all elements", function()
+			local minHeap = Heap.min()
+			minHeap:Push("X", 1)
+			minHeap:Push("X", 2)
+			minHeap:Push("X", 3)
+			
+			expect(minHeap:RemoveAllOccurrences("X")).is(3)
+			expect(#minHeap).is(0)
+			expect(minHeap:IsEmpty()).is(true)
+			expect(minHeap:Peek()).is(nil)
+		end)
+
+		test("should handle large number of duplicates", function()
+			local maxHeap = Heap.max()
+			
+			-- Add 50 duplicates mixed with other values
+			for i = 1, 50 do
+				maxHeap:Push("DUP", i)
+				maxHeap:Push("OTHER", i + 100)
+			end
+			
+			expect(#maxHeap).is(100)
+			expect(maxHeap:RemoveAllOccurrences("DUP")).is(50)
+			expect(#maxHeap).is(50)
+			
+			-- Verify all remaining are "OTHER"
+			for i = 1, 50 do
+				local val = maxHeap:Pop()
+				expect(val).is("OTHER")
+			end
+		end)
+
+		test("should work correctly with interleaved duplicates", function()
+			local minHeap = Heap.min()
+			-- Create pattern: A, B, A, C, A, D
+			minHeap:Push("A", 1)
+			minHeap:Push("B", 2)
+			minHeap:Push("A", 3)
+			minHeap:Push("C", 4)
+			minHeap:Push("A", 5)
+			minHeap:Push("D", 6)
+			
+			expect(minHeap:RemoveAllOccurrences("A")).is(3)
+			expect(#minHeap).is(3)
+			
+			-- Verify remaining structure
+			expect(minHeap:Has("A")).is(false)
+			expect(minHeap:Has("B")).is(true)
+			expect(minHeap:Has("C")).is(true)
+			expect(minHeap:Has("D")).is(true)
+		end)
+
+		test("should maintain heap property after complex removal", function()
+			local minHeap = Heap.min()
+			
+			-- Build heap with many duplicates
+			for i = 1, 10 do
+				minHeap:Push("REMOVE", i)
+				minHeap:Push("KEEP", i + 100)
+			end
+			
+			local removed = minHeap:RemoveAllOccurrences("REMOVE")
+			expect(removed).is(10)
+			expect(#minHeap).is(10)
+			
+			-- All remaining should be in sorted order
+			local prev = -math.huge
+			for i = 1, 10 do
+				local val, cost = minHeap:Pop()
+				expect(val).is("KEEP")
+				expect(cost > prev).is(true)
+				prev = cost
+			end
+		end)
+
+		test("should handle empty heap", function()
+			local minHeap = Heap.min()
+			expect(minHeap:RemoveAllOccurrences("anything")).is(0)
+		end)
+
+		test("should work after push/pop/remove cycles", function()
+			local maxHeap = Heap.max()
+			
+			-- Cycle 1: Add and remove some
+			for i = 1, 10 do
+				maxHeap:Push("A", i)
+			end
+			maxHeap:RemoveAllOccurrences("A")
+			expect(#maxHeap).is(0)
+			
+			-- Cycle 2: Add different values
+			for i = 1, 5 do
+				maxHeap:Push("B", i)
+				maxHeap:Push("C", i + 10)
+			end
+			expect(#maxHeap).is(10)
+			
+			-- Remove one type
+			expect(maxHeap:RemoveAllOccurrences("B")).is(5)
+			expect(#maxHeap).is(5)
+			
+			-- Verify remaining
+			for i = 1, 5 do
+				local val = maxHeap:Pop()
+				expect(val).is("C")
+			end
+		end)
 	end)
 
-	-- describe("ToArray", function() -- ToArray is not supported
-	-- 	test("should return an array representation of the heap", function()
-	-- 		local minHeap = Heap.min()
-	-- 		minHeap:Push(5)
-	-- 		minHeap:Push(3)
-	-- 		minHeap:Push(8)
-	-- 		minHeap:Push(3)
-	-- 		minHeap:Push(3)
-	-- 		minHeap:Push(10)
-	-- 		expect(minHeap:ToArray()).is_shallow_equal({3, 3, 3, 5, 8, 10})
-	-- 	end)
-	-- end)
+	describe("Edge Cases and Stress Tests", function()
+		test("should handle alternating push and remove operations", function()
+			local minHeap = Heap.min()
+			
+			for round = 1, 10 do
+				-- Add 5 elements
+				for i = 1, 5 do
+					minHeap:Push(round * 10 + i)
+				end
+				
+				-- Remove 2 elements
+				minHeap:RemoveFirstOccurrence(round * 10 + 2)
+				minHeap:RemoveFirstOccurrence(round * 10 + 4)
+			end
+			
+			-- Should have 30 elements left (50 added - 20 removed)
+			expect(#minHeap).is(30)
+			
+			-- Verify heap property
+			local prev = -math.huge
+			while #minHeap > 0 do
+				local val = minHeap:Pop()
+				expect(val > prev).is(true)
+				prev = val
+			end
+		end)
 
+		test("should handle removing elements with same cost", function()
+			local minHeap = Heap.min()
+			minHeap:Push("A", 5)
+			minHeap:Push("B", 5)
+			minHeap:Push("C", 5)
+			minHeap:Push("D", 3)
+			minHeap:Push("E", 7)
+			
+			minHeap:RemoveFirstOccurrence("B")
+			expect(#minHeap).is(4)
+			
+			-- Verify heap is still valid
+			expect(minHeap:Peek()).is("D") -- Should be D with cost 3
+			minHeap:Pop()
+			
+			local val = minHeap:Peek()
+			expect(val == "A" or val == "C").is(true) -- One of the cost-5 elements
+		end)
+
+		test("should handle remove after UpdateCost", function()
+			local minHeap = Heap.min()
+			minHeap:Push("A", 10)
+			minHeap:Push("B", 5)
+			minHeap:Push("C", 15)
+			
+			-- Update cost then remove
+			minHeap:UpdateCost("B", 20)
+			minHeap:RemoveFirstOccurrence("B")
+			
+			expect(#minHeap).is(2)
+			expect(minHeap:Peek()).is("A")
+		end)
+
+		test("should handle stress test with random operations", function()
+			local minHeap = Heap.min()
+			local existingValues = {}
+			
+			-- Perform 100 random operations
+			for i = 1, 100 do
+				local op = math.random(1, 3)
+				
+				if op == 1 or #existingValues == 0 then
+					-- Push
+					local val = math.random(1, 50)
+					minHeap:Push(val)
+					table.insert(existingValues, val)
+				elseif op == 2 and #existingValues > 0 then
+					-- Pop
+					minHeap:Pop()
+					table.remove(existingValues, 1)
+				else
+					-- Remove random existing value
+					if #existingValues > 0 then
+						local idx = math.random(1, #existingValues)
+						local val = existingValues[idx]
+						minHeap:RemoveFirstOccurrence(val)
+						table.remove(existingValues, idx)
+					end
+				end
+			end
+			
+			-- Verify heap is still valid by popping all elements
+			local prev = -math.huge
+			while #minHeap > 0 do
+				local val = minHeap:Pop()
+				expect(val >= prev).is(true)
+				prev = val
+			end
+		end)
+
+		test("should handle removing all elements one by one", function()
+			local maxHeap = Heap.max()
+			local values = {}
+			
+			for i = 1, 20 do
+				local val = "Item_" .. i
+				maxHeap:Push(val, i)
+				table.insert(values, val)
+			end
+			
+			-- Remove all in random order
+			for i = #values, 1, -1 do
+				local idx = math.random(1, i)
+				local val = values[idx]
+				expect(maxHeap:RemoveFirstOccurrence(val)).is(true)
+				table.remove(values, idx)
+				
+				-- Verify heap property maintained after each removal
+				if #maxHeap > 0 then
+					local peek = maxHeap:Peek()
+					expect(peek).never_is(nil)
+				end
+			end
+			
+			expect(#maxHeap).is(0)
+		end)
+
+		test("should handle remove on heap with negative costs", function()
+			local minHeap = Heap.min()
+			minHeap:Push("A", -10)
+			minHeap:Push("B", -5)
+			minHeap:Push("C", 0)
+			minHeap:Push("D", 5)
+			
+			expect(minHeap:Peek()).is("A")
+			minHeap:RemoveFirstOccurrence("A")
+			expect(minHeap:Peek()).is("B")
+			minHeap:RemoveFirstOccurrence("B")
+			expect(minHeap:Peek()).is("C")
+		end)
+
+		test("should handle remove with very large heap", function()
+			local minHeap = Heap.min()
+			
+			-- Build large heap
+			for i = 1, 1000 do
+				minHeap:Push(i)
+			end
+			
+			-- Remove several elements from different positions
+			minHeap:RemoveFirstOccurrence(1)    -- root
+			minHeap:RemoveFirstOccurrence(500)  -- middle
+			minHeap:RemoveFirstOccurrence(1000) -- likely a leaf
+			minHeap:RemoveFirstOccurrence(250)  -- another middle
+			
+			expect(#minHeap).is(996)
+			
+			-- Verify heap property still holds
+			local prev = -math.huge
+			for i = 1, 996 do
+				local val = minHeap:Pop()
+				expect(val > prev).is(true)
+				prev = val
+			end
+		end)
+
+		test("should maintain correctness with mixed value types", function()
+			local minHeap = Heap.min()
+			local items = {}
+			
+			-- Add different table values with same structure, keep references
+			for i = 1, 10 do
+				local item = {id = i, name = "Item" .. i}
+				items[i] = item
+				minHeap:Push(item, i)
+			end
+			
+			-- Remove item 5 by reference
+			minHeap:RemoveFirstOccurrence(items[5])
+			
+			expect(#minHeap).is(9)
+			
+			-- Verify heap is still sorted by cost
+			local prevCost = -math.huge
+			while #minHeap > 0 do
+				local _val, cost = minHeap:Pop()
+				expect(cost > prevCost).is(true)
+				prevCost = cost
+			end
+		end)
+
+		test("should handle edge case: remove then immediately push same value", function()
+			local minHeap = Heap.min()
+			minHeap:Push("A", 5)
+			minHeap:Push("B", 3)
+			minHeap:Push("C", 7)
+			
+			minHeap:RemoveFirstOccurrence("B")
+			minHeap:Push("B", 1) -- Push with different cost
+			
+			expect(minHeap:Peek()).is("B") -- Should be new "B" with cost 1
+			local poppedVal, poppedCost = minHeap:Pop()
+			expect(poppedVal).is("B")
+			expect(poppedCost).is(1)
+		end)
+
+		test("should handle remove when heap has been rebuilt multiple times", function()
+			local maxHeap = Heap.max()
+			
+			-- Build, drain, rebuild cycle
+			for cycle = 1, 3 do
+				for i = 1, 10 do
+					maxHeap:Push(i + (cycle * 100))
+				end
+				
+				-- Drain partially
+				for i = 1, 5 do
+					maxHeap:Pop()
+				end
+				
+				-- Remove some
+				maxHeap:RemoveFirstOccurrence(2 + (cycle * 100))
+				maxHeap:RemoveFirstOccurrence(4 + (cycle * 100))
+			end
+			
+			-- Should have 9 elements left (15 added - 15 removed via pop - 6 via remove = -6, but cycles...)
+			-- Actually: 30 added, 15 popped, 6 removed = 9 left
+			expect(#maxHeap).is(9)
+			
+			-- Verify heap property
+			local prev = math.huge
+			while #maxHeap > 0 do
+				local val = maxHeap:Pop()
+				expect(val <= prev).is(true)
+				prev = val
+			end
+		end)
+
+		test("should correctly heapify when removed element's replacement needs to go down", function()
+			local minHeap = Heap.min()
+			-- Build a specific structure where removing middle element 
+			-- causes last element to be moved and need to heapify down
+			minHeap:Push(1)  -- root
+			minHeap:Push(3)  -- left child
+			minHeap:Push(5)  -- right child
+			minHeap:Push(7)  -- left-left
+			minHeap:Push(9)  -- left-right
+			minHeap:Push(6)  -- right-left
+			minHeap:Push(8)  -- right-right
+			
+			-- Remove 3 (left child of root)
+			-- Last element (8) will be moved to position of 3
+			-- 8 is greater than parent (1) but needs to move down
+			minHeap:RemoveFirstOccurrence(3)
+			
+			-- Verify heap property maintained
+			expect(minHeap:Peek()).is(1)
+			local prev = -math.huge
+			while #minHeap > 0 do
+				local val = minHeap:Pop()
+				expect(val >= prev).is(true)
+				prev = val
+			end
+		end)
+
+		test("should correctly heapify when removed element's replacement needs to go up", function()
+			local minHeap = Heap.min()
+			-- Build structure where removing causes upward heapify
+			minHeap:Push(5)
+			minHeap:Push(10)
+			minHeap:Push(15)
+			minHeap:Push(20)
+			minHeap:Push(25)
+			minHeap:Push(30)
+			minHeap:Push(1)  -- This will be last element
+			
+			-- Remove 15 (right child of root)
+			-- Element 1 (last) will be moved to position of 15
+			-- 1 is less than parent (5) and needs to move up
+			minHeap:RemoveFirstOccurrence(15)
+			
+			-- After proper heapify, 1 should be at root
+			expect(minHeap:Peek()).is(1)
+			
+			local prev = -math.huge
+			while #minHeap > 0 do
+				local val = minHeap:Pop()
+				expect(val >= prev).is(true)
+				prev = val
+			end
+		end)
+
+		test("should handle max heap removal requiring downward heapify", function()
+			local maxHeap = Heap.max()
+			maxHeap:Push(100) -- root
+			maxHeap:Push(80)  -- left
+			maxHeap:Push(90)  -- right
+			maxHeap:Push(70)  -- left-left
+			maxHeap:Push(75)  -- left-right
+			maxHeap:Push(85)  -- right-left
+			maxHeap:Push(60)  -- right-right (will be last)
+			
+			-- Remove 90 (right child)
+			-- Element 60 moved to position of 90
+			-- 60 < 100 (parent) so no upward move, but needs to go down
+			maxHeap:RemoveFirstOccurrence(90)
+			
+			expect(maxHeap:Peek()).is(100)
+			local prev = math.huge
+			while #maxHeap > 0 do
+				local val = maxHeap:Pop()
+				expect(val <= prev).is(true)
+				prev = val
+			end
+		end)
+
+		test("should handle max heap removal requiring upward heapify", function()
+			local maxHeap = Heap.max()
+			maxHeap:Push(50)  -- root
+			maxHeap:Push(30)  -- left
+			maxHeap:Push(40)  -- right
+			maxHeap:Push(20)  -- left-left
+			maxHeap:Push(25)  -- left-right
+			maxHeap:Push(35)  -- right-left
+			maxHeap:Push(200) -- right-right (will be last, should bubble to top)
+			
+			-- Remove 30 (left child)
+			-- Element 200 moved to position of 30
+			-- 200 > 50 (parent) so needs to move up to become new root
+			maxHeap:RemoveFirstOccurrence(30)
+			
+			expect(maxHeap:Peek()).is(200)
+			local prev = math.huge
+			while #maxHeap > 0 do
+				local val = maxHeap:Pop()
+				expect(val <= prev).is(true)
+				prev = val
+			end
+		end)
+
+		test("should handle removal at different depths correctly", function()
+			local minHeap = Heap.min()
+			
+			-- Build larger heap
+			for i = 1, 31 do
+				minHeap:Push(i)
+			end
+			
+			-- Remove from different depths
+			minHeap:RemoveFirstOccurrence(2)   -- depth 1
+			minHeap:RemoveFirstOccurrence(7)   -- depth 2
+			minHeap:RemoveFirstOccurrence(15)  -- depth 3
+			minHeap:RemoveFirstOccurrence(25)  -- depth 4
+			
+			-- Verify heap property maintained
+			local prev = -math.huge
+			while #minHeap > 0 do
+				local val = minHeap:Pop()
+				expect(val > prev).is(true)
+				prev = val
+			end
+		end)
+
+		test("should handle RemoveAllOccurrences with changing heap structure", function()
+			local minHeap = Heap.min()
+			
+			-- Create a pattern where removals will cause significant restructuring
+			for i = 1, 20 do
+				minHeap:Push("KEEP", i)
+				minHeap:Push("REMOVE", i + 100)
+			end
+			
+			-- Remove all "REMOVE" entries (20 removals with changing structure)
+			local removed = minHeap:RemoveAllOccurrences("REMOVE")
+			expect(removed).is(20)
+			expect(#minHeap).is(20)
+			
+			-- Verify heap property maintained after all removals
+			local prev = -math.huge
+			for i = 1, 20 do
+				local val, cost = minHeap:Pop()
+				expect(val).is("KEEP")
+				expect(cost > prev).is(true)
+				prev = cost
+			end
+		end)
+
+		test("should handle edge case: remove element equal to parent and children", function()
+			local minHeap = Heap.min()
+			minHeap:Push("A", 5)
+			minHeap:Push("B", 5)  -- Same cost as parent
+			minHeap:Push("C", 5)  -- Same cost as parent
+			minHeap:Push("D", 5)  -- Will be moved
+			
+			minHeap:RemoveFirstOccurrence("B")
+			
+			-- Should still maintain valid heap (all costs same, so any order valid)
+			expect(#minHeap).is(3)
+			local prev = -math.huge
+			while #minHeap > 0 do
+				local _val, cost = minHeap:Pop()
+				expect(cost >= prev).is(true)
+				prev = cost
+			end
+		end)
+		end)
+
+	--------------------------------------------------------------------------------
+		--// Metamethods //--
+	--------------------------------------------------------------------------------
+	
 	describe("__len", function()
 		test("should return correct number of elements", function()
 			local minHeap = Heap.min()
@@ -953,6 +1675,10 @@ local test_suite = function(tiniest)
 		-- 	end
 		-- end)
 	end)
+
+	--------------------------------------------------------------------------------
+		--// Info Tests (Kept so I can analyze perf) //--
+	--------------------------------------------------------------------------------
 
 	describe("Performance Benchmarks", function()
 		test("Compare heap vs array for finding minimum", function()

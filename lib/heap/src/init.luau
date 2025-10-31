@@ -489,24 +489,78 @@ end
     Removes the first occurrence of a given value from the heap.
     Heaps are not optimized for search removals, so this method should
     be used sparingly.
+    
+    :::note Performance
+    This operation requires O(n) search time to locate the element, followed by O(log n) heapify.
+    A reverse mapping (refIdx → heapPos) could reduce this to O(log n), but would add memory overhead
+    and complexity to maintain across all heap operations. For typical use cases where Push/Pop
+    dominate, the current approach favors simplicity and lower memory usage.
+    :::
 ]=]
 function Heap:RemoveFirstOccurrence<T>(valueToRemove: T): boolean
 	for refIdx, value in pairs(self._Values) do
 		if value == valueToRemove then
-			-- Remove the value and cost linked to the current root (We could probably remove this since it's refIndex is marked for reuse)
+			-- Find the heap position where this refIdx is located (O(n) search)
+			-- Note: Could be optimized to O(1) with a reverse mapping at cost of extra memory
+			local heapPos = nil
+			for i = 1, self._Size do
+				if self._HeapIndex[i] == refIdx then
+					heapPos = i
+					break
+				end
+			end
+			
+			if not heapPos then
+				-- This shouldn't happen, but handle it gracefully
+				return false
+			end
+
+			-- Remove the value and cost
 			self._Values[refIdx] = nil
 			self._Costs[refIdx] = nil
-
-			-- Move last element to root and remove last entry
-			self._HeapIndex[1] = self._HeapIndex[self._Size]
-			self._HeapIndex[self._Size] = nil
-			self._Size -= 1
 
 			-- Store freed index for reuse
 			table.insert(self._OpenIndices, refIdx)
 
-			-- Heapify down
-			self:_heapifyDown(1)
+			-- If this was the last element, just remove it
+			if heapPos == self._Size then
+				self._HeapIndex[self._Size] = nil
+				self._Size -= 1
+				return true
+			end
+
+			-- Move last element to the removed position
+			local lastRefIdx = self._HeapIndex[self._Size]
+			self._HeapIndex[heapPos] = lastRefIdx
+			self._HeapIndex[self._Size] = nil
+			self._Size -= 1
+
+			-- Heapify from the position (determine direction based on heap property)
+			if self._Size > 0 then
+				-- Optimization: Only heapify in ONE direction by checking parent
+				-- Logic: If element violates heap property with parent, it MUST go up
+				--        If element satisfies heap property with parent, it CAN'T go up,
+				--        so we check if it needs to go down (heapifyDown checks children)
+				-- This avoids calling both heapifyUp AND heapifyDown unnecessarily
+				if heapPos > 1 then
+					local parent = math.floor(heapPos / 2)
+					local movedCost = self._Costs[lastRefIdx]
+					local parentCost = self._Costs[self._HeapIndex[parent]]
+					
+					-- Check if moved element violates heap property with parent
+					local needsHeapifyUp = (self._isMinHeap and movedCost < parentCost)
+						or (not self._isMinHeap and movedCost > parentCost)
+					
+					if needsHeapifyUp then
+						self:_heapifyUp(heapPos)
+					else
+						self:_heapifyDown(heapPos)
+					end
+				else
+					-- At root, can only heapify down
+					self:_heapifyDown(heapPos)
+				end
+			end
 
 			return true
 		end
@@ -521,22 +575,68 @@ end
 ]=]
 function Heap:RemoveAllOccurrences<T>(valueToRemove: T): number
 	local count = 0
+	-- Collect all refIdx values to remove (can't modify while iterating)
+	local toRemove = {}
 	for refIdx, value in pairs(self._Values) do
 		if value == valueToRemove then
-			-- Remove the value and cost linked to the current root (We could probably remove this since it's refIndex is marked for reuse)
+			table.insert(toRemove, refIdx)
+		end
+	end
+	
+	-- Remove each occurrence
+	for _, refIdx in ipairs(toRemove) do
+		-- Find the heap position where this refIdx is located
+		local heapPos = nil
+		for i = 1, self._Size do
+			if self._HeapIndex[i] == refIdx then
+				heapPos = i
+				break
+			end
+		end
+		
+		if heapPos then
+			-- Remove the value and cost
 			self._Values[refIdx] = nil
 			self._Costs[refIdx] = nil
-
-			-- Move last element to root and remove last entry
-			self._HeapIndex[1] = self._HeapIndex[self._Size]
-			self._HeapIndex[self._Size] = nil
-			self._Size -= 1
 
 			-- Store freed index for reuse
 			table.insert(self._OpenIndices, refIdx)
 
-			-- Heapify down
-			self:_heapifyDown(1)
+			-- If this was the last element, just remove it
+			if heapPos == self._Size then
+				self._HeapIndex[self._Size] = nil
+				self._Size -= 1
+			else
+				-- Move last element to the removed position
+				local lastRefIdx = self._HeapIndex[self._Size]
+				self._HeapIndex[heapPos] = lastRefIdx
+				self._HeapIndex[self._Size] = nil
+				self._Size -= 1
+
+				-- Heapify from the position (determine direction based on heap property)
+				if self._Size > 0 then
+					-- Optimization: Only heapify in ONE direction (see RemoveFirstOccurrence for details)
+					if heapPos > 1 then
+						local parent = math.floor(heapPos / 2)
+						local movedCost = self._Costs[lastRefIdx]
+						local parentCost = self._Costs[self._HeapIndex[parent]]
+						
+						-- Check if moved element violates heap property with parent
+						local needsHeapifyUp = (self._isMinHeap and movedCost < parentCost)
+							or (not self._isMinHeap and movedCost > parentCost)
+						
+						if needsHeapifyUp then
+							self:_heapifyUp(heapPos)
+						else
+							self:_heapifyDown(heapPos)
+						end
+					else
+						-- At root, can only heapify down
+						self:_heapifyDown(heapPos)
+					end
+				end
+			end
+			
 			count += 1
 		end
 	end
