@@ -33,8 +33,8 @@ type table = {[any]: any}
     | Listable | If you set the optional key Listable to true in your table, this will tell Cmdr that comma-separated lists are allowed for this type. Cmdr will automatically split the list and parse each segment through your Transform, Validate, Autocomplete, and Parse functions individually, so you don't have to change the logic of your Type at all. The only limitation is that your Parse function must return a table. The tables from each individual segment's Parse will be merged into one table at the end of the parse step. The uniqueness of values is ensured upon merging, so even if the user lists the same value several times, it will only appear once in the final table.
 ]=]
 export type TypeDefinition = {
-    DisplayName: string,
-    Prefixes: string,
+    DisplayName: string?,
+    Prefixes: string?,
     Transform: nil | (rawText: string, executor: Player) -> any,
     Validate: nil | <T>(value: T) -> (boolean, string?),
     ValidateOnce: nil | <T>(value: T) -> (boolean, string?),
@@ -110,7 +110,7 @@ export type CommandContext = {
     BroadcastEvent: (self: CommandContext, event: string, ...any) -> (),
     Reply: (self: CommandContext, message: string, color: Color3?) -> (), -- Prints the given text in the user's console. Useful for when a command needs to print more than one message or is long-running. You should still return a string from the command implementation when you are finished, Reply should only be used to send additional messages before the final message.
     HasImplementation: (self: CommandContext) -> boolean,
-} -- 
+}
 
 
 

@@ -172,8 +172,11 @@ function PermissionsHandler:GiveRobloxGroupRankPermissionGroups(groupId: number,
 	end
 
 	return function()
-		table.remove(groupPermData, table.find(groupPermData, rankPermData))
-		PermissionsHandler.GroupRankPermissionGroupsChanged:Fire(_groupRankPermissionGroups)
+        local idx = table.find(groupPermData, rankPermData)
+        if idx then
+            table.remove(groupPermData, idx)
+            PermissionsHandler.GroupRankPermissionGroupsChanged:Fire(_groupRankPermissionGroups)
+        end
 	end
 end
 

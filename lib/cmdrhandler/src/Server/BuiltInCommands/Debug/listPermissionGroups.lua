@@ -12,7 +12,6 @@ local Command = {
 			Type = "player",
 			Name = "Player",
 			Description = "Lists the permission groups",
-			Default = Players.LocalPlayer,
 			Optional = true,
 		},
 	},
