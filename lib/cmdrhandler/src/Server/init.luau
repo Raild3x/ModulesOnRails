@@ -12,7 +12,6 @@
 --// Services //--
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
-local _PermissionsService = game:GetService("PermissionsService")
 
 --// Imports //--
 local Packages = script.Parent.Parent
@@ -136,7 +135,7 @@ end
 function CmdrServer:ExecuteCommand(commandText: string, executor: Player, options: { Data: any?, IsHuman: boolean }?)
 	assert(typeof(executor) == "Instance", "Bad executor")
 	assert(executor:IsA("Player"), "Bad executor")
-	assert(type(commandText) == "string", "Bad commandId")
+	assert(type(commandText) == "string", "Bad commandText")
 	return Cmdr.Dispatcher:EvaluateAndRun(commandText, executor, options)
 end
 
