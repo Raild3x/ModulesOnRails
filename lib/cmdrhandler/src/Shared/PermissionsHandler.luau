@@ -26,7 +26,14 @@ type CmdrRegistry = {
 }
 
 local Packages = script.Parent.Parent.Parent
-local Signal = require(Packages.Signal)
+local Signal = require(Packages.Signal) :: any
+
+-- Default permission inheritance structure (shared constant)
+local DEFAULT_PERMISSION_INHERITANCE: { [string]: { string } } = {
+	DefaultAdmin = { "DefaultDebug", "DefaultUtility", "Help" },
+	Admin = { "DefaultAdmin" },
+	Tester = { "DefaultDebug", "DefaultUtility", "Help" },
+}
 
 --------------------------------------------------------------------------------
 --// Shared Handler //--
@@ -42,11 +49,7 @@ PermissionsHandler.GroupRankPermissionGroupsChanged = Signal.new() :: any
 PermissionsHandler.GroupRolePermissionGroupsChanged = Signal.new() :: any
 
 -- Data storage (will be managed by client/server implementations)
-local permissionInheritance: { [string]: { string } } = {
-	DefaultAdmin = { "DefaultDebug", "DefaultUtility", "Help" },
-	Admin = { "DefaultAdmin" },
-	Tester = { "DefaultDebug", "DefaultUtility", "Help" },
-}
+local permissionInheritance: { [string]: { string } } = table.clone(DEFAULT_PERMISSION_INHERITANCE)
 local playerPermissionGroups: { [Player]: { string } } = {}
 -- GroupId can be number or string due to JSON serialization/networking
 type GroupId = number | string
@@ -196,24 +199,27 @@ function PermissionsHandler:GiveRobloxGroupRankPermissionGroups(
 	end
 
 	return function()
-		table.remove(groupPermData, table.find(groupPermData, rankPermData))
-		PermissionsHandler.GroupRankPermissionGroupsChanged:Fire(groupRankPermissionGroups)
+		local index = table.find(groupPermData, rankPermData)
+		if index then
+			table.remove(groupPermData, index)
+			PermissionsHandler.GroupRankPermissionGroupsChanged:Fire(groupRankPermissionGroups)
+		end
 	end
 end
 
 --[=[
 	Grants specified roles in a Roblox Group permission to use commands under a given PermissionGroup.
-	@param groupId -- The Roblox group id to grant permissions to
+	@param robloxGroupId -- The Roblox group id to grant permissions to
 	@param role -- The role name to grant permissions to
 	@param permissionGroups -- The permission groups to grant
 	@return function -- A function that can be called to remove the permissions
 ]=]
 function PermissionsHandler:GiveRobloxGroupRolePermissionGroups(
-	groupId: number,
+	robloxGroupId: number,
 	role: string,
 	permissionGroups: string | { string }
 ): () -> ()
-	assert(typeof(groupId) == "number", "Bad groupId")
+	assert(typeof(robloxGroupId) == "number", "Bad robloxGroupId")
 	assert(typeof(role) == "string", "Bad role")
 	assert(typeof(permissionGroups) == "string" or typeof(permissionGroups) == "table", "Bad permissions")
 
@@ -223,7 +229,7 @@ function PermissionsHandler:GiveRobloxGroupRolePermissionGroups(
 	assert(typeof(permissionGroups) == "table", "Bad permissions")
 
 	-- Store using string key for consistency (JSON serialization converts numbers to strings)
-	local groupIdKey = normalizeGroupId(groupId)
+	local groupIdKey = normalizeGroupId(robloxGroupId)
 	local groupPermData = groupRolePermissionGroups[groupIdKey]
 	if not groupPermData then
 		groupPermData = {}
@@ -244,7 +250,7 @@ function PermissionsHandler:GiveRobloxGroupRolePermissionGroups(
 
 	if RunService:IsStudio() then
 		print(
-			`[PermissionsHandler] - Granted group [{groupId}] permissions [{table.concat(permissionGroups :: any, ", ")}] for role [{role}]`
+			`[PermissionsHandler] - Granted group [{robloxGroupId}] permissions [{table.concat(permissionGroups :: any, ", ")}] for role [{role}]`
 		)
 	end
 
@@ -338,11 +344,7 @@ function PermissionsHandler:_setPermissionInheritanceData(data: { [string]: { st
 	if data then
 		permissionInheritance = data
 	else
-		permissionInheritance = {
-			DefaultAdmin = { "DefaultDebug", "DefaultUtility", "Help" },
-			Admin = { "DefaultAdmin" },
-			Tester = { "DefaultDebug", "DefaultUtility", "Help" },
-		}
+		permissionInheritance = table.clone(DEFAULT_PERMISSION_INHERITANCE)
 	end
 end
 
