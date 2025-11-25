@@ -19,40 +19,53 @@ type CommandDefinition = CmdrTypes.CommandDefinition
 type CommandContext = CmdrTypes.CommandContext
 type TypeDefinition = CmdrTypes.TypeDefinition
 
+-- Basic interface for Cmdr registry based on usage in this module
+type CmdrRegistry = {
+	GetCommand: (self: CmdrRegistry, commandName: string) -> CommandDefinition?,
+	GetCommands: (self: CmdrRegistry) -> { CommandDefinition },
+}
+
 local Packages = script.Parent.Parent.Parent
 local Signal = require(Packages.Signal)
 
 --------------------------------------------------------------------------------
-    --// Shared Handler //--
+--// Shared Handler //--
 --------------------------------------------------------------------------------
 
 local PermissionsHandler = {}
 PermissionsHandler.ClassName = "PermissionsHandler"
 
 -- Events for data changes
-PermissionsHandler.PermissionInheritanceChanged = Signal.new()
-PermissionsHandler.PlayerPermissionGroupsChanged = Signal.new()
-PermissionsHandler.GroupRankPermissionGroupsChanged = Signal.new()
-PermissionsHandler.GroupRolePermissionGroupsChanged = Signal.new()
+PermissionsHandler.PermissionInheritanceChanged = Signal.new() :: any
+PermissionsHandler.PlayerPermissionGroupsChanged = Signal.new() :: any
+PermissionsHandler.GroupRankPermissionGroupsChanged = Signal.new() :: any
+PermissionsHandler.GroupRolePermissionGroupsChanged = Signal.new() :: any
 
 -- Data storage (will be managed by client/server implementations)
-local _permissionInheritance = {
-	DefaultAdmin = {"DefaultDebug", "DefaultUtility", "Help"},
-	Admin = {"DefaultAdmin"},
-	Tester = {"DefaultDebug", "DefaultUtility", "Help"},
+local permissionInheritance: { [string]: { string } } = {
+	DefaultAdmin = { "DefaultDebug", "DefaultUtility", "Help" },
+	Admin = { "DefaultAdmin" },
+	Tester = { "DefaultDebug", "DefaultUtility", "Help" },
 }
-local _playerPermissionGroups: {[Player]: {string}} = {}
-local _groupRankPermissionGroups: {[number]: {{Ranks: NumberRange, Permissions: {string}}}} = {}
-local _groupRolePermissionGroups: {[number]: {[string]: {string}}} = {}
+local playerPermissionGroups: { [Player]: { string } } = {}
+-- GroupId can be number or string due to JSON serialization/networking
+type GroupId = number | string
+local groupRankPermissionGroups: { [GroupId]: { { Ranks: NumberRange, Permissions: { string } } } } = {}
+local groupRolePermissionGroups: { [GroupId]: { [string]: { string } } } = {}
 
 -- Reference to the Cmdr registry (will be set by server/client)
-local _cmdrRegistry = nil
+local _cmdrRegistry: CmdrRegistry? = nil
+
+-- Helper function to normalize GroupId to string for consistent storage
+local function normalizeGroupId(groupId: number): string
+	return tostring(groupId)
+end
 
 --[=[
 	Sets the Cmdr registry reference for command lookups
 	@param registry -- The Cmdr registry instance
 ]=]
-function PermissionsHandler:SetCmdrRegistry(registry)
+function PermissionsHandler:SetCmdrRegistry(registry: CmdrRegistry): ()
 	_cmdrRegistry = registry
 end
 
@@ -67,9 +80,10 @@ function PermissionsHandler:PlayerHasPermissionForCommand(plr: Player, commandNa
 		warn("PermissionsHandler: Cmdr registry not set!")
 		return false
 	end
-	
+
 	local commandData = _cmdrRegistry:GetCommand(commandName) :: CommandDefinition
 	if not commandData then
+		warn(`PermissionsHandler: Command [{commandName}] not found in registry!`)
 		return false
 	end
 
@@ -77,7 +91,7 @@ function PermissionsHandler:PlayerHasPermissionForCommand(plr: Player, commandNa
 	if table.find(permissions, commandData.Group) or table.find(permissions, "Creator") then
 		return true
 	end
-	
+
 	return false
 end
 
@@ -86,8 +100,8 @@ end
 	@param plr -- The player to get permissions for
 	@return {string} -- Array of permission group names
 ]=]
-function PermissionsHandler:GetPlayerPermissionGroups(plr: Player): {string}
-	local permissions = _playerPermissionGroups[plr] or {}
+function PermissionsHandler:GetPlayerPermissionGroups(plr: Player): { string }
+	local permissions = playerPermissionGroups[plr] or {}
 	return Util.getPlayerPermissions(PermissionsHandler, plr, permissions)
 end
 
@@ -97,12 +111,12 @@ end
 	@param plr -- The player to set permissions for
 	@param permissions -- The permission group(s) to set
 ]=]
-function PermissionsHandler:SetPlayerPermissionGroups(plr: Player, permissions: string | {string})
-    if typeof(permissions) == "string" then
-        permissions = {permissions}
-    end
-    _playerPermissionGroups[plr] = permissions :: {string}
-    PermissionsHandler.PlayerPermissionGroupsChanged:Fire(plr, permissions)
+function PermissionsHandler:SetPlayerPermissionGroups(plr: Player, permissions: string | { string }): ()
+	if typeof(permissions) == "string" then
+		permissions = { permissions }
+	end
+	playerPermissionGroups[plr] = permissions :: { string }
+	PermissionsHandler.PlayerPermissionGroupsChanged:Fire(plr, permissions)
 end
 
 --[=[
@@ -110,12 +124,12 @@ end
 	@param plr -- The player to grant permissions to
 	@param permissionGroups -- The permission groups to grant
 ]=]
-function PermissionsHandler:GivePlayerPermissionGroups(plr: Player, permissionGroups: string | {string})
+function PermissionsHandler:GivePlayerPermissionGroups(plr: Player, permissionGroups: string | { string }): ()
 	if typeof(permissionGroups) == "string" then
-		permissionGroups = {permissionGroups}
+		permissionGroups = { permissionGroups }
 	end
 	assert(typeof(permissionGroups) == "table", "Bad permissionGroups")
-	local currentPermissions = _playerPermissionGroups[plr] or {}
+	local currentPermissions = playerPermissionGroups[plr] or {}
 	for _, permission: string in permissionGroups do
 		if not table.find(currentPermissions, permission) then
 			table.insert(currentPermissions, permission)
@@ -126,30 +140,36 @@ end
 
 --[=[
 	Gets the permissions granted to a particular rank in a group.
-	@param groupId -- The Roblox group id to get permissions for
+	@param robloxGroupId -- The Roblox group id to get permissions for
 	@param rank -- The rank to get permissions for
 	@return {string} -- The permission groups granted to the rank
 ]=]
-function PermissionsHandler:GetRobloxGroupRankPermissionGroups(groupId: number, rank: number): {string}
-	return Util.getGroupRankPermissions(PermissionsHandler, groupId, rank)
+function PermissionsHandler:GetRobloxGroupRankPermissionGroups(robloxGroupId: number, rank: number): { string }
+	return Util.getGroupRankPermissions(PermissionsHandler, robloxGroupId, rank)
 end
 
 --[=[
 	Grants specified ranks in a Roblox Group permission to use the commands under a given PermissionGroup.
-	@param groupId -- The Roblox group id to grant permissions to
+	@param robloxGroupId -- The Roblox group id to grant permissions to
 	@param ranks -- The ranks to apply the permissions to. Can be a single rank or a range of ranks.
 	@param permissionGroups -- The permissions to grant to the group
 	@return function -- A function that can be called to remove the permissions
 ]=]
-function PermissionsHandler:GiveRobloxGroupRankPermissionGroups(groupId: number, ranks: number | NumberRange, permissionGroups: string | {string})
-	assert(typeof(groupId) == "number", "Bad groupId")
+function PermissionsHandler:GiveRobloxGroupRankPermissionGroups(
+	robloxGroupId: number,
+	ranks: number | NumberRange,
+	permissionGroups: string | { string }
+): () -> ()
+	assert(typeof(robloxGroupId) == "number", "Bad robloxGroupId")
 	assert(typeof(ranks) == "number" or typeof(ranks) == "NumberRange", "Bad ranks")
 	assert(typeof(permissionGroups) == "string" or typeof(permissionGroups) == "table", "Bad permissions")
 
-	local groupPermData = _groupRankPermissionGroups[groupId]
+	-- Store using string key for consistency (JSON serialization converts numbers to strings)
+	local groupIdKey = normalizeGroupId(robloxGroupId)
+	local groupPermData = groupRankPermissionGroups[groupIdKey]
 	if not groupPermData then
 		groupPermData = {}
-		_groupRankPermissionGroups[groupId] = groupPermData
+		groupRankPermissionGroups[groupIdKey] = groupPermData
 	end
 
 	if typeof(ranks) == "number" then
@@ -157,26 +177,27 @@ function PermissionsHandler:GiveRobloxGroupRankPermissionGroups(groupId: number,
 	end
 
 	if typeof(permissionGroups) == "string" then
-		permissionGroups = {permissionGroups}
+		permissionGroups = { permissionGroups }
 	end
 
 	local rankPermData = {
 		Ranks = ranks,
-		Permissions = permissionGroups
+		Permissions = permissionGroups,
 	}
 	table.insert(groupPermData, rankPermData)
-	PermissionsHandler.GroupRankPermissionGroupsChanged:Fire(_groupRankPermissionGroups)
+	PermissionsHandler.GroupRankPermissionGroupsChanged:Fire(groupRankPermissionGroups)
 
 	if RunService:IsStudio() then
-		print(`[PermissionsHandler] - Granted group [{groupId}] permissions [{table.concat(permissionGroups :: any, ", ")}] for ranks [{(ranks :: NumberRange).Min}, {(ranks :: NumberRange).Max}]`)
+		print(
+			`[PermissionsHandler] - Granted group [{robloxGroupId}] permissions [{table.concat(permissionGroups :: any, ", ")}] for ranks [{(
+				ranks :: NumberRange
+			).Min}, {(ranks :: NumberRange).Max}]`
+		)
 	end
 
 	return function()
-        local idx = table.find(groupPermData, rankPermData)
-        if idx then
-            table.remove(groupPermData, idx)
-            PermissionsHandler.GroupRankPermissionGroupsChanged:Fire(_groupRankPermissionGroups)
-        end
+		table.remove(groupPermData, table.find(groupPermData, rankPermData))
+		PermissionsHandler.GroupRankPermissionGroupsChanged:Fire(groupRankPermissionGroups)
 	end
 end
 
@@ -187,20 +208,26 @@ end
 	@param permissionGroups -- The permission groups to grant
 	@return function -- A function that can be called to remove the permissions
 ]=]
-function PermissionsHandler:GiveRobloxGroupRolePermissionGroups(groupId: number, role: string, permissionGroups: string | {string})
+function PermissionsHandler:GiveRobloxGroupRolePermissionGroups(
+	groupId: number,
+	role: string,
+	permissionGroups: string | { string }
+): () -> ()
 	assert(typeof(groupId) == "number", "Bad groupId")
 	assert(typeof(role) == "string", "Bad role")
 	assert(typeof(permissionGroups) == "string" or typeof(permissionGroups) == "table", "Bad permissions")
 
 	if typeof(permissionGroups) == "string" then
-		permissionGroups = {permissionGroups}
+		permissionGroups = { permissionGroups }
 	end
 	assert(typeof(permissionGroups) == "table", "Bad permissions")
 
-	local groupPermData = _groupRolePermissionGroups[groupId]
+	-- Store using string key for consistency (JSON serialization converts numbers to strings)
+	local groupIdKey = normalizeGroupId(groupId)
+	local groupPermData = groupRolePermissionGroups[groupIdKey]
 	if not groupPermData then
 		groupPermData = {}
-		_groupRolePermissionGroups[groupId] = groupPermData
+		groupRolePermissionGroups[groupIdKey] = groupPermData
 	end
 
 	if not groupPermData[role] then
@@ -213,19 +240,23 @@ function PermissionsHandler:GiveRobloxGroupRolePermissionGroups(groupId: number,
 		end
 	end
 
-	PermissionsHandler.GroupRolePermissionGroupsChanged:Fire(_groupRolePermissionGroups)
+	PermissionsHandler.GroupRolePermissionGroupsChanged:Fire(groupRolePermissionGroups)
 
 	if RunService:IsStudio() then
-		print(`[PermissionsHandler] - Granted group [{groupId}] permissions [{table.concat(permissionGroups :: any, ", ")}] for role [{role}]`)
+		print(
+			`[PermissionsHandler] - Granted group [{groupId}] permissions [{table.concat(permissionGroups :: any, ", ")}] for role [{role}]`
+		)
 	end
 
 	return function()
 		for _, permission: string in permissionGroups do
 			local idx = table.find(groupPermData[role], permission)
-			if not idx then continue end
+			if not idx then
+				continue
+			end
 			table.remove(groupPermData[role], idx)
 		end
-		PermissionsHandler.GroupRolePermissionGroupsChanged:Fire(_groupRolePermissionGroups)
+		PermissionsHandler.GroupRolePermissionGroupsChanged:Fire(groupRolePermissionGroups)
 	end
 end
 
@@ -234,14 +265,14 @@ end
     @param permissionGroup -- The permission group to set the inheritance for
     @param inheritedGroups -- The group(s) to inherit permissions from
 ]=]
-function PermissionsHandler:SetPermissionGroupInheritance(permissionGroup: string, inheritedGroups: string | {string})
+function PermissionsHandler:SetPermissionGroupInheritance(permissionGroup: string, inheritedGroups: string | { string }): ()
 	assert(typeof(permissionGroup) == "string", "Bad permissionGroup")
 	if typeof(inheritedGroups) == "string" then
-		inheritedGroups = {inheritedGroups}
+		inheritedGroups = { inheritedGroups }
 	end
-    assert(typeof(inheritedGroups) == "table", "Bad inheritedGroups")
-	_permissionInheritance[permissionGroup] = inheritedGroups
-	PermissionsHandler.PermissionInheritanceChanged:Fire(_permissionInheritance)
+	assert(typeof(inheritedGroups) == "table", "Bad inheritedGroups")
+	permissionInheritance[permissionGroup] = inheritedGroups
+	PermissionsHandler.PermissionInheritanceChanged:Fire(permissionInheritance)
 end
 
 --[=[
@@ -249,18 +280,8 @@ end
 	@param permissionGroup -- The permission group to get inheritance for
 	@return {string} -- Array of inherited permission groups
 ]=]
-function PermissionsHandler:GetPermissionInheritance(permissionGroup: string): {string}
-	return _permissionInheritance[permissionGroup] or {}
-end
-
---[=[
-	@private
-	Gets the raw group rank permissions (used by CmdrUtil)
-	@param groupId -- The group ID to get permissions for
-	@return {any} -- Raw group permission data
-]=]
-function PermissionsHandler:_getRawGroupPerms(groupId: number): {any}
-	return _groupRankPermissionGroups[groupId] or {}
+function PermissionsHandler:GetPermissionInheritance(permissionGroup: string): { string }
+	return permissionInheritance[permissionGroup] or {}
 end
 
 --[=[
@@ -268,13 +289,13 @@ end
 	@param permissionGroup -- The permission group to get commands for
 	@return {string} -- Array of command names
 ]=]
-function PermissionsHandler:GetCommandsAvailableToPermissionGroup(permissionGroup: string): {string}
+function PermissionsHandler:GetCommandsAvailableToPermissionGroup(permissionGroup: string): { string }
 	if not _cmdrRegistry then
 		warn("PermissionsHandler: Cmdr registry not set!")
 		return {}
 	end
-	
-	local commands = {}
+
+	local commands: { string } = {}
 	for _, command in _cmdrRegistry:GetCommands() do
 		if command.Group == permissionGroup then
 			table.insert(commands, command.Name)
@@ -283,38 +304,58 @@ function PermissionsHandler:GetCommandsAvailableToPermissionGroup(permissionGrou
 	return commands
 end
 
+--[=[
+	@private
+	Gets the raw group rank permissions (used by CmdrUtil)
+	@param groupId -- The group ID to get permissions for (can be number or string)
+	@return {any} -- Raw group permission data
+]=]
+function PermissionsHandler:_getRawGroupPerms(groupId: number): { any }
+	-- Handle both number and string GroupIds (due to JSON serialization)
+	local groupIdKey = normalizeGroupId(groupId)
+	return groupRankPermissionGroups[groupId] or groupRankPermissionGroups[groupIdKey] or {}
+end
+
 -- Data getters for networking
-function PermissionsHandler:_getPermissionInheritanceData()
-	return _permissionInheritance
+function PermissionsHandler:_getPermissionInheritanceData(): { [string]: { string } }
+	return permissionInheritance
 end
 
-function PermissionsHandler:_getPlayerPermissionGroupsData()
-	return _playerPermissionGroups
+function PermissionsHandler:_getPlayerPermissionGroupsData(): { [Player]: { string } }
+	return playerPermissionGroups
 end
 
-function PermissionsHandler:_getGroupRankPermissionGroupsData()
-	return _groupRankPermissionGroups
+function PermissionsHandler:_getGroupRankPermissionGroupsData(): { [GroupId]: { { Ranks: NumberRange, Permissions: { string } } } }
+	return groupRankPermissionGroups
 end
 
-function PermissionsHandler:_getGroupRolePermissionGroupsData()
-	return _groupRolePermissionGroups
+function PermissionsHandler:_getGroupRolePermissionGroupsData(): { [GroupId]: { [string]: { string } } }
+	return groupRolePermissionGroups
 end
 
 -- Data setters for networking (used by client to sync from server)
-function PermissionsHandler:_setPermissionInheritanceData(data)
-	_permissionInheritance = data or {}
+function PermissionsHandler:_setPermissionInheritanceData(data: { [string]: { string } }?): ()
+	if data then
+		permissionInheritance = data
+	else
+		permissionInheritance = {
+			DefaultAdmin = { "DefaultDebug", "DefaultUtility", "Help" },
+			Admin = { "DefaultAdmin" },
+			Tester = { "DefaultDebug", "DefaultUtility", "Help" },
+		}
+	end
 end
 
-function PermissionsHandler:_setPlayerPermissionGroupsData(data)
-	_playerPermissionGroups = data or {}
+function PermissionsHandler:_setPlayerPermissionGroupsData(data: { [Player]: { string } }?): ()
+	playerPermissionGroups = data or {}
 end
 
-function PermissionsHandler:_setGroupRankPermissionGroupsData(data)
-	_groupRankPermissionGroups = data or {}
+function PermissionsHandler:_setGroupRankPermissionGroupsData(data: { [GroupId]: { { Ranks: NumberRange, Permissions: { string } } } }?): ()
+	groupRankPermissionGroups = data or {}
 end
 
-function PermissionsHandler:_setGroupRolePermissionGroupsData(data)
-	_groupRolePermissionGroups = data or {}
+function PermissionsHandler:_setGroupRolePermissionGroupsData(data: { [GroupId]: { [string]: { string } } }?): ()
+	groupRolePermissionGroups = data or {}
 end
 
 return PermissionsHandler
