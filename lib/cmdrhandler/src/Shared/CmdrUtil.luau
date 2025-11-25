@@ -2,7 +2,6 @@
 -- May 03, 2024
 
 --// Services //--
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local GroupService = game:GetService("GroupService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -50,7 +49,7 @@ function Util.getPlayerPermissions(cmdrWrapper, plr: Player, rawPlayerPerms: {st
 	end
 
     for _, groupData in GroupCache[plr] or {} do
-        for _, groupPerm in Util.GetGroupRankPermissions(cmdrWrapper, groupData.Id, groupData.Rank) do
+        for _, groupPerm in Util.getGroupRankPermissions(cmdrWrapper, groupData.Id, groupData.Rank) do
             if not table.find(playerPerms, groupPerm) then
                 table.insert(playerPerms, groupPerm)
             end
@@ -60,7 +59,7 @@ function Util.getPlayerPermissions(cmdrWrapper, plr: Player, rawPlayerPerms: {st
     return playerPerms
 end
 
-function Util.GetGroupRankPermissions(cmdrWrapper, groupId, rank): {string}
+function Util.getGroupRankPermissions(cmdrWrapper, groupId: number, rank: number): {string}
     local groupData = cmdrWrapper:_getRawGroupPerms(groupId)
     local rankPerms = {}
 
