@@ -294,6 +294,41 @@ function CmdrServer:Init()
 		end
 
 		-- Sync initial player permissions to client
+		--[[
+			[⚠️ • NOTE]: Player:GetRoleInGroup() still returns the player rank,
+			so this should not be used until Roblox fixes it.
+
+			[⚠️ • NOTE]: When getting back to this, check again this implementation.
+			A player might have multiple roles with different permissions, and :GetRoleInGroup()
+			assumes only one role per player.
+
+			local groupRolePermissionGroups = Client.GroupRolePermissionGroups:Get()
+			for groupId, roleData in groupRolePermissionGroups do
+				if player:IsInGroup(groupId) then
+					for role, permissionGroups in roleData do
+						if player:GetRoleInGroup(groupId) == role then
+							CmdrServer.PermissionsHandler:GivePlayerPermissionGroups(player, permissionGroups)
+						end
+					end
+				end
+			end
+		--]]
+
+		local groupRankPermissionGroups = Client.GroupRankPermissionGroups:Get()
+		for groupId, rankData in groupRankPermissionGroups do
+			if player:IsInGroup(groupId) then
+				for _, rankPermissionsData in rankData do
+					local playerRank = player:GetRankInGroup(groupId)
+					if playerRank >= rankPermissionsData.Ranks.Min and playerRank <= rankPermissionsData.Ranks.Max then
+						CmdrServer.PermissionsHandler:GivePlayerPermissionGroups(
+							player,
+							rankPermissionsData.Permissions
+						)
+					end
+				end
+			end
+		end
+
 		local playerPerms = CmdrServer.PermissionsHandler:_getPlayerPermissionGroupsData()[player]
 		Client.Permissions:SetFor(player, playerPerms)
 	end)
@@ -309,6 +344,7 @@ function CmdrServer:Init()
 
 	CmdrServer.PermissionsHandler.GroupRolePermissionGroupsChanged:Connect(function(newValue)
 		Client.GroupRolePermissionGroups:Set(newValue)
+		warn("Changed to", newValue)
 	end)
 
 	CmdrServer.PermissionsHandler.PlayerPermissionGroupsChanged:Connect(function(player, newValue)

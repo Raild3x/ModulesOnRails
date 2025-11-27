@@ -192,9 +192,10 @@ function PermissionsHandler:GiveRobloxGroupRankPermissionGroups(
 
 	if RunService:IsStudio() then
 		print(
-			`[PermissionsHandler] - Granted group [{robloxGroupId}] permissions [{table.concat(permissionGroups :: any, ", ")}] for ranks [{(
-				ranks :: NumberRange
-			).Min}, {(ranks :: NumberRange).Max}]`
+			`[PermissionsHandler] - Granted group [{robloxGroupId}] permissions [{table.concat(
+				permissionGroups :: any,
+				", "
+			)}] for ranks [{(ranks :: NumberRange).Min}, {(ranks :: NumberRange).Max}]`
 		)
 	end
 
@@ -219,6 +220,9 @@ function PermissionsHandler:GiveRobloxGroupRolePermissionGroups(
 	role: string,
 	permissionGroups: string | { string }
 ): () -> ()
+	error(
+		"Using group roles for permissions does not work properly yet since Player:GetRoleInGroup() returns the player rank instead of the role. Use :GiveRobloxGroupRankPermissionGroups() instead."
+	)
 	assert(typeof(robloxGroupId) == "number", "Bad robloxGroupId")
 	assert(typeof(role) == "string", "Bad role")
 	assert(typeof(permissionGroups) == "string" or typeof(permissionGroups) == "table", "Bad permissions")
@@ -250,7 +254,10 @@ function PermissionsHandler:GiveRobloxGroupRolePermissionGroups(
 
 	if RunService:IsStudio() then
 		print(
-			`[PermissionsHandler] - Granted group [{robloxGroupId}] permissions [{table.concat(permissionGroups :: any, ", ")}] for role [{role}]`
+			`[PermissionsHandler] - Granted group [{robloxGroupId}] permissions [{table.concat(
+				permissionGroups :: any,
+				", "
+			)}] for role [{role}]`
 		)
 	end
 
@@ -271,7 +278,10 @@ end
     @param permissionGroup -- The permission group to set the inheritance for
     @param inheritedGroups -- The group(s) to inherit permissions from
 ]=]
-function PermissionsHandler:SetPermissionGroupInheritance(permissionGroup: string, inheritedGroups: string | { string }): ()
+function PermissionsHandler:SetPermissionGroupInheritance(
+	permissionGroup: string,
+	inheritedGroups: string | { string }
+): ()
 	assert(typeof(permissionGroup) == "string", "Bad permissionGroup")
 	if typeof(inheritedGroups) == "string" then
 		inheritedGroups = { inheritedGroups }
@@ -331,7 +341,9 @@ function PermissionsHandler:_getPlayerPermissionGroupsData(): { [Player]: { stri
 	return playerPermissionGroups
 end
 
-function PermissionsHandler:_getGroupRankPermissionGroupsData(): { [GroupId]: { { Ranks: NumberRange, Permissions: { string } } } }
+function PermissionsHandler:_getGroupRankPermissionGroupsData(): {
+	[GroupId]: { { Ranks: NumberRange, Permissions: { string } } },
+}
 	return groupRankPermissionGroups
 end
 
@@ -352,7 +364,9 @@ function PermissionsHandler:_setPlayerPermissionGroupsData(data: { [Player]: { s
 	playerPermissionGroups = data or {}
 end
 
-function PermissionsHandler:_setGroupRankPermissionGroupsData(data: { [GroupId]: { { Ranks: NumberRange, Permissions: { string } } } }?): ()
+function PermissionsHandler:_setGroupRankPermissionGroupsData(data: {
+	[GroupId]: { { Ranks: NumberRange, Permissions: { string } } },
+}?): ()
 	groupRankPermissionGroups = data or {}
 end
 
