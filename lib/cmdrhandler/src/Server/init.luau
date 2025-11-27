@@ -344,7 +344,6 @@ function CmdrServer:Init()
 
 	CmdrServer.PermissionsHandler.GroupRolePermissionGroupsChanged:Connect(function(newValue)
 		Client.GroupRolePermissionGroups:Set(newValue)
-		warn("Changed to", newValue)
 	end)
 
 	CmdrServer.PermissionsHandler.PlayerPermissionGroupsChanged:Connect(function(player, newValue)
