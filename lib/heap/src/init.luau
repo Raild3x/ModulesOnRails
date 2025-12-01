@@ -166,18 +166,22 @@ local function newHeap<T>(heapType: "min" | "max"): Heap<T>
 end
 
 --[=[
-    @tag static
-    Creates a min-heap where the smallest element is always on top.
-    @return Heap<T> -- A min-heap instance.
+	@tag HeapClass
+	@tag static
+	@within Heap
+	Creates a min-heap where the smallest element is always on top.
+	@return Heap<T> -- A min-heap instance.
 ]=]
 function HeapClass.min<T>(): Heap<T>
 	return newHeap("min")
 end
 
 --[=[
-    @tag static
-    Creates a max-heap where the largest element is always on top.
-    @return Heap<T> -- A max-heap instance.
+	@tag HeapClass
+	@tag static
+	@within Heap
+	Creates a max-heap where the largest element is always on top.
+	@return Heap<T> -- A max-heap instance.
 ]=]
 function HeapClass.max<T>(): Heap<T>
 	return newHeap("max")
