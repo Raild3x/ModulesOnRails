@@ -217,13 +217,6 @@ ServerNetWireClass.ClassName = "ServerNetWire"
 --------------------------------------------------------------------------------
 
 --// ServerNetWire Instance Methods Class //--
---[=[
-    @class ServerNetWire
-    @server
-    
-    Instance methods for ServerNetWire objects.
-    These methods are available on created ServerNetWire instances.
-]=]
 local ServerNetWire = {}
 
 local ServerNetWireMT = {}

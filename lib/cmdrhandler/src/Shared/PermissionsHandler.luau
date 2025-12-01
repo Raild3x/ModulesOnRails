@@ -2,7 +2,6 @@
 -- February 26, 2025
 --[=[
     @class PermissionsHandler
-    @shared
     
     Shared permissions handler that works on both client and server.
     The actual data storage and networking is handled by the respective
@@ -65,10 +64,11 @@ local function normalizeGroupId(groupId: number): string
 end
 
 --[=[
+	@private
 	Sets the Cmdr registry reference for command lookups
-	@param registry -- The Cmdr registry instance
+	@param registry any -- The Cmdr registry instance
 ]=]
-function PermissionsHandler:SetCmdrRegistry(registry: CmdrRegistry): ()
+function PermissionsHandler:SetCmdrRegistry(registry: any)
 	_cmdrRegistry = registry
 end
 
