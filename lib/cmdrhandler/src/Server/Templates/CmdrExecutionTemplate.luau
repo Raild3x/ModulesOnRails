@@ -1,6 +1,6 @@
 --[=[
-	Generic command definition template which we can use to
-	@class CmdrCommandDefinitionTemplate
+	Generic command execution template which we can use to
+	@class CmdrExecutionTemplate
 	@ignore
 ]=]
 
