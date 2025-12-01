@@ -26,6 +26,7 @@ type CmdrRegistry = {
 
 local Packages = script.Parent.Parent.Parent
 local Signal = require(Packages.Signal) :: any
+local IS_SERVER = RunService:IsServer()
 
 -- Default permission inheritance structure (shared constant)
 local DEFAULT_PERMISSION_INHERITANCE: { [string]: { string } } = {
@@ -104,6 +105,7 @@ end
 	@return {string} -- Array of permission group names
 ]=]
 function PermissionsHandler:GetPlayerPermissionGroups(plr: Player): { string }
+	assert(IS_SERVER, "PermissionsHandler:GetPlayerPermissionGroups can only be called on the server")
 	local permissions = playerPermissionGroups[plr] or {}
 	return Util.getPlayerPermissions(PermissionsHandler, plr, permissions)
 end
@@ -115,6 +117,7 @@ end
 	@param permissions -- The permission group(s) to set
 ]=]
 function PermissionsHandler:SetPlayerPermissionGroups(plr: Player, permissions: string | { string }): ()
+	assert(IS_SERVER, "PermissionsHandler:SetPlayerPermissionGroups can only be called on the server")
 	if typeof(permissions) == "string" then
 		permissions = { permissions }
 	end
@@ -128,6 +131,7 @@ end
 	@param permissionGroups -- The permission groups to grant
 ]=]
 function PermissionsHandler:GivePlayerPermissionGroups(plr: Player, permissionGroups: string | { string }): ()
+	assert(IS_SERVER, "PermissionsHandler:GivePlayerPermissionGroups can only be called on the server")
 	if typeof(permissionGroups) == "string" then
 		permissionGroups = { permissionGroups }
 	end
@@ -209,6 +213,9 @@ function PermissionsHandler:GiveRobloxGroupRankPermissionGroups(
 end
 
 --[=[
+	@ignore
+	@unreleased
+
 	Grants specified roles in a Roblox Group permission to use commands under a given PermissionGroup.
 	@param robloxGroupId -- The Roblox group id to grant permissions to
 	@param role -- The role name to grant permissions to
@@ -282,6 +289,7 @@ function PermissionsHandler:SetPermissionGroupInheritance(
 	permissionGroup: string,
 	inheritedGroups: string | { string }
 ): ()
+	assert(IS_SERVER, "PermissionsHandler:SetPermissionGroupInheritance can only be called on the server")
 	assert(typeof(permissionGroup) == "string", "Bad permissionGroup")
 	if typeof(inheritedGroups) == "string" then
 		inheritedGroups = { inheritedGroups }
