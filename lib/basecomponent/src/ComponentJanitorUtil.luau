@@ -139,8 +139,13 @@ end
     @param component any
 ]=]
 function ComponentJanitorUtilExtension.Stopped(component)
-    component[JANITOR]:Destroy()
-    component[JANITOR] = nil
+    if component[JANITOR] then
+        task.spawn(function()
+            -- Janitor runs synchronously, so to prevent any issues we spawn a new thread.
+            component[JANITOR]:Destroy()
+        end)
+        component[JANITOR] = nil
+    end
 end
 
 

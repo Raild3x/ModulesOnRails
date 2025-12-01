@@ -33,11 +33,13 @@ end
 
 --[=[
     @within CmdrHandler
+    @server
     @prop Server CmdrServer
 ]=]
 
 --[=[
     @within CmdrHandler
+    @client
     @prop Client CmdrClient
 ]=]
 
@@ -47,6 +49,10 @@ local CmdrHandler = {
 }
 
 local CmdrTypes = require(script.Shared.CmdrTypes)
-export type CommandModuleData<T> = CmdrTypes.CommandModuleData<T>
+export type CommandModuleData = CmdrTypes.CommandModuleData
+export type CommandDefinition = CmdrTypes.CommandDefinition
+export type CommandContext = CmdrTypes.CommandContext
+export type ArgumentContext = CmdrTypes.ArgumentContext
+export type TypeDefinition = CmdrTypes.TypeDefinition
 
 return CmdrHandler

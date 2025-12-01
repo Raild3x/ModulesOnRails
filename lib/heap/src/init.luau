@@ -84,54 +84,56 @@
     :::
 ]=]
 
-type Branch<T> = {Value: T, Left: Branch<T>?, Right: Branch<T>?}
+type Branch<T> = { Value: T, Left: Branch<T>?, Right: Branch<T>? }
 
 export type Heap<T> = {
-    ClassName: "Heap",
+	ClassName: "Heap",
 
-    --- Inserts a value into the heap.
-    Push: (self: Heap<T>, value: T, _cost: number?) -> (),
+	--- Inserts a value into the heap.
+	Push: (self: Heap<T>, value: T, _cost: number?) -> (),
 
-    --- Removes and returns the top value from the heap.
-    Pop: (self: Heap<T>) -> (T?, number?),
+	--- Removes and returns the top value from the heap.
+	Pop: (self: Heap<T>) -> (T?, number?),
 
-    --- Returns the top value from the heap without removing it.
-    Peek: (self: Heap<T>) -> (T?, number?),
+	--- Returns the top value from the heap without removing it.
+	Peek: (self: Heap<T>) -> (T?, number?),
 
-    --- Returns the number of elements in the heap.
-    Size: (self: Heap<T>) -> number,
+	--- Returns the number of elements in the heap.
+	Size: (self: Heap<T>) -> number,
 
-    --- Checks if the heap contains a specified value; also compares against cost if one is provided.
-    Has: (self: Heap<T>, valueToCheckFor: T, cost: number?) -> boolean,
+	--- Checks if the heap is empty. Equivalent to checking if `#heap == 0`.
+	IsEmpty: (self: Heap<T>) -> boolean,
 
-    --- Updates the cost of a value in the heap. If no value is found, false is returned.
-    UpdateCost: (
-        self: Heap<T>, 
-        valueToUpdate: T | (value: T) -> boolean,
-        newCost: number | (oldCost: number) -> number,
-        updateAll: boolean?
-    ) -> boolean,
+	--- Checks if the heap contains a specified value; also compares against cost if one is provided.
+	Has: (self: Heap<T>, valueToCheckFor: T, cost: number?) -> boolean,
 
-    --- Returns the cost given to a value. If no value is found, nil is returned.
-    GetCost: (self: Heap<T>, valueToCheckCostOf: T) -> number?,
+	--- Updates the cost of a value in the heap. If no value is found, false is returned.
+	UpdateCost: (
+		self: Heap<T>,
+		valueToUpdate: T | (value: T) -> boolean,
+		newCost: number | (oldCost: number) -> number,
+		updateAll: boolean?
+	) -> boolean,
 
-    --- Returns the number of occurrences of a value in the heap.
-    CountOccurrences: (self: Heap<T>, valueToCheckFor: T) -> number,
+	--- Returns the cost given to a value. If no value is found, nil is returned.
+	GetCost: (self: Heap<T>, valueToCheckCostOf: T) -> number?,
 
-    --- Removes the first occurrence of a given value from the heap.
-    RemoveFirstOccurrence: (self: Heap<T>, value: T) -> boolean,
+	--- Returns the number of occurrences of a value in the heap.
+	CountOccurrences: (self: Heap<T>, valueToCheckFor: T) -> number,
 
-    --- Removes all occurrences of a given value from the heap.
-    RemoveAllOccurrences: (self: Heap<T>, value: T) -> boolean,
+	--- Removes the first occurrence of a given value from the heap.
+	RemoveFirstOccurrence: (self: Heap<T>, value: T) -> boolean,
 
-    --- Converts the heap into a tree structure. Used for debug visualizations
-    ToTree: (self: Heap<T>) -> Branch<T>?,
+	--- Removes all occurrences of a given value from the heap.
+	RemoveAllOccurrences: (self: Heap<T>, value: T) -> boolean,
+
+	--- Converts the heap into a tree structure. Used for debug visualizations
+	ToTree: (self: Heap<T>) -> Branch<T>?,
 }
 
 --------------------------------------------------------------------------------
-    --// Class //--
+--// Class //--
 --------------------------------------------------------------------------------
-
 
 local Heap = {}
 Heap.__index = Heap
@@ -147,18 +149,20 @@ Heap.__index = Heap
 Heap.ClassName = "Heap"
 
 --------------------------------------------------------------------------------
-    --// Constructors //--
+--// Constructors //--
 --------------------------------------------------------------------------------
 
+local HeapClass = {}
+
 local function newHeap<T>(heapType: "min" | "max"): Heap<T>
-    return setmetatable({
-        _Costs = {} :: {number},
-        _Values = {} :: {T},
-        _HeapIndex = {} :: {number},
-        _Size = 0,
-        _isMinHeap = if heapType == "min" then true else false,
-        _OpenIndices = {},
-    }, Heap) :: any
+	return setmetatable({
+		_Costs = {} :: { number },
+		_Values = {} :: { T },
+		_HeapIndex = {} :: { number },
+		_Size = 0,
+		_isMinHeap = if heapType == "min" then true else false,
+		_OpenIndices = {},
+	}, Heap) :: any
 end
 
 --[=[
@@ -166,8 +170,8 @@ end
     Creates a min-heap where the smallest element is always on top.
     @return Heap<T> -- A min-heap instance.
 ]=]
-function Heap.min<T>(): Heap<T>
-    return newHeap("min")
+function HeapClass.min<T>(): Heap<T>
+	return newHeap("min")
 end
 
 --[=[
@@ -175,12 +179,12 @@ end
     Creates a max-heap where the largest element is always on top.
     @return Heap<T> -- A max-heap instance.
 ]=]
-function Heap.max<T>(): Heap<T>
-    return newHeap("max")
+function HeapClass.max<T>(): Heap<T>
+	return newHeap("max")
 end
 
 --------------------------------------------------------------------------------
-    --// Methods //--
+--// Methods //--
 --------------------------------------------------------------------------------
 
 --[=[
@@ -195,9 +199,11 @@ end
     *Time Complexity:* Runs in `O(1)` time.
 ]=]
 function Heap:Peek<T>(): (T?, number?)
-    if self._Size == 0 then return nil, nil end
-    local refIndex = self._HeapIndex[1]
-    return self._Values[refIndex], self._Costs[refIndex]
+	if self._Size == 0 then
+		return nil, nil
+	end
+	local refIndex = self._HeapIndex[1]
+	return self._Values[refIndex], self._Costs[refIndex]
 end
 
 --[=[
@@ -226,27 +232,27 @@ end
     ```
     :::
 ]=]
-function Heap:Push<T>(value: T, cost: number?)
-    -- If not cost is given then just use the value
-    local Cost: number = cost or value :: any
+function Heap:Push<T>(value: T, _cost: number?)
+	-- If not cost is given then just use the value
+	local Cost: number = _cost or value :: any
 
-    self._Size += 1
-    local index = self._Size
+	self._Size += 1
+	local index = self._Size
 
-    -- Reuse an open index if available, attempts to reduce fragmentation
-    if #self._OpenIndices > 0 then
-        index = table.remove(self._OpenIndices) -- Pop from open indices stack
-    end
+	-- Reuse an open index if available, attempts to reduce fragmentation
+	if #self._OpenIndices > 0 then
+		index = table.remove(self._OpenIndices) -- Pop from open indices stack
+	end
 
-    -- Insert new element
-    self._Costs[index] = Cost
-    self._Values[index] = value
-    self._HeapIndex[self._Size] = index
+	-- Insert new element
+	self._Costs[index] = Cost
+	self._Values[index] = value
+	self._HeapIndex[self._Size] = index
 
-    -- Restore heap property
-    self:_heapifyUp(self._Size)
+	-- Restore heap property
+	self:_heapifyUp(self._Size)
 
-    -- Should we return the heapId? Probably not since it is not a guaranteed unique identifier
+	-- Should we return the heapId? Probably not since it is not a guaranteed unique identifier
 end
 
 --[=[
@@ -255,31 +261,33 @@ end
     *Time Complexity:* Runs in worst case `O(log n)` time.
 ]=]
 function Heap:Pop<T>(): (T?, number?)
-    if self._Size == 0 then return nil, nil end
+	if self._Size == 0 then
+		return nil, nil
+	end
 
-    -- Collect root node info
-    local rootRefIndex = self._HeapIndex[1]
-    local rootValue = self._Values[rootRefIndex]
-    local rootCost = self._Costs[rootRefIndex]
+	-- Collect root node info
+	local rootRefIndex = self._HeapIndex[1]
+	local rootValue = self._Values[rootRefIndex]
+	local rootCost = self._Costs[rootRefIndex]
 
-    -- TODO: try and reuse rootRefIndex here to prevent fragmentation immediately
+	-- TODO: try and reuse rootRefIndex here to prevent fragmentation immediately
 
-    -- Remove value and cost linked to current root (We could probably remove this since it's refIndex is marked for reuse)
-    self._Values[rootRefIndex] = nil
-    self._Costs[rootRefIndex] = nil
+	-- Remove value and cost linked to current root (We could probably remove this since it's refIndex is marked for reuse)
+	self._Values[rootRefIndex] = nil
+	self._Costs[rootRefIndex] = nil
 
-    -- Move last element to root and remove last entry
-    self._HeapIndex[1] = self._HeapIndex[self._Size]
-    self._HeapIndex[self._Size] = nil
-    self._Size -= 1
+	-- Move last element to root and remove last entry
+	self._HeapIndex[1] = self._HeapIndex[self._Size]
+	self._HeapIndex[self._Size] = nil
+	self._Size -= 1
 
-    -- Store freed index for reuse
-    table.insert(self._OpenIndices, rootRefIndex)
+	-- Store freed index for reuse
+	table.insert(self._OpenIndices, rootRefIndex)
 
-    -- Heapify down
-    self:_heapifyDown(1)
+	-- Heapify down
+	self:_heapifyDown(1)
 
-    return rootValue, rootCost
+	return rootValue, rootCost
 end
 
 --[=[
@@ -289,7 +297,14 @@ end
     *Time Complexity:* Runs in `O(1)` time.
 ]=]
 function Heap:Size(): number
-    return self._Size
+	return self._Size
+end
+
+--[=[
+    Checks if the heap is empty. Equivalent to checking if `#heap == 0`.
+]=]
+function Heap:IsEmpty(): boolean
+	return self._Size == 0
 end
 
 --[=[
@@ -300,13 +315,13 @@ end
     *Time Complexity:* Runs in worst case `O(n)` time.
 ]=]
 function Heap:Has<T>(valueToCheckFor: T, cost: number?): boolean
-    local Costs = self._Costs
-    for refIdx, value in pairs(self._Values) do
-        if value == valueToCheckFor and (not cost or Costs[refIdx] == cost) then
-            return true
-        end
-    end
-    return false
+	local Costs = self._Costs
+	for refIdx, value in pairs(self._Values) do
+		if value == valueToCheckFor and (not cost or Costs[refIdx] == cost) then
+			return true
+		end
+	end
+	return false
 end
 
 --[=[
@@ -319,12 +334,12 @@ end
 
     @return {{Value: T, Cost: number}}
 ]=]
-function Heap:ToArray<T>(): {{Value: T, Cost: number}}
-    local array = table.create(self._Size)
-    for refIdx, value in pairs(self._Values) do
-        table.insert(array, {Value = value, Cost = self._Costs[refIdx]})
-    end
-    return array
+function Heap:ToArray<T>(): { { Value: T, Cost: number } }
+	local array = table.create(self._Size)
+	for refIdx, value in pairs(self._Values) do
+		table.insert(array, { Value = value, Cost = self._Costs[refIdx] })
+	end
+	return array
 end
 
 --[=[
@@ -336,7 +351,7 @@ end
     Using `updateAll` can be expensive as it may need to perform a large resorting of the heap to ensure proper ordering.
     :::
     @param valueToUpdate -- The value to update the cost of.
-    @param newCost -- The new cost to assign to the value. Can also be a function that takes the old cost and returns a new cost.
+    @param newCost -- The new cost to assign to the value. Can also be a function that takes the value and old cost and returns a new cost.
     @param updateAll -- If true, all occurrences of the value will be updated. Defaults to false.
     @return boolean -- True if the cost was updated, false otherwise.
 
@@ -364,24 +379,26 @@ end
     ```
 ]=]
 function Heap:UpdateCost<T>(
-    valueToUpdate: T | (value: T) -> (boolean),
-    newCost: number | (value: T, oldCost: number) -> number,
-    updateAll: boolean?
+	valueToUpdate: T | (value: T) -> boolean,
+	newCost: number | (value: T, oldCost: number) -> number,
+	updateAll: boolean?
 ): boolean
     local Values, Costs, HeapIndex, Size = self._Values, self._Costs, self._HeapIndex, self._Size
     local updated = 0
-    local updatedIdx = nil -- used to track the index of the updated value (used only when updating a single value)
+    local updatedHeapIdx = nil -- used to track the heap index of the updated value (used only when updating a single value)
+
+    local newCostIsFn = type(newCost) == "function"
 
     -- First pass: Update costs in place
     if type(valueToUpdate) == "function" then -- I split this up intentionally to reduce the number of comparisons made
         for realIdx, refIdx in pairs(HeapIndex) do
             if valueToUpdate(Values[refIdx]) then
                 local oldCost = Costs[refIdx]
-                local computedNewCost = if type(newCost) == "function" then newCost(Values[refIdx], oldCost) else newCost
+                local computedNewCost: number = if newCostIsFn then (newCost :: any)(Values[refIdx], oldCost) else newCost
 
                 if oldCost ~= computedNewCost then
                     Costs[refIdx] = computedNewCost
-                    updatedIdx = refIdx
+                    updatedHeapIdx = realIdx -- Store the heap position, not the ref index
                     updated += 1
                 end
 
@@ -392,30 +409,36 @@ function Heap:UpdateCost<T>(
         for realIdx, refIdx in pairs(HeapIndex) do
             if Values[refIdx] == valueToUpdate then
                 local oldCost = Costs[refIdx]
-                local computedNewCost = if type(newCost) == "function" then newCost(oldCost, Values[refIdx]) else newCost
+                local computedNewCost: number = if newCostIsFn then (newCost :: any)(Values[refIdx], oldCost) else newCost
 
                 if oldCost ~= computedNewCost then
                     Costs[refIdx] = computedNewCost
-                    updatedIdx = refIdx
+                    updatedHeapIdx = realIdx -- Store the heap position, not the ref index
                     updated += 1
                 end
 
-                if not updateAll then break end
-            end
-        end
-    end
+				if not updateAll then
+					break
+				end
+			end
+		end
+	end
 
     if updated == 1 then
-         -- Only heapify down once if a single value was updated
-        self:_heapifyDown(updatedIdx)
+         -- Only heapify once if a single value was updated
+         -- Try heapifying up first (in case cost decreased for min-heap or increased for max-heap)
+         -- then heapify down (in case cost increased for min-heap or decreased for max-heap)
+        self:_heapifyUp(updatedHeapIdx)
+        self:_heapifyDown(updatedHeapIdx)
     elseif updated > 1 then
         -- If we made multiple updates, we need to perform a more robust heapify
+        -- Rebuild the heap from the bottom up
         for i = math.floor(Size / 2), 1, -1 do
             self:_heapifyDown(i)
         end
     end
 
-    return if updated > 0 then true else false 
+	return if updated > 0 then true else false
 end
 Heap.UpdateCostOfValue = Heap.UpdateCost -- backwards compat aliases
 
@@ -432,15 +455,15 @@ Heap.UpdateCostOfValue = Heap.UpdateCost -- backwards compat aliases
     :::
 ]=]
 function Heap:GetCost<T>(valueToCheckCostOf: T): number?
-    for refIdx, value in pairs(self._Values) do
-        if value == valueToCheckCostOf then
-            return self._Costs[refIdx]
-        end
-    end
-    return nil
+	for refIdx, value in pairs(self._Values) do
+		if value == valueToCheckCostOf then
+			return self._Costs[refIdx]
+		end
+	end
+	return nil
 end
 -- Alias for backwards compat of old version, this was changed to keep wording consistent between method names
-Heap.GetCostFromValue = Heap.GetCost 
+Heap.GetCostFromValue = Heap.GetCost
 Heap.GetCostOfValue = Heap.GetCost
 
 --[=[
@@ -453,42 +476,96 @@ Heap.GetCostOfValue = Heap.GetCost
     *Time Complexity:* Runs in `O(n)` time.
 ]=]
 function Heap:CountOccurrences<T>(valueToCheckFor: T): number
-    local count = 0
-    for _, value in pairs(self._Values) do
-        if value == valueToCheckFor then
-            count += 1
-        end
-    end
-    return count
+	local count = 0
+	for _, value in pairs(self._Values) do
+		if value == valueToCheckFor then
+			count += 1
+		end
+	end
+	return count
 end
 
 --[=[
     Removes the first occurrence of a given value from the heap.
     Heaps are not optimized for search removals, so this method should
     be used sparingly.
+    
+    :::note Performance
+    This operation requires O(n) search time to locate the element, followed by O(log n) heapify.
+    A reverse mapping (refIdx → heapPos) could reduce this to O(log n), but would add memory overhead
+    and complexity to maintain across all heap operations. For typical use cases where Push/Pop
+    dominate, the current approach favors simplicity and lower memory usage.
+    :::
 ]=]
 function Heap:RemoveFirstOccurrence<T>(valueToRemove: T): boolean
-    for refIdx, value in pairs(self._Values) do
-        if value == valueToRemove then
-            -- Remove the value and cost linked to the current root (We could probably remove this since it's refIndex is marked for reuse)
-            self._Values[refIdx] = nil
-            self._Costs[refIdx] = nil
+	for refIdx, value in pairs(self._Values) do
+		if value == valueToRemove then
+			-- Find the heap position where this refIdx is located (O(n) search)
+			-- Note: Could be optimized to O(1) with a reverse mapping at cost of extra memory
+			local heapPos = nil
+			for i = 1, self._Size do
+				if self._HeapIndex[i] == refIdx then
+					heapPos = i
+					break
+				end
+			end
+			
+			if not heapPos then
+				-- This shouldn't happen, but handle it gracefully
+				return false
+			end
 
-            -- Move last element to root and remove last entry
-            self._HeapIndex[1] = self._HeapIndex[self._Size]
-            self._HeapIndex[self._Size] = nil
-            self._Size -= 1
+			-- Remove the value and cost
+			self._Values[refIdx] = nil
+			self._Costs[refIdx] = nil
 
-            -- Store freed index for reuse
-            table.insert(self._OpenIndices, refIdx)
+			-- Store freed index for reuse
+			table.insert(self._OpenIndices, refIdx)
 
-            -- Heapify down
-            self:_heapifyDown(1)
+			-- If this was the last element, just remove it
+			if heapPos == self._Size then
+				self._HeapIndex[self._Size] = nil
+				self._Size -= 1
+				return true
+			end
 
-            return true
-        end
-    end
-    return false
+			-- Move last element to the removed position
+			local lastRefIdx = self._HeapIndex[self._Size]
+			self._HeapIndex[heapPos] = lastRefIdx
+			self._HeapIndex[self._Size] = nil
+			self._Size -= 1
+
+			-- Heapify from the position (determine direction based on heap property)
+			if self._Size > 0 then
+				-- Optimization: Only heapify in ONE direction by checking parent
+				-- Logic: If element violates heap property with parent, it MUST go up
+				--        If element satisfies heap property with parent, it CAN'T go up,
+				--        so we check if it needs to go down (heapifyDown checks children)
+				-- This avoids calling both heapifyUp AND heapifyDown unnecessarily
+				if heapPos > 1 then
+					local parent = math.floor(heapPos / 2)
+					local movedCost = self._Costs[lastRefIdx]
+					local parentCost = self._Costs[self._HeapIndex[parent]]
+					
+					-- Check if moved element violates heap property with parent
+					local needsHeapifyUp = (self._isMinHeap and movedCost < parentCost)
+						or (not self._isMinHeap and movedCost > parentCost)
+					
+					if needsHeapifyUp then
+						self:_heapifyUp(heapPos)
+					else
+						self:_heapifyDown(heapPos)
+					end
+				else
+					-- At root, can only heapify down
+					self:_heapifyDown(heapPos)
+				end
+			end
+
+			return true
+		end
+	end
+	return false
 end
 
 --[=[
@@ -497,27 +574,73 @@ end
     removals, so this method should be used sparingly.
 ]=]
 function Heap:RemoveAllOccurrences<T>(valueToRemove: T): number
-    local count = 0
-    for refIdx, value in pairs(self._Values) do
-        if value == valueToRemove then
-            -- Remove the value and cost linked to the current root (We could probably remove this since it's refIndex is marked for reuse)
-            self._Values[refIdx] = nil
-            self._Costs[refIdx] = nil
+	local count = 0
+	-- Collect all refIdx values to remove (can't modify while iterating)
+	local toRemove = {}
+	for refIdx, value in pairs(self._Values) do
+		if value == valueToRemove then
+			table.insert(toRemove, refIdx)
+		end
+	end
+	
+	-- Remove each occurrence
+	for _, refIdx in ipairs(toRemove) do
+		-- Find the heap position where this refIdx is located
+		local heapPos = nil
+		for i = 1, self._Size do
+			if self._HeapIndex[i] == refIdx then
+				heapPos = i
+				break
+			end
+		end
+		
+		if heapPos then
+			-- Remove the value and cost
+			self._Values[refIdx] = nil
+			self._Costs[refIdx] = nil
 
-            -- Move last element to root and remove last entry
-            self._HeapIndex[1] = self._HeapIndex[self._Size]
-            self._HeapIndex[self._Size] = nil
-            self._Size -= 1
+			-- Store freed index for reuse
+			table.insert(self._OpenIndices, refIdx)
 
-            -- Store freed index for reuse
-            table.insert(self._OpenIndices, refIdx)
+			-- If this was the last element, just remove it
+			if heapPos == self._Size then
+				self._HeapIndex[self._Size] = nil
+				self._Size -= 1
+			else
+				-- Move last element to the removed position
+				local lastRefIdx = self._HeapIndex[self._Size]
+				self._HeapIndex[heapPos] = lastRefIdx
+				self._HeapIndex[self._Size] = nil
+				self._Size -= 1
 
-            -- Heapify down
-            self:_heapifyDown(1)
-            count += 1
-        end
-    end
-    return count
+				-- Heapify from the position (determine direction based on heap property)
+				if self._Size > 0 then
+					-- Optimization: Only heapify in ONE direction (see RemoveFirstOccurrence for details)
+					if heapPos > 1 then
+						local parent = math.floor(heapPos / 2)
+						local movedCost = self._Costs[lastRefIdx]
+						local parentCost = self._Costs[self._HeapIndex[parent]]
+						
+						-- Check if moved element violates heap property with parent
+						local needsHeapifyUp = (self._isMinHeap and movedCost < parentCost)
+							or (not self._isMinHeap and movedCost > parentCost)
+						
+						if needsHeapifyUp then
+							self:_heapifyUp(heapPos)
+						else
+							self:_heapifyDown(heapPos)
+						end
+					else
+						-- At root, can only heapify down
+						self:_heapifyDown(heapPos)
+					end
+				end
+			end
+			
+			count += 1
+		end
+	end
+	return count
 end
 
 --[=[
@@ -529,19 +652,21 @@ end
     @return Branch<T>? -- A tree representation of the heap.
 ]=]
 function Heap:ToTree<T>(): Branch<T>?
-    local function buildTree(index, depth)
-        if index > #self._Data then return nil end
-        return {
-            Value = self._Data[index],
-            Left = buildTree(index * 2, depth + 1),
-            Right = buildTree(index * 2 + 1, depth + 1),
-        }
-    end
-    return buildTree(1, 0)
+	local function buildTree(index, depth)
+		if index > #self._Data then
+			return nil
+		end
+		return {
+			Value = self._Data[index],
+			Left = buildTree(index * 2, depth + 1),
+			Right = buildTree(index * 2 + 1, depth + 1),
+		}
+	end
+	return buildTree(1, 0)
 end
 
 --------------------------------------------------------------------------------
-    --// Heapify Methods //--
+--// Heapify Methods //--
 --------------------------------------------------------------------------------
 
 --[=[
@@ -553,32 +678,32 @@ end
     it is a performance boost.
 ]=]
 function Heap:_heapifyUp(index: number)
-    local Costs, HeapIndex = self._Costs, self._HeapIndex
-    if self._isMinHeap then
-        while index > 1 do
-            local parent = math.floor(index / 2)
-            local currentIndex = HeapIndex[index]
-            local parentIndex = HeapIndex[parent]
-            if Costs[currentIndex] < Costs[parentIndex] then
-                HeapIndex[index], HeapIndex[parent] = parentIndex, currentIndex
-                index = parent
-            else
-                break
-            end
-        end
-    else
-        while index > 1 do
-            local parent = math.floor(index / 2)
-            local currentIndex = HeapIndex[index]
-            local parentIndex = HeapIndex[parent]
-            if Costs[currentIndex] > Costs[parentIndex] then
-                HeapIndex[index], HeapIndex[parent] = parentIndex, currentIndex
-                index = parent
-            else
-                break
-            end
-        end
-    end
+	local Costs, HeapIndex = self._Costs, self._HeapIndex
+	if self._isMinHeap then
+		while index > 1 do
+			local parent = math.floor(index / 2)
+			local currentIndex = HeapIndex[index]
+			local parentIndex = HeapIndex[parent]
+			if Costs[currentIndex] < Costs[parentIndex] then
+				HeapIndex[index], HeapIndex[parent] = parentIndex, currentIndex
+				index = parent
+			else
+				break
+			end
+		end
+	else
+		while index > 1 do
+			local parent = math.floor(index / 2)
+			local currentIndex = HeapIndex[index]
+			local parentIndex = HeapIndex[parent]
+			if Costs[currentIndex] > Costs[parentIndex] then
+				HeapIndex[index], HeapIndex[parent] = parentIndex, currentIndex
+				index = parent
+			else
+				break
+			end
+		end
+	end
 end
 
 --[=[
@@ -590,48 +715,52 @@ end
     it is a performance boost.
 ]=]
 function Heap:_heapifyDown(index: number)
-    local Size, Costs, HeapIndex = self._Size, self._Costs, self._HeapIndex
-    if self._isMinHeap then
-        while true do
-            local left, right, smallest = index * 2, index * 2 + 1, index
+	local Size, Costs, HeapIndex = self._Size, self._Costs, self._HeapIndex
+	if self._isMinHeap then
+		while true do
+			local left, right, smallest = index * 2, index * 2 + 1, index
 
-            if left <= Size and Costs[HeapIndex[left]] < Costs[HeapIndex[smallest]] then
-                smallest = left
-            end
-            if right <= Size and Costs[HeapIndex[right]] < Costs[HeapIndex[smallest]] then
-                smallest = right
-            end
+			if left <= Size and Costs[HeapIndex[left]] < Costs[HeapIndex[smallest]] then
+				smallest = left
+			end
+			if right <= Size and Costs[HeapIndex[right]] < Costs[HeapIndex[smallest]] then
+				smallest = right
+			end
 
-            if smallest == index then break end
+			if smallest == index then
+				break
+			end
 
-            -- Swap the _HeapIndex pointers
-            HeapIndex[index], HeapIndex[smallest] = HeapIndex[smallest], HeapIndex[index]
+			-- Swap the _HeapIndex pointers
+			HeapIndex[index], HeapIndex[smallest] = HeapIndex[smallest], HeapIndex[index]
 
-            index = smallest
-        end
-    else
-        while true do
-            local left, right, largest = index * 2, index * 2 + 1, index
+			index = smallest
+		end
+	else
+		while true do
+			local left, right, largest = index * 2, index * 2 + 1, index
 
-            if left <= Size and Costs[HeapIndex[left]] > Costs[HeapIndex[largest]] then
-                largest = left
-            end
-            if right <= Size and Costs[HeapIndex[right]] > Costs[HeapIndex[largest]] then
-                largest = right
-            end
+			if left <= Size and Costs[HeapIndex[left]] > Costs[HeapIndex[largest]] then
+				largest = left
+			end
+			if right <= Size and Costs[HeapIndex[right]] > Costs[HeapIndex[largest]] then
+				largest = right
+			end
 
-            if largest == index then break end
+			if largest == index then
+				break
+			end
 
-            -- Swap the _HeapIndex pointers
-            HeapIndex[index], HeapIndex[largest] = HeapIndex[largest], HeapIndex[index]
+			-- Swap the _HeapIndex pointers
+			HeapIndex[index], HeapIndex[largest] = HeapIndex[largest], HeapIndex[index]
 
-            index = largest
-        end
-    end
+			index = largest
+		end
+	end
 end
 
 --------------------------------------------------------------------------------
-    --// MetaMethods //--
+--// MetaMethods //--
 --------------------------------------------------------------------------------
 
 --[=[
@@ -648,7 +777,7 @@ end
     ```
 ]=]
 function Heap:__len(): number
-    return self._Size
+	return self._Size
 end
 
 --[=[
@@ -659,27 +788,29 @@ end
     Attempts to return a string representation of the heap in a tree like display.
 ]=]
 function Heap:__tostring(): string
-    local function buildTree(index, depth, isLeft)
-        if index > self._Size then return "" end
+	local function buildTree(index, depth, isLeft)
+		if index > self._Size then
+			return ""
+		end
 
-        local left = buildTree(index * 2, depth + 1, true)
-        local right = buildTree(index * 2 + 1, depth + 1, false)
+		local left = buildTree(index * 2, depth + 1, true)
+		local right = buildTree(index * 2 + 1, depth + 1, false)
 
-        local prefix = string.rep("    ", depth)
-        local branch = isLeft and "\\" or "/"
+		local prefix = string.rep("    ", depth)
+		local branch = isLeft and "\\" or "/"
 
-        if depth == 0 then
-            return tostring(self._Values[self._HeapIndex[index]]) .. "\n" .. right .. left
-        end
+		if depth == 0 then
+			return tostring(self._Values[self._HeapIndex[index]]) .. "\n" .. right .. left
+		end
 
-        return right .. prefix .. branch .. " " .. tostring(self._Values[self._HeapIndex[index]]) .. "\n" .. left
-    end
+		return right .. prefix .. branch .. " " .. tostring(self._Values[self._HeapIndex[index]]) .. "\n" .. left
+	end
 
-    local success, heapString = pcall(buildTree, 1, 0)
-    if not success then
-        return "[Heap.__tostring() - Error building tree]"
-    end
-    return "Heap:\n" .. heapString
+	local success, heapString = pcall(buildTree, 1, 0)
+	if not success then
+		return "[Heap.__tostring() - Error building tree]"
+	end
+	return "Heap:\n" .. heapString
 end
 
 --[=[
@@ -721,15 +852,16 @@ end
     :::
 ]=]
 function Heap:__iter<T>()
-    local index = 0
-    return function()
-        index += 1
-        local refIdx = self._HeapIndex[index]
-        if refIdx ~= nil then
-            return self._Values[refIdx], self._Costs[refIdx]
-        end
-        return nil, nil
-    end
+	local index = 0
+	return function()
+		index += 1
+		local refIdx = self._HeapIndex[index]
+		if refIdx ~= nil then
+			return self._Values[refIdx], self._Costs[refIdx]
+		end
+		return nil, nil
+	end
 end
 
-return table.freeze(Heap)
+table.freeze(Heap)
+return table.freeze(HeapClass)

@@ -3,6 +3,10 @@
 --[=[
 	@class CmdrClient
 	@client
+
+	This is a wrapper client for Evaera's Cmdr module (https://eryn.io/Cmdr/).
+	It provides an easier way to interact with Cmdr and autoboots with Roam's
+	systems.
 ]=]
 
 --// Services //--
@@ -11,19 +15,20 @@ local Players = game:GetService("Players")
 
 --// Imports //--
 local Packages = script.Parent.Parent
+
 local Signal = require(Packages.Signal)
 local Promise = require(Packages.Promise)
 local Janitor = require(Packages.Janitor)
 local NetWire = require(Packages.NetWire)
-local Util = require(script.Parent.Shared.CmdrUtil)
+
 local CmdrTypes = require(script.Parent.Shared.CmdrTypes)
 
 --// Types //--
 type Cmdr = any
 type Promise = typeof(Promise.new())
-type CommandDefinition<T> = CmdrTypes.CommandDefinition<T>
-type CommandContext<T> = CmdrTypes.CommandContext<T>
-type TypeDefinition<T> = CmdrTypes.TypeDefinition<T>
+type CommandDefinition = CmdrTypes.CommandDefinition
+type CommandContext = CmdrTypes.CommandContext
+type TypeDefinition = CmdrTypes.TypeDefinition
 
 --// Constants //--
 local LocalPlayer = Players.LocalPlayer
@@ -31,13 +36,23 @@ local LocalPlayer = Players.LocalPlayer
 --// Volatiles //--
 local cmdrReadied = Signal.new()
 local cmdrProm = Promise.fromEvent(cmdrReadied)
+local cmdrInstance: Cmdr? = nil
+
+local PermissionsHandler = require(script.Parent.Shared.PermissionsHandler)
+local bindingsJanitor = Janitor.new()
 
 --------------------------------------------------------------------------------
---// Controller //--
+--// Client //--
 --------------------------------------------------------------------------------
 
 local CmdrClient = {}
-CmdrClient.Name = "CmdrClient"
+CmdrClient.ClassName = "CmdrClient"
+
+--[=[
+	@within CmdrClient
+	@prop PermissionsHandler PermissionsHandler
+]=]
+CmdrClient.PermissionsHandler = PermissionsHandler
 
 --[=[
 	Returns a promise that resolves with the Cmdr instance.
@@ -53,66 +68,86 @@ end
 	@param commandName -- The name of the command to check
 ]=]
 function CmdrClient:HasPermission(commandName: string): boolean
-	if not self._Cmdr then
-		return false
-	end
-
-	local commandData = self._Cmdr.Registry:GetCommand(commandName) :: CommandDefinition<any>
-	if not commandData then
-		return false
-	end
-
-	local permissions = self:GetPermissions()
-	if table.find(permissions, commandData.Group) or table.find(permissions, "Creator") then
-		return true
-	end
-	
-	return false
+	return CmdrClient.PermissionsHandler:PlayerHasPermissionForCommand(LocalPlayer, commandName)
 end
 
 --[=[
 	Executes a command
 	@return Promise<string>
 	```lua
-	CmdrService:ExecuteCommand("blink")
+	CmdrClient:ExecuteCommand("blink")
 	```
 ]=]
 function CmdrClient:ExecuteCommand(...: string): Promise
-	local args = {...}
-	return self:PromiseCmdr():andThen(function(cmdr)
+	local args = { ... }
+	return CmdrClient:PromiseCmdr():andThen(function(cmdr)
 		return cmdr.Dispatcher:Run(table.unpack(args))
 	end)
 end
 
 --[=[
-	Gets the permissions for the local player
-	Does not return permissions granted from groups
+	Checks if a command exists in the registry
+	@param commandName -- The name of the command to check
+	@return boolean -- Whether the command exists
 ]=]
-function CmdrClient:GetPermissions(): {any}
-	local permissions = self.Server.Permissions:Get() or {}
-	return Util.getPlayerPermissions(self, LocalPlayer, permissions)
+function CmdrClient:CommandExists(commandName: string): boolean
+	if not cmdrInstance then
+		return false
+	end
+
+	local command = cmdrInstance.Registry:GetCommand(commandName)
+	return command ~= nil
 end
 
 --[=[
-	Gets the permissions granted to a particular rank in a group
-	@param groupId -- The Roblox group id to get permissions for
-	@param rank -- The rank to get permissions for
-	@return {string} -- The permissions granted to the rank
-	```lua
-	local permissions = CmdrService:GetGroupRankPermissions(15905255, 230)
-	```
+	Gets information about a specific command
+	@param commandName -- The name of the command to get info for
+	@return CommandDefinition? -- The command data, or nil if not found
 ]=]
-function CmdrClient:GetGroupRankPermissions(groupId: number, rank: number)
-	return Util.GetGroupRankPermissions(self, groupId, rank)
+function CmdrClient:GetCommandInfo(commandName: string): CommandDefinition?
+	if not cmdrInstance then
+		return nil
+	end
+
+	return cmdrInstance.Registry:GetCommand(commandName)
 end
 
 --[=[
-	Fetches the inherited permission group for a permission group
+	Gets all commands available to the local player
+	@return {string} -- Array of command names the player can use
 ]=]
-function CmdrClient:GetPermissionInheritance(permissionGroup: string): {string}
-	local inheritanceDict = self.Server.PermissionInheritance:Get() or {}
-	return inheritanceDict[permissionGroup] or {}
+function CmdrClient:GetAvailableCommands(): { string }
+	if not cmdrInstance then
+		return {}
+	end
+
+	local availableCommands = {}
+	local permissions = CmdrClient.PermissionsHandler:GetPlayerPermissionGroups(LocalPlayer)
+
+	for _, command in cmdrInstance.Registry:GetCommands() do
+		if table.find(permissions, command.Group) or table.find(permissions, "Creator") then
+			table.insert(availableCommands, command.Name)
+		end
+	end
+
+	return availableCommands
 end
+
+--[=[
+	Gets all registered commands
+	@return {CommandDefinition} -- Array of all registered commands
+]=]
+function CmdrClient:GetAllCommands(): { CommandDefinition }
+	if not cmdrInstance then
+		return {}
+	end
+
+	return cmdrInstance.Registry:GetCommands()
+end
+
+--------------------------------------------------------------------------------
+--// Client Core //--
+--------------------------------------------------------------------------------
 
 --[=[
 	@private
@@ -120,58 +155,74 @@ end
 ]=]
 function CmdrClient:_setBindings(cmdr: Cmdr)
 	cmdr:SetActivationUnlocksMouse(true)
-	cmdr:SetActivationKeys({ Enum.KeyCode.F2 })
+	cmdr:SetActivationKeys { Enum.KeyCode.F2 }
 
 	-- enable activation on mobile
-	self._Janitor:Add(Players.LocalPlayer.Chatted:Connect(function(chat)
-		-- check if the chat string starts with "/cmdr"
-		local keyword = "/cmdr"
-		if chat:sub(1, #keyword):lower() == keyword then
-			cmdr:Show()
-		end
-	end), nil, "ChatBind")
+	bindingsJanitor:Add(
+		Players.LocalPlayer.Chatted:Connect(function(chat)
+			-- check if the chat string starts with "/cmdr"
+			local keyword = "/cmdr"
+			if chat:sub(1, #keyword):lower() == keyword then
+				cmdr:Show()
+			end
+		end),
+		nil,
+		"ChatBind"
+	)
 
 	-- Race condition
 	-- task.defer(function()
 	-- 	-- Default blink for debugging purposes
 	-- 	cmdr.Dispatcher:Run("bind", Enum.KeyCode.G.Name, "blink")
-	-- end)
+	--	end)
 end
 
 --[=[
-	@private
+	Initializes the Cmdr Client
 ]=]
-function CmdrClient:_getRawGroupPerms(groupId: number): {string}
-	local groupSets = (self.Server.GroupPerms:Get() or {})
-	return groupSets[groupId] or groupSets[tostring(groupId)] or {}
-end
-
---------------------------------------------------------------------------------
-	--// Service Core //--
---------------------------------------------------------------------------------
-
 function CmdrClient:Init()
-	self.Server = NetWire.Client("CmdrServer")
-	self._Janitor = Janitor.new()
+	local Server = NetWire.Client("CmdrServer")
 
-	self.Server.ExecuteCommand:Connect(function(...: string)
-		self:ExecuteCommand(...)
+	-- Set up PermissionsHandler data syncing from server
+	Server.PermissionInheritance:Observe(function(newValue)
+		CmdrClient.PermissionsHandler:_setPermissionInheritanceData(newValue)
+	end)
+
+	Server.GroupRankPermissionGroups:Observe(function(newValue)
+		CmdrClient.PermissionsHandler:_setGroupRankPermissionGroupsData(newValue)
+	end)
+
+	Server.GroupRolePermissionGroups:Observe(function(newValue)
+		CmdrClient.PermissionsHandler:_setGroupRolePermissionGroupsData(newValue)
+	end)
+
+	Server.Permissions:Observe(function(newValue)
+		local playerData = {}
+		if newValue then
+			playerData[LocalPlayer] = newValue
+		end
+		CmdrClient.PermissionsHandler:_setPlayerPermissionGroupsData(playerData)
 	end)
 
 	task.spawn(function()
-		self._Cmdr = require(ReplicatedStorage:WaitForChild("CmdrClient") :: any)
-		cmdrReadied:Fire(self._Cmdr)
-		self:_setBindings(self._Cmdr)
+		cmdrInstance = require(ReplicatedStorage:WaitForChild("CmdrClient") :: any)
+		CmdrClient._Cmdr = cmdrInstance
+
+		-- Set up PermissionsHandler with Cmdr registry
+		CmdrClient.PermissionsHandler:SetCmdrRegistry(cmdrInstance.Registry)
+		CmdrClient:_setBindings(cmdrInstance)
+
+		cmdrReadied:Fire(cmdrInstance)
 	end)
 
-	self:PromiseCmdr():andThen(function(cmdr)
-		cmdr.Registry:RegisterHook("BeforeRun", function(context: CommandContext<any>)
+	CmdrClient:PromiseCmdr():andThen(function(cmdr)
+		cmdr.Registry:RegisterHook("BeforeRun", function(context: CommandContext)
 			-- allow!
 			if context.Executor == nil then
 				return nil
 			end
 
-			local HasPermission = self:HasPermission(context.Name)
+			local HasPermission = CmdrClient:HasPermission(context.Name)
 			if not HasPermission then
 				return "[Client] You do not have permission to run this command."
 			end
@@ -182,7 +233,7 @@ function CmdrClient:Init()
 end
 
 --------------------------------------------------------------------------------
-    --// Registration and Return //--
+--// Registration and Return //--
 --------------------------------------------------------------------------------
 
 return CmdrClient

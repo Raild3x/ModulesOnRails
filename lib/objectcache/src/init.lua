@@ -185,8 +185,6 @@ function ObjectCache:_GetNew(Amount: number, Warn: boolean)
 	for _, Object in AddedObjects do
 		(Object:: Instance).Parent = CacheHolder
 	end
-
-	return self._FreeObjects[InitialLength + Amount]
 end
 
 --[=[
@@ -197,7 +195,10 @@ end
     :::
 ]=]
 function ObjectCache:Get<T>(moveTo: CFrame?): T
-	local obj = table.remove(self._FreeObjects) or self:_GetNew(self._ExpandAmount, true)
+    if #self._FreeObjects == 0 then
+        self:_GetNew(self._ExpandAmount, true)
+    end
+	local obj = table.remove(self._FreeObjects)
 
 	self._InUseObjects[obj] = true
 
