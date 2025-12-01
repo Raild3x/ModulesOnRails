@@ -4,7 +4,6 @@
 --// Services //--
 local GroupService = game:GetService("GroupService")
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 
 --// Imports //--
 local GroupCache = (setmetatable({}, {__mode = "k"}) :: any) :: {[Player]: {{

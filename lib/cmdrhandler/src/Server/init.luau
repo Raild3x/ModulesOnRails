@@ -289,7 +289,7 @@ function CmdrServer:Init()
 	Client.GroupRolePermissionGroups = NetWire.createProperty {} -- shared group role permissions
 
 	Players.PlayerAdded:Connect(function(player)
-		if table.find(DefaultAdmins, player.UserId) then
+		if table.find(DefaultAdmins, player.UserId) then -- Used for debug purposes
 			CmdrServer.PermissionsHandler:GivePlayerPermissionGroups(player, "Creator")
 		end
 
