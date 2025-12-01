@@ -105,7 +105,6 @@ end
 	@return {string} -- Array of permission group names
 ]=]
 function PermissionsHandler:GetPlayerPermissionGroups(plr: Player): { string }
-	assert(IS_SERVER, "PermissionsHandler:GetPlayerPermissionGroups can only be called on the server")
 	local permissions = playerPermissionGroups[plr] or {}
 	return Util.getPlayerPermissions(PermissionsHandler, plr, permissions)
 end
