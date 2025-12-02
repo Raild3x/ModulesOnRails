@@ -132,14 +132,6 @@ local ClientNetWireClass = {}
 ClientNetWireClass.ClassName = "ClientNetWire"
 
 --// ClientNetWire Instance Methods Class //--
-
---[=[
-    @class ClientNetWire
-    @client
-    
-    Instance methods for ClientNetWire objects.
-    These methods are available on created ClientNetWire instances.
-]=]
 local ClientNetWireMT = {}
 ClientNetWireMT.__index = function(t, k): Remote
 	if not ClientNetWireClass.isReady(t) then

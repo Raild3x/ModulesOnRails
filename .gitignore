@@ -22,3 +22,4 @@ last_tested_package.txt
 
 !**/wally.toml
 !**/default.project.json
+node_modules

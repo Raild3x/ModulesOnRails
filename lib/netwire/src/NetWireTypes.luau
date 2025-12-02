@@ -496,14 +496,6 @@ export type ServerRemoteProperty = {
 }
 
 --[=[
-	@class ClientRemoteProperty
-	@client
-	
-	Client-side remote property class with reactive updates.
-	Based on Sleitnick's Comm RemoteProperty implementation.
-]=]
-
---[=[
 	@within ClientRemoteProperty
 	@prop Changed Signal<any>
 
