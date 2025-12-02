@@ -20,7 +20,9 @@
 	- `Roblox Instance` refers to the Roblox instance to which the component instance is bound.
 
 	Methods and properties are tagged with the above terms to help clarify the level at which they are used.
+]=]
 
+--[[
 	## Lifecycle
 
 	The component lifecycle follows this order:
@@ -169,7 +171,7 @@
 	The `ShouldConstruct` function is called before any construction begins. ALL extensions
 	with a `ShouldConstruct` function must return `true` for construction to proceed.
 	If any returns `false`, no component is created and no cleanup is needed.
-]=]
+]]
 
 type AncestorList = { Instance }
 
@@ -240,7 +242,7 @@ type ExtensionShouldFn = (any) -> boolean
 	local player, an extension might look like this, assuming the
 	instance has an attribute linking it to the player's UserId:
 	```lua
-	local Players = game:GetService("Players").
+	local Players = game:GetService("Players")
 
 	local OnlyLocalPlayer = {}
 	function OnlyLocalPlayer.ShouldConstruct(component)
@@ -862,23 +864,30 @@ function Component:_instantiate(instance: Instance, constructId: number?)
 
 	-- Handle error during construction
 	if not success then
-		warn(
-			string.format(
-				"[Component] Error during instantiation of '%s' on '%s': %s",
-				self.Tag,
-				instance:GetFullName(),
-				tostring(result)
+		if not constructionCancelled then
+			warn(
+				string.format(
+					"[Component] Error during construction of '%s' on '%s':\n%s",
+					self.Tag,
+					instance:GetFullName(),
+					tostring(result)
+				)
 			)
-		)
-
+		end
 		component:Stop()
-
 		return nil
 	end
 
-	-- Handle nil result (construction was cancelled or ShouldConstruct returned false)
+	-- Handle nil result (construction was cancelled midway)
 	if result == nil and constructionStarted then
 		-- Construction started but was cancelled mid-way, clean up partial state
+		warn(
+			string.format(
+				"[Component] Construction cancelled for '%s' on '%s'. Running Stop now",
+				self.Tag,
+				instance:GetFullName()
+			)
+		)
 		component:Stop()
 	end
 
@@ -1188,14 +1197,12 @@ function Component:_setup()
 		the calling code to continue (important for batch operations).
 	]]
 	local function TryDeconstructComponent(instance)
+		self[KEY_LOCK_CONSTRUCT][instance] = nil
 		local component = self[KEY_INST_TO_COMPONENTS][instance]
-		-- Always clear the construction lock, even if no component exists yet.
-		-- This handles cases where construction was started but not completed.
 		if not component then
 			return
 		end
 		self[KEY_INST_TO_COMPONENTS][instance] = nil
-		self[KEY_LOCK_CONSTRUCT][instance] = nil
 		local components = self[KEY_COMPONENTS] :: table
 		local index = table.find(components, component)
 		if index then
@@ -1623,7 +1630,10 @@ function Component:WhileHasComponents(
 		return c.Instance == self.Instance
 	end):andThen(connProxy.Destroy))
 
-	assert(typeof(componentClasses) == "table", "Component:WhileHasComponents() expects an array of component classes.")
+	assert(typeof(componentClasses) == "table", "Component:WhileHasComponents() expects a non-empty array of component classes.")  
+	for _, class in ipairs(componentClasses) do  
+		assert(typeof(class) == "table" and class.Tag, "Component:WhileHasComponents() expects all elements to be component classes.")  
+	end  
 
 	-- Helper to get all component instances for self.Instance
 	local function getAllComponents()
@@ -1649,17 +1659,18 @@ function Component:WhileHasComponents(
 
 		activeJanitor = bindJani:Add(Janitor.new(), "Destroy")
 		activeJanitor:Add(task.spawn(fn, components, activeJanitor))
+		local function cleanupJanitor()
+			if activeJanitor then
+				activeJanitor:Destroy()
+				activeJanitor = nil
+			end
+		end
 
 		-- If any component stops, destroy janitor
 		for _, class in ipairs(componentClasses) do
 			activeJanitor:AddPromise(Promise.fromEvent(class.Stopped, function(c)
 				return c.Instance == self.Instance
-			end):andThen(function()
-				if activeJanitor then
-					activeJanitor:Destroy()
-					activeJanitor = nil
-				end
-			end))
+			end):andThen(cleanupJanitor))
 		end
 	end
 
@@ -1821,13 +1832,14 @@ function Component:Destroy()
 		end
 	end
 
+	-- Destroy the trove which will clean up all connections
+	self[KEY_TROVE]:Destroy()
+
 	-- Clear all tracking tables
 	table.clear(self[KEY_INST_TO_COMPONENTS])
 	table.clear(self[KEY_COMPONENTS])
 	table.clear(self[KEY_LOCK_CONSTRUCT])
 
-	-- Destroy the trove which will clean up all connections
-	self[KEY_TROVE]:Destroy()
 end
 
 return Component
