@@ -160,6 +160,9 @@ def main():
     # Add unreleased packages section if there are any
     if unreleased_packages:
         readme_content += """
+        
+---
+
 # Unreleased Packages
 
 > ⚠️ **Warning:** The following packages are unreleased and have not been fully tested for production use. Use them at your own risk.
