@@ -43,7 +43,7 @@ classes = ["PlayerProfileManager", "PlayerDataManager", "ServerPlayerDataManager
 
 [[classOrder]]
 section = "Admin Commands [Cmdr]"
-classes = ["CmdrHandler", "CmdrServer", "CmdrClient", "CmdrTypes"]
+classes = ["CmdrHandler", "PermissionsHandler", "CmdrServer", "CmdrClient", "CmdrTypes"]
 
 [[classOrder]]
 section = "Data Structures"

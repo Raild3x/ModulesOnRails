@@ -13,6 +13,8 @@ formattedName = "AdjustableTimerManager"
 # The intro page for the documentation
 docsLink = "AdjustableTimerManager"
 
+unreleased = true
+
 [dependencies]
 Signal = "lucasmzreal/fastsignal@^10.2.1"
 Promise = "evaera/promise@^4.0.0"
