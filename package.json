@@ -1,4 +1,11 @@
 {
+  "scripts": {
+    "readme": "python scripts/generateReadMe.py",
+    "setup": "python scripts/setup.py",
+    "clear": "python scripts/clearPackages.py",
+    "publish": "python scripts/publish.py",
+    "test": "python scripts/runTests.py"
+  },
   "devDependencies": {
     "caniuse-lite": "^1.0.30001757"
   },
