@@ -8,6 +8,7 @@ import os
 import sys
 import subprocess
 from pathlib import Path
+from typing import Optional
 
 
 SRC_DIR = Path("lib")
@@ -56,21 +57,7 @@ def main():
     user_input = input("Do you want to open Roblox Studio? (y/n): ").strip().lower()
     
     if user_input == "y":
-        # Get username for path
-        username = os.environ.get("USERNAME") or os.environ.get("USER")
-        
-        # Find Roblox Studio - check common locations
-        roblox_versions_dir = Path(f"C:/Users/{username}/AppData/Local/Roblox/Versions")
-        
-        roblox_studio_path = None
-        if roblox_versions_dir.is_dir():
-            # Find the most recent version folder containing RobloxStudioBeta.exe
-            for version_dir in roblox_versions_dir.iterdir():
-                if version_dir.is_dir():
-                    studio_exe = version_dir / "RobloxStudioBeta.exe"
-                    if studio_exe.is_file():
-                        roblox_studio_path = studio_exe
-                        break
+        roblox_studio_path = find_roblox_studio()
 
         if roblox_studio_path:
             print("Opening Roblox Studio...")
@@ -81,6 +68,39 @@ def main():
             print("Please open the test place manually.")
 
     return 0
+
+
+def find_roblox_studio() -> Optional[Path]:
+    """Find Roblox Studio executable based on the current platform."""
+    if sys.platform == "win32":
+        # Windows
+        username = os.environ.get("USERNAME")
+        roblox_versions_dir = Path(f"C:/Users/{username}/AppData/Local/Roblox/Versions")
+        
+        if roblox_versions_dir.is_dir():
+            for version_dir in roblox_versions_dir.iterdir():
+                if version_dir.is_dir():
+                    studio_exe = version_dir / "RobloxStudioBeta.exe"
+                    if studio_exe.is_file():
+                        return studio_exe
+    
+    elif sys.platform == "darwin":
+        # macOS
+        studio_path = Path("/Applications/RobloxStudio.app/Contents/MacOS/RobloxStudio")
+        if studio_path.is_file():
+            return studio_path
+        
+        # Alternative location
+        username = os.environ.get("USER")
+        alt_path = Path(f"/Users/{username}/Applications/RobloxStudio.app/Contents/MacOS/RobloxStudio")
+        if alt_path.is_file():
+            return alt_path
+    
+    else:
+        # Linux or other - Roblox Studio doesn't officially support Linux
+        print("Warning: Roblox Studio opening is only supported on Windows and macOS.")
+    
+    return None
 
 
 if __name__ == "__main__":

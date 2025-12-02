@@ -7,9 +7,10 @@ import os
 import subprocess
 import re
 from pathlib import Path
+from typing import Optional, Tuple, Dict
 
 
-def get_git_remote_info():
+def get_git_remote_info() -> Tuple[Optional[str], Optional[str]]:
     """Extract repository owner and name from git remote URL."""
     try:
         remote_url = subprocess.check_output(
@@ -31,44 +32,60 @@ def get_git_remote_info():
     return None, None
 
 
-def parse_wally_toml(file_path: Path) -> dict:
-    """Parse a wally.toml file and extract relevant fields."""
-    config = {}
+def parse_wally_toml(file_path: Path) -> Dict[str, Dict[str, str]]:
+    """Parse a wally.toml file and extract relevant fields organized by section."""
+    config = {
+        "package": {},
+        "custom": {},
+    }
     current_section = None
     
     with open(file_path, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             
+            # Skip empty lines and comments
+            if not line or line.startswith("#"):
+                continue
+            
             # Check for section headers
             if line.startswith("[") and line.endswith("]"):
                 current_section = line[1:-1]
+                if current_section not in config:
+                    config[current_section] = {}
                 continue
             
-            # Parse key-value pairs
+            # Parse key-value pairs (ignore inline comments)
             if "=" in line:
                 key, value = line.split("=", 1)
                 key = key.strip()
-                value = value.strip().strip('"').strip("'")
+                value = value.split("#")[0].strip().strip('"').strip("'")  # Remove inline comments
                 
-                # Store with section prefix for custom fields
-                if current_section == "custom":
-                    config[key] = value
-                elif current_section == "package":
-                    config[key] = value
-                else:
-                    config[key] = value
+                # Store in the appropriate section
+                if current_section and current_section in config:
+                    config[current_section][key] = value
     
     return config
 
 
-def generate_table_row(package: dict, docs_link: str) -> str:
+def get_config_value(config: Dict[str, Dict[str, str]], key: str, default: str = "") -> str:
+    """Get a value from config, checking both package and custom sections."""
+    # Check custom section first (for formattedName, docsLink, etc.)
+    if key in config.get("custom", {}):
+        return config["custom"][key]
+    # Then check package section
+    if key in config.get("package", {}):
+        return config["package"][key]
+    return default
+
+
+def generate_table_row(config: Dict[str, Dict[str, str]], docs_link: str) -> str:
     """Generate a markdown table row for a package."""
-    formatted_name = package.get("formattedName", "")
-    package_docs_link = package.get("docsLink", "")
-    package_name = package.get("name", "")
-    package_version = package.get("version", "")
-    package_description = package.get("description", "")
+    formatted_name = get_config_value(config, "formattedName")
+    package_docs_link = get_config_value(config, "docsLink")
+    package_name = get_config_value(config, "name")
+    package_version = get_config_value(config, "version")
+    package_description = get_config_value(config, "description")
     
     # Use package name if no formatted name provided
     if not formatted_name:
@@ -130,15 +147,15 @@ def main():
         config = parse_wally_toml(wally_toml)
         
         # Check if package should be ignored
-        if config.get("ignore", "").lower() == "true":
-            print(f"  Ignoring package {config.get('name', 'unknown')}")
+        if get_config_value(config, "ignore").lower() == "true":
+            print(f"  Ignoring package {get_config_value(config, 'name', 'unknown')}")
             continue
         
         # Generate table row
         table_row = generate_table_row(config, docs_link)
         
         # Sort into released or unreleased
-        if config.get("unreleased", "").lower() == "true":
+        if get_config_value(config, "unreleased").lower() == "true":
             unreleased_packages.append(table_row)
             print("  -> Marked as unreleased")
         else:
@@ -160,7 +177,7 @@ def main():
     # Add unreleased packages section if there are any
     if unreleased_packages:
         readme_content += """
-        
+
 ---
 
 # Unreleased Packages

@@ -10,6 +10,7 @@ import re
 import subprocess
 import shutil
 from pathlib import Path
+from typing import Optional
 
 
 SRC_DIR = Path("lib")
@@ -37,7 +38,7 @@ def clear_package_dir(package_dir: Path):
                 item.unlink()
 
 
-def get_current_version(wally_toml: Path) -> str | None:
+def get_current_version(wally_toml: Path) -> Optional[str]:
     """Extract the current version from wally.toml."""
     content = wally_toml.read_text(encoding="utf-8")
     match = re.search(r'^version\s*=\s*"([^"]+)"', content, re.MULTILINE)
