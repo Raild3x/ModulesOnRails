@@ -13,6 +13,8 @@ formattedName = "DropletManager"
 # The intro page for the documentation
 docsLink = "DropletManager"
 
+unreleased = true
+
 [dependencies]
 Promise = "evaera/promise@^4.0.0"
 OctoTree = "sleitnick/octo-tree@0.3.1"

@@ -37,7 +37,11 @@ echo "Docs Link: $DOCS_LINK"
 # Output README file
 README_FILE="README.md"
 
-# Start the README file with a title and table header
+# Temporary files to store released and unreleased packages
+RELEASED_PACKAGES=$(mktemp)
+UNRELEASED_PACKAGES=$(mktemp)
+
+# Start the README file with a title
 cat <<EOF > "$README_FILE"
 $REPO_NAME is a collection of Wally packages to streamline Roblox development.
 
@@ -68,6 +72,7 @@ for PACKAGE_DIR in "$SRC_DIR"/*/ ; do
             PACKAGE_VERSION=$(grep '^version =' "$WALLY_TOML" | cut -d'=' -f2 | xargs)
             PACKAGE_DESCRIPTION=$(grep '^description =' "$WALLY_TOML" | cut -d'=' -f2 | xargs)
             IGNORE=$(grep '^ignore =' "$WALLY_TOML" | cut -d'=' -f2 | xargs)
+            UNRELEASED=$(grep '^unreleased =' "$WALLY_TOML" | cut -d'=' -f2 | xargs)
 
             if [ "$IGNORE" = "true" ]; then
                 echo "Ignoring package $PACKAGE_NAME"
@@ -82,10 +87,16 @@ for PACKAGE_DIR in "$SRC_DIR"/*/ ; do
                 echo "No formatted name provided for $FORMATTED_NAME. Using package name as formatted name."
             fi
 
-            # Append the package information to the README file
-            cat <<EOF >> "$README_FILE"
-| [$FORMATTED_NAME]($PACKAGE_DOCS_LINK) | \`$FORMATTED_NAME = "$PACKAGE_NAME@$PACKAGE_VERSION"\` | $PACKAGE_DESCRIPTION |
-EOF
+            # Create the table row
+            TABLE_ROW="| [$FORMATTED_NAME]($PACKAGE_DOCS_LINK) | \`$FORMATTED_NAME = \"$PACKAGE_NAME@$PACKAGE_VERSION\"\` | $PACKAGE_DESCRIPTION |"
+
+            # Append to the appropriate temp file based on unreleased status
+            if [ "$UNRELEASED" = "true" ]; then
+                echo "$TABLE_ROW" >> "$UNRELEASED_PACKAGES"
+                echo "  -> Marked as unreleased"
+            else
+                echo "$TABLE_ROW" >> "$RELEASED_PACKAGES"
+            fi
         else
             echo "Warning: $WALLY_TOML not found"
         fi
@@ -93,5 +104,27 @@ EOF
         echo "Warning: $PACKAGE_DIR is not a directory"
     fi
 done
+
+# Append released packages to README
+if [ -s "$RELEASED_PACKAGES" ]; then
+    cat "$RELEASED_PACKAGES" >> "$README_FILE"
+fi
+
+# Append unreleased packages section if there are any
+if [ -s "$UNRELEASED_PACKAGES" ]; then
+    cat <<EOF >> "$README_FILE"
+
+# Unreleased Packages
+
+> ⚠️ **Warning:** The following packages are unreleased and have not been fully tested for production use. Use them at your own risk.
+
+| Package | Latest Version | Description |
+|---------|----------------|-------------|
+EOF
+    cat "$UNRELEASED_PACKAGES" >> "$README_FILE"
+fi
+
+# Clean up temp files
+rm -f "$RELEASED_PACKAGES" "$UNRELEASED_PACKAGES"
 
 echo "README.md has been generated successfully."

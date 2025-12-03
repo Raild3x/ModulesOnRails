@@ -9,7 +9,7 @@ realm = "shared"
 
 [custom]
 # The properly capitalized and spaced name of the library
-formattedName = "Cmdr Handler"
+formattedName = "CmdrHandler"
 # The intro page for the documentation
 docsLink = "CmdrHandler"
 # Whether or not to ignore this package in the readme
