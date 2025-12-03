@@ -706,6 +706,15 @@ function Component.getUnsetupComponents(): { ComponentClass }
 	return table.clone(UNSETUP_COMPONENTS) :: any
 end
 
+--[=[
+	@private
+	@within Component
+	@param instance Instance -- The Roblox instance to check
+	@return boolean -- True if the instance is within any valid ancestor, false otherwise
+
+	Checks if the given instance is a descendant of any of the valid ancestors
+	for this component class.
+]=]
 function Component:_isInAncestorList(instance: Instance): boolean
 	for _, parent in ipairs(self[KEY_ANCESTORS] :: { Instance }) do
 		if instance:IsDescendantOf(parent) then
@@ -724,40 +733,35 @@ end
 
 	Creates a new component instance bound to the given Roblox instance.
 
-	## Edge Case Handling
+	## Construction Flow (Promise-based)
+	
+	Construction is wrapped in a Promise that can be cancelled if:
+	- The instance moves outside valid ancestors (ancestry change)
+	- A newer construction attempt supersedes this one (constructId mismatch)
 
-	### State Validation After Yields
-	After each potential yield point (extension calls, Construct), the system validates:
-	- The instance is still within valid ancestors
-	- No newer construction attempt has superseded this one
-	- Construction wasn't cancelled due to ancestry change
 
-	### Ancestry Change During Construction
-	If the instance moves outside valid ancestors during construction:
-	- An ancestry change listener detects this immediately
-	- The construction thread is cancelled if suspended
-	- A warning is logged with the component tag and instance path
-	- Any partial state is cleaned up via Stop()
+	## Phases
+	
+	1. **Setup**: Create component, bind extensions
+	2. **Validation**: Check ShouldConstruct (early exit, no cleanup needed)
+	3. **Construction**: Run Constructing → Construct() → Constructed hooks
+	4. **Finalization**: Return component or handle failure
 
-	### Construction ID Tracking
-	The `constructId` parameter allows the system to detect when a newer construction
-	attempt should supersede the current one. This handles rapid reparenting scenarios
-	where an instance might move in/out of valid ancestors multiple times.
-
-	### Error Handling
-	All construction logic is wrapped in pcall. If an error occurs:
-	- The error is logged with context (tag, instance path, error message)
-	- Stop() is called to clean up any partial state
-	- nil is returned so the component isn't tracked
-
-	### ShouldConstruct Failure
-	If ShouldConstruct returns false, construction stops cleanly without calling Stop()
-	since no component state was created yet.
+	## Error Handling
+	
+	Errors during construction are caught, logged, and result in Stop() being
+	called to clean up any partial state.
 ]=]
 function Component:_instantiate(instance: Instance, constructId: number?)
+	-- ══════════════════════════════════════════════════════════════════════
+	-- PHASE 1: Setup
+	-- Create the component instance and bind extensions
+	-- ══════════════════════════════════════════════════════════════════════
+	
 	local component = setmetatable({}, self)
 	component.Instance = instance
 
+	-- Bind extensions
 	component[KEY_ACTIVE_EXTENSIONS] =
 		GetActiveExtensions(component, self[KEY_EXTENSIONS], table.clone(self[KEY_CLASS_ACTIVE_EXTENSIONS] :: any))
 	for _, extension in ipairs(component[KEY_ACTIVE_EXTENSIONS]) do
@@ -766,129 +770,132 @@ function Component:_instantiate(instance: Instance, constructId: number?)
 		end
 	end
 
-	-- Track if construction was cancelled due to ancestry change
-	local constructionCancelled = false
-	local constructionThread: thread? = nil
+	-- ══════════════════════════════════════════════════════════════════════
+	-- PHASE 2: Validation (ShouldConstruct)
+	-- If any extension vetoes construction, exit early with no cleanup needed
+	-- ══════════════════════════════════════════════════════════════════════
+	
+	if not ShouldConstruct(component) then
+		return nil
+	end
 
-	-- Listen for ancestry changes during construction to cancel if instance becomes invalid
-	local ancestryConnection: RBXScriptConnection?
-	ancestryConnection = RailUtil.Signal
-		.combine({
-			instance.AncestryChanged,
-			self.AncestorsChanged,
-		})
-		:Connect(function()
-			if not self:_isInAncestorList(instance) then
-				warn(
-					string.format(
-						"[Component] Construction cancelled for '%s' on '%s' due to ancestry change.",
-						self.Tag,
-						instance:GetFullName()
-					)
-				)
-				constructionCancelled = true
-				if ancestryConnection then
-					ancestryConnection:Disconnect()
-					ancestryConnection = nil
-				end
-				-- Cancel the construction thread if it's yielding
-				if constructionThread and coroutine.status(constructionThread) == "suspended" then
-					task.cancel(constructionThread)
-				end
-			end
-		end)
+	-- ══════════════════════════════════════════════════════════════════════
+	-- PHASE 3: Construction (Promise-based)
+	-- Wrap construction in a cancellable Promise for clean cancellation handling
+	-- ══════════════════════════════════════════════════════════════════════
 
-	-- Helper to validate that the component is still in a valid state after potential yields
-	local function validateState(): boolean
-		if constructionCancelled then
-			return false
-		end
-		-- Check if instance moved outside valid ancestors
+	-- Helper: Check if construction should continue
+	local function shouldContinue(): boolean
 		if not self:_isInAncestorList(instance) then
 			return false
 		end
-		-- Check if a newer construct attempt has superseded this one
 		if constructId and self[KEY_LOCK_CONSTRUCT][instance] ~= constructId then
 			return false
 		end
 		return true
 	end
 
-	-- Cleanup helper for when construction fails or is cancelled
-	local function cleanup()
-		if ancestryConnection then
-			ancestryConnection:Disconnect()
-			ancestryConnection = nil
-		end
-	end
 
-	-- Track if construction actually started (past ShouldConstruct)
-	local constructionStarted = false
+	local enteredConstruction = false
+	local didReject = false
 
-	local success, result = pcall(function()
-		constructionThread = coroutine.running()
-
-		if not ShouldConstruct(component) then
-			return nil
+	local constructionPromise = Promise.new(function(resolve, reject)
+		if not shouldContinue() then
+			reject("Invalid Post-ShouldConstruct")
+			return
 		end
 
-		if not validateState() then
-			return nil
-		end
+		-- Mark that we're entering construction - from this point, cleanup is needed on failure
+		enteredConstruction = true
 
-		constructionStarted = true
+		-- Constructing hook (extensions)
 		InvokeExtensionFn(component, "Constructing")
-
-		if not validateState() then
-			return nil
+		if not shouldContinue() then
+			reject("Invalid Post-Constructing")
+			return
 		end
 
+		-- User's Construct method
 		if type(component.Construct) == "function" then
 			component:Construct()
 		end
-
-		if not validateState() then
-			return nil
+		if not shouldContinue() then
+			reject("Invalid Post-Construct")
+			return
 		end
 
+		-- Constructed hook (extensions)
 		InvokeExtensionFn(component, "Constructed")
-
-		if not validateState() then
-			return nil
+		if not shouldContinue() then
+			reject("Invalid Post-Constructed")
+			return
 		end
 
-		return component
+		-- Success!
+		resolve(component)
+	end)
+	:catch(function(err)
+		-- Log error
+		didReject = true
+		warn(string.format(
+			"[Component] Error during construction of '%s' on '%s':\n%s",
+			self.Tag,
+			instance:GetFullName(),
+			tostring(err)
+		))
 	end)
 
-	cleanup()
-
-	-- Handle error during construction
-	if not success then
-		if not constructionCancelled then
-			warn(
-				string.format(
-					"[Component] Error during construction of '%s' on '%s':\n%s",
+	-- Set up ancestry change listener to cancel construction if instance becomes invalid
+	local ancestryConnection = RailUtil.Signal
+		.combine({
+			instance.AncestryChanged,
+			self.AncestorsChanged,
+		})
+		:Connect(function()
+			if not self:_isInAncestorList(instance) then
+				warn(string.format(
+					"[Component] Construction of '%s' on '%s' cancelled due to reparenting outside valid ancestors.",
 					self.Tag,
-					instance:GetFullName(),
-					tostring(result)
-				)
-			)
-		end
-		component:Stop()
-		return nil
-	end
+					instance:GetFullName()
+				))
+				constructionPromise:cancel()
+			end
+		end)
 
-	-- Handle nil result (construction was cancelled midway)
-	if result == nil and constructionStarted then
-		-- Construction started but was cancelled mid-way, clean up partial state
-		warn(
-			string.format(
-				"[Component] Construction cancelled for '%s' on '%s'. Running Stop now",
+	-- Clean up when promise settles (success, failure, or cancel)
+	constructionPromise:finally(function(status)
+		ancestryConnection:Disconnect()
+
+		-- Clean up partial component state if not resolved successfully
+		if status ~= Promise.Status.Resolved or didReject then
+			if enteredConstruction then
+				InvokeExtensionFn(component, "Stopping")
+				component:Stop()
+				InvokeExtensionFn(component, "Stopped")
+			end
+			-- If we never entered construction, no cleanup is needed
+		end
+	end)
+
+	-- ══════════════════════════════════════════════════════════════════════
+	-- PHASE 4: Finalization
+	-- Await the promise and handle the result
+	-- ══════════════════════════════════════════════════════════════════════
+	
+	local success, result = constructionPromise:await()
+
+	if not success then
+		-- Log error if it was a real error (not just cancellation)
+		if typeof(result) == "string" then
+			warn(string.format(
+				"[Component] Error during construction of '%s' on '%s':\n%s",
 				self.Tag,
-				instance:GetFullName()
-			)
-		)
-		component:Stop()
+				instance:GetFullName(),
+				tostring(result)
+			))
+		end
+
+		return nil
 	end
 
 	return result
@@ -898,6 +905,7 @@ end
 	@tag Component Class
 	@within Component
 	@method _setup
+	@private
 
 	This is an internal method that is called to set up the component class.
 	It is automatically called when the component class is created, unless the
@@ -1048,7 +1056,7 @@ function Component:_setup()
 		  - Clears KEY_STARTING first to signal cancellation to StartComponent
 		  - Thread cancellation depends on state:
 		    * "suspended": Cancel immediately (thread is yielding)
-		    * "normal": Thread is in call stack, defer cancellation
+		    * "normal": Thread is in the call stack, defer cancellation
 		    * "running": This is the current thread, don't cancel (would error)
 		  - Uses pcall around task.cancel as the thread may have already finished
 		
@@ -1197,11 +1205,11 @@ function Component:_setup()
 		the calling code to continue (important for batch operations).
 	]]
 	local function TryDeconstructComponent(instance)
-		self[KEY_LOCK_CONSTRUCT][instance] = nil
 		local component = self[KEY_INST_TO_COMPONENTS][instance]
 		if not component then
 			return
 		end
+		self[KEY_LOCK_CONSTRUCT][instance] = nil
 		self[KEY_INST_TO_COMPONENTS][instance] = nil
 		local components = self[KEY_COMPONENTS] :: table
 		local index = table.find(components, component)
@@ -1307,8 +1315,7 @@ end
 	calling `GetAll` would return the three component instances.
 
 	```lua
-	local MyComponent = Component.new({Tag = "MyComponent"})
-
+	local MyComponent = Component.new({Tag = "MyComponent"})	
 	-- ...
 
 	local components = MyComponent:GetAll()
@@ -1324,23 +1331,6 @@ end
 --[=[
 	@tag Component Class
 	@return Component?
-
-	Gets an instance of a component class from the given Roblox
-	instance. Returns `nil` if not found.
-
-	```lua
-	local MyComponent = require(somewhere.MyComponent)
-
-	local myComponentInstance = MyComponent:FromInstance(workspace.SomeInstance)
-	```
-]=]
-function Component:FromInstance(instance: Instance)
-	return self[KEY_INST_TO_COMPONENTS][instance]
-end
-
---[=[
-	@tag Component Class
-	@return Promise<ComponentInstance>
 
 	Resolves a promise once the component instance is present on a given
 	Roblox instance.
@@ -1508,11 +1498,14 @@ end
 	```
 ]=]
 function Component:WhileHasComponent(componentClass: ComponentClass, fn: (component: Component, jani: Janitor) -> ())
+	assert(typeof(componentClass) == "table", ":WhileHasComponent() expects a component class.")
 	if not componentClass.Tag and componentClass[1] and componentClass[1].Tag then
 		error(
-			"Component:WhileHasComponent() called with an array of component classes. Did you mean to call WhileHasComponents() instead?"
+			":WhileHasComponent() called with an array of component classes. Did you mean to call :WhileHasComponents() instead?"
 		)
 	end
+	assert(componentClass.Tag, ":WhileHasComponent() expects a component class.")
+
 	local bindJani = Janitor.new()
 
 	local connProxy = {}
@@ -1534,11 +1527,6 @@ function Component:WhileHasComponent(componentClass: ComponentClass, fn: (compon
 	bindJani:AddPromise(Promise.fromEvent(self.Stopped, function(c)
 		return c.Instance == self.Instance
 	end):andThen(connProxy.Destroy))
-
-	assert(
-		typeof(componentClass) == "table" and componentClass.Tag,
-		"Component:WhileHasComponent() expects a component class."
-	)
 
 	-- Track janitor for the component
 	local activeJanitor = nil
@@ -1630,10 +1618,10 @@ function Component:WhileHasComponents(
 		return c.Instance == self.Instance
 	end):andThen(connProxy.Destroy))
 
-	assert(typeof(componentClasses) == "table", "Component:WhileHasComponents() expects a non-empty array of component classes.")  
-	for _, class in ipairs(componentClasses) do  
-		assert(typeof(class) == "table" and class.Tag, "Component:WhileHasComponents() expects all elements to be component classes.")  
-	end  
+	assert(typeof(componentClasses) == "table", "Component:WhileHasComponents() expects a non-empty array of component classes.")
+	for _, class in ipairs(componentClasses) do
+		assert(typeof(class) == "table" and class.Tag, "Component:WhileHasComponents() expects all elements to be component classes.")
+	end
 
 	-- Helper to get all component instances for self.Instance
 	local function getAllComponents()
@@ -1696,7 +1684,8 @@ function Component:ForEachSibling(...)
 	)
 	-- For backwards compatibility, try to detect if it's multiple components and route appropriately
 	local componentClassOrClasses = ...
-	if componentClassOrClasses and typeof(componentClassOrClasses) == "table" and not componentClassOrClasses.Tag then
+	assert(typeof(componentClassOrClasses) == "table", ":ForEachSibling() expects a component class or an array of component classes.")
+	if not componentClassOrClasses.Tag then
 		return self:WhileHasComponents(...)
 	else
 		return self:WhileHasComponent(...)
