@@ -382,6 +382,14 @@ function Droplet:Magnetize(playerWhoCollected: Player)
 
 		-- Avoid raycasting to include the visual model of the droplet itself in case it's a [Model].
 		ResourceHeightRayParams:AddToFilter(Model)
+		self:AddTask(function()
+			local filteredInstances = ResourceHeightRayParams.FilterDescendantsInstances
+			local entryIndex = table.find(filteredInstances, Model)
+			if entryIndex then
+				table.remove(filteredInstances, entryIndex)
+				ResourceHeightRayParams.FilterDescendantsInstances = filteredInstances
+			end
+		end)
 
         CorePart.Anchored = true
         CorePart.CanCollide = false
