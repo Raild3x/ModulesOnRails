@@ -380,6 +380,9 @@ function Droplet:Magnetize(playerWhoCollected: Player)
         assert(CorePart, "Model must have a PrimaryPart")
         CorePart.BrickColor = BrickColor.new("Bright red")
 
+		-- Avoid raycasting to include the visual model of the droplet itself in case it's a [Model].
+		ResourceHeightRayParams:AddToFilter(Model)
+
         CorePart.Anchored = true
         CorePart.CanCollide = false
 
