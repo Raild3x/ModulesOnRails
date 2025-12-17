@@ -241,6 +241,7 @@ end
 	:::caution Overriding
 	If you override this method, you need to make sure you call
 	`SuperClass.Destroy(self)` to call the superclass methods.
+	:::
 	```lua
 	function MyCustomClass:Destroy()
 		SuperClass.Destroy(self) -- calls the superclass method to clean up events, tasks, etc..

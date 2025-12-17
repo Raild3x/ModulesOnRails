@@ -12,3 +12,4 @@ realm = "shared"
 formattedName = "AdjustableTimer"
 # The intro page for the documentation
 docsLink = "AdjustableTimer"
+unreleased = true
