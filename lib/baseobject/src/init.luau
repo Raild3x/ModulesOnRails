@@ -5,21 +5,22 @@
 	@class BaseObject
 
 	BaseObject provides interface methods for three core features:
-	- Object Destruction via adding a :Destroy() method and IsDestroyed flag property,
+	- Object Destruction via adding a :Destroy() method and Destroyed flag property,
 	- Task Management across the objects lifetime by providing a janitor internally,
 	- and Signal Management by providing interfaces to Register, Get, and Fire signals easily.
 	
 
 	Destroy Behavior:
-	* When a BaseObject instance is destroyed, it's `IsDestroyed` property is set to true, and it's `Destroyed` signal is fired.
+	* When a BaseObject instance is destroyed, it's `Destroyed` property is set to true, and it's `Destroyed` signal is fired.
 	* It's metatable is set to a metatable that will error when any of it's methods or metamethods are called.
 	
-	You should check `IsDestroyed` before calling any methods on a BaseObject instance if you are not sure if it has been destroyed or not.
+	You should check `Destroyed` before calling any methods on a BaseObject instance if you are not sure if it has been destroyed or not.
 ]=]
 
 --[[ API
 	[CLASS PROPS]
 	.ClassName: string
+	.SignalBehavior: Enum.SignalBehavior -- Determines the default signal behavior for signals fired from this BaseObject
 	._DEBUG: boolean -- Whether or not to print debug messages
 
 	[STATIC METHODS]
@@ -28,18 +29,20 @@
 	.isDestroyed(self: BaseObject) -> boolean
 
 	[OBJECT PROPS]
-	.IsDestroyed: boolean?
+	.Destroyed: boolean?
 
 	[OBJECT METHODS]
 	:GetId() -> number
 	:IsA(class: any) -> boolean
 	:Destroy()
 
-	:BindToInstance(obj: Instance, destroyOnParentNil: boolean?) -> function
+	:BindToInstance(obj: Instance, destroyOnNilParent: boolean?) -> function
 
 	:GetTask(taskId: any) -> Task?
 	:AddTask(task: Task, cleanupMethodName: (string | true)?, taskId: any?) -> Task
+	:GiveTask(task: Task, cleanupMethodName: (string | true)?, taskId: any?) -> Task -- Alias for AddTask
 	:AddPromise(prom: Promise) -> Promise
+	:GivePromise(prom: Promise) -> Promise -- Alias for AddPromise
 	:RemoveTask(taskId: any, dontClean: boolean?)
 	:RemoveTaskNoClean(taskId: any)
 
@@ -47,6 +50,8 @@
 	:HasSignal(signalName: string) -> boolean
 	:FireSignal(signalName: string, ...)
 	:RegisterSignal(signalName: string)
+	:ConnectSignal(signalName: string, func: (...any) -> ()) -> Connection
+	:GetDestroyingSignal() -> Signal
 	:GetDestroyedSignal() -> Signal
 ]]
 
@@ -54,7 +59,6 @@
 local RunService = game:GetService("RunService")
 
 --// Requires //--
-
 local Signal = require(script.Parent.Signal)
 local Symbol = require(script.Parent.Symbol)
 local Janitor = require(script.Parent.Janitor)
@@ -62,7 +66,8 @@ local Promise = require(script.Parent.Promise)
 
 --// Types //--
 type Janitor = Janitor.Janitor
-type Signal = Signal.ScriptSignal<any>
+type Signal = Signal.ClassicSignal<...any>
+type Connection = Signal.Connection
 type Promise = typeof(Promise.new())
 
 type genericFn = () -> ()
@@ -75,6 +80,7 @@ local KEY_JANITOR = Symbol("Janitor")
 local KEY_SIGNALS = Symbol("Signals")
 local SIGNAL_MARKER = Symbol("SignalMarker")
 
+local DESTROYING_SIGNAL_NAME = "Destroying"
 local DESTROYED_SIGNAL_NAME = "Destroyed"
 
 --// Volatiles //--
@@ -115,6 +121,8 @@ local destroyedMetatable = {
 
 local BaseObject = {}
 BaseObject.ClassName = "BaseObject"
+BaseObject.SignalBehavior = Enum.SignalBehavior.Immediate
+-- BaseObject.AllowSignalsToFireAfterDestroy = false -- Not implemented yet
 BaseObject._DEBUG = false
 BaseObject.__index = BaseObject
 BaseObject.__call = function(t, ...)
@@ -127,9 +135,39 @@ end
 ]=]
 
 --[=[
+	@prop _DEBUG boolean
+	@within BaseObject
+	@tag static
+	@private
+	When set to true, enables debug warnings for operations like attempting to destroy an already destroyed object.
+]=]
+
+--[=[
 	@prop ClassName string
 	@within BaseObject
 	@readonly
+	@tag static
+]=]
+
+--[=[
+	@prop SignalBehavior Enum.SignalBehavior
+	@within BaseObject
+	@tag static
+	Determines the default signal behavior for signals fired from this BaseObject via `FireSignal`.
+]=]
+
+--[=[
+	@prop Destroyed boolean?
+	@within BaseObject
+	@readonly
+
+	Indicates whether or not the object has been destroyed.
+	```lua
+	local obj = BaseObject.new()
+	print(obj.Destroyed) -- nil
+	obj:Destroy()
+	print(obj.Destroyed) -- true
+	```
 ]=]
 
 --[=[
@@ -167,7 +205,7 @@ end
 	```
 ]=]
 function BaseObject.isDestroyed(self: BaseObject): boolean
-	return self.IsDestroyed == true
+	return self.Destroyed == true
 end
 
 --[=[
@@ -226,7 +264,7 @@ function BaseObject.new<T>(tbl: {[any]: any}?)
 	GLOBAL_ID += 2
 
 	-- Leave this as nil until destroyed to avoid bloat
-	(self :: any).IsDestroyed = nil :: boolean?
+	(self :: any).Destroyed = nil :: boolean?
 
 	return self
 end
@@ -249,10 +287,14 @@ end
 	```
 ]=]
 function BaseObject:Destroy()
-	if self.IsDestroyed then
+	if self.Destroyed then
 		return
 	end
-	self.IsDestroyed = true
+	self.Destroyed = true
+	self.IsDestroyed = true -- kept for backwards compatibility
+
+	-- Add stack traceback for debugging
+	destroyedObjectStacks[self] = debug.traceback()
 
 	local ClassName = self.ClassName
 	self.Destroy = function()
@@ -261,24 +303,45 @@ function BaseObject:Destroy()
 		end
 	end
 	
-	-- Fire signal if it exists
-	if self:HasSignal(DESTROYED_SIGNAL_NAME) then
-		self:GetSignal(DESTROYED_SIGNAL_NAME):Fire()
+	-- Fire destroying signal if it exists
+	if self:HasSignal(DESTROYING_SIGNAL_NAME) then
+		self:GetSignal(DESTROYING_SIGNAL_NAME):Fire()
 	end
 
-	-- Mark as destroyed and clean janitor
-	(self[KEY_JANITOR] :: any):Destroy()
+	-- I added this coroutine check to prevent unexpected yielding during janitor destruction
+	local jani = self[KEY_JANITOR] :: any
+	local janiThread = coroutine.create(function()
+		jani:Destroy()
+	end)
+	coroutine.resume(janiThread)
+	if coroutine.status(janiThread) ~= "dead" then
+		warn(`Detected Janitor Destroy yielded for {ClassName}[{self[KEY_ID]}]. This may cause unexpected behavior.`)
+	end
+
+	-- Fire destroyed signal, allows deferring if configured
+	self:FireSignal(DESTROYED_SIGNAL_NAME)
+
+	-- Destroy any existing signals
+	if self[KEY_SIGNALS] then
+		for _, signal: Signal in self[KEY_SIGNALS] :: any do
+			if typeof(signal) == "table" and signal ~= SIGNAL_MARKER then
+				signal:Destroy()
+			end
+		end
+		self[KEY_SIGNALS] = nil
+	end
 
 	-- Set metatable to destroyed metatable
 	setmetatable(self, destroyedMetatable)
 
-	-- Add stack
-	destroyedObjectStacks[self] = debug.traceback()
+	-- Remove from storage
+	STORAGE[self[KEY_ID] :: any] = nil
 end
 
 --[=[
 	Returns the ID of the BaseObject
 	Can be used to fetch the object with BaseObject.getObjectFromId(id)
+	@return number
 ]=]
 function BaseObject:GetId(): number
 	return self[KEY_ID] :: number
@@ -287,6 +350,8 @@ end
 --[=[
 	Returns true if the given object is of a given class.
 	Takes a class name or class object.
+	@param classOrClassName {[any]: any} | string -- The class or class name to check against
+	@return boolean
 ]=]
 function BaseObject:IsA(classOrClassName: {[any]: any} | string): boolean
 	local current = self
@@ -344,10 +409,16 @@ end
 
 	obj:Destroy() -- Prints "Hello, World!"
 	```
+
+	:::caution yielding
+	Avoid yielding within added tasks as it may cause unexpected behavior during destruction.
+	:::
 ]=]
 function BaseObject:AddTask<T>(task: T, taskCleanupMethod: (string | true | nil)?, taskId: any?): T
 	return self[KEY_JANITOR]:Add(task, taskCleanupMethod, taskId)
 end
+
+-- Alias for :AddTask(). Provided for compatibility with maid-style APIs.
 BaseObject.GiveTask = BaseObject.AddTask -- Alias for those familiar with maids
 
 --[=[
@@ -371,6 +442,8 @@ function BaseObject:AddPromise(prom: Promise): Promise
 	self[KEY_JANITOR]:AddPromise(prom)
 	return prom
 end
+
+-- Alias for :AddPromise(). Provided for compatibility with maid-style APIs.
 BaseObject.GivePromise = BaseObject.AddPromise
 
 --[=[
@@ -421,8 +494,11 @@ end
 
 --[=[
 	Fires the signal with the given name, if it exists.
-	Equivalent to calling `:GetSignal(signalName):Fire(...)` except this does not require
-	the signal to exist first.
+	
+	:::info deferred signals
+	If the BaseObject's SignalBehavior is not set to Immediate, signals will be fired deferred.
+	:::
+
 	@param signalName string -- The name of the signal to fire
 	@param ... any -- Arguments to pass to the signal
 
@@ -440,7 +516,11 @@ end
 function BaseObject:FireSignal(signalName: string, ...)
 	if self[KEY_SIGNALS] and typeof(self[KEY_SIGNALS][signalName]) == "table" then
 		local signal = self[KEY_SIGNALS][signalName] :: Signal
-		signal:Fire(...)
+		if self.SignalBehavior :: any == Enum.SignalBehavior.Immediate then
+			signal:Fire(...)
+		else
+			signal:FireDeferred(...)
+		end	
 	end
 end
 
@@ -448,6 +528,10 @@ end
 	Marks a signal with the given name as registered. Does not actually
 	build a new signal, it sets the index to a SignalMarker to identify
 	it as registered so that it can be fetched later.
+
+	This is mainly here to just enforce good patterns with registering
+	signals before fetching them.
+
 	@param signalName string -- Name of signal to register
 ]=]
 function BaseObject:RegisterSignal(signalName: string)
@@ -488,17 +572,18 @@ end
 	@return Signal
 ]=]
 function BaseObject:GetSignal(signalName: string): Signal
-	local sigtbl = (self :: any)[KEY_SIGNALS]
-
 	-- Register signal if it doesn't exist
-	if not sigtbl or not sigtbl[signalName] then
+	if not self[KEY_SIGNALS] or not (self[KEY_SIGNALS] :: any)[signalName] then
 		warn(`Signal name '{signalName}' not pre-registered. Please Register before fetching on {self.ClassName}`)
 		self:RegisterSignal(signalName)
 	end
 
+	-- Get sigtbl after potential RegisterSignal call
+	local sigtbl = (self :: any)[KEY_SIGNALS]
+
 	-- Replace SignalMarker with a new Signal
 	if sigtbl[signalName] == SIGNAL_MARKER then
-		sigtbl[signalName] = self:AddTask(Signal.new())
+		sigtbl[signalName] = Signal.new()
 	end
 
 	return sigtbl[signalName] :: Signal
@@ -507,14 +592,38 @@ end
 --[=[
 	Connects a function to a signal with the given name. Creates the signal JIT.
 	Shorthand for `:GetSignal(signalName):Connect(func)`.
+	@param signalName string -- The name of the signal to connect to
+	@param func (...any) -> () -- The function to connect
+	@return Connection -- The connection object
 ]=]
-function BaseObject:ConnectSignal(signalName: string, func: (...any) -> ())
+function BaseObject:ConnectSignal(signalName: string, func: (...any) -> ()): Connection
 	return self:GetSignal(signalName):Connect(func)
 end
 
 --[=[
+	Returns a signal that fires when the object is being destroyed. Creates the signal JIT.
+	
+	The Destroying signal is unique in that it always fires immediately instead of deferred.
+
+	```lua
+	local obj = BaseObject.new()
+
+	obj:GetDestroyingSignal():Connect(function()
+		print("Object Destroying!")
+	end)
+
+	obj:Destroy() -- Prints "Object Destroying!"
+	```
+]=]
+function BaseObject:GetDestroyingSignal(): Signal
+	if not self:HasSignal(DESTROYING_SIGNAL_NAME) then
+		self:RegisterSignal(DESTROYING_SIGNAL_NAME)
+	end
+	return self:GetSignal(DESTROYING_SIGNAL_NAME)
+end
+
+--[=[
 	Returns a signal that fires when the object is destroyed. Creates the signal JIT.
-	Kept for backwards compatibility.
 
 	```lua
 	local obj = BaseObject.new()
@@ -523,15 +632,12 @@ end
 		print("Object Destroyed!")
 	end)
 
-	obj:Destroy() -- Prints "Object Destroyed!"
+	obj:Destroy()
 	```
 ]=]
 function BaseObject:GetDestroyedSignal(): Signal
 	if not self:HasSignal(DESTROYED_SIGNAL_NAME) then
 		self:RegisterSignal(DESTROYED_SIGNAL_NAME)
-		-- if not self.Destroyed then
-		-- 	self.Destroyed = self:GetSignal(DESTROYED_SIGNAL_NAME)
-		-- end
 	end
 	return self:GetSignal(DESTROYED_SIGNAL_NAME)
 end
@@ -567,29 +673,55 @@ end
 	```
 ]=]
 function BaseObject:BindToInstance(obj: Instance, destroyOnNilParent: boolean?): () -> ()
+	-- Validate that obj is an Instance with required signals
+	assert(typeof(obj) == "Instance", "Argument 1 must be an Instance")
+	
 	local connections = {}
+	local janitorKeys = {}
+	local isCleanedUp = false
+	
 	local function CleanConnections()
+		if isCleanedUp then
+			return
+		end
+		isCleanedUp = true
+		
+		-- Disconnect raw connections
 		for _, conn in ipairs(connections) do
-			conn:Disconnect()
+			if typeof(conn) == "RBXScriptConnection" then
+				conn:Disconnect()
+			end
+		end
+		
+		-- Remove tasks from janitor
+		for _, key in ipairs(janitorKeys) do
+			self:RemoveTaskNoClean(key)
 		end
 	end
 
+	-- Connection 1: When BaseObject is destroyed, destroy the Instance
 	table.insert(connections, self:GetDestroyedSignal():Once(function()
 		pcall(obj.Destroy, obj)
 	end))
 
-	table.insert(connections, self:AddTask(obj.Destroying:Once(function()
-		if not self.IsDestroyed then
+	-- Connection 2: When Instance is destroyed, destroy the BaseObject
+	local key1 = {}
+	table.insert(janitorKeys, key1)
+	self:AddTask(obj.Destroying:Once(function()
+		if not self.Destroyed and not self.IsDestroyed then
 			self:Destroy()
 		end
-	end)))
+	end), true, key1)
 
+	-- Connection 3: When Instance parent is nil'd, destroy the BaseObject
 	if destroyOnNilParent then
-		table.insert(connections, self:AddTask(obj.AncestryChanged:Connect(function(_, parent)
+		local key2 = {}
+		table.insert(janitorKeys, key2)
+		self:AddTask(obj.AncestryChanged:Connect(function(_, parent)
 			if not parent then
 				self:Destroy()
 			end
-		end)))
+		end), true, key2)
 	end
 	
 	return CleanConnections

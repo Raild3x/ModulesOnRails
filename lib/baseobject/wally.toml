@@ -2,7 +2,7 @@
 name = "raild3x/baseobject"
 description = "A base class for creating objects with a lifecycle, janitor, and event system."
 authors = ["Logan Hunt (Raildex)"]
-version = "0.1.0"
+version = "0.2.1"
 license = "MIT"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
@@ -16,5 +16,5 @@ docsLink = "BaseObject"
 [dependencies]
 Promise = "evaera/promise@^4.0.0"
 Janitor = "howmanysmall/janitor@^1.16.0"
-Signal = "lucasmzreal/fastsignal@^10.2.1"
+Signal = "howmanysmall/better-signal@2.1.0"
 Symbol = "sleitnick/symbol@^2.0.1"
