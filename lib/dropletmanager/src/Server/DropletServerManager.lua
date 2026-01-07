@@ -14,6 +14,7 @@ local Packages = script.Parent.Parent.Parent
 local DropletUtil = require(script.Parent.Parent.DropletUtil)
 local ProbabilityDistributor = require(Packages.ProbabilityDistributor)
 local BaseObject = require(Packages.BaseObject)
+local RailUtil = require(Packages.RailUtil)
 local NetWire = require(Packages.NetWire)
 
 type table = {[any]: any}
@@ -126,7 +127,7 @@ function DropletServerManager.new()
     self._DropletStorage = {} -- [seed] = {}
 
     if RunService:IsRunning() then
-        self._Replicator = NetWire.Server("DropletService")
+        self._Replicator = NetWire.Server("DropletServerManager")
         self._Replicator.DropletCreated = NetWire.createEvent()
         self._Replicator.DropletClaimed = NetWire.createEvent()
         self._Replicator.DropletCollected = NetWire.createEvent()
@@ -151,6 +152,7 @@ function DropletServerManager.new()
 
     return self
 end
+DropletServerManager.new = DropletServerManager.getInstance -- backward compatibility alias 
 
 --[=[
     @private
@@ -323,13 +325,17 @@ function DropletServerManager:Claim(collector: Player, seed: number, dropletNumb
     assert(collector and collector:IsA("Player"), "Invalid collector passed when attempting to claim droplet")
     assert(typeof(seed) == "number", `Invalid Seed passed when attempting to collect droplet: {tostring(seed)}, must be a number`)
     local serverData = self:GetDropletServerData(seed)
-    if not serverData then return false end
+    if not serverData then 
+        warn(`Droplet request with seed '{seed}' does not exist when attempting to claim.`)
+        return false 
+    end
 
     --// If no droplet number then collect all droplets
     if typeof(dropletNumber) ~= "number" then
         if not dropletNumber then
             local fullSuccess = true
-            for key in pairs(serverData.DropletData) do
+            local keys = RailUtil.Table.Keys(serverData.DropletData)
+            for _, key in ipairs(keys) do
                 local claimSuccess = self:Claim(collector, seed, key)
                 fullSuccess = fullSuccess and claimSuccess
             end
@@ -354,9 +360,7 @@ function DropletServerManager:Claim(collector: Player, seed: number, dropletNumb
                 #dropletData.ClaimedBy > 0 else table.find(dropletData.ClaimedBy, collector) ~= nil
 
         if alreadyClaimed then
-            if self._DEBUG then
-                warn(`Player '{collector.Name}' has already claimed Droplet [{seed}][{dropletNumber}]`)
-            end
+            warn(`Player '{collector.Name}' has already claimed Droplet [{seed}][{dropletNumber}]`)
             return false
         end
     end
@@ -372,7 +376,9 @@ function DropletServerManager:Claim(collector: Player, seed: number, dropletNumb
         error("Invalid CollectorMode: " .. tostring(collectorMode))
     end
 
-    -- print(`{collector.Name} claimed Droplet [{seed}][{dropletNumber}]`)
+    if self._DEBUG then
+        print(`{collector.Name} claimed Droplet [{seed}][{dropletNumber}]`)
+    end
 
     return true
 end
@@ -421,9 +427,7 @@ function DropletServerManager:Collect(collector: Player, seed: number, dropletNu
             #dropletData.CollectedBy > 0 else table.find(dropletData.CollectedBy, collector) ~= nil
 
         if alreadyCollected then
-            if self._DEBUG then
-                warn(`Player '{collector.Name}' has already collected droplet with seed '{seed}' and droplet number '{dropletNumber}'`)
-            end
+            warn(`Player '{collector.Name}' has already collected droplet with seed '{seed}' and droplet number '{dropletNumber}'`)
             return false
         end
     end
@@ -446,7 +450,9 @@ function DropletServerManager:Collect(collector: Player, seed: number, dropletNu
         error("Invalid CollectorMode: " .. tostring(collectorMode))
     end
 
-    -- print(`{collector.Name} collected Droplet [{seed}][{dropletNumber}]`)
+    if self._DEBUG then
+        print(`{collector.Name} collected Droplet [{seed}][{dropletNumber}]`)
+    end
 
     do -- Check to see if all droplets have been collected
         local isAllCollected = true

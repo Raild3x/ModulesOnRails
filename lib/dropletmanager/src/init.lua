@@ -54,15 +54,17 @@
             Part.Parent = Model
             Model.PrimaryPart = Part
 
-            droplet:AttachModel(Model)
+            -- Weld our model to the droplet
+            droplet:Attach(Model)
 
+            -- Create metadata to be used in in the render functions
             local SetupData = {
                 Direction = if math.random() > 0.5 then 1 else -1 end;
             }
-            return CustomData
+            return SetupData
         end;
 
-        -- Ran when the droplet is within render range of the LocalPlayer's Camera
+        -- Ran when the droplet is within render range/view of the LocalPlayer's Camera
         OnRenderUpdate = function(droplet: Droplet, rendertimeElapsed: number): CFrame?
             local SetupData = droplet:GetSetupData()
             local OffsetCFrame = CFrame.new()

@@ -15,11 +15,13 @@ end
 --// Imports //--
 local Packages = script.Parent.Parent.Parent
 local DropletUtil = require(script.Parent.Parent.DropletUtil)
+local Promise = require(Packages.Promise)
 local RailUtil = require(Packages.RailUtil)
 local SuperClass = require(Packages.BaseObject)
+local DropletsFolder = require(script.Parent.DropletsFolder)
 
 --// Constants //--
-local PLAYER_MASS = 150 -- 1_000_000
+local PLAYER_MASS = 150
 local MAXIMUM_DISPLAY_COLLECT_DISTANCE = 80 -- The furthest distance a player can be from a droplet for us to show the collection visual
 
 --// Types //--
@@ -30,20 +32,17 @@ local WorldAlignAttachment = Instance.new("Attachment")
 WorldAlignAttachment.Name = "DropletWorldAlignAttachment"
 WorldAlignAttachment.Parent = workspace.Terrain
 
-local CharactersList = {}
-
 local ResourceHeightRayParams = RaycastParams.new()
 ResourceHeightRayParams.FilterType = Enum.RaycastFilterType.Exclude
 ResourceHeightRayParams.CollisionGroup = DropletUtil.DROPLET_COLLISION_GROUP
-ResourceHeightRayParams.FilterDescendantsInstances = {}
+ResourceHeightRayParams.FilterDescendantsInstances = {DropletsFolder}
 
 RailUtil.Player.forEachCharacter(function(Character, janitor)
-    table.insert(CharactersList, Character)
-    ResourceHeightRayParams.FilterDescendantsInstances = CharactersList
+    ResourceHeightRayParams:AddToFilter(Character)
 
     janitor:Add(function()
-        RailUtil.Table.SwapRemoveFirstValue(CharactersList, Character)
-        ResourceHeightRayParams.FilterDescendantsInstances = CharactersList
+        RailUtil.Table.SwapRemoveFirstValue(ResourceHeightRayParams.FilterDescendantsInstances, Character)
+        ResourceHeightRayParams.FilterDescendantsInstances = table.clone(ResourceHeightRayParams.FilterDescendantsInstances)
     end)
 end)
 
@@ -198,8 +197,13 @@ function Droplet.new(config: {
         -- warn(`Droplet expired: [{config.NetworkPacket.Seed}][{config.Id}]`)
         self._TimingOut = true
         self:FireSignal("Timedout")
-        TryCall(RTData.OnDropletTimeout, self)
-        self:Destroy()
+        Promise.new(function(resolve)
+            local RTData = self:GetResourceTypeData()
+            TryCall(RTData.OnDropletTimeoutBegin, self)
+            resolve()
+        end):timeout(60):finally(function()
+            self:Destroy()
+        end)
     end), nil, "LifeTimeThread")
 
     --------------------------------
@@ -241,28 +245,28 @@ end
 --------------------------------------------------------------------------------
 
 --[=[
-    
+    Fetches the end-user defined value of the droplet.
 ]=]
 function Droplet:GetValue(): any
     return self._Value
 end
 
 --[=[
-    
+    Fetches the metadata for the droplet if any has been given
 ]=]
 function Droplet:GetMetadata(): any?
     return self._NetworkPacket.Metadata
 end
 
 --[=[
-    
+    Fetches the resource type data for the droplet.
 ]=]
 function Droplet:GetResourceTypeData(): ResourceTypeData
     return self._ResourceTypeData
 end
 
 --[=[
-    
+    Fetches the position of the droplet.
 ]=]
 function Droplet:GetPosition(): Vector3
     return self:GetPivot().Position;
@@ -270,13 +274,14 @@ end
 
 --[=[
     @private
+    Fetches the pivot CFrame of the droplet.
 ]=]
 function Droplet:GetPivot(): CFrame
     return self._Model:GetPivot()
 end
 
 --[=[
-    
+    Fetches the main actor model of the droplet.
 ]=]
 function Droplet:GetModel(): Actor
     return self._Model;
@@ -312,32 +317,58 @@ end
 --------------------------------------------------------------------------------
 
 --[=[
-    Attaches a Model or Part to the droplet. Use this to add your visuals to the droplet.
+    Welds a Model or Part to the droplet. Use this to add your visuals to the droplet.
+    Provides optional C0 and C1 for the Weld created between the droplet and the object.
+    @param object Model | BasePart -- The object to attach to the droplet.
+    @param C0 CFrame? -- Optional C0 for the Weld.
+    @param C1 CFrame? -- Optional C1 for the Weld.
 ]=]
-function Droplet:AttachModel(object: Model | BasePart)
+function Droplet:Attach(object: Model | BasePart, C0: CFrame?, C1: CFrame?): Weld
+    local function setupPart(part: BasePart)
+        part.Anchored = false
+        part.Massless = true
+        part.CanCollide = false
+        part.CanTouch = false
+        part.CanQuery = false
+        part.CollisionGroup = DropletUtil.DROPLET_COLLISION_GROUP
+    end
+
     local CorePart
     if object:IsA("BasePart") then
         CorePart = object
+        setupPart(object)
     else
         CorePart = object.PrimaryPart
-        assert(CorePart, "Model must have a PrimaryPart")
+        assert(CorePart, "Provided Model must have a PrimaryPart")
+        for _, part in object:QueryDescendants("BasePart") do
+            setupPart(part)
+        end
     end
 
-    (object :: any).Parent = self:GetModel()
+    (object :: PVInstance).Parent = self:GetModel()
 
     local Weld = Instance.new("Weld")
     Weld.Part0 = self:GetModel():FindFirstChild("AttachmentPart")
     Weld.Part1 = CorePart
-    Weld.C0 = CFrame.new(0, 0, 0)
+    Weld.C0 = C0 or CFrame.new(0, 0, 0)
+    Weld.C1 = C1 or CFrame.new(0, 0, 0)
     Weld.Parent = CorePart
 
     return Weld
 end
+Droplet.AttachModel = Droplet.Attach -- Alias
 
 --[=[
-    
+    Collects the droplet for the specified player.
+    Lets the server know that the player has collected this droplet.
+    Destroys the droplet after collection.
 ]=]
 function Droplet:Collect(playerWhoCollected: Player)
+    if self._Collected then 
+        warn("Tried to collect but is already collected!", self._Collected) 
+        return 
+    end
+    self._Collected = playerWhoCollected
     self:RemoveTask("MagnetizationThread")
 
     local RTData = self:GetResourceTypeData()
@@ -354,7 +385,10 @@ end
     
 ]=]
 function Droplet:Claim(playerWhoClaimed: Player)
-    if self:IsTimingOut() then return warn("Tried to claim but is already Timing Out!") end
+    if self:IsTimingOut() then 
+        warn("Tried to claim but is already Timing Out!") 
+        return 
+    end
     self:RemoveTask("LifeTimeThread")
 
     self:Magnetize(playerWhoClaimed)
@@ -365,12 +399,11 @@ end
 
 --[=[
     @private
+    Starts the magnetization process for the droplet.
+    Called automatically when a player enters the droplet's collection radius.
 ]=]
 function Droplet:Magnetize(playerWhoCollected: Player)
     self:RemoveTask("LifeTimeThread")
-
-    local PlayerExists = playerWhoCollected and playerWhoCollected.Parent == Players
-    local Character = PlayerExists and playerWhoCollected.Character
 
     local GRAVITY = Vector3.new(0, -1, 0)
 
@@ -380,26 +413,16 @@ function Droplet:Magnetize(playerWhoCollected: Player)
         assert(CorePart, "Model must have a PrimaryPart")
         CorePart.BrickColor = BrickColor.new("Bright red")
 
-		-- Avoid raycasting to include the visual model of the droplet itself in case it's a [Model].
-		ResourceHeightRayParams:AddToFilter(Model)
-		self:AddTask(function()
-			local filteredInstances = ResourceHeightRayParams.FilterDescendantsInstances
-			local entryIndex = table.find(filteredInstances, Model)
-			if entryIndex then
-				table.remove(filteredInstances, entryIndex)
-				ResourceHeightRayParams.FilterDescendantsInstances = filteredInstances
-			end
-		end)
-
         CorePart.Anchored = true
         CorePart.CanCollide = false
+        CorePart.CanQuery = false
 
         local MagnetizationStartTime = os.clock()
 
         local Velocity = CorePart.AssemblyLinearVelocity * Vector3.new(1,0.5,1)
         local function Update(dt: number)
             -- Handle situation where the player its magnetizing towards leaves the game/dies
-            if playerWhoCollected.Parent ~= Players or not playerWhoCollected.Character then
+            if playerWhoCollected.Parent ~= Players or not playerWhoCollected.Character or not playerWhoCollected.Character.PrimaryPart then
                 self:Collect(playerWhoCollected)
                 return
             end
@@ -422,6 +445,7 @@ function Droplet:Magnetize(playerWhoCollected: Player)
             Velocity = truncate(Velocity + Steering * dt, self._MaxVelocity) :: Vector3
             local g = GRAVITY * dt
             if currentPos.Y < targetPos.Y then
+                -- Adjust gravity to be less when below the target to prevent overshooting
                 g /= math.max(1, targetPos.Y - currentPos.Y)
             end
             Velocity += g
@@ -468,6 +492,9 @@ function Droplet:Magnetize(playerWhoCollected: Player)
 
         self:AddTask(RunService.PreAnimation:Connect(Update), nil, "MagnetizationThread")
     end
+
+    local PlayerExists = playerWhoCollected and playerWhoCollected.Parent == Players
+    local Character = PlayerExists and playerWhoCollected.Character
     
     --Check if its a valid player and if the player is within a reasonable distance (like if the player is >50 studs away)
     if Character and (Character:GetPivot().Position - self:GetPosition()).Magnitude < MAXIMUM_DISPLAY_COLLECT_DISTANCE then
@@ -500,6 +527,6 @@ end
     @within Droplet
     @type Droplet Droplet
 ]=]
-export type Droplet = typeof(Droplet.new({} :: any))
+export type Droplet = typeof(Droplet)
 
 return Droplet

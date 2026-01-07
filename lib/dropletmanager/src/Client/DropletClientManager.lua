@@ -17,22 +17,22 @@ local RailUtil = require(Packages.RailUtil)
 local OctoTree = require(Packages.OctoTree)
 local NetWire = require(Packages.NetWire)
 local SuperClass = require(Packages.BaseObject)
+local DropletsFolder = require(script.Parent.DropletsFolder)
 
 --// Types //--
-type Droplet = Droplet.Droplet
 type ResourceTypeData = DropletUtil.ResourceTypeData
-type DropletNode = any --OctoTree.Node<Droplet> -- TODO: Add OctoTree types
+type Droplet = Droplet.Droplet
 type DropletOctree = OctoTree.Octree<Droplet>
+type DropletNode = {
+	Position: Vector3,
+	Object: Droplet,
+}
 
 --// Constants //--
 local DEFAULT_COLLECTION_RADIUS = 15
 
 local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
-
-local DropletsFolder = Instance.new("Folder")
-DropletsFolder.Name = "Droplets"
-DropletsFolder.Parent = workspace
 
 local function CalculateEjectionVelocity(hForce, vForce, NumGen: Random): Vector3
 
@@ -83,7 +83,7 @@ end
     Creates a new DropletClientManager if one has not already been made,
     returns the existing one if one already exists.
 ]=]
-function DropletClientManager.new()
+function DropletClientManager.getInstance()
     if SINGLETON then return SINGLETON end
     local self = setmetatable(SuperClass.new(), DropletClientManager)
     SINGLETON = self
@@ -92,7 +92,7 @@ function DropletClientManager.new()
     self._ResourceTypeDataMap = {}
 
     if RunService:IsRunning() then
-        self._Replicator = NetWire.Client("DropletService")
+        self._Replicator = NetWire.Client("DropletServerManager")
 
         self._Replicator.DropletCreated:Connect(function(...)
             self:_OnCreateDroplet(...)
@@ -107,18 +107,18 @@ function DropletClientManager.new()
 
     self._RenderOctoTree = OctoTree.new() :: DropletOctree
     self._MagnetOctoTree = OctoTree.new() :: DropletOctree
-    self._CollectionTracker = setmetatable({}, {__mode = "k"})
+    -- Tracks droplets that have been marked for collection. Uses a weak reference to prevent memory leaks. The octo trees manage the hard references.
+    self._CollectionTracker = setmetatable({} :: {[Droplet]: boolean}, {__mode = "k"})
 
     self._RenderRadius = 100
 
     self:AddTask(RunService.PreSimulation:Connect(function(dt: number)
         self:_Update(dt)
     end))
-
-    -- self:RegisterResourceType("Test", Import("TestResourceTypeData"))
     
     return self
 end
+DropletClientManager.new = DropletClientManager.getInstance -- backward compatibility alias
 
 
 --------------------------------------------------------------------------------
@@ -164,13 +164,14 @@ end
 function DropletClientManager:_Update(dt: number)
     dt = dt or 0
 
-    local CollectionTracker = self._CollectionTracker
+    local CollectionTracker: {[Droplet]: boolean} = self._CollectionTracker
     
     debug.profilebegin("Droplet Collection Check")
     if LocalPlayer.Character and LocalPlayer.Character.PrimaryPart then
         local PlayerPos = LocalPlayer.Character:GetPivot().Position
 
-        for node: DropletNode in self._MagnetOctoTree:ForEachInRadius(PlayerPos, self:GetCollectionRadius()) do
+        local octree = self._MagnetOctoTree :: DropletOctree
+        for node: DropletNode in octree:ForEachInRadius(PlayerPos, self:GetCollectionRadius()) do
             local droplet = node.Object
             if not CollectionTracker[droplet] then
                 CollectionTracker[droplet] = true
@@ -200,7 +201,7 @@ end
     Marks a droplet to be checked for collection
 ]=]
 function DropletClientManager:_MarkForCollection(droplet: Droplet)
-    local octree = self._MagnetOctoTree
+    local octree = self._MagnetOctoTree :: DropletOctree
     local node = octree:CreateNode(droplet:GetPosition(), droplet)
 
     droplet:GetSignal("PositionChanged"):Connect(function(newPos)
@@ -253,7 +254,7 @@ function DropletClientManager:_OnCreateDroplet(networkPacket: DropletUtil.Drople
     local NumGen = Random.new(Seed)
     local EjectionDuration = DropletUtil.parse(networkPacket.EjectionDuration, NumGen)
 
-    for i, rawData in pairs(DropletUtil.calculateDropletValues(Value, Count, Seed, LifeTime)) do
+    for i, rawData in DropletUtil.calculateDropletValues(Value, Count, Seed, LifeTime) do
         local droplet = Droplet.new({
             Id = i,
             NetworkPacket = networkPacket,
@@ -265,7 +266,7 @@ function DropletClientManager:_OnCreateDroplet(networkPacket: DropletUtil.Drople
             DropletClientManager = self,
         })
 
-        droplet:GetDestroyedSignal():Once(function()
+        droplet:AddTask(function()
             -- print(`Droplet [{Seed}][{i}] destroyed`)
             Droplets[i] = nil
         end)
