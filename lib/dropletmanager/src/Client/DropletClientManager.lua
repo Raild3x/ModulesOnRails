@@ -13,9 +13,10 @@ local Players = game:GetService("Players")
 local Packages = script.Parent.Parent.Parent
 local DropletUtil = require(script.Parent.Parent.DropletUtil)
 local Droplet = require(script.Parent.Droplet)
+local Heap = require(Packages.Heap)
+local NetWire = require(Packages.NetWire)
 local RailUtil = require(Packages.RailUtil)
 local OctoTree = require(Packages.OctoTree)
-local NetWire = require(Packages.NetWire)
 local SuperClass = require(Packages.BaseObject)
 local DropletsFolder = require(script.Parent.DropletsFolder)
 
@@ -108,6 +109,7 @@ function DropletClientManager.getInstance()
     self._RenderOctoTree = OctoTree.new() :: DropletOctree
     self._MagnetOctoTree = OctoTree.new() :: DropletOctree
     -- Tracks droplets that have been marked for collection. Uses a weak reference to prevent memory leaks. The octo trees manage the hard references.
+    self._DistanceHeap = Heap.max()
     self._CollectionTracker = setmetatable({} :: {[Droplet]: boolean}, {__mode = "k"})
 
     self._RenderRadius = 100
@@ -170,12 +172,25 @@ function DropletClientManager:_Update(dt: number)
     if LocalPlayer.Character and LocalPlayer.Character.PrimaryPart then
         local PlayerPos = LocalPlayer.Character:GetPivot().Position
 
+        -- Use the maximum magnetization radius from the heap to determine search radius
+        local maxMagnetizationRadius = self._DistanceHeap:Peek() or DEFAULT_COLLECTION_RADIUS
+        
         local octree = self._MagnetOctoTree :: DropletOctree
-        for node: DropletNode in octree:ForEachInRadius(PlayerPos, self:GetCollectionRadius()) do
+        for node: DropletNode in octree:ForEachInRadius(PlayerPos, maxMagnetizationRadius) do
             local droplet = node.Object
-            if not CollectionTracker[droplet] then
-                CollectionTracker[droplet] = true
-                self:_RequestClaimDroplet(droplet)
+            if CollectionTracker[droplet] then
+                continue
+            end
+            local dropletPos = node.Position
+            local distance = (PlayerPos - dropletPos).Magnitude
+            
+            -- Check if within this droplet's specific magnetization radius
+            if distance <= droplet:GetMagnetizationRadius() then
+                -- Check if it must settle before collecting
+                if not droplet:MustSettleBeforeCollect() or droplet:IsSettled() then
+                    CollectionTracker[droplet] = true
+                    self:_RequestClaimDroplet(droplet)
+                end
             end
         end
     end
@@ -208,7 +223,14 @@ function DropletClientManager:_MarkForCollection(droplet: Droplet)
         octree:ChangeNodePosition(node, newPos)
     end)
 
-    local function Remove() octree:RemoveNode(node) end
+    -- Track magnetization radius in heap for dynamic radius checking
+    local magnetizationRadius = droplet:GetMagnetizationRadius()
+    self._DistanceHeap:Push(magnetizationRadius)
+
+    local function Remove() 
+        octree:RemoveNode(node)
+        self._DistanceHeap:RemoveFirstOccurrence(magnetizationRadius)
+    end
     droplet:GetSignal("Timedout"):Once(Remove)
     droplet:GetDestroyedSignal():Once(Remove)
 end

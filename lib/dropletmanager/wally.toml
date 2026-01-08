@@ -16,6 +16,7 @@ docsLink = "DropletManager"
 unreleased = true
 
 [dependencies]
+Heap = "raild3x/heap@2.1.3"
 Promise = "evaera/promise@^4.0.0"
 OctoTree = "sleitnick/octo-tree@0.3.1"
 NetWire = "raild3x/netwire@^0"

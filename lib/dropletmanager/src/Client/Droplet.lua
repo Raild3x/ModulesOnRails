@@ -178,9 +178,12 @@ function Droplet.new(config: {
 
     local DEFAULTS = self._ResourceTypeData.Defaults or {}
     self._CollectionRadius = DEFAULTS.CollectionRadius or 1.5
+    self._MagnetizationRadius = DEFAULTS.MagnetizationRadius or 15
+    self._MustSettleBeforeCollect = if DEFAULTS.MustSettleBeforeCollect ~= nil then DEFAULTS.MustSettleBeforeCollect else true
     self._MaxVelocity = DEFAULTS.MaxVelocity or 150
     self._MaxForce = DEFAULTS.MaxForce or math.huge
     self._Mass = DEFAULTS.Mass or 1
+    self._IsSettled = false
 
     self._Model = GenerateNewActor()
     self._Weld = self._Model.Weld
@@ -232,8 +235,11 @@ function Droplet.new(config: {
             if settledFor >= 0.5 then
                 CorePart.Anchored = true
                 CorePart.CanCollide = false
+                self._IsSettled = true
                 self:RemoveTask("SettleCheck")
             end
+        else
+            settledFor = 0
         end
     end), nil, "SettleCheck")
 
@@ -311,6 +317,27 @@ function Droplet:IsTimingOut(): boolean
     return self._TimingOut == true;
 end
 
+--[=[
+    Returns whether or not the droplet has settled (come to a complete stop).
+]=]
+function Droplet:IsSettled(): boolean
+    return self._IsSettled == true
+end
+
+--[=[
+    Returns the magnetization radius for this droplet.
+    This is the distance from a player at which the droplet will begin moving towards them.
+]=]
+function Droplet:GetMagnetizationRadius(): number
+    return self._MagnetizationRadius or 15
+end
+
+--[=[
+    Returns whether this droplet must settle before it can be collected.
+]=]
+function Droplet:MustSettleBeforeCollect(): boolean
+    return self._MustSettleBeforeCollect == true
+end
 
 --------------------------------------------------------------------------------
     --// Methods //--

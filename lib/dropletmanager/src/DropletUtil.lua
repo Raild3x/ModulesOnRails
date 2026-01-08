@@ -96,8 +96,12 @@ type NumOrRangeOrWeightedArray = NumOrRange | WeightedArray<NumOrRange>
 
     - `[Defaults]` is a table of default values for the droplet. This can be left empty.
     The values in this table are used to fill in any missing values in the ResourceSpawnData
-    when a droplet is spawned as well as overriding certain behaviors internall for things
+    when a droplet is spawned as well as overriding certain behaviors internally for things
     like magnetization.
+    
+    - `CollectionRadius` - Distance from the player's center that the droplet must be to be collected
+    - `MagnetizationRadius` - Distance from the player at which the droplet starts moving towards them
+    - `MustSettleBeforeCollect` - If true, droplet must come to a complete stop before it can be claimed
 
     - `[SetupDroplet]` is called when a new droplet is created. Use this to setup your visuals and
     any variables you need to keep track of. All parts within this should be
@@ -134,6 +138,8 @@ export type ResourceTypeData = {
         MaxForce: number?,
         MaxVelocity: number?,
         CollectionRadius: number?,
+        MagnetizationRadius: number?,
+        MustSettleBeforeCollect: boolean?,
 
         --CalculateAttraction: (droplet: Droplet, player: Player) -> Vector3?,
     };
