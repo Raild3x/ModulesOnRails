@@ -7,13 +7,11 @@
 --// Services //--
 local PhysicsService = game:GetService("PhysicsService")
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 
 --// Imports //--
 local Packages = script.Parent.Parent.Parent
 local DropletUtil = require(script.Parent.Parent.DropletUtil)
 local ProbabilityDistributor = require(Packages.ProbabilityDistributor)
-local BaseObject = require(Packages.BaseObject)
 local RailUtil = require(Packages.RailUtil)
 local NetWire = require(Packages.NetWire)
 
@@ -28,7 +26,6 @@ type ResourceSpawnData = DropletUtil.ResourceSpawnData
 type ResourceTypeData = DropletUtil.ResourceTypeData
 
 --// Constants //--
-local SuperClass = BaseObject
 local DropletEnums = DropletUtil.Enums
 
 local DEFAULT_COLLECTOR_MODE = DropletEnums.CollectorMode.MultiCollector
@@ -95,111 +92,54 @@ end
 local ParseNRWT = DropletUtil.parse
 
 --------------------------------------------------------------------------------
---// CLASS //--
+--// MODULE STATE //--
 --------------------------------------------------------------------------------
+local DEBUG = false
+local DropletServerManager = {}
 
-local SINGLETON
+local ResourceTypeDataMap: {[string]: ResourceTypeData} = {}
+local DropletStorage: {[number]: DropletUtil.DropletServerCacheData} = {}
 
-local DropletServerManager = setmetatable({}, SuperClass)
-DropletServerManager.ClassName = "DropletServerManager"
-DropletServerManager.__index = DropletServerManager
+local Replicator = NetWire.Server("DropletServerManager")
+Replicator.DropletCreated = NetWire.createEvent()
+Replicator.DropletClaimed = NetWire.createEvent()
+Replicator.DropletCollected = NetWire.createEvent()
+Replicator.CollectionRadius = NetWire.createProperty(15)
 
-local function AssertIsSingleton(self)
-    assert(self == SINGLETON, "Called method on class instead of singleton")
-end
+Replicator.DropletClaimed:Connect(function(...)
+    (DropletServerManager :: any):Claim(...)
+end)
 
---[=[
-    @tag constructor
-    @return DropletServerManager
+Replicator.DropletCollected:Connect(function(...)
+    (DropletServerManager :: any):Collect(...)
+end)
 
-    Creates a new DropletServerManager if one has not already been made,
-    returns the existing one if one already exists.
-]=]
-function DropletServerManager.new()
-    if SINGLETON then return SINGLETON end
-    local self = setmetatable(SuperClass.new(), DropletServerManager)
-    SINGLETON = self
+PhysicsService:RegisterCollisionGroup(DropletUtil.DROPLET_COLLISION_GROUP)
+PhysicsService:CollisionGroupSetCollidable(DropletUtil.DROPLET_COLLISION_GROUP, DropletUtil.DROPLET_COLLISION_GROUP, false)
 
-    self._ActiveDroplets = {}
-
-    self._ResourceTypeDataMap = {}
-
-    self._DropletStorage = {} -- [seed] = {}
-
-    if RunService:IsRunning() then
-        self._Replicator = NetWire.Server("DropletServerManager")
-        self._Replicator.DropletCreated = NetWire.createEvent()
-        self._Replicator.DropletClaimed = NetWire.createEvent()
-        self._Replicator.DropletCollected = NetWire.createEvent()
-        self._Replicator.CollectionRadius = NetWire.createProperty(15)
-
-        self._Replicator.DropletClaimed:Connect(function(...: any)
-            self:Claim(...)
-        end)
-
-        self._Replicator.DropletCollected:Connect(function(...: any)
-            self:Collect(...)
-        end)
-    else
-        warn("Loaded DropletServerManager in edit mode")
-    end
-    
-
-    PhysicsService:RegisterCollisionGroup(DropletUtil.DROPLET_COLLISION_GROUP)
-    PhysicsService:CollisionGroupSetCollidable(DropletUtil.DROPLET_COLLISION_GROUP, DropletUtil.DROPLET_COLLISION_GROUP, false)
-
-    -- self:RegisterResourceType("Test", Import("TestResourceTypeData"))
-
-    return self
-end
-DropletServerManager.new = DropletServerManager.getInstance -- backward compatibility alias 
-
---[=[
-    @private
-]=]
-function DropletServerManager:Destroy()
-    error("Cannot destroy singleton")
-end
-
---[=[
-    @private
-    Generates a new unused seed
-]=]
-function DropletServerManager:_GenerateSeed(): number
-    local seed
-    repeat
-        seed = math.random(1, 2^16)
-    until not self._DropletStorage[seed]
-    return seed
-end
+--------------------------------------------------------------------------------
+--// MODULE //--
+--------------------------------------------------------------------------------
 
 --[=[
     Registers a new resource type. Attempting to register a resource type with the same name as an existing one will error.
+    Resource types define how droplets of that type behave on the server and client.
+    The same table must be registered to the same name on both server and client.
     ```lua
-    local data = Import("ExampleResourceTypeData") -- This is an Example file included in the package you can check out.
+    local data = require(path.to.ExampleResourceTypeData) -- There is an Example file included in the package you can check out.
     DropletServerManager:RegisterResourceType("Example", data)
     ```
 ]=]
 function DropletServerManager:RegisterResourceType(resourceType: string, data: ResourceTypeData)
-    AssertIsSingleton(self)
-    assert(not self._ResourceTypeDataMap[resourceType], `ResourceType already registered for: '{tostring(resourceType)}'`)
-    self._ResourceTypeDataMap[resourceType] = data
+    assert(not ResourceTypeDataMap[resourceType], `ResourceType already registered for: '{tostring(resourceType)}'`)
+    ResourceTypeDataMap[resourceType] = data
 end
 
 --[=[
-    Returns the resource type data for the given resource type.
+    Returns the data that was provided for a given registered resource type.
 ]=]
 function DropletServerManager:GetResourceTypeData(resourceType: string): ResourceTypeData?
-    AssertIsSingleton(self)
-    return self._ResourceTypeDataMap[resourceType]
-end
-
---[=[
-    @private
-    Returns the droplet server data for the given seed.
-]=]
-function DropletServerManager:GetDropletServerData(seed: number): DropletUtil.DropletServerCacheData?
-    return self._DropletStorage[seed] or warn("Droplet request with seed '" .. tostring(seed) .. "' does not exist")
+    return ResourceTypeDataMap[resourceType]
 end
 
 --[=[
@@ -227,7 +167,7 @@ end
             7,
             math.random(-Bounds,Bounds)
         );
-        CollectorMode = DropletUtil.Enums.CollectorMode.MultiCollector;
+        CollectorMode = "MultiCollector";
     })
     ```
 
@@ -235,8 +175,6 @@ end
     @return number -- The seed of the droplet request.
 ]=]
 function DropletServerManager:Spawn(data: ResourceSpawnData): number
-    AssertIsSingleton(self)
-
     local rtData = self:GetResourceTypeData(data.ResourceType)
     assert(rtData, `Resource type '{tostring(data.ResourceType)}' not registered`)
     local DEFAULTS = rtData.Defaults
@@ -295,19 +233,19 @@ function DropletServerManager:Spawn(data: ResourceSpawnData): number
         rawDropletData[i] = { ActualValue = rawData.RawValue }
     end
 
-    self._DropletStorage[Seed] = {
+    DropletStorage[Seed] = {
         NetworkPacket = NetworkPacket,
         DropletData = rawDropletData,
         PlayerTargets = ValidatePlayerTargets(data.PlayerTargets),
     } :: DropletUtil.DropletServerCacheData
 
-    self._Replicator.DropletCreated:FireFor(self._DropletStorage[Seed].PlayerTargets, NetworkPacket)
+    Replicator.DropletCreated:FireFor(DropletStorage[Seed].PlayerTargets, NetworkPacket)
 
     --// Schedule the droplet to be removed after its lifetime has expired //--
     local LifetimeUpperBound = if typeof(LifeTime) == "NumberRange" then LifeTime.Max else LifeTime
-    self:AddTask(task.delay(LifetimeUpperBound + 30, function()
-        self._DropletStorage[Seed] = nil
-    end), nil, Seed)
+    task.delay(LifetimeUpperBound + 30, function()
+        DropletStorage[Seed] = nil
+    end)
 
     return Seed
 end
@@ -320,8 +258,6 @@ end
     @return boolean -- Whether or not the claim was successful.
 ]=]
 function DropletServerManager:Claim(collector: Player, seed: number, dropletNumber: (number)?): boolean
-    AssertIsSingleton(self)
-
     assert(collector and collector:IsA("Player"), "Invalid collector passed when attempting to claim droplet")
     assert(typeof(seed) == "number", `Invalid Seed passed when attempting to collect droplet: {tostring(seed)}, must be a number`)
     local serverData = self:GetDropletServerData(seed)
@@ -336,7 +272,7 @@ function DropletServerManager:Claim(collector: Player, seed: number, dropletNumb
             local fullSuccess = true
             local keys = RailUtil.Table.Keys(serverData.DropletData)
             for _, key in ipairs(keys) do
-                local claimSuccess = self:Claim(collector, seed, key)
+                local claimSuccess = DropletServerManager:Claim(collector, seed, key)
                 fullSuccess = fullSuccess and claimSuccess
             end
             return fullSuccess
@@ -369,14 +305,14 @@ function DropletServerManager:Claim(collector: Player, seed: number, dropletNumb
     --// Handle collection //--
     table.insert(dropletData.ClaimedBy, collector)
     if collectorMode == DropletEnums.CollectorMode.SingleCollector then
-        self._Replicator.DropletClaimed:FireFor(serverData.PlayerTargets, collector, seed, dropletNumber)
+        Replicator.DropletClaimed:FireFor(serverData.PlayerTargets, collector, seed, dropletNumber)
     elseif collectorMode == DropletEnums.CollectorMode.MultiCollector then
-        self._Replicator.DropletClaimed:Fire(collector, collector, seed, dropletNumber)
+        Replicator.DropletClaimed:Fire(collector, collector, seed, dropletNumber)
     else
         error("Invalid CollectorMode: " .. tostring(collectorMode))
     end
 
-    if self._DEBUG then
+    if DEBUG then
         print(`{collector.Name} claimed Droplet [{seed}][{dropletNumber}]`)
     end
 
@@ -391,11 +327,9 @@ end
     @return boolean -- Whether or not the collection was successful.
 ]=]
 function DropletServerManager:Collect(collector: Player, seed: number, dropletNumber: (number)?): boolean
-    AssertIsSingleton(self)
-
     assert(collector and collector:IsA("Player"), "Invalid collector passed when attempting to claim droplet")
     assert(typeof(seed) == "number", `Invalid Seed passed when attempting to collect droplet: {tostring(seed)}, must be a number`)
-    local serverData = self:GetDropletServerData(seed)
+    local serverData = DropletServerManager:_GetDropletServerData(seed)
     if not serverData then return false end
 
     --// If no droplet number then collect all droplets
@@ -403,7 +337,7 @@ function DropletServerManager:Collect(collector: Player, seed: number, dropletNu
         if not dropletNumber then
             local fullSuccess = true
             for key in pairs(serverData.DropletData) do
-                local collectSuccess = self:Collect(collector, seed, key)
+                local collectSuccess = DropletServerManager:Collect(collector, seed, key)
                 fullSuccess = fullSuccess and collectSuccess
             end
             return fullSuccess
@@ -434,7 +368,7 @@ function DropletServerManager:Collect(collector: Player, seed: number, dropletNu
     
 
     --// Handle collection //--
-    local resourceTypeData = self:GetResourceTypeData(dropletInfo.ResourceType)
+    local resourceTypeData = DropletServerManager:GetResourceTypeData(dropletInfo.ResourceType)
     TryCall(resourceTypeData.OnServerCollect, collector, dropletData.ActualValue, dropletInfo.Metadata)
 
     if collectorMode == DropletEnums.CollectorMode.SingleCollector then
@@ -450,7 +384,7 @@ function DropletServerManager:Collect(collector: Player, seed: number, dropletNu
         error("Invalid CollectorMode: " .. tostring(collectorMode))
     end
 
-    if self._DEBUG then
+    if DEBUG then
         print(`{collector.Name} collected Droplet [{seed}][{dropletNumber}]`)
     end
 
@@ -463,7 +397,7 @@ function DropletServerManager:Collect(collector: Player, seed: number, dropletNu
             end
         end
         if isAllCollected then -- remove the droplet request
-            self._DropletStorage[seed] = nil
+            DropletStorage[seed] = nil
         end
     end
 
@@ -471,19 +405,23 @@ function DropletServerManager:Collect(collector: Player, seed: number, dropletNu
 end
 
 --[=[
-    Gets the collection radius for the given player.
+    @private
+    Generates a new unused seed
 ]=]
-function DropletServerManager:GetCollectionRadius(player: Player): number
-    return self._Replicator.CollectionRadius:GetFor(player)
+function DropletServerManager:_GenerateSeed(): number
+    local seed
+    repeat
+        seed = math.random(1, 2^16)
+    until not DropletStorage[seed]
+    return seed
 end
 
 --[=[
-    Sets the collection radius for the given player.
+    @private
+    Returns the droplet server data for the given seed.
 ]=]
-function DropletServerManager:SetCollectionRadius(player: Player, radius: number)
-    assert(typeof(radius) == "number" and radius >= 0, "Invalid radius given, must be a non-negative number")
-    self._Replicator.CollectionRadius:SetFor(player, radius)
+function DropletServerManager:_GetDropletServerData(seed: number): DropletUtil.DropletServerCacheData?
+    return DropletStorage[seed] or warn("Droplet request with seed '" .. tostring(seed) .. "' does not exist")
 end
-
 
 return DropletServerManager

@@ -145,23 +145,26 @@ export type ResourceTypeData = DropletUtil.ResourceTypeData
 ]=]
 export type ResourceSpawnData = DropletUtil.ResourceSpawnData
 
+--------------------------------------------------------------------------------
+    --// Module //--
+--------------------------------------------------------------------------------
 local DropletManager = {}
 
 --[=[
     @within DropletManager
     @prop Server DropletServerManager
     @server
-    Accessing this will automatically create a new DropletServerManager if one does not exist.
 ]=]
-DropletManager.Server = nil :: typeof(require(script.Server.DropletServerManager))
+local Server : typeof(require(script.Server.DropletServerManager)) = nil
+DropletManager.Server = Server
 
 --[=[
     @within DropletManager
     @prop Client DropletClientManager
     @client
-    Accessing this will automatically create a new DropletClientManager if one does not exist.
 ]=]
-DropletManager.Client = nil :: typeof(require(script.Client.DropletClientManager))
+local Client : typeof(require(script.Client.DropletClientManager)) = nil
+DropletManager.Client = Client
 
 --[=[
     @within DropletManager
@@ -170,14 +173,20 @@ DropletManager.Client = nil :: typeof(require(script.Client.DropletClientManager
 DropletManager.Util = DropletUtil
 
 -- Handles lazy initialization of the DropletManager
-setmetatable(DropletManager, {
+setmetatable(DropletManager :: any, {
     __index = function(t, k)
         if k == "Server" then
             assert(RunService:IsServer(), "Attempted to access DropletManager.Server on client")
-            t[k] = require(script.Server.DropletServerManager).new()
+            t[k] = require(script.Server.DropletServerManager)
         elseif k == "Client" then
             assert(RunService:IsClient(), "Attempted to access DropletManager.Client on server")
-            t[k] = require(script.Client.DropletClientManager).new()
+            t[k] = require(script.Client.DropletClientManager)
+        end
+
+        if RunService:IsServer() then
+            t = t.Server
+        else
+            t = t.Client
         end
         return t[k]
     end

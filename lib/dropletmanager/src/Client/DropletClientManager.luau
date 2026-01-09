@@ -12,28 +12,27 @@ local Players = game:GetService("Players")
 --// Imports //--
 local Packages = script.Parent.Parent.Parent
 local DropletUtil = require(script.Parent.Parent.DropletUtil)
+local DropletsFolder = require(script.Parent.DropletsFolder)
 local Droplet = require(script.Parent.Droplet)
 local Heap = require(Packages.Heap)
 local NetWire = require(Packages.NetWire)
 local RailUtil = require(Packages.RailUtil)
 local OctoTree = require(Packages.OctoTree)
-local SuperClass = require(Packages.BaseObject)
-local DropletsFolder = require(script.Parent.DropletsFolder)
 
 --// Types //--
 type ResourceTypeData = DropletUtil.ResourceTypeData
 type Droplet = Droplet.Droplet
-type DropletOctree = OctoTree.Octree<Droplet>
-type DropletNode = {
-	Position: Vector3,
-	Object: Droplet,
-}
 
 --// Constants //--
 local DEFAULT_COLLECTION_RADIUS = 15
+local RENDER_RADIUS: number = 100
 
 local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
+
+--------------------------------------------------------------------------------
+--// Util Functions //--
+--------------------------------------------------------------------------------
 
 local function CalculateEjectionVelocity(hForce, vForce, NumGen: Random): Vector3
 
@@ -64,92 +63,47 @@ local function ParseLocation(location): CFrame
 end
 
 --------------------------------------------------------------------------------
---// CLASS //--
+--// MODULE STATE //--
 --------------------------------------------------------------------------------
+local DropletClientManager = {}
 
-local SINGLETON
+local DropletStorage: {[number]: Droplet} = {}
+local ResourceTypeDataMap: {[string]: ResourceTypeData} = {}
+local RenderOctoTree: OctoTree.Octree<Droplet> = OctoTree.new()
+local MagnetOctoTree: OctoTree.Octree<Droplet> = OctoTree.new()
+local DistanceHeap: Heap.Heap<number> = Heap.max()
+local CollectionTracker = setmetatable({} :: {[Droplet]: boolean}, {__mode = "k"})
 
-local DropletClientManager = setmetatable({}, SuperClass)
-DropletClientManager.ClassName = "DropletClientManager"
-DropletClientManager.__index = DropletClientManager
+local Replicator = NetWire.Client("DropletServerManager")
+Replicator.DropletCreated:Connect(function(...)
+    (DropletClientManager :: any):_OnCreateDroplet(...)
+end)
 
-local function AssertIsSingleton(self)
-    assert(self == SINGLETON, "Called method on class instead of singleton")
-end
+Replicator.DropletClaimed:Connect(function(...: any)
+    (DropletClientManager :: any):_OnClaimDroplet(...)
+end)
 
---[=[
-    @tag constructor
-    @return DropletClientManager
-
-    Creates a new DropletClientManager if one has not already been made,
-    returns the existing one if one already exists.
-]=]
-function DropletClientManager.getInstance()
-    if SINGLETON then return SINGLETON end
-    local self = setmetatable(SuperClass.new(), DropletClientManager)
-    SINGLETON = self
-
-    self._DropletStorage = {}
-    self._ResourceTypeDataMap = {}
-
-    if RunService:IsRunning() then
-        self._Replicator = NetWire.Client("DropletServerManager")
-
-        self._Replicator.DropletCreated:Connect(function(...)
-            self:_OnCreateDroplet(...)
-        end)
-
-        self._Replicator.DropletClaimed:Connect(function(...: any)
-            self:_OnClaimDroplet(...)
-        end)
-    else
-        warn("Loaded DropletClientManager in edit mode")
-    end
-
-    self._RenderOctoTree = OctoTree.new() :: DropletOctree
-    self._MagnetOctoTree = OctoTree.new() :: DropletOctree
-    -- Tracks droplets that have been marked for collection. Uses a weak reference to prevent memory leaks. The octo trees manage the hard references.
-    self._DistanceHeap = Heap.max()
-    self._CollectionTracker = setmetatable({} :: {[Droplet]: boolean}, {__mode = "k"})
-
-    self._RenderRadius = 100
-
-    self:AddTask(RunService.PreSimulation:Connect(function(dt: number)
-        self:_Update(dt)
-    end))
-    
-    return self
-end
-DropletClientManager.new = DropletClientManager.getInstance -- backward compatibility alias
-
+RunService.PreSimulation:Connect(function(dt: number)
+    (DropletClientManager :: any):_Update(dt)
+end)
 
 --------------------------------------------------------------------------------
-    --// Methods //--
+    --// METHODS //--
 --------------------------------------------------------------------------------
 
 --[=[
     Registers a new resource type.
 ]=]
 function DropletClientManager:RegisterResourceType(resourceType: string, data: ResourceTypeData)
-    AssertIsSingleton(self)
-    assert(not self._ResourceTypeDataMap[resourceType], "Resource type already registered")
-    self._ResourceTypeDataMap[resourceType] = data
+    assert(not ResourceTypeDataMap[resourceType], "Resource type already registered")
+    ResourceTypeDataMap[resourceType] = data
 end
 
 --[=[
     Returns the resource type data for the given resource type
 ]=]
 function DropletClientManager:GetResourceTypeData(resourceType: string): ResourceTypeData?
-    AssertIsSingleton(self)
-    return self._ResourceTypeDataMap[resourceType]
-end
-
---[=[
-    Gets the distance at which a droplet must be within to be collected by the LocalPlayer
-]=]
-function DropletClientManager:GetCollectionRadius(): number
-    AssertIsSingleton(self)
-    return self._Replicator.CollectionRadius:Get() or DEFAULT_COLLECTION_RADIUS
+    return ResourceTypeDataMap[resourceType]
 end
 
 --------------------------------------------------------------------------------
@@ -166,17 +120,16 @@ end
 function DropletClientManager:_Update(dt: number)
     dt = dt or 0
 
-    local CollectionTracker: {[Droplet]: boolean} = self._CollectionTracker
+    local CollectionTracker: {[Droplet]: boolean} = CollectionTracker
     
     debug.profilebegin("Droplet Collection Check")
     if LocalPlayer.Character and LocalPlayer.Character.PrimaryPart then
         local PlayerPos = LocalPlayer.Character:GetPivot().Position
 
         -- Use the maximum magnetization radius from the heap to determine search radius
-        local maxMagnetizationRadius = self._DistanceHeap:Peek() or DEFAULT_COLLECTION_RADIUS
+        local maxMagnetizationRadius = DistanceHeap:Peek() or DEFAULT_COLLECTION_RADIUS
         
-        local octree = self._MagnetOctoTree :: DropletOctree
-        for node: DropletNode in octree:ForEachInRadius(PlayerPos, maxMagnetizationRadius) do
+        for node in MagnetOctoTree:ForEachInRadius(PlayerPos, maxMagnetizationRadius) do
             local droplet = node.Object
             if CollectionTracker[droplet] then
                 continue
@@ -189,7 +142,7 @@ function DropletClientManager:_Update(dt: number)
                 -- Check if it must settle before collecting
                 if not droplet:MustSettleBeforeCollect() or droplet:IsSettled() then
                     CollectionTracker[droplet] = true
-                    self:_RequestClaimDroplet(droplet)
+                    DropletClientManager:_RequestClaimDroplet(droplet)
                 end
             end
         end
@@ -202,8 +155,8 @@ function DropletClientManager:_Update(dt: number)
 
     debug.profilebegin("Droplet Visualization Update")
     local isOnScreen = RailUtil.Camera.isOnScreen
-    local pos: Vector3 = (Camera.CFrame + Camera.CFrame.LookVector * (self._RenderRadius/2)).Position
-    for node: DropletNode in self._RenderOctoTree:ForEachInRadius(pos, self._RenderRadius) do
+    local pos: Vector3 = (Camera.CFrame + Camera.CFrame.LookVector * (RENDER_RADIUS/2)).Position
+    for node in RenderOctoTree:ForEachInRadius(pos, RENDER_RADIUS) do
         if isOnScreen(node.Position) then
             node.Object:_Render(dt)
         end
@@ -216,22 +169,22 @@ end
     Marks a droplet to be checked for collection
 ]=]
 function DropletClientManager:_MarkForCollection(droplet: Droplet)
-    local octree = self._MagnetOctoTree :: DropletOctree
-    local node = octree:CreateNode(droplet:GetPosition(), droplet)
+    assert(not MagnetOctoTree:FindFirstNode(droplet), "Droplet already marked for collection")
+    local node = MagnetOctoTree:CreateNode(droplet:GetPosition(), droplet)
 
     droplet:GetSignal("PositionChanged"):Connect(function(newPos)
-        octree:ChangeNodePosition(node, newPos)
+        MagnetOctoTree:ChangeNodePosition(node, newPos)
     end)
 
     -- Track magnetization radius in heap for dynamic radius checking
     local magnetizationRadius = droplet:GetMagnetizationRadius()
-    self._DistanceHeap:Push(magnetizationRadius)
+    DistanceHeap:Push(magnetizationRadius)
 
     local function Remove() 
-        octree:RemoveNode(node)
-        self._DistanceHeap:RemoveFirstOccurrence(magnetizationRadius)
+        MagnetOctoTree:RemoveNode(node)
+        DistanceHeap:RemoveFirstOccurrence(magnetizationRadius)
     end
-    droplet:GetSignal("Timedout"):Once(Remove)
+    droplet:GetSignal("TimedOut"):Once(Remove)
     droplet:GetDestroyedSignal():Once(Remove)
 end
 
@@ -240,15 +193,15 @@ end
     Marks a droplet for rendering by placing it into the octree
 ]=]
 function DropletClientManager:_MarkForRender(droplet: Droplet)
-    local octree = self._RenderOctoTree
-    local node = octree:CreateNode(droplet:GetPosition(), droplet)
+    assert(not RenderOctoTree:FindFirstNode(droplet), "Droplet already marked for render")
+    local node = RenderOctoTree:CreateNode(droplet:GetPosition(), droplet)
 
     droplet:GetSignal("PositionChanged"):Connect(function(newPos)
-        octree:ChangeNodePosition(node, newPos)
+        RenderOctoTree:ChangeNodePosition(node, newPos)
     end)
-    
-    local function Remove() octree:RemoveNode(node) end
-    droplet:GetSignal("Timedout"):Once(Remove)
+
+    local function Remove() RenderOctoTree:RemoveNode(node) end
+    droplet:GetSignal("TimedOut"):Once(Remove)
     droplet:GetDestroyedSignal():Once(Remove)
 end
 
@@ -257,7 +210,7 @@ end
     Called when the server informs us that a new droplet has been created
 ]=]
 function DropletClientManager:_OnCreateDroplet(networkPacket: DropletUtil.DropletNetworkPacket)
-    local rtData = self:GetResourceTypeData(networkPacket.ResourceType)
+    local rtData = DropletClientManager:GetResourceTypeData(networkPacket.ResourceType)
     assert(rtData, `Resource type '{tostring(networkPacket.ResourceType)}' not registered`)
     local DEFAULTS = rtData.Defaults
 
@@ -268,7 +221,7 @@ function DropletClientManager:_OnCreateDroplet(networkPacket: DropletUtil.Drople
     networkPacket.Metadata = networkPacket.Metadata or DEFAULTS.Metadata
 
     local Droplets: {[number]: Droplet} = {}
-    self._DropletStorage[Seed] = {
+    DropletStorage[Seed] = {
         NetworkPacket = networkPacket,
         Droplets = Droplets,
     }
@@ -280,12 +233,12 @@ function DropletClientManager:_OnCreateDroplet(networkPacket: DropletUtil.Drople
         local droplet = Droplet.new({
             Id = i,
             NetworkPacket = networkPacket,
-            ResourceTypeData = self:GetResourceTypeData(networkPacket.ResourceType),
+            ResourceTypeData = DropletClientManager:GetResourceTypeData(networkPacket.ResourceType),
 
             Value = rawData.RawValue,
             LifeTime = rawData.RawLifeTime,
 
-            DropletClientManager = self,
+            DropletClientManager = DropletClientManager,
         })
 
         droplet:AddTask(function()
@@ -295,7 +248,7 @@ function DropletClientManager:_OnCreateDroplet(networkPacket: DropletUtil.Drople
 
         droplet:GetSignal("Collected"):Connect(function(collector)
             if collector == LocalPlayer then
-                self:_RequestCollectDroplet(droplet)
+                DropletClientManager:_RequestCollectDroplet(droplet)
             end
         end)
 
@@ -323,7 +276,7 @@ end
     Called when the server informs us that a droplet has been claimed
 ]=]
 function DropletClientManager:_OnClaimDroplet(collector: Player, seed: number, dropletId: number)
-    local dropletRequest = self._DropletStorage[seed]
+    local dropletRequest = DropletStorage[seed]
     assert(dropletRequest, `No Droplet-Request found with seed '{seed}'`)
 
     local droplet = dropletRequest.Droplets[dropletId]
@@ -343,7 +296,7 @@ end
 function DropletClientManager:_RequestClaimDroplet(droplet: Droplet)
     local seed, dropletId = droplet:Identify()
     --print(`Requesting claim of droplet [{seed}][{dropletId}]`)
-    self._Replicator.DropletClaimed:Fire(seed, dropletId)
+    Replicator.DropletClaimed:Fire(seed, dropletId)
 end
 
 --[=[
@@ -353,7 +306,7 @@ end
 function DropletClientManager:_RequestCollectDroplet(droplet: Droplet)
     local seed, dropletId = droplet:Identify()
     --print(`Requesting collect of droplet [{seed}][{dropletId}]`)
-    self._Replicator.DropletCollected:Fire(seed, dropletId)
+    Replicator.DropletCollected:Fire(seed, dropletId)
 end
 
 

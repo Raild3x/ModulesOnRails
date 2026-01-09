@@ -9,20 +9,21 @@ local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 
 if not RunService:IsClient() then
+    -- Prevents server from loading this module
     return {} :: Droplet
 end
 
 --// Imports //--
 local Packages = script.Parent.Parent.Parent
 local DropletUtil = require(script.Parent.Parent.DropletUtil)
+local DropletsFolder = require(script.Parent.DropletsFolder)
 local Promise = require(Packages.Promise)
 local RailUtil = require(Packages.RailUtil)
 local SuperClass = require(Packages.BaseObject)
-local DropletsFolder = require(script.Parent.DropletsFolder)
 
 --// Constants //--
-local PLAYER_MASS = 150
-local MAXIMUM_DISPLAY_COLLECT_DISTANCE = 80 -- The furthest distance a player can be from a droplet for us to show the collection visual
+local PLAYER_MASS = 200 -- Used for gravitational attraction calculations
+local COLLECT_MAX_DISPLAY_DISTANCE = 80 -- The furthest distance a player can be from a droplet for us to show the collection visual
 
 --// Types //--
 type ResourceTypeData = DropletUtil.ResourceTypeData
@@ -45,7 +46,6 @@ RailUtil.Player.forEachCharacter(function(Character, janitor)
         ResourceHeightRayParams.FilterDescendantsInstances = table.clone(ResourceHeightRayParams.FilterDescendantsInstances)
     end)
 end)
-
 
 local BulkRenderData = {
     Size = 0;
@@ -530,7 +530,7 @@ function Droplet:Magnetize(playerWhoCollected: Player)
     local Character = PlayerExists and playerWhoCollected.Character
     
     --Check if its a valid player and if the player is within a reasonable distance (like if the player is >50 studs away)
-    if Character and (Character:GetPivot().Position - self:GetPosition()).Magnitude < MAXIMUM_DISPLAY_COLLECT_DISTANCE then
+    if Character and (Character:GetPivot().Position - self:GetPosition()).Magnitude < COLLECT_MAX_DISPLAY_DISTANCE then
         BeginMagnetization()
     else
         self:Collect(playerWhoCollected)
