@@ -124,7 +124,7 @@
 
 local RunService = game:GetService("RunService")
 
-local DropletUtil = require(script.DropletUtil) ---@module DropletUtil
+local DropletUtil = require(script.DropletUtil)
 local Droplet = require(script.Client.Droplet)
 
 --[=[
@@ -153,7 +153,7 @@ local DropletManager = {}
     @server
     Accessing this will automatically create a new DropletServerManager if one does not exist.
 ]=]
-DropletManager.Server = nil ---@module DropletServerManager
+DropletManager.Server = nil :: typeof(require(script.Server.DropletServerManager))
 
 --[=[
     @within DropletManager
@@ -161,7 +161,7 @@ DropletManager.Server = nil ---@module DropletServerManager
     @client
     Accessing this will automatically create a new DropletClientManager if one does not exist.
 ]=]
-DropletManager.Client = nil ---@module DropletClientManager
+DropletManager.Client = nil :: typeof(require(script.Client.DropletClientManager))
 
 --[=[
     @within DropletManager

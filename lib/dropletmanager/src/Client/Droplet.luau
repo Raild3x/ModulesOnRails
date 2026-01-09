@@ -165,7 +165,7 @@ function Droplet.new(config: {
     local self = setmetatable(SuperClass.new(), Droplet)
 
     self:RegisterSignal("PositionChanged")
-    self:RegisterSignal("Timedout")
+    self:RegisterSignal("TimedOut")
     self:RegisterSignal("Collected")
 
     self._RenderClock = 0
@@ -179,7 +179,7 @@ function Droplet.new(config: {
     local DEFAULTS = self._ResourceTypeData.Defaults or {}
     self._CollectionRadius = DEFAULTS.CollectionRadius or 1.5
     self._MagnetizationRadius = DEFAULTS.MagnetizationRadius or 15
-    self._MustSettleBeforeCollect = if DEFAULTS.MustSettleBeforeCollect ~= nil then DEFAULTS.MustSettleBeforeCollect else true
+    self._MustSettleBeforeCollect = if DEFAULTS.MustSettleBeforeCollect ~= nil then DEFAULTS.MustSettleBeforeCollect else false
     self._MaxVelocity = DEFAULTS.MaxVelocity or 150
     self._MaxForce = DEFAULTS.MaxForce or math.huge
     self._Mass = DEFAULTS.Mass or 1
@@ -199,7 +199,7 @@ function Droplet.new(config: {
     self:AddTask(task.delay(config.LifeTime, function()
         -- warn(`Droplet expired: [{config.NetworkPacket.Seed}][{config.Id}]`)
         self._TimingOut = true
-        self:FireSignal("Timedout")
+        self:FireSignal("TimedOut")
         Promise.new(function(resolve)
             local RTData = self:GetResourceTypeData()
             TryCall(RTData.OnDropletTimeoutBegin, self)
@@ -279,14 +279,6 @@ function Droplet:GetPosition(): Vector3
 end
 
 --[=[
-    @private
-    Fetches the pivot CFrame of the droplet.
-]=]
-function Droplet:GetPivot(): CFrame
-    return self._Model:GetPivot()
-end
-
---[=[
     Fetches the main actor model of the droplet.
 ]=]
 function Droplet:GetModel(): Actor
@@ -302,26 +294,10 @@ function Droplet:GetSetupData(): any
 end
 
 --[=[
-    Returns the seed and id of the droplet. Used for internal identification.
-    @return number -- The seed of the droplet
-    @return number -- The id of the droplet
-]=]
-function Droplet:Identify(): (number, number)
-    return self._NetworkPacket.Seed, self._DropletId
-end
-
---[=[
     Returns whether or not the droplet is in the process of timing out.
 ]=]
 function Droplet:IsTimingOut(): boolean
     return self._TimingOut == true;
-end
-
---[=[
-    Returns whether or not the droplet has settled (come to a complete stop).
-]=]
-function Droplet:IsSettled(): boolean
-    return self._IsSettled == true
 end
 
 --[=[
@@ -333,10 +309,35 @@ function Droplet:GetMagnetizationRadius(): number
 end
 
 --[=[
+    Returns whether or not the droplet has settled (come to a complete stop).
+]=]
+function Droplet:IsSettled(): boolean
+    return self._IsSettled == true
+end
+
+--[=[
     Returns whether this droplet must settle before it can be collected.
 ]=]
 function Droplet:MustSettleBeforeCollect(): boolean
     return self._MustSettleBeforeCollect == true
+end
+
+--[=[
+    @private
+    Fetches the pivot CFrame of the droplet.
+]=]
+function Droplet:GetPivot(): CFrame
+    return self._Model:GetPivot()
+end
+
+--[=[
+    @private
+    Returns the seed and id of the droplet. Used for internal identification.
+    @return number -- The seed of the droplet
+    @return number -- The id of the droplet
+]=]
+function Droplet:Identify(): (number, number)
+    return self._NetworkPacket.Seed, self._DropletId
 end
 
 --------------------------------------------------------------------------------
@@ -386,9 +387,11 @@ end
 Droplet.AttachModel = Droplet.Attach -- Alias
 
 --[=[
+    @private
     Collects the droplet for the specified player.
     Lets the server know that the player has collected this droplet.
     Destroys the droplet after collection.
+    You should not need to call this manually as it is handled by the DropletClientManager.
 ]=]
 function Droplet:Collect(playerWhoCollected: Player)
     if self._Collected then 
@@ -409,7 +412,10 @@ function Droplet:Collect(playerWhoCollected: Player)
 end
 
 --[=[
-    
+    @private
+    Called when a player enters the droplet's collection radius.
+    Starts the magnetization process.
+    Called automatically when the server registers that a player has claimed this droplet.
 ]=]
 function Droplet:Claim(playerWhoClaimed: Player)
     if self:IsTimingOut() then 
