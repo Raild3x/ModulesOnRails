@@ -94,7 +94,7 @@
                 VisualModel:ScaleTo(1)
             end), nil, "GrowThread")
             
-            droplet:AttachModel(VisualModel)
+            droplet:Attach(VisualModel)  -- Important!
 
             return {
                 VisualModel = VisualModel;
@@ -285,7 +285,7 @@ return {
             VisualModel:ScaleTo(1)
         end), nil, "GrowThread")
         
-        droplet:AttachModel(VisualModel)
+        droplet:Attach(VisualModel)
 
         return {
             VisualModel = VisualModel;
