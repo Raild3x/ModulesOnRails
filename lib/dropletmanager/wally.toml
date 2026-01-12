@@ -2,7 +2,7 @@
 name = "raild3x/dropletmanager"
 description = "A Droplet System for managing client-sided collectable items in a game."
 authors = ["Logan Hunt (Raildex)"]
-version = "0.0.3"
+version = "0.1.0"
 license = "MIT"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"

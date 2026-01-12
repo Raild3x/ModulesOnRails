@@ -168,7 +168,7 @@ export type ResourceTypeData = {
     .EjectionDuration NumOrRangeOrWeightedArray? -- The time it takes to spew out all the droplets
     .EjectionHorizontalVelocity NumOrRangeOrWeightedArray? -- The horizontal velocity of the droplets when they are ejected (perpendicular to ejection direction)
     .EjectionVerticalVelocity NumOrRangeOrWeightedArray? -- The vertical velocity of the droplets when they are ejected (along ejection direction)
-    .EjectionDirection Vector3? -- The direction to eject droplets towards (defaults to Vector3.yAxis, or CFrame.LookVector if SpawnLocation is a CFrame)
+    .EjectionDirection Vector3? -- The direction to eject droplets towards (defaults to Vector3.yAxis)
 
     :::caution Special Behaviors
     Any index that takes a `NumOrRangeOrWeightedArray` will be parsed and calculated

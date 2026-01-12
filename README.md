@@ -31,6 +31,6 @@ ModulesOnRails is a collection of Wally packages to streamline Roblox developmen
 |---------|----------------|-------------|
 | [AdjustableTimer](https://raild3x.github.io/ModulesOnRails/api/AdjustableTimer) | `AdjustableTimer = "raild3x/adjustabletimer@1.0.0"` | A timer class that can be easily adjusted and paused without constant ticking. |
 | [AdjustableTimerManager](https://raild3x.github.io/ModulesOnRails/api/AdjustableTimerManager) | `AdjustableTimerManager = "raild3x/adjustabletimermanager@1.0.1"` | A replication manager for AdjustableTimer that allows for easy synchronization across clients in a Roblox game. It handles the replication of timer states and adjustments, ensuring that all clients have a consistent view of the timer's status. |
-| [DropletManager](https://raild3x.github.io/ModulesOnRails/api/DropletManager) | `DropletManager = "raild3x/dropletmanager@0.0.3"` | A Droplet System for managing client-sided collectable items in a game. |
+| [DropletManager](https://raild3x.github.io/ModulesOnRails/api/DropletManager) | `DropletManager = "raild3x/dropletmanager@0.1.0"` | A Droplet System for managing client-sided collectable items in a game. |
 | [PlayerDataManager](https://raild3x.github.io/ModulesOnRails/api/PlayerDataManager) | `PlayerDataManager = "raild3x/playerdatamanager@0.1.2"` | A class for managing player profiles. |
 | [PlayerProfileManager](https://raild3x.github.io/ModulesOnRails/api/PlayerProfileManager) | `PlayerProfileManager = "raild3x/playerprofilemanager@0.0.4"` | A class for managing player profiles. |
