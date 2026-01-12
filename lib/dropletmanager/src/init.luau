@@ -54,15 +54,17 @@
             Part.Parent = Model
             Model.PrimaryPart = Part
 
-            droplet:AttachModel(Model)
+            -- Weld our model to the droplet
+            droplet:Attach(Model)
 
+            -- Create metadata to be used in in the render functions
             local SetupData = {
                 Direction = if math.random() > 0.5 then 1 else -1 end;
             }
-            return CustomData
+            return SetupData
         end;
 
-        -- Ran when the droplet is within render range of the LocalPlayer's Camera
+        -- Ran when the droplet is within render range/view of the LocalPlayer's Camera
         OnRenderUpdate = function(droplet: Droplet, rendertimeElapsed: number): CFrame?
             local SetupData = droplet:GetSetupData()
             local OffsetCFrame = CFrame.new()
@@ -122,7 +124,7 @@
 
 local RunService = game:GetService("RunService")
 
-local DropletUtil = require(script.DropletUtil) ---@module DropletUtil
+local DropletUtil = require(script.DropletUtil)
 local Droplet = require(script.Client.Droplet)
 
 --[=[
@@ -143,23 +145,26 @@ export type ResourceTypeData = DropletUtil.ResourceTypeData
 ]=]
 export type ResourceSpawnData = DropletUtil.ResourceSpawnData
 
+--------------------------------------------------------------------------------
+    --// Module //--
+--------------------------------------------------------------------------------
 local DropletManager = {}
 
 --[=[
     @within DropletManager
     @prop Server DropletServerManager
     @server
-    Accessing this will automatically create a new DropletServerManager if one does not exist.
 ]=]
-DropletManager.Server = nil ---@module DropletServerManager
+local Server : typeof(require(script.Server.DropletServerManager)) = nil
+DropletManager.Server = Server
 
 --[=[
     @within DropletManager
     @prop Client DropletClientManager
     @client
-    Accessing this will automatically create a new DropletClientManager if one does not exist.
 ]=]
-DropletManager.Client = nil ---@module DropletClientManager
+local Client : typeof(require(script.Client.DropletClientManager)) = nil
+DropletManager.Client = Client
 
 --[=[
     @within DropletManager
@@ -168,15 +173,16 @@ DropletManager.Client = nil ---@module DropletClientManager
 DropletManager.Util = DropletUtil
 
 -- Handles lazy initialization of the DropletManager
-setmetatable(DropletManager, {
+setmetatable(DropletManager :: any, {
     __index = function(t, k)
         if k == "Server" then
             assert(RunService:IsServer(), "Attempted to access DropletManager.Server on client")
-            t[k] = require(script.Server.DropletServerManager).new()
+            t[k] = require(script.Server.DropletServerManager)
         elseif k == "Client" then
             assert(RunService:IsClient(), "Attempted to access DropletManager.Client on server")
-            t[k] = require(script.Client.DropletClientManager).new()
+            t[k] = require(script.Client.DropletClientManager)
         end
+
         return t[k]
     end
 })

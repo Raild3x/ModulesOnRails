@@ -23,21 +23,24 @@
     --------------------------------------------------------------------------------
 
     return {
+        
         Defaults = {
             Value = NumberRange.new(0.6, 1.4); -- The value you want the droplet to have. This can be anything.
             -- Metadata = {}; -- You typically shouldnt default metadata.
-
+            
             Count = NumberRange.new(2, 5); -- Number of droplets to spawn
             LifeTime = NumberRange.new(50, 60); -- Time before the droplet dissapears
             EjectionDuration = 1; -- Time it takes to spew out all the droplets
             EjectionHorizontalVelocity = NumberRange.new(0, 25);
             EjectionVerticalVelocity = NumberRange.new(25, 50);
             CollectorMode = DropletUtil.Enums.CollectorMode.MultiCollector;
-
+            
             Mass = 1; -- Mass of the droplet (Used in magnitization calculations)
             MaxForce = math.huge; -- Maximum steering force applied to the droplet when magnitized to a player
             MaxVelocity = 150; -- Maxiumum velocity of the droplet when magnitized to a player
             CollectionRadius = 1.5; -- Radius from center of player the droplet must be to be considered 'collected'
+            MagnetizationRadius = 12; -- Radius from player in which the droplet will start being attracted to the player
+            MustSettleBeforeCollect = false; -- Whether the droplet must come to a complete stop before it can be collected
         };
 
         --[[
@@ -91,7 +94,7 @@
                 VisualModel:ScaleTo(1)
             end), nil, "GrowThread")
             
-            droplet:AttachModel(VisualModel)
+            droplet:Attach(VisualModel)  -- Important!
 
             return {
                 VisualModel = VisualModel;
@@ -214,19 +217,21 @@ GenericPart.Massless = true
 return {
     Defaults = {
         Value = NumberRange.new(0.6, 1.4); -- The value you want the droplet to have. This can be anything.
-        -- Metadata = {}; -- You typically shouldnt default metadata.
 
         Count = NumberRange.new(2, 5); -- Number of droplets to spawn
         LifeTime = NumberRange.new(50, 60); -- Time before the droplet dissapears
         EjectionDuration = 1; -- Time it takes to spew out all the droplets
         EjectionHorizontalVelocity = NumberRange.new(0, 25);
         EjectionVerticalVelocity = NumberRange.new(25, 50);
+        EjectionDirection = nil; -- Direction to eject towards (defaults to Vector3.yAxis, or CFrame.LookVector if SpawnLocation is a CFrame)
         CollectorMode = DropletUtil.Enums.CollectorMode.MultiCollector;
 
         Mass = 1; -- Mass of the droplet (Used in magnitization calculations)
         MaxForce = math.huge; -- Maximum steering force applied to the droplet when magnitized to a player
         MaxVelocity = 150; -- Maxiumum velocity of the droplet when magnitized to a player
         CollectionRadius = 1.5; -- Radius from center of player the droplet must be to be considered 'collected'
+        MagnetizationRadius = 12; -- Radius from player in which the droplet will start being attracted to the player
+        MustSettleBeforeCollect = true; -- Whether the droplet must come to a complete stop before it can be collected
     };
 
     --[[
@@ -280,7 +285,7 @@ return {
             VisualModel:ScaleTo(1)
         end), nil, "GrowThread")
         
-        droplet:AttachModel(VisualModel)
+        droplet:Attach(VisualModel)
 
         return {
             VisualModel = VisualModel;

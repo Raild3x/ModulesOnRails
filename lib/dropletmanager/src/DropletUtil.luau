@@ -96,8 +96,12 @@ type NumOrRangeOrWeightedArray = NumOrRange | WeightedArray<NumOrRange>
 
     - `[Defaults]` is a table of default values for the droplet. This can be left empty.
     The values in this table are used to fill in any missing values in the ResourceSpawnData
-    when a droplet is spawned as well as overriding certain behaviors internall for things
+    when a droplet is spawned as well as overriding certain behaviors internally for things
     like magnetization.
+    
+    - `CollectionRadius` - Distance from the player's center that the droplet must be to be collected
+    - `MagnetizationRadius` - Distance from the player at which the droplet starts moving towards them
+    - `MustSettleBeforeCollect` - If true, droplet must come to a complete stop before it can be claimed
 
     - `[SetupDroplet]` is called when a new droplet is created. Use this to setup your visuals and
     any variables you need to keep track of. All parts within this should be
@@ -123,17 +127,21 @@ type NumOrRangeOrWeightedArray = NumOrRange | WeightedArray<NumOrRange>
 export type ResourceTypeData = {
     Defaults: {
         Value: any?;
+        Metadata: any?;
         CollectorMode: CollectorMode?;
         Count: NumOrRangeOrWeightedArray?,
         LifeTime: NumOrRangeOrWeightedArray?,
         EjectionDuration: NumOrRangeOrWeightedArray?,
         EjectionHorizontalVelocity: NumOrRangeOrWeightedArray?,
         EjectionVerticalVelocity: NumOrRangeOrWeightedArray?,
+        EjectionDirection: Vector3?,
 
         Mass: number?,
         MaxForce: number?,
         MaxVelocity: number?,
         CollectionRadius: number?,
+        MagnetizationRadius: number?,
+        MustSettleBeforeCollect: boolean?,
 
         --CalculateAttraction: (droplet: Droplet, player: Player) -> Vector3?,
     };
@@ -158,8 +166,9 @@ export type ResourceTypeData = {
     .LifeTime NumOrRange? -- The time before the droplet dissapears
     .Count NumOrRangeOrWeightedArray? -- The number of droplets to spawn
     .EjectionDuration NumOrRangeOrWeightedArray? -- The time it takes to spew out all the droplets
-    .EjectionHorizontalVelocity NumOrRangeOrWeightedArray? -- The horizontal velocity of the droplets when they are ejected
-    .EjectionVerticalVelocity NumOrRangeOrWeightedArray? -- The vertical velocity of the droplets when they are ejected
+    .EjectionHorizontalVelocity NumOrRangeOrWeightedArray? -- The horizontal velocity of the droplets when they are ejected (perpendicular to ejection direction)
+    .EjectionVerticalVelocity NumOrRangeOrWeightedArray? -- The vertical velocity of the droplets when they are ejected (along ejection direction)
+    .EjectionDirection Vector3? -- The direction to eject droplets towards (defaults to Vector3.yAxis)
 
     :::caution Special Behaviors
     Any index that takes a `NumOrRangeOrWeightedArray` will be parsed and calculated
@@ -182,6 +191,7 @@ export type ResourceSpawnData = {
     EjectionDuration: NumOrRangeOrWeightedArray?;
     EjectionHorizontalVelocity: NumOrRangeOrWeightedArray?,
     EjectionVerticalVelocity: NumOrRangeOrWeightedArray?,
+    EjectionDirection: Vector3?,
 }
 
 
@@ -193,8 +203,9 @@ export type DropletNetworkPacket = {
     SpawnTime: number, -- The moment the spawn request was made (os.clock)
     CollectorMode: CollectorMode, -- The mode of the collector
     EjectionDuration: number, -- The time it takes to eject/spawn all the droplets (in seconds)
-    EjectionHorizontalVelocity: NumOrRangeOrWeightedArray?, -- The horizontal velocity of the droplets when they are ejected
-    EjectionVerticalVelocity: NumOrRangeOrWeightedArray?, -- The vertical velocity of the droplets when they are ejected
+    EjectionHorizontalVelocity: NumOrRangeOrWeightedArray?, -- The horizontal velocity of the droplets when they are ejected (perpendicular to ejection direction)
+    EjectionVerticalVelocity: NumOrRangeOrWeightedArray?, -- The vertical velocity of the droplets when they are ejected (along ejection direction)
+    EjectionDirection: Vector3?, -- The direction to eject droplets towards (defaults to Vector3.yAxis if not provided)
 
     -- Data directly passed by ResourceSpawnData
     ResourceType: string,
@@ -253,6 +264,72 @@ Enums.CollectorMode = {
     The default collision group for droplets
 ]=]
 DropletUtil.DROPLET_COLLISION_GROUP = "Droplet"
+
+--[=[
+    @within DropletUtil
+    @server
+    @prop DEFAULT_COLLECTOR_MODE CollectorMode
+    The default collector mode for droplets
+]=]
+DropletUtil.DEFAULT_COLLECTOR_MODE = Enums.CollectorMode.MultiCollector
+
+--[=[
+    @within DropletUtil
+    @server
+    @prop DEFAULT_COUNT NumOrRangeOrWeightedArray
+    The default number of droplets to spawn
+]=]
+DropletUtil.DEFAULT_COUNT = 1
+
+--[=[
+    @within DropletUtil
+    @server
+    @prop DEFAULT_LIFETIME NumOrRangeOrWeightedArray
+    The default lifetime for droplets
+]=]
+DropletUtil.DEFAULT_LIFETIME = 10
+
+--[=[
+    @within DropletUtil
+    @server
+    @prop DEFAULT_EJECTION_DURATION number
+    The default ejection duration for droplets.
+]=]
+DropletUtil.DEFAULT_EJECTION_DURATION = 1
+
+--[=[
+    @within DropletUtil
+    @client
+    @prop DEFAULT_COLLECTION_RADIUS number
+    The default radius within which droplets are marked for collection.
+]=]
+DropletUtil.DEFAULT_COLLECTION_RADIUS = 15
+
+--[=[
+    @within DropletUtil
+    @client
+    @prop MAX_MAGNETIZATION_RADIUS number
+    The radius within which droplets are allowed to magnetize towards players. Beyond this
+    radius, droplets will not magnetize and will just be instantly collected. This is to prevent
+    wildly swinging droplets that gain tons of acceleration from far away.
+]=]
+DropletUtil.MAX_MAGNETIZATION_RADIUS = 50
+
+--[=[
+    @within DropletUtil
+    @client
+    @prop RENDER_RADIUS number
+    The radius within which droplets will have their render functions called
+]=]
+DropletUtil.RENDER_RADIUS = 100
+
+--[=[
+    @within DropletUtil
+    @client
+    @prop PLAYER_MASS number
+    The default player mass for gravitational calculations
+]=]
+DropletUtil.PLAYER_MASS = 200
 
 --------------------------------------------------------------------------------
     --// Utility functions //--
