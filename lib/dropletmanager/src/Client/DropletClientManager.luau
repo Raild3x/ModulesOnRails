@@ -17,16 +17,13 @@ local Droplet = require(script.Parent.Droplet)
 local Heap = require(Packages.Heap)
 local NetWire = require(Packages.NetWire)
 local RailUtil = require(Packages.RailUtil)
-local OctoTree = require(Packages.OctoTree)
+local Octree = require(Packages.Octree)
 
 --// Types //--
 type ResourceTypeData = DropletUtil.ResourceTypeData
 type Droplet = Droplet.Droplet
 
 --// Constants //--
-local DEFAULT_COLLECTION_RADIUS = 15
-local RENDER_RADIUS: number = 100
-
 local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
@@ -34,18 +31,38 @@ local LocalPlayer = Players.LocalPlayer
 --// Util Functions //--
 --------------------------------------------------------------------------------
 
-local function CalculateEjectionVelocity(hForce, vForce, NumGen: Random): Vector3
-
+--[=[
+    Calculates the ejection velocity for a droplet with support for arbitrary ejection directions.
+    
+    @param hForce number | NumberRange -- Horizontal force (perpendicular to direction)
+    @param vForce number | NumberRange -- Vertical force (along direction axis)
+    @param direction Vector3? -- Direction to eject towards (defaults to Vector3.yAxis)
+    @param NumGen Random -- Random number generator
+    @return Vector3 -- The calculated ejection velocity
+]=]
+local function CalculateEjectionVelocity(hForce, vForce, direction: Vector3?, NumGen: Random): Vector3
+    local ejectionDirection = (direction or Vector3.yAxis).Unit -- Ensure normalized
+    
     local HorizontalForce = DropletUtil.parse(hForce, NumGen) or NumGen:NextInteger(2, 25)
     local VerticalForce = DropletUtil.parse(vForce, NumGen) or NumGen:NextInteger(25, 50)
 
-    --// Generate a random force for the X and Z axis from a circular distribution
+    -- Create orthonormal basis from direction
+    -- We need two perpendicular vectors to the direction for the horizontal plane
+    local up = if math.abs(ejectionDirection.Y) < 0.99 then Vector3.yAxis else Vector3.xAxis
+    local right = ejectionDirection:Cross(up).Unit
+    local forward = right:Cross(ejectionDirection).Unit
+    
+    -- Generate a random horizontal direction in the plane perpendicular to ejection direction
     local RandomRotation = NumGen:NextNumber(-math.pi, math.pi)
-    local RandomDirection = RailUtil.Vector.rotateVector2(Vector2.new(1,0), RandomRotation)
-    local RandomForce = RandomDirection * HorizontalForce
-
-    local EjectionVelocity = Vector3.new(RandomForce.X, VerticalForce, RandomForce.Y)
-    return EjectionVelocity
+    local horizontalX = math.cos(RandomRotation) * HorizontalForce
+    local horizontalZ = math.sin(RandomRotation) * HorizontalForce
+    
+    -- Combine: vertical force along direction, horizontal force perpendicular to it
+    local velocity = ejectionDirection * VerticalForce 
+                   + right * horizontalX 
+                   + forward * horizontalZ
+    
+    return velocity
 end
 
 local function ParseLocation(location): CFrame
@@ -69,8 +86,8 @@ local DropletClientManager = {}
 
 local DropletStorage: {[number]: Droplet} = {}
 local ResourceTypeDataMap: {[string]: ResourceTypeData} = {}
-local RenderOctoTree: OctoTree.Octree<Droplet> = OctoTree.new()
-local MagnetOctoTree: OctoTree.Octree<Droplet> = OctoTree.new()
+local RenderOctree: Octree.Octree<Droplet> = Octree.new()
+local MagnetOctree: Octree.Octree<Droplet> = Octree.new()
 local DistanceHeap: Heap.Heap<number> = Heap.max()
 local CollectionTracker = setmetatable({} :: {[Droplet]: boolean}, {__mode = "k"})
 
@@ -119,17 +136,15 @@ end
 ]=]
 function DropletClientManager:_Update(dt: number)
     dt = dt or 0
-
-    local CollectionTracker: {[Droplet]: boolean} = CollectionTracker
     
     debug.profilebegin("Droplet Collection Check")
     if LocalPlayer.Character and LocalPlayer.Character.PrimaryPart then
         local PlayerPos = LocalPlayer.Character:GetPivot().Position
 
         -- Use the maximum magnetization radius from the heap to determine search radius
-        local maxMagnetizationRadius = DistanceHeap:Peek() or DEFAULT_COLLECTION_RADIUS
+        local maxMagnetizationRadius = DistanceHeap:Peek() or DropletUtil.DEFAULT_COLLECTION_RADIUS
         
-        for node in MagnetOctoTree:ForEachInRadius(PlayerPos, maxMagnetizationRadius) do
+        for node in MagnetOctree:ForEachInRadius(PlayerPos, maxMagnetizationRadius) do
             local droplet = node.Object
             if CollectionTracker[droplet] then
                 continue
@@ -154,9 +169,10 @@ function DropletClientManager:_Update(dt: number)
     debug.profileend()
 
     debug.profilebegin("Droplet Visualization Update")
+    local RENDER_RADIUS = DropletUtil.RENDER_RADIUS
     local isOnScreen = RailUtil.Camera.isOnScreen
     local pos: Vector3 = (Camera.CFrame + Camera.CFrame.LookVector * (RENDER_RADIUS/2)).Position
-    for node in RenderOctoTree:ForEachInRadius(pos, RENDER_RADIUS) do
+    for node in RenderOctree:ForEachInRadius(pos, RENDER_RADIUS + 1) do
         if isOnScreen(node.Position) then
             node.Object:_Render(dt)
         end
@@ -169,11 +185,11 @@ end
     Marks a droplet to be checked for collection
 ]=]
 function DropletClientManager:_MarkForCollection(droplet: Droplet)
-    assert(not MagnetOctoTree:FindFirstNode(droplet), "Droplet already marked for collection")
-    local node = MagnetOctoTree:CreateNode(droplet:GetPosition(), droplet)
+    assert(not MagnetOctree:FindFirstNode(droplet), "Droplet already marked for collection")
+    local node = MagnetOctree:CreateNode(droplet:GetPosition(), droplet)
 
     droplet:GetSignal("PositionChanged"):Connect(function(newPos)
-        MagnetOctoTree:ChangeNodePosition(node, newPos)
+        MagnetOctree:ChangeNodePosition(node, newPos)
     end)
 
     -- Track magnetization radius in heap for dynamic radius checking
@@ -181,7 +197,7 @@ function DropletClientManager:_MarkForCollection(droplet: Droplet)
     DistanceHeap:Push(magnetizationRadius)
 
     local function Remove() 
-        MagnetOctoTree:RemoveNode(node)
+        MagnetOctree:RemoveNode(node)
         DistanceHeap:RemoveFirstOccurrence(magnetizationRadius)
     end
     droplet:GetSignal("TimedOut"):Once(Remove)
@@ -193,14 +209,14 @@ end
     Marks a droplet for rendering by placing it into the octree
 ]=]
 function DropletClientManager:_MarkForRender(droplet: Droplet)
-    assert(not RenderOctoTree:FindFirstNode(droplet), "Droplet already marked for render")
-    local node = RenderOctoTree:CreateNode(droplet:GetPosition(), droplet)
+    assert(not RenderOctree:FindFirstNode(droplet), "Droplet already marked for render")
+    local node = RenderOctree:CreateNode(droplet:GetPosition(), droplet)
 
     droplet:GetSignal("PositionChanged"):Connect(function(newPos)
-        RenderOctoTree:ChangeNodePosition(node, newPos)
+        RenderOctree:ChangeNodePosition(node, newPos)
     end)
 
-    local function Remove() RenderOctoTree:RemoveNode(node) end
+    local function Remove() RenderOctree:RemoveNode(node) end
     droplet:GetSignal("TimedOut"):Once(Remove)
     droplet:GetDestroyedSignal():Once(Remove)
 end
@@ -242,7 +258,6 @@ function DropletClientManager:_OnCreateDroplet(networkPacket: DropletUtil.Drople
         })
 
         droplet:AddTask(function()
-            -- print(`Droplet [{Seed}][{i}] destroyed`)
             Droplets[i] = nil
         end)
 
@@ -254,18 +269,28 @@ function DropletClientManager:_OnCreateDroplet(networkPacket: DropletUtil.Drople
 
 
         local dropletModel: Model = droplet:GetModel()
-        dropletModel:PivotTo(ParseLocation(networkPacket.SpawnLocation))
+        local spawnCFrame = ParseLocation(networkPacket.SpawnLocation)
+        dropletModel:PivotTo(spawnCFrame)
         dropletModel.Parent = DropletsFolder
         local dropletPrimaryPart = dropletModel.PrimaryPart
         assert(dropletPrimaryPart, "Droplet model has no primary part")
-        dropletPrimaryPart.AssemblyLinearVelocity = (CalculateEjectionVelocity(
+        
+        -- Extract ejection direction from spawn location if it's a CFrame, otherwise use default
+        local ejectionDirection = networkPacket.EjectionDirection or DEFAULTS.EjectionDirection
+        if not ejectionDirection and typeof(networkPacket.SpawnLocation) == "CFrame" then
+            ejectionDirection = networkPacket.SpawnLocation.LookVector
+        elseif not ejectionDirection and typeof(networkPacket.SpawnLocation) == "table" and networkPacket.SpawnLocation.CF then
+            ejectionDirection = networkPacket.SpawnLocation.CF.LookVector
+        end
+        
+        dropletPrimaryPart.AssemblyLinearVelocity = CalculateEjectionVelocity(
             networkPacket.EjectionHorizontalVelocity or DEFAULTS.EjectionHorizontalVelocity,
             networkPacket.EjectionVerticalVelocity or DEFAULTS.EjectionVerticalVelocity,
+            ejectionDirection,
             NumGen
-        ))
+        )
         
-
-        table.insert(Droplets, droplet)
+        Droplets[i] = droplet
         task.wait(EjectionDuration/Count)
     end
 end

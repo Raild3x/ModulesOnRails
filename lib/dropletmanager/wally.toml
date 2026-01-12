@@ -18,7 +18,7 @@ unreleased = true
 [dependencies]
 Heap = "raild3x/heap@2.1.3"
 Promise = "evaera/promise@^4.0.0"
-OctoTree = "sleitnick/octo-tree@0.3.1"
+Octree = "sleitnick/octo-tree@0.3.1"
 NetWire = "raild3x/netwire@^0"
 RailUtil = "raild3x/railutil@^1"
 BaseObject = "raild3x/baseobject@^0"

@@ -21,10 +21,6 @@ local Promise = require(Packages.Promise)
 local RailUtil = require(Packages.RailUtil)
 local SuperClass = require(Packages.BaseObject)
 
---// Constants //--
-local PLAYER_MASS = 200 -- Used for gravitational attraction calculations
-local COLLECT_MAX_DISPLAY_DISTANCE = 80 -- The furthest distance a player can be from a droplet for us to show the collection visual
-
 --// Types //--
 type ResourceTypeData = DropletUtil.ResourceTypeData
 
@@ -189,25 +185,25 @@ function Droplet.new(config: {
     self._Weld = self._Model.Weld
     self:BindToInstance(self._Model)
 
-    local RTData = self:GetResourceTypeData()
-    if RTData.SetupDroplet then
-        self._CustomSetupData = RTData.SetupDroplet(self) or {}
-    else
-        warn("No Setup function for resource type "..self._NetworkPacket.ResourceType)
-    end
+	local RTData = self:GetResourceTypeData() :: ResourceTypeData
+	if RTData.SetupDroplet then
+		self._CustomSetupData = RTData.SetupDroplet(self) or {}
+	else
+		warn("No Setup function for resource type " .. self._NetworkPacket.ResourceType)
+	end
 
-    self:AddTask(task.delay(config.LifeTime, function()
-        -- warn(`Droplet expired: [{config.NetworkPacket.Seed}][{config.Id}]`)
-        self._TimingOut = true
-        self:FireSignal("TimedOut")
-        Promise.new(function(resolve)
-            local RTData = self:GetResourceTypeData()
-            TryCall(RTData.OnDropletTimeoutBegin, self)
-            resolve()
-        end):timeout(60):finally(function()
-            self:Destroy()
-        end)
-    end), nil, "LifeTimeThread")
+	local timeoutThread = task.delay(config.LifeTime, function()
+		self._TimingOut = true
+		self:FireSignal("TimedOut")
+		Promise.new(function(resolve)
+			resolve(TryCall(RTData.OnDropletTimeout, self))
+		end)
+			:timeout(60)
+			:finally(function()
+				self:Destroy()
+			end)
+	end)
+	self:AddTask(timeoutThread, nil, "TimeOutThread")
 
     --------------------------------
     -- Settle Checkers --
@@ -422,7 +418,7 @@ function Droplet:Claim(playerWhoClaimed: Player)
         warn("Tried to claim but is already Timing Out!") 
         return 
     end
-    self:RemoveTask("LifeTimeThread")
+    self:RemoveTask("TimeOutThread")
 
     self:Magnetize(playerWhoClaimed)
 
@@ -436,7 +432,7 @@ end
     Called automatically when a player enters the droplet's collection radius.
 ]=]
 function Droplet:Magnetize(playerWhoCollected: Player)
-    self:RemoveTask("LifeTimeThread")
+    self:RemoveTask("TimeOutThread")
 
     local GRAVITY = Vector3.new(0, -1, 0)
 
@@ -469,7 +465,7 @@ function Droplet:Magnetize(playerWhoCollected: Player)
 
             local DesiredVelocity = targetVector.Unit * self._MaxVelocity
             local Steering = DesiredVelocity - Velocity -- find the direction of force we need to apply
-            local attractionForce = CalculateGravitationalAttraction(self._Mass, PLAYER_MASS, targetDist)
+            local attractionForce = CalculateGravitationalAttraction(self._Mass, DropletUtil.PLAYER_MASS, targetDist)
             Steering += DesiredVelocity * attractionForce
             Steering = truncate(Steering, self._MaxForce) -- limit the steering force
             Steering /= self._Mass
@@ -530,7 +526,7 @@ function Droplet:Magnetize(playerWhoCollected: Player)
     local Character = PlayerExists and playerWhoCollected.Character
     
     --Check if its a valid player and if the player is within a reasonable distance (like if the player is >50 studs away)
-    if Character and (Character:GetPivot().Position - self:GetPosition()).Magnitude < COLLECT_MAX_DISPLAY_DISTANCE then
+    if Character and (Character:GetPivot().Position - self:GetPosition()).Magnitude < DropletUtil.MAX_MAGNETIZATION_RADIUS then
         BeginMagnetization()
     else
         self:Collect(playerWhoCollected)

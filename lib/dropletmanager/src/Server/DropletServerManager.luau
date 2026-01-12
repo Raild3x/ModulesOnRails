@@ -15,6 +15,7 @@ local ProbabilityDistributor = require(Packages.ProbabilityDistributor)
 local RailUtil = require(Packages.RailUtil)
 local NetWire = require(Packages.NetWire)
 
+--// Types //--
 type table = {[any]: any}
 type CollectorMode = DropletUtil.CollectorMode
 type WeightedArray<T> = ProbabilityDistributor.WeightedArray<T>
@@ -25,13 +26,8 @@ type NumOrRangeOrWeightedArray = NumOrRange | WeightedArray<NumOrRangeOrWeighted
 type ResourceSpawnData = DropletUtil.ResourceSpawnData
 type ResourceTypeData = DropletUtil.ResourceTypeData
 
---// Constants //--
-local DropletEnums = DropletUtil.Enums
-
-local DEFAULT_COLLECTOR_MODE = DropletEnums.CollectorMode.MultiCollector
-local DEFAULT_LIFE_TIME = NumberRange.new(8, 12)
-local DEFAULT_EJECTION_DURATION = 0.1
-local DEFAULT_COUNT = 1
+--// Enums //--
+local CollectorMode = DropletUtil.Enums.CollectorMode
 
 --------------------------------------------------------------------------------
     --// Util Functions //--
@@ -175,20 +171,20 @@ end
     @return number -- The seed of the droplet request.
 ]=]
 function DropletServerManager:Spawn(data: ResourceSpawnData): number
-    local rtData = self:GetResourceTypeData(data.ResourceType)
+    local rtData = DropletServerManager:GetResourceTypeData(data.ResourceType)
     assert(rtData, `Resource type '{tostring(data.ResourceType)}' not registered`)
     local DEFAULTS = rtData.Defaults
 
-    local Seed = self:_GenerateSeed()
+    local Seed = DropletServerManager:_GenerateSeed()
     local NumGen = Random.new(Seed)
 
     local VALUE = data.Value or DEFAULTS.Value
 
-    local Count = math.round(ParseNRWT(data.Count or DEFAULTS.Count or DEFAULT_COUNT, NumGen))
+    local Count = math.round(ParseNRWT(data.Count or DEFAULTS.Count or DropletUtil.DEFAULT_COUNT, NumGen))
     assert(typeof(Count) == "number" and Count >= 0, "Count must resolve to a non-negative number")
-    local EjectionDuration = ParseNRWT(data.EjectionDuration or DEFAULTS.EjectionDuration or DEFAULT_EJECTION_DURATION, NumGen)
+    local EjectionDuration = ParseNRWT(data.EjectionDuration or DEFAULTS.EjectionDuration or DropletUtil.DEFAULT_EJECTION_DURATION, NumGen)
     assert(typeof(EjectionDuration) == "number" and EjectionDuration >= 0, "EjectionDuration must resolve to a non-negative number")
-    local LifeTime = data.LifeTime or DEFAULTS.LifeTime or DEFAULT_LIFE_TIME
+    local LifeTime = data.LifeTime or DEFAULTS.LifeTime or DropletUtil.DEFAULT_LIFETIME
     AssertTypes("LifeTime", LifeTime, "number", "NumberRange")
     if typeof(LifeTime) == "NumberRange" then
         assert(LifeTime.Min >= 0 and LifeTime.Max >= 0, "LifeTime must resolve to a positive number")
@@ -213,10 +209,11 @@ function DropletServerManager:Spawn(data: ResourceSpawnData): number
             Seed = Seed,
             Count = Count,
             SpawnTime = workspace:GetServerTimeNow(),
-            CollectorMode = data.CollectorMode or DEFAULTS.CollectorMode or DEFAULT_COLLECTOR_MODE,
+            CollectorMode = data.CollectorMode or DEFAULTS.CollectorMode or DropletUtil.DEFAULT_COLLECTOR_MODE,
             EjectionDuration = EjectionDuration,
             EjectionVerticalVelocity = AssertValidNRWT(data.EjectionVerticalVelocity),
             EjectionHorizontalVelocity = AssertValidNRWT(data.EjectionHorizontalVelocity),
+            EjectionDirection = data.EjectionDirection or DEFAULTS.EjectionDirection,
 
             ResourceType = data.ResourceType,
             Value = VALUE,
@@ -260,7 +257,7 @@ end
 function DropletServerManager:Claim(collector: Player, seed: number, dropletNumber: (number)?): boolean
     assert(collector and collector:IsA("Player"), "Invalid collector passed when attempting to claim droplet")
     assert(typeof(seed) == "number", `Invalid Seed passed when attempting to collect droplet: {tostring(seed)}, must be a number`)
-    local serverData = self:GetDropletServerData(seed)
+    local serverData = DropletServerManager:_GetDropletServerData(seed)
     if not serverData then 
         warn(`Droplet request with seed '{seed}' does not exist when attempting to claim.`)
         return false 
@@ -292,7 +289,7 @@ function DropletServerManager:Claim(collector: Player, seed: number, dropletNumb
         end
 
         dropletData.ClaimedBy = dropletData.ClaimedBy or {}
-        local alreadyClaimed = if collectorMode == DropletEnums.CollectorMode.SingleCollector then
+        local alreadyClaimed = if collectorMode == CollectorMode.SingleCollector then
                 #dropletData.ClaimedBy > 0 else table.find(dropletData.ClaimedBy, collector) ~= nil
 
         if alreadyClaimed then
@@ -304,9 +301,9 @@ function DropletServerManager:Claim(collector: Player, seed: number, dropletNumb
     
     --// Handle collection //--
     table.insert(dropletData.ClaimedBy, collector)
-    if collectorMode == DropletEnums.CollectorMode.SingleCollector then
+    if collectorMode == CollectorMode.SingleCollector then
         Replicator.DropletClaimed:FireFor(serverData.PlayerTargets, collector, seed, dropletNumber)
-    elseif collectorMode == DropletEnums.CollectorMode.MultiCollector then
+    elseif collectorMode == CollectorMode.MultiCollector then
         Replicator.DropletClaimed:Fire(collector, collector, seed, dropletNumber)
     else
         error("Invalid CollectorMode: " .. tostring(collectorMode))
@@ -357,7 +354,7 @@ function DropletServerManager:Collect(collector: Player, seed: number, dropletNu
         end
 
         dropletData.CollectedBy = dropletData.CollectedBy or {}
-        local alreadyCollected = if collectorMode == DropletEnums.CollectorMode.SingleCollector then
+        local alreadyCollected = if collectorMode == CollectorMode.SingleCollector then
             #dropletData.CollectedBy > 0 else table.find(dropletData.CollectedBy, collector) ~= nil
 
         if alreadyCollected then
@@ -371,10 +368,10 @@ function DropletServerManager:Collect(collector: Player, seed: number, dropletNu
     local resourceTypeData = DropletServerManager:GetResourceTypeData(dropletInfo.ResourceType)
     TryCall(resourceTypeData.OnServerCollect, collector, dropletData.ActualValue, dropletInfo.Metadata)
 
-    if collectorMode == DropletEnums.CollectorMode.SingleCollector then
+    if collectorMode == CollectorMode.SingleCollector then
         serverData.DropletData[dropletNumber] = nil -- Remove this droplet from the droplet data
     
-    elseif collectorMode == DropletEnums.CollectorMode.MultiCollector then
+    elseif collectorMode == CollectorMode.MultiCollector then
         table.insert(dropletData.CollectedBy, collector)
 
         if #dropletData.CollectedBy == #serverData.PlayerTargets then
@@ -411,7 +408,7 @@ end
 function DropletServerManager:_GenerateSeed(): number
     local seed
     repeat
-        seed = math.random(1, 2^16)
+        seed = math.random(1, 2^20)
     until not DropletStorage[seed]
     return seed
 end

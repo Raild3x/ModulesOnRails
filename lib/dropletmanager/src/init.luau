@@ -183,11 +183,6 @@ setmetatable(DropletManager :: any, {
             t[k] = require(script.Client.DropletClientManager)
         end
 
-        if RunService:IsServer() then
-            t = t.Server
-        else
-            t = t.Client
-        end
         return t[k]
     end
 })

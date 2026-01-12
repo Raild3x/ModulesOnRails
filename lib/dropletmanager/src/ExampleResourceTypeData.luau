@@ -217,13 +217,13 @@ GenericPart.Massless = true
 return {
     Defaults = {
         Value = NumberRange.new(0.6, 1.4); -- The value you want the droplet to have. This can be anything.
-        -- Metadata = {}; -- You typically shouldnt default metadata.
 
         Count = NumberRange.new(2, 5); -- Number of droplets to spawn
         LifeTime = NumberRange.new(50, 60); -- Time before the droplet dissapears
         EjectionDuration = 1; -- Time it takes to spew out all the droplets
         EjectionHorizontalVelocity = NumberRange.new(0, 25);
         EjectionVerticalVelocity = NumberRange.new(25, 50);
+        EjectionDirection = nil; -- Direction to eject towards (defaults to Vector3.yAxis, or CFrame.LookVector if SpawnLocation is a CFrame)
         CollectorMode = DropletUtil.Enums.CollectorMode.MultiCollector;
 
         Mass = 1; -- Mass of the droplet (Used in magnitization calculations)
