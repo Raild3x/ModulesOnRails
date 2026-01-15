@@ -1,5 +1,6 @@
 -- Authors: Logan Hunt (Raildex)
 -- July 17, 2024
+-- THIS FILE IS OUTDATED AND NO LONGER MAINTAINED. TESTS MAY NOT WORK AS INTENDED.
 
 type table = {[any]: any}
 
