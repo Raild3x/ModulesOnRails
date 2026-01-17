@@ -13,8 +13,8 @@
 	functionality, and instead focuses on providing a simple methodology to easily
 	initialize Services given to it.
 
-	Roam gathers a collection of specified services and initializes 'syncronously'.
-	Once all services have been fully initialized, it then starts them 'asyncronously' by
+	Roam gathers a collection of specified services and initializes 'synchronously'.
+	Once all services have been fully initialized, it then starts them 'asynchronously' by
 	spawning their 'RoamStart' method in a new thread.
 
 	Roam is RunContext agnostic, meaning it can be used on both the server and client in the same manner.
@@ -59,6 +59,37 @@
 	Roam does not inherently have networking functionality. However, it can easily be added through the use of NetWire's 
 	**[.setupServiceNetworking](https://raild3x.github.io/ModulesOnRails/api/ServerNetWire/#setupServiceNetworking)** funtion.
 	:::
+
+	----
+	LIFECYCLE
+	----
+	For those interested in the full execution order roam follows for booting services, see the diagrams below:
+
+	**Initialization Phase (Synchronous):**
+	- `GlobalPreInit` - Called once before ANY service initializes (global setup)
+	- For each service (in dependency order):
+		- Await dependencies to finish initializing
+		- `PreInit(service)` - Called before this service's RoamInit
+		- Service's `RoamInit()` method executes
+		- `PostInit(service)` - Called after this service's RoamInit
+	- `GlobalPostInit` - Called once after ALL services finish initializing
+	
+	**Start Phase (Fully Async - Does Not Block):**
+	- `GlobalPreStart` - Called once before ANY service starts.
+	- For each service (in dependency order):
+		- `PreStart(service)` - Called before this service's RoamStart
+		- Service's `RoamStart()` method executes
+		- `PostStart(service)` - Called after this service's RoamStart
+	- `GlobalPostStart` - Called once after ALL services start
+
+
+	**Key Concepts:**
+	- **Parallel Initialization**: Services without dependencies initialize concurrently via coroutines
+	- **Dependency Blocking**: Services wait for their dependencies' PostInit before starting their PreInit
+	- **Synchronous Init Phase**: The Initialization Phase completes fully before Start Phase begins
+	- **Async Start Phase**: The Start Phase spawns services lifecycle methods asynchronously
+
+	![Advanced Roam Lifecycle Diagram](../roam/RoamLifecycleAdvanced.png)
 ]=]
 
 local RunService = game:GetService("RunService")
@@ -106,7 +137,7 @@ export type Service = table
 	return MyService
 	```
 
-	:::caution Deffering RequiredServices
+	:::caution Deferring RequiredServices
 	Do NOT add services to the RequiredServices after you have created or registered the service. This will cause undefined behavior.
 	:::
 ]=]
@@ -115,8 +146,40 @@ export type ServiceConfig = {
 	RequiredServices: { Service }?, -- The Services that this Service depends on. Roam will ensure that these Services are initialized before this Service.
 	StartMethodName: string?, -- Overrides default StartMethodName of "RoamStart"
 	InitMethodName: string?, -- Overrides default InitMethodName of "RoamInit"
+	InitTimeout: number?, -- Overrides default init timeout in seconds (default: 120)
 	[any]: any,
 }
+
+--[=[
+	@within Roam
+	@tag debug
+	@type ServiceState "REGISTERED" | "AWAITING_DEPENDENCIES" | "PRE_INIT" | "ROAM_INIT" | "POST_INIT" | "INITIALIZED" | "PRE_START" | "ROAM_START" | "POST_START" | "STARTED" | "FAILED"
+
+	Represents the current lifecycle state of a service:
+	- `REGISTERED` - Service has been registered but not yet initialized
+	- `AWAITING_DEPENDENCIES` - Service is waiting for its RequiredServices to finish initializing
+	- `PRE_INIT` - Calling PreInit with service
+	- `ROAM_INIT` - Calling Service:RoamInit method
+	- `POST_INIT` - Calling PostInit with service
+	- `INITIALIZED` - Service has completed all initialization steps
+	- `PRE_START` - Calling PreStart with service
+	- `ROAM_START` - Calling Service:RoamStart method
+	- `POST_START` - Calling PostStart with service
+	- `ACTIVE` - Service is actively running and has completed its startup routine
+	- `FAILED` - Service initialization failed
+]=]
+export type ServiceState =
+	"REGISTERED"
+	| "AWAITING_DEPENDENCIES"
+	| "PRE_INIT"
+	| "ROAM_INIT"
+	| "POST_INIT"
+	| "INITIALIZED"
+	| "PRE_START"
+	| "ROAM_START"
+	| "POST_START"
+	| "STARTED"
+	| "FAILED"
 
 type Promise = typeof(Promise.new())
 
@@ -135,6 +198,7 @@ local RUN_CONTEXT = RunService:IsServer() and "SERVER" or "CLIENT"
 --------------------------------------------------------------------------------
 
 local services: { [string]: Service } = {}
+local serviceStates: { [Service]: ServiceState } = {} -- Track state of each service
 local started = false
 local startedComplete = false
 local onStartedComplete = Instance.new("BindableEvent")
@@ -147,19 +211,15 @@ local function serviceNameMatch(obj: Instance): boolean
 	return obj.Name:match("Service$") ~= nil
 end
 
-local function reconcile<T>(primary: T?, secondary: T): T
-	primary = primary or {} :: any
-	secondary = secondary or {} :: any
-	for key, value in pairs(secondary :: any) do
-		(primary :: any)[key] = (primary :: any)[key] or value
-	end
-	return primary :: T
+local function setServiceState(service: Service, state: ServiceState): ()
+	serviceStates[service] = state
 end
 
 local function serviceExists(service: string | table): boolean
 	if type(service) == "string" then
 		return services[service] ~= nil
 	elseif type(service) == "table" then
+		-- Check if the service table is registered
 		for _, registeredService in pairs(services) do
 			if registeredService == service then
 				return true
@@ -185,6 +245,7 @@ local function ensureUnyieldingRequire(module: ModuleScript)
 		end)
 
 		if coroutine.status(current) ~= "dead" then
+			-- This is not a great traceback. I wish it could find the original yield point, but I cant detect which modules are being required.
 			error(
 				`Roam Require detected yield. Check the following module and the modules it requires: {module:GetFullName()}`
 			)
@@ -301,13 +362,12 @@ end
 --// Service Management //--
 --------------------------------------------------------------------------------
 
-local rejectedInitializations = {}
 local function createServiceInitPromise(service: Service, config: ServiceConfig): Promise?
 	local initMethodName = config.InitMethodName or DEFAULT_INIT_METHOD
 	local initMethod = service[initMethodName]
 
 	if type(initMethod) ~= "function" then
-		return nil
+		return Promise.resolve(0)
 	end
 
 	return Promise.new(function(resolve, reject)
@@ -323,30 +383,28 @@ local function createServiceInitPromise(service: Service, config: ServiceConfig)
 			error(`{config.Name} | Cannot call Init method after service has been initialized`)
 		end
 
-		local success = false
+		local elapsed
 		local initThread = task.spawn(function()
-			debug.setmemorycategory(config.Name)
+			debug.setmemorycategory(config.Name .. "_Init")
 			initFunction(service)
-			success = true
+			elapsed = os.clock() - startTime
 		end)
 
 		while coroutine.status(initThread) ~= "dead" do
 			task.wait()
 		end
 
-		if not success then
-			table.insert(rejectedInitializations, "\n - " .. config.Name)
+		if not elapsed then
 			reject(`Failed to initialize {config.Name}`)
 			return
 		end
 
-		local elapsed = os.clock() - startTime
 		if Roam.Debug then
 			print(`[{RUN_CONTEXT}] Initialized {config.Name} in {string.format("%.3f", elapsed)}s`)
 		end
 
 		resolve(elapsed)
-	end):timeout(INIT_TIMEOUT_SECONDS, `Service {config.Name} took too long to initialize`)
+	end):timeout(config.InitTimeout or INIT_TIMEOUT_SECONDS, `Service {config.Name} took too long to initialize`)
 end
 
 local function startService(service: Service, config: ServiceConfig): ()
@@ -362,7 +420,7 @@ local function startService(service: Service, config: ServiceConfig): ()
 			print(`[{RUN_CONTEXT}] Starting {config.Name}`)
 		end
 
-		debug.setmemorycategory(config.Name)
+		debug.setmemorycategory(config.Name .. "_Start")
 		local startFunction = service[startMethodName]
 
 		-- Prevent re-starting
@@ -421,15 +479,6 @@ end
 --------------------------------------------------------------------------------
 
 --[=[
-	@private
-	@within Roam
-	@tag ReadOnly
-	@prop ClassName "Roam"
-	The ClassName of the Roam module.
-]=]
-Roam.ClassName = "Roam"
-
---[=[
 	@within Roam
 	@prop Services {[string]: Service}
 	A table of Services. Only properly accessible after Roam has been started.
@@ -453,14 +502,15 @@ Roam.DEFAULT_SRC_NAME = "src"
 	A table of generic bootstrappers for Roam that you can use to quickly setup new projects.
 	```lua
 	local Roam = require(Packages.Roam)
-
+	
 	Roam.Bootstrappers.Server(script)
 	:andThenCall(print, "Roam Server Bootstrapped!")
 	```
 ]=]
+type BootStrapper = (script: Script, config: { [string]: any }?) -> Promise
 Roam.Bootstrappers = { -- Generic Bootstrappers for Roam / Orion
-	Server = require(script:FindFirstChild("Bootstrappers"):FindFirstChild("ServerBootstrapper")) :: (script: Script, config: { [string]: any }?) -> Promise,
-	Client = require(script:FindFirstChild("Bootstrappers"):FindFirstChild("ClientBootstrapper")) :: (script: Script, config: { [string]: any }?) -> Promise,
+	Server = require(script:FindFirstChild("Bootstrappers"):FindFirstChild("ServerBootstrapper")) :: BootStrapper,
+	Client = require(script:FindFirstChild("Bootstrappers"):FindFirstChild("ClientBootstrapper")) :: BootStrapper,
 }
 
 --[=[
@@ -496,25 +546,37 @@ function Roam.registerService(service: Service, serviceConfig: (ServiceConfig | 
 	end
 
 	local config = validateServiceConfig(serviceConfig, service.Name)
-	local reconciledConfig = table.freeze(reconcile(config, { Name = config.Name }))
 
-	service[KEY_CONFIG] = reconciledConfig
+	service[KEY_CONFIG] = config
 	services[config.Name] = service
+	serviceStates[service] = "REGISTERED" -- Track initial state
 
 	return service
 end
 
 --[=[
-	@param postInitPreStart (() -> (Promise?))?
-	@return Promise
+	@within Roam
 
 	Starts Roam. Should only be called once. Calling multiple times will result in a promise rejection.
 	
-	Optional argument `postInitPreStart` is a function that is called
-	after all services have been initialized, but before they are started.
-
+	Optional config argument provides lifecycle hooks in execution order:
+	Init lifecycle hooks can recieve a promise as a return value to delay progression until resolved.
+	
 	```lua
-	Roam.start()
+	Roam.start({
+		GlobalPreInit = function()
+			print("=== Initialization Phase Starting ===")
+		end,
+		PreInit = function(service)
+			print("Initializing:", Roam.getServiceName(service))
+		end,
+		PostInit = function(service)
+			print("✓ Initialized:", Roam.getServiceName(service))
+		end,
+		GlobalPostInit = function()
+			print("=== All Services Initialized ===")
+		end,
+	})
 	:andThenCall(print, "Roam started!")
 	:catch(warn)
 	```
@@ -524,21 +586,60 @@ end
 	calling `Start`. Services cannot be added later.
 	:::
 
-	:::tip Bootstrapping
-	You can use the [Roam.Bootstrappers](Roam#Bootstrappers) table/methods to quickly bootstrap Roam in your project.
-	This is reccomended as it will provide a consistent starting point for your projects.
-	:::
 ]=]
-function Roam.start(postInitPreStart: (() -> Promise?)?): Promise
+function Roam.start(config: {
+	GlobalPreInit: (() -> Promise?)?,
+	PreInit: ((service: Service) -> Promise?)?,
+	PostInit: ((service: Service) -> Promise?)?,
+	GlobalPostInit: (() -> Promise?)?,
+	GlobalPreStart: (() -> ())?,
+	PreStart: ((service: Service) -> ())?,
+	PostStart: ((service: Service) -> ())?,
+	GlobalPostStart: (() -> ())?,
+}?): Promise
 	if started then
 		return Promise.reject("Roam already started")
 	end
 
-	if postInitPreStart and type(postInitPreStart) ~= "function" then
-		error(
-			formatError("Invalid Parameter", `postInitPreStart must be a function or nil, got {type(postInitPreStart)}`)
-		)
+	-- Validate and extract lifecycle hooks from config
+	local function validateHook(hookName: string): ((...any) -> any)?
+		if not config then
+			return nil
+		end
+
+		local hookValue = (config :: any)[hookName]
+		if hookValue ~= nil and type(hookValue) ~= "function" then
+			error(formatError("Invalid Parameter", `{hookName} must be a function or nil, got {type(hookValue)}`))
+		end
+		return hookValue
 	end
+
+	-- Helper to call a lifecycle hook and handle Promise results
+	local function callLifecycleHook(hook: ((service: Service?) -> Promise?)?, service: Service?, async: boolean?)
+		if not hook then
+			return
+		end
+
+		if async then
+			task.defer(hook, service)
+		else
+			local result = hook(service)
+			-- If the hook returns a Promise, await it
+			if result and typeof(result) == "table" and result.await then
+				result:await()
+			end
+		end
+	end
+
+	-- Extract and validate all lifecycle hooks
+	local globalPreInit = validateHook("GlobalPreInit")
+	local preInit = validateHook("PreInit")
+	local postInit = validateHook("PostInit")
+	local globalPostInit = validateHook("GlobalPostInit")
+	local globalPreStart = validateHook("GlobalPreStart")
+	local preStart = validateHook("PreStart")
+	local postStart = validateHook("PostStart")
+	local globalPostStart = validateHook("GlobalPostStart")
 
 	started = true
 
@@ -550,67 +651,124 @@ function Roam.start(postInitPreStart: (() -> Promise?)?): Promise
 
 	local sortedServices = getSortedServices()
 
-	return Promise.new(function(resolve)
+	return Promise.new(function(resolve, reject)
+		local startTime = os.clock()
 		table.freeze(services)
-
-		-- Initialize services
-		local initPromises = {}
-		local totalInitTime = 0
-
-		for _, service in ipairs(sortedServices) do
-			local config = service[KEY_CONFIG]
-			local initPromise = createServiceInitPromise(service, config)
-
-			if initPromise then
-				table.insert(
-					initPromises,
-					initPromise:andThen(function(elapsed)
-						totalInitTime += elapsed
-					end)
-				)
-			end
-		end
-
 		Roam.Services = services
 
-		local initializationPromise = Promise.all(initPromises)
-			:andThen(function()
-				if Roam.Debug then
-					print(`[{RUN_CONTEXT}] All services initialized in {string.format("%.3f", totalInitTime)}s`)
+		-- GlobalPreInit hook
+		callLifecycleHook(globalPreInit)
+
+		-- Track completion promises for each service (for dependency blocking)
+		local rejectedInitializations: { string } = {}
+		local serviceCompletionPromises: { [Service]: Promise } = {}
+		local initPromises: { Promise } = {}
+
+		-- Initialize services with dependency-aware parallelization
+		for _, service in ipairs(sortedServices) do
+			local serviceConfig = service[KEY_CONFIG]
+
+			local dependencyPromises = {}
+			if serviceConfig.RequiredServices then
+				for _, requiredService in ipairs(serviceConfig.RequiredServices) do
+					local depPromise = serviceCompletionPromises[requiredService]
+					if depPromise then
+						table.insert(dependencyPromises, depPromise)
+					else
+						warn(
+							formatError(
+								"Missing Dependency Promise",
+								`Service "{serviceConfig.Name}" has a required service that lacks a completion promise`
+							)
+						)
+					end
 				end
-			end)
-			:catch(function(error)
-				return Promise.reject(
-					formatError(
-						"Initialization Failed for the following services",
-						table.concat(rejectedInitializations)
-					)
-				)
+			end
+
+			serviceStates[service] = "AWAITING_DEPENDENCIES"
+			local errMsg = "\n - " .. serviceConfig.Name
+
+			local servicePromise = Promise.all(dependencyPromises):andThen(function()
+				-- Dependencies are ready
+				return Promise.resolve()
+					:andThenCall(setServiceState, service, "PRE_INIT")
+					:andThenCall(callLifecycleHook, preInit, service)
+					:andThenCall(setServiceState, service, "ROAM_INIT")
+					:andThenCall(createServiceInitPromise, service, serviceConfig)
+					:andThenCall(setServiceState, service, "POST_INIT")
+					:andThenCall(callLifecycleHook, postInit, service)
+					:andThenCall(setServiceState, service, "INITIALIZED")
+					:catch(function(err)
+						table.insert(rejectedInitializations, errMsg)
+						serviceStates[service] = "FAILED"
+						return Promise.reject(err)
+					end)
+			end, function(err)
+				table.insert(rejectedInitializations, errMsg .. " (Dependency Failed) [" .. tostring(err) .. "]")
+				serviceStates[service] = "FAILED"
+				return Promise.reject(err)
 			end)
 
-		resolve(initializationPromise)
+			-- Track this service's completion for dependent services
+			serviceCompletionPromises[service] = servicePromise
+			table.insert(initPromises, servicePromise)
+		end
+
+		-- Wait for all services to complete initialization
+		local success: boolean = Promise.all(initPromises):await()
+
+		if success then
+			-- GlobalPostInit hook
+			callLifecycleHook(globalPostInit)
+			local totalInitTime = os.clock() - startTime
+			if Roam.Debug then
+				print(`[{RUN_CONTEXT}] All services initialized in {string.format("%.3f", totalInitTime)}s`)
+			end
+			resolve(totalInitTime)
+		else
+			local errMsg =
+				formatError("Initialization Failed for the following services", table.concat(rejectedInitializations))
+			reject(errMsg)
+		end
+	end):andThen(function()
+		---------------------------------------------------------------------
+		-- START Phase (Fully Async - Does Not Block) --
+		---------------------------------------------------------------------
+
+		-- GlobalPreStart hook
+		callLifecycleHook(globalPreStart, nil, true)
+
+		-- Start services with interleaved hooks (respects dependency order)
+		for _, service in ipairs(sortedServices) do
+			if serviceStates[service] == "FAILED" then
+				continue -- skip starting failed services
+			end
+			local serviceConfig = service[KEY_CONFIG]
+			-- PreStart hook
+			serviceStates[service] = "PRE_START"
+			callLifecycleHook(preStart, service, true)
+
+			-- Service Start
+			serviceStates[service] = "ROAM_START"
+			startService(service, serviceConfig)
+
+			-- PostStart hook
+			serviceStates[service] = "POST_START"
+			callLifecycleHook(postStart, service, true)
+
+			serviceStates[service] = "STARTED"
+		end
+
+		-- GlobalPostStart hook
+		callLifecycleHook(globalPostStart, nil, true)
+
+		startedComplete = true
+		onStartedComplete:Fire()
+
+		task.defer(function()
+			onStartedComplete:Destroy()
+		end)
 	end)
-		:andThen(function()
-			-- Call post-init hook if provided
-			if postInitPreStart then
-				return postInitPreStart()
-			end
-			return nil
-		end)
-		:andThen(function()
-			-- Start services
-			for _, service in ipairs(sortedServices) do
-				local config = service[KEY_CONFIG]
-				startService(service, config)
-			end
-
-			startedComplete = true
-			onStartedComplete:Fire()
-
-			task.defer(function()
-				onStartedComplete:Destroy()
-			end)
-		end)
 end
 
 --[=[
@@ -645,8 +803,9 @@ end
 	way to quickly load all services that might be in a folder. Takes an optional predicate
 	function to filter which modules are loaded. Services collected this way must not yield.
 	- `DeepSearch` -> whether it checks descendants or just children
+	- `AllowYieldingRequires` -> whether to allow required modules to yield (default: false)
 	- `RequirePredicate` -> a predicate function that determines whether a module should be required
-	- `IgnoreDescendantsPredicate` -> A Predicate for whether the Descendants of the Module should be Searched (Only matters if DeepSearch is true)
+	- `IgnoreDescendantsPredicate` -> A Predicate for whether the Descendants of an instance should be Searched (Only matters if DeepSearch is true)
 	- `StopOnFailedRequire` -> whether to stop requiring modules if one fails to require (default: false). Useful for debugging, helps to clear excessive noise from the output.
 
 	```lua
@@ -673,6 +832,7 @@ function Roam.requireModules(
 		IgnoreDescendantsPredicate: ((obj: Instance) -> boolean)?,
 	}?
 ): {
+	Success: boolean,
 	ModuleContent: { [ModuleScript]: any },
 	FailedModuleRequires: { ModuleScript },
 }
@@ -751,15 +911,78 @@ end
 --[=[
 	@within Roam
 	@private
+	@tag debug
+	Prints the dependency graph of all registered services to the output.
+]=]
+function Roam.printDependencyGraph(): ()
+	print("Service Dependency Graph:")
+	for serviceName, service in pairs(services) do
+		local config = service[KEY_CONFIG]
+		print(`  {serviceName}:`)
+		if config.RequiredServices then
+			for _, dep in ipairs(config.RequiredServices) do
+				local depName = dep[KEY_CONFIG].Name
+				print(`    -> {depName}`)
+			end
+		else
+			print("    (no dependencies)")
+		end
+	end
+end
+
+--[=[
+	@within Roam
+	@private
+	@tag debug
+	Returns the current lifecycle state of a service.
+	
+	@param serviceName string | Service -- Either the name of the service or the service table itself
+	@return ServiceState? -- The current state of the service, or nil if not found
+	
+	```lua
+	local state = Roam.getServiceState("MyService")
+	if state == "STARTED" then
+		print("MyService is fully running!")
+	end
+	```
+]=]
+function Roam.getServiceState(serviceName: string | Service): ServiceState?
+	local service: Service?
+
+	if type(serviceName) == "string" then
+		service = services[serviceName]
+	elseif type(serviceName) == "table" then
+		service = serviceName
+	else
+		error(
+			formatError(
+				"Invalid Argument",
+				`getServiceState expects a string or Service table, got {type(serviceName)}`
+			)
+		)
+	end
+
+	if not service then
+		return nil
+	end
+
+	return serviceStates[service]
+end
+
+--[=[
+	@within Roam
+	@private
+	@tag debug
 	Fetches the name of a registered Service.
 ]=]
-function Roam.getNameFromService(service: Service): string
+function Roam.getServiceName(service: Service): string
 	local config = service[KEY_CONFIG]
 	if not config then
 		error(formatError("Invalid Service", "Service is not registered with Roam"))
 	end
 	return config.Name
 end
+Roam.getNameFromService = Roam.getServiceName -- backwards compat
 
 --[=[
 	@deprecated 0.1.5

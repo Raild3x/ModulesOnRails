@@ -8,6 +8,5 @@
     "editor.formatOnSave": true
   },
   "selene.selenePath": "",
-  "stylua.targetReleaseVersion": "latest",
-
+  "stylua.targetReleaseVersion": "latest"
 }
