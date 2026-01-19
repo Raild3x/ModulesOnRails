@@ -12,12 +12,9 @@ local Packages = ReplicatedStorage.Packages
 local Roam = require(Packages.Roam)
 
 local function StartGame()
-	-- Register modules under the Server folder.
-	Roam.requireModules({
-		ServerScriptService.Server,
-	}, {
-		DeepSearch = true,
-	})
+	for _, module in ServerScriptService.Server:QueryDescendants("ModuleScript") do
+		require(module)
+	end
 
 	-- Start Roam
 	return Roam.start()
@@ -43,10 +40,9 @@ local Packages = ReplicatedStorage.Packages
 local Roam = require(Packages.Roam)
 
 local function StartGame()
-	-- Require modules under the Client folder that end.
-	Roam.requireModules {
-		ReplicatedStorage.Client,
-	}
+	for _, module in ReplicatedStorage.Client:QueryDescendants("ModuleScript") do
+		require(module)
+	end
 
 	-- Wait for the server to start Roam
 	if not workspace:GetAttribute("RoamStarted") then
