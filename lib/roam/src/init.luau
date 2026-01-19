@@ -9,18 +9,48 @@
 	initialize and start services in a topologically sorted manner without the need to
 	manually order and start services.
 	
-	Roam follows a design pattern similar to [Knit](https://sleitnick.github.io/Knit/), but is more lightweight. It removes all networking and replication
-	functionality, and instead focuses on providing a simple methodology to easily
-	initialize Services given to it.
-
-	Roam gathers a collection of specified services and initializes 'synchronously'.
-	Once all services have been fully initialized, it then starts them 'asynchronously' by
-	spawning their 'RoamStart' method in a new thread.
+	Roam follows a design pattern similar to [Knit](https://sleitnick.github.io/Knit/), but is more lightweight. 
+	It removes all networking and replication functionality, and instead focuses on providing a simple methodology 
+	to easily initialize and start Services given to it.
 
 	Roam is RunContext agnostic, meaning it can be used on both the server and client in the same manner.
 	It makes no distinction between the two, and instead focuses on providing a simple
 	interface for initializing and starting services. This means you could create a service and register it on 
 	both the server and client, and it will be initialized and started on both ends. 
+
+	**[EXAMPLE SERVICE]**
+	```lua 
+	-- MyService.lua
+	local MyService = {}
+
+	function MyService:RoamInit()
+		print("MyService initialized!")
+	end
+
+	function MyService:RoamStart()
+		print("MyService started!")
+	end
+
+	-- Register the service table with Roam
+	local Roam = require(ReplicatedStorage.Roam)
+	Roam.registerService(MyService, "MyService")
+
+	return MyService
+	```
+
+	**[EXAMPLE STARTUP]**
+	```lua 
+	-- ServerBootstrapper.server.lua
+	local Roam = require(ReplicatedStorage.Roam)
+
+	-- Require your services. (Tip: Roam.requireModules can help abstract this process!)
+	require(ReplicatedStorage.MyService)
+
+	-- Start Roam
+	Roam.start()
+	:andThenCall(print, "Roam started!")
+	:catch(warn)
+	```
 
 	**[CONTRACTS]**
 	- Services must be created/registered before Roam is started.
@@ -29,23 +59,6 @@
 	  called when Roam is started at the appropriate time. (Names are configurable)
 	- `RequiredServices` boot in proper topological order if specified in the ServiceConfig.
 	- Roam functions the same regardless of RunContext (Server/Client).
-
-	**[EXAMPLE STARTUP]**
-	```lua -- ServerBootstrapper.Server.lua
-	local Roam = require(ReplicatedStorage.Roam)
-
-	-- Just iterates through all the children of the given parents
-	-- and requires any module scripts that match the given predicate
-	Roam.requireModules({
-		ReplicatedStorage.Shared;
-		ServerScriptService.Server;
-	})
-
-	-- Start Roam
-	Roam.start()
-	:andThenCall(print, "Roam started!")
-	:catch(warn)
-	```
 
 	:::info Setting up Services
 	Services can be set up in a variety of ways. The most common way is to create a ModuleScript
@@ -152,6 +165,7 @@ export type ServiceConfig = {
 
 --[=[
 	@within Roam
+	@private
 	@tag debug
 	@type ServiceState "REGISTERED" | "AWAITING_DEPENDENCIES" | "PRE_INIT" | "ROAM_INIT" | "POST_INIT" | "INITIALIZED" | "PRE_START" | "ROAM_START" | "POST_START" | "STARTED" | "FAILED"
 
@@ -182,6 +196,33 @@ export type ServiceState =
 	| "FAILED"
 
 type Promise = typeof(Promise.new())
+
+--[=[
+	@within Roam
+	@interface StartConfig
+	.GlobalPreInit (() -> ())? -- Called once before ANY service initializes
+	.PreInit ((service: Service) -> ())? -- Called before each service's RoamInit
+	.PostInit ((service: Service) -> ())? -- Called after each service's RoamInit
+	.GlobalPostInit (() -> ())? -- Called once after ALL services finish initializing
+	.GlobalPreStart (() -> ())? -- Called once before ANY service starts. (Async)
+	.PreStart ((service: Service) -> ())? -- Called before each service's RoamStart (Async)
+	.PostStart ((service: Service) -> ())? -- Called after each service's RoamStart (Async)
+	.GlobalPostStart (() -> ())? -- Called once after ALL services start (Async)
+
+	Yielding in `Init` lifecycle hooks will prevent Roam from progressing to the next step.
+	
+	`Start` lifecycle hooks are fully asynchronous and do not block progression at any point.
+]=]
+export type StartConfig = {
+	GlobalPreInit: (() -> Promise?)?,
+	PreInit: ((service: Service) -> Promise?)?,
+	PostInit: ((service: Service) -> Promise?)?,
+	GlobalPostInit: (() -> Promise?)?,
+	GlobalPreStart: (() -> ())?,
+	PreStart: ((service: Service) -> ())?,
+	PostStart: ((service: Service) -> ())?,
+	GlobalPostStart: (() -> ())?,
+}
 
 --------------------------------------------------------------------------------
 --// Constants //--
@@ -245,7 +286,7 @@ local function ensureUnyieldingRequire(module: ModuleScript)
 		end)
 
 		if coroutine.status(current) ~= "dead" then
-			-- This is not a great traceback. I wish it could find the original yield point, but I cant detect which modules are being required.
+			-- This is not a great traceback. I wish it could find the original yield point, but I can't detect which modules are being required.
 			error(
 				`Roam Require detected yield. Check the following module and the modules it requires: {module:GetFullName()}`
 			)
@@ -480,6 +521,7 @@ end
 
 --[=[
 	@within Roam
+	@deprecated 0.1.6
 	@prop Services {[string]: Service}
 	A table of Services. Only properly accessible after Roam has been started.
 ]=]
@@ -489,11 +531,20 @@ Roam.ServiceNameMatch = serviceNameMatch
 
 --[=[
 	@within Roam
+	@tag debug
+	@private
 	@prop Debug boolean
 	Whether or not to print debug messages. Default is false.
 ]=]
 Roam.Debug = false -- Whether or not to print debug messages
 
+--[=[
+	@within Roam
+	@private
+	@prop DEFAULT_SRC_NAME string
+	The default name of the source folder where your modules are located. Default is "src".
+	This is only used by the generic Bootstrappers provided with Roam.
+]=]
 Roam.DEFAULT_SRC_NAME = "src"
 
 --[=[
@@ -554,25 +605,13 @@ function Roam.registerService(service: Service, serviceConfig: (ServiceConfig | 
 	return service
 end
 
-export type StartConfig = {
-	GlobalPreInit: (() -> Promise?)?,
-	PreInit: ((service: Service) -> Promise?)?,
-	PostInit: ((service: Service) -> Promise?)?,
-	GlobalPostInit: (() -> Promise?)?,
-	GlobalPreStart: (() -> ())?,
-	PreStart: ((service: Service) -> ())?,
-	PostStart: ((service: Service) -> ())?,
-	GlobalPostStart: (() -> ())?,
-}
-
 --[=[
 	@within Roam
 
 	Starts Roam. Should only be called once. Calling multiple times will result in a promise rejection.
-	
-	Optional config argument provides lifecycle hooks in execution order:
-	Init lifecycle hooks can recieve a promise as a return value to delay progression until resolved.
-	
+
+	Optional config argument provides lifecycle hooks.
+
 	```lua
 	Roam.start({
 		GlobalPreInit = function()
@@ -596,18 +635,8 @@ export type StartConfig = {
 	Be sure that all services have been created _before_
 	calling `Start`. Services cannot be added later.
 	:::
-
 ]=]
-function Roam.start(config: {
-	GlobalPreInit: (() -> Promise?)?,
-	PreInit: ((service: Service) -> Promise?)?,
-	PostInit: ((service: Service) -> Promise?)?,
-	GlobalPostInit: (() -> Promise?)?,
-	GlobalPreStart: (() -> ())?,
-	PreStart: ((service: Service) -> ())?,
-	PostStart: ((service: Service) -> ())?,
-	GlobalPostStart: (() -> ())?,
-}?): Promise
+function Roam.start(config: StartConfig?): Promise
 	if started then
 		return Promise.reject("Roam already started")
 	end
@@ -786,10 +815,10 @@ end
 	@return Promise
 	Returns a promise that is resolved once Roam has started. This is useful
 	for any code that needs to tie into Roam services but is not the script
-	that called `Start`.
+	that called `start`.
 	```lua
 	Roam.onStart():andThen(function()
-		local MyService = Roam.Services.MyService
+		local MyService = require(ReplicatedStorage.MyService)
 		MyService:DoSomething()
 	end):catch(warn)
 	```
@@ -919,6 +948,9 @@ function Roam.requireModules(
 	}
 end
 
+--------------------------------------------------------------------------------
+--// DEBUG //--
+--------------------------------------------------------------------------------
 --[=[
 	@within Roam
 	@private
@@ -995,6 +1027,9 @@ function Roam.getServiceName(service: Service): string
 end
 Roam.getNameFromService = Roam.getServiceName -- backwards compat
 
+--------------------------------------------------------------------------------
+--// DEPRECATED //--
+--------------------------------------------------------------------------------
 --[=[
 	@deprecated 0.1.5
 	@private
@@ -1038,7 +1073,7 @@ end
 	Cannot be called until Roam has been started.
 ]=]
 function Roam.getService(serviceName: string): Service
-	warn("[Roam] getService is deprecated, use Roam.Services[serviceName] instead")
+	warn("[Roam] getService is deprecated. Prefer to use direct requires")
 
 	if not started then
 		warn(formatError("Early Access", "Services accessed before Roam started\n" .. debug.traceback()))

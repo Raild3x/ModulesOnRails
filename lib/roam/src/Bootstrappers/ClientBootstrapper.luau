@@ -21,7 +21,7 @@ local function StartGame(
 		StopOnFailedRequire: boolean?, -- Default: true
 	} & Roam.StartConfig)?
 )
-	if script.Name == "start" then -- We may want to remove this check later. It doesnt allow nice custom structures since its tailored to my opinion.
+	if script.Name == "start" then -- We may want to remove this check later. It doesn't allow nice custom structures since its tailored to my opinion.
 		script:Destroy()
 		return Promise.resolve(false)
 	end
