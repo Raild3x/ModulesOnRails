@@ -554,6 +554,17 @@ function Roam.registerService(service: Service, serviceConfig: (ServiceConfig | 
 	return service
 end
 
+export type StartConfig = {
+	GlobalPreInit: (() -> Promise?)?,
+	PreInit: ((service: Service) -> Promise?)?,
+	PostInit: ((service: Service) -> Promise?)?,
+	GlobalPostInit: (() -> Promise?)?,
+	GlobalPreStart: (() -> ())?,
+	PreStart: ((service: Service) -> ())?,
+	PostStart: ((service: Service) -> ())?,
+	GlobalPostStart: (() -> ())?,
+}
+
 --[=[
 	@within Roam
 

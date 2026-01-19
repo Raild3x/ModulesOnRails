@@ -13,15 +13,11 @@ local Roam = require(Packages.Roam)
 
 local function StartGame()
 	-- Register modules under the Server folder.
-	Roam.requireModules(
-		{
-			ServerScriptService.Server,
-		},
-		true,
-		function(obj: ModuleScript) -- Only require modules that end in "Service"
-			return obj.Name:match("Service$") ~= nil
-		end
-	)
+	Roam.requireModules({
+		ServerScriptService.Server,
+	}, {
+		DeepSearch = true,
+	})
 
 	-- Start Roam
 	return Roam.start()
@@ -48,11 +44,9 @@ local Roam = require(Packages.Roam)
 
 local function StartGame()
 	-- Require modules under the Client folder that end.
-	Roam.requireModules(
-		{
-			ReplicatedStorage.Client,
-		}
-	)
+	Roam.requireModules {
+		ReplicatedStorage.Client,
+	}
 
 	-- Wait for the server to start Roam
 	if not workspace:GetAttribute("RoamStarted") then

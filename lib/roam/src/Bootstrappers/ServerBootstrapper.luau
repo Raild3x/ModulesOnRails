@@ -8,6 +8,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local BootstrapperModule = script
+local Roam = require(BootstrapperModule.Parent.Parent)
+local Promise = require(BootstrapperModule.Parent.Parent.Parent.Promise)
 
 local function ShutdownServer(err)
 	local shutdownMsg = `This server has shutdown due to ROAM failing to boot, please contact a dev:\n{err}`
@@ -25,28 +27,34 @@ local function ShutdownServer(err)
 	end
 end
 
-local function StartGame(script, requireConfig: {
-	AllowYieldingRequires: boolean?; -- Default: false
-	StopOnFailedRequire: boolean?; -- Default: true
-	}?)
-	local Promise = require(BootstrapperModule.Parent.Parent.Parent.Promise)
+local function checkConfig(config: any, field: string, default: any?)
+	if config and config[field] ~= nil then
+		return config[field]
+	end
+	return default
+end
+
+local function StartGame(
+	script,
+	config: ({
+		AllowYieldingRequires: boolean?, -- Default: false
+		StopOnFailedRequire: boolean?, -- Default: true
+	} & Roam.StartConfig)?
+)
 	if script.Name == "start" then -- We may want to remove this check later. It doesnt allow nice custom structures since its tailored to my opinion.
 		script:Destroy()
-		return Promise.reject()
+		return Promise.resolve(false)
 	end
 
-	local Roam = require(BootstrapperModule.Parent.Parent)
+	-- Register modules under the Server and Shared folders.
 	local SRC_NAME = Roam.DEFAULT_SRC_NAME
-	-- Roam.Debug = true -- Enables prints to see when services Init and Start
-
-	-- Register modules under the Server folder.
 	local result = Roam.requireModules({
 		ServerScriptService[SRC_NAME].Server,
 		ReplicatedStorage[SRC_NAME].Shared,
 	}, {
 		DeepSearch = true,
-		StopOnFailedRequire = if requireConfig and requireConfig.StopOnFailedRequire ~= nil then requireConfig.StopOnFailedRequire else true,
-		AllowYieldingRequires = if requireConfig and requireConfig.AllowYieldingRequires ~= nil then requireConfig.AllowYieldingRequires else false,
+		StopOnFailedRequire = checkConfig(config, "StopOnFailedRequire", true),
+		AllowYieldingRequires = checkConfig(config, "AllowYieldingRequires", false),
 		RequirePredicate = function(obj: ModuleScript) -- Only require modules that end in "Service"
 			local isService = obj.Name:match("Service$")
 			return isService
@@ -59,18 +67,18 @@ local function StartGame(script, requireConfig: {
 	if result.Success == false then
 		task.spawn(error, "🛑  [SERVER] Failed module requires during server bootstrap  🛑")
 		ShutdownServer("Failed module requires during server bootstrap")
-		return Promise.reject()
+		return Promise.resolve(false)
 	end
 
 	-- Start Roam
-	return Roam.start()
+	return Roam.start(config)
 		:andThen(function()
 			print("[SERVER] Roam Started!")
 			workspace:SetAttribute("RoamStarted", true) -- Alert the Client that the Server is ready
 			return true
 		end)
 		:catch(function(err)
-			local sanitizedError = tostring(err):gsub("%[(.-):", "")
+			local sanitizedError = tostring(err):gsub("%[(.-):", "") -- Replaces failure warning so I can add a fancier looking one
 			task.spawn(error, "🛑  [SERVER] Roam Failed to Start!  🛑" .. sanitizedError)
 			ShutdownServer(err)
 			return false
