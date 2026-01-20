@@ -2,6 +2,177 @@
 -- Stephen Leitnick, Logan Hunt
 -- November 26, 2021
 
+--[=[
+	@class Component
+	
+	## Overview
+	
+	This is a fork of the original Component module by Stephen Leitnick. This fork expands upon the functionality of
+	extensions and provides several new useful methods, along with robust handling of edge cases during component
+	lifecycle management.
+
+	Bind components to Roblox instances using the Component class and CollectionService tags.
+
+	To avoid confusion of terms:
+	- `Component` refers to this module.
+	- `Component Class` (e.g. `MyComponent` through this documentation) refers to a class created via `Component.new`
+	- `Component Instance` refers to an instance of a component class.
+	- `Roblox Instance` refers to the Roblox instance to which the component instance is bound.
+
+	Methods and properties are tagged with the above terms to help clarify the level at which they are used.
+]=]
+
+--[[
+	## Lifecycle
+
+	The component lifecycle follows this order:
+	1. **ShouldConstruct** - Extensions can veto construction by returning `false`
+	2. **Constructing** - Extension hook before `Construct()`
+	3. **Construct()** - Component initialization (may yield)
+	4. **Constructed** - Extension hook after `Construct()`
+	5. **Starting** - Extension hook before `Start()`
+	6. **Start()** - Component startup (may yield)
+	7. **Started** - Extension hook after `Start()`
+	8. **Update loops** - HeartbeatUpdate, SteppedUpdate, RenderSteppedUpdate connected
+	9. **Stopping** - Extension hook before `Stop()`
+	10. **Stop()** - Component cleanup
+	11. **Stopped** - Extension hook after `Stop()`
+
+	## Edge Cases and Robustness
+
+	### Yielding During Construction
+	
+	If `Construct()` or any extension function yields (e.g., waiting for data, HTTP requests, etc.),
+	the system tracks the construction state and validates it after each yield point. If the instance
+	becomes invalid (moves outside valid ancestors, loses its tag, or a newer construction attempt
+	starts), construction is cancelled and any partial state is cleaned up.
+
+	**Example scenario:**
+	```lua
+	function MyComponent:Construct()
+		self.Data = HttpService:GetAsync("...") -- Yields!
+		-- If instance is reparented during this yield, construction is cancelled
+		self.ProcessedData = processData(self.Data)
+	end
+	```
+
+	### Yielding During Start
+	
+	Similar to construction, if `Start()` or extension Starting/Started functions yield, the system
+	checks after each yield point whether the component should still be running. If `Stop()` is called
+	during startup (e.g., the instance is removed), the start thread is cancelled if possible.
+
+	### Reparenting During Lifecycle
+	
+	If an instance is reparented outside of valid ancestors during construction:
+	- Construction is immediately cancelled
+	- Any partial component state is cleaned up via `Stop()`
+	- The construction thread is cancelled if suspended
+
+	If an instance is reparented outside of valid ancestors after construction but during start:
+	- The start thread is cancelled if possible
+	- `Stop()` is called to clean up the component
+
+	### Rapid Reparenting (Ping-Pong)
+	
+	If an instance rapidly moves in and out of valid ancestors:
+	- Each construction attempt gets a unique ID (`constructId`)
+	- Only the most recent construction attempt is allowed to complete
+	- Stale construction attempts are cancelled and cleaned up
+	- The `KEY_LOCK_CONSTRUCT` table tracks the current valid construction ID
+
+	**Example scenario:**
+	```lua
+	-- Instance starts in workspace (valid ancestor)
+	local part = Instance.new("Part", workspace)
+	CollectionService:AddTag(part, "MyComponent")
+	-- Construction starts...
+	part.Parent = ReplicatedStorage -- Moves out - construction cancelled
+	part.Parent = workspace -- Moves back in - NEW construction starts
+	-- Only the second construction attempt will complete
+	```
+
+	### Errors During Construction
+	
+	If an error occurs during `Construct()` or any extension function:
+	- The error is caught and logged with a warning
+	- `Stop()` is called on the partial component to clean up any state
+	- The component is not added to tracking tables
+	- Other components are not affected
+
+	### Errors During Start/Stop
+	
+	Extension functions (`Starting`, `Started`, `Stopping`, `Stopped`) and lifecycle methods
+	are called in order. If one errors, the error propagates but cleanup still occurs for
+	connections and state that was set up.
+
+	### Thread Cancellation
+	
+	When stopping a component that's still in its Start phase:
+	- If the start thread is suspended (yielding), it's cancelled via `task.cancel()`
+	- If the start thread is the current thread (Stop called from within Start), it's not cancelled
+	  but the thread will return early due to state checks
+	- If the start thread is in "normal" status (in call stack but not current), cancellation is deferred
+
+	### Memory Management
+	
+	The component system tracks instances in several tables:
+	- `KEY_INST_TO_COMPONENTS`: Maps Roblox instances to their component instances
+	- `KEY_COMPONENTS`: Array of all active component instances
+	- `KEY_LOCK_CONSTRUCT`: Maps instances to their current construction attempt ID
+
+	All tables are properly cleaned up when:
+	- A component is stopped (instance removed from tables)
+	- The component class is destroyed (all tables cleared, all components stopped)
+	- An instance loses its tag (component stopped and removed from tracking)
+
+	### Ancestor Changes
+	
+	When `UpdateAncestors()` is called:
+	- The `AncestorsChanged` signal fires
+	- All watched instances are re-evaluated
+	- Instances now outside valid ancestors have their components stopped
+	- Instances now inside valid ancestors have components constructed
+
+	### Tag Removal
+	
+	When a tag is removed from an instance:
+	- The instance is immediately removed from the watching list
+	- Any active component is stopped
+	- Any in-progress construction is cancelled
+
+	### Component Class Destruction
+	
+	When `Destroy()` is called on a component class:
+	- All active components are stopped
+	- All tracking tables are cleared
+	- All CollectionService connections are disconnected
+	- The class is removed from the unsetup components list if present
+
+	## Extension System
+
+	Extensions can hook into the component lifecycle at various points. Extensions are processed
+	in order, with nested extensions (via the `Extensions` array) processed recursively.
+
+	### Extension Methods
+	
+	Extensions can add methods to component classes via the `Methods` table. These methods are
+	added at the class level, not the instance level, so they're available regardless of
+	`ShouldExtend` results.
+
+	### ShouldExtend
+	
+	The `ShouldExtend` function is called per-instance to determine if an extension applies.
+	This is evaluated during construction, so extensions can be conditionally applied based
+	on instance attributes or other runtime conditions.
+
+	### ShouldConstruct
+	
+	The `ShouldConstruct` function is called before any construction begins. ALL extensions
+	with a `ShouldConstruct` function must return `true` for construction to proceed.
+	If any returns `false`, no component is created and no cleanup is needed.
+]]
+
 type AncestorList = { Instance }
 
 --[=[
@@ -28,7 +199,7 @@ type ExtensionShouldFn = (any) -> boolean
 	.Stopping ExtensionFn?
 	.Stopped ExtensionFn?
 	.Extensions {Extension}?
-	.Methods {[string]: function}?
+	.Methods {[string]: (...any) -> ...any}?
 
 	An extension allows the ability to extend the behavior of
 	components. This is useful for adding injection systems or
@@ -71,12 +242,12 @@ type ExtensionShouldFn = (any) -> boolean
 	local player, an extension might look like this, assuming the
 	instance has an attribute linking it to the player's UserId:
 	```lua
-	local player = game:GetService("Players").LocalPlayer
+	local Players = game:GetService("Players")
 
 	local OnlyLocalPlayer = {}
 	function OnlyLocalPlayer.ShouldConstruct(component)
 		local ownerId = component.Instance:GetAttribute("OwnerId")
-		return ownerId == player.UserId
+		return ownerId == Players.LocalPlayer.UserId
 	end
 
 	local MyComponent = Component.new({Tag = "MyComponent", Extensions = {OnlyLocalPlayer}})
@@ -225,7 +396,7 @@ local Signal = require(Packages.Signal)
 local Trove = require(Packages.Trove)
 
 type Janitor = Janitor.Janitor
-type table = {[any]: any}
+type table = { [any]: any }
 type Component = table
 type ComponentClass = table
 
@@ -234,7 +405,23 @@ local DEFAULT_ANCESTORS = { workspace, game:GetService("Players") }
 local DEFAULT_TIMEOUT = 60
 local UNSETUP_COMPONENTS = {}
 
--- Symbol keys:
+--[[
+	Symbol Keys Documentation:
+	
+	These symbols are used as keys in component tables to avoid conflicts with user-defined
+	properties and to provide a clear separation between internal and public state.
+	
+	KEY_ANCESTORS: Array of valid ancestor instances for this component class
+	KEY_INST_TO_COMPONENTS: Map of Roblox Instance -> Component Instance
+	KEY_LOCK_CONSTRUCT: Map of Roblox Instance -> construction attempt ID (for cancellation)
+	KEY_COMPONENTS: Array of all active component instances
+	KEY_TROVE: Trove instance for managing connections and cleanup
+	KEY_EXTENSIONS: Array of extension definitions for this component class
+	KEY_ACTIVE_EXTENSIONS: Array of extensions active for a specific component instance
+	KEY_STARTING: Thread reference when component is in Start phase (nil otherwise)
+	KEY_STARTED: Boolean, true when component has fully started
+	KEY_CLASS_ACTIVE_EXTENSIONS: Extensions determined at class level (ShouldExtend not called per-instance)
+]]
 local KEY_ANCESTORS = Symbol("Ancestors")
 local KEY_INST_TO_COMPONENTS = Symbol("InstancesToComponents")
 local KEY_LOCK_CONSTRUCT = Symbol("LockConstruct")
@@ -252,6 +439,16 @@ local function NextRenderName(): string
 	return "ComponentRender" .. tostring(renderId)
 end
 
+--[[
+	InvokeExtensionFn - Calls a lifecycle hook on all active extensions.
+	
+	Parameters:
+	- component: The component instance
+	- fnName: Name of the extension function to call (e.g., "Constructing", "Starting")
+	
+	Note: This function may yield if any extension function yields.
+	The caller is responsible for state validation after calling this.
+]]
 local function InvokeExtensionFn(component, fnName: string)
 	for _, extension in ipairs(component[KEY_ACTIVE_EXTENSIONS]) do
 		local fn = extension[fnName]
@@ -261,6 +458,15 @@ local function InvokeExtensionFn(component, fnName: string)
 	end
 end
 
+--[[
+	ShouldConstruct - Checks if all extensions allow construction.
+	
+	Returns false if ANY extension's ShouldConstruct returns false.
+	Returns true if all extensions allow construction (or have no ShouldConstruct).
+	
+	This is called BEFORE any component state is created, so returning false
+	means no cleanup is needed.
+]]
 local function ShouldConstruct(component): boolean
 	for _, extension in ipairs(component[KEY_ACTIVE_EXTENSIONS]) do
 		local fn = extension.ShouldConstruct
@@ -274,7 +480,25 @@ local function ShouldConstruct(component): boolean
 	return true
 end
 
--- Handles which extensions should be applied and in what order.
+--[[
+	GetActiveExtensions - Determines which extensions apply to a component.
+	
+	Parameters:
+	- component: The component instance or class
+	- extensionList: Array of extensions to process
+	- activeExtensions: Accumulator array (for recursion)
+	- isClass: If true, don't call ShouldExtend (determining class-level extensions)
+	
+	Extension Processing:
+	1. For each extension, checks if it should be applied
+	2. If extension is already in activeExtensions, moves it to front (priority)
+	3. If not present and should extend, adds to end
+	4. Recursively processes extension.Extensions for nested extensions
+	5. Final pass removes extensions whose ShouldExtend returned false
+	
+	The recursion handling ensures nested extensions are processed and that
+	extension dependencies are properly ordered (dependencies come first).
+]]
 local function GetActiveExtensions(component, extensionList, activeExtensions, isClass)
 	activeExtensions = activeExtensions or {}
 	extensionList = extensionList or {}
@@ -305,19 +529,27 @@ local function GetActiveExtensions(component, extensionList, activeExtensions, i
 	end
 
 	if not isClass then
-        for i = #activeExtensions, 1, -1 do
-            local extension = activeExtensions[i]
-            local fn = extension.ShouldExtend
-            if type(fn) == "function" and not fn(component) then
-                table.remove(activeExtensions, i)
-            end
-        end
-    end
+		for i = #activeExtensions, 1, -1 do
+			local extension = activeExtensions[i]
+			local fn = extension.ShouldExtend
+			if type(fn) == "function" and not fn(component) then
+				table.remove(activeExtensions, i)
+			end
+		end
+	end
 
 	return activeExtensions
 end
 
--- Added by Raildex
+--[[
+	BindExtensionMethod - Adds methods from an extension to a component.
+	
+	Methods are added directly to the component table, making them callable
+	as component:MethodName(). This happens at the CLASS level, not instance
+	level, so methods are available regardless of ShouldExtend results.
+	
+	Errors if a method value is not a function (catches configuration mistakes).
+]]
 local function BindExtensionMethod(component, extension)
 	if extension.Methods then
 		for key, value in extension.Methods do
@@ -330,29 +562,16 @@ local function BindExtensionMethod(component, extension)
 	end
 end
 
+--[[
+	BindExtensionMethods - Binds methods from all extensions in a list.
+	Wrapper that calls BindExtensionMethod for each extension.
+]]
 local function BindExtensionMethods(component, extensionList)
 	for _, extension in ipairs(extensionList) do
 		BindExtensionMethod(component, extension)
 	end
 end
 
---[=[
-    @class Component
-
-    This is a fork of the original Component module by Stephen Leitnick. This fork expands upon the functionality of
-    extensions and provides several new useful methods.
-
-
-    Bind components to Roblox instances using the Component class and CollectionService tags.
-
-    To avoid confusion of terms:
-    - `Component` refers to this module.
-    - `Component Class` (e.g. `MyComponent` through this documentation) refers to a class created via `Component.new`
-    - `Component Instance` refers to an instance of a component class.
-    - `Roblox Instance` refers to the Roblox instance to which the component instance is bound.
-
-    Methods and properties are tagged with the above terms to help clarify the level at which they are used.
-]=]
 local Component = {}
 Component.__index = Component
 
@@ -388,7 +607,6 @@ Component.DelaySetup = script:GetAttribute("DelaySetup") or false
 	print(MyComponent.Tag) -- "MyComponent"
 	```
 ]=]
-
 
 --[=[
 	@tag Component
@@ -484,42 +702,263 @@ end
 	end
 	```
 ]=]
-function Component.getUnsetupComponents(): {ComponentClass}
+function Component.getUnsetupComponents(): { ComponentClass }
 	return table.clone(UNSETUP_COMPONENTS) :: any
 end
 
+--[=[
+	@private
+	@within Component
+	@param instance Instance -- The Roblox instance to check
+	@return boolean -- True if the instance is within any valid ancestor, false otherwise
 
-function Component:_instantiate(instance: Instance)
+	Checks if the given instance is a descendant of any of the valid ancestors
+	for this component class.
+]=]
+function Component:_isInAncestorList(instance: Instance): boolean
+	for _, parent in ipairs(self[KEY_ANCESTORS] :: { Instance }) do
+		if instance:IsDescendantOf(parent) then
+			return true
+		end
+	end
+	return false
+end
+
+--[=[
+	@private
+	@within Component
+	@param instance Instance -- The Roblox instance to create a component for
+	@param constructId number? -- Optional ID to track this construction attempt for cancellation
+	@return Component? -- The constructed component, or nil if construction failed/was cancelled
+
+	Creates a new component instance bound to the given Roblox instance.
+
+	## Construction Flow (Promise-based)
+	
+	Construction is wrapped in a Promise that can be cancelled if:
+	- The instance moves outside valid ancestors (ancestry change)
+	- A newer construction attempt supersedes this one (constructId mismatch)
+
+
+	## Phases
+	
+	1. **Setup**: Create component, bind extensions
+	2. **Validation**: Check ShouldConstruct (early exit, no cleanup needed)
+	3. **Construction**: Run Constructing → Construct() → Constructed hooks
+	4. **Finalization**: Return component or handle failure
+
+	## Error Handling
+	
+	Errors during construction are caught, logged, and result in Stop() being
+	called to clean up any partial state.
+]=]
+function Component:_instantiate(instance: Instance, constructId: number?)
+	-- ══════════════════════════════════════════════════════════════════════
+	-- PHASE 1: Setup
+	-- Create the component instance and bind extensions
+	-- ══════════════════════════════════════════════════════════════════════
+	
 	local component = setmetatable({}, self)
 	component.Instance = instance
 
-	component[KEY_ACTIVE_EXTENSIONS] = GetActiveExtensions(component, self[KEY_EXTENSIONS], table.clone(self[KEY_CLASS_ACTIVE_EXTENSIONS] :: any))
+	-- Bind extensions
+	component[KEY_ACTIVE_EXTENSIONS] =
+		GetActiveExtensions(component, self[KEY_EXTENSIONS], table.clone(self[KEY_CLASS_ACTIVE_EXTENSIONS] :: any))
 	for _, extension in ipairs(component[KEY_ACTIVE_EXTENSIONS]) do
 		if not table.find(self[KEY_CLASS_ACTIVE_EXTENSIONS], extension) then
 			BindExtensionMethod(component, extension)
 		end
 	end
 
+	-- ══════════════════════════════════════════════════════════════════════
+	-- PHASE 2: Validation (ShouldConstruct)
+	-- If any extension vetoes construction, exit early with no cleanup needed
+	-- ══════════════════════════════════════════════════════════════════════
+	
 	if not ShouldConstruct(component) then
 		return nil
 	end
-	InvokeExtensionFn(component, "Constructing")
-	if type(component.Construct) == "function" then
-		component:Construct()
+
+	-- ══════════════════════════════════════════════════════════════════════
+	-- PHASE 3: Construction (Promise-based)
+	-- Wrap construction in a cancellable Promise for clean cancellation handling
+	-- ══════════════════════════════════════════════════════════════════════
+
+	-- Helper: Check if construction should continue
+	local function shouldContinue(): boolean
+		if not self:_isInAncestorList(instance) then
+			return false
+		end
+		if constructId and self[KEY_LOCK_CONSTRUCT][instance] ~= constructId then
+			return false
+		end
+		return true
 	end
-	InvokeExtensionFn(component, "Constructed")
-	return component
+
+
+	local enteredConstruction = false
+	local didReject = false
+
+	local constructionPromise = Promise.new(function(resolve, reject)
+		if not shouldContinue() then
+			reject("Invalid Post-ShouldConstruct")
+			return
+		end
+
+		-- Mark that we're entering construction - from this point, cleanup is needed on failure
+		enteredConstruction = true
+
+		-- Constructing hook (extensions)
+		InvokeExtensionFn(component, "Constructing")
+		if not shouldContinue() then
+			reject("Invalid Post-Constructing")
+			return
+		end
+
+		-- User's Construct method
+		if type(component.Construct) == "function" then
+			component:Construct()
+		end
+		if not shouldContinue() then
+			reject("Invalid Post-Construct")
+			return
+		end
+
+		-- Constructed hook (extensions)
+		InvokeExtensionFn(component, "Constructed")
+		if not shouldContinue() then
+			reject("Invalid Post-Constructed")
+			return
+		end
+
+		-- Success!
+		resolve(component)
+	end)
+	:catch(function(err)
+		-- Log error
+		didReject = true
+		warn(string.format(
+			"[Component] Error during construction of '%s' on '%s':\n%s",
+			self.Tag,
+			instance:GetFullName(),
+			tostring(err)
+		))
+	end)
+
+	-- Set up ancestry change listener to cancel construction if instance becomes invalid
+	local ancestryConnection = RailUtil.Signal
+		.combine({
+			instance.AncestryChanged,
+			self.AncestorsChanged,
+		})
+		:Connect(function()
+			if not self:_isInAncestorList(instance) then
+				warn(string.format(
+					"[Component] Construction of '%s' on '%s' cancelled due to reparenting outside valid ancestors.",
+					self.Tag,
+					instance:GetFullName()
+				))
+				constructionPromise:cancel()
+			end
+		end)
+
+	-- Clean up when promise settles (success, failure, or cancel)
+	constructionPromise:finally(function(status)
+		ancestryConnection:Disconnect()
+
+		-- Clean up partial component state if not resolved successfully
+		if status ~= Promise.Status.Resolved or didReject then
+			if enteredConstruction then
+				InvokeExtensionFn(component, "Stopping")
+				component:Stop()
+				InvokeExtensionFn(component, "Stopped")
+			end
+			-- If we never entered construction, no cleanup is needed
+		end
+	end)
+
+	-- ══════════════════════════════════════════════════════════════════════
+	-- PHASE 4: Finalization
+	-- Await the promise and handle the result
+	-- ══════════════════════════════════════════════════════════════════════
+	
+	local success, result = constructionPromise:await()
+
+	if not success then
+		-- Log error if it was a real error (not just cancellation)
+		if typeof(result) == "string" then
+			warn(string.format(
+				"[Component] Error during construction of '%s' on '%s':\n%s",
+				self.Tag,
+				instance:GetFullName(),
+				tostring(result)
+			))
+		end
+
+		return nil
+	end
+
+	return result
 end
 
 --[=[
 	@tag Component Class
 	@within Component
 	@method _setup
+	@private
 
 	This is an internal method that is called to set up the component class.
 	It is automatically called when the component class is created, unless the
 	`DelaySetup` option is set to `true` in the component configuration.
 	If `DelaySetup` is `true`, then this method must be called manually.
+
+	## Internal Functions
+
+	### StartComponent
+	Starts a fully constructed component:
+	- Sets KEY_STARTING to the current thread for cancellation tracking
+	- Calls extension Starting hooks, Start(), and Started hooks
+	- After each call, checks if KEY_STARTING was set to nil (component was stopped)
+	- If stopped mid-start, returns early without setting up update loops
+	- Connects HeartbeatUpdate, SteppedUpdate, and RenderSteppedUpdate if present
+	- Sets KEY_STARTED to true and fires the Started signal
+
+	### StopComponent
+	Stops a running or starting component:
+	- If KEY_STARTING is set (component is mid-start):
+	  - Gets the start thread reference
+	  - Sets KEY_STARTING to nil to signal cancellation
+	  - If the start thread is suspended and not the current thread, cancels it
+	  - If the start thread is in "normal" status, defers cancellation
+	- Disconnects all update loop connections
+	- Calls extension Stopping hooks, Stop(), and Stopped hooks
+	- Fires the Stopped signal
+
+	### SafeConstruct
+	Wrapper around _instantiate that handles superseded construction:
+	- Checks if the construction ID is still current before calling _instantiate
+	- Checks again after _instantiate returns
+	- If superseded, cleans up the component (if one was returned) and returns nil
+	- Note: _instantiate already handles cleanup for cancelled/failed constructions
+
+	### TryConstructComponent
+	Attempts to construct a component for an instance:
+	- Skips if a component already exists for the instance
+	- Increments the construction ID to track this attempt
+	- Defers construction to allow batching and avoid blocking
+	- On success, tracks the component and defers starting it
+
+	### TryDeconstructComponent
+	Stops and removes a component for an instance:
+	- Removes the component from tracking tables
+	- Clears the construction lock (important for preventing stale locks)
+	- Spawns StopComponent if the component was started or starting
+
+	### StartWatchingInstance / InstanceTagged / InstanceUntagged
+	Manages the per-instance ancestry watching:
+	- StartWatchingInstance sets up a combined signal for AncestryChanged and AncestorsChanged
+	- When ancestry changes, evaluates if component should be constructed or deconstructed
+	- InstanceUntagged removes the watch and deconstructs the component
 ]=]
 function Component:_setup()
 	local idx = table.find(UNSETUP_COMPONENTS, self)
@@ -528,24 +967,50 @@ function Component:_setup()
 	else
 		warn(self, ":_setup was already called for this component.")
 	end
-	
+
+	-- Tracks instances being watched for ancestry changes
+	-- Key: Instance, Value: RBXScriptConnection for the ancestry listener
+	-- Cleaned up when: instance is untagged or component class is destroyed
 	local watchingInstances = {}
 
 	self[KEY_CLASS_ACTIVE_EXTENSIONS] = GetActiveExtensions(self, self[KEY_EXTENSIONS], {}, true)
 	BindExtensionMethods(self, self[KEY_CLASS_ACTIVE_EXTENSIONS]) -- Added by Raildex
 
+	--[[
+		StartComponent - Starts a fully constructed component instance.
+		
+		Edge Cases Handled:
+		- Stop called during Starting extension: KEY_STARTING becomes nil, returns early
+		- Stop called during Start(): KEY_STARTING becomes nil, returns early
+		- Stop called during Started extension: KEY_STARTING becomes nil, returns early
+		- Yielding in any hook: State is checked after each potential yield point
+		
+		Thread tracking via KEY_STARTING allows StopComponent to cancel the start
+		thread if the component needs to be stopped while still starting.
+	]]
 	local function StartComponent(component)
 		component[KEY_STARTING] = coroutine.running()
 
 		InvokeExtensionFn(component, "Starting")
 
-		component:Start()
+		-- Check if component was stopped during Starting extension
 		if component[KEY_STARTING] == nil then
-			-- Component's Start method stopped the component
+			return
+		end
+
+		component:Start()
+
+		-- Check if component was stopped during Start method
+		if component[KEY_STARTING] == nil then
 			return
 		end
 
 		InvokeExtensionFn(component, "Started")
+
+		-- Check if component was stopped during Started extension
+		if component[KEY_STARTING] == nil then
+			return
+		end
 
 		local hasHeartbeatUpdate = typeof(component.HeartbeatUpdate) == "function"
 		local hasSteppedUpdate = typeof(component.SteppedUpdate) == "function"
@@ -582,22 +1047,54 @@ function Component:_setup()
 		self.Started:Fire(component)
 	end
 
+	--[[
+		StopComponent - Stops a component, handling both fully started and mid-start cases.
+		
+		Thread Cancellation Edge Cases:
+		- If component is mid-start (KEY_STARTING set):
+		  - Captures the start thread reference before clearing KEY_STARTING
+		  - Clears KEY_STARTING first to signal cancellation to StartComponent
+		  - Thread cancellation depends on state:
+		    * "suspended": Cancel immediately (thread is yielding)
+		    * "normal": Thread is in the call stack, defer cancellation
+		    * "running": This is the current thread, don't cancel (would error)
+		  - Uses pcall around task.cancel as the thread may have already finished
+		
+		- If KEY_STARTING is nil:
+		  - Component either fully started or never started
+		  - Just clean up connections and call Stop()
+		
+		Connection Cleanup:
+		- Disconnects HeartbeatUpdate, SteppedUpdate connections if they exist
+		- Unbinds RenderStepped if using BindToRenderStep, or disconnects if using Connect
+		
+		Extension Hooks:
+		- Stopping hook called before Stop()
+		- Stopped hook called after Stop()
+		- These are called even if the component was stopped mid-start
+	]]
 	local function StopComponent(component)
 		if component[KEY_STARTING] then
 			-- Stop the component during its start method invocation:
 			local startThread = component[KEY_STARTING] :: thread
-			if coroutine.status(startThread) ~= "normal" then
-				pcall(function()
-					task.cancel(startThread)
-				end)
-			else
-				task.defer(function()
-					pcall(function()
-						task.cancel(startThread)
-					end)
-				end)
-			end
+			local currentThread = coroutine.running()
 			component[KEY_STARTING] = nil
+
+			-- Only cancel if we're not currently running in that thread
+			if startThread ~= currentThread then
+				if coroutine.status(startThread) == "suspended" then
+					pcall(task.cancel, startThread)
+				elseif coroutine.status(startThread) == "normal" then
+					-- Thread is in the call stack but not the current one, defer cancellation
+					task.defer(function()
+						if coroutine.status(startThread) == "suspended" then
+							pcall(task.cancel, startThread)
+						end
+					end)
+				end
+			end
+			-- If we are in the same thread, we don't cancel - just let it return naturally
+			-- The KEY_STARTING = nil check in StartComponent will handle this case
 		end
 
 		if component._heartbeatUpdate then
@@ -620,17 +1117,55 @@ function Component:_setup()
 		self.Stopped:Fire(component)
 	end
 
+	--[[
+		SafeConstruct - Wrapper that handles superseded construction attempts.
+		
+		Returns nil if:
+		- Construction ID doesn't match BEFORE calling _instantiate (stale attempt)
+		- Construction ID doesn't match AFTER _instantiate returns (superseded during construction)
+		- _instantiate itself returned nil (cancelled/failed/ShouldConstruct false)
+		
+		Cleanup Note:
+		- _instantiate handles its own cleanup when returning nil (calls Stop() on partial components)
+		- SafeConstruct only needs to call Stop() if _instantiate returned a valid component
+		  but the ID was superseded during construction
+	]]
 	local function SafeConstruct(instance, id)
 		if self[KEY_LOCK_CONSTRUCT][instance] ~= id then
 			return nil
 		end
-		local component = self:_instantiate(instance)
+		local component = self:_instantiate(instance, id)
 		if self[KEY_LOCK_CONSTRUCT][instance] ~= id then
+			-- Construction was superseded by a newer attempt
+			-- Note: _instantiate already handles cleanup via component:Stop() when returning nil,
+			-- so we only need to clean up if a valid component was returned but is now stale
+			if component then
+				-- Component was successfully constructed but is now stale, need to clean up
+				component:Stop()
+			end
 			return nil
 		end
 		return component
 	end
 
+	--[[
+		TryConstructComponent - Attempts to construct a component for a tagged instance.
+		
+		Construction ID System:
+		- Each construction attempt gets a unique, incrementing ID
+		- ID is stored in KEY_LOCK_CONSTRUCT[instance]
+		- SafeConstruct and _instantiate check this ID to detect superseded attempts
+		- This handles rapid reparenting where instance moves in/out of valid ancestors
+		
+		Deferred Execution:
+		- Construction is deferred via task.defer to avoid blocking
+		- Starting is also deferred after construction completes
+		- This allows multiple instances to be batched and processed efficiently
+		
+		Double-Check Pattern:
+		- Before starting, verifies the component is still the active one
+		- Protects against race conditions where the component was replaced
+	]]
 	local function TryConstructComponent(instance)
 		if self[KEY_INST_TO_COMPONENTS][instance] then
 			return
@@ -653,16 +1188,33 @@ function Component:_setup()
 		end)
 	end
 
+	--[[
+		TryDeconstructComponent - Removes and stops a component for an instance.
+		
+		Cleanup Order:
+		1. Remove from KEY_INST_TO_COMPONENTS (prevents new lookups)
+		2. Clear KEY_LOCK_CONSTRUCT (prevents stale construction locks)
+		3. Remove from KEY_COMPONENTS array (uses swap-remove for O(1))
+		4. Spawn StopComponent if component was started/starting
+		
+		Important: KEY_LOCK_CONSTRUCT is cleared even if no component exists.
+		This handles the case where construction is in progress but not complete,
+		preventing the stale lock from blocking future construction attempts.
+		
+		Note: Uses task.spawn for StopComponent to avoid blocking and allow
+		the calling code to continue (important for batch operations).
+	]]
 	local function TryDeconstructComponent(instance)
 		local component = self[KEY_INST_TO_COMPONENTS][instance]
 		if not component then
 			return
 		end
-		self[KEY_INST_TO_COMPONENTS][instance] = nil
 		self[KEY_LOCK_CONSTRUCT][instance] = nil
+		self[KEY_INST_TO_COMPONENTS][instance] = nil
 		local components = self[KEY_COMPONENTS] :: table
 		local index = table.find(components, component)
 		if index then
+			-- Swap-remove for O(1) removal from unordered array
 			local n = #components
 			components[index] = components[n]
 			components[n] = nil
@@ -672,38 +1224,66 @@ function Component:_setup()
 		end
 	end
 
+	--[[
+		StartWatchingInstance - Sets up ancestry monitoring for a tagged instance.
+		
+		Combined Signal:
+		- Listens to both instance.AncestryChanged and self.AncestorsChanged
+		- This means components respond to BOTH instance movement AND ancestor list changes
+		- Uses RailUtil.Signal.combine for efficient combined listening
+		
+		Ancestry Evaluation:
+		- On any ancestry change, checks if instance is in valid ancestor list
+		- If valid: TryConstructComponent (may already exist, that's handled)
+		- If invalid: TryDeconstructComponent (cleans up if exists)
+		
+		Memory Management:
+		- Connection stored in watchingInstances table
+		- Connection added to component class Trove for automatic cleanup on Destroy
+		- InstanceUntagged explicitly removes from watchingInstances and Trove
+	]]
 	local function StartWatchingInstance(instance)
 		if watchingInstances[instance] then
 			return
 		end
-		local function IsInAncestorList(): boolean
-			for _, parent in ipairs(self[KEY_ANCESTORS] :: {Instance}) do
-				if instance:IsDescendantOf(parent) then
-					return true
+
+		local ancestryChangedHandle = self[KEY_TROVE]:Connect(
+			RailUtil.Signal.combine {
+				instance.AncestryChanged,
+				self.AncestorsChanged,
+			},
+			function(_, parent)
+				if parent and self:_isInAncestorList(instance) then
+					TryConstructComponent(instance)
+				else
+					TryDeconstructComponent(instance)
 				end
 			end
-			return false
-		end
-		local ancestryChangedHandle = self[KEY_TROVE]:Connect(RailUtil.Signal.combine({
-			instance.AncestryChanged,
-			self.AncestorsChanged,
-		}), function(_, parent)
-			if parent and IsInAncestorList() then
-				TryConstructComponent(instance)
-			else
-				TryDeconstructComponent(instance)
-			end
-		end)
+		)
 		watchingInstances[instance] = ancestryChangedHandle
-		if IsInAncestorList() then
+		if self:_isInAncestorList(instance) then
 			TryConstructComponent(instance)
 		end
 	end
 
+	--[[
+		InstanceTagged - Called when CollectionService detects a new tagged instance.
+		Simply starts watching the instance for ancestry changes.
+	]]
 	local function InstanceTagged(instance: Instance)
 		StartWatchingInstance(instance)
 	end
 
+	--[[
+		InstanceUntagged - Called when CollectionService detects tag removal.
+		
+		Cleanup:
+		1. Removes ancestry watching connection from watchingInstances
+		2. Removes connection from Trove (prevents double-disconnect on Destroy)
+		3. Deconstructs any existing component
+		
+		This is the primary cleanup path for normal component removal.
+	]]
 	local function InstanceUntagged(instance: Instance)
 		local watchHandle = watchingInstances[instance]
 		if watchHandle then
@@ -713,9 +1293,13 @@ function Component:_setup()
 		TryDeconstructComponent(instance)
 	end
 
+	-- Connect to CollectionService for tag add/remove events
+	-- These connections are stored in the Trove for cleanup on Destroy
 	self[KEY_TROVE]:Connect(CollectionService:GetInstanceAddedSignal(self.Tag), InstanceTagged)
 	self[KEY_TROVE]:Connect(CollectionService:GetInstanceRemovedSignal(self.Tag), InstanceUntagged)
 
+	-- Process all instances that already have the tag
+	-- Deferred to avoid blocking and allow batching
 	local tagged = CollectionService:GetTagged(self.Tag)
 	for _, instance in ipairs(tagged) do
 		task.defer(InstanceTagged, instance)
@@ -731,8 +1315,7 @@ end
 	calling `GetAll` would return the three component instances.
 
 	```lua
-	local MyComponent = Component.new({Tag = "MyComponent"})
-
+	local MyComponent = Component.new({Tag = "MyComponent"})	
 	-- ...
 
 	local components = MyComponent:GetAll()
@@ -748,23 +1331,6 @@ end
 --[=[
 	@tag Component Class
 	@return Component?
-
-	Gets an instance of a component class from the given Roblox
-	instance. Returns `nil` if not found.
-
-	```lua
-	local MyComponent = require(somewhere.MyComponent)
-
-	local myComponentInstance = MyComponent:FromInstance(workspace.SomeInstance)
-	```
-]=]
-function Component:FromInstance(instance: Instance)
-	return self[KEY_INST_TO_COMPONENTS][instance]
-end
-
---[=[
-	@tag Component Class
-	@return Promise<ComponentInstance>
 
 	Resolves a promise once the component instance is present on a given
 	Roblox instance.
@@ -817,7 +1383,7 @@ end
 	end)
 	```
 ]=]
-function Component:UpdateAncestors(newAncestors: {Instance})
+function Component:UpdateAncestors(newAncestors: { Instance })
 	local lastAncestors = self[KEY_ANCESTORS]
 	self[KEY_ANCESTORS] = newAncestors
 	self.AncestorsChanged:Fire(newAncestors, lastAncestors)
@@ -828,7 +1394,7 @@ end
 
 	Gets the current valid ancestors of a component class.
 ]=]
-function Component:GetAncestors(): {Instance}
+function Component:GetAncestors(): { Instance }
 	return table.clone(self[KEY_ANCESTORS])
 end
 
@@ -906,7 +1472,6 @@ function Component:GetComponent(componentClass)
 	return componentClass[KEY_INST_TO_COMPONENTS][self.Instance]
 end
 
-
 --[=[
 	@tag Component Instance
 	@return Connection
@@ -914,7 +1479,7 @@ end
 	Ties a function to the lifecycle of the calling component and the equivalent component of the given
 	`componentClass`. The function is run whenever a component of the given class is started. The given
 	function passes the sibling component of the given class and a janitor to handle any connections
-	you may make within it. The Janitor is cleaned up whenever either compenent is stopped.
+	you may make within it. The Janitor is cleaned up whenever either component is stopped.
 
 	```lua
 	local AnotherComponentClass = require(somewhere.AnotherComponent)
@@ -932,7 +1497,15 @@ end
 	end
 	```
 ]=]
-function Component:WhileHasComponent(componentClassOrClasses: ComponentClass | {ComponentClass}, fn: (components: Component | {Component}, jani: Janitor) -> ())
+function Component:WhileHasComponent(componentClass: ComponentClass, fn: (component: Component, jani: Janitor) -> ())
+	assert(typeof(componentClass) == "table", ":WhileHasComponent() expects a component class.")
+	if not componentClass.Tag and componentClass[1] and componentClass[1].Tag then
+		error(
+			":WhileHasComponent() called with an array of component classes. Did you mean to call :WhileHasComponents() instead?"
+		)
+	end
+	assert(componentClass.Tag, ":WhileHasComponent() expects a component class.")
+
 	local bindJani = Janitor.new()
 
 	local connProxy = {}
@@ -947,7 +1520,7 @@ function Component:WhileHasComponent(componentClassOrClasses: ComponentClass | {
 	setmetatable(connProxy, {
 		__call = function(t, ...)
 			return t.Destroy(...)
-		end
+		end,
 	})
 
 	bindJani:Add(connProxy)
@@ -955,10 +1528,100 @@ function Component:WhileHasComponent(componentClassOrClasses: ComponentClass | {
 		return c.Instance == self.Instance
 	end):andThen(connProxy.Destroy))
 
-	assert(typeof(componentClassOrClasses) == "table", "Component:WhileHasComponent() expects a component class or an array of component classes.")
-	local isSingleComponentClass = if (componentClassOrClasses :: any).Tag == nil then true else false
-	-- Normalize to array of classes
-	local componentClasses = if isSingleComponentClass then componentClassOrClasses else {componentClassOrClasses}
+	-- Track janitor for the component
+	local activeJanitor = nil
+
+	local function SetupIfPresent()
+		local component = self:GetComponent(componentClass)
+		if not component or activeJanitor then
+			return
+		end
+
+		activeJanitor = bindJani:Add(Janitor.new(), "Destroy")
+		activeJanitor:Add(task.spawn(fn, component, activeJanitor))
+
+		-- If the component stops, destroy janitor
+		activeJanitor:AddPromise(Promise.fromEvent(componentClass.Stopped, function(c)
+			return c.Instance == self.Instance
+		end):andThen(function()
+			if activeJanitor then
+				activeJanitor:Destroy()
+				activeJanitor = nil
+			end
+		end))
+	end
+
+	-- Listen for component start events
+	bindJani:Add(componentClass.Started:Connect(function(component)
+		if component.Instance == self.Instance then
+			SetupIfPresent()
+		end
+	end))
+
+	-- Initial check in case component is already present
+	SetupIfPresent()
+
+	return connProxy
+end
+
+--[=[
+	@tag Component Instance
+	@return Connection
+
+	Ties a function to the lifecycle of the calling component and the equivalent components of the given
+	array of `componentClasses`. The function is run whenever all components of the given classes are started.
+	The given function passes an array of sibling components of the given classes and a janitor to handle any 
+	connections you may make within it. The Janitor is cleaned up whenever any of the components is stopped.
+
+	```lua
+	local AnotherComponentClass = require(somewhere.AnotherComponent)
+	local ThirdComponentClass = require(somewhere.ThirdComponent)
+
+	local MyComponent = Component.new({Tag = "MyComponent"})
+
+	function MyComponent:Start()
+		self:WhileHasComponents({AnotherComponentClass, ThirdComponentClass}, function(siblingComponents, jani)
+			local anotherComponent = siblingComponents[1]
+			local thirdComponent = siblingComponents[2]
+			print(anotherComponent.SomeProperty, thirdComponent.AnotherProperty)
+			
+			jani:Add(function()
+				print("One or more sibling components stopped")
+			end)
+		end)
+	end
+	```
+]=]
+function Component:WhileHasComponents(
+	componentClasses: { ComponentClass },
+	fn: (components: { Component }, jani: Janitor) -> ()
+)
+	local bindJani = Janitor.new()
+
+	local connProxy = {}
+	connProxy.IsConnected = true
+	connProxy.Disconnect = function()
+		if connProxy.IsConnected then
+			connProxy.IsConnected = false
+			bindJani:Destroy()
+		end
+	end
+	connProxy.Destroy = connProxy.Disconnect
+	setmetatable(connProxy, {
+		__call = function(t, ...)
+			return t.Destroy(...)
+		end,
+	})
+
+	bindJani:Add(connProxy)
+	bindJani:AddPromise(Promise.fromEvent(self.Stopped, function(c)
+		return c.Instance == self.Instance
+	end):andThen(connProxy.Destroy))
+
+	assert(typeof(componentClasses) == "table", "Component:WhileHasComponents() expects a non-empty array of component classes.")
+	for _, class in ipairs(componentClasses) do
+		assert(typeof(class) == "table" and class.Tag, "Component:WhileHasComponents() expects all elements to be component classes.")
+	end
 
 	-- Helper to get all component instances for self.Instance
 	local function getAllComponents()
@@ -973,31 +1636,29 @@ function Component:WhileHasComponent(componentClassOrClasses: ComponentClass | {
 		return components
 	end
 
-	-- Track janitors for each set of components
-	local activeJanitors = {}
+	-- Track janitor for the set of components
+	local activeJanitor = nil
 
 	local function SetupIfAllPresent()
 		local components = getAllComponents()
-		if not components then return end
-		-- Prevent duplicate setups for the same set
-		if activeJanitors[self.Instance] then return end
-		local currentJani = bindJani:Add(Janitor.new(), "Destroy", self.Instance)
-		activeJanitors[self.Instance] = currentJani
-
-		if isSingleComponentClass then
-			-- If only one component class, just pass it directly to maintain backwards compatibility
-			components = table.unpack(components)
+		if not components or activeJanitor then
+			return
 		end
-		currentJani:Add(task.spawn(fn, components, currentJani))
+
+		activeJanitor = bindJani:Add(Janitor.new(), "Destroy")
+		activeJanitor:Add(task.spawn(fn, components, activeJanitor))
+		local function cleanupJanitor()
+			if activeJanitor then
+				activeJanitor:Destroy()
+				activeJanitor = nil
+			end
+		end
 
 		-- If any component stops, destroy janitor
-		for i, class in ipairs(componentClasses) do
-			currentJani:AddPromise(Promise.fromEvent(class.Stopped, function(c)
+		for _, class in ipairs(componentClasses) do
+			activeJanitor:AddPromise(Promise.fromEvent(class.Stopped, function(c)
 				return c.Instance == self.Instance
-			end):andThen(function()
-				currentJani:Destroy()
-				activeJanitors[self.Instance] = nil
-			end))
+			end):andThen(cleanupJanitor))
 		end
 	end
 
@@ -1016,12 +1677,20 @@ function Component:WhileHasComponent(componentClassOrClasses: ComponentClass | {
 	return connProxy
 end
 
--- DEPRECATED: Use WhileHasComponent instead. Kept for backwards compat
+-- DEPRECATED: Use WhileHasComponent or WhileHasComponents instead. Kept for backwards compat
 function Component:ForEachSibling(...)
-	warn("ForEachSibling is deprecated. Use WhileHasComponent instead.")
-	return self:WhileHasComponent(...)
+	warn(
+		"ForEachSibling is deprecated. Use WhileHasComponent for single components or WhileHasComponents for multiple components instead."
+	)
+	-- For backwards compatibility, try to detect if it's multiple components and route appropriately
+	local componentClassOrClasses = ...
+	assert(typeof(componentClassOrClasses) == "table", ":ForEachSibling() expects a component class or an array of component classes.")
+	if not componentClassOrClasses.Tag then
+		return self:WhileHasComponents(...)
+	else
+		return self:WhileHasComponent(...)
+	end
 end
-
 
 --[=[
 	@tag Component Class
@@ -1104,12 +1773,62 @@ end
 	```
 ]=]
 
+--[=[
+	@tag Component Class
+	@within Component
+	@private
+
+	Destroys the component class, stopping all active components and cleaning up all resources.
+
+	## Cleanup Process
+
+	1. Removes from UNSETUP_COMPONENTS if present
+	2. Stops all active components (those with KEY_STARTED or KEY_STARTING set)
+	3. Clears all tracking tables:
+	   - KEY_INST_TO_COMPONENTS (instance -> component mapping)
+	   - KEY_COMPONENTS (array of all components)
+	   - KEY_LOCK_CONSTRUCT (construction attempt IDs)
+	4. Destroys the Trove, which:
+	   - Disconnects CollectionService tag signals
+	   - Disconnects all ancestry watching connections
+	   - Cleans up Started, Stopped, and AncestorsChanged signals
+
+	## Memory Leak Prevention
+
+	This method ensures no references to component instances or Roblox instances
+	are retained after destruction. All internal tables are cleared, and the Trove
+	pattern ensures all connections are properly disconnected.
+
+	## Usage
+
+	```lua
+	local MyComponent = Component.new({Tag = "MyComponent"})
+	-- ... later when you want to completely disable this component class ...
+	MyComponent:Destroy()
+	```
+]=]
 function Component:Destroy()
 	local idx = table.find(UNSETUP_COMPONENTS, self)
 	if idx then
 		table.remove(UNSETUP_COMPONENTS, idx)
 	end
+
+	-- Clear component tracking tables to prevent memory leaks
+	-- Stop all active components first
+	for _, component in pairs(self[KEY_INST_TO_COMPONENTS]) do
+		if component[KEY_STARTED] or component[KEY_STARTING] then
+			task.spawn(component.Stop, component)
+		end
+	end
+
+	-- Destroy the trove which will clean up all connections
 	self[KEY_TROVE]:Destroy()
+
+	-- Clear all tracking tables
+	table.clear(self[KEY_INST_TO_COMPONENTS])
+	table.clear(self[KEY_COMPONENTS])
+	table.clear(self[KEY_LOCK_CONSTRUCT])
+
 end
 
 return Component
