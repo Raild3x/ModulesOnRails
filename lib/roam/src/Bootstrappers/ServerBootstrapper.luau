@@ -8,7 +8,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local BootstrapperModule = script
-local Roam = require(BootstrapperModule.Parent.Parent)
+local types = require(BootstrapperModule.Parent.Parent.types)
 local Promise = require(BootstrapperModule.Parent.Parent.Parent.Promise)
 
 local function ShutdownServer(err)
@@ -39,8 +39,9 @@ local function StartGame(
 	config: ({
 		AllowYieldingRequires: boolean?, -- Default: false
 		StopOnFailedRequire: boolean?, -- Default: true
-	} & Roam.StartConfig)?
+	} & types.StartConfig)?
 )
+	local Roam = require(BootstrapperModule.Parent.Parent)
 	if script.Name == "start" then -- We may want to remove this check later. It doesn't allow nice custom structures since its tailored to my opinion.
 		script:Destroy()
 		return Promise.resolve(false)
