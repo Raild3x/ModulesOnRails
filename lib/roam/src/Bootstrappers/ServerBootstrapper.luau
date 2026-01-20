@@ -8,6 +8,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local BootstrapperModule = script
+local types = require(BootstrapperModule.Parent.Parent.types)
+local Promise = require(BootstrapperModule.Parent.Parent.Parent.Promise)
 
 local function ShutdownServer(err)
 	local shutdownMsg = `This server has shutdown due to ROAM failing to boot, please contact a dev:\n{err}`
@@ -25,41 +27,62 @@ local function ShutdownServer(err)
 	end
 end
 
-local function StartGame(script)
-	if script.Name == "start" then
+local function checkConfig(config: any, field: string, default: any?)
+	if config and config[field] ~= nil then
+		return config[field]
+	end
+	return default
+end
+
+local function StartGame(
+	script,
+	config: ({
+		AllowYieldingRequires: boolean?, -- Default: false
+		StopOnFailedRequire: boolean?, -- Default: true
+	} & types.StartConfig)?
+)
+	local Roam = require(BootstrapperModule.Parent.Parent)
+	if script.Name == "start" then -- We may want to remove this check later. It doesn't allow nice custom structures since its tailored to my opinion.
 		script:Destroy()
-		local Promise = require(BootstrapperModule.Parent.Parent.Parent.Promise)
-		return Promise.reject()
+		return Promise.resolve(false)
 	end
 
-	local Roam = require(BootstrapperModule.Parent.Parent)
+	-- Register modules under the Server and Shared folders.
 	local SRC_NAME = Roam.DEFAULT_SRC_NAME
-	-- Roam.Debug = true -- Enables prints to see when services Init and Start
-
-	-- Register modules under the Server folder.
-	Roam.requireModules({
+	local result = Roam.requireModules({
 		ServerScriptService[SRC_NAME].Server,
 		ReplicatedStorage[SRC_NAME].Shared,
 	}, {
 		DeepSearch = true,
+		StopOnFailedRequire = checkConfig(config, "StopOnFailedRequire", true),
+		AllowYieldingRequires = checkConfig(config, "AllowYieldingRequires", false),
 		RequirePredicate = function(obj: ModuleScript) -- Only require modules that end in "Service"
 			local isService = obj.Name:match("Service$")
 			return isService
 		end,
-		IgnoreDescendantsPredicate = function(obj: Instance) -- Ignore the "node_modules_dependencies" folder and anything under "Client"
-			return obj.Name == "Client" -- or obj.Name == DPDN
+		IgnoreDescendantsPredicate = function(obj: Instance) -- Ignore anything under "Client"
+			return obj.Name == "Client"
 		end,
 	})
 
+	if result.Success == false then
+		task.spawn(error, "🛑  [SERVER] Failed module requires during server bootstrap  🛑")
+		ShutdownServer("Failed module requires during server bootstrap")
+		return Promise.resolve(false)
+	end
+
 	-- Start Roam
-	return Roam.start()
+	return Roam.start(config)
 		:andThen(function()
 			print("[SERVER] Roam Started!")
 			workspace:SetAttribute("RoamStarted", true) -- Alert the Client that the Server is ready
+			return true
 		end)
 		:catch(function(err)
+			local sanitizedError = tostring(err):gsub("%[(.-):", "") -- Replaces failure warning so I can add a fancier looking one
+			task.spawn(error, "🛑  [SERVER] Roam Failed to Start!  🛑" .. sanitizedError)
 			ShutdownServer(err)
-			task.spawn(error, "🛑  [SERVER] Roam Failed to Start!  🛑\n\t" .. tostring(err))
+			return false
 		end)
 end
 

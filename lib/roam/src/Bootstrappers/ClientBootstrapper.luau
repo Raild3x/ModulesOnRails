@@ -4,47 +4,68 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local BootstrapperModule = script
+local Promise = require(BootstrapperModule.Parent.Parent.Parent.Promise)
+local types = require(BootstrapperModule.Parent.Parent.types)
 
-local function StartGame(script)
-    if script.Name == "start" then
-        script:Destroy()
-        local Promise = require(BootstrapperModule.Parent.Parent.Parent.Promise)
-        return Promise.reject()
-    end
-    
-    local Roam = require(BootstrapperModule.Parent.Parent)
-    local SRC_NAME = Roam.DEFAULT_SRC_NAME
-    -- Roam.Debug = true -- Enables prints to see when services Init and Start
+local function checkConfig(config: any, field: string, default: any?)
+	if config and config[field] ~= nil then
+		return config[field]
+	end
+	return default
+end
 
-    -- Require modules under the Client folder that end.
-    Roam.requireModules({
-        ReplicatedStorage[SRC_NAME].Client;
-        ReplicatedStorage[SRC_NAME].Shared;
-    }, {
-        DeepSearch = true;
-        RequirePredicate = function(obj: ModuleScript) -- Only require modules that end in "Service" or "Controller"
-            local isService = obj.Name:match("Service$") or obj.Name:match("Controller$")
-            return isService
-        end;
-        IgnoreDescendantsPredicate = function(obj: Instance) -- Ignore the "node_modules_dependencies" folder and anything under "Server"
-            return obj.Name == "Server" -- or obj.Name == DPDN
-        end;
-    })
+local function StartGame(
+	script,
+	config: ({
+		AllowYieldingRequires: boolean?, -- Default: false
+		StopOnFailedRequire: boolean?, -- Default: true
+	} & types.StartConfig)?
+)
+	local Roam = require(BootstrapperModule.Parent.Parent)
+	if script.Name == "start" then -- We may want to remove this check later. It doesn't allow nice custom structures since its tailored to my opinion.
+		script:Destroy()
+		return Promise.resolve(false)
+	end
 
+	-- Require modules under the Client and Shared folder that end in "Service" or "Controller"
+	local SRC_NAME = Roam.DEFAULT_SRC_NAME
+	local result = Roam.requireModules({
+		ReplicatedStorage[SRC_NAME].Client,
+		ReplicatedStorage[SRC_NAME].Shared,
+	}, {
+		DeepSearch = true,
+		StopOnFailedRequire = checkConfig(config, "StopOnFailedRequire", true),
+		AllowYieldingRequires = checkConfig(config, "AllowYieldingRequires", false),
+		RequirePredicate = function(obj: ModuleScript) -- Only require modules that end in "Service" or "Controller"
+			local isService = obj.Name:match("Service$") or obj.Name:match("Controller$")
+			return isService
+		end,
+		IgnoreDescendantsPredicate = function(obj: Instance) -- Ignore anything under "Server"
+			return obj.Name == "Server"
+		end,
+	})
 
-    -- Wait for the server to start Orion
-    if not workspace:GetAttribute("RoamStarted") then
-        workspace:GetAttributeChangedSignal("RoamStarted"):Wait()
-    end
+	if not result.Success then
+		task.spawn(error, "🛑  [CLIENT] Failed module requires during client bootstrap  🛑")
+		return Promise.resolve(false)
+	end
 
+	-- Wait for the server to start
+	if not workspace:GetAttribute("RoamStarted") then
+		workspace:GetAttributeChangedSignal("RoamStarted"):Wait()
+	end
 
-    -- Start Roam
-    return Roam.start():andThen(function()
-        print("[CLIENT] Roam Started!")
-    end):catch(function(err)
-        warn(err)
-        error("[CLIENT] Roam Failed to Start!")
-    end)    
+	-- Start Roam
+	return Roam.start(config)
+		:andThen(function()
+			print("[CLIENT] Roam Started!")
+			return true
+		end)
+		:catch(function(err)
+			local sanitizedError = tostring(err):gsub("%[(.-):", "") -- Replaces failure warning so I can add a fancier looking one
+			task.spawn(error, "🛑  [CLIENT] Roam Failed to Start!  🛑" .. sanitizedError)
+			return false
+		end)
 end
 
 return StartGame

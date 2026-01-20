@@ -9,19 +9,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local Packages = ReplicatedStorage.Packages
-local Roam = require(Packages.Roam) :: any ---@module Roam
+local Roam = require(Packages.Roam)
 
 local function StartGame()
-	-- Register modules under the Server folder.
-	Roam.requireModules(
-		{
-			ServerScriptService.Orion.Server,
-		},
-		true,
-		function(obj: ModuleScript) -- Only require modules that end in "Service"
-			return obj.Name:match("Service$") ~= nil
-		end
-	)
+	for _, module in ServerScriptService.Server:QueryDescendants("ModuleScript") do
+		require(module)
+	end
 
 	-- Start Roam
 	return Roam.start()
@@ -44,15 +37,12 @@ StartGame()
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Packages = ReplicatedStorage.Packages
-local Roam = require(Packages.Roam) :: any ---@module Roam
+local Roam = require(Packages.Roam)
 
 local function StartGame()
-	-- Require modules under the Client folder that end.
-	Roam.requireModules(
-		{
-			ReplicatedStorage.Orion.Client,
-		}
-	)
+	for _, module in ReplicatedStorage.Client:QueryDescendants("ModuleScript") do
+		require(module)
+	end
 
 	-- Wait for the server to start Roam
 	if not workspace:GetAttribute("RoamStarted") then
@@ -77,11 +67,9 @@ StartGame()
 --------------------------------------------------------------------------------
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
 local Packages = ReplicatedStorage.Packages
-local Roam = require(Packages.Roam) :: any ---@module Roam
 
-local MyService = Roam.createService("MyService") ---@class MyService
+local MyService = {}
 
 function MyService:RoamStart()
 	-- Game Logic
@@ -90,5 +78,8 @@ end
 function MyService:RoamInit()
 	-- Initialize the Service
 end
+
+local Roam = require(Packages.Roam)
+Roam.registerService(MyService, "MyService")
 
 return MyService

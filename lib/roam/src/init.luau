@@ -9,18 +9,48 @@
 	initialize and start services in a topologically sorted manner without the need to
 	manually order and start services.
 	
-	Roam follows a design pattern similar to [Knit](https://sleitnick.github.io/Knit/), but is more lightweight. It removes all networking and replication
-	functionality, and instead focuses on providing a simple methodology to easily
-	initialize Services given to it.
-
-	Roam gathers a collection of specified services and initializes 'syncronously'.
-	Once all services have been fully initialized, it then starts them 'asyncronously' by
-	spawning their 'RoamStart' method in a new thread.
+	Roam follows a design pattern similar to [Knit](https://sleitnick.github.io/Knit/), but is more lightweight. 
+	It removes all networking and replication functionality, and instead focuses on providing a simple methodology 
+	to easily initialize and start Services given to it.
 
 	Roam is RunContext agnostic, meaning it can be used on both the server and client in the same manner.
 	It makes no distinction between the two, and instead focuses on providing a simple
 	interface for initializing and starting services. This means you could create a service and register it on 
 	both the server and client, and it will be initialized and started on both ends. 
+
+	**[EXAMPLE SERVICE]**
+	```lua 
+	-- MyService.lua
+	local MyService = {}
+
+	function MyService:RoamInit()
+		print("MyService initialized!")
+	end
+
+	function MyService:RoamStart()
+		print("MyService started!")
+	end
+
+	-- Register the service table with Roam
+	local Roam = require(ReplicatedStorage.Roam)
+	Roam.registerService(MyService, "MyService")
+
+	return MyService
+	```
+
+	**[EXAMPLE STARTUP]**
+	```lua 
+	-- ServerBootstrapper.server.lua
+	local Roam = require(ReplicatedStorage.Roam)
+
+	-- Require your services. (Tip: Roam.requireModules can help abstract this process!)
+	require(ReplicatedStorage.MyService)
+
+	-- Start Roam
+	Roam.start()
+	:andThenCall(print, "Roam started!")
+	:catch(warn)
+	```
 
 	**[CONTRACTS]**
 	- Services must be created/registered before Roam is started.
@@ -29,23 +59,6 @@
 	  called when Roam is started at the appropriate time. (Names are configurable)
 	- `RequiredServices` boot in proper topological order if specified in the ServiceConfig.
 	- Roam functions the same regardless of RunContext (Server/Client).
-
-	**[EXAMPLE STARTUP]**
-	```lua -- ServerBootstrapper.Server.lua
-	local Roam = require(ReplicatedStorage.Roam)
-
-	-- Just iterates through all the children of the given parents
-	-- and requires any module scripts that match the given predicate
-	Roam.requireModules({
-		ReplicatedStorage.Shared;
-		ServerScriptService.Server;
-	})
-
-	-- Start Roam
-	Roam.start()
-	:andThenCall(print, "Roam started!")
-	:catch(warn)
-	```
 
 	:::info Setting up Services
 	Services can be set up in a variety of ways. The most common way is to create a ModuleScript
@@ -57,225 +70,939 @@
 	
 	:::tip Networking
 	Roam does not inherently have networking functionality. However, it can easily be added through the use of NetWire's 
-	**[.setupServiceNetworking](https://raild3x.github.io/ModulesOnRails/api/ServerNetWire/#setupServiceNetworking)** funtion.
+	**[.setupServiceNetworking](https://raild3x.github.io/ModulesOnRails/api/ServerNetWire/#setupServiceNetworking)** function.
 	:::
-]=]
 
+	----
+	LIFECYCLE
+	----
+	For those interested in the full execution order roam follows for booting services, see the diagrams below:
+
+	**Initialization Phase (Synchronous):**
+	- `GlobalPreInit` - Called once before ANY service initializes (global setup)
+	- For each service (in dependency order):
+		- Await dependencies to finish initializing
+		- `PreInit(service)` - Called before this service's RoamInit
+		- Service's `RoamInit()` method executes
+		- `PostInit(service)` - Called after this service's RoamInit
+	- `GlobalPostInit` - Called once after ALL services finish initializing
+	
+	**Start Phase (Fully Async - Does Not Block):**
+	- `GlobalPreStart` - Called once before ANY service starts.
+	- For each service (in dependency order):
+		- `PreStart(service)` - Called before this service's RoamStart
+		- Service's `RoamStart()` method executes
+		- `PostStart(service)` - Called after this service's RoamStart
+	- `GlobalPostStart` - Called once after ALL services start
+
+
+	**Key Concepts:**
+	- **Parallel Initialization**: Services without dependencies initialize concurrently via coroutines
+	- **Dependency Blocking**: Services wait for their dependencies' PostInit before starting their PreInit
+	- **Synchronous Init Phase**: The Initialization Phase completes fully before Start Phase begins
+	- **Async Start Phase**: The Start Phase spawns services lifecycle methods asynchronously
+
+	![Advanced Roam Lifecycle Diagram](../roam/RoamLifecycleAdvanced.png)
+]=]
 
 local RunService = game:GetService("RunService")
 
 local Packages = script.Parent
-local Promise = require(Packages.Promise) ---@module _Promise
-local Symbol = require(Packages.Symbol) ---@module _Symbol
+local Promise = require(Packages.Promise)
+local Symbol = require(Packages.Symbol)
+local Types = require(script.types)
 
-local KEY_CONFIG = Symbol("RoamServiceConfig")
-
-local Roam_START_METHOD_NAME = "RoamStart"
-local Roam_INIT_METHOD_NAME = "RoamInit"
-
-local RunContext = RunService:IsServer() and "SERVER" or "CLIENT"
-
---// Types //--
-type table = { [any]: any }
-export type Service = table
-
---[=[
-	@within Roam
-	@interface ServiceConfig
-	@field Name string -- Name of the Service. Must be unique. Used when accessing via .getService
-	@field RequiredServices {Service}? -- The Services that this Service depends on. Roam will ensure that these Services are initialized before this Service.
-	@field StartMethodName string? -- Overrides default StartMethodName of "RoamStart"
-	@field InitMethodName string? -- Overrides default InitMethodName of "RoamInit"
-
-	```lua
-	local myOtherService = require(ReplicatedStorage.MyOtherService)
-
-	-------------------------------------------------
-
-	local MyService = {}
-
-	function MyService:CustomStartMethod()
-		print("MyService started!")
-	end
-
-	-------------------------------------------------
-
-	Roam.registerService(MyService, {
-		Name = "MyService",
-		RequiredServices = {myOtherService},
-		StartMethodName = "CustomStartMethod",
-	})
-
-	return MyService
-	```
-
-	:::caution Deffering RequiredServices
-	Do NOT add services to the RequiredServices after you have created or registered the service. This will cause undefined behavior.
-	:::
-]=]
-export type ServiceConfig = {
-	Name: string, -- Name of the Service. Must be unique. Used when accessing via .getService
-	RequiredServices: {Service}?, -- The Services that this Service depends on. Roam will ensure that these Services are initialized before this Service.
-	StartMethodName: string?, -- Overrides default StartMethodName of "RoamStart"
-	InitMethodName: string?, -- Overrides default InitMethodName of "RoamInit"
-	[any]: any,
-}
-
-type Promise = typeof(Promise.new())
+local Roam = {}
 
 --------------------------------------------------------------------------------
---// Volatiles //--
+--// Types //--
+--------------------------------------------------------------------------------
+
+export type Service = Types.Service
+export type ServiceConfig = Types.ServiceConfig
+export type ServiceState = Types.ServiceState
+export type StartConfig = Types.StartConfig
+
+type Promise = typeof(Promise.new())
+type table = { [any]: any }
+
+--------------------------------------------------------------------------------
+--// Constants //--
+--------------------------------------------------------------------------------
+
+local KEY_CONFIG = Symbol("RoamServiceConfig")
+local DEFAULT_START_METHOD = "RoamStart"
+local DEFAULT_INIT_METHOD = "RoamInit"
+local INIT_TIMEOUT_SECONDS = 120
+local RUN_CONTEXT = RunService:IsServer() and "SERVER" or "CLIENT"
+
+--------------------------------------------------------------------------------
+--// State //--
 --------------------------------------------------------------------------------
 
 local services: { [string]: Service } = {}
-
+local serviceStates: { [Service]: ServiceState } = {} -- Track state of each service
 local started = false
 local startedComplete = false
 local onStartedComplete = Instance.new("BindableEvent")
 
 --------------------------------------------------------------------------------
---// Private Functions //--
+--// Utility Functions //--
 --------------------------------------------------------------------------------
 
--- Checks to see if an Instance's Name ends in `Service`
-local function ServiceNameMatch(obj: Instance)
+local function serviceNameMatch(obj: Instance): boolean
 	return obj.Name:match("Service$") ~= nil
 end
 
--- Reconciles a primary table with a secondary table
-local function Reconcile(primary, secondary)
-	primary = primary or {}
-	secondary = secondary or {}
-	for i in pairs(secondary) do
-		primary[i] = primary[i] or secondary[i]
+local function setServiceState(service: Service, state: ServiceState): ()
+	serviceStates[service] = state
+end
+
+local function serviceExists(service: string | table): boolean
+	if type(service) == "string" then
+		return services[service] ~= nil
+	elseif type(service) == "table" then
+		-- Check if the service table is registered
+		for _, registeredService in pairs(services) do
+			if registeredService == service then
+				return true
+			end
+		end
+		return false
+	else
+		error("serviceExists expects a string or table as argument")
 	end
-	return primary
 end
 
--- checks if a service exists with the given name
-local function DoesServiceExist(serviceName: string): boolean
-	local service: Service? = services[serviceName]
-	return service ~= nil
-end
-
--- requires a given modulescript and throws a safe error if it yields
-local function EnsureUnyieldingRequire(module: ModuleScript)
-	local moduleContent
+local FAILED_REQUIRE_YIELD = Symbol("FailedRequireYield")
+local function ensureUnyieldingRequire(module: ModuleScript)
+	local moduleContent = FAILED_REQUIRE_YIELD
 	task.spawn(function()
-		local current
+		local current: thread? = nil
 		task.spawn(function()
 			current = coroutine.running()
 			local success, msg = pcall(function()
 				moduleContent = require(module) :: any
+				return moduleContent
 			end)
 			assert(success, `Failed to load module: {module.Name}\n{msg}`)
 		end)
-		assert(coroutine.status(current) == "dead", "Roam Require Yielded: ".. module:GetFullName())
+
+		if current and coroutine.status(current) ~= "dead" then
+			-- This is not a great traceback. I wish it could find the original yield point, but I can't detect which modules are being required.
+			error(
+				`Roam Require detected yield. Check the following module and the modules it requires: {module:GetFullName()}`
+			)
+		end
 	end)
+
 	return moduleContent
 end
 
+local function formatError(context: string, details: string): string
+	return `[Roam {RUN_CONTEXT}] {context}: {details}`
+end
+
 --------------------------------------------------------------------------------
---// Roam //--
+--// Validation Functions //--
 --------------------------------------------------------------------------------
 
-local Roam = {}
-Roam.ClassName = "Roam"
-Roam.Services = services -- A table of Services. Only properly accessible after Roam has been started.
-Roam.ServiceNameMatch = ServiceNameMatch
-Roam.Debug = false -- Whether or not to print debug messages
-Roam.DEFAULT_SRC_NAME = "src"
+local function validateServiceConfig(serviceConfig: any, serviceName: string?): ServiceConfig
+	if typeof(serviceConfig) == "string" then
+		serviceConfig = { Name = serviceConfig }
+	elseif not serviceConfig then
+		serviceConfig = {}
+	end
 
-Roam.Bootstrappers = { -- Generic Bootstrappers for Roam / Orion
-	Server = require(script:FindFirstChild("Bootstrappers"):FindFirstChild("ServerBootstrapper")) :: (script: Script) -> (Promise);
-	Client = require(script:FindFirstChild("Bootstrappers"):FindFirstChild("ClientBootstrapper")) :: (script: Script) -> (Promise);
-}
+	if typeof(serviceConfig) ~= "table" then
+		error(formatError("Invalid ServiceConfig", `Expected table, got {typeof(serviceConfig)}`))
+	end
+
+	local name = serviceConfig.Name or serviceName
+	if not name then
+		error(formatError("Missing Service Name", "Service must have a name"))
+	end
+
+	if type(name) ~= "string" or #name == 0 then
+		error(formatError("Invalid Service Name", `Name must be a non-empty string, got {type(name)}`))
+	end
+
+	if serviceExists(name) then
+		error(formatError("Duplicate Service", `Service "{name}" already exists`))
+	end
+
+	if serviceConfig.RequiredServices then
+		for i, requiredService in ipairs(serviceConfig.RequiredServices :: { Service }) do
+			if type(requiredService) ~= "table" then
+				error(
+					formatError(
+						"Invalid Required Service",
+						`RequiredServices[{i}] must be a Service table, got {typeof(requiredService)} while registering "{name}"`
+					)
+				)
+			end
+			if not serviceExists(requiredService :: Service) then
+				warn(
+					formatError(
+						"Unregistered Required Service",
+						`RequiredServices[{i}] is not a registered service while registering "{name}"`
+					)
+				)
+			end
+		end
+	end
+
+	-- Detect and remove duplicates from RequiredServices
+	if serviceConfig.RequiredServices then
+		local seen = {}
+		local uniqueRequiredServices = {}
+		for i, reqService in ipairs(serviceConfig.RequiredServices :: { Service }) do
+			if not seen[reqService] then
+				seen[reqService] = true
+				table.insert(uniqueRequiredServices, reqService)
+			else
+				warn(
+					formatError(
+						"Duplicate RequiredService",
+						`Service "{name}" has duplicate required service at index {i}`
+					)
+				)
+			end
+		end
+		serviceConfig.RequiredServices = uniqueRequiredServices
+	end
+
+	return serviceConfig :: ServiceConfig
+end
+
+local function validateRequiredServices(): { string }
+	local missingServices = {}
+
+	for serviceName, service in pairs(services) do
+		local config: ServiceConfig = service[KEY_CONFIG]
+		if not config.RequiredServices then
+			continue
+		end
+
+		for _, requiredService in ipairs(config.RequiredServices) do
+			local found = false
+			for _, existingService in pairs(services) do
+				if requiredService == existingService then
+					found = true
+					break
+				end
+			end
+
+			if not found then
+				table.insert(missingServices, `Required service for '{serviceName}' not found`)
+			end
+		end
+	end
+
+	return missingServices
+end
+
+--------------------------------------------------------------------------------
+--// Service Management //--
+--------------------------------------------------------------------------------
+
+local function createServiceInitPromise(service: Service, config: ServiceConfig): Promise?
+	local initMethodName = config.InitMethodName or DEFAULT_INIT_METHOD
+	local initMethod = service[initMethodName]
+
+	if type(initMethod) ~= "function" then
+		return Promise.resolve(0)
+	end
+
+	return Promise.new(function(resolve, reject)
+		if Roam.Debug then
+			print(`[{RUN_CONTEXT}] Initializing {config.Name}`)
+		end
+
+		local startTime = os.clock()
+		local initFunction = service[initMethodName]
+
+		-- Prevent re-initialization
+		service[initMethodName] = function()
+			error(`{config.Name} | Cannot call Init method after service has been initialized`)
+		end
+
+		local elapsed
+		local initThread = task.spawn(function()
+			debug.setmemorycategory(config.Name .. "_Init")
+			initFunction(service)
+			elapsed = os.clock() - startTime
+		end)
+
+		while coroutine.status(initThread) ~= "dead" do
+			task.wait()
+		end
+
+		if not elapsed then
+			reject(`Failed to initialize {config.Name}`)
+			return
+		end
+
+		if Roam.Debug then
+			print(`[{RUN_CONTEXT}] Initialized {config.Name} in {string.format("%.3f", elapsed)}s`)
+		end
+
+		resolve(elapsed)
+	end):timeout(config.InitTimeout or INIT_TIMEOUT_SECONDS, `Service {config.Name} took too long to initialize`)
+end
+
+local function startService(service: Service, config: ServiceConfig): ()
+	local startMethodName = config.StartMethodName or DEFAULT_START_METHOD
+	local startMethod = service[startMethodName]
+
+	if type(startMethod) ~= "function" then
+		return
+	end
+
+	task.spawn(function()
+		if Roam.Debug then
+			print(`[{RUN_CONTEXT}] Starting {config.Name}`)
+		end
+
+		debug.setmemorycategory(config.Name .. "_Start")
+		local startFunction = service[startMethodName]
+
+		-- Prevent re-starting
+		service[startMethodName] = function()
+			error(`{config.Name} | Cannot call Start method after service has been started`)
+		end
+
+		startFunction(service)
+	end)
+end
+
+--------------------------------------------------------------------------------
+--// Topological Sorting //--
+--------------------------------------------------------------------------------
+
+local function createAdjacencyList(): { [Service]: { Service } }
+	local adjacencyList = {}
+	for _, service in pairs(services) do
+		adjacencyList[service] = service[KEY_CONFIG].RequiredServices or {}
+	end
+	return adjacencyList
+end
+
+local function topologicalSort(adjacencyList: { [Service]: { Service } }): { Service }
+	local visited = {}
+	local stack = {}
+
+	local function visit(service: Service)
+		if visited[service] then
+			return
+		end
+
+		visited[service] = true
+
+		for _, dependency in ipairs(adjacencyList[service] or {}) do
+			visit(dependency)
+		end
+
+		table.insert(stack, service)
+	end
+
+	for service in pairs(adjacencyList) do
+		visit(service)
+	end
+
+	return stack
+end
+
+local function getSortedServices(): { Service }
+	local adjacencyList = createAdjacencyList()
+	return topologicalSort(adjacencyList)
+end
+
+--------------------------------------------------------------------------------
+--// Main Roam Module //--
+--------------------------------------------------------------------------------
 
 --[=[
+	@within Roam
+	@deprecated 0.1.6
 	@private
-	@within Roam
-	@tag ReadOnly
-	@prop ClassName "Roam"
-	The ClassName of the Roam module.
+	@prop Services {[string]: Service}
+	A table of Services. Only properly accessible after Roam has been started.
 ]=]
+Roam.Services = services
+
+Roam.ServiceNameMatch = serviceNameMatch
 
 --[=[
 	@within Roam
+	@tag debug
+	@private
 	@prop Debug boolean
 	Whether or not to print debug messages. Default is false.
 ]=]
+Roam.Debug = false -- Whether or not to print debug messages
 
 --[=[
 	@within Roam
-	@prop Bootstrappers {Server: (script: Script) -> (), Client: (script: Script) -> ()}
+	@private
+	@prop DEFAULT_SRC_NAME string
+	The default name of the source folder where your modules are located. Default is "src".
+	This is only used by the generic Bootstrappers provided with Roam.
+]=]
+Roam.DEFAULT_SRC_NAME = "src"
+
+--[=[
+	@within Roam
+	@prop Bootstrappers {Server: (script: Script) -> Promise, Client: (script: Script) -> Promise}
 	A table of generic bootstrappers for Roam that you can use to quickly setup new projects.
 	```lua
-	local Roam = require(Packages.Roam)
-
 	Roam.Bootstrappers.Server(script)
 	:andThenCall(print, "Roam Server Bootstrapped!")
 	```
 ]=]
+type BootStrapper = (script: Script, config: { [string]: any }?) -> Promise
+Roam.Bootstrappers = { -- Generic Bootstrappers for Roam / Orion
+	Server = require(script:FindFirstChild("Bootstrappers"):FindFirstChild("ServerBootstrapper")) :: BootStrapper,
+	Client = require(script:FindFirstChild("Bootstrappers"):FindFirstChild("ClientBootstrapper")) :: BootStrapper,
+}
 
 --[=[
 	Registers a Service/Table with Roam to be Initialized and Started when Roam starts.
 	Cannot be called after Roam has been started.
 
-	```lua -- MyRegisteredService.lua
-	local MyRegisteredService = {}
+	```lua -- MyService.lua
+	local MyService = {}
 
-	function MyRegisteredService:RoamStart()
-		print("MyRegisteredService started!")
+	function MyService:RoamInit()
+		print("MyService initialized!")
 	end
 
-	function MyRegisteredService:RoamInit()
-		print("MyRegisteredService initialized!")
+	function MyService:RoamStart()
+		print("MyService started!")
 	end
 
 	----------------------------------------------------------------
 
-	local Roam = require(Packages.Roam)
-	Roam.registerService(MyRegisteredService, "MyRegisteredService")
-
-	return MyRegisteredService
+	Roam.registerService(MyService, "MyService")
 	```
 ]=]
 function Roam.registerService(service: Service, serviceConfig: (ServiceConfig | string)?): Service
-	assert(not started, "Cannot register Services after Roam has been started")
-	assert(type(service) == "table", `Service must be a table; got {type(service)}`)
-
-	if typeof(serviceConfig) == "string" then
-		serviceConfig = { Name = serviceConfig }
-	elseif not serviceConfig then
-		serviceConfig = {} :: any
+	if started then
+		error(formatError("Registration Error", "Cannot register services after Roam has started"))
 	end
 
-	assert(typeof(serviceConfig) == "table", `ServiceConfig must be a table; got {typeof(serviceConfig)}`)
-	--serviceConfig.ENV = getfenv(2) -- This is no longer supported
-
-	local Name = serviceConfig.Name or service.Name
-	if not Name then
-		error("No name provided for service")
-		-- Name = serviceConfig.ENV.script.Name
-		-- warn(`No Service name was given; this is not recommended. Roam will attempt to continue by attempting to infer the ServiceName. [Inferred Service Name: "{Name}"]`)
+	if type(service) ~= "table" then
+		error(formatError("Invalid Service", `Service must be a table, got {type(service)}`))
 	end
 
-	assert(
-		not serviceConfig or type(serviceConfig) == "table",
-		`ServiceConfig must be a table; got {type(serviceConfig)}`
-	)
-	assert(type(Name) == "string", `Service.Name must be a string; got {type(Name)}`)
-	assert(#Name > 0, "Service.Name must be a non-empty string")
-	assert(not DoesServiceExist(Name), `Service "{Name}" already exists`)
+	local config = validateServiceConfig(serviceConfig, service.Name)
 
-	service[KEY_CONFIG] = table.freeze(Reconcile(serviceConfig :: any, {
-		Name = Name,
-	}))
-	services[Name] = service
+	service[KEY_CONFIG] = config
+	services[config.Name] = service
+	serviceStates[service] = "REGISTERED" -- Track initial state
 
 	return service
 end
 
+--[=[
+	@within Roam
+
+	Starts Roam. Should only be called once. Calling multiple times will result in a promise rejection.
+
+	Optional config argument provides lifecycle hooks.
+
+	```lua
+	Roam.start({
+		GlobalPreInit = function()
+			print("=== Initialization Phase Starting ===")
+		end,
+		PreInit = function(service)
+			print("Initializing:", Roam.getServiceName(service))
+		end,
+		PostInit = function(service)
+			print("✓ Initialized:", Roam.getServiceName(service))
+		end,
+		GlobalPostInit = function()
+			print("=== All Services Initialized ===")
+		end,
+	})
+	:andThenCall(print, "Roam started!")
+	:catch(warn)
+	```
+
+	:::caution
+	Be sure that all services have been created _before_
+	calling `Start`. Services cannot be added later.
+	:::
+]=]
+function Roam.start(config: StartConfig?): Promise
+	if started then
+		return Promise.reject("Roam already started")
+	end
+
+	-- Validate and extract lifecycle hooks from config
+	local function validateHook(hookName: string): ((...any) -> any)?
+		if not config then
+			return nil
+		end
+
+		local hookValue = (config :: any)[hookName]
+		if hookValue ~= nil and type(hookValue) ~= "function" then
+			error(formatError("Invalid Parameter", `{hookName} must be a function or nil, got {type(hookValue)}`))
+		end
+		return hookValue
+	end
+
+	-- Helper to call a lifecycle hook and handle Promise results
+	local function callLifecycleHook(hook: ((service: Service?) -> Promise?)?, service: Service?, async: boolean?)
+		if not hook then
+			return
+		end
+
+		if async then
+			task.defer(hook, service)
+		else
+			local result = hook(service)
+			-- If the hook returns a Promise, await it
+			if result and typeof(result) == "table" and result.await and type(result.await) == "function" then
+				(result :: any):await()
+			end
+		end
+	end
+
+	-- Extract and validate all lifecycle hooks
+	local globalPreInit = validateHook("GlobalPreInit")
+	local preInit = validateHook("PreInit")
+	local postInit = validateHook("PostInit")
+	local globalPostInit = validateHook("GlobalPostInit")
+	local globalPreStart = validateHook("GlobalPreStart")
+	local preStart = validateHook("PreStart")
+	local postStart = validateHook("PostStart")
+	local globalPostStart = validateHook("GlobalPostStart")
+
+	started = true
+
+	-- Validate all required services are registered
+	local missingServices = validateRequiredServices()
+	if #missingServices > 0 then
+		error(formatError("Missing Dependencies", table.concat(missingServices, "; ")))
+	end
+
+	local sortedServices = getSortedServices()
+
+	return Promise.new(function(resolve, reject)
+		local startTime = os.clock()
+		table.freeze(services)
+		Roam.Services = services
+
+		-- GlobalPreInit hook
+		callLifecycleHook(globalPreInit)
+
+		-- Track completion promises for each service (for dependency blocking)
+		local rejectedInitializations: { string } = {}
+		local serviceCompletionPromises: { [Service]: Promise } = {}
+		local initPromises: { Promise } = {}
+
+		-- Initialize services with dependency-aware parallelization
+		for _, service in ipairs(sortedServices) do
+			local serviceConfig = service[KEY_CONFIG]
+
+			local dependencyPromises = {}
+			if serviceConfig.RequiredServices then
+				for _, requiredService in ipairs(serviceConfig.RequiredServices :: { Service }) do
+					local depPromise = serviceCompletionPromises[requiredService]
+					if depPromise then
+						table.insert(dependencyPromises, depPromise)
+					else
+						warn(
+							formatError(
+								"Missing Dependency Promise",
+								`Service "{serviceConfig.Name}" has a required service that lacks a completion promise`
+							)
+						)
+					end
+				end
+			end
+
+			serviceStates[service] = "AWAITING_DEPENDENCIES"
+			local errMsg: string = "\n - " .. serviceConfig.Name
+
+			local servicePromise = Promise.all(dependencyPromises):andThen(function()
+				-- Dependencies are ready
+				return Promise.resolve()
+					:andThenCall(setServiceState, service, "PRE_INIT")
+					:andThenCall(callLifecycleHook, preInit, service)
+					:andThenCall(setServiceState, service, "ROAM_INIT")
+					:andThenCall(createServiceInitPromise, service, serviceConfig)
+					:andThenCall(setServiceState, service, "POST_INIT")
+					:andThenCall(callLifecycleHook, postInit, service)
+					:andThenCall(setServiceState, service, "INITIALIZED")
+					:catch(function(err)
+						table.insert(rejectedInitializations, errMsg)
+						serviceStates[service] = "FAILED"
+						return Promise.reject(err)
+					end)
+			end, function(err)
+				table.insert(rejectedInitializations, errMsg .. " (Dependency Failed) [" .. tostring(err) .. "]")
+				serviceStates[service] = "FAILED"
+				return Promise.reject(err)
+			end)
+
+			-- Track this service's completion for dependent services
+			serviceCompletionPromises[service] = servicePromise
+			table.insert(initPromises, servicePromise)
+		end
+
+		-- Wait for all services to complete initialization
+		local success: boolean = Promise.all(initPromises):await()
+
+		if success then
+			-- GlobalPostInit hook
+			callLifecycleHook(globalPostInit)
+			local totalInitTime = os.clock() - startTime
+			if Roam.Debug then
+				print(`[{RUN_CONTEXT}] All services initialized in {string.format("%.3f", totalInitTime)}s`)
+			end
+			resolve(totalInitTime)
+		else
+			local errMsg =
+				formatError("Initialization Failed for the following services", table.concat(rejectedInitializations))
+			reject(errMsg)
+		end
+	end):andThen(function()
+		---------------------------------------------------------------------
+		-- START Phase (Fully Async - Does Not Block) --
+		---------------------------------------------------------------------
+
+		-- GlobalPreStart hook
+		callLifecycleHook(globalPreStart, nil, true)
+
+		-- Start services with interleaved hooks (respects dependency order)
+		for _, service in ipairs(sortedServices) do
+			if serviceStates[service] == "FAILED" then
+				continue -- skip starting failed services
+			end
+			local serviceConfig = service[KEY_CONFIG]
+			-- PreStart hook
+			serviceStates[service] = "PRE_START"
+			callLifecycleHook(preStart, service, true)
+
+			-- Service Start
+			serviceStates[service] = "ROAM_START"
+			startService(service, serviceConfig)
+
+			-- PostStart hook
+			serviceStates[service] = "POST_START"
+			callLifecycleHook(postStart, service, true)
+
+			serviceStates[service] = "STARTED"
+		end
+
+		-- GlobalPostStart hook
+		callLifecycleHook(globalPostStart, nil, true)
+
+		startedComplete = true
+		onStartedComplete:Fire()
+
+		task.defer(function()
+			onStartedComplete:Destroy()
+		end)
+	end)
+end
+
+--[=[
+	@return Promise
+	Returns a promise that is resolved once Roam has started. This is useful
+	for any code that needs to tie into Roam services but is not the script
+	that called `start`.
+	```lua
+	Roam.onStart():andThen(function()
+		local MyService = require(ReplicatedStorage.MyService)
+		MyService:DoSomething()
+	end):catch(warn)
+	```
+]=]
+function Roam.onStart(): Promise
+	if startedComplete then
+		return Promise.resolve()
+	else
+		return Promise.fromEvent(onStartedComplete.Event)
+	end
+end
+
+--[=[
+	Returns whether or not Roam has been successfully started and is ready for external access.
+]=]
+function Roam.isReady(): boolean
+	return startedComplete
+end
+
+--[=[
+	Requires all the modules that are children of the given parent. This is an easy
+	way to quickly load all services that might be in a folder. Takes an optional predicate
+	function to filter which modules are loaded. Services collected this way must not yield.
+	- `DeepSearch` -> whether it checks descendants or just children
+	- `AllowYieldingRequires` -> whether to allow required modules to yield (default: false)
+	- `RequirePredicate` -> a predicate function that determines whether a module should be required
+	- `IgnoreDescendantsPredicate` -> A Predicate for whether the Descendants of an instance should be Searched (Only matters if DeepSearch is true)
+	- `StopOnFailedRequire` -> whether to stop requiring modules if one fails to require (default: false). Useful for debugging, helps to clear excessive noise from the output.
+
+	```lua
+	local pred = function(obj: ModuleScript): boolean
+		return obj.Name:match("Service$") ~= nil
+	end
+
+	Roam.requireModules(ReplicatedStorage.Shared, {
+		DeepSearch = true,
+		RequirePredicate = pred,
+		IgnoreDescendantsPredicate = function(obj: Instance): boolean
+			return obj.Name == "Ignore"
+		end,
+	})
+	```
+]=]
+function Roam.requireModules(
+	parents: Instance | { Instance },
+	config: {
+		DeepSearch: boolean?,
+		AllowYieldingRequires: boolean?,
+		StopOnFailedRequire: boolean?,
+		RequirePredicate: ((obj: ModuleScript) -> boolean)?,
+		IgnoreDescendantsPredicate: ((obj: Instance) -> boolean)?,
+	}?
+): {
+	Success: boolean,
+	ModuleContent: { [ModuleScript]: any },
+	FailedModuleRequires: { ModuleScript },
+}
+	if typeof(parents) == "Instance" then
+		parents = { parents }
+	end
+
+	config = config or {} :: any
+	assert(typeof(config) == "table", formatError("Invalid Config", `Config must be a table, got {typeof(config)}`))
+
+	local deepSearch: boolean = config.DeepSearch or false
+	local requirePredicate: ((obj: ModuleScript) -> boolean)? = config.RequirePredicate
+	local ignoreDescendantsPredicate: ((obj: Instance) -> boolean)? = config.IgnoreDescendantsPredicate
+	local allowYieldingRequires: boolean? = config.AllowYieldingRequires
+	local stopOnFailedRequire: boolean? = config.StopOnFailedRequire
+
+	local successfullyRequiredModuleContent = {}
+	local failedModuleRequires = {}
+
+	local function searchInstance(obj: Instance | { Instance })
+		if typeof(obj) == "table" then
+			for _, child in ipairs(obj) do
+				local success = searchInstance(child)
+				if not success and stopOnFailedRequire then
+					return false
+				end
+			end
+			return true
+		end
+
+		if typeof(obj) ~= "Instance" then
+			error(formatError("Invalid Object", `Expected Instance or table of Instances, got {typeof(obj)}`))
+		end
+
+		if obj:IsA("ModuleScript") and (not requirePredicate or requirePredicate(obj)) then
+			if allowYieldingRequires then
+				local success, moduleContent = pcall(function()
+					return require(obj) :: any
+				end)
+				if success then
+					successfullyRequiredModuleContent[obj] = moduleContent
+					return true
+				else
+					table.insert(failedModuleRequires, obj)
+					return false
+				end
+			end
+
+			local moduleContent = ensureUnyieldingRequire(obj)
+			if moduleContent == FAILED_REQUIRE_YIELD then
+				table.insert(failedModuleRequires, obj)
+				return false
+			end
+
+			successfullyRequiredModuleContent[obj] = moduleContent
+		end
+
+		if deepSearch and (not ignoreDescendantsPredicate or not ignoreDescendantsPredicate(obj)) then
+			return searchInstance(obj:GetChildren())
+		end
+		return true
+	end
+
+	if typeof(parents) ~= "table" then
+		error(formatError("Invalid Parents", "Parents must be an Instance or table of Instances"))
+	end
+
+	searchInstance(parents)
+
+	return {
+		Success = #failedModuleRequires == 0,
+		ModuleContent = successfullyRequiredModuleContent,
+		FailedModuleRequires = failedModuleRequires,
+	}
+end
+
+--------------------------------------------------------------------------------
+--// DEBUG //--
+--------------------------------------------------------------------------------
+--[=[
+	@within Roam
+	@private
+	@tag debug
+	Prints the dependency graph of all registered services to the output.
+	Shows the full recursive dependency tree for each service with tree symbols.
+]=]
+function Roam.printDependencyGraph(): ()
+	local function printDependencyTree(
+		service: Service,
+		prefix: string,
+		isLast: boolean,
+		visited: { [Service]: boolean }
+	)
+		local config = service[KEY_CONFIG]
+		local serviceName = config.Name
+
+		-- Choose the appropriate tree symbol
+		local connector = isLast and "└─ " or "├─ "
+
+		-- Check for circular dependencies
+		if visited[service] then
+			print(`{prefix}{connector}{serviceName} (circular reference)`)
+			return
+		end
+
+		visited[service] = true
+		print(`{prefix}{connector}{serviceName}`)
+
+		if config.RequiredServices then
+			local deps = config.RequiredServices
+			-- Sort dependencies alphabetically for consistent display
+			local sortedDeps: { Service } = {}
+			for _, dep in ipairs(deps) do
+				table.insert(sortedDeps, dep :: Service)
+			end
+			table.sort(sortedDeps, function(a: Service, b: Service)
+				return (a[KEY_CONFIG] :: ServiceConfig).Name < (b[KEY_CONFIG] :: ServiceConfig).Name
+			end)
+
+			-- Extend the prefix for nested dependencies
+			local childPrefix = prefix .. (isLast and "   " or "│  ")
+
+			for i, dep in ipairs(sortedDeps) do
+				local isLastDep = (i == #sortedDeps)
+				printDependencyTree(dep, childPrefix, isLastDep, visited)
+			end
+		end
+
+		visited[service] = nil -- Allow same service in different branches
+	end
+
+	print("Service Dependency Graph:")
+	print(
+		"═══════════════════════════════════════"
+	)
+
+	-- Get all services and sort them alphabetically
+	local sortedServiceNames = {}
+	for serviceName in pairs(services) do
+		table.insert(sortedServiceNames, serviceName)
+	end
+	table.sort(sortedServiceNames)
+
+	-- Print each service and its dependencies
+	for i, serviceName in ipairs(sortedServiceNames) do
+		local service = services[serviceName]
+		local config = service[KEY_CONFIG]
+
+		print(`\n{serviceName}`)
+		if config.RequiredServices then
+			local deps = config.RequiredServices
+			-- Sort dependencies alphabetically
+			local sortedDeps: { Service } = {}
+			for _, dep in ipairs(deps) do
+				table.insert(sortedDeps, dep :: Service)
+			end
+			table.sort(sortedDeps, function(a: Service, b: Service)
+				return (a[KEY_CONFIG] :: ServiceConfig).Name < (b[KEY_CONFIG] :: ServiceConfig).Name
+			end)
+
+			for j, dep in ipairs(sortedDeps) do
+				local isLastDep = (j == #sortedDeps)
+				printDependencyTree(dep, "", isLastDep, {})
+			end
+			-- else
+			-- 	print("└─ (no dependencies)")
+		end
+	end
+
+	print(
+		"\n═══════════════════════════════════════"
+	)
+end
+
+--[=[
+	@within Roam
+	@private
+	@tag debug
+	Returns the current lifecycle state of a service.
+	
+	@param serviceName string | Service -- Either the name of the service or the service table itself
+	@return ServiceState? -- The current state of the service, or nil if not found
+	
+	```lua
+	local state = Roam.getServiceState("MyService")
+	if state == "STARTED" then
+		print("MyService is fully running!")
+	end
+	```
+]=]
+function Roam.getServiceState(serviceName: string | Service): ServiceState?
+	local service: Service?
+
+	if type(serviceName) == "string" then
+		service = services[serviceName]
+	elseif type(serviceName) == "table" then
+		service = serviceName
+	else
+		error(
+			formatError(
+				"Invalid Argument",
+				`getServiceState expects a string or Service table, got {type(serviceName)}`
+			)
+		)
+	end
+
+	if not service then
+		return nil
+	end
+
+	return serviceStates[service]
+end
+
+--[=[
+	@within Roam
+	@private
+	@tag debug
+	Fetches the name of a registered Service.
+]=]
+function Roam.getServiceName(service: Service): string
+	local config = service[KEY_CONFIG]
+	if not config then
+		error(formatError("Invalid Service", "Service is not registered with Roam"))
+	end
+	return config.Name
+end
+Roam.getNameFromService = Roam.getServiceName -- backwards compat
+
+--------------------------------------------------------------------------------
+--// DEPRECATED //--
+--------------------------------------------------------------------------------
 --[=[
 	@deprecated 0.1.5
 	@private
@@ -308,315 +1035,8 @@ end
 	```
 ]=]
 function Roam.createService(serviceDef: ServiceConfig): Service
-	assert(not started, "Cannot create Services after Roam has been started")
-	assert(type(serviceDef) == "table", `Service must be a table; got {type(serviceDef)}`)
-
-	local Name = serviceDef.Name
-	assert(type(Name) == "string", `Service.Name must be a string; got {type(Name)}`)
-	assert(#Name > 0, "Service.Name must be a non-empty string")
-	assert(not DoesServiceExist(Name), `Service "{Name}" already exists`)
-
-	local service: Service = serviceDef
-	service[KEY_CONFIG] = table.freeze({
-		Name = Name,
-		StartMethodName = serviceDef.StartMethodName,
-		InitMethodName = serviceDef.InitMethodName,
-		--ENV = getfenv(2),
-	})
-
-	-- Register Service to Roam
-	services[Name] = service
-
-	return service
-end
-
---[=[
-	@param postInitPreStart (() -> (Promise?))?
-	@return Promise
-
-	Starts Roam. Should only be called once. Calling multiple times will result in a promise rejection.
-	
-	Optional argument `postInitPreStart` is a function that is called
-	after all services have been initialized, but before they are started.
-
-	```lua
-	Roam.start()
-	:andThenCall(print, "Roam started!")
-	:catch(warn)
-	```
-
-	:::caution
-	Be sure that all services have been created _before_
-	calling `Start`. Services cannot be added later.
-	:::
-
-	:::tip Bootstrapping
-	You can use the [Roam.Bootstrappers](Roam#Bootstrappers) table/methods to quickly bootstrap Roam in your project.
-	This is reccomended as it will provide a consistent starting point for your projects.
-	:::
-]=]
-function Roam.start(postInitPreStart: (() -> Promise?)?): Promise
-	if started then
-		return Promise.reject("Roam already started")
-	end
-
-	assert(
-		not postInitPreStart or type(postInitPreStart) == "function",
-		`postInitPreStart must be a function or nil; got {type(postInitPreStart)}`
-	)
-
-	started = true
-	--Roam.Started = started
-
-	local topologicallySortedServices: {Service}
-	do -- fetch topologically sorted services
-		local function sortUtil(service, adjacencyList, visited, stack)
-			visited[service] = true
-			for _, neighbor in pairs(adjacencyList[service] or {}) do
-				if not visited[neighbor] then
-					sortUtil(neighbor, adjacencyList, visited, stack)
-				end
-			end
-			table.insert(stack, service)
-		end
-
-		local function topologicalSort(adjacencyList)
-			local stack, visited = {}, {}
-			for service in pairs(adjacencyList) do
-				if not visited[service] then
-					sortUtil(service, adjacencyList, visited, stack)
-				end
-			end
-			return stack
-		end
-
-		-- Generate Adjacency List of Required Services
-		local adjacencyList = {}
-		for _, service in pairs(services) do
-			adjacencyList[service] = service[KEY_CONFIG].RequiredServices or {}
-
-			-- Fetches services dynamically is no longer supported due to de-optimization
-			-- for _, envProp in pairs(service[KEY_CONFIG].ENV) do
-			-- 	if typeof(envProp) == "table" and envProp[KEY_CONFIG] then
-			-- 		if not table.find(adjacencyList[service], envProp) then
-			-- 			table.insert(adjacencyList[service], envProp)
-			-- 		end
-			-- 	end
-			-- end
-		end
-
-		topologicallySortedServices = topologicalSort(adjacencyList)
-	end
-
-
-	return Promise.new(function(resolve)
-		table.freeze(services)
-
-		-- Init:
-		local totalInitTime = 0
-		local promisesInitServices = {}
-		local servicesThatFailedToInit = {}
-
-		for _, service in topologicallySortedServices do
-			local ServiceConfig = service[KEY_CONFIG]
-			local InitMethodName = ServiceConfig.InitMethodName or Roam_INIT_METHOD_NAME
-			if type(service[InitMethodName]) == "function" then
-				table.insert(
-					promisesInitServices,
-					Promise.new(function(resolveService, reject)
-						if Roam.Debug then
-							print(`[{RunContext}] Initializing {ServiceConfig.Name}`)
-						end
-						local t = os.clock()
-						
-						local serviceInitFn = service[InitMethodName]
-						service[InitMethodName] = function()
-							error(`{ServiceConfig.Name} | Cannot call Init method after service has been initialized`)
-						end
-
-						local successfullyInitialized = false
-						local initThread = task.spawn(function()
-							debug.setmemorycategory(ServiceConfig.Name)
-							serviceInitFn(service)
-							successfullyInitialized = true
-						end)
-						while coroutine.status(initThread) ~= "dead" do
-							task.wait() -- Yield until the coroutine is dead
-						end
-						if not successfullyInitialized then
-							table.insert(servicesThatFailedToInit, ServiceConfig.Name)
-							reject(`Failed to initialize {ServiceConfig.Name}`)
-							return
-						end
-
-						t = os.clock() - t
-						totalInitTime += t
-						if Roam.Debug then
-							print(`[ROAM {RunContext}] Initialized {ServiceConfig.Name} in {t} seconds.`)
-						end
-						resolveService()
-					end):timeout(120, `Service {ServiceConfig.Name} took too long to initialize.`)
-				)
-			end
-		end
-
-		Roam.Services = services
-
-		local InitProm = Promise.all(promisesInitServices)
-			:tap(function()
-				if Roam.Debug then
-					print(`[{RunContext}] ROAM Initialized all services in {totalInitTime} seconds.`)
-				end
-			end)
-			:catch(function()
-				task.wait()
-				local err = `ROAM failed to initialize services: ` .. table.concat(servicesThatFailedToInit, ", ")
-				return Promise.reject(err)
-			end)
-
-		resolve(InitProm)
-	end)
-	:andThen(function()
-		if postInitPreStart then
-			return postInitPreStart() :: Promise?
-		end
-		return nil
-	end)
-	:andThen(function()
-		-- Start:
-		for _, service in topologicallySortedServices do
-			local ServiceConfig = service[KEY_CONFIG]
-			local StartMethodName = ServiceConfig.StartMethodName or Roam_START_METHOD_NAME
-			if type(service[StartMethodName]) == "function" then
-				task.spawn(function()
-					if Roam.Debug then
-						print(`[{RunContext}] Starting {ServiceConfig.Name}`)
-					end
-					debug.setmemorycategory(ServiceConfig.Name)
-					local serviceStartFn = service[StartMethodName]
-					service[StartMethodName] = function()
-						error(`{ServiceConfig.Name} | Cannot call Start method after service has been initialized`)
-					end
-					serviceStartFn(service)
-				end)
-			end
-		end
-
-		startedComplete = true
-		--Roam.Ready = startedComplete
-		onStartedComplete:Fire()
-
-		task.defer(function()
-			onStartedComplete:Destroy()
-		end)
-	end)
-end
-
---[=[
-	@return Promise
-	Returns a promise that is resolved once Roam has started. This is useful
-	for any code that needs to tie into Roam services but is not the script
-	that called `Start`.
-	```lua
-	Roam.onStart():andThen(function()
-		local MyService = Roam.Services.MyService
-		MyService:DoSomething()
-	end):catch(warn)
-	```
-]=]
-function Roam.onStart()
-	if startedComplete then
-		return Promise.resolve()
-	else
-		return Promise.fromEvent(onStartedComplete.Event)
-	end
-end
-
---[=[
-	Returns whether or not Roam has been successfully started and is ready for external access.
-]=]
-function Roam.isReady(): boolean
-	return startedComplete
-end
-
---[=[
-	Requires all the modules that are children of the given parent. This is an easy
-	way to quickly load all services that might be in a folder. Takes an optional predicate
-	function to filter which modules are loaded. Services collected this way must not yield.
-	- `DeepSearch` -> whether it checks descendants or just children
-	- `RequirePredicate` -> a predicate function that determines whether a module should be required
-	- `IgnoreDescendantsPredicate` -> A Predicate for whether the Descendants of the Module should be Searched (Only matters if DeepSearch is true)
-
-	```lua
-	local pred = function(obj: ModuleScript): boolean
-		return obj.Name:match("Service$") ~= nil
-	end
-
-	Roam.requireModules(ReplicatedStorage.Shared, {
-		DeepSearch = true,
-		RequirePredicate = pred,
-		IgnoreDescendantsPredicate = function(obj: Instance): boolean
-			return obj.Name == "Ignore"
-		end,
-	})
-	```
-]=]
-function Roam.requireModules(
-	parents: Instance | { Instance },
-	config: {
-		DeepSearch: boolean?,
-		RequirePredicate: ((obj: ModuleScript) -> boolean)?,
-		IgnoreDescendantsPredicate: ((obj: Instance) -> boolean)?,
-	}?
-): { Service }
-	if typeof(parents) == "Instance" then
-		parents = { parents }
-	end
-
-	config = config or {}
-	assert(typeof(config) == "table", `config must be a table; got {typeof(config)}`)
-	local deepSearch = config.DeepSearch or false
-	local predicate = config.RequirePredicate
-	local ignoreDescendantsPredicate = config.IgnoreDescendantsPredicate
-
-	local addedServices = {}
-	local function SearchInstance(obj: Instance | {Instance})
-		if typeof(obj) == "table" then
-			for _, v in ipairs(obj) do
-				SearchInstance(v)
-			end
-			return
-		end
-
-		assert(typeof(obj) == "Instance", "Expected Instance or table of Instances. Got:"..tostring(obj))
-		if obj:IsA("ModuleScript") and (not predicate or predicate(obj)) then
-			local service = EnsureUnyieldingRequire(obj)
-			if table.find(addedServices, service) then
-				warn("Already added service '" .. service[KEY_CONFIG].Name .. "' | " .. obj:GetFullName())
-				return
-			end
-
-			table.insert(addedServices, service)
-		end
-
-		if deepSearch and (not ignoreDescendantsPredicate or not ignoreDescendantsPredicate(obj)) then
-			SearchInstance(obj:GetChildren())
-		end
-	end
-	
-	assert(typeof(parents) == "table", "Parents must be an Instance or table of Instances")
-	for _, parent in ipairs(parents) do
-		SearchInstance(parent:GetChildren())
-	end
-
-	return addedServices
-end
-
---[=[
-	Fetches the name of a registered Service.
-]=]
-function Roam.getNameFromService(service: Service): string
-	return service[KEY_CONFIG].Name
+	warn("[Roam] createService is deprecated, use registerService instead")
+	return Roam.registerService(serviceDef, serviceDef)
 end
 
 --[=[
@@ -626,11 +1046,22 @@ end
 	Cannot be called until Roam has been started.
 ]=]
 function Roam.getService(serviceName: string): Service
+	warn("[Roam] getService is deprecated. Prefer to use direct requires")
+
 	if not started then
-		warn("!Roam has not been started yet! Services are not safe to access before Roam has been started.\n"..debug.traceback())
+		warn(formatError("Early Access", "Services accessed before Roam started\n" .. debug.traceback()))
 	end
-	assert(type(serviceName) == "string", `ServiceName must be a string; got {type(serviceName)}`)
-	return assert(services[serviceName], `Could not find service "{serviceName}"`) :: Service
+
+	if type(serviceName) ~= "string" then
+		error(formatError("Invalid Service Name", `ServiceName must be a string, got {type(serviceName)}`))
+	end
+
+	local service = services[serviceName]
+	if not service then
+		error(formatError("Service Not Found", `Could not find service "{serviceName}"`))
+	end
+
+	return service
 end
 
 return Roam
