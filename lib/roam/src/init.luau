@@ -522,10 +522,11 @@ end
 --[=[
 	@within Roam
 	@deprecated 0.1.6
+	@private
 	@prop Services {[string]: Service}
 	A table of Services. Only properly accessible after Roam has been started.
 ]=]
-Roam.Services = services -- A table of Services. Only properly accessible after Roam has been started.
+Roam.Services = services
 
 Roam.ServiceNameMatch = serviceNameMatch
 
@@ -552,8 +553,6 @@ Roam.DEFAULT_SRC_NAME = "src"
 	@prop Bootstrappers {Server: (script: Script) -> Promise, Client: (script: Script) -> Promise}
 	A table of generic bootstrappers for Roam that you can use to quickly setup new projects.
 	```lua
-	local Roam = require(Packages.Roam)
-	
 	Roam.Bootstrappers.Server(script)
 	:andThenCall(print, "Roam Server Bootstrapped!")
 	```
@@ -568,23 +567,20 @@ Roam.Bootstrappers = { -- Generic Bootstrappers for Roam / Orion
 	Registers a Service/Table with Roam to be Initialized and Started when Roam starts.
 	Cannot be called after Roam has been started.
 
-	```lua -- MyRegisteredService.lua
-	local MyRegisteredService = {}
+	```lua -- MyService.lua
+	local MyService = {}
 
-	function MyRegisteredService:RoamStart()
-		print("MyRegisteredService started!")
+	function MyService:RoamInit()
+		print("MyService initialized!")
 	end
 
-	function MyRegisteredService:RoamInit()
-		print("MyRegisteredService initialized!")
+	function MyService:RoamStart()
+		print("MyService started!")
 	end
 
 	----------------------------------------------------------------
 
-	local Roam = require(Packages.Roam)
-	Roam.registerService(MyRegisteredService, "MyRegisteredService")
-
-	return MyRegisteredService
+	Roam.registerService(MyService, "MyService")
 	```
 ]=]
 function Roam.registerService(service: Service, serviceConfig: (ServiceConfig | string)?): Service
@@ -956,21 +952,94 @@ end
 	@private
 	@tag debug
 	Prints the dependency graph of all registered services to the output.
+	Shows the full recursive dependency tree for each service with tree symbols.
 ]=]
 function Roam.printDependencyGraph(): ()
-	print("Service Dependency Graph:")
-	for serviceName, service in pairs(services) do
+	local function printDependencyTree(
+		service: Service,
+		prefix: string,
+		isLast: boolean,
+		visited: { [Service]: boolean }
+	)
 		local config = service[KEY_CONFIG]
-		print(`  {serviceName}:`)
+		local serviceName = config.Name
+
+		-- Choose the appropriate tree symbol
+		local connector = isLast and "└─ " or "├─ "
+
+		-- Check for circular dependencies
+		if visited[service] then
+			print(`{prefix}{connector}{serviceName} (circular reference)`)
+			return
+		end
+
+		visited[service] = true
+		print(`{prefix}{connector}{serviceName}`)
+
 		if config.RequiredServices then
-			for _, dep in ipairs(config.RequiredServices) do
-				local depName = dep[KEY_CONFIG].Name
-				print(`    -> {depName}`)
+			local deps = config.RequiredServices
+			-- Sort dependencies alphabetically for consistent display
+			local sortedDeps = {}
+			for _, dep in ipairs(deps) do
+				table.insert(sortedDeps, dep)
 			end
-		else
-			print("    (no dependencies)")
+			table.sort(sortedDeps, function(a, b)
+				return a[KEY_CONFIG].Name < b[KEY_CONFIG].Name
+			end)
+
+			-- Extend the prefix for nested dependencies
+			local childPrefix = prefix .. (isLast and "   " or "│  ")
+
+			for i, dep in ipairs(sortedDeps) do
+				local isLastDep = (i == #sortedDeps)
+				printDependencyTree(dep, childPrefix, isLastDep, visited)
+			end
+		end
+
+		visited[service] = nil -- Allow same service in different branches
+	end
+
+	print("Service Dependency Graph:")
+	print(
+		"═══════════════════════════════════════"
+	)
+
+	-- Get all services and sort them alphabetically
+	local sortedServiceNames = {}
+	for serviceName in pairs(services) do
+		table.insert(sortedServiceNames, serviceName)
+	end
+	table.sort(sortedServiceNames)
+
+	-- Print each service and its dependencies
+	for i, serviceName in ipairs(sortedServiceNames) do
+		local service = services[serviceName]
+		local config = service[KEY_CONFIG]
+
+		print(`\n{serviceName}`)
+		if config.RequiredServices then
+			local deps = config.RequiredServices
+			-- Sort dependencies alphabetically
+			local sortedDeps = {}
+			for _, dep in ipairs(deps) do
+				table.insert(sortedDeps, dep)
+			end
+			table.sort(sortedDeps, function(a, b)
+				return a[KEY_CONFIG].Name < b[KEY_CONFIG].Name
+			end)
+
+			for j, dep in ipairs(sortedDeps) do
+				local isLastDep = (j == #sortedDeps)
+				printDependencyTree(dep, "", isLastDep, {})
+			end
+			-- else
+			-- 	print("└─ (no dependencies)")
 		end
 	end
+
+	print(
+		"\n═══════════════════════════════════════"
+	)
 end
 
 --[=[
