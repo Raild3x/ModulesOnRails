@@ -70,7 +70,7 @@
 	
 	:::tip Networking
 	Roam does not inherently have networking functionality. However, it can easily be added through the use of NetWire's 
-	**[.setupServiceNetworking](https://raild3x.github.io/ModulesOnRails/api/ServerNetWire/#setupServiceNetworking)** funtion.
+	**[.setupServiceNetworking](https://raild3x.github.io/ModulesOnRails/api/ServerNetWire/#setupServiceNetworking)** function.
 	:::
 
 	----
@@ -179,7 +179,7 @@ export type ServiceConfig = {
 	- `PRE_START` - Calling PreStart with service
 	- `ROAM_START` - Calling Service:RoamStart method
 	- `POST_START` - Calling PostStart with service
-	- `ACTIVE` - Service is actively running and has completed its startup routine
+	- `STARTED` - Service is actively running and has completed its startup routine
 	- `FAILED` - Service initialization failed
 ]=]
 export type ServiceState =
@@ -276,16 +276,17 @@ local FAILED_REQUIRE_YIELD = Symbol("FailedRequireYield")
 local function ensureUnyieldingRequire(module: ModuleScript)
 	local moduleContent = FAILED_REQUIRE_YIELD
 	task.spawn(function()
-		local current
+		local current: thread? = nil
 		task.spawn(function()
 			current = coroutine.running()
 			local success, msg = pcall(function()
 				moduleContent = require(module) :: any
+				return moduleContent
 			end)
 			assert(success, `Failed to load module: {module.Name}\n{msg}`)
 		end)
 
-		if coroutine.status(current) ~= "dead" then
+		if current and coroutine.status(current) ~= "dead" then
 			-- This is not a great traceback. I wish it could find the original yield point, but I can't detect which modules are being required.
 			error(
 				`Roam Require detected yield. Check the following module and the modules it requires: {module:GetFullName()}`
@@ -329,7 +330,7 @@ local function validateServiceConfig(serviceConfig: any, serviceName: string?): 
 	end
 
 	if serviceConfig.RequiredServices then
-		for i, requiredService in ipairs(serviceConfig.RequiredServices) do
+		for i, requiredService in ipairs(serviceConfig.RequiredServices :: { Service }) do
 			if type(requiredService) ~= "table" then
 				error(
 					formatError(
@@ -338,7 +339,7 @@ local function validateServiceConfig(serviceConfig: any, serviceName: string?): 
 					)
 				)
 			end
-			if not serviceExists(requiredService) then
+			if not serviceExists(requiredService :: Service) then
 				warn(
 					formatError(
 						"Unregistered Required Service",
@@ -349,11 +350,11 @@ local function validateServiceConfig(serviceConfig: any, serviceName: string?): 
 		end
 	end
 
-	-- remove duplicates from RequiredServices
+	-- Detect and remove duplicates from RequiredServices
 	if serviceConfig.RequiredServices then
 		local seen = {}
 		local uniqueRequiredServices = {}
-		for i, reqService in ipairs(serviceConfig.RequiredServices) do
+		for i, reqService in ipairs(serviceConfig.RequiredServices :: { Service }) do
 			if not seen[reqService] then
 				seen[reqService] = true
 				table.insert(uniqueRequiredServices, reqService)
@@ -661,8 +662,8 @@ function Roam.start(config: StartConfig?): Promise
 		else
 			local result = hook(service)
 			-- If the hook returns a Promise, await it
-			if result and typeof(result) == "table" and result.await then
-				result:await()
+			if result and typeof(result) == "table" and result.await and type(result.await) == "function" then
+				(result :: any):await()
 			end
 		end
 	end
@@ -706,7 +707,7 @@ function Roam.start(config: StartConfig?): Promise
 
 			local dependencyPromises = {}
 			if serviceConfig.RequiredServices then
-				for _, requiredService in ipairs(serviceConfig.RequiredServices) do
+				for _, requiredService in ipairs(serviceConfig.RequiredServices :: { Service }) do
 					local depPromise = serviceCompletionPromises[requiredService]
 					if depPromise then
 						table.insert(dependencyPromises, depPromise)
@@ -722,7 +723,7 @@ function Roam.start(config: StartConfig?): Promise
 			end
 
 			serviceStates[service] = "AWAITING_DEPENDENCIES"
-			local errMsg = "\n - " .. serviceConfig.Name
+			local errMsg: string = "\n - " .. serviceConfig.Name
 
 			local servicePromise = Promise.all(dependencyPromises):andThen(function()
 				-- Dependencies are ready
@@ -876,14 +877,15 @@ function Roam.requireModules(
 		parents = { parents }
 	end
 
-	config = config or {}
-	if typeof(config) ~= "table" then
-		error(formatError("Invalid Config", `Config must be a table, got {typeof(config)}`))
-	end
+	config = config or {} :: any
+	assert(typeof(config) == "table", formatError("Invalid Config", `Config must be a table, got {typeof(config)}`))
 
-	local deepSearch = config.DeepSearch or false
-	local requirePredicate = config.RequirePredicate
-	local ignoreDescendantsPredicate = config.IgnoreDescendantsPredicate
+	local deepSearch: boolean = config.DeepSearch or false
+	local requirePredicate: ((obj: ModuleScript) -> boolean)? = config.RequirePredicate
+	local ignoreDescendantsPredicate: ((obj: Instance) -> boolean)? = config.IgnoreDescendantsPredicate
+	local allowYieldingRequires: boolean = config.AllowYieldingRequires
+	local stopOnFailedRequire: boolean = config.StopOnFailedRequire
+
 	local successfullyRequiredModuleContent = {}
 	local failedModuleRequires = {}
 
@@ -891,7 +893,7 @@ function Roam.requireModules(
 		if typeof(obj) == "table" then
 			for _, child in ipairs(obj) do
 				local success = searchInstance(child)
-				if not success and config.StopOnFailedRequire then
+				if not success and stopOnFailedRequire then
 					return false
 				end
 			end
@@ -903,7 +905,7 @@ function Roam.requireModules(
 		end
 
 		if obj:IsA("ModuleScript") and (not requirePredicate or requirePredicate(obj)) then
-			if config.AllowYieldingRequires then
+			if allowYieldingRequires then
 				local success, moduleContent = pcall(function()
 					return require(obj) :: any
 				end)
@@ -979,12 +981,12 @@ function Roam.printDependencyGraph(): ()
 		if config.RequiredServices then
 			local deps = config.RequiredServices
 			-- Sort dependencies alphabetically for consistent display
-			local sortedDeps = {}
+			local sortedDeps: { Service } = {}
 			for _, dep in ipairs(deps) do
-				table.insert(sortedDeps, dep)
+				table.insert(sortedDeps, dep :: Service)
 			end
-			table.sort(sortedDeps, function(a, b)
-				return a[KEY_CONFIG].Name < b[KEY_CONFIG].Name
+			table.sort(sortedDeps, function(a: Service, b: Service)
+				return (a[KEY_CONFIG] :: ServiceConfig).Name < (b[KEY_CONFIG] :: ServiceConfig).Name
 			end)
 
 			-- Extend the prefix for nested dependencies
@@ -1020,12 +1022,12 @@ function Roam.printDependencyGraph(): ()
 		if config.RequiredServices then
 			local deps = config.RequiredServices
 			-- Sort dependencies alphabetically
-			local sortedDeps = {}
+			local sortedDeps: { Service } = {}
 			for _, dep in ipairs(deps) do
-				table.insert(sortedDeps, dep)
+				table.insert(sortedDeps, dep :: Service)
 			end
-			table.sort(sortedDeps, function(a, b)
-				return a[KEY_CONFIG].Name < b[KEY_CONFIG].Name
+			table.sort(sortedDeps, function(a: Service, b: Service)
+				return (a[KEY_CONFIG] :: ServiceConfig).Name < (b[KEY_CONFIG] :: ServiceConfig).Name
 			end)
 
 			for j, dep in ipairs(sortedDeps) do
