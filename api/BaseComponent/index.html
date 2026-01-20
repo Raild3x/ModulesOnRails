@@ -12,8 +12,8 @@ Also adds a way to check if a Component has been destroyed.
 
 Extends **ComponentJanitorUtil**, **ComponentAttributeUtil**, and **ComponentPropertyUtil**.
 Check their documentation for more information."><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/BaseComponent"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/BaseComponent" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/BaseComponent" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.63df4edd.css">
-<script src="/ModulesOnRails/assets/js/runtime~main.0cd1b791.js" defer="defer"></script>
-<script src="/ModulesOnRails/assets/js/main.62c4f1ff.js" defer="defer"></script>
+<script src="/ModulesOnRails/assets/js/runtime~main.196aad38.js" defer="defer"></script>
+<script src="/ModulesOnRails/assets/js/main.33828349.js" defer="defer"></script>
 </head>
 <body class="navigation-with-keyboard">
 <script>!function(){function t(t){document.documentElement.setAttribute("data-theme",t)}var e=function(){try{return new URLSearchParams(window.location.search).get("docusaurus-theme")}catch(t){}}()||function(){try{return window.localStorage.getItem("theme")}catch(t){}}();null!==e?t(e):window.matchMedia("(prefers-color-scheme: dark)").matches?t("dark"):(window.matchMedia("(prefers-color-scheme: light)").matches,t("light"))}(),function(){try{const c=new URLSearchParams(window.location.search).entries();for(var[t,e]of c)if(t.startsWith("docusaurus-data-")){var a=t.replace("docusaurus-data-","data-");document.documentElement.setAttribute(a,e)}}catch(t){}}()</script><div id="__docusaurus"><div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#__docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="navbar navbar--fixed-top"><div class="navbar__inner"><div class="navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-hidden="true" viewBox="0 0 24 24" class="iconExternalLink_nPIU"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"></path></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="Switch between dark and light mode (currently light mode)" aria-label="Switch between dark and light mode (currently light mode)" aria-live="polite" aria-pressed="false"><svg viewBox="0 0 24 24" width="24" height="24" class="lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" class="darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg></button></div><div class="navbarSearchContainer_Bca1"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input id="search_input_react" type="search" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="__docusaurus_skipToContent_fallback" class="main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject">​Base​Object</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Roam">​Roam</a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/TableManager">TableManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/TableReplicator">TableReplicator</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/NetWire">NetWire</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" href="/ModulesOnRails/api/Component">Instance Component Systems</a></div><ul style="display:block;overflow:visible;height:auto" class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/Component">​Component</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/RemoteComponent">​Remote​Component</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" tabindex="0" href="/ModulesOnRails/api/BaseComponent">​Base​Component</a></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/DropletManager">DropletManager</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/AdjustableTimer">AdjustableTimer [Unreleased]</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/PlayerProfileManager">PlayerDataManagement [Unreleased]</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/CmdrHandler">Admin Commands [Cmdr]</a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Queue">Data Structures</a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ObjectCache">​Object​Cache</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ProbabilityDistributor">​Probability​Distributor</a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PromValue">​Prom​Value</a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><div class="tocCollapsible_ETCw theme-doc-toc-mobile tocMobile_oUs_"><button type="button" class="clean-btn tocCollapsibleButton_TO0P">On this page</button></div><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">Base</span><span style="display:inline-block">Component</span></h1><div class="luaClassTags_EipM"></div><div>
@@ -25,7 +25,82 @@ Check their documentation for more information."><link data-rh="true" rel="canon
   Extends <strong>ComponentJanitorUtil</strong>, <strong>ComponentAttributeUtil</strong>, and <strong>ComponentPropertyUtil</strong>.
   Check their documentation for more information.
 </p>
-</div></header><h2 class="anchor anchorWithStickyNavbar_LWe7" id="functions">Functions<a href="#functions" class="hash-link" aria-label="Direct link to Functions" title="Direct link to Functions">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetAttribute"><code style="text-decoration:none">GetAttribute</code><a href="#GetAttribute" class="hash-link" aria-label="Direct link to GetAttribute" title="Direct link to GetAttribute">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentAttributeUtil.luau#L61"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">GetAttribute</code><code>(</code><div class="inset_uKQm"><div><code>attributeName<!-- -->: </code><code class="blue_P4bS">string</code><span class="inlineDescription_G7Er">-- <span>
+</div></header><h2 class="anchor anchorWithStickyNavbar_LWe7" id="functions">Functions<a href="#functions" class="hash-link" aria-label="Direct link to Functions" title="Direct link to Functions">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="ObserveProperty"><code style="text-decoration:none">ObserveProperty</code><a href="#ObserveProperty" class="hash-link" aria-label="Direct link to ObserveProperty" title="Direct link to ObserveProperty">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentPropertyUtil.luau#L53"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">ObserveProperty</code><code>(</code><div class="inset_uKQm"><div><code>propertyName<!-- -->: </code><code class="blue_P4bS">string</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
+<p>The name of the property to observe</p>
+</span></span></div><div><code>callback<!-- -->: </code><code class="purple_ieR2">(</code><code class="green_DgR4">(</code><code>newValue<!-- -->: </code><code class="blue_P4bS">any</code><code class="green_DgR4">)</code><code class="green_DgR4"> → </code><code class="green_DgR4">(</code><code class="green_DgR4">)</code><code class="purple_ieR2">)</code><span class="inlineDescription_G7Er">-- <span>
+<p>The function to call when the property changes</p>
+</span></span></div></div><code>) → </code><code class="blue_P4bS">function</code><span class="inlineDescription_G7Er">-- <span>
+<p>A function to disconnect the observer</p>
+</span></span></div><div>
+<p>Watches for when the property changes and calls the callback. Also calls the callback initially with the current value</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="OutProperty"><code style="text-decoration:none">OutProperty</code><a href="#OutProperty" class="hash-link" aria-label="Direct link to OutProperty" title="Direct link to OutProperty">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentPropertyUtil.luau#L80"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">OutProperty</code><code>(</code><div class="inset_uKQm"><div><code>propertyName<!-- -->: </code><code class="blue_P4bS">string</code><span class="inlineDescription_G7Er">-- <span>
+<p>The name of the property to fetch</p>
+</span></span></div></div><code>) → </code><code class="blue_P4bS">Value</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">any</code><code class="op_lSLc">&gt;</code><span class="inlineDescription_G7Er">-- <span>
+<p>The synchronized fusion value of the property</p>
+</span></span></div><div>
+<p>Fetches an property and turns into into a synchronized usable value</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="PropertyChanged"><code style="text-decoration:none">PropertyChanged</code><a href="#PropertyChanged" class="hash-link" aria-label="Direct link to PropertyChanged" title="Direct link to PropertyChanged">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentPropertyUtil.luau#L110"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">PropertyChanged</code><code>(</code><div class="inset_uKQm"><div><code>propertyName<!-- -->: </code><code class="blue_P4bS">string</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
+<p>The name of the property to observe</p>
+</span></span></div><div><code>fn<!-- -->: </code><code class="purple_ieR2">(</code><code class="green_DgR4">(</code><code class="blue_P4bS">...any</code><code class="green_DgR4">)</code><code class="green_DgR4"> → </code><code class="green_DgR4">(</code><code class="green_DgR4">)</code><code class="purple_ieR2">)</code><code class="blue_P4bS">?</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
+<p>The function to call when the property changes</p>
+</span></span></div><div><code>connectOnce<!-- -->: </code><code class="blue_P4bS">boolean?</code><span class="inlineDescription_G7Er">-- <span>
+<p>If true, the function will only be called the first time the property changes</p>
+</span></span></div></div><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/RBXScriptConnection" target="_blank" rel="noopener noreferrer">RBXScriptConnection<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="op_lSLc"> | </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/RBXScriptSignal" target="_blank" rel="noopener noreferrer">RBXScriptSignal<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><span class="inlineDescription_G7Er">-- <span>
+<p>A connection or signal</p>
+</span></span></div><div>
+<p>
+  Fetches the PropertyChanged signal for the property if no function is given.
+  If a function is provided, it will connect the function to the property changed signal and return the connection
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="RegisterSignal"><code style="text-decoration:none">RegisterSignal</code><a href="#RegisterSignal" class="hash-link" aria-label="Direct link to RegisterSignal" title="Direct link to RegisterSignal">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/init.luau#L69"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">RegisterSignal</code><code>(</code><div class="inset_uKQm"><div><code>signalName<!-- -->: </code><code class="blue_P4bS">string</code><span class="inlineDescription_G7Er">-- <span>
+<p>The name of the signal to register.</p>
+</span></span></div></div><code>) → </code><code class="blue_P4bS">Signal</code><span class="inlineDescription_G7Er">-- <span>
+<p>The signal that was registered.</p>
+</span></span></div><div>
+<p>Registers a signal to the component.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetSignal"><code style="text-decoration:none">GetSignal</code><a href="#GetSignal" class="hash-link" aria-label="Direct link to GetSignal" title="Direct link to GetSignal">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/init.luau#L88"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">GetSignal</code><code>(</code><div class="inset_uKQm"><div><code>signalName<!-- -->: </code><code class="blue_P4bS">string</code><span class="inlineDescription_G7Er">-- <span>
+<p>The name of the signal to get.</p>
+</span></span></div></div><code>) → </code><code class="blue_P4bS">Signal</code><span class="inlineDescription_G7Er">-- <span>
+<p>The signal that was retrieved.</p>
+</span></span></div><div>
+<p>Gets a signal from the component.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="FireSignal"><code style="text-decoration:none">FireSignal</code><a href="#FireSignal" class="hash-link" aria-label="Direct link to FireSignal" title="Direct link to FireSignal">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/init.luau#L107"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">FireSignal</code><code>(</code><div class="inset_uKQm"><div><code>signalName<!-- -->: </code><code class="blue_P4bS">string</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
+<p>The name of the signal to fire.</p>
+</span></span></div><div><code>...<!-- -->: </code><code class="blue_P4bS">any</code><span class="inlineDescription_G7Er">-- <span>
+<p>The arguments to pass to the signal.</p>
+</span></span></div></div><code>) → </code><code>(</code><code>)</code></div><div>
+<p>Fires a signal from the component.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="ConnectSignal"><code style="text-decoration:none">ConnectSignal</code><a href="#ConnectSignal" class="hash-link" aria-label="Direct link to ConnectSignal" title="Direct link to ConnectSignal">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/init.luau#L122"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">ConnectSignal</code><code>(</code><div class="inset_uKQm"><div><code>signalName<!-- -->: </code><code class="blue_P4bS">string</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
+<p>The name of the signal to connect to.</p>
+</span></span></div><div><code>callback<!-- -->: </code><code class="purple_ieR2">(</code><code class="blue_P4bS">...any</code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code><span class="inlineDescription_G7Er">-- <span>
+<p>The callback to call when the signal is fired.</p>
+</span></span></div></div><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/RBXScriptConnection" target="_blank" rel="noopener noreferrer">RBXScriptConnection<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><span class="inlineDescription_G7Er">-- <span>
+<p>The connection object.</p>
+</span></span></div><div>
+<p>Connects a callback to a signal.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="AddPromise"><code style="text-decoration:none">AddPromise</code><a href="#AddPromise" class="hash-link" aria-label="Direct link to AddPromise" title="Direct link to AddPromise">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentJanitorUtil.luau#L50"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">AddPromise</code><code>(</code><code>promise<!-- -->: </code><code class="blue_P4bS">Promise</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">T</code><code class="op_lSLc">&gt;</code><code>) → </code><code class="blue_P4bS">Promise</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">T</code><code class="op_lSLc">&gt;</code></div><div>
+<p>Adds a promise to the component's janitor. Returns the same promise that was given.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="AddTask"><code style="text-decoration:none">AddTask</code><a href="#AddTask" class="hash-link" aria-label="Direct link to AddTask" title="Direct link to AddTask">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentJanitorUtil.luau#L65"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">AddTask</code><code>(</code><div class="inset_uKQm"><div><code>task<!-- -->: </code><code class="blue_P4bS">T</code><code>,</code></div><div><code>cleanupMethod<!-- -->: </code><code class="purple_ieR2">(</code><code class="blue_P4bS">string</code><code class="op_lSLc"> | </code><code class="blue_P4bS">true</code><code class="purple_ieR2">)</code><code class="blue_P4bS">?</code><code>,</code></div><div><code>index<!-- -->: </code><code class="blue_P4bS">any?</code></div></div><code>) → </code><code class="blue_P4bS">T</code><span class="inlineDescription_G7Er">-- <span>
+<p>The same task that was given</p>
+</span></span></div><div>
+<p>Adds a task to the component's janitor.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="RemoveTaskNoClean"><code style="text-decoration:none">RemoveTaskNoClean</code><a href="#RemoveTaskNoClean" class="hash-link" aria-label="Direct link to RemoveTaskNoClean" title="Direct link to RemoveTaskNoClean">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentJanitorUtil.luau#L77"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">RemoveTaskNoClean</code><code>(</code><div class="inset_uKQm"><div><code>index<!-- -->: </code><code class="blue_P4bS">any</code><span class="inlineDescription_G7Er">-- <span>
+<p>The index of the task to remove.</p>
+</span></span></div></div><code>) → </code><code>(</code><code>)</code></div><div>
+<p>Removes a task from the component's janitor without cleaning it.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="RemoveTask"><code style="text-decoration:none">RemoveTask</code><a href="#RemoveTask" class="hash-link" aria-label="Direct link to RemoveTask" title="Direct link to RemoveTask">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentJanitorUtil.luau#L90"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">RemoveTask</code><code>(</code><div class="inset_uKQm"><div><code>index<!-- -->: </code><code class="blue_P4bS">any</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
+<p>The id of the task to remove.</p>
+</span></span></div><div><code>dontClean<!-- -->: </code><code class="blue_P4bS">boolean?</code><span class="inlineDescription_G7Er">-- <span>
+<p>Optional flag to not clean the task.</p>
+</span></span></div></div><code>) → </code><code>(</code><code>)</code></div><div>
+<p>Removes a task from the component's janitor.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetTask"><code style="text-decoration:none">GetTask</code><a href="#GetTask" class="hash-link" aria-label="Direct link to GetTask" title="Direct link to GetTask">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentJanitorUtil.luau#L106"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">GetTask</code><code>(</code><div class="inset_uKQm"><div><code>index<!-- -->: </code><code class="blue_P4bS">any</code><span class="inlineDescription_G7Er">-- <span>
+<p>The id of the task to get.</p>
+</span></span></div></div><code>) → </code><code class="blue_P4bS">any</code><span class="inlineDescription_G7Er">-- <span>
+<p>The task that was retrieved.</p>
+</span></span></div><div>
+<p>Gets a task from the janitor.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetAttribute"><code style="text-decoration:none">GetAttribute</code><a href="#GetAttribute" class="hash-link" aria-label="Direct link to GetAttribute" title="Direct link to GetAttribute">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentAttributeUtil.luau#L61"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">GetAttribute</code><code>(</code><div class="inset_uKQm"><div><code>attributeName<!-- -->: </code><code class="blue_P4bS">string</code><span class="inlineDescription_G7Er">-- <span>
 <p>The name of the attribute to fetch</p>
 </span></span></div></div><code>) → </code><code class="blue_P4bS">any?</code><span class="inlineDescription_G7Er">-- <span>
 <p>The current value of the attribute</p>
@@ -93,83 +168,333 @@ Check their documentation for more information."><link data-rh="true" rel="canon
   Returns a scope associated with the lifecycle of the component.
   Inherits methods from RailUtil.Fusion and Fusion.
 </p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="AddPromise"><code style="text-decoration:none">AddPromise</code><a href="#AddPromise" class="hash-link" aria-label="Direct link to AddPromise" title="Direct link to AddPromise">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentJanitorUtil.luau#L50"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">AddPromise</code><code>(</code><code>promise<!-- -->: </code><code class="blue_P4bS">Promise</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">T</code><code class="op_lSLc">&gt;</code><code>) → </code><code class="blue_P4bS">Promise</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">T</code><code class="op_lSLc">&gt;</code></div><div>
-<p>Adds a promise to the component's janitor. Returns the same promise that was given.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="AddTask"><code style="text-decoration:none">AddTask</code><a href="#AddTask" class="hash-link" aria-label="Direct link to AddTask" title="Direct link to AddTask">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentJanitorUtil.luau#L65"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">AddTask</code><code>(</code><div class="inset_uKQm"><div><code>task<!-- -->: </code><code class="blue_P4bS">T</code><code>,</code></div><div><code>cleanupMethod<!-- -->: </code><code class="purple_ieR2">(</code><code class="blue_P4bS">string</code><code class="op_lSLc"> | </code><code class="blue_P4bS">true</code><code class="purple_ieR2">)</code><code class="blue_P4bS">?</code><code>,</code></div><div><code>index<!-- -->: </code><code class="blue_P4bS">any?</code></div></div><code>) → </code><code class="blue_P4bS">T</code><span class="inlineDescription_G7Er">-- <span>
-<p>The same task that was given</p>
-</span></span></div><div>
-<p>Adds a task to the component's janitor.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="RemoveTaskNoClean"><code style="text-decoration:none">RemoveTaskNoClean</code><a href="#RemoveTaskNoClean" class="hash-link" aria-label="Direct link to RemoveTaskNoClean" title="Direct link to RemoveTaskNoClean">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentJanitorUtil.luau#L77"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">RemoveTaskNoClean</code><code>(</code><div class="inset_uKQm"><div><code>index<!-- -->: </code><code class="blue_P4bS">any</code><span class="inlineDescription_G7Er">-- <span>
-<p>The index of the task to remove.</p>
-</span></span></div></div><code>) → </code><code>(</code><code>)</code></div><div>
-<p>Removes a task from the component's janitor without cleaning it.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="RemoveTask"><code style="text-decoration:none">RemoveTask</code><a href="#RemoveTask" class="hash-link" aria-label="Direct link to RemoveTask" title="Direct link to RemoveTask">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentJanitorUtil.luau#L90"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">RemoveTask</code><code>(</code><div class="inset_uKQm"><div><code>index<!-- -->: </code><code class="blue_P4bS">any</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
-<p>The id of the task to remove.</p>
-</span></span></div><div><code>dontClean<!-- -->: </code><code class="blue_P4bS">boolean?</code><span class="inlineDescription_G7Er">-- <span>
-<p>Optional flag to not clean the task.</p>
-</span></span></div></div><code>) → </code><code>(</code><code>)</code></div><div>
-<p>Removes a task from the component's janitor.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetTask"><code style="text-decoration:none">GetTask</code><a href="#GetTask" class="hash-link" aria-label="Direct link to GetTask" title="Direct link to GetTask">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentJanitorUtil.luau#L106"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">GetTask</code><code>(</code><div class="inset_uKQm"><div><code>index<!-- -->: </code><code class="blue_P4bS">any</code><span class="inlineDescription_G7Er">-- <span>
-<p>The id of the task to get.</p>
-</span></span></div></div><code>) → </code><code class="blue_P4bS">any</code><span class="inlineDescription_G7Er">-- <span>
-<p>The task that was retrieved.</p>
-</span></span></div><div>
-<p>Gets a task from the janitor.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="ObserveProperty"><code style="text-decoration:none">ObserveProperty</code><a href="#ObserveProperty" class="hash-link" aria-label="Direct link to ObserveProperty" title="Direct link to ObserveProperty">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentPropertyUtil.luau#L53"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">ObserveProperty</code><code>(</code><div class="inset_uKQm"><div><code>propertyName<!-- -->: </code><code class="blue_P4bS">string</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
-<p>The name of the property to observe</p>
-</span></span></div><div><code>callback<!-- -->: </code><code class="purple_ieR2">(</code><code class="green_DgR4">(</code><code>newValue<!-- -->: </code><code class="blue_P4bS">any</code><code class="green_DgR4">)</code><code class="green_DgR4"> → </code><code class="green_DgR4">(</code><code class="green_DgR4">)</code><code class="purple_ieR2">)</code><span class="inlineDescription_G7Er">-- <span>
-<p>The function to call when the property changes</p>
-</span></span></div></div><code>) → </code><code class="blue_P4bS">function</code><span class="inlineDescription_G7Er">-- <span>
-<p>A function to disconnect the observer</p>
-</span></span></div><div>
-<p>Watches for when the property changes and calls the callback. Also calls the callback initially with the current value</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="OutProperty"><code style="text-decoration:none">OutProperty</code><a href="#OutProperty" class="hash-link" aria-label="Direct link to OutProperty" title="Direct link to OutProperty">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentPropertyUtil.luau#L80"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">OutProperty</code><code>(</code><div class="inset_uKQm"><div><code>propertyName<!-- -->: </code><code class="blue_P4bS">string</code><span class="inlineDescription_G7Er">-- <span>
-<p>The name of the property to fetch</p>
-</span></span></div></div><code>) → </code><code class="blue_P4bS">Value</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">any</code><code class="op_lSLc">&gt;</code><span class="inlineDescription_G7Er">-- <span>
-<p>The synchronized fusion value of the property</p>
-</span></span></div><div>
-<p>Fetches an property and turns into into a synchronized usable value</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="PropertyChanged"><code style="text-decoration:none">PropertyChanged</code><a href="#PropertyChanged" class="hash-link" aria-label="Direct link to PropertyChanged" title="Direct link to PropertyChanged">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/ComponentPropertyUtil.luau#L110"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">PropertyChanged</code><code>(</code><div class="inset_uKQm"><div><code>propertyName<!-- -->: </code><code class="blue_P4bS">string</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
-<p>The name of the property to observe</p>
-</span></span></div><div><code>fn<!-- -->: </code><code class="purple_ieR2">(</code><code class="green_DgR4">(</code><code class="blue_P4bS">...any</code><code class="green_DgR4">)</code><code class="green_DgR4"> → </code><code class="green_DgR4">(</code><code class="green_DgR4">)</code><code class="purple_ieR2">)</code><code class="blue_P4bS">?</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
-<p>The function to call when the property changes</p>
-</span></span></div><div><code>connectOnce<!-- -->: </code><code class="blue_P4bS">boolean?</code><span class="inlineDescription_G7Er">-- <span>
-<p>If true, the function will only be called the first time the property changes</p>
-</span></span></div></div><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/RBXScriptConnection" target="_blank" rel="noopener noreferrer">RBXScriptConnection<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="op_lSLc"> | </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/RBXScriptSignal" target="_blank" rel="noopener noreferrer">RBXScriptSignal<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><span class="inlineDescription_G7Er">-- <span>
-<p>A connection or signal</p>
-</span></span></div><div>
-<p>
-  Fetches the PropertyChanged signal for the property if no function is given.
-  If a function is provided, it will connect the function to the property changed signal and return the connection
-</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="RegisterSignal"><code style="text-decoration:none">RegisterSignal</code><a href="#RegisterSignal" class="hash-link" aria-label="Direct link to RegisterSignal" title="Direct link to RegisterSignal">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/init.luau#L69"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">RegisterSignal</code><code>(</code><div class="inset_uKQm"><div><code>signalName<!-- -->: </code><code class="blue_P4bS">string</code><span class="inlineDescription_G7Er">-- <span>
-<p>The name of the signal to register.</p>
-</span></span></div></div><code>) → </code><code class="blue_P4bS">Signal</code><span class="inlineDescription_G7Er">-- <span>
-<p>The signal that was registered.</p>
-</span></span></div><div>
-<p>Registers a signal to the component.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="GetSignal"><code style="text-decoration:none">GetSignal</code><a href="#GetSignal" class="hash-link" aria-label="Direct link to GetSignal" title="Direct link to GetSignal">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/init.luau#L88"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">GetSignal</code><code>(</code><div class="inset_uKQm"><div><code>signalName<!-- -->: </code><code class="blue_P4bS">string</code><span class="inlineDescription_G7Er">-- <span>
-<p>The name of the signal to get.</p>
-</span></span></div></div><code>) → </code><code class="blue_P4bS">Signal</code><span class="inlineDescription_G7Er">-- <span>
-<p>The signal that was retrieved.</p>
-</span></span></div><div>
-<p>Gets a signal from the component.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="FireSignal"><code style="text-decoration:none">FireSignal</code><a href="#FireSignal" class="hash-link" aria-label="Direct link to FireSignal" title="Direct link to FireSignal">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/init.luau#L107"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">FireSignal</code><code>(</code><div class="inset_uKQm"><div><code>signalName<!-- -->: </code><code class="blue_P4bS">string</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
-<p>The name of the signal to fire.</p>
-</span></span></div><div><code>...<!-- -->: </code><code class="blue_P4bS">any</code><span class="inlineDescription_G7Er">-- <span>
-<p>The arguments to pass to the signal.</p>
-</span></span></div></div><code>) → </code><code>(</code><code>)</code></div><div>
-<p>Fires a signal from the component.</p>
-</div><div class="divider_rE5g"></div><h3 class="anchor anchorWithStickyNavbar_LWe7" id="ConnectSignal"><code style="text-decoration:none">ConnectSignal</code><a href="#ConnectSignal" class="hash-link" aria-label="Direct link to ConnectSignal" title="Direct link to ConnectSignal">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/basecomponent/src/init.luau#L122"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BaseComponent<!-- -->:</code><code class="green_DgR4">ConnectSignal</code><code>(</code><div class="inset_uKQm"><div><code>signalName<!-- -->: </code><code class="blue_P4bS">string</code><code>,</code><span class="inlineDescription_G7Er">-- <span>
-<p>The name of the signal to connect to.</p>
-</span></span></div><div><code>callback<!-- -->: </code><code class="purple_ieR2">(</code><code class="blue_P4bS">...any</code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code><span class="inlineDescription_G7Er">-- <span>
-<p>The callback to call when the signal is fired.</p>
-</span></span></div></div><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/RBXScriptConnection" target="_blank" rel="noopener noreferrer">RBXScriptConnection<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><span class="inlineDescription_G7Er">-- <span>
-<p>The connection object.</p>
-</span></span></div><div>
-<p>Connects a callback to a signal.</p>
 </div></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
     &quot;functions&quot;: [
+        {
+            &quot;name&quot;: &quot;ObserveProperty&quot;,
+            &quot;desc&quot;: &quot;Watches for when the property changes and calls the callback. Also calls the callback initially with the current value&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;propertyName&quot;,
+                    &quot;desc&quot;: &quot;The name of the property to observe&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;callback&quot;,
+                    &quot;desc&quot;: &quot;The function to call when the property changes&quot;,
+                    &quot;lua_type&quot;: &quot;((newValue: any) -&gt; ())&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;A function to disconnect the observer&quot;,
+                    &quot;lua_type&quot;: &quot;function&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 53,
+                &quot;path&quot;: &quot;lib/basecomponent/src/ComponentPropertyUtil.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;OutProperty&quot;,
+            &quot;desc&quot;: &quot;Fetches an property and turns into into a synchronized usable value&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;propertyName&quot;,
+                    &quot;desc&quot;: &quot;The name of the property to fetch&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;The synchronized fusion value of the property&quot;,
+                    &quot;lua_type&quot;: &quot;Value&lt;any&gt;&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 80,
+                &quot;path&quot;: &quot;lib/basecomponent/src/ComponentPropertyUtil.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;PropertyChanged&quot;,
+            &quot;desc&quot;: &quot;Fetches the PropertyChanged signal for the property if no function is given.\nIf a function is provided, it will connect the function to the property changed signal and return the connection&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;propertyName&quot;,
+                    &quot;desc&quot;: &quot;The name of the property to observe&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;fn&quot;,
+                    &quot;desc&quot;: &quot;The function to call when the property changes&quot;,
+                    &quot;lua_type&quot;: &quot;((...any) -&gt; ())?&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;connectOnce&quot;,
+                    &quot;desc&quot;: &quot;If true, the function will only be called the first time the property changes&quot;,
+                    &quot;lua_type&quot;: &quot;boolean?&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;A connection or signal&quot;,
+                    &quot;lua_type&quot;: &quot;RBXScriptConnection | RBXScriptSignal&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 110,
+                &quot;path&quot;: &quot;lib/basecomponent/src/ComponentPropertyUtil.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;RegisterSignal&quot;,
+            &quot;desc&quot;: &quot;Registers a signal to the component.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;signalName&quot;,
+                    &quot;desc&quot;: &quot;The name of the signal to register.&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;The signal that was registered.&quot;,
+                    &quot;lua_type&quot;: &quot;Signal&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 69,
+                &quot;path&quot;: &quot;lib/basecomponent/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetSignal&quot;,
+            &quot;desc&quot;: &quot;Gets a signal from the component.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;signalName&quot;,
+                    &quot;desc&quot;: &quot;The name of the signal to get.&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;The signal that was retrieved.&quot;,
+                    &quot;lua_type&quot;: &quot;Signal&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 88,
+                &quot;path&quot;: &quot;lib/basecomponent/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;FireSignal&quot;,
+            &quot;desc&quot;: &quot;Fires a signal from the component.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;signalName&quot;,
+                    &quot;desc&quot;: &quot;The name of the signal to fire.&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;...&quot;,
+                    &quot;desc&quot;: &quot;The arguments to pass to the signal.&quot;,
+                    &quot;lua_type&quot;: &quot;any&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 107,
+                &quot;path&quot;: &quot;lib/basecomponent/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;ConnectSignal&quot;,
+            &quot;desc&quot;: &quot;Connects a callback to a signal.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;signalName&quot;,
+                    &quot;desc&quot;: &quot;The name of the signal to connect to.&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;callback&quot;,
+                    &quot;desc&quot;: &quot;The callback to call when the signal is fired.&quot;,
+                    &quot;lua_type&quot;: &quot;(...any) -&gt; ()&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;The connection object.&quot;,
+                    &quot;lua_type&quot;: &quot;RBXScriptConnection&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 122,
+                &quot;path&quot;: &quot;lib/basecomponent/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;Constructing&quot;,
+            &quot;desc&quot;: &quot;&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;component&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;any&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;ignore&quot;: true,
+            &quot;source&quot;: {
+                &quot;line&quot;: 163,
+                &quot;path&quot;: &quot;lib/basecomponent/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;Stopped&quot;,
+            &quot;desc&quot;: &quot;&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;component&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;any&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;ignore&quot;: true,
+            &quot;source&quot;: {
+                &quot;line&quot;: 179,
+                &quot;path&quot;: &quot;lib/basecomponent/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;AddPromise&quot;,
+            &quot;desc&quot;: &quot;Adds a promise to the component&#x27;s janitor. Returns the same promise that was given.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;promise&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Promise&lt;T&gt;&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Promise&lt;T&gt;&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 50,
+                &quot;path&quot;: &quot;lib/basecomponent/src/ComponentJanitorUtil.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;AddTask&quot;,
+            &quot;desc&quot;: &quot;Adds a task to the component&#x27;s janitor.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;task&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;T&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;cleanupMethod&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;(string | true)?&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;index&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;any?&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;The same task that was given&quot;,
+                    &quot;lua_type&quot;: &quot;T&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 65,
+                &quot;path&quot;: &quot;lib/basecomponent/src/ComponentJanitorUtil.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;RemoveTaskNoClean&quot;,
+            &quot;desc&quot;: &quot;Removes a task from the component&#x27;s janitor without cleaning it.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;index&quot;,
+                    &quot;desc&quot;: &quot;The index of the task to remove.&quot;,
+                    &quot;lua_type&quot;: &quot;any&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 77,
+                &quot;path&quot;: &quot;lib/basecomponent/src/ComponentJanitorUtil.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;RemoveTask&quot;,
+            &quot;desc&quot;: &quot;Removes a task from the component&#x27;s janitor.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;index&quot;,
+                    &quot;desc&quot;: &quot;The id of the task to remove.&quot;,
+                    &quot;lua_type&quot;: &quot;any&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;dontClean&quot;,
+                    &quot;desc&quot;: &quot;Optional flag to not clean the task.&quot;,
+                    &quot;lua_type&quot;: &quot;boolean?&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 90,
+                &quot;path&quot;: &quot;lib/basecomponent/src/ComponentJanitorUtil.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetTask&quot;,
+            &quot;desc&quot;: &quot;Gets a task from the janitor.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;index&quot;,
+                    &quot;desc&quot;: &quot;The id of the task to get.&quot;,
+                    &quot;lua_type&quot;: &quot;any&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;The task that was retrieved.&quot;,
+                    &quot;lua_type&quot;: &quot;any&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 106,
+                &quot;path&quot;: &quot;lib/basecomponent/src/ComponentJanitorUtil.luau&quot;
+            }
+        },
         {
             &quot;name&quot;: &quot;GetAttribute&quot;,
             &quot;desc&quot;: &quot;Fetches the current Value of an attribute on the Component Instance&quot;,
@@ -390,331 +715,6 @@ Check their documentation for more information."><link data-rh="true" rel="canon
             &quot;source&quot;: {
                 &quot;line&quot;: 47,
                 &quot;path&quot;: &quot;lib/basecomponent/src/ComponentFusionUtil.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;AddPromise&quot;,
-            &quot;desc&quot;: &quot;Adds a promise to the component&#x27;s janitor. Returns the same promise that was given.&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;promise&quot;,
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;Promise&lt;T&gt;&quot;
-                }
-            ],
-            &quot;returns&quot;: [
-                {
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;Promise&lt;T&gt;&quot;
-                }
-            ],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 50,
-                &quot;path&quot;: &quot;lib/basecomponent/src/ComponentJanitorUtil.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;AddTask&quot;,
-            &quot;desc&quot;: &quot;Adds a task to the component&#x27;s janitor.&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;task&quot;,
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;T&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;cleanupMethod&quot;,
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;(string | true)?&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;index&quot;,
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;any?&quot;
-                }
-            ],
-            &quot;returns&quot;: [
-                {
-                    &quot;desc&quot;: &quot;The same task that was given&quot;,
-                    &quot;lua_type&quot;: &quot;T&quot;
-                }
-            ],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 65,
-                &quot;path&quot;: &quot;lib/basecomponent/src/ComponentJanitorUtil.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;RemoveTaskNoClean&quot;,
-            &quot;desc&quot;: &quot;Removes a task from the component&#x27;s janitor without cleaning it.&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;index&quot;,
-                    &quot;desc&quot;: &quot;The index of the task to remove.&quot;,
-                    &quot;lua_type&quot;: &quot;any&quot;
-                }
-            ],
-            &quot;returns&quot;: [],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 77,
-                &quot;path&quot;: &quot;lib/basecomponent/src/ComponentJanitorUtil.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;RemoveTask&quot;,
-            &quot;desc&quot;: &quot;Removes a task from the component&#x27;s janitor.&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;index&quot;,
-                    &quot;desc&quot;: &quot;The id of the task to remove.&quot;,
-                    &quot;lua_type&quot;: &quot;any&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;dontClean&quot;,
-                    &quot;desc&quot;: &quot;Optional flag to not clean the task.&quot;,
-                    &quot;lua_type&quot;: &quot;boolean?&quot;
-                }
-            ],
-            &quot;returns&quot;: [],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 90,
-                &quot;path&quot;: &quot;lib/basecomponent/src/ComponentJanitorUtil.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;GetTask&quot;,
-            &quot;desc&quot;: &quot;Gets a task from the janitor.&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;index&quot;,
-                    &quot;desc&quot;: &quot;The id of the task to get.&quot;,
-                    &quot;lua_type&quot;: &quot;any&quot;
-                }
-            ],
-            &quot;returns&quot;: [
-                {
-                    &quot;desc&quot;: &quot;The task that was retrieved.&quot;,
-                    &quot;lua_type&quot;: &quot;any&quot;
-                }
-            ],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 106,
-                &quot;path&quot;: &quot;lib/basecomponent/src/ComponentJanitorUtil.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;ObserveProperty&quot;,
-            &quot;desc&quot;: &quot;Watches for when the property changes and calls the callback. Also calls the callback initially with the current value&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;propertyName&quot;,
-                    &quot;desc&quot;: &quot;The name of the property to observe&quot;,
-                    &quot;lua_type&quot;: &quot;string&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;callback&quot;,
-                    &quot;desc&quot;: &quot;The function to call when the property changes&quot;,
-                    &quot;lua_type&quot;: &quot;((newValue: any) -&gt; ())&quot;
-                }
-            ],
-            &quot;returns&quot;: [
-                {
-                    &quot;desc&quot;: &quot;A function to disconnect the observer&quot;,
-                    &quot;lua_type&quot;: &quot;function&quot;
-                }
-            ],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 53,
-                &quot;path&quot;: &quot;lib/basecomponent/src/ComponentPropertyUtil.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;OutProperty&quot;,
-            &quot;desc&quot;: &quot;Fetches an property and turns into into a synchronized usable value&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;propertyName&quot;,
-                    &quot;desc&quot;: &quot;The name of the property to fetch&quot;,
-                    &quot;lua_type&quot;: &quot;string&quot;
-                }
-            ],
-            &quot;returns&quot;: [
-                {
-                    &quot;desc&quot;: &quot;The synchronized fusion value of the property&quot;,
-                    &quot;lua_type&quot;: &quot;Value&lt;any&gt;&quot;
-                }
-            ],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 80,
-                &quot;path&quot;: &quot;lib/basecomponent/src/ComponentPropertyUtil.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;PropertyChanged&quot;,
-            &quot;desc&quot;: &quot;Fetches the PropertyChanged signal for the property if no function is given.\nIf a function is provided, it will connect the function to the property changed signal and return the connection&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;propertyName&quot;,
-                    &quot;desc&quot;: &quot;The name of the property to observe&quot;,
-                    &quot;lua_type&quot;: &quot;string&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;fn&quot;,
-                    &quot;desc&quot;: &quot;The function to call when the property changes&quot;,
-                    &quot;lua_type&quot;: &quot;((...any) -&gt; ())?&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;connectOnce&quot;,
-                    &quot;desc&quot;: &quot;If true, the function will only be called the first time the property changes&quot;,
-                    &quot;lua_type&quot;: &quot;boolean?&quot;
-                }
-            ],
-            &quot;returns&quot;: [
-                {
-                    &quot;desc&quot;: &quot;A connection or signal&quot;,
-                    &quot;lua_type&quot;: &quot;RBXScriptConnection | RBXScriptSignal&quot;
-                }
-            ],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 110,
-                &quot;path&quot;: &quot;lib/basecomponent/src/ComponentPropertyUtil.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;RegisterSignal&quot;,
-            &quot;desc&quot;: &quot;Registers a signal to the component.&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;signalName&quot;,
-                    &quot;desc&quot;: &quot;The name of the signal to register.&quot;,
-                    &quot;lua_type&quot;: &quot;string&quot;
-                }
-            ],
-            &quot;returns&quot;: [
-                {
-                    &quot;desc&quot;: &quot;The signal that was registered.&quot;,
-                    &quot;lua_type&quot;: &quot;Signal&quot;
-                }
-            ],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 69,
-                &quot;path&quot;: &quot;lib/basecomponent/src/init.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;GetSignal&quot;,
-            &quot;desc&quot;: &quot;Gets a signal from the component.&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;signalName&quot;,
-                    &quot;desc&quot;: &quot;The name of the signal to get.&quot;,
-                    &quot;lua_type&quot;: &quot;string&quot;
-                }
-            ],
-            &quot;returns&quot;: [
-                {
-                    &quot;desc&quot;: &quot;The signal that was retrieved.&quot;,
-                    &quot;lua_type&quot;: &quot;Signal&quot;
-                }
-            ],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 88,
-                &quot;path&quot;: &quot;lib/basecomponent/src/init.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;FireSignal&quot;,
-            &quot;desc&quot;: &quot;Fires a signal from the component.&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;signalName&quot;,
-                    &quot;desc&quot;: &quot;The name of the signal to fire.&quot;,
-                    &quot;lua_type&quot;: &quot;string&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;...&quot;,
-                    &quot;desc&quot;: &quot;The arguments to pass to the signal.&quot;,
-                    &quot;lua_type&quot;: &quot;any&quot;
-                }
-            ],
-            &quot;returns&quot;: [],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 107,
-                &quot;path&quot;: &quot;lib/basecomponent/src/init.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;ConnectSignal&quot;,
-            &quot;desc&quot;: &quot;Connects a callback to a signal.&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;signalName&quot;,
-                    &quot;desc&quot;: &quot;The name of the signal to connect to.&quot;,
-                    &quot;lua_type&quot;: &quot;string&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;callback&quot;,
-                    &quot;desc&quot;: &quot;The callback to call when the signal is fired.&quot;,
-                    &quot;lua_type&quot;: &quot;(...any) -&gt; ()&quot;
-                }
-            ],
-            &quot;returns&quot;: [
-                {
-                    &quot;desc&quot;: &quot;The connection object.&quot;,
-                    &quot;lua_type&quot;: &quot;RBXScriptConnection&quot;
-                }
-            ],
-            &quot;function_type&quot;: &quot;method&quot;,
-            &quot;source&quot;: {
-                &quot;line&quot;: 122,
-                &quot;path&quot;: &quot;lib/basecomponent/src/init.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;Constructing&quot;,
-            &quot;desc&quot;: &quot;&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;component&quot;,
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;any&quot;
-                }
-            ],
-            &quot;returns&quot;: [],
-            &quot;function_type&quot;: &quot;static&quot;,
-            &quot;ignore&quot;: true,
-            &quot;source&quot;: {
-                &quot;line&quot;: 163,
-                &quot;path&quot;: &quot;lib/basecomponent/src/init.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;Stopped&quot;,
-            &quot;desc&quot;: &quot;&quot;,
-            &quot;params&quot;: [
-                {
-                    &quot;name&quot;: &quot;component&quot;,
-                    &quot;desc&quot;: &quot;&quot;,
-                    &quot;lua_type&quot;: &quot;any&quot;
-                }
-            ],
-            &quot;returns&quot;: [],
-            &quot;function_type&quot;: &quot;static&quot;,
-            &quot;ignore&quot;: true,
-            &quot;source&quot;: {
-                &quot;line&quot;: 179,
-                &quot;path&quot;: &quot;lib/basecomponent/src/init.luau&quot;
             }
         }
     ],
