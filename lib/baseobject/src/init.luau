@@ -85,7 +85,7 @@ local DESTROYED_SIGNAL_NAME = "Destroyed"
 
 --// Volatiles //--
 local GLOBAL_ID = if RunService:IsServer() then 0 else 1
-local STORAGE = (setmetatable({}, { __mode = "v" }) :: any) :: {[number]: BaseObject}-- Stores all objects weakly
+local STORAGE = (setmetatable({}, { __mode = "v" }) :: any) :: { [number]: BaseObject } -- Stores all objects weakly
 
 --// Ethans Funky Stuff //--
 -- Create weaktable to store destroyed object stacks
@@ -93,7 +93,9 @@ local destroyedObjectStacks = setmetatable({}, { __mode = "k" })
 
 -- Create an warn message for destroyed objects
 local function errorDestroyed(self: any, ...)
-	warn(`Attempted to perform operation on a destroyed Object!\n{debug.traceback(" Operation Traceback:", 2)}\n Destruction Traceback:\n{destroyedObjectStacks[self]}`)
+	warn(
+		`Attempted to perform operation on a destroyed Object!\n{debug.traceback(" Operation Traceback:", 2)}\n Destruction Traceback:\n{destroyedObjectStacks[self]}`
+	)
 end
 
 -- Metatable that produces an error when any method is called
@@ -252,7 +254,7 @@ end
 	return MyClass
 	```
 ]=]
-function BaseObject.new<T>(tbl: {[any]: any}?)
+function BaseObject.new<T>(tbl: { [any]: any }?)
 	assert(typeof(tbl) == "table" or tbl == nil, "Argument 1 must be a table or nil")
 	local self = setmetatable(tbl or {}, BaseObject)
 
@@ -302,7 +304,7 @@ function BaseObject:Destroy()
 			warn(`Attempted to destroy an already destroyed object! {ClassName}[{self[KEY_ID]}]`)
 		end
 	end
-	
+
 	-- Fire destroying signal if it exists
 	if self:HasSignal(DESTROYING_SIGNAL_NAME) then
 		self:GetSignal(DESTROYING_SIGNAL_NAME):Fire()
@@ -353,7 +355,7 @@ end
 	@param classOrClassName {[any]: any} | string -- The class or class name to check against
 	@return boolean
 ]=]
-function BaseObject:IsA(classOrClassName: {[any]: any} | string): boolean
+function BaseObject:IsA(classOrClassName: { [any]: any } | string): boolean
 	local current = self
 	while current do
 		current = getmetatable(current)
@@ -363,8 +365,6 @@ function BaseObject:IsA(classOrClassName: {[any]: any} | string): boolean
 	end
 	return false
 end
-
-
 
 --------------------------------------------------------------------------------
 --// Task Management //--
@@ -520,7 +520,7 @@ function BaseObject:FireSignal(signalName: string, ...)
 			signal:Fire(...)
 		else
 			signal:FireDeferred(...)
-		end	
+		end
 	end
 end
 
@@ -643,7 +643,7 @@ function BaseObject:GetDestroyedSignal(): Signal
 end
 
 --------------------------------------------------------------------------------
-	--// Methods //--
+--// Methods //--
 --------------------------------------------------------------------------------
 
 --[=[
@@ -675,24 +675,24 @@ end
 function BaseObject:BindToInstance(obj: Instance, destroyOnNilParent: boolean?): () -> ()
 	-- Validate that obj is an Instance with required signals
 	assert(typeof(obj) == "Instance", "Argument 1 must be an Instance")
-	
+
 	local connections = {}
 	local janitorKeys = {}
 	local isCleanedUp = false
-	
+
 	local function CleanConnections()
 		if isCleanedUp then
 			return
 		end
 		isCleanedUp = true
-		
+
 		-- Disconnect raw connections
 		for _, conn in ipairs(connections) do
 			if typeof(conn) == "RBXScriptConnection" then
 				conn:Disconnect()
 			end
 		end
-		
+
 		-- Remove tasks from janitor
 		for _, key in ipairs(janitorKeys) do
 			self:RemoveTaskNoClean(key)
@@ -700,33 +700,43 @@ function BaseObject:BindToInstance(obj: Instance, destroyOnNilParent: boolean?):
 	end
 
 	-- Connection 1: When BaseObject is destroyed, destroy the Instance
-	table.insert(connections, self:GetDestroyedSignal():Once(function()
-		pcall(obj.Destroy, obj)
-	end))
+	table.insert(
+		connections,
+		self:GetDestroyedSignal():Once(function()
+			pcall(obj.Destroy, obj)
+		end)
+	)
 
 	-- Connection 2: When Instance is destroyed, destroy the BaseObject
 	local key1 = {}
 	table.insert(janitorKeys, key1)
-	self:AddTask(obj.Destroying:Once(function()
-		if not self.Destroyed and not self.IsDestroyed then
-			self:Destroy()
-		end
-	end), true, key1)
+	self:AddTask(
+		obj.Destroying:Once(function()
+			if not self.Destroyed and not self.IsDestroyed then
+				self:Destroy()
+			end
+		end),
+		nil,
+		key1
+	)
 
 	-- Connection 3: When Instance parent is nil'd, destroy the BaseObject
 	if destroyOnNilParent then
 		local key2 = {}
 		table.insert(janitorKeys, key2)
-		self:AddTask(obj.AncestryChanged:Connect(function(_, parent)
-			if not parent then
-				self:Destroy()
-			end
-		end), true, key2)
+		self:AddTask(
+			obj.AncestryChanged:Connect(function(_, parent)
+				if not parent then
+					self:Destroy()
+				end
+			end),
+			nil,
+			key2
+		)
 	end
-	
+
 	return CleanConnections
 end
-
 
 --------------------------------------------------------------------------------
 --// Finalization //--
