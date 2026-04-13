@@ -8,7 +8,9 @@ local Packages = script.Parent.Parent.Parent
 local Promise = require(Packages.Promise)
 
 --// Types //--
-type Promise = typeof(Promise.new())
+type Promise = typeof(Promise.new(
+	function(resolve, reject: (...any) -> (), onCancel: (abortHandler: (() -> ())?) -> boolean) end
+))
 
 export type RemoteProperty<T> = {
 	_remote: RemoteEvent,
@@ -18,14 +20,12 @@ export type RemoteProperty<T> = {
 	_initialized: boolean?,
 	_readyCallbacks: { () -> () }?,
 	Set: (self: RemoteProperty<T>, value: T) -> (),
+	SetFor: (self: RemoteProperty<T>, player: Player, value: T) -> (),
 	Get: (self: RemoteProperty<T>) -> T,
 	Observe: (self: RemoteProperty<T>, callback: (T) -> ()) -> () -> (),
 	IsReady: (self: RemoteProperty<T>) -> boolean,
 	OnReady: (self: RemoteProperty<T>) -> Promise,
 }
-
-local RemoteProperty = {}
-RemoteProperty.__index = RemoteProperty
 
 local IS_SERVER = RunService:IsServer()
 
@@ -33,13 +33,16 @@ local function getFolder()
 	return script
 end
 
+local RemoteProperty = {}
+RemoteProperty.__index = RemoteProperty
+
 --[=[
 	Creates a new RemoteProperty (Server-side only)
 	@param name string -- Name of the property
 	@param initialValue any -- Initial value
 	@return RemoteProperty
 ]=]
-function RemoteProperty.new<T>(name: string, initialValue: T): RemoteProperty<T>
+function RemoteProperty.new<T>(name: string, initialValue: T, requestHandler: ((player: Player) -> T)?): RemoteProperty<T>
 	assert(IS_SERVER, "RemoteProperty.new can only be called on the server")
 
 	local self = setmetatable({}, RemoteProperty)
@@ -55,9 +58,10 @@ function RemoteProperty.new<T>(name: string, initialValue: T): RemoteProperty<T>
 	self._value = initialValue
 	self._name = name
 
-	-- Handle client requests for current value
+	-- Handle client requests for current value; requestHandler allows per-player responses
 	remote.OnServerEvent:Connect(function(player)
-		remote:FireClient(player, self._value)
+		local value = if requestHandler then requestHandler(player) else self._value
+		remote:FireClient(player, value)
 	end)
 
 	return self
@@ -124,6 +128,17 @@ function RemoteProperty:Set(value: any)
 
 	-- Fire to all clients
 	self._remote:FireAllClients(value)
+end
+
+--[=[
+	Fires a value to a specific client only (Server-side only).
+	Does not update the shared default value seen by other clients.
+	@param player Player -- The player to send the value to
+	@param value any -- Value to send
+]=]
+function RemoteProperty:SetFor(player: Player, value: any)
+	assert(IS_SERVER, "RemoteProperty:SetFor can only be called on the server")
+	self._remote:FireClient(player, value)
 end
 
 --[=[

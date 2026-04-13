@@ -8,11 +8,12 @@ local RunService = game:GetService("RunService")
 assert(RunService:IsClient(), "WeatherClient can only be required on the client")
 
 --// Imports //--
-local Janitor = require(script.Parent.Parent.Janitor)
-local T = require(script.Parent.Parent.T)
-local Fusion = require(script.Parent.Parent.Fusion)
-local WeatherUtil = require(script.Parent.Shared.WeatherUtil)
-local RemoteProperty = require(script.Parent.Networking.RemoteProperty)
+local Packages = script.Parent.Parent.Parent
+local Janitor = require(Packages.Janitor)
+local T = require(Packages.T)
+local Fusion = require(Packages.Fusion)
+local WeatherUtil = require(Packages.WeatherManager.Shared.WeatherUtil)
+local RemoteProperty = require(Packages.WeatherManager.Networking.RemoteProperty)
 
 --// Types //--
 type WeatherData = WeatherUtil.WeatherData
@@ -30,10 +31,30 @@ local ActiveWeatherEffects = {}
 -- Setup networking
 local ActiveWeatherProperty = RemoteProperty.fromServer("WeatherSystem_ActiveWeather")
 
+-- Maps each WeatherData category to the Roblox instance class it drives.
+-- Used to create missing instances on demand when a weather effect that
+-- references a category becomes active for the first time.
+local CategoryInstanceRequirements = {
+	SkyboxData = { parent = Lighting, className = "Sky" },
+	AtmosphereData = { parent = Lighting, className = "Atmosphere" },
+	BloomData = { parent = Lighting, className = "BloomEffect" },
+	BlurData = { parent = Lighting, className = "BlurEffect" },
+	ColorCorrectionData = { parent = Lighting, className = "ColorCorrectionEffect" },
+	DepthOfFieldData = { parent = Lighting, className = "DepthOfFieldEffect" },
+	SunRaysData = { parent = Lighting, className = "SunRaysEffect" },
+	CloudData = { parent = workspace.Terrain, className = "Clouds" },
+}
+
 -- Setup visual effects data
 local AtmosphereData = {}
 local CloudsData = {}
 local LightingData = {}
+local SkyboxData = {}
+local BloomData = {}
+local BlurData = {}
+local ColorCorrectionData = {}
+local DepthOfFieldData = {}
+local SunRaysData = {}
 
 --------------------------------------------------------------------------------
 --// WeatherClient //--
@@ -61,6 +82,216 @@ WeatherClient.WeatherStarted = WeatherStarted
 	Signal fired when a weather effect stops.
 ]=]
 WeatherClient.WeatherStopped = WeatherStopped
+
+--------------------------------------------------------------------------------
+--// Visual Effects Setup //--
+--------------------------------------------------------------------------------
+
+-- Registered refresher functions, one per tracked property. Calling
+-- RefreshBaselines() snapshots all current instance values into their
+-- corresponding Fusion Values so the spring transitions FROM the live state.
+local BaselineRefreshers: { () -> () } = {}
+
+local function trackProperty(scope, instance, propertyName)
+	local value = scope:Value(instance[propertyName])
+	table.insert(BaselineRefreshers, function()
+		value:set(instance[propertyName])
+	end)
+	return value
+end
+
+local function RefreshBaselines()
+	for _, refresh in BaselineRefreshers do
+		refresh()
+	end
+end
+
+local function GenerateDataCategory(scope, Data, DataCategory)
+	local SortedWeathers = scope:Value {}
+
+	local function sortWeatherEffects()
+		local activeWeatherTypes = {}
+		for weatherType in pairs(ActiveWeatherEffects) do
+			table.insert(activeWeatherTypes, weatherType)
+		end
+		table.sort(activeWeatherTypes, function(a, b)
+			local aData = RegisteredWeatherEffects[a]
+			local bData = RegisteredWeatherEffects[b]
+			local aPriority = aData and ((aData[DataCategory] and aData[DataCategory].Priority) or aData.Priority) or 1
+			local bPriority = bData and ((bData[DataCategory] and bData[DataCategory].Priority) or bData.Priority) or 1
+			return aPriority > bPriority
+		end)
+		SortedWeathers:set(activeWeatherTypes)
+	end
+
+	WeatherStarted:Connect(sortWeatherEffects)
+	WeatherStopped:Connect(sortWeatherEffects)
+	sortWeatherEffects()
+
+	local function getHighestPriorityProperty(propertyName: string)
+		local computed = scope:Computed(function(use)
+			local sortedWeathers = use(SortedWeathers)
+			local propertyValue = Data[propertyName]
+			for _, weatherType in sortedWeathers do
+				local weatherData = RegisteredWeatherEffects[weatherType]
+				if weatherData and weatherData[DataCategory] and weatherData[DataCategory][propertyName] then
+					propertyValue = weatherData[DataCategory][propertyName]
+					break
+				end
+			end
+			return use(propertyValue)
+		end)
+		-- Only apply Spring to types Fusion can interpolate. Strings (texture IDs,
+		-- etc.) must be returned as plain Computed or Fusion errors with nil.
+		local baselineType = typeof(Fusion.peek(Data[propertyName]))
+		if baselineType == "number" or baselineType == "Color3" or baselineType == "Vector3" then
+			return scope:Spring(computed, 0.5)
+		end
+		return computed
+	end
+
+	local tbl = {}
+	for propertyName in Data do
+		tbl[propertyName] = getHighestPriorityProperty(propertyName)
+	end
+	return tbl
+end
+
+local function SetupSkybox(Sky: Sky)
+	local scope = Fusion.scoped(Fusion)
+
+	SkyboxData = {
+		MoonAngularSize = trackProperty(scope, Sky, "MoonAngularSize"),
+		MoonTextureId = trackProperty(scope, Sky, "MoonTextureId"),
+		SkyboxBk = trackProperty(scope, Sky, "SkyboxBk"),
+		SkyboxDn = trackProperty(scope, Sky, "SkyboxDn"),
+		SkyboxFt = trackProperty(scope, Sky, "SkyboxFt"),
+		SkyboxLf = trackProperty(scope, Sky, "SkyboxLf"),
+		SkyboxRt = trackProperty(scope, Sky, "SkyboxRt"),
+		SkyboxUp = trackProperty(scope, Sky, "SkyboxUp"),
+		SkyboxOrientation = trackProperty(scope, Sky, "SkyboxOrientation"),
+		StarCount = trackProperty(scope, Sky, "StarCount"),
+		SunAngularSize = trackProperty(scope, Sky, "SunAngularSize"),
+		SunTextureId = trackProperty(scope, Sky, "SunTextureId"),
+	}
+
+	local tbl = GenerateDataCategory(scope, SkyboxData, "SkyboxData")
+	scope:Hydrate(Sky)(tbl)
+end
+
+local function SetupBloom(Bloom: BloomEffect)
+	local scope = Fusion.scoped(Fusion)
+
+	BloomData = {
+		Intensity = trackProperty(scope, Bloom, "Intensity"),
+		Size = trackProperty(scope, Bloom, "Size"),
+		Threshold = trackProperty(scope, Bloom, "Threshold"),
+	}
+
+	local tbl = GenerateDataCategory(scope, BloomData, "BloomData")
+	scope:Hydrate(Bloom)(tbl)
+end
+
+local function SetupBlur(Blur: BlurEffect)
+	local scope = Fusion.scoped(Fusion)
+
+	BlurData = {
+		Size = trackProperty(scope, Blur, "Size"),
+	}
+
+	local tbl = GenerateDataCategory(scope, BlurData, "BlurData")
+	scope:Hydrate(Blur)(tbl)
+end
+
+local function SetupColorCorrection(ColorCorrection: ColorCorrectionEffect)
+	local scope = Fusion.scoped(Fusion)
+
+	ColorCorrectionData = {
+		Brightness = trackProperty(scope, ColorCorrection, "Brightness"),
+		Contrast = trackProperty(scope, ColorCorrection, "Contrast"),
+		Saturation = trackProperty(scope, ColorCorrection, "Saturation"),
+		TintColor = trackProperty(scope, ColorCorrection, "TintColor"),
+	}
+
+	local tbl = GenerateDataCategory(scope, ColorCorrectionData, "ColorCorrectionData")
+	scope:Hydrate(ColorCorrection)(tbl)
+end
+
+local function SetupDepthOfField(DepthOfField: DepthOfFieldEffect)
+	local scope = Fusion.scoped(Fusion)
+
+	DepthOfFieldData = {
+		FarIntensity = trackProperty(scope, DepthOfField, "FarIntensity"),
+		FocusDistance = trackProperty(scope, DepthOfField, "FocusDistance"),
+		NearIntensity = trackProperty(scope, DepthOfField, "NearIntensity"),
+		InFocusRadius = trackProperty(scope, DepthOfField, "InFocusRadius"),
+	}
+
+	local tbl = GenerateDataCategory(scope, DepthOfFieldData, "DepthOfFieldData")
+	scope:Hydrate(DepthOfField)(tbl)
+end
+
+local function SetupSunRays(SunRays: SunRaysEffect)
+	local scope = Fusion.scoped(Fusion)
+
+	SunRaysData = {
+		Intensity = trackProperty(scope, SunRays, "Intensity"),
+		Spread = trackProperty(scope, SunRays, "Spread"),
+	}
+
+	local tbl = GenerateDataCategory(scope, SunRaysData, "SunRaysData")
+	scope:Hydrate(SunRays)(tbl)
+end
+
+local function SetupAtmosphere(Atmosphere: Atmosphere)
+	local scope = Fusion.scoped(Fusion)
+
+	AtmosphereData = {
+		Color = trackProperty(scope, Atmosphere, "Color"),
+		Decay = trackProperty(scope, Atmosphere, "Decay"),
+		Density = trackProperty(scope, Atmosphere, "Density"),
+		Offset = trackProperty(scope, Atmosphere, "Offset"),
+		Glare = trackProperty(scope, Atmosphere, "Glare"),
+		Haze = trackProperty(scope, Atmosphere, "Haze"),
+	}
+
+	local tbl = GenerateDataCategory(scope, AtmosphereData, "AtmosphereData")
+	scope:Hydrate(Atmosphere)(tbl)
+end
+
+local function SetupClouds(Clouds: Clouds)
+	local scope = Fusion.scoped(Fusion)
+
+	CloudsData = {
+		Color = trackProperty(scope, Clouds, "Color"),
+		Cover = trackProperty(scope, Clouds, "Cover"),
+		Density = trackProperty(scope, Clouds, "Density"),
+	}
+
+	local tbl = GenerateDataCategory(scope, CloudsData, "CloudsData")
+	scope:Hydrate(Clouds)(tbl)
+end
+
+local function SetupLighting()
+	local scope = Fusion.scoped(Fusion)
+
+	LightingData = {
+		Ambient = trackProperty(scope, Lighting, "Ambient"),
+		Brightness = trackProperty(scope, Lighting, "Brightness"),
+		ColorShift_Bottom = trackProperty(scope, Lighting, "ColorShift_Bottom"),
+		ColorShift_Top = trackProperty(scope, Lighting, "ColorShift_Top"),
+		EnvironmentDiffuseScale = trackProperty(scope, Lighting, "EnvironmentDiffuseScale"),
+		EnvironmentSpecularScale = trackProperty(scope, Lighting, "EnvironmentSpecularScale"),
+		OutdoorAmbient = trackProperty(scope, Lighting, "OutdoorAmbient"),
+		ShadowSoftness = trackProperty(scope, Lighting, "ShadowSoftness"),
+		ClockTime = trackProperty(scope, Lighting, "ClockTime"),
+		GeographicLatitude = trackProperty(scope, Lighting, "GeographicLatitude"),
+		ExposureCompensation = trackProperty(scope, Lighting, "ExposureCompensation"),
+	}
+
+	local tbl = GenerateDataCategory(scope, LightingData, "LightingData")
+	scope:Hydrate(Lighting)(tbl)
+end
 
 --------------------------------------------------------------------------------
 --// Methods //--
@@ -139,6 +370,22 @@ local function StartWeather(weatherType: string)
 		return
 	end
 
+	-- Snapshot whatever the external lighting system currently has as the
+	-- baseline before any weather properties take over.
+	if next(ActiveWeatherEffects) == nil then
+		RefreshBaselines()
+	end
+
+	-- Create any Roblox instances required by this weather's data categories
+	-- if they don't yet exist. ChildAdded fires synchronously on .Parent =,
+	-- so each Setup* function runs and its Fusion pipeline is fully wired
+	-- before WeatherStarted fires below.
+	for category, req in CategoryInstanceRequirements do
+		if weatherData[category] and not req.parent:FindFirstChildWhichIsA(req.className) then
+			Instance.new(req.className).Parent = req.parent
+		end
+	end
+
 	local janitor = Janitor.new()
 	ActiveWeatherEffects[weatherType] = {
 		Janitor = janitor,
@@ -176,122 +423,53 @@ local function StopWeather(weatherType: string)
 end
 
 --------------------------------------------------------------------------------
---// Visual Effects Setup //--
---------------------------------------------------------------------------------
-
-local function GenerateDataCategory(scope, Data, DataCategory)
-	local SortedWeathers = scope:Value {}
-
-	local function sortWeatherEffects()
-		local activeWeatherTypes = {}
-		for weatherType in pairs(ActiveWeatherEffects) do
-			table.insert(activeWeatherTypes, weatherType)
-		end
-		table.sort(activeWeatherTypes, function(a, b)
-			local aData = RegisteredWeatherEffects[a]
-			local bData = RegisteredWeatherEffects[b]
-			local aPriority = aData and ((aData[DataCategory] and aData[DataCategory].Priority) or aData.Priority) or 1
-			local bPriority = bData and ((bData[DataCategory] and bData[DataCategory].Priority) or bData.Priority) or 1
-			return aPriority > bPriority
-		end)
-		SortedWeathers:set(activeWeatherTypes)
-	end
-
-	WeatherStarted:Connect(sortWeatherEffects)
-	WeatherStopped:Connect(sortWeatherEffects)
-	sortWeatherEffects()
-
-	local function getHighestPriorityProperty(propertyName: string)
-		local value = scope:Computed(function(use)
-			local sortedWeathers = use(SortedWeathers)
-			local propertyValue = Data[propertyName]
-			for _, weatherType in sortedWeathers do
-				local weatherData = RegisteredWeatherEffects[weatherType]
-				if weatherData and weatherData[DataCategory] and weatherData[DataCategory][propertyName] then
-					propertyValue = weatherData[DataCategory][propertyName]
-					break
-				end
-			end
-			return use(propertyValue)
-		end)
-		return scope:Spring(value, 0.5)
-	end
-
-	local tbl = {}
-	for propertyName in Data do
-		tbl[propertyName] = getHighestPriorityProperty(propertyName)
-	end
-	return tbl
-end
-
-local function SetupAtmosphere()
-	local Atmosphere: Atmosphere = Lighting:FindFirstChildWhichIsA("Atmosphere")
-	if not Atmosphere then
-		warn("WeatherClient: No Atmosphere instance found in Lighting")
-		return
-	end
-	local scope = Fusion.scoped(Fusion)
-
-	AtmosphereData = {
-		Color = scope:Value(Atmosphere.Color),
-		Decay = scope:Value(Atmosphere.Decay),
-		Density = scope:Value(Atmosphere.Density),
-		Offset = scope:Value(Atmosphere.Offset),
-		Glare = scope:Value(Atmosphere.Glare),
-		Haze = scope:Value(Atmosphere.Haze),
-	}
-
-	local tbl = GenerateDataCategory(scope, AtmosphereData, "AtmosphereData")
-	scope:Hydrate(Atmosphere)(tbl)
-end
-
-local function SetupClouds()
-	local Clouds: Clouds = workspace.Terrain:FindFirstChildWhichIsA("Clouds")
-	if not Clouds then
-		warn("WeatherClient: No Clouds instance found in Terrain")
-		return
-	end
-	local scope = Fusion.scoped(Fusion)
-
-	CloudsData = {
-		Color = scope:Value(Clouds.Color),
-		Cover = scope:Value(Clouds.Cover),
-		Density = scope:Value(Clouds.Density),
-	}
-
-	local tbl = GenerateDataCategory(scope, CloudsData, "CloudsData")
-	scope:Hydrate(Clouds)(tbl)
-end
-
-local function SetupLighting()
-	local scope = Fusion.scoped(Fusion)
-
-	LightingData = {
-		Ambient = scope:Value(Lighting.Ambient),
-		Brightness = scope:Value(Lighting.Brightness),
-		ColorShift_Bottom = scope:Value(Lighting.ColorShift_Bottom),
-		ColorShift_Top = scope:Value(Lighting.ColorShift_Top),
-		EnvironmentDiffuseScale = scope:Value(Lighting.EnvironmentDiffuseScale),
-		EnvironmentSpecularScale = scope:Value(Lighting.EnvironmentSpecularScale),
-		OutdoorAmbient = scope:Value(Lighting.OutdoorAmbient),
-		ShadowSoftness = scope:Value(Lighting.ShadowSoftness),
-		ClockTime = scope:Value(Lighting.ClockTime),
-		GeographicLatitude = scope:Value(Lighting.GeographicLatitude),
-		ExposureCompensation = scope:Value(Lighting.ExposureCompensation),
-	}
-
-	local tbl = GenerateDataCategory(scope, LightingData, "LightingData")
-	scope:Hydrate(Lighting)(tbl)
-end
-
---------------------------------------------------------------------------------
 --// Initialization //--
 --------------------------------------------------------------------------------
 
 -- Setup visual effects
-SetupAtmosphere()
-SetupClouds()
+-- Lighting is always present, run immediately.
 SetupLighting()
+
+-- For all optional child instances: run setup now if present, and watch for
+-- late additions so an external system can create them at any point.
+local function trySetup(instance, setupFn)
+	if instance then
+		setupFn(instance)
+	end
+end
+
+trySetup(Lighting:FindFirstChildWhichIsA("Sky"), SetupSkybox)
+trySetup(Lighting:FindFirstChildWhichIsA("Atmosphere"), SetupAtmosphere)
+trySetup(Lighting:FindFirstChildWhichIsA("BloomEffect"), SetupBloom)
+trySetup(Lighting:FindFirstChildWhichIsA("BlurEffect"), SetupBlur)
+trySetup(Lighting:FindFirstChildWhichIsA("ColorCorrectionEffect"), SetupColorCorrection)
+trySetup(Lighting:FindFirstChildWhichIsA("DepthOfFieldEffect"), SetupDepthOfField)
+trySetup(Lighting:FindFirstChildWhichIsA("SunRaysEffect"), SetupSunRays)
+trySetup(workspace.Terrain:FindFirstChildWhichIsA("Clouds"), SetupClouds)
+
+-- Map class names to their setup functions for the ChildAdded listeners below.
+local lightingSetupByClass = {
+	Sky = SetupSkybox,
+	Atmosphere = SetupAtmosphere,
+	BloomEffect = SetupBloom,
+	BlurEffect = SetupBlur,
+	ColorCorrectionEffect = SetupColorCorrection,
+	DepthOfFieldEffect = SetupDepthOfField,
+	SunRaysEffect = SetupSunRays,
+}
+
+Lighting.ChildAdded:Connect(function(child)
+	local setupFn = lightingSetupByClass[child.ClassName]
+	if setupFn then
+		setupFn(child)
+	end
+end)
+
+workspace.Terrain.ChildAdded:Connect(function(child)
+	if child:IsA("Clouds") then
+		SetupClouds(child)
+	end
+end)
 
 -- Sync active weather from server
 ActiveWeatherProperty:Observe(function(activeWeather)

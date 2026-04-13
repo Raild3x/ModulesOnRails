@@ -3,14 +3,16 @@
 
 --// Roblox Services //--
 local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
 
 assert(RunService:IsServer(), "WeatherServer can only be required on the server")
 
 --// Imports //--
-local Janitor = require(script.Parent.Parent.Janitor)
-local T = require(script.Parent.Parent.T)
-local WeatherUtil = require(script.Parent.Shared.WeatherUtil)
-local RemoteProperty = require(script.Parent.Networking.RemoteProperty)
+local Packages = script.Parent.Parent.Parent
+local T = require(Packages.T)
+local Janitor = require(Packages.Janitor)
+local WeatherUtil = require(Packages.WeatherManager.Shared.WeatherUtil)
+local RemoteProperty = require(Packages.WeatherManager.Networking.RemoteProperty)
 
 --// Types //--
 type WeatherData = WeatherUtil.WeatherData
@@ -25,13 +27,46 @@ local WeatherStopped = WeatherUtil.WeatherStopped
 --// State //--
 local RegisteredWeatherEffects = {}
 local ActiveWeatherEffects = {}
+local PlayerWeatherEffects = {} -- Per-player weather overrides: { [Player]: { [string]: { Janitor: Janitor, EndTime: number? } } }
 local WeatherCycleEnabled = false
 local WeatherCycleThread = nil
 local LastWeatherPicked = nil
 local ExpirationLoopThread = nil -- Track the expiration loop thread
 
--- Setup networking
-local ActiveWeatherProperty = RemoteProperty.new("WeatherSystem_ActiveWeather", {})
+-- global active weather + any per-player overrides, deduplicated.
+local getEffectiveWeatherForPlayer = function(player: Player): { string }
+	local active = {}
+	local seen = {}
+	for weatherType in pairs(ActiveWeatherEffects) do
+		seen[weatherType] = true
+		table.insert(active, weatherType)
+	end
+	local playerEffects = PlayerWeatherEffects[player]
+	if playerEffects then
+		for weatherType in pairs(playerEffects) do
+			if not seen[weatherType] then
+				seen[weatherType] = true
+				table.insert(active, weatherType)
+			end
+		end
+	end
+	return active
+end
+
+-- Setup networking; requestHandler provides per-player effective weather on join
+local ActiveWeatherProperty = RemoteProperty.new("WeatherSystem_ActiveWeather", {}, function(player)
+	return getEffectiveWeatherForPlayer(player)
+end)
+
+--------------------------------------------------------------------------------
+--// WeatherServer //--
+--------------------------------------------------------------------------------
+
+local WeatherServer = {}
+
+--------------------------------------------------------------------------------
+--// Internal Methods //--
+--------------------------------------------------------------------------------
 
 -- Create a folder to hold ObjectValues pointing to weather modules
 local function getWeatherModulesFolder()
@@ -44,15 +79,15 @@ local function getWeatherModulesFolder()
 	return folder
 end
 
---------------------------------------------------------------------------------
---// WeatherServer //--
---------------------------------------------------------------------------------
+local function pushWeatherToPlayers(players: { Player })
+	for _, player in players do
+		ActiveWeatherProperty:SetFor(player, getEffectiveWeatherForPlayer(player))
+	end
+end
 
-local WeatherServer = {}
-
---------------------------------------------------------------------------------
---// Internal Methods //--
---------------------------------------------------------------------------------
+local function pushWeatherToAllPlayers()
+	pushWeatherToPlayers(Players:GetPlayers())
+end
 
 local function StartExpirationLoop()
 	-- Don't start if already running
@@ -72,7 +107,17 @@ local function StartExpirationLoop()
 				end
 			end
 
-			-- If no active weather, stop the loop
+			-- Check per-player weather expiration
+			for player, playerEffects in pairs(PlayerWeatherEffects) do
+				for weatherType, activeWeather in pairs(playerEffects) do
+					hasActiveWeather = true
+					if activeWeather.EndTime and currentTime >= activeWeather.EndTime then
+						WeatherServer.StopWeather(weatherType, { player })
+					end
+				end
+			end
+
+			-- If no active weather (global or per-player), stop the loop
 			if not hasActiveWeather then
 				ExpirationLoopThread = nil
 				return
@@ -240,12 +285,16 @@ end
 --[=[
 	Starts a weather effect of the specified type.
 	@param weatherType string -- The weather type to start
-	@param config table? -- Optional configuration: {Duration: number?}
+	@param config table? -- Optional configuration:
+	  - `Duration` (number | NumberRange)? — auto-stop after this many seconds
+	  - `Players` { Player }? — if provided, applies the effect only to those players;
+	      if nil, applies globally to all players
 ]=]
 function WeatherServer.StartWeather(
 	weatherType: string,
 	config: {
-		Duration: number?,
+		Duration: (number | NumberRange)?,
+		Players: { Player }?,
 	}?
 )
 	local weatherData = RegisteredWeatherEffects[weatherType]
@@ -256,9 +305,54 @@ function WeatherServer.StartWeather(
 
 	local Config = config or {}
 	assert(T.interface {
-		Duration = T.optional(T.numberPositive),
+		Duration = T.optional(T.union(T.numberPositive, T.typeof("NumberRange"))),
+		Players = T.optional(T.array(T.instanceIsA("Player"))),
 	}(Config))
 
+	-- Resolve NumberRange to a concrete number
+	if typeof(Config.Duration) == "NumberRange" then
+		Config = table.clone(Config)
+		Config.Duration = math.random(Config.Duration.Min, Config.Duration.Max)
+	end
+
+	-- Per-player path
+	if Config.Players then
+		local anyNewlyStarted = false
+		for _, player in Config.Players do
+			if not PlayerWeatherEffects[player] then
+				PlayerWeatherEffects[player] = {}
+			end
+			local existing = PlayerWeatherEffects[player][weatherType]
+			if existing then
+				-- Update the end time for an already-active per-player effect
+				if Config.Duration then
+					existing.EndTime = workspace:GetServerTimeNow() + Config.Duration
+				else
+					existing.EndTime = nil
+				end
+			else
+				local janitor = Janitor.new()
+				PlayerWeatherEffects[player][weatherType] = {
+					Janitor = janitor,
+					EndTime = if Config.Duration then workspace:GetServerTimeNow() + Config.Duration else nil,
+				}
+				if weatherData.OnStart then
+					janitor:Add(task.spawn(weatherData.OnStart, janitor))
+				end
+				anyNewlyStarted = true
+			end
+		end
+		if Config.Duration then
+			StartExpirationLoop()
+		end
+		pushWeatherToPlayers(Config.Players)
+		if anyNewlyStarted then
+			WeatherStarted:Fire(weatherType)
+		end
+		return
+	end
+
+	-- Global path
 	local activeWeather = ActiveWeatherEffects[weatherType]
 	if activeWeather then
 		if Config.Duration then
@@ -275,8 +369,8 @@ function WeatherServer.StartWeather(
 		EndTime = if Config.Duration then workspace:GetServerTimeNow() + Config.Duration else nil,
 	}
 
-	-- Update clients
-	ActiveWeatherProperty:Set(WeatherServer.GetActiveWeather())
+	-- Update all clients
+	pushWeatherToAllPlayers()
 
 	-- Start expiration loop if needed
 	if Config.Duration then
@@ -293,30 +387,124 @@ end
 --[=[
 	Stops a weather effect of the specified type.
 	@param weatherType string -- The weather type to stop
+	@param players { Player }? -- If provided, stops the per-player override for only those players.
+	  If nil, stops the global effect AND sweeps any per-player overrides for this type.
 ]=]
-function WeatherServer.StopWeather(weatherType: string)
+function WeatherServer.StopWeather(weatherType: string, players: { Player }?)
 	local weatherData = RegisteredWeatherEffects[weatherType]
 	if not weatherData then
 		warn("Weather type not registered: " .. weatherType)
 		return
 	end
 
+	-- Per-player targeted stop
+	if players then
+		local affectedPlayers = {}
+		for _, player in players do
+			local playerEffects = PlayerWeatherEffects[player]
+			if not playerEffects or not playerEffects[weatherType] then
+				continue
+			end
+			local entry = playerEffects[weatherType]
+			playerEffects[weatherType] = nil
+			if next(playerEffects) == nil then
+				PlayerWeatherEffects[player] = nil
+			end
+			local janitor = entry.Janitor
+			if weatherData.OnStop then
+				janitor:Add(task.spawn(weatherData.OnStop, janitor))
+			end
+			janitor:Destroy()
+			table.insert(affectedPlayers, player)
+		end
+		if #affectedPlayers > 0 then
+			pushWeatherToPlayers(affectedPlayers)
+			WeatherStopped:Fire(weatherType)
+		end
+		return
+	end
+
+	-- Global stop: stop the global effect and sweep all per-player overrides for this type
 	local activeWeather = ActiveWeatherEffects[weatherType]
-	if not activeWeather then
+	local stoppedSomething = false
+
+	if activeWeather then
+		ActiveWeatherEffects[weatherType] = nil
+		local janitor = activeWeather.Janitor
+		if weatherData.OnStop then
+			janitor:Add(task.spawn(weatherData.OnStop, janitor))
+		end
+		janitor:Destroy()
+		stoppedSomething = true
+	end
+
+	-- Sweep per-player overrides for this weather type
+	for player, playerEffects in pairs(PlayerWeatherEffects) do
+		if playerEffects[weatherType] then
+			local entry = playerEffects[weatherType]
+			playerEffects[weatherType] = nil
+			if next(playerEffects) == nil then
+				PlayerWeatherEffects[player] = nil
+			end
+			local janitor = entry.Janitor
+			if weatherData.OnStop then
+				janitor:Add(task.spawn(weatherData.OnStop, janitor))
+			end
+			janitor:Destroy()
+			stoppedSomething = true
+		end
+	end
+
+	if not stoppedSomething then
 		warn(weatherType .. " is not currently active.")
 		return
 	end
 
-	ActiveWeatherEffects[weatherType] = nil
-	ActiveWeatherProperty:Set(WeatherServer.GetActiveWeather())
-
-	local janitor = activeWeather.Janitor
-	if weatherData.OnStop then
-		janitor:Add(task.spawn(weatherData.OnStop, janitor))
-	end
-	janitor:Destroy()
-
+	pushWeatherToAllPlayers()
 	WeatherStopped:Fire(weatherType)
+end
+
+--[=[
+	Returns the effective active weather for a specific player.
+	This includes both global weather and any per-player overrides.
+	@param player Player -- The player to query
+]=]
+function WeatherServer.GetActiveWeatherForPlayer(player: Player): { string }
+	return getEffectiveWeatherForPlayer(player)
+end
+
+--[=[
+	Checks if a specific weather type is currently active for a given player.
+	Returns true if the weather is active globally OR as a per-player override for this player.
+	@param player Player -- The player to check
+	@param weatherType string -- The weather type to check
+]=]
+function WeatherServer.IsWeatherActiveForPlayer(player: Player, weatherType: string): boolean
+	if ActiveWeatherEffects[weatherType] then
+		return true
+	end
+	local playerEffects = PlayerWeatherEffects[player]
+	return playerEffects ~= nil and playerEffects[weatherType] ~= nil
+end
+
+--[=[
+	Stops all per-player weather overrides for the given player.
+	Global weather is unaffected.
+	@param player Player -- The player whose overrides should be cleared
+]=]
+function WeatherServer.StopAllWeatherForPlayer(player: Player)
+	local playerEffects = PlayerWeatherEffects[player]
+	if not playerEffects then
+		return
+	end
+	-- Collect keys first to avoid mutating the table during iteration
+	local weatherTypes = {}
+	for weatherType in pairs(playerEffects) do
+		table.insert(weatherTypes, weatherType)
+	end
+	for _, weatherType in weatherTypes do
+		WeatherServer.StopWeather(weatherType, { player })
+	end
 end
 
 local function RunWeatherCycle()
@@ -448,6 +636,18 @@ local function SetupClientBootstrapper()
 		end
 	end
 end
+
+-- Clean up per-player weather state when a player leaves to prevent memory leaks
+Players.PlayerRemoving:Connect(function(player)
+	local playerEffects = PlayerWeatherEffects[player]
+	if not playerEffects then
+		return
+	end
+	for _, entry in pairs(playerEffects) do
+		entry.Janitor:Destroy()
+	end
+	PlayerWeatherEffects[player] = nil
+end)
 
 task.defer(SetupClientBootstrapper)
 
