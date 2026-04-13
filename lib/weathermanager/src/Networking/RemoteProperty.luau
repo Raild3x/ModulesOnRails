@@ -2,6 +2,7 @@
 -- Simple replicated property system for client-server synchronization
 
 local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
 
 --// Imports //--
 local Packages = script.Parent.Parent.Parent
@@ -15,6 +16,8 @@ type Promise = typeof(Promise.new(
 export type RemoteProperty<T> = {
 	_remote: RemoteEvent,
 	_value: T,
+	_playerValues: { [Player]: T },
+	_playerRemovingConn: RBXScriptConnection?,
 	_name: string,
 	_observers: { (T) -> () }?,
 	_initialized: boolean?,
@@ -22,9 +25,12 @@ export type RemoteProperty<T> = {
 	Set: (self: RemoteProperty<T>, value: T) -> (),
 	SetFor: (self: RemoteProperty<T>, player: Player, value: T) -> (),
 	Get: (self: RemoteProperty<T>) -> T,
+	GetFor: (self: RemoteProperty<T>, player: Player) -> T,
+	ClearFor: (self: RemoteProperty<T>, player: Player) -> (),
 	Observe: (self: RemoteProperty<T>, callback: (T) -> ()) -> () -> (),
 	IsReady: (self: RemoteProperty<T>) -> boolean,
 	OnReady: (self: RemoteProperty<T>) -> Promise,
+	Destroy: (self: RemoteProperty<T>) -> (),
 }
 
 local IS_SERVER = RunService:IsServer()
@@ -42,7 +48,7 @@ RemoteProperty.__index = RemoteProperty
 	@param initialValue any -- Initial value
 	@return RemoteProperty
 ]=]
-function RemoteProperty.new<T>(name: string, initialValue: T, requestHandler: ((player: Player) -> T)?): RemoteProperty<T>
+function RemoteProperty.new<T>(name: string, initialValue: T): RemoteProperty<T>
 	assert(IS_SERVER, "RemoteProperty.new can only be called on the server")
 
 	local self = setmetatable({}, RemoteProperty)
@@ -56,12 +62,19 @@ function RemoteProperty.new<T>(name: string, initialValue: T, requestHandler: ((
 
 	self._remote = remote
 	self._value = initialValue
+	self._playerValues = {}
 	self._name = name
 
-	-- Handle client requests for current value; requestHandler allows per-player responses
+	-- Respond to each client's initial-value request with their personal value,
+	-- falling back to the shared default for players with no per-player override.
 	remote.OnServerEvent:Connect(function(player)
-		local value = if requestHandler then requestHandler(player) else self._value
-		remote:FireClient(player, value)
+		remote:FireClient(player, self:GetFor(player))
+	end)
+
+	-- Automatically remove stale per-player entries when a player leaves so this
+	-- object never holds a reference to a departed Player instance.
+	self._playerRemovingConn = Players.PlayerRemoving:Connect(function(player)
+		self._playerValues[player] = nil
 	end)
 
 	return self
@@ -138,7 +151,31 @@ end
 ]=]
 function RemoteProperty:SetFor(player: Player, value: any)
 	assert(IS_SERVER, "RemoteProperty:SetFor can only be called on the server")
+	self._playerValues[player] = value
 	self._remote:FireClient(player, value)
+end
+
+--[=[
+	Returns the last value sent to a specific player (Server-side only).
+	Falls back to the shared default value if no per-player value has been set.
+	@param player Player -- The player to query
+	@return any
+]=]
+function RemoteProperty:GetFor(player: Player)
+	assert(IS_SERVER, "RemoteProperty:GetFor can only be called on the server")
+	local playerValue = self._playerValues[player]
+	return if playerValue ~= nil then playerValue else self._value
+end
+
+--[=[
+	Clears the per-player value for a specific player (Server-side only).
+	After this call, GetFor will return the shared default value for that player.
+	Does not notify the client; call SetFor or Set separately if needed.
+	@param player Player -- The player whose override should be cleared
+]=]
+function RemoteProperty:ClearFor(player: Player)
+	assert(IS_SERVER, "RemoteProperty:ClearFor can only be called on the server")
+	self._playerValues[player] = nil
 end
 
 --[=[
@@ -208,6 +245,21 @@ function RemoteProperty:OnReady(): Promise
 
 		table.insert(self._readyCallbacks, resolve)
 	end)
+end
+
+--[=[
+	Destroys this RemoteProperty, disconnecting all internal connections and
+	removing the underlying RemoteEvent. Should be called when the property
+	is no longer needed to prevent memory leaks. (Server-side only)
+]=]
+function RemoteProperty:Destroy()
+	assert(IS_SERVER, "RemoteProperty:Destroy can only be called on the server")
+	if self._playerRemovingConn then
+		self._playerRemovingConn:Disconnect()
+		self._playerRemovingConn = nil
+	end
+	table.clear(self._playerValues)
+	self._remote:Destroy()
 end
 
 return RemoteProperty

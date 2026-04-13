@@ -53,10 +53,8 @@ local getEffectiveWeatherForPlayer = function(player: Player): { string }
 	return active
 end
 
--- Setup networking; requestHandler provides per-player effective weather on join
-local ActiveWeatherProperty = RemoteProperty.new("WeatherSystem_ActiveWeather", {}, function(player)
-	return getEffectiveWeatherForPlayer(player)
-end)
+-- Setup networking; GetFor handles per-player values with fallback to the shared default
+local ActiveWeatherProperty = RemoteProperty.new("WeatherSystem_ActiveWeather", {})
 
 --------------------------------------------------------------------------------
 --// WeatherServer //--
@@ -470,7 +468,7 @@ end
 	@param player Player -- The player to query
 ]=]
 function WeatherServer.GetActiveWeatherForPlayer(player: Player): { string }
-	return getEffectiveWeatherForPlayer(player)
+	return ActiveWeatherProperty:GetFor(player)
 end
 
 --[=[
@@ -480,11 +478,7 @@ end
 	@param weatherType string -- The weather type to check
 ]=]
 function WeatherServer.IsWeatherActiveForPlayer(player: Player, weatherType: string): boolean
-	if ActiveWeatherEffects[weatherType] then
-		return true
-	end
-	local playerEffects = PlayerWeatherEffects[player]
-	return playerEffects ~= nil and playerEffects[weatherType] ~= nil
+	return table.find(ActiveWeatherProperty:GetFor(player), weatherType) ~= nil
 end
 
 --[=[
@@ -637,16 +631,21 @@ local function SetupClientBootstrapper()
 	end
 end
 
+-- Populate a new player's entry in RemoteProperty before their scripts can fire,
+-- so GetFor always returns the correct initial weather even without a prior SetFor call.
+Players.PlayerAdded:Connect(function(player)
+	ActiveWeatherProperty:SetFor(player, getEffectiveWeatherForPlayer(player))
+end)
+
 -- Clean up per-player weather state when a player leaves to prevent memory leaks
 Players.PlayerRemoving:Connect(function(player)
 	local playerEffects = PlayerWeatherEffects[player]
-	if not playerEffects then
-		return
+	if playerEffects then
+		for _, entry in pairs(playerEffects) do
+			entry.Janitor:Destroy()
+		end
+		PlayerWeatherEffects[player] = nil
 	end
-	for _, entry in pairs(playerEffects) do
-		entry.Janitor:Destroy()
-	end
-	PlayerWeatherEffects[player] = nil
 end)
 
 task.defer(SetupClientBootstrapper)
