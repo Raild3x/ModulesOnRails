@@ -7,6 +7,21 @@ local RegisteredWeather = Signal.new()
 local WeatherStarted = Signal.new()
 local WeatherStopped = Signal.new()
 
+type LightingData = {
+	Priority: number?, -- Priority for lighting changes. Overrides lower priority lighting data
+	Ambient: Color3?,
+	Brightness: number?,
+	ColorShift_Bottom: Color3?,
+	ColorShift_Top: Color3?,
+	EnvironmentDiffuseScale: number?,
+	EnvironmentSpecularScale: number?,
+	OutdoorAmbient: Color3?,
+	ShadowSoftness: number?,
+	ClockTime: number?,
+	GeographicLatitude: number?,
+	ExposureCompensation: number?,
+}
+
 --// Types //--
 type Janitor = typeof(Janitor.new())
 export type WeatherData = {
@@ -34,20 +49,7 @@ export type WeatherData = {
 		Cover: number?,
 		Density: number?,
 	}?,
-	LightingData: {
-		Priority: number?, -- Priority for lighting changes. Overrides lower priority lighting data
-		Ambient: Color3?,
-		Brightness: number?,
-		ColorShift_Bottom: Color3?,
-		ColorShift_Top: Color3?,
-		EnvironmentDiffuseScale: number?,
-		EnvironmentSpecularScale: number?,
-		OutdoorAmbient: Color3?,
-		ShadowSoftness: number?,
-		ClockTime: number?,
-		GeographicLatitude: number?,
-		ExposureCompensation: number?,
-	}?,
+	LightingData: LightingData?,
 
 	-- Callback functions to handle starting and stopping the weather effect
 	OnStart: ((janitor: Janitor) -> ())?,
@@ -60,9 +62,20 @@ local ValidateWeatherData = T.interface {
 	OnStop = T.optional(T.callback),
 }
 
+local function LoadLightingDataFromFolder(Folder: Instance): LightingData
+	local LightingData: LightingData = {}
+
+	for _, Attribute in pairs(Folder:GetAttributes()) do
+		LightingData[Attribute] = Folder:GetAttribute(Attribute)
+	end
+
+	return LightingData
+end
+
 return {
 	ValidateWeatherData = ValidateWeatherData,
 	RegisteredWeather = RegisteredWeather,
 	WeatherStarted = WeatherStarted,
 	WeatherStopped = WeatherStopped,
+	LoadLightingDataFromFolder = LoadLightingDataFromFolder,
 }
