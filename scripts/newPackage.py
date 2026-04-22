@@ -80,22 +80,6 @@ def create_init_luau(src_dir: Path, formatted_name: str) -> None:
 ]=]
 
 local {formatted_name} = {{}}
-{formatted_name}.__index = {formatted_name}
-
---[=[
-    Creates a new {formatted_name}.
-    @return {formatted_name}
-]=]
-function {formatted_name}.new()
-    local self = setmetatable({{}}, {formatted_name})
-    return self
-end
-
---[=[
-    Destroys the {formatted_name}.
-]=]
-function {formatted_name}:Destroy()
-end
 
 return {formatted_name}
 """
@@ -113,16 +97,14 @@ def create_init_spec_luau(src_dir: Path, formatted_name: str) -> None:
     This is a test suite for the {formatted_name} class.
 ]=]
 
-return function()
+return function(t: tiniest)
     local {formatted_name} = require(script.Parent)
 
-    describe("{formatted_name}", function()
-        it("should be creatable", function()
-            local obj = {formatted_name}.new()
-            expect(obj).to.be.ok()
-            obj:Destroy()
-        end)
-    end)
+    local describe = t.describe
+    local expect = t.expect
+    local test = t.test
+
+    
 end
 """
     (src_dir / "init.spec.luau").write_text(content, encoding="utf-8")

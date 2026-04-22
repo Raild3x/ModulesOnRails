@@ -8,7 +8,7 @@
     "editor.formatOnSave": true
   },
   "luau-lsp.types.definitionFiles": [
-    "types/tiniest_lib.d.luau",
+    "types/tiniest_lib.d.luau"
   ],
 
   "selene.selenePath": "",
