@@ -1,15 +1,13 @@
--- From dphfox/tiniest, licenced under MIT
+-- From dphfox/tiniest, licensed under BSD
 --!strict
 
 export type Plugin = {
-	is_tiniest_plugin: true
+	is_tiniest_plugin: true,
 }
 
 local tiniest_plugin = {}
 
-function tiniest_plugin.configure(
-	plugins: {any}?
-)
+function tiniest_plugin.configure(plugins: { any }?)
 	if plugins ~= nil then
 		for index, plugin in plugins do
 			if not plugin.is_tiniest_plugin then
@@ -20,10 +18,7 @@ function tiniest_plugin.configure(
 
 	local self = {}
 
-	function self.notify(
-		method_name: string,
-		...
-	): ()
+	function self.notify(method_name: string, ...): ()
 		if plugins == nil then
 			return
 		end

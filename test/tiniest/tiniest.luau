@@ -1,57 +1,68 @@
--- From dphfox/tiniest, licenced under MIT
+-- From dphfox/tiniest, licensed under BSD
 --!strict
+
+--[=[
+	@class Tiniest
+	
+	Core testing framework that provides the fundamental test definition and execution functionality.
+	
+	This is typically not used directly - instead use `tiniest_for_roblox` which wraps this
+	with Roblox-specific features and better defaults.
+]=]
 
 local tiniest_plugin = require("./tiniest_plugin")
 
-type Context = DescribeContext | RunContext
-
 type DescribeContext = {
 	type: "describe",
-	labels: {string},
-	add_test: (Test) -> ()
+	labels: { string },
+	add_test: (Test) -> (),
 }
 
 type RunContext = {
-	type: "run"
+	type: "run",
 }
+
+type Context = DescribeContext | RunContext
 
 export type ErrorReport = {
 	type: "tiniest.ErrorReport",
+	line: number,
+	source: string,
 	message: string,
 	trace: string,
 	code: {
 		snippet: string,
-		line: string
-	}?
+		line: string,
+	}?,
 }
 
 export type Test = {
-	labels: {string},
-	run: () -> ()
+	labels: { string },
+	run: (Context) -> (),
 }
 
 export type RunResult = {
-	tests: {Test},
+	tests: { Test },
 	status_tally: {
 		pass: number,
-		fail: number
+		fail: number,
 	},
-	individual: {[Test]: TestRunResult}
+	individual: { [Test]: TestRunResult },
 }
 
 export type TestRunResult = PassTestRunResult | FailTestRunResult
 
 export type PassTestRunResult = {
-	status: "pass"
+	status: "pass",
 }
 
 export type FailTestRunResult = {
 	status: "fail",
-	error: ErrorReport
+	error: ErrorReport,
 }
 
 export type Options = {
-	plugins: nil | {tiniest_plugin.Plugin}
+	plugins: nil | { tiniest_plugin.Plugin },
 }
 
 export type RunOptions = {}
@@ -63,10 +74,13 @@ local function catch_errors(func: any, ...)
 		if typeof(message) == "table" and message.type == "tiniest.ErrorReport" then
 			report = message :: ErrorReport
 		else
+			local source, line = debug.info(2, "sl")
 			report = {
 				type = "tiniest.ErrorReport",
+				line = line,
+				source = source,
 				message = tostring(message),
-				trace = debug.traceback(nil, 2)
+				trace = debug.traceback(nil, 2), -- This is the traceback when the test actually errors instead of fails
 			}
 		end
 		local from, to = string.find(report.trace, outer_trace, 1, true)
@@ -75,15 +89,13 @@ local function catch_errors(func: any, ...)
 		end
 		return report
 	end
-	outer_trace = debug.traceback(); return xpcall(func, handler, ...)
+	outer_trace = debug.traceback()
+	return xpcall(func, handler, ...)
 end
 
 local tiniest = {}
 
-function tiniest.configure(
-	options: Options
-)
-
+function tiniest.configure(options: Options)
 	local plugins = tiniest_plugin.configure(options.plugins)
 
 	local get_context, with_root_context, with_inner_context
@@ -95,40 +107,57 @@ function tiniest.configure(
 			return current_context
 		end
 
-		function with_root_context(
-			root_context: Context,
-			inner: (Context) -> ()
-		): ()
+		function with_root_context(root_context: Context, inner: (Context) -> ()): ()
 			assert(current_context == nil, "This function can't be called from inside of a test suite")
 			current_context = root_context
 			local ok, err = catch_errors(inner :: any, root_context)
 			current_context = nil
 			if not ok then
-				error(err.message, 0)
+				error(err, 0)
 			end
 		end
 
-		function with_inner_context(
-			make_context: (Context) -> Context,
-			inner: (Context) -> ()
-		): ()
+		function with_inner_context(make_context: (Context) -> Context, inner: (Context) -> ()): ()
 			local outer_context = get_context()
 			local inner_context = make_context(outer_context)
 			current_context = inner_context
 			local ok, err = catch_errors(inner :: any, inner_context)
 			current_context = outer_context
 			if not ok then
-				error(err.message, 0)
+				error(err, 0)
 			end
 		end
 	end
 
 	local self = {}
 
-	function self.describe(
-		label: string,
-		inner: () -> ()
-	): ()
+	--[=[
+		Creates a nested test suite with the given label.
+		
+		All tests and nested describes within the inner function will be grouped under this label.
+		This allows for organizing tests hierarchically.
+		
+		@param label string -- The name/label for this test suite
+		@param inner (Context) -> () -- Function containing test definitions
+		
+		## Example
+		```lua
+		describe("Player System", function()
+			describe("Health", function()
+				test("should start at 100", function()
+					expect(player.Health).is(100)
+				end)
+			end)
+			
+			describe("Stamina", function()
+				test("should decrease when running", function()
+					-- test implementation
+				end)
+			end)
+		end)
+		```
+	]=]
+	function self.describe(label: string, inner: (Context) -> ()): ()
 		with_inner_context(function(outer_context: Context): Context
 			assert(outer_context.type == "describe", "This function can only be called outside of tests")
 			local context = table.clone(outer_context)
@@ -138,85 +167,156 @@ function tiniest.configure(
 		end, inner)
 	end
 
-	function self.test(
-		label: string,
-		run: () -> ()
-	): ()
+	--[=[
+		Defines an individual test case.
+		
+		Must be called within a describe block. The test will be executed when run_tests is called.
+		
+		@param label string -- The name/description of what this test does
+		@param run (Context) -> () -- Function containing the test logic and assertions
+		
+		## Example
+		```lua
+		test("should add two numbers correctly", function()
+			local result = add(2, 3)
+			expect(result).is(5)
+		end)
+		
+		test("should handle negative numbers", function()
+			local result = add(-5, 3)
+			expect(result).is(-2)
+		end)
+		```
+	]=]
+	function self.test(label: string, run: (Context) -> ()): ()
+		assert(typeof(label) == "string", "Test label must be a string")
+		assert(label ~= "", "Test Label should not be empty")
+		assert(typeof(run) == "function", "Test body must be a function")
 		local context = get_context()
 		assert(context.type == "describe", "This function can only be called outside of tests")
 		local labels = table.clone(context.labels)
 		table.insert(labels, label)
 		local test: Test = {
 			labels = labels,
-			run = run
+			run = run,
 		}
 		context.add_test(test)
 	end
 
-	function self.collect_tests(
-		inner: () -> ()
-	): {Test}
+	--[=[
+		Collects all tests defined within the inner function.
+		
+		Executes the inner function in a special context that captures all describe/test calls
+		and returns them as an array of Test objects that can be passed to run_tests.
+		
+		@param inner (Context) -> () -- Function containing describe/test definitions
+		@return {Test} -- Array of collected test objects
+		
+		## Example
+		```lua
+		local tests = collect_tests(function()
+			describe("Math", function()
+				test("addition", function()
+					expect(1 + 1).is(2)
+				end)
+			end)
+		end)
+		
+		local results = run_tests(tests, {})
+		```
+	]=]
+	function self.collect_tests(inner: (Context) -> ()): { Test }
 		local tests = {}
 		local context: Context = {
 			type = "describe",
 			labels = {},
 			add_test = function(test)
 				table.insert(tests, test)
-			end
+			end,
 		}
 		with_root_context(context, inner)
 		return tests
 	end
 
-	function self.run_tests(
-		tests: {Test},
-		run_options: RunOptions
-	): RunResult
+	--[=[
+		Executes the given array of tests and returns the results.
+		
+		Each test is run in isolation with error handling. Results include pass/fail status,
+		error reports for failures, and aggregated statistics.
+		
+		@param tests {Test} -- Array of tests to run (typically from collect_tests)
+		@param run_options RunOptions -- Configuration options for the test run
+		@return RunResult -- Object containing test results and statistics
+		
+		## RunResult Structure
+		- `tests: {Test}` -- The tests that were run
+		- `status_tally: {pass: number, fail: number}` -- Count of passed and failed tests
+		- `individual: {[Test]: TestRunResult}` -- Individual result for each test
+		
+		## Example
+		```lua
+		local tests = collect_tests(function()
+			describe("Suite", function()
+				test("passes", function()
+					expect(true).is_true()
+				end)
+				test("fails", function()
+					expect(false).is_true()
+				end)
+			end)
+		end)
+		
+		local results = run_tests(tests, {})
+		print(`Passed: {results.status_tally.pass}`)
+		print(`Failed: {results.status_tally.fail}`)
+		```
+	]=]
+	function self.run_tests(tests: { Test }, run_options: RunOptions): RunResult
 		plugins.notify("before_run", tests, run_options)
 
 		local context: Context = {
-			type = "run"
+			type = "run",
 		}
-		
+
 		local individual = {}
 		for _, test in tests do
 			plugins.notify("before_test", test, run_options)
-			local _, test_run_result = xpcall(
-				function()
-					with_root_context(context, test.run)
-					local pass: TestRunResult = {
-						status = "pass"
+			local _, test_run_result = xpcall(function()
+				with_root_context(context, test.run)
+				local pass: TestRunResult = {
+					status = "pass",
+				}
+				return pass
+			end, function(message)
+				if typeof(message) == "table" and message.type == "tiniest.ErrorReport" then
+					local fail: TestRunResult = {
+						status = "fail",
+						error = message :: ErrorReport,
 					}
-					return pass
-				end,
-				function(message)
-					if typeof(message) == "table" and message.type == "tiniest.ErrorReport" then
-						local fail: TestRunResult = {
-							status = "fail",
-							error = message :: ErrorReport
-						}
-						return fail
-					else
-						local error: ErrorReport = {
-							type = "tiniest.ErrorReport",
-							message = tostring(message),
-							trace = debug.traceback()
-						}
-						local fail: TestRunResult = {
-							status = "fail",
-							error = error
-						}
-						return fail
-					end
+					return fail
+				else
+					local source, line = debug.info(1, "sl")
+					local error: ErrorReport = {
+						type = "tiniest.ErrorReport",
+						line = line,
+						source = source,
+						message = tostring(message),
+						trace = debug.traceback(),
+					}
+					local fail: TestRunResult = {
+						status = "fail",
+						error = error,
+					}
+					return fail
 				end
-			)
+			end)
 			plugins.notify("after_test", test, test_run_result, run_options)
 			individual[test] = test_run_result
 		end
 
 		local status_tally = {
 			pass = 0,
-			fail = 0
+			fail = 0,
 		}
 
 		for _, result in individual do
@@ -226,7 +326,7 @@ function tiniest.configure(
 		local result: RunResult = {
 			tests = tests,
 			status_tally = status_tally,
-			individual = individual
+			individual = individual,
 		}
 		plugins.notify("after_run", result, run_options)
 

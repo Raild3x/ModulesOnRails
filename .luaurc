@@ -1,7 +1,7 @@
 {
 	"aliases": {
 		"lune": "~/.lune/.typedefs/0.8.0",
-		"tiniest": "test/tiniest"
+		"tiniest": "test/tiniest/tiniest"
 	},
 
 	"globals": [

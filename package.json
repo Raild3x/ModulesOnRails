@@ -4,7 +4,8 @@
     "setup": "python scripts/setup.py",
     "clear": "python scripts/clearPackages.py",
     "publish": "python scripts/publish.py",
-    "test": "python scripts/runTests.py"
+    "test": "python scripts/runTests.py",
+    "newpackage": "python scripts/newPackage.py"
   },
   "devDependencies": {
     "caniuse-lite": "^1.0.30001757"
