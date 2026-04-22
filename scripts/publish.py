@@ -14,7 +14,7 @@ from typing import Optional
 
 
 SRC_DIR = Path("lib")
-IGNORE_LIST = ["src", "default.project.json", "wally.toml"]
+IGNORE_LIST = ["src", "default.project.json", "wally.toml", "README.md"]
 
 
 def find_project_root() -> Path:

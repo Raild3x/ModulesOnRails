@@ -1,16 +1,8 @@
--- From dphfox/tiniest, licenced under MIT
+-- From dphfox/tiniest, licensed under BSD
 --!strict
 
-local function tiniest_quote(
-	x: unknown,
-	given_indent_amount: number?
-): string
-	if 
-		type(x) == "nil" or 
-		type(x) == "number" or 
-		type(x) == "boolean" or 
-		type(x) == "userdata"
-	then
+local function tiniest_quote(x: unknown, given_indent_amount: number?): string
+	if type(x) == "nil" or type(x) == "number" or type(x) == "boolean" or type(x) == "userdata" then
 		return tostring(x)
 	elseif type(x) == "string" then
 		return string.format("%q", x)
@@ -27,14 +19,14 @@ local function tiniest_quote(
 		for key, value in tbl do
 			table.insert(sorted_pairs, {
 				key = tiniest_quote(key, inner_indent_amount),
-				value = tiniest_quote(value, inner_indent_amount)
+				value = tiniest_quote(value, inner_indent_amount),
 			})
 		end
 		table.sort(sorted_pairs, function(a, b)
 			return a.key < b.key
 		end)
 		local frozen = table.isfrozen(tbl)
-		local lines = {if frozen then "table.freeze {" else "{"}
+		local lines = { if frozen then "table.freeze {" else "{" }
 		for _, pair in sorted_pairs do
 			table.insert(lines, `{inner_indent}[{pair.key}] = {pair.value};`)
 		end
@@ -45,4 +37,4 @@ local function tiniest_quote(
 	end
 end
 
-return tiniest_quote :: (unknown) -> string 
+return tiniest_quote :: (unknown) -> string

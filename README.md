@@ -5,7 +5,7 @@ ModulesOnRails is a collection of Wally packages to streamline Roblox developmen
 | Package | Latest Version | Description |
 |---------|----------------|-------------|
 | [BaseComponent](https://raild3x.github.io/ModulesOnRails/api/BaseComponent) | `BaseComponent = "raild3x/basecomponent@0.1.2"` | A utility extension to provide helpers for working with signals, janitors, attributes, and properties. *Only works with my Component fork.* |
-| [BaseObject](https://raild3x.github.io/ModulesOnRails/api/BaseObject) | `BaseObject = "raild3x/baseobject@0.2.1"` | A base class for creating objects with a lifecycle, janitor, and event system. |
+| [BaseObject](https://raild3x.github.io/ModulesOnRails/api/BaseObject) | `BaseObject = "raild3x/baseobject@0.2.2"` | A base class for creating objects with a lifecycle, janitor, and event system. |
 | [CmdrHandler](https://raild3x.github.io/ModulesOnRails/api/CmdrHandler) | `CmdrHandler = "raild3x/cmdrhandler@0.2.2"` | A wrapper for eveara/quenty's Cmdr library. |
 | [Component](https://raild3x.github.io/ModulesOnRails/api/Component) | `Component = "raild3x/component@0.2.0"` | A fork of Sleitnick's Component class for Roblox. |
 | [Heap](https://raild3x.github.io/ModulesOnRails/api/Heap) | `Heap = "raild3x/heap@2.1.3"` | A generic min/max heap implementation in Luau. |
@@ -17,6 +17,7 @@ ModulesOnRails is a collection of Wally packages to streamline Roblox developmen
 | [Queue](https://raild3x.github.io/ModulesOnRails/api/Queue) | `Queue = "raild3x/queue@1.0.0"` | A generic queue implementation in luau. |
 | [RemoteComponent](https://raild3x.github.io/ModulesOnRails/api/RemoteComponent) | `RemoteComponent = "raild3x/remotecomponent@0.1.3"` | A component extension to provide easy networking functionality. |
 | [Roam](https://raild3x.github.io/ModulesOnRails/api/Roam) | `Roam = "raild3x/roam@0.2.0"` | Roam is a service initialization framework for Roblox. |
+| [T](https://raild3x.github.io/ModulesOnRails/api/T) | `T = "raild3x/t@0.1.0"` | A runtime typechecker for Luau/Roblox |
 | [TableManager](https://raild3x.github.io/ModulesOnRails/api/TableManager) | `TableManager = "raild3x/tablemanager@0.2.2"` | A class for managing and observing data in a table. Includes some additional classes for extending functionality. |
 | [TableReplicator](https://raild3x.github.io/ModulesOnRails/api/ServerTableReplicator) | `TableReplicator = "raild3x/tablereplicator@0.2.7"` | A set of classes for replicating tables and their changes between server and client with minimal effort. |
 

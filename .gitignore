@@ -13,6 +13,7 @@ src/tablereplicator/*
 
 lib/*/*
 !lib/*/src
+!lib/*/README.md
 
 last_tested_package.txt
 

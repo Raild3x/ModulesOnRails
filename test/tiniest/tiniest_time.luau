@@ -1,4 +1,4 @@
--- From dphfox/tiniest, licenced under MIT
+-- From dphfox/tiniest, licensed under BSD
 --!strict
 
 local tiniest = require("./tiniest")
@@ -6,22 +6,19 @@ local tiniest_pretty = require("./tiniest_pretty")
 type Test = tiniest.Test
 
 export type TestRunResult = tiniest.TestRunResult & {
-	duration: number
+	duration: number,
 }
 export type RunResult = tiniest.RunResult & {
-	duration: number
+	duration: number,
 }
 
 export type Options = {
-	get_timestamp: () -> number
+	get_timestamp: () -> number,
 }
 
 local tiniest_time = {}
 
-local function format_duration(
-	seconds: number,
-	options: tiniest_pretty.Options
-): string
+local function format_duration(seconds: number, options: tiniest_pretty.Options): string
 	local SECOND = 1
 	local MILLISECOND = SECOND / 1000
 	local MICROSECOND = MILLISECOND / 1000
@@ -39,43 +36,27 @@ local function format_duration(
 	end
 end
 
-function tiniest_time.configure(
-	options: Options
-)
-	
+function tiniest_time.configure(options: Options)
 	local self = {}
 	self.is_tiniest_plugin = true
 
 	local start_times = {}
 
-	function self.before_run(
-		tests: {Test},
-		_
-	): ()
+	function self.before_run(tests: { Test }, _): ()
 		start_times[tests] = options.get_timestamp()
 	end
 
-	function self.after_run(
-		original_run_result: tiniest.RunResult,
-		_
-	): ()
+	function self.after_run(original_run_result: tiniest.RunResult, _): ()
 		local run_result = original_run_result :: RunResult
 		run_result.duration = options.get_timestamp() - start_times[run_result.tests]
 		start_times[run_result.tests] = nil
 	end
 
-	function self.before_test(
-		test: Test,
-		_
-	): ()
+	function self.before_test(test: Test, _): ()
 		start_times[test] = options.get_timestamp()
 	end
 
-	function self.after_test(
-		test: Test,
-		original_run_result: tiniest.TestRunResult,
-		_
-	): ()
+	function self.after_test(test: Test, original_run_result: tiniest.TestRunResult, _): ()
 		local run_result = original_run_result :: TestRunResult
 		run_result.duration = options.get_timestamp() - start_times[test]
 		start_times[test] = nil
