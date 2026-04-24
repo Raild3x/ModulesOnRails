@@ -3,73 +3,102 @@
 -- forked by raild3x from osyris's t
 
 --[=[
-	@class t
+    @class T
 
-	A composable runtime typechecker for Luau and Roblox.
+    A composable runtime typechecker for Luau and Roblox.
 
-	Each validator returns `true` on success or `false, errorMessage` on
-	failure, which makes the library useful both for defensive assertions and
-	reusable configuration validation.
+    Each check returns `true` on success or `false, errorMessage` on
+    failure, which makes the library useful both for defensive assertions and
+    reusable configuration validation.
 
-	### Examples
+    ### Examples
 
-	```lua
-	local t = require(path.to.t)
+    ```lua
+    local t = require(path.to.t)
 
-	local ok, err = t.string("hello")
-	print(ok, err) --> true nil
+    local ok, err = t.string("hello")
+    print(ok, err) --> true nil
 
-	local checkPlayer = t.interface({
-		Name = t.string,
-		Health = t.numberConstrained(0, 100),
-	})
+    local checkPlayer = t.interface({
+        Name = t.string,
+        Health = t.numberConstrained(0, 100),
+    })
 
-	print(checkPlayer({ Name = "Builderman", Health = 100 })) --> true
-	print(checkPlayer({ Name = "Builderman", Health = 150 })) --> false [interface] ...
-	```
+    print(checkPlayer({ Name = "Builderman", Health = 100 })) --> true
+    print(checkPlayer({ Name = "Builderman", Health = 150 })) --> false [interface] ...
+    ```
 
-	```lua
-	local t = require(path.to.t)
+    ```lua
+    local t = require(path.to.t)
 
 
-	local isStringArray = t.array(t.string)
+    local isStringArray = t.array(t.string)
     assert(isStringArray({ "a", "b", "c" })) -- true
     assert(isStringArray({ "a", 1, "c" })) -- false, bad value for key 2: string expected, got number
-	```
+    ```
 ]=]
 
---- A checker function that returns `true` on success or `false, errorMessage` on failure.
-export type Check = (value: any) -> (boolean, string?)
-export type Validator<T> = (value: any) -> (boolean, string?)
-export type TupleValidator = (...any) -> (boolean, string?)
-export type Predicate<T> = (value: T) -> (boolean, string?)
+--[=[
+	@within T
+	@type Check<T = any> (value: any) -> (boolean, string?)
+	A function that validates a single value and returns `true` on success or `false, errorMessage` on failure.
+	`T` is a phantom type tag used for composition — callers may pass any value regardless of T.
+]=]
+export type Check<T = any> = (value: any) -> (boolean, string?)
+--[=[
+	@within T
+	@type TupleCheck<T... = ...any> (T...) -> (boolean, string?)
+	A function that validates a list of positional arguments and returns `true` on success or `false, errorMessage` on failure.
+]=]
+export type CheckTuple<T... = ...any> = (T...) -> (boolean, string?)
 --[[
-    NOTE:
-    Technically validators should return (true) | (false, string), but Luau doesn't support this very nicely, 
+	NOTE:
+	Technically checks should return (true) | (false, string), but Luau doesn't support this very nicely,
     so we use (boolean, string?) instead. Internally true is just casted to `any` to satisfy the type system.
     This is done to keep backwards compatibility with the original T library.
 ]]
 
-type CheckMap = { [any]: Check }
-type ChildCheckMap = { [string]: Check }
+-- --[=[
+-- 	@within T
+-- 	@type TupleCheck<T... = ...any> (T...) -> (boolean, string?)
+-- 	A function that validates a list of positional arguments and returns `true` on success or `false, errorMessage` on failure.
+
+-- 	```lua
+-- 	local argCheck: t.TupleCheck<string, number> = t.strictTuple(t.string, t.number)
+-- 	```
+-- ]=]
+-- export type TupleCheck<T... = ...any> = (T...) -> (boolean, string?)
+
+--[=[
+	@within T
+	@type Predicate<T> (T) -> (boolean, string?)
+	A refinement function used by `t.where` to apply an additional rule after a base check has passed.
+
+	```lua
+	local function isPositive(value: number)
+		return value > 0, "number must be positive"
+	end
+	```
+]=]
+export type Predicate<T> = (value: T) -> (boolean, string?)
 
 local t = {}
 
 --[=[
-	@within t
+	@within T
+	@function type
 	Creates a checker using Lua's native `type()`.
 
-	## Example
 	```lua
 	local isTable = t.type("table")
 	print(isTable({})) --> true
 	```
 
 	@param typeName string -- The Lua type name to check against
-	@return Validator<any>
+	@return Check
 ]=]
-function t.type(typeName: string): Validator<any>
-	return function(value: any): (boolean, string?)
+function t.type(typeName: string): Check<any>
+	return function(value: unknown): (boolean, string?)
 		local valueType = type(value)
 		if valueType == typeName then
 			return true :: any
@@ -80,20 +109,20 @@ function t.type(typeName: string): Validator<any>
 end
 
 --[=[
-	@within t
+	@within T
+	@function typeof
 	Creates a checker using Roblox's `typeof()`.
 
-	## Example
 	```lua
 	local isVector3 = t.typeof("Vector3")
 	print(isVector3(Vector3.zero)) --> true
 	```
 
 	@param typeName string -- The Roblox type name to check against
-	@return Validator<any>
+	@return Check
 ]=]
-function t.typeof(typeName: string): Validator<any>
-	return function(value: any): (boolean, string?)
+function t.typeof(typeName: string): Check<any>
+	return function(value: unknown): (boolean, string?)
 		local valueType = typeof(value)
 		if valueType == typeName then
 			return true :: any
@@ -104,10 +133,10 @@ function t.typeof(typeName: string): Validator<any>
 end
 
 --[=[
-	@within t
+	@within T
+	@function any
 	Matches any type except nil.
 
-	## Example
 	```lua
 	print(t.any("value")) --> true
 	print(t.any(nil)) --> false, "any expected, got nil"
@@ -117,7 +146,7 @@ end
 	@return boolean
 	@return string?
 ]=]
-function t.any(value: any): (boolean, string?)
+function t.any(value: unknown): (boolean, string?)
 	if value ~= nil then
 		return true :: any
 	else
@@ -129,74 +158,101 @@ end
 
 --[=[
 	Ensures Lua primitive boolean type.
-	@prop boolean Check
-	@within t
+	@within T
+	@function boolean
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.boolean = t.typeof("boolean")
+t.boolean = t.typeof("boolean") :: Check<boolean>
 
 --[=[
 	Ensures Lua primitive buffer type.
-	@prop buffer Check
-	@within t
+	@within T
+	@function buffer
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.buffer = t.typeof("buffer")
+t.buffer = t.typeof("buffer") :: Check<buffer>
 
 --[=[
 	Ensures Lua primitive thread type.
-	@prop thread Check
-	@within t
+	@within T
+	@function thread
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.thread = t.typeof("thread")
+t.thread = t.typeof("thread") :: Check<thread>
 
 --[=[
 	Ensures Lua primitive function type.
-	@prop callback Check
-	@within t
+	@within T
+	@function callback
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.callback = t.typeof("function")
+t.callback = t.typeof("function") :: Check<(...any) -> ...any>
 t["function"] = t.callback
 
 --[=[
 	Ensures Lua primitive nil type.
-	@prop none Check
-	@within t
+	@within T
+	@function none
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.none = t.typeof("nil")
+t.none = t.typeof("nil") :: Check<nil>
 t["nil"] = t.none
 
 --[=[
 	Ensures Lua primitive string type.
-	@prop string Check
-	@within t
+	@within T
+	@function string
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.string = t.typeof("string")
+t.string = t.typeof("string") :: Check<string>
 
 --[=[
 	Ensures Lua primitive table type.
-	@prop table Check
-	@within t
+	@within T
+	@function table
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.table = t.typeof("table")
+t.table = t.typeof("table") :: Check<{ [any]: any }>
 
 --[=[
 	Ensures Lua primitive userdata type.
-	@prop userdata Check
-	@within t
+	@within T
+	@function userdata
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.userdata = t.type("userdata")
+t.userdata = t.type("userdata") :: Check<any>
 
 --[=[
 	Ensures Lua primitive vector type.
-	@prop vector Check
-	@within t
+	@within T
+	@function vector
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.vector = t.type("vector")
+t.vector = t.type("vector") :: Check<vector>
 
 --[=[
-	@within t
+	@function number
+	@within T
 	Ensures value is a non-NaN number.
 
-	## Example
 	```lua
 	print(t.number(42)) --> true
 	print(t.number(0 / 0)) --> false, "unexpected NaN value"
@@ -206,7 +262,7 @@ t.vector = t.type("vector")
 	@return boolean
 	@return string?
 ]=]
-function t.number(value: any): (boolean, string?)
+function t.number(value: unknown): (boolean, string?)
 	local valueType = typeof(value)
 	if valueType == "number" then
 		if value == value then
@@ -218,12 +274,13 @@ function t.number(value: any): (boolean, string?)
 		return false, string.format("number expected, got %s", valueType)
 	end
 end
+t.number = (t.number :: any) :: Check<number>
 
 --[=[
-	@within t
+	@within T
+	@function nan
 	Ensures value is NaN.
 
-	## Example
 	```lua
 	print(t.nan(0 / 0)) --> true
 	print(t.nan(5)) --> false, "unexpected non-NaN value"
@@ -233,7 +290,7 @@ end
 	@return boolean
 	@return string?
 ]=]
-function t.nan(value: any): (boolean, string?)
+function t.nan(value: unknown): (boolean, string?)
 	local valueType = typeof(value)
 	if valueType == "number" then
 		if value ~= value then
@@ -245,290 +302,405 @@ function t.nan(value: any): (boolean, string?)
 		return false, string.format("number expected, got %s", valueType)
 	end
 end
+t.nan = (t.nan :: any) :: Check<number>
 
 -- Roblox types
 
 --[=[
 	Ensures Roblox Axes type.
-	@prop Axes Check
-	@within t
+	@within T
+	@function Axes
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.Axes = t.typeof("Axes")
+t.Axes = t.typeof("Axes") :: Check<Axes>
 
 --[=[
 	Ensures Roblox BrickColor type.
-	@prop BrickColor Check
-	@within t
+	@within T
+	@function BrickColor
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.BrickColor = t.typeof("BrickColor")
+t.BrickColor = t.typeof("BrickColor") :: Check<BrickColor>
 
 --[=[
 	Ensures Roblox CatalogSearchParams type.
-	@prop CatalogSearchParams Check
-	@within t
+	@within T
+	@function CatalogSearchParams
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.CatalogSearchParams = t.typeof("CatalogSearchParams")
+t.CatalogSearchParams = t.typeof("CatalogSearchParams") :: Check<CatalogSearchParams>
 
 --[=[
 	Ensures Roblox CFrame type.
-	@prop CFrame Check
-	@within t
+	@within T
+	@function CFrame
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.CFrame = t.typeof("CFrame")
+t.CFrame = t.typeof("CFrame") :: Check<CFrame>
 
 --[=[
 	Ensures Roblox Color3 type.
-	@prop Color3 Check
-	@within t
+	@within T
+	@function Color3
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.Color3 = t.typeof("Color3")
+t.Color3 = t.typeof("Color3") :: Check<Color3>
 
 --[=[
 	Ensures Roblox ColorSequence type.
-	@prop ColorSequence Check
-	@within t
+	@within T
+	@function ColorSequence
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.ColorSequence = t.typeof("ColorSequence")
+t.ColorSequence = t.typeof("ColorSequence") :: Check<ColorSequence>
 
 --[=[
 	Ensures Roblox ColorSequenceKeypoint type.
-	@prop ColorSequenceKeypoint Check
-	@within t
+	@within T
+	@function ColorSequenceKeypoint
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.ColorSequenceKeypoint = t.typeof("ColorSequenceKeypoint")
+t.ColorSequenceKeypoint = t.typeof("ColorSequenceKeypoint") :: Check<ColorSequenceKeypoint>
 
 --[=[
 	Ensures Roblox DateTime type.
-	@prop DateTime Check
-	@within t
+	@within T
+	@function DateTime
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.DateTime = t.typeof("DateTime")
+t.DateTime = t.typeof("DateTime") :: Check<DateTime>
 
 --[=[
 	Ensures Roblox DockWidgetPluginGuiInfo type.
-	@prop DockWidgetPluginGuiInfo Check
-	@within t
+	@within T
+	@function DockWidgetPluginGuiInfo
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.DockWidgetPluginGuiInfo = t.typeof("DockWidgetPluginGuiInfo")
+t.DockWidgetPluginGuiInfo = t.typeof("DockWidgetPluginGuiInfo") :: Check<DockWidgetPluginGuiInfo>
 
 --[=[
 	Ensures Roblox Enum type.
-	@prop Enum Check
-	@within t
+	@within T
+	@function Enum
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.Enum = t.typeof("Enum")
+t.Enum = t.typeof("Enum") :: Check<Enum>
 
 --[=[
 	Ensures Roblox EnumItem type.
-	@prop EnumItem Check
-	@within t
+	@within T
+	@function EnumItem
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.EnumItem = t.typeof("EnumItem")
+t.EnumItem = t.typeof("EnumItem") :: Check<EnumItem>
 
 --[=[
 	Ensures Roblox Enums type.
-	@prop Enums Check
-	@within t
+	@within T
+	@function Enums
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.Enums = t.typeof("Enums")
+t.Enums = t.typeof("Enums") :: Check<Enums>
 
 --[=[
 	Ensures Roblox Faces type.
-	@prop Faces Check
-	@within t
+	@within T
+	@function Faces
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.Faces = t.typeof("Faces")
+t.Faces = t.typeof("Faces") :: Check<Faces>
 
 --[=[
 	Ensures Roblox FloatCurveKey type.
-	@prop FloatCurveKey Check
-	@within t
+	@within T
+	@function FloatCurveKey
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.FloatCurveKey = t.typeof("FloatCurveKey")
+t.FloatCurveKey = t.typeof("FloatCurveKey") :: Check<FloatCurveKey>
 
 --[=[
 	Ensures Roblox Font type.
-	@prop Font Check
-	@within t
+	@within T
+	@function Font
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.Font = t.typeof("Font")
+t.Font = t.typeof("Font") :: Check<Font>
 
 --[=[
 	Ensures Roblox Instance type.
-	@prop Instance Check
-	@within t
+	@within T
+	@function Instance
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.Instance = t.typeof("Instance")
+t.Instance = t.typeof("Instance") :: Check<Instance>
 
 --[=[
 	Ensures Roblox NumberRange type.
-	@prop NumberRange Check
-	@within t
+	@within T
+	@function NumberRange
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.NumberRange = t.typeof("NumberRange")
+t.NumberRange = t.typeof("NumberRange") :: Check<NumberRange>
 
 --[=[
 	Ensures Roblox NumberSequence type.
-	@prop NumberSequence Check
-	@within t
+	@within T
+	@function NumberSequence
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.NumberSequence = t.typeof("NumberSequence")
+t.NumberSequence = t.typeof("NumberSequence") :: Check<NumberSequence>
 
 --[=[
 	Ensures Roblox NumberSequenceKeypoint type.
-	@prop NumberSequenceKeypoint Check
-	@within t
+	@within T
+	@function NumberSequenceKeypoint
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.NumberSequenceKeypoint = t.typeof("NumberSequenceKeypoint")
+t.NumberSequenceKeypoint = t.typeof("NumberSequenceKeypoint") :: Check<NumberSequenceKeypoint>
 
 --[=[
 	Ensures Roblox OverlapParams type.
-	@prop OverlapParams Check
-	@within t
+	@within T
+	@function OverlapParams
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.OverlapParams = t.typeof("OverlapParams")
+t.OverlapParams = t.typeof("OverlapParams") :: Check<OverlapParams>
 
 --[=[
 	Ensures Roblox PathWaypoint type.
-	@prop PathWaypoint Check
-	@within t
+	@within T
+	@function PathWaypoint
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.PathWaypoint = t.typeof("PathWaypoint")
+t.PathWaypoint = t.typeof("PathWaypoint") :: Check<PathWaypoint>
 
 --[=[
 	Ensures Roblox PhysicalProperties type.
-	@prop PhysicalProperties Check
-	@within t
+	@within T
+	@function PhysicalProperties
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.PhysicalProperties = t.typeof("PhysicalProperties")
+t.PhysicalProperties = t.typeof("PhysicalProperties") :: Check<PhysicalProperties>
 
 --[=[
 	Ensures Roblox Random type.
-	@prop Random Check
-	@within t
+	@within T
+	@function Random
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.Random = t.typeof("Random")
+t.Random = t.typeof("Random") :: Check<Random>
 
 --[=[
 	Ensures Roblox Ray type.
-	@prop Ray Check
-	@within t
+	@within T
+	@function Ray
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.Ray = t.typeof("Ray")
+t.Ray = t.typeof("Ray") :: Check<Ray>
 
 --[=[
 	Ensures Roblox RaycastParams type.
-	@prop RaycastParams Check
-	@within t
+	@within T
+	@function RaycastParams
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.RaycastParams = t.typeof("RaycastParams")
+t.RaycastParams = t.typeof("RaycastParams") :: Check<RaycastParams>
 
 --[=[
 	Ensures Roblox RaycastResult type.
-	@prop RaycastResult Check
-	@within t
+	@within T
+	@function RaycastResult
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.RaycastResult = t.typeof("RaycastResult")
+t.RaycastResult = t.typeof("RaycastResult") :: Check<RaycastResult>
 
 --[=[
 	Ensures Roblox RBXScriptConnection type.
-	@prop RBXScriptConnection Check
-	@within t
+	@within T
+	@function RBXScriptConnection
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.RBXScriptConnection = t.typeof("RBXScriptConnection")
+t.RBXScriptConnection = t.typeof("RBXScriptConnection") :: Check<RBXScriptConnection>
 
 --[=[
 	Ensures Roblox RBXScriptSignal type.
-	@prop RBXScriptSignal Check
-	@within t
+	@within T
+	@function RBXScriptSignal
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.RBXScriptSignal = t.typeof("RBXScriptSignal")
+t.RBXScriptSignal = t.typeof("RBXScriptSignal") :: Check<RBXScriptSignal>
 
 --[=[
 	Ensures Roblox Rect type.
-	@prop Rect Check
-	@within t
+	@within T
+	@function Rect
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.Rect = t.typeof("Rect")
+t.Rect = t.typeof("Rect") :: Check<Rect>
 
 --[=[
 	Ensures Roblox Region3 type.
-	@prop Region3 Check
-	@within t
+	@within T
+	@function Region3
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.Region3 = t.typeof("Region3")
+t.Region3 = t.typeof("Region3") :: Check<Region3>
 
 --[=[
 	Ensures Roblox Region3int16 type.
-	@prop Region3int16 Check
-	@within t
+	@within T
+	@function Region3int16
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.Region3int16 = t.typeof("Region3int16")
+t.Region3int16 = t.typeof("Region3int16") :: Check<Region3int16>
 
 --[=[
 	Ensures Roblox TweenInfo type.
-	@prop TweenInfo Check
-	@within t
+	@within T
+	@function TweenInfo
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.TweenInfo = t.typeof("TweenInfo")
+t.TweenInfo = t.typeof("TweenInfo") :: Check<TweenInfo>
 
 --[=[
 	Ensures Roblox UDim type.
-	@prop UDim Check
-	@within t
+	@within T
+	@function UDim
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.UDim = t.typeof("UDim")
+t.UDim = t.typeof("UDim") :: Check<UDim>
 
 --[=[
 	Ensures Roblox UDim2 type.
-	@prop UDim2 Check
-	@within t
+	@within T
+	@function UDim2
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.UDim2 = t.typeof("UDim2")
+t.UDim2 = t.typeof("UDim2") :: Check<UDim2>
 
 --[=[
 	Ensures Roblox Vector2 type.
-	@prop Vector2 Check
-	@within t
+	@within T
+	@function Vector2
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.Vector2 = t.typeof("Vector2")
+t.Vector2 = t.typeof("Vector2") :: Check<Vector2>
 
 --[=[
 	Ensures Roblox Vector2int16 type.
-	@prop Vector2int16 Check
-	@within t
+	@within T
+	@function Vector2int16
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.Vector2int16 = t.typeof("Vector2int16")
+t.Vector2int16 = t.typeof("Vector2int16") :: Check<Vector2int16>
 
 --[=[
 	Ensures Roblox Vector3 type.
-	@prop Vector3 Check
-	@within t
+	@within T
+	@function Vector3
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.Vector3 = t.typeof("Vector3")
+t.Vector3 = t.typeof("Vector3") :: Check<Vector3>
 
 --[=[
 	Ensures Roblox Vector3int16 type.
-	@prop Vector3int16 Check
-	@within t
+	@within T
+	@function Vector3int16
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.Vector3int16 = t.typeof("Vector3int16")
+t.Vector3int16 = t.typeof("Vector3int16") :: Check<Vector3int16>
 
 --[=[
-	@within t
+	@function literal
+	@within T
 	Ensures value is a given literal value. When given multiple arguments,
 	creates a union of the provided literals.
 
-	## Example
 	```lua
 	local stateCheck = t.literal("idle", "running")
 	print(stateCheck("idle")) --> true
 	```
 
 	@param ... any -- The literal value(s) to match
-	@return Validator<T>
+	@return Check
 ]=]
-function t.literal<T>(...: T): Validator<T>
+function t.literal<L>(...: L): Check<L>
 	local size = select("#", ...)
 	if size == 1 then
 		local literal = ...
@@ -550,26 +722,28 @@ end
 
 --[=[
 	Alias for `t.literal`.
-	@prop exactly Check
-	@within t
+	@function exactly
+	@within T
 	@deprecated Use `t.literal` instead.
+	@param ... any -- The literal value(s) to match
+	@return Check<T>
 ]=]
 t.exactly = t.literal
 
 --[=[
-	@within t
+	@within T
+	@function keyOf
 	Returns a `t.union` of each key in the table as a `t.literal`.
 
-	## Example
 	```lua
 	local isMode = t.keyOf({ Easy = true, Hard = true })
 	print(isMode("Easy")) --> true
 	```
 
-	@param keyTable {[any]: any} -- The table whose keys are the allowed values
-	@return Validator<K>
+	@param keyTable {[K]: any} -- The table whose keys are the allowed values
+	@return Check<K>
 ]=]
-function t.keyOf<K>(keyTable: { [K]: any }): Validator<K>
+function t.keyOf<K>(keyTable: { [K]: any }): Check<K>
 	local keys = {}
 	local length = 0
 	for key in pairs(keyTable) do
@@ -580,19 +754,19 @@ function t.keyOf<K>(keyTable: { [K]: any }): Validator<K>
 end
 
 --[=[
-	@within t
+	@within T
+	@function valueOf
 	Returns a `t.union` of each value in the table as a `t.literal`.
 
-	## Example
 	```lua
 	local isRank = t.valueOf({ Bronze = 1, Silver = 2 })
 	print(isRank(2)) --> true
 	```
 
-	@param valueTable {[any]: any} -- The table whose values are the allowed values
-	@return Validator<V>
+	@param valueTable {[any]: V} -- The table whose values are the allowed values
+	@return Check
 ]=]
-function t.valueOf<V>(valueTable: { [any]: V }): Validator<V>
+function t.valueOf<V>(valueTable: { [any]: V }): Check<V>
 	local values = {}
 	local length = 0
 	for _, value in pairs(valueTable) do
@@ -603,10 +777,10 @@ function t.valueOf<V>(valueTable: { [any]: V }): Validator<V>
 end
 
 --[=[
-	@within t
+	@within T
+	@function integer
 	Ensures value is an integer (whole number).
 
-	## Example
 	```lua
 	print(t.integer(8)) --> true
 	print(t.integer(8.5)) --> false, "integer expected, got 8.5"
@@ -616,23 +790,24 @@ end
 	@return boolean
 	@return string?
 ]=]
-function t.integer(value: any): (boolean, string?)
+function t.integer(value: unknown): (boolean, string?)
 	local success, errMsg = t.number(value)
 	if not success then
 		return false, errMsg or ""
 	end
-	if value % 1 == 0 then
+	if (value :: number) % 1 == 0 then
 		return true :: any
 	else
-		return false, string.format("integer expected, got %s", value)
+		return false, string.format("integer expected, got %s", tostring(value))
 	end
 end
+t.integer = (t.integer :: any) :: Check<number>
 
 --[=[
-	@within t
+	@within T
+	@function integerMin
 	Ensures value is an integer where `min <= value`.
 
-	## Example
 	```lua
 	local atLeastTen = t.integerMin(10)
 	print(atLeastTen(12)) --> true
@@ -641,14 +816,14 @@ end
 	@param min number -- The inclusive minimum bound
 	@return Check
 ]=]
-function t.integerMin(min: number): Check
+function t.integerMin(min: number): Check<number>
 	assert(t.integer(min))
 	return function(value: any): (boolean, string?)
 		local success, errMsg = t.integer(value)
 		if not success then
 			return false, errMsg or ""
 		end
-		if value >= min then
+		if (value :: number) >= min then
 			return true :: any
 		else
 			return false, string.format("integer >= %s expected, got %s", tostring(min), tostring(value))
@@ -657,10 +832,10 @@ function t.integerMin(min: number): Check
 end
 
 --[=[
-	@within t
+	@within T
+	@function integerMax
 	Ensures value is an integer where `value <= max`.
 
-	## Example
 	```lua
 	local atMostTen = t.integerMax(10)
 	print(atMostTen(8)) --> true
@@ -669,14 +844,14 @@ end
 	@param max number -- The inclusive maximum bound
 	@return Check
 ]=]
-function t.integerMax(max: number): Check
+function t.integerMax(max: number): Check<number>
 	assert(t.integer(max))
 	return function(value: any): (boolean, string?)
 		local success, errMsg = t.integer(value)
 		if not success then
 			return false, errMsg or ""
 		end
-		if value <= max then
+		if (value :: number) <= max then
 			return true :: any
 		else
 			return false, string.format("integer <= %s expected, got %s", tostring(max), tostring(value))
@@ -685,10 +860,10 @@ function t.integerMax(max: number): Check
 end
 
 --[=[
-	@within t
+	@within T
+	@function integerMinExclusive
 	Ensures value is an integer where `min < value`.
 
-	## Example
 	```lua
 	local positive = t.integerMinExclusive(0)
 	print(positive(1)) --> true
@@ -697,14 +872,14 @@ end
 	@param min number -- The exclusive minimum bound
 	@return Check
 ]=]
-function t.integerMinExclusive(min: number): Check
+function t.integerMinExclusive(min: number): Check<number>
 	assert(t.integer(min))
 	return function(value: any): (boolean, string?)
 		local success, errMsg = t.integer(value)
 		if not success then
 			return false, errMsg or ""
 		end
-		if min < value then
+		if min < (value :: number) then
 			return true :: any
 		else
 			return false, string.format("integer > %s expected, got %s", tostring(min), tostring(value))
@@ -713,10 +888,10 @@ function t.integerMinExclusive(min: number): Check
 end
 
 --[=[
-	@within t
+	@within T
+	@function integerMaxExclusive
 	Ensures value is an integer where `value < max`.
 
-	## Example
 	```lua
 	local belowTen = t.integerMaxExclusive(10)
 	print(belowTen(9)) --> true
@@ -725,14 +900,14 @@ end
 	@param max number -- The exclusive maximum bound
 	@return Check
 ]=]
-function t.integerMaxExclusive(max: number): Check
+function t.integerMaxExclusive(max: number): Check<number>
 	assert(t.integer(max))
 	return function(value: any): (boolean, string?)
 		local success, errMsg = t.integer(value)
 		if not success then
 			return false, errMsg or ""
 		end
-		if value < max then
+		if (value :: number) < max then
 			return true :: any
 		else
 			return false, string.format("integer < %s expected, got %s", tostring(max), tostring(value))
@@ -742,23 +917,29 @@ end
 
 --[=[
 	Ensures value is an integer greater than 0.
-	@prop integerPositive Check
-	@within t
+	@within T
+	@function integerPositive
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.integerPositive = t.integerMinExclusive(0)
+t.integerPositive = t.integerMinExclusive(0) :: Check<number>
 
 --[=[
 	Ensures value is an integer less than 0.
-	@prop integerNegative Check
-	@within t
+	@within T
+	@function integerNegative
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.integerNegative = t.integerMaxExclusive(0)
+t.integerNegative = t.integerMaxExclusive(0) :: Check<number>
 
 --[=[
-	@within t
+	@within T
+	@function integerConstrained
 	Ensures value is an integer where `min <= value <= max`.
 
-	## Example
 	```lua
 	local levelCheck = t.integerConstrained(1, 100)
 	print(levelCheck(25)) --> true
@@ -768,7 +949,7 @@ t.integerNegative = t.integerMaxExclusive(0)
 	@param max number -- The inclusive maximum bound
 	@return Check
 ]=]
-function t.integerConstrained(min: number, max: number): Check
+function t.integerConstrained(min: number, max: number): Check<number>
 	assert(t.integer(min))
 	assert(t.integer(max))
 	local minCheck = t.integerMin(min)
@@ -787,10 +968,10 @@ function t.integerConstrained(min: number, max: number): Check
 end
 
 --[=[
-	@within t
+	@within T
+	@function integerConstrainedExclusive
 	Ensures value is an integer where `min < value < max`.
 
-	## Example
 	```lua
 	local bounded = t.integerConstrainedExclusive(0, 10)
 	print(bounded(5)) --> true
@@ -800,7 +981,7 @@ end
 	@param max number -- The exclusive maximum bound
 	@return Check
 ]=]
-function t.integerConstrainedExclusive(min: number, max: number): Check
+function t.integerConstrainedExclusive(min: number, max: number): Check<number>
 	assert(t.integer(min))
 	assert(t.integer(max))
 	local minCheck = t.integerMinExclusive(min)
@@ -819,10 +1000,10 @@ function t.integerConstrainedExclusive(min: number, max: number): Check
 end
 
 --[=[
-	@within t
+	@within T
+	@function numberMin
 	Ensures value is a number where `min <= value`.
 
-	## Example
 	```lua
 	local atLeastTen = t.numberMin(10)
 	print(atLeastTen(12)) --> true
@@ -831,13 +1012,13 @@ end
 	@param min number -- The inclusive minimum bound
 	@return Check
 ]=]
-function t.numberMin(min: number): Check
+function t.numberMin(min: number): Check<number>
 	return function(value: any): (boolean, string?)
 		local success, errMsg = t.number(value)
 		if not success then
 			return false, errMsg or ""
 		end
-		if value >= min then
+		if (value :: number) >= min then
 			return true :: any
 		else
 			return false, string.format("number >= %s expected, got %s", tostring(min), tostring(value))
@@ -846,10 +1027,10 @@ function t.numberMin(min: number): Check
 end
 
 --[=[
-	@within t
+	@within T
+	@function numberMax
 	Ensures value is a number where `value <= max`.
 
-	## Example
 	```lua
 	local atMostTen = t.numberMax(10)
 	print(atMostTen(8)) --> true
@@ -858,13 +1039,13 @@ end
 	@param max number -- The inclusive maximum bound
 	@return Check
 ]=]
-function t.numberMax(max: number): Check
+function t.numberMax(max: number): Check<number>
 	return function(value: any): (boolean, string?)
 		local success, errMsg = t.number(value)
 		if not success then
 			return false, errMsg
 		end
-		if value <= max then
+		if (value :: number) <= max then
 			return true :: any
 		else
 			return false, string.format("number <= %s expected, got %s", tostring(max), tostring(value))
@@ -873,10 +1054,10 @@ function t.numberMax(max: number): Check
 end
 
 --[=[
-	@within t
+	@within T
+	@function numberMinExclusive
 	Ensures value is a number where `min < value`.
 
-	## Example
 	```lua
 	local positive = t.numberMinExclusive(0)
 	print(positive(1)) --> true
@@ -885,13 +1066,13 @@ end
 	@param min number -- The exclusive minimum bound
 	@return Check
 ]=]
-function t.numberMinExclusive(min: number): Check
+function t.numberMinExclusive(min: number): Check<number>
 	return function(value: any): (boolean, string?)
 		local success, errMsg = t.number(value)
 		if not success then
 			return false, errMsg or ""
 		end
-		if min < value then
+		if min < (value :: number) then
 			return true :: any
 		else
 			return false, string.format("number > %s expected, got %s", tostring(min), tostring(value))
@@ -900,10 +1081,10 @@ function t.numberMinExclusive(min: number): Check
 end
 
 --[=[
-	@within t
+	@within T
+	@function numberMaxExclusive
 	Ensures value is a number where `value < max`.
 
-	## Example
 	```lua
 	local belowTen = t.numberMaxExclusive(10)
 	print(belowTen(9)) --> true
@@ -912,7 +1093,7 @@ end
 	@param max number -- The exclusive maximum bound
 	@return Check
 ]=]
-function t.numberMaxExclusive(max: number): Check
+function t.numberMaxExclusive(max: number): Check<number>
 	return function(value: any): (boolean, string?)
 		local success, errMsg = t.number(value)
 		if not success then
@@ -928,23 +1109,29 @@ end
 
 --[=[
 	Ensures value is a number greater than 0.
-	@prop numberPositive Check
-	@within t
+	@within T
+	@function numberPositive
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.numberPositive = t.numberMinExclusive(0)
+t.numberPositive = t.numberMinExclusive(0) :: Check<number>
 
 --[=[
 	Ensures value is a number less than 0.
-	@prop numberNegative Check
-	@within t
+	@within T
+	@function numberNegative
+	@param value any
+	@return boolean
+	@return string?
 ]=]
-t.numberNegative = t.numberMaxExclusive(0)
+t.numberNegative = t.numberMaxExclusive(0) :: Check<number>
 
 --[=[
-	@within t
+	@within T
+	@function numberConstrained
 	Ensures value is a number where `min <= value <= max`.
 
-	## Example
 	```lua
 	local healthCheck = t.numberConstrained(0, 100)
 	print(healthCheck(75)) --> true
@@ -954,7 +1141,7 @@ t.numberNegative = t.numberMaxExclusive(0)
 	@param max number -- The inclusive maximum bound
 	@return Check
 ]=]
-function t.numberConstrained(min: number, max: number): Check
+function t.numberConstrained(min: number, max: number): Check<number>
 	assert(t.number(min))
 	assert(t.number(max))
 	local minCheck = t.numberMin(min)
@@ -973,10 +1160,10 @@ function t.numberConstrained(min: number, max: number): Check
 end
 
 --[=[
-	@within t
+	@within T
+	@function numberConstrainedExclusive
 	Ensures value is a number where `min < value < max`.
 
-	## Example
 	```lua
 	local unitInterval = t.numberConstrainedExclusive(0, 1)
 	print(unitInterval(0.5)) --> true
@@ -986,7 +1173,7 @@ end
 	@param max number -- The exclusive maximum bound
 	@return Check
 ]=]
-function t.numberConstrainedExclusive(min: number, max: number): Check
+function t.numberConstrainedExclusive(min: number, max: number): Check<number>
 	assert(t.number(min))
 	assert(t.number(max))
 	local minCheck = t.numberMinExclusive(min)
@@ -1005,19 +1192,19 @@ function t.numberConstrainedExclusive(min: number, max: number): Check
 end
 
 --[=[
-	@within t
+	@within T
+	@function match
 	Ensures value is a string matching the given Lua pattern.
 
-	## Example
 	```lua
 	local isSlug = t.match("^[a-z]+%-%d+$")
 	print(isSlug("entry-42")) --> true
 	```
 
 	@param pattern string -- The Lua pattern to match against
-	@return Validator<string>
+	@return Check<string>
 ]=]
-function t.match(pattern: string): Validator<string>
+function t.match(pattern: string): Check<string>
 	assert(t.string(pattern))
 	return function(value: any): (boolean, string?)
 		local stringSuccess, stringErrMsg = t.string(value)
@@ -1032,19 +1219,19 @@ function t.match(pattern: string): Validator<string>
 end
 
 --[=[
-	@within t
+	@within T
+	@function optional
 	Ensures value is either nil or passes the given check.
 
-	## Example
 	```lua
 	local maybeString = t.optional(t.string)
 	print(maybeString(nil)) --> true
 	```
 
-	@param check Validator<T> -- The check to apply when the value is non-nil
-	@return Validator<T?>
+	@param check Check<T> -- The check to apply when the value is non-nil
+	@return Check<T?>
 ]=]
-function t.optional<T>(check: Validator<T>): Validator<T?>
+function t.optional<T>(check: Check<T>): Check<T?>
 	assert(t.callback(check))
 	return function(value: any): (boolean, string?)
 		if value == nil then
@@ -1060,22 +1247,21 @@ function t.optional<T>(check: Validator<T>): Validator<T?>
 end
 
 --[=[
-	@within t
-	Refines an existing validator with an additional predicate.
+	@within T
+	@function where
+	Refines an existing check with an additional predicate.
 
-	## Example
 	```lua
 	local nonEmptyString = t.where(t.string, function(value)
 		return #value > 0, "string must not be empty"
 	end)
 	```
 
-	@param check Validator<T> -- The base validator that must pass first
+	@param check Check<T> -- The base check that must pass first
 	@param predicate Predicate<T> -- Additional validation applied after `check`
-	@param errorMessage string? -- Fallback message when the predicate fails without its own message
-	@return Validator<T>
+	@return Check<T>
 ]=]
-function t.where<T>(check: Validator<T>, predicate: Predicate<T>, errorMessage: string?): Validator<T>
+function t.where<T>(check: Check<T>, predicate: Predicate<T>): Check<T>
 	assert(t.callback(check))
 	assert(t.callback(predicate))
 	return function(value: any): (boolean, string?)
@@ -1089,24 +1275,24 @@ function t.where<T>(check: Validator<T>, predicate: Predicate<T>, errorMessage: 
 			return true :: any
 		end
 
-		return false, predicateErrMsg or errorMessage or "value failed refinement"
+		return false, predicateErrMsg or "value failed refinement"
 	end
 end
 
 --[=[
-	@within t
+	@within T
+	@function tuple
 	Matches a tuple of values against a tuple of checks.
 
-	## Example
 	```lua
 	local fooArgs = t.tuple(t.string, t.number)
 	print(fooArgs("score", 50)) --> true
 	```
 
 	@param ... Check -- The check for each tuple position, in order
-	@return TupleValidator
+	@return TupleCheck
 ]=]
-function t.tuple(...: Check): TupleValidator
+function t.tuple(...: Check<any>): CheckTuple
 	local checks = { ... }
 	return function(...: any): (boolean, string?)
 		local args = { ... }
@@ -1121,19 +1307,19 @@ function t.tuple(...: Check): TupleValidator
 end
 
 --[=[
-	@within t
+	@within T
+	@function strictTuple
 	Matches a tuple of values against a tuple of checks and disallows excess arguments.
 
-	## Example
 	```lua
 	local createArgs = t.strictTuple(t.string, t.number)
 	print(createArgs("score", 50)) --> true
 	```
 
 	@param ... Check -- The check for each tuple position, in order
-	@return TupleValidator
+	@return TupleCheck
 ]=]
-function t.strictTuple(...: Check): TupleValidator
+function t.strictTuple(...: Check<any>): CheckTuple
 	local checks = { ... }
 	return function(...: any): (boolean, string?)
 		local argCount = select("#", ...)
@@ -1154,19 +1340,19 @@ function t.strictTuple(...: Check): TupleValidator
 end
 
 --[=[
-	@within t
+	@within T
+	@function keys
 	Ensures all keys in a table pass the given check.
 
-	## Example
 	```lua
 	local stringKeys = t.keys(t.string)
 	print(stringKeys({ Name = true })) --> true
 	```
 
-	@param check Validator<K> -- The check applied to each key
-	@return Validator<{ [K]: any }>
+	@param check Check<K> -- The check applied to each key
+	@return Check<{ [K]: unknown }>
 ]=]
-function t.keys<K>(check: Validator<K>): Validator<{ [K]: any }>
+function t.keys<K>(check: Check<K>): Check<{ [K]: unknown }>
 	assert(t.callback(check))
 	return function(value: any): (boolean, string?)
 		local tableSuccess, tableErrMsg = t.table(value)
@@ -1184,19 +1370,19 @@ function t.keys<K>(check: Validator<K>): Validator<{ [K]: any }>
 end
 
 --[=[
-	@within t
+	@within T
+	@function values
 	Ensures all values in a table pass the given check.
 
-	## Example
 	```lua
 	local numberValues = t.values(t.number)
 	print(numberValues({ Coins = 10 })) --> true
 	```
 
-	@param check Validator<V> -- The check applied to each value
-	@return Validator<{ [any]: V }>
+	@param check Check<V> -- The check applied to each value
+	@return Check<{ [any]: V }>
 ]=]
-function t.values<V>(check: Validator<V>): Validator<{ [any]: V }>
+function t.values<V>(check: Check<V>): Check<{ [any]: V }>
 	assert(t.callback(check))
 	return function(value: any): (boolean, string?)
 		local tableSuccess, tableErrMsg = t.table(value)
@@ -1214,20 +1400,20 @@ function t.values<V>(check: Validator<V>): Validator<{ [any]: V }>
 end
 
 --[=[
-	@within t
+	@within T
+	@function map<K, V>
 	Ensures value is a table where all keys pass `keyCheck` and all values pass `valueCheck`.
 
-	## Example
 	```lua
 	local scoreMap = t.map(t.string, t.number)
 	print(scoreMap({ Alpha = 10 })) --> true
 	```
 
-	@param keyCheck Validator<K> -- Check applied to each key
-	@param valueCheck Validator<V> -- Check applied to each value
-	@return Validator<{ [K]: V }>
+	@param keyCheck Check<K> -- Check applied to each key
+	@param valueCheck Check<V> -- Check applied to each value
+	@return Check<{ [K]: V }>
 ]=]
-function t.map<K, V>(keyCheck: Validator<K>, valueCheck: Validator<V>): Validator<{ [K]: V }>
+function t.map<K, V>(keyCheck: Check<K>, valueCheck: Check<V>): Check<{ [K]: V }>
 	assert(t.callback(keyCheck))
 	assert(t.callback(valueCheck))
 	local keyChecker = t.keys(keyCheck)
@@ -1246,27 +1432,28 @@ function t.map<K, V>(keyCheck: Validator<K>, valueCheck: Validator<V>): Validato
 end
 
 --[=[
-	@within t
+	@within T
+	@function set
 	Ensures value is a set — a table where all keys pass `valueCheck` and all values are `true`.
 
-	## Example
 	```lua
 	local tagSet = t.set(t.string)
 	print(tagSet({ Fast = true, Active = true })) --> true
 	```
 
-	@param valueCheck Validator<K> -- Check applied to each key
-	@return Validator<{ [K]: true }>
+	@param valueCheck Check<K> -- Check applied to each key
+	@return Check<{ [K]: true }>
 ]=]
-function t.set<K>(valueCheck: Validator<K>): Validator<{ [K]: true }>
-	return t.map(valueCheck, t.literal(true))
+function t.set<K>(valueCheck: Check<K>): Check<{ [K]: true }>
+	return t.map(valueCheck, t.literal(true :: true))
 end
 
 do
 	local arrayKeysCheck = t.keys(t.integer)
 
 	--[=[
-		@within t
+		@within T
+		@function array
 		Ensures value is a sequential array where every element passes the given check.
 
 		## Example
@@ -1275,10 +1462,10 @@ do
 		print(stringArray({ "a", "b" })) --> true
 		```
 
-		@param check Validator<T> -- The check applied to each element
-		@return Validator<{T}>
+		@param check Check<T> -- The check applied to each element
+		@return Check<{V}>
 	]=]
-	function t.array<T>(check: Validator<T>): Validator<{ T }>
+	function t.array<V>(check: Check<V>): Check<{ V }>
 		assert(t.callback(check))
 		local valuesCheck = t.values(check)
 		return function(value: any): (boolean, string?)
@@ -1306,7 +1493,8 @@ do
 	end
 
 	--[=[
-		@within t
+		@within T
+		@function strictArray
 		Ensures value is an array with an exact sequence of element types.
 		The array must not be longer than the number of provided checks.
 
@@ -1317,10 +1505,12 @@ do
 		```
 
 		@param ... Check -- The checks for each array index, in order
-		@return Check
+		@return Check<{ any }>
 	]=]
-	function t.strictArray(...: Check): Check
-		local valueTypes = { ... } :: { Check }
+	-- NOTE: returns Check<{ any }> because Luau lacks variadic generics.
+	-- Positional element types (e.g. Check<{ string, number }>) cannot be expressed without overloads.
+	function t.strictArray(...: Check<any>): Check<{ any }>
+		local valueTypes = { ... }
 		assert(t.array(t.callback)(valueTypes))
 		return function(value: any): (boolean, string?)
 			local keySuccess, keyErrMsg = arrayKeysCheck(value)
@@ -1331,7 +1521,7 @@ do
 				return false, string.format("[strictArray] Array size exceeds limit of %d", #valueTypes)
 			end
 			for idx, typeFn in ipairs(valueTypes) do
-				local typeCheck = typeFn :: Check
+				local typeCheck = typeFn :: Check<any>
 				local typeSuccess, typeErrMsg = typeCheck(value[idx])
 				if not typeSuccess then
 					return false, string.format("[strictArray] Array index #%s - %s", tostring(idx), typeErrMsg or "")
@@ -1346,7 +1536,8 @@ do
 	local callbackArray = t.array(t.callback)
 
 	--[=[
-		@within t
+		@within T
+		@function union
 		Creates a union type that passes if any of the given checks pass.
 
 		## Example
@@ -1356,9 +1547,11 @@ do
 		```
 
 		@param ... Check -- The checks to union
-		@return Validator<T>
+		@return Check
 	]=]
-	function t.union<T>(...: Validator<T>): Validator<T>
+	-- NOTE: returns Check<any> because Luau lacks variadic generics.
+	-- t.union(t.string, t.number) cannot produce Check<string | number> at the type level.
+	function t.union(...: Check<any>): Check<any>
 		local checks = { ... }
 		assert(callbackArray(checks))
 		return function(value: any): (boolean, string?)
@@ -1374,11 +1567,19 @@ do
 		end
 	end
 
-	--- Alias for `t.union`.
+	--[=[
+		Alias for `t.union`.
+		@within T
+		@function some
+		@deprecated Use `t.union` instead.
+		@param ... Check<T> -- The checks to union
+		@return Check<T>
+	]=]
 	t.some = t.union
 
 	--[=[
-		@within t
+		@within T
+		@function intersection
 		Creates an intersection type that passes only if all of the given checks pass.
 
 		## Example
@@ -1388,9 +1589,11 @@ do
 		```
 
 		@param ... Check -- The checks to intersect
-		@return Validator<T>
+		@return Check<T>
 	]=]
-	function t.intersection<T>(...: Validator<T>): Validator<T>
+	-- NOTE: returns Check<any> because Luau lacks variadic generics.
+	-- t.intersection(t.integer, t.numberPositive) cannot produce Check<number & integer> at the type level.
+	function t.intersection(...: Check<any>): Check<any>
 		local checks = { ... }
 		assert(callbackArray(checks))
 		return function(value: any): (boolean, string?)
@@ -1404,15 +1607,61 @@ do
 		end
 	end
 
-	--- Alias for `t.intersection`.
+	--[=[
+		Alias for `t.intersection`.
+		@within T
+		@function every
+		@deprecated Use `t.intersection` instead.
+		@param ... Check<T> -- The checks to intersect
+		@return Check<T>
+	]=]
 	t.every = t.intersection
+end
+
+--[=[
+	@within T
+	@function unionOf
+	Two-argument typed union. Returns `Check<A | B>`, which `t.union` cannot express
+	due to Luau's lack of variadic generics.
+
+	```lua
+	local stringOrNumber = t.unionOf(t.string, t.number)
+	-- type: Check<string | number>
+	```
+
+	@param checkA Check<A>
+	@param checkB Check<B>
+	@return Check<A | B>
+]=]
+function t.unionOf<A, B>(checkA: Check<A>, checkB: Check<B>): Check<A | B>
+	return t.union(checkA, checkB) :: Check<A | B>
+end
+
+--[=[
+	@within T
+	@function intersectionOf
+	Two-argument typed intersection. Returns `Check<A & B>`, which `t.intersection` cannot express
+	due to Luau's lack of variadic generics.
+
+	```lua
+	local positiveInt = t.intersectionOf(t.integer, t.numberPositive)
+	-- type: Check<number & number>
+	```
+
+	@param checkA Check<A>
+	@param checkB Check<B>
+	@return Check<A & B>
+]=]
+function t.intersectionOf<A, B>(checkA: Check<A>, checkB: Check<B>): Check<A & B>
+	return t.intersection(checkA, checkB) :: Check<A & B>
 end
 
 do
 	local checkInterface = t.map(t.any, t.callback)
 
 	--[=[
-		@within t
+		@within T
+		@function interface
 		Ensures value is a table matching the given interface definition.
 		Extra fields on the table are allowed.
 
@@ -1425,9 +1674,9 @@ do
 		```
 
 		@param checkTable {[any]: Check} -- Map of field name to checker
-		@return Validator<T>
+		@return Check<any>
 	]=]
-	function t.interface<T>(checkTable: CheckMap): Validator<T>
+	function t.interface(checkTable: { [any]: Check<any> }): Check<any>
 		assert(checkInterface(checkTable))
 		return function(value: any): (boolean, string?)
 			local tableSuccess, tableErrMsg = t.table(value)
@@ -1437,7 +1686,11 @@ do
 			for key, check in pairs(checkTable) do
 				local success, errMsg = check(value[key])
 				if success == false then
-					return false, string.format("[interface] bad value for %s:\n\t%s", tostring(key), errMsg or "")
+					if type(key) == "string" then
+						return false, string.format("[interface] bad value for %s:\n\t%s", key :: string, errMsg or "")
+					else
+						return false, string.format("bad value for key %s:\n\t%s", type(key), errMsg or "")
+					end
 				end
 			end
 			return true :: any
@@ -1445,7 +1698,8 @@ do
 	end
 
 	--[=[
-		@within t
+		@within T
+		@function partialInterface
 		Ensures value is a table whose known fields pass the given checks when present.
 		Missing fields are allowed.
 
@@ -1458,9 +1712,9 @@ do
 		```
 
 		@param checkTable {[any]: Check} -- Map of field name to checker for optional fields
-		@return Validator<T>
+		@return Check<any>
 	]=]
-	function t.partialInterface<T>(checkTable: CheckMap): Validator<T>
+	function t.partialInterface(checkTable: { [any]: Check<any> }): Check<any>
 		assert(checkInterface(checkTable))
 		return function(value: any): (boolean, string?)
 			local tableSuccess, tableErrMsg = t.table(value)
@@ -1472,8 +1726,13 @@ do
 				if fieldValue ~= nil then
 					local success, errMsg = check(fieldValue)
 					if success == false then
-						return false,
-							string.format("[partialInterface] bad value for %s:\n\t%s", tostring(key), errMsg or "")
+						if type(key) == "string" then
+							return false,
+								string.format("[partialInterface] bad value for %s:\n\t%s", key :: string, errMsg or "")
+						else
+							return false,
+								string.format("bad value for key %s:\n\t%s", type(key), errMsg or "")
+						end
 					end
 				end
 			end
@@ -1482,7 +1741,8 @@ do
 	end
 
 	--[=[
-		@within t
+		@within T
+		@function strictInterface
 		Ensures value is a table matching the given interface definition exactly.
 		Any extra fields not present in `checkTable` will cause the check to fail.
 
@@ -1495,9 +1755,9 @@ do
 		```
 
 		@param checkTable {[any]: Check} -- Map of field name to checker
-		@return Validator<T>
+		@return Check<any>
 	]=]
-	function t.strictInterface<T>(checkTable: CheckMap): Validator<T>
+	function t.strictInterface(checkTable: { [any]: Check<any> }): Check<any>
 		assert(checkInterface(checkTable))
 		return function(value: any): (boolean, string?)
 			local tableSuccess, tableErrMsg = t.table(value)
@@ -1507,12 +1767,20 @@ do
 			for key, check in pairs(checkTable) do
 				local success, errMsg = check(value[key])
 				if success == false then
-					return false, string.format("[interface] bad value for %s:\n\t%s", tostring(key), errMsg or "")
+					if type(key) == "string" then
+						return false, string.format("[interface] bad value for %s:\n\t%s", key :: string, errMsg or "")
+					else
+						return false, string.format("bad value for key %s:\n\t%s", type(key), errMsg or "")
+					end
 				end
 			end
 			for key in pairs(value) do
 				if not checkTable[key] then
-					return false, string.format("[interface] unexpected field %q", tostring(key))
+					if type(key) == "string" then
+						return false, string.format("[interface] unexpected field %q", key :: string)
+					else
+						return false, "[interface] unexpected field"
+					end
 				end
 			end
 			return true :: any
@@ -1521,10 +1789,10 @@ do
 end
 
 --[=[
-	@within t
+	@within T
+	@function instanceOf
 	Ensures value is an Instance whose `ClassName` exactly matches the given class name.
 
-	## Example
 	```lua
 	local isFolder = t.instanceOf("Folder")
 	print(isFolder(Instance.new("Folder"))) --> true
@@ -1532,11 +1800,11 @@ end
 
 	@param className string -- The exact class name to match
 	@param childTable {[string]: Check}? -- Optional map of child names to checks
-	@return Validator<Instance>
+	@return Check<Instance>
 ]=]
-function t.instanceOf(className: string, childTable: ChildCheckMap?): Validator<Instance>
+function t.instanceOf(className: string, childTable: { [string]: Check<Instance> }?): Check<Instance>
 	assert(t.string(className))
-	local childrenCheck: Check?
+	local childrenCheck
 	if childTable ~= nil then
 		childrenCheck = t.children(childTable)
 	end
@@ -1551,32 +1819,41 @@ function t.instanceOf(className: string, childTable: ChildCheckMap?): Validator<
 		if childrenCheck then
 			local childrenSuccess, childrenErrMsg = childrenCheck(value)
 			if not childrenSuccess then
-				return false, childrenErrMsg
+				return false, childrenErrMsg or ""
 			end
 		end
 		return true :: any
 	end
 end
 
+--[=[
+	Alias for `t.instanceOf`.
+	@within T
+	@function instance
+	@deprecated Use `t.instanceOf` instead.
+	@param className string -- The exact class name to match
+	@param childTable {[string]: Check}? -- Optional map of child names to checks
+	@return Check<Instance>
+]=]
 t.instance = t.instanceOf
 
 --[=[
-	@within t
+	@within T
+	@function instanceIsA
 	Ensures value is an Instance that passes `value:IsA(className)`.
 
-	## Example
 	```lua
 	local isGuiObject = t.instanceIsA("GuiObject")
 	print(isGuiObject(Instance.new("Frame"))) --> true
 	```
 
 	@param className string -- The class name to use with `IsA`
-	@param childTable {[string]: Check}? -- Optional map of child names to checks
-	@return Validator<Instance>
+	@param childTable {[string]: Check<Instance>}? -- Optional map of child names to checks
+	@return Check<Instance>
 ]=]
-function t.instanceIsA(className: string, childTable: ChildCheckMap?): Validator<Instance>
+function t.instanceIsA(className: string, childTable: { [string]: Check<Instance> }?): Check<Instance>
 	assert(t.string(className))
-	local childrenCheck: Check?
+	local childrenCheck
 	if childTable ~= nil then
 		childrenCheck = t.children(childTable)
 	end
@@ -1591,7 +1868,7 @@ function t.instanceIsA(className: string, childTable: ChildCheckMap?): Validator
 		if childrenCheck then
 			local childrenSuccess, childrenErrMsg = childrenCheck(value)
 			if not childrenSuccess then
-				return false, childrenErrMsg
+				return false, childrenErrMsg or ""
 			end
 		end
 		return true :: any
@@ -1599,19 +1876,44 @@ function t.instanceIsA(className: string, childTable: ChildCheckMap?): Validator
 end
 
 --[=[
-	@within t
+	@within T
+	@function enum
 	Ensures value is an EnumItem belonging to the given Enum type.
 
-	## Example
+	:::tip Choosing the right Enum check
+	There are three related validators — use the one that matches how specific you need to be:
+
+	- **`t.Enum`** — accepts an `Enum` *type object* (e.g. `Enum.Material`), not an item from it.
+	  Use this when a function receives an enum category as a parameter.
+
+	- **`t.EnumItem`** — accepts *any* `EnumItem`, from any enum.
+	  Use this when you only care that the value is some enum item, regardless of which enum it belongs to.
+
+	- **`t.itemOfEnum(Enum.X)`** — accepts an `EnumItem` that belongs to a *specific* enum.
+	  Use this when you need the value to come from exactly one known enum (e.g. only `Enum.Material` items).
+	:::
+
+	Alias: `t.enum`
+
 	```lua
-	local isMaterial = t.enum(Enum.Material)
-	print(isMaterial(Enum.Material.Slate)) --> true
+	-- Only accepts Enum.Material items
+	local isMaterial = t.itemOfEnum(Enum.Material)
+	print(isMaterial(Enum.Material.Slate))  --> true
+	print(isMaterial(Enum.KeyCode.A))       --> false
+
+	-- Accepts any EnumItem from any enum
+	print(t.EnumItem(Enum.Material.Slate))  --> true
+	print(t.EnumItem(Enum.KeyCode.A))       --> true
+
+	-- Accepts the Enum type object itself, not an item
+	print(t.Enum(Enum.Material))            --> true
+	print(t.Enum(Enum.Material.Slate))      --> false
 	```
 
 	@param enum Enum -- The Enum type to check against
-	@return Validator<EnumItem>
+	@return Check<EnumItem>
 ]=]
-function t.enum(enum: Enum): Validator<EnumItem>
+function t.itemOfEnum(enum: Enum): Check<EnumItem>
 	assert(t.Enum(enum))
 	return function(value: any): (boolean, string?)
 		local enumItemSuccess, enumItemErrMsg = t.EnumItem(value)
@@ -1625,12 +1927,14 @@ function t.enum(enum: Enum): Validator<EnumItem>
 		end
 	end
 end
+t.enum = t.itemOfEnum -- Alias for itemOfEnum
 
 do
 	local checkWrap = t.tuple(t.callback, t.callback)
 
 	--[=[
-		@within t
+		@within T
+		@function wrap
 		Wraps a callback with an argument-check assertion. The returned function
 		will `assert` the check before forwarding to the original callback.
 
@@ -1642,10 +1946,10 @@ do
 		```
 
 		@param callback (...any) -> ...any -- The function to wrap
-		@param checkArgs TupleValidator -- The check asserted on the arguments
+		@param checkArgs TupleCheck -- The check asserted on the arguments
 		@return (...any) -> ...any
 	]=]
-	function t.wrap<Args..., Returns...>(callback: (Args...) -> Returns..., checkArgs: TupleValidator): (Args...) -> Returns...
+	function t.wrap<V..., R...>(callback: (V...) -> R..., checkArgs: CheckTuple<V...>): (V...) -> R...
 		assert(checkWrap(callback, checkArgs))
 		return function(...: any): ...any
 			assert(checkArgs(...))
@@ -1655,19 +1959,19 @@ do
 end
 
 --[=[
-	@within t
+	@within T
+	@function strict
 	Wraps a check in an `assert`, producing a function that throws on failure.
 
-	## Example
 	```lua
 	local assertString = t.strict(t.tuple(t.string))
 	assertString("hello")
 	```
 
-	@param check TupleValidator -- The check to wrap
+	@param check TupleCheck -- The check to wrap
 	@return (...any) -> ()
 ]=]
-function t.strict<Args...>(check: TupleValidator): (Args...) -> ()
+function t.strict<Args...>(check: CheckTuple<Args...>): (Args...) -> ()
 	return function(...: Args...): ()
 		assert(check(...))
 	end
@@ -1677,7 +1981,8 @@ do
 	local checkChildren = t.map(t.string, t.callback)
 
 	--[=[
-		@within t
+		@within T
+		@function children
 		Ensures an Instance tree has named children that pass the corresponding checks.
 		Each entry in `checkTable` must be satisfied by a child with that exact name.
 
@@ -1693,9 +1998,9 @@ do
 		:::
 
 		@param checkTable {[string]: Check} -- Map of child name to checker
-		@return Validator<Instance>
+		@return Check<Instance>
 	]=]
-	function t.children(checkTable: ChildCheckMap): Validator<Instance>
+	function t.children(checkTable: { [string]: Check<any> }): Check<Instance>
 		assert(checkChildren(checkTable))
 		return function(value: any): (boolean, string?)
 			local instanceSuccess, instanceErrMsg = t.Instance(value)
