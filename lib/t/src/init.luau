@@ -47,7 +47,7 @@
 export type Check<T = any> = (value: any) -> (boolean, string?)
 --[=[
 	@within T
-	@type TupleCheck<T... = ...any> (T...) -> (boolean, string?)
+	@type CheckTuple<T... = ...any> (T...) -> (boolean, string?)
 	A function that validates a list of positional arguments and returns `true` on success or `false, errorMessage` on failure.
 ]=]
 export type CheckTuple<T... = ...any> = (T...) -> (boolean, string?)
@@ -1618,46 +1618,22 @@ do
 	t.every = t.intersection
 end
 
---[=[
-	@within T
-	@function unionOf
-	Two-argument typed union. Returns `Check<A | B>`, which `t.union` cannot express
-	due to Luau's lack of variadic generics.
-
-	```lua
-	local stringOrNumber = t.unionOf(t.string, t.number)
-	-- type: Check<string | number>
-	```
-
-	@param checkA Check<A>
-	@param checkB Check<B>
-	@return Check<A | B>
-]=]
-function t.unionOf<A, B>(checkA: Check<A>, checkB: Check<B>): Check<A | B>
-	return t.union(checkA, checkB) :: Check<A | B>
-end
-
---[=[
-	@within T
-	@function intersectionOf
-	Two-argument typed intersection. Returns `Check<A & B>`, which `t.intersection` cannot express
-	due to Luau's lack of variadic generics.
-
-	```lua
-	local positiveInt = t.intersectionOf(t.integer, t.numberPositive)
-	-- type: Check<number & number>
-	```
-
-	@param checkA Check<A>
-	@param checkB Check<B>
-	@return Check<A & B>
-]=]
-function t.intersectionOf<A, B>(checkA: Check<A>, checkB: Check<B>): Check<A & B>
-	return t.intersection(checkA, checkB) :: Check<A & B>
-end
-
 do
 	local checkInterface = t.map(t.any, t.callback)
+
+	-- Stable primitives (number, boolean) produce a readable tostring value.
+	-- Reference types (table, userdata, function, thread) use a typeof label in
+	-- angle brackets to avoid unstable memory addresses.
+	local function formatKey(key: unknown): string
+		local keyType = type(key)
+		if keyType == "string" then
+			return key :: string
+		elseif keyType == "number" or keyType == "boolean" then
+			return tostring(key)
+		else
+			return string.format("<%s>", typeof(key))
+		end
+	end
 
 	--[=[
 		@within T
@@ -1686,11 +1662,7 @@ do
 			for key, check in pairs(checkTable) do
 				local success, errMsg = check(value[key])
 				if success == false then
-					if type(key) == "string" then
-						return false, string.format("[interface] bad value for %s:\n\t%s", key :: string, errMsg or "")
-					else
-						return false, string.format("bad value for key %s:\n\t%s", type(key), errMsg or "")
-					end
+					return false, string.format("[interface] bad value for %s:\n\t%s", formatKey(key), errMsg or "")
 				end
 			end
 			return true :: any
@@ -1726,13 +1698,7 @@ do
 				if fieldValue ~= nil then
 					local success, errMsg = check(fieldValue)
 					if success == false then
-						if type(key) == "string" then
-							return false,
-								string.format("[partialInterface] bad value for %s:\n\t%s", key :: string, errMsg or "")
-						else
-							return false,
-								string.format("bad value for key %s:\n\t%s", type(key), errMsg or "")
-						end
+						return false, string.format("[partialInterface] bad value for %s:\n\t%s", formatKey(key), errMsg or "")
 					end
 				end
 			end
@@ -1767,17 +1733,16 @@ do
 			for key, check in pairs(checkTable) do
 				local success, errMsg = check(value[key])
 				if success == false then
-					if type(key) == "string" then
-						return false, string.format("[interface] bad value for %s:\n\t%s", key :: string, errMsg or "")
-					else
-						return false, string.format("bad value for key %s:\n\t%s", type(key), errMsg or "")
-					end
+					return false, string.format("[interface] bad value for %s:\n\t%s", formatKey(key), errMsg or "")
 				end
 			end
 			for key in pairs(value) do
 				if not checkTable[key] then
-					if type(key) == "string" then
+					local keyType = type(key)
+					if keyType == "string" then
 						return false, string.format("[interface] unexpected field %q", key :: string)
+					elseif keyType == "number" or keyType == "boolean" then
+						return false, string.format("[interface] unexpected field %s", tostring(key))
 					else
 						return false, "[interface] unexpected field"
 					end

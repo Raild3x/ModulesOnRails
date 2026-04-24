@@ -200,9 +200,6 @@ return function(tiniest: tiniest)
 			expectFail(stringValues { a = 1 })("bad value for key a:\n\tstring expected, got number")
 
 			local scoreMap = T.map(T.string, T.number)
-			scoreMap { Alpha = 10, Beta = 20 }
-			scoreMap { Alpha = "oops" }
-
 			expectPass(scoreMap { Alpha = 10, Beta = 20 })
 			expectFail(scoreMap { Alpha = "oops" })("bad value for key Alpha:\n\tnumber expected, got string")
 
@@ -269,7 +266,7 @@ return function(tiniest: tiniest)
 			local key = {}
 			local myInterface = T.interface { [key] = T.number }
 			expectPass(myInterface { [key] = 1 })
-			expectFail(myInterface { [key] = "1" })("bad value for key table:\n\tnumber expected, got string")
+			expectFail(myInterface { [key] = "1" })("[interface] bad value for <table>:\n\tnumber expected, got string")
 		end)
 
 		test("strict interfaces reject non-string keys", function()
