@@ -426,6 +426,20 @@ return function(tiniest: tiniest)
 			expect(type(err)).is("string")
 		end)
 
+		test("wrapArgs composes variadic checks into tuple validation", function()
+			local wrapped = T.wrapArgs(function(a: any, b: any)
+				return a + b
+			end, T.number, T.number)
+
+			expect(wrapped(2, 3)).is(5)
+
+			local ok, err = pcall(function()
+				wrapped("2", 3)
+			end)
+			expect(ok).is(false)
+			expect(type(err)).is("string")
+		end)
+
 		test("strict converts a validator into an asserting function", function()
 			local assertString = T.strict(T.tuple(T.string))
 
