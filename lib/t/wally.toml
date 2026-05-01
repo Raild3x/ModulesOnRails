@@ -2,7 +2,7 @@
 name = "raild3x/t"
 description = "A runtime typechecker for Luau/Roblox"
 authors = ["Logan Hunt (Raildex)", "osyrisrblx"]
-version = "0.1.0"
+version = "1.0.0"
 license = "MIT"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
