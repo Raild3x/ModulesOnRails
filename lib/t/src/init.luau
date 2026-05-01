@@ -1559,7 +1559,6 @@ local arrayKeysCheck = t.keys(t.integer)
 	@function array
 	Ensures value is a sequential array where every element passes the given check.
 
-	## Example
 	```lua
 	local stringArray = t.array(t.string)
 	print(stringArray({ "a", "b" })) --> true
@@ -1602,7 +1601,6 @@ t.array = t_array
 	Ensures value is an array with an exact sequence of element types.
 	The array must not be longer than the number of provided checks.
 
-	## Example
 	```lua
 	local playerTuple = t.strictArray(t.string, t.number)
 	print(playerTuple({ "Builderman", 100 })) --> true
@@ -1646,7 +1644,6 @@ local callbackArray = t.array(t.callback)
 	@function union
 	Creates a union type that passes if any of the given checks pass.
 
-	## Example
 	```lua
 	local stringOrNumber = t.union(t.string, t.number)
 	print(stringOrNumber(5)) --> true
@@ -1677,6 +1674,15 @@ t.union = t_union
 --[=[
 	Alias for `t.union`.
 	@within T
+	@function anyOf
+	@param ... Check -- The checks to union
+	@return Check
+]=]
+t.anyOf = t.union
+
+--[=[
+	Alias for `t.union`.
+	@within T
 	@function some
 	@deprecated Use `t.union` instead.
 	@param ... Check -- The checks to union
@@ -1689,7 +1695,6 @@ t.some = t.union
 	@function intersection
 	Creates an intersection type that passes only if all of the given checks pass.
 
-	## Example
 	```lua
 	local positiveInteger = t.intersection(t.integer, t.numberPositive)
 	print(positiveInteger(4)) --> true
@@ -1714,6 +1719,15 @@ local function t_intersection(...: Check<any>): Check<any>
 	end
 end
 t.intersection = t_intersection
+
+--[=[
+	Alias for `t.intersection`.
+	@within T
+	@function allOf
+	@param ... Check<V> -- The checks to intersect
+	@return Check<V>
+]=]
+t.allOf = t.intersection
 
 --[=[
 	Alias for `t.intersection`.
@@ -1784,6 +1798,8 @@ t.interface = t_interface
 	@function partialInterface
 	Ensures value is a table whose known fields pass the given checks when present.
 	Missing fields are allowed.
+
+	Equivalent to wrapping all the values of `checkTable` in a `t.interface` with `t.optional`.
 
 	```lua
 	local patchCheck = t.partialInterface({
@@ -1867,6 +1883,84 @@ t.strictInterface = t_strictInterface
 --// INSTANCE CHECKS //--
 --------------------------------------------------------------------------------
 
+local checkAttributes = t.map(t.string, t.callback)
+local checkProperties = t.map(t.string, t.callback)
+local checkChildren = t.map(t.string, t.callback)
+
+--[=[
+	@within T
+	@function attributes
+	Ensures an Instance has attributes whose values pass the corresponding checks.
+
+	```lua
+	local hasValidAttributes = t.attributes({
+		Health = t.numberConstrained(0, 100),
+		DisplayName = t.match("^Player%d+$"),
+	})
+	```
+
+	@param checkTable {[string]: Check} -- Map of attribute name to checker
+	@return Check<Instance>
+]=]
+local function t_attributes(checkTable: { [string]: Check<any> }): Check<Instance>
+	assert(checkAttributes(checkTable))
+	return function(value: Instance): (boolean, string?)
+		local instanceSuccess, instanceErrMsg = t.Instance(value)
+		if not instanceSuccess then
+			return false, instanceErrMsg or ""
+		end
+		for name, check in pairs(checkTable) do
+			local success, errMsg = check(value:GetAttribute(name))
+			if success == false then
+				return false, string.format("[attributes] bad value for %q:\n\t%s", name, errMsg or "")
+			end
+		end
+		return true :: any
+	end
+end
+t.attributes = t_attributes
+
+--[=[
+	@within T
+	@function properties
+	Ensures an Instance has properties whose values pass the corresponding checks.
+
+	```lua
+	local validNpcRef = t.properties({
+		Name = t.literal("Boss", "Minion"),
+		Value = t.instanceOf("Model"),
+	})
+	```
+
+	@param checkTable {[string]: Check} -- Map of property name to checker
+	@return Check<Instance>
+]=]
+local function t_properties(checkTable: { [string]: Check<any> }): Check<Instance>
+	assert(checkProperties(checkTable))
+	return function(value: Instance): (boolean, string?)
+		local instanceSuccess, instanceErrMsg = t.Instance(value)
+		if not instanceSuccess then
+			return false, instanceErrMsg or ""
+		end
+		for name, check in pairs(checkTable) do
+			local ok, propertyValue = pcall(function()
+				return (value :: any)[name]
+			end)
+			if not ok then
+				return false, string.format("[properties] could not read property %q", name)
+			end
+			local success, errMsg = check(propertyValue)
+			if success == false then
+				return false, string.format("[properties] bad value for %q:\n\t%s", name, errMsg or "")
+			end
+		end
+		return true :: any
+	end
+end
+t.properties = t_properties
+
+local t_children: (checkTable: { [string]: Check<Instance> }) -> Check<Instance>
+
 --[=[
 	@within T
 	@function instanceOf
@@ -1877,16 +1971,36 @@ t.strictInterface = t_strictInterface
 	print(isFolder(Instance.new("Folder"))) --> true
 	```
 
+	Example with child checks:
+	```lua
+	local isModelWithDisplayName = t.instanceOf("Model", {
+		DisplayName = t.instanceOf("StringValue"),
+	})
+	print(isModelWithDisplayName(model)) --> true if model has a StringValue child named DisplayName
+	```
+
+	Compose additional checks with `t.intersection`:
+	```lua
+	local checkModel = t.intersection(
+		t.instanceOf("Model", {
+			Config = t.instanceOf("StringValue"),
+		}),
+		t.attributes({
+		Enabled = t.boolean,
+		}),
+		t.properties({
+		Name = t.string,
+		})
+	)
+	```
+
 	@param className string -- The exact class name to match
-	@param childTable {[string]: Check}? -- Optional map of child names to checks
+	@param childTable {[string]: Check<Instance>}? -- Optional map of child names to checks
 	@return Check<Instance>
 ]=]
 local function t_instanceOf(className: string, childTable: { [string]: Check<Instance> }?): Check<Instance>
 	assert(t.string(className))
-	local childrenCheck
-	if childTable ~= nil then
-		childrenCheck = t.children(childTable)
-	end
+	local childrenCheck = if childTable ~= nil then t_children(childTable) else nil
 	return function(value: Instance): (boolean, string?)
 		local instanceSuccess, instanceErrMsg = t.Instance(value)
 		if not instanceSuccess then
@@ -1912,7 +2026,7 @@ t.instanceOf = t_instanceOf
 	@function instance
 	@deprecated Use `t.instanceOf` instead.
 	@param className string -- The exact class name to match
-	@param childTable {[string]: Check}? -- Optional map of child names to checks
+	@param childTable {[string]: Check<Instance>}? -- Optional map of child names to checks
 	@return Check<Instance>
 ]=]
 t.instance = t.instanceOf
@@ -1927,16 +2041,21 @@ t.instance = t.instanceOf
 	print(isGuiObject(Instance.new("Frame"))) --> true
 	```
 
+	Compose alternative schemas with `t.union`:
+	```lua
+	local folderOrModel = t.union(
+		t.instanceOf("Folder"),
+		t.instanceOf("Model")
+	)
+	```
+
 	@param className string -- The class name to use with `IsA`
 	@param childTable {[string]: Check<Instance>}? -- Optional map of child names to checks
 	@return Check<Instance>
 ]=]
 local function t_instanceIsA(className: string, childTable: { [string]: Check<Instance> }?): Check<Instance>
 	assert(t.string(className))
-	local childrenCheck
-	if childTable ~= nil then
-		childrenCheck = t.children(childTable)
-	end
+	local childrenCheck = if childTable ~= nil then t_children(childTable) else nil
 	return function(value: Instance): (boolean, string?)
 		local instanceSuccess, instanceErrMsg = t.Instance(value)
 		if not instanceSuccess then
@@ -1956,28 +2075,26 @@ local function t_instanceIsA(className: string, childTable: { [string]: Check<In
 end
 t.instanceIsA = t_instanceIsA
 
-local checkChildren = t.map(t.string, t.callback)
-
 --[=[
-		@within T
-		@function children
-		Ensures an Instance tree has named children that pass the corresponding checks.
-		Each entry in `checkTable` must be satisfied by a child with that exact name.
+	@within T
+	@function children
+	Ensures an Instance tree has named children that pass the corresponding checks.
+	Each entry in `checkTable` must be satisfied by a child with that exact name.
 
-		```lua
-		local hasConfig = t.children({
-			Config = t.instanceOf("StringValue"),
-		})
-		```
+	```lua
+	local hasConfig = t.children({
+		Config = t.instanceOf("StringValue"),
+	})
+	```
 
-		:::warning
-		If the instance has multiple children with the same name, this check will always fail.
-		:::
+	:::warning
+	If the instance has multiple children with the same name, this check will always fail.
+	:::
 
-		@param checkTable {[string]: Check<Instance>} -- Map of child name to checker
-		@return Check<Instance>
-	]=]
-local function t_children(checkTable: { [string]: Check<Instance> }): Check<Instance>
+	@param checkTable {[string]: Check<Instance>} -- Map of child name to checker
+	@return Check<Instance>
+]=]
+t_children = function(checkTable: { [string]: Check<Instance> }): Check<Instance>
 	assert(checkChildren(checkTable))
 	return function(value: Instance): (boolean, string?)
 		local instanceSuccess, instanceErrMsg = t.Instance(value)
@@ -2015,33 +2132,16 @@ t.children = t_children
 	Ensures value is an EnumItem belonging to the given Enum type.
 
 	:::tip Choosing the right Enum check
-	There are three related validators — use the one that matches how specific you need to be:
-
-	- **`t.Enum`** — accepts an `Enum` *type object* (e.g. `Enum.Material`), not an item from it.
-	  Use this when a function receives an enum category as a parameter.
-
-	- **`t.EnumItem`** — accepts *any* `EnumItem`, from any enum.
-	  Use this when you only care that the value is some enum item, regardless of which enum it belongs to.
-
-	- **`t.itemOfEnum(Enum.X)`** — accepts an `EnumItem` that belongs to a *specific* enum.
-	  Use this when you need the value to come from exactly one known enum (e.g. only `Enum.Material` items).
+	There are three related validators:
+	- `t.itemOfEnum(enum)` checks for a specific enum type like `Enum.Material`.
+	- `t.EnumItem` accepts any `EnumItem`.
+	- `t.Enum` accepts an enum container like `Enum.Material` itself.
 	:::
 
-	Alias: `t.enum`
-
 	```lua
-	-- Only accepts Enum.Material items
 	local isMaterial = t.itemOfEnum(Enum.Material)
-	print(isMaterial(Enum.Material.Slate))  --> true
-	print(isMaterial(Enum.KeyCode.A))       --> false
-
-	-- Accepts any EnumItem from any enum
-	print(t.EnumItem(Enum.Material.Slate))  --> true
-	print(t.EnumItem(Enum.KeyCode.A))       --> true
-
-	-- Accepts the Enum type object itself, not an item
-	print(t.Enum(Enum.Material))            --> true
-	print(t.Enum(Enum.Material.Slate))      --> false
+	print(isMaterial(Enum.Material.Slate)) --> true
+	print(isMaterial(Enum.KeyCode.A)) --> false
 	```
 
 	@param enum Enum -- The Enum type to check against
@@ -2049,16 +2149,15 @@ t.children = t_children
 ]=]
 local function t_itemOfEnum(enum: Enum): Check<EnumItem>
 	assert(t.Enum(enum))
-	return function(value: EnumItem): (boolean, string?)
+	return function(value: any): (boolean, string?)
 		local enumItemSuccess, enumItemErrMsg = t.EnumItem(value)
 		if not enumItemSuccess then
-			return false, enumItemErrMsg
+			return false, enumItemErrMsg or ""
 		end
 		if value.EnumType == enum then
 			return true :: any
-		else
-			return false, string.format("enum of %s expected, got enum of %s", tostring(enum), tostring(value.EnumType))
 		end
+		return false, string.format("enum of %s expected, got enum of %s", tostring(enum), tostring(value.EnumType))
 	end
 end
 t.itemOfEnum = t_itemOfEnum

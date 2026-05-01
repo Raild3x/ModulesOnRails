@@ -404,10 +404,103 @@ return function(tiniest: tiniest)
 			}
 			expectPass(childrenCheck(folder))
 
+			folder:SetAttribute("Enabled", true)
+			value:SetAttribute("Loaded", true)
+
+			expectPass(T.attributes { Enabled = T.boolean }(folder))
+			expectPass(T.properties { Name = T.string }(folder))
+
+			local richChildrenCheck = T.intersection(
+				T.instanceOf("Folder"),
+				T.attributes { Enabled = T.boolean },
+				T.properties { Name = T.string },
+				T.children {
+					Config = T.intersection(
+						T.instanceOf("StringValue"),
+						T.attributes { Loaded = T.boolean },
+						T.properties { Name = T.string }
+					),
+				}
+			)
+			expectPass(richChildrenCheck(folder))
+
+			expectFail(T.attributes { Missing = T.boolean }(folder))(
+				'[attributes] bad value for "Missing":\n\tboolean expected, got nil'
+			)
+
 			local extra = Instance.new("Folder")
 			extra.Name = "Config"
 			extra.Parent = folder
 			expectFail(childrenCheck(folder))('Cannot process multiple children with the same name "Config"')
+		end)
+
+		test("attributes and properties support composed validators", function()
+			local ok, folder = pcall(function()
+				return Instance.new("Folder")
+			end)
+			if not ok then
+				expect(true).is(true)
+				return
+			end
+
+			folder.Name = "InventoryRoot"
+			folder.Archivable = true
+			folder:SetAttribute("Mode", "Auto")
+			folder:SetAttribute("Health", 80)
+			folder:SetAttribute("Enabled", true)
+
+			local config = Instance.new("StringValue")
+			config.Name = "ConfigState"
+			config.Value = "Ready"
+			config.Parent = folder
+
+			local attributeCheck = T.attributes {
+				Mode = T.anyOf(T.literal("Auto"), T.literal("Manual")),
+				Health = T.allOf(T.integer, T.integerConstrained(0, 100)),
+				Enabled = T.boolean,
+			}
+			expectPass(attributeCheck(folder))
+
+			local propertyCheck = T.properties {
+				Name = T.match("^Inventory"),
+				Archivable = T.boolean,
+			}
+			expectPass(propertyCheck(folder))
+
+			local nestedPropertyCheck = T.properties {
+				Name = T.match("^Config"),
+				Value = T.anyOf(T.literal("Ready"), T.literal("Idle")),
+				Parent = T.instanceOf("Folder"),
+			}
+			expectPass(nestedPropertyCheck(config))
+
+			folder:SetAttribute("Health", 150)
+			expectFail(attributeCheck(folder))(
+				'[attributes] bad value for "Health":\n\tinteger <= 100 expected, got 150'
+			)
+			folder:SetAttribute("Health", 80)
+
+			config.Value = "Broken"
+			expectFail(nestedPropertyCheck(config))(
+				'[properties] bad value for "Value":\n\tbad type for union:\n\t[1] expected Ready, got Broken\n\t[2] expected Idle, got Broken'
+			)
+
+			expectFail(T.properties { MissingProperty = T.string }(folder))(
+				'[properties] could not read property "MissingProperty"'
+			)
+		end)
+
+		test("anyOf and allOf alias union and intersection behavior", function()
+			local stringOrNumber = T.anyOf(T.string, T.number)
+			expectPass(stringOrNumber("hello"))
+			expectPass(stringOrNumber(5))
+			expectFail(stringOrNumber(true))(
+				"bad type for union:\n\t[1] string expected, got boolean\n\t[2] number expected, got boolean"
+			)
+
+			local positiveInteger = T.allOf(T.integer, T.numberPositive)
+			expectPass(positiveInteger(4))
+			expectFail(positiveInteger(-1))("number > 0 expected, got -1")
 		end)
 	end)
 
