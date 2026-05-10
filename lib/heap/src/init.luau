@@ -387,39 +387,45 @@ function Heap:UpdateCost<T>(
 	newCost: number | (value: T, oldCost: number) -> number,
 	updateAll: boolean?
 ): boolean
-    local Values, Costs, HeapIndex, Size = self._Values, self._Costs, self._HeapIndex, self._Size
-    local updated = 0
-    local updatedHeapIdx = nil -- used to track the heap index of the updated value (used only when updating a single value)
+	local Values, Costs, HeapIndex, Size = self._Values, self._Costs, self._HeapIndex, self._Size
+	local updated = 0
+	local updatedHeapIdx = nil -- used to track the heap index of the updated value (used only when updating a single value)
 
-    local newCostIsFn = type(newCost) == "function"
+	local newCostIsFn = type(newCost) == "function"
 
-    -- First pass: Update costs in place
-    if type(valueToUpdate) == "function" then -- I split this up intentionally to reduce the number of comparisons made
-        for realIdx, refIdx in pairs(HeapIndex) do
-            if valueToUpdate(Values[refIdx]) then
-                local oldCost = Costs[refIdx]
-                local computedNewCost: number = if newCostIsFn then (newCost :: any)(Values[refIdx], oldCost) else newCost
+	-- First pass: Update costs in place
+	if type(valueToUpdate) == "function" then -- I split this up intentionally to reduce the number of comparisons made
+		for realIdx, refIdx in pairs(HeapIndex) do
+			if valueToUpdate(Values[refIdx]) then
+				local oldCost = Costs[refIdx]
+				local computedNewCost: number = if newCostIsFn
+					then (newCost :: any)(Values[refIdx], oldCost)
+					else newCost
 
-                if oldCost ~= computedNewCost then
-                    Costs[refIdx] = computedNewCost
-                    updatedHeapIdx = realIdx -- Store the heap position, not the ref index
-                    updated += 1
-                end
+				if oldCost ~= computedNewCost then
+					Costs[refIdx] = computedNewCost
+					updatedHeapIdx = realIdx -- Store the heap position, not the ref index
+					updated += 1
+				end
 
-                if not updateAll then break end
-            end
-        end
-    else
-        for realIdx, refIdx in pairs(HeapIndex) do
-            if Values[refIdx] == valueToUpdate then
-                local oldCost = Costs[refIdx]
-                local computedNewCost: number = if newCostIsFn then (newCost :: any)(Values[refIdx], oldCost) else newCost
+				if not updateAll then
+					break
+				end
+			end
+		end
+	else
+		for realIdx, refIdx in pairs(HeapIndex) do
+			if Values[refIdx] == valueToUpdate then
+				local oldCost = Costs[refIdx]
+				local computedNewCost: number = if newCostIsFn
+					then (newCost :: any)(Values[refIdx], oldCost)
+					else newCost
 
-                if oldCost ~= computedNewCost then
-                    Costs[refIdx] = computedNewCost
-                    updatedHeapIdx = realIdx -- Store the heap position, not the ref index
-                    updated += 1
-                end
+				if oldCost ~= computedNewCost then
+					Costs[refIdx] = computedNewCost
+					updatedHeapIdx = realIdx -- Store the heap position, not the ref index
+					updated += 1
+				end
 
 				if not updateAll then
 					break
@@ -428,19 +434,19 @@ function Heap:UpdateCost<T>(
 		end
 	end
 
-    if updated == 1 then
-         -- Only heapify once if a single value was updated
-         -- Try heapifying up first (in case cost decreased for min-heap or increased for max-heap)
-         -- then heapify down (in case cost increased for min-heap or decreased for max-heap)
-        self:_heapifyUp(updatedHeapIdx)
-        self:_heapifyDown(updatedHeapIdx)
-    elseif updated > 1 then
-        -- If we made multiple updates, we need to perform a more robust heapify
-        -- Rebuild the heap from the bottom up
-        for i = math.floor(Size / 2), 1, -1 do
-            self:_heapifyDown(i)
-        end
-    end
+	if updated == 1 then
+		-- Only heapify once if a single value was updated
+		-- Try heapifying up first (in case cost decreased for min-heap or increased for max-heap)
+		-- then heapify down (in case cost increased for min-heap or decreased for max-heap)
+		self:_heapifyUp(updatedHeapIdx)
+		self:_heapifyDown(updatedHeapIdx)
+	elseif updated > 1 then
+		-- If we made multiple updates, we need to perform a more robust heapify
+		-- Rebuild the heap from the bottom up
+		for i = math.floor(Size / 2), 1, -1 do
+			self:_heapifyDown(i)
+		end
+	end
 
 	return if updated > 0 then true else false
 end
@@ -493,14 +499,15 @@ end
     Removes the first occurrence of a given value from the heap.
     Heaps are not optimized for search removals, so this method should
     be used sparingly.
-    
+]=]
+--[[
     :::note Performance
     This operation requires O(n) search time to locate the element, followed by O(log n) heapify.
     A reverse mapping (refIdx → heapPos) could reduce this to O(log n), but would add memory overhead
     and complexity to maintain across all heap operations. For typical use cases where Push/Pop
     dominate, the current approach favors simplicity and lower memory usage.
     :::
-]=]
+]]
 function Heap:RemoveFirstOccurrence<T>(valueToRemove: T): boolean
 	for refIdx, value in pairs(self._Values) do
 		if value == valueToRemove then
@@ -513,7 +520,7 @@ function Heap:RemoveFirstOccurrence<T>(valueToRemove: T): boolean
 					break
 				end
 			end
-			
+
 			if not heapPos then
 				-- This shouldn't happen, but handle it gracefully
 				return false
@@ -550,11 +557,11 @@ function Heap:RemoveFirstOccurrence<T>(valueToRemove: T): boolean
 					local parent = math.floor(heapPos / 2)
 					local movedCost = self._Costs[lastRefIdx]
 					local parentCost = self._Costs[self._HeapIndex[parent]]
-					
+
 					-- Check if moved element violates heap property with parent
 					local needsHeapifyUp = (self._isMinHeap and movedCost < parentCost)
 						or (not self._isMinHeap and movedCost > parentCost)
-					
+
 					if needsHeapifyUp then
 						self:_heapifyUp(heapPos)
 					else
@@ -586,7 +593,7 @@ function Heap:RemoveAllOccurrences<T>(valueToRemove: T): number
 			table.insert(toRemove, refIdx)
 		end
 	end
-	
+
 	-- Remove each occurrence
 	for _, refIdx in ipairs(toRemove) do
 		-- Find the heap position where this refIdx is located
@@ -597,7 +604,7 @@ function Heap:RemoveAllOccurrences<T>(valueToRemove: T): number
 				break
 			end
 		end
-		
+
 		if heapPos then
 			-- Remove the value and cost
 			self._Values[refIdx] = nil
@@ -624,11 +631,11 @@ function Heap:RemoveAllOccurrences<T>(valueToRemove: T): number
 						local parent = math.floor(heapPos / 2)
 						local movedCost = self._Costs[lastRefIdx]
 						local parentCost = self._Costs[self._HeapIndex[parent]]
-						
+
 						-- Check if moved element violates heap property with parent
 						local needsHeapifyUp = (self._isMinHeap and movedCost < parentCost)
 							or (not self._isMinHeap and movedCost > parentCost)
-						
+
 						if needsHeapifyUp then
 							self:_heapifyUp(heapPos)
 						else
@@ -640,7 +647,7 @@ function Heap:RemoveAllOccurrences<T>(valueToRemove: T): number
 					end
 				end
 			end
-			
+
 			count += 1
 		end
 	end
