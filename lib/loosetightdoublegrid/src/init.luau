@@ -66,6 +66,7 @@ local TightCell = require(script.TightCell)
 
 --// Types //--
 type LooseCell = LooseCell.LooseCell
+type TightCell = TightCell.TightCell
 export type AABB = LooseCell.AABB -- Stored in the order of {L,B,R,T} (Liberty!), can also be anvisioned as a ccw rotation of the sides.
 export type EntityId = LooseCell.EntityId
 --[=[
@@ -82,9 +83,9 @@ export type EntityId = LooseCell.EntityId
     Use the ShapeType enum for comparisions as the raw values are subject to change.
 ]=]
 export type ShapeType = "c" | "r" | "p"
-local SHAPE_TYPE_CIRCLE = "c"
-local SHAPE_TYPE_RECT = "r"
-local SHAPE_TYPE_POINT = "p"
+local SHAPE_TYPE_CIRCLE: ShapeType = "c"
+local SHAPE_TYPE_RECT: ShapeType = "r"
+local SHAPE_TYPE_POINT: ShapeType = "p"
 
 --[=[
     @within LooseTightDoubleGrid
@@ -104,6 +105,57 @@ export type FilterParams = {
 	FilterType: Enum.RaycastFilterType?,
 }
 
+type LTDGInternal = {
+	Position: Vector2,
+	_LastRender: Instance?,
+	BottomCornerX: number,
+	BottomCornerY: number,
+	invCellWidth: number,
+	invCellHeight: number,
+	tCols: number,
+	tRows: number,
+	cWidth: number,
+	cHeight: number,
+	ShapeMap: { [EntityId]: ShapeType },
+	LooseGrid: { [number]: LooseCell },
+	TightGrid: { [number]: TightCell },
+	EntityIdToLooseCellIdx: { [EntityId]: number },
+	DirtyLooseCells: { [LooseCell]: number },
+	_QueryStamp: number,
+	_SeenLooseCellStamp: { [number]: number },
+	_SeenTightCellStamp: { [number]: number },
+	GetCol: (self: LTDGInternal, x: number) -> number,
+	GetRow: (self: LTDGInternal, y: number) -> number,
+	_RayAABBIntersection: (
+		self: LTDGInternal,
+		origin: Vector2,
+		direction: Vector2,
+		l: number,
+		b: number,
+		r: number,
+		t: number
+	) -> (boolean, Vector2?, Vector2?),
+	_RayCircleIntersection: (
+		self: LTDGInternal,
+		origin: Vector2,
+		direction: Vector2,
+		aabb: AABB
+	) -> (boolean, Vector2?, Vector2?),
+	_RayPointIntersection: (
+		self: LTDGInternal,
+		origin: Vector2,
+		direction: Vector2,
+		aabb: AABB
+	) -> (boolean, Vector2?, Vector2?),
+}
+
+type RaycastHit = {
+	Normal: Vector2,
+	Position: Vector2,
+	Distance: number,
+	EntityId: EntityId,
+}
+
 --------------------------------------------------------------------------------
 --// Util Functions //--
 --------------------------------------------------------------------------------
@@ -115,13 +167,22 @@ local function generateFilter(filterParams: FilterParams?): (boolean, (EntityId)
 	local filterList = filterParams and filterParams.FilterList
 	local customFilter = filterParams and filterParams.CustomFilter
 	local filterType = filterParams and filterParams.FilterType or FILTER_TYPE_INCLUDE
+	local filterSet: { [EntityId]: true }? = nil
+
+	if filterList then
+		table.freeze(filterList)
+		filterSet = {}
+		for _, entityId in ipairs(filterList) do
+			filterSet[entityId] = true
+		end
+	end
 
 	local function isFilteredOut(entityId: EntityId): boolean
 		local isFiltered = false
 		if customFilter then
 			isFiltered = customFilter(entityId)
-		elseif filterList then
-			isFiltered = table.find(filterList, entityId) ~= nil
+		elseif filterSet then
+			isFiltered = filterSet[entityId] == true
 		end
 		if filterType == FILTER_TYPE_INCLUDE then
 			return not isFiltered -- Include only if the filter is not found
@@ -133,7 +194,16 @@ local function generateFilter(filterParams: FilterParams?): (boolean, (EntityId)
 	return skipFilter, isFilteredOut
 end
 
-local function CheckRectRectIntersection(left1, bottom1, right1, top1, left2, bottom2, right2, top2)
+local function CheckRectRectIntersection(
+	left1: number,
+	bottom1: number,
+	right1: number,
+	top1: number,
+	left2: number,
+	bottom2: number,
+	right2: number,
+	top2: number
+): boolean
 	-- Check if the two rectangles overlap
 	local noOverlap = right1 <= left2 -- Rectangle 1 is completely to the left of Rectangle 2
 		or right2 <= left1 -- Rectangle 2 is completely to the left of Rectangle 1
@@ -143,7 +213,15 @@ local function CheckRectRectIntersection(left1, bottom1, right1, top1, left2, bo
 	return not noOverlap -- If there is no overlap, return false; otherwise, return true
 end
 
-local function CheckCircleRectIntersection(circleX, circleY, circleRadius, rectLeft, rectBottom, rectRight, rectTop)
+local function CheckCircleRectIntersection(
+	circleX: number,
+	circleY: number,
+	circleRadius: number,
+	rectLeft: number,
+	rectBottom: number,
+	rectRight: number,
+	rectTop: number
+): boolean
 	-- Calculate the rectangle's center and half dimensions
 	local rectCenterX = (rectLeft + rectRight)
 	local rectCenterY = (rectBottom + rectTop)
@@ -177,7 +255,14 @@ local function CheckCircleRectIntersection(circleX, circleY, circleRadius, rectL
 	return cornerDistanceSquared <= (circleRadius * circleRadius)
 end
 
-local function CheckCircleCircleIntersection(cx1, cy1, radius1, cx2, cy2, radius2)
+local function CheckCircleCircleIntersection(
+	cx1: number,
+	cy1: number,
+	radius1: number,
+	cx2: number,
+	cy2: number,
+	radius2: number
+): boolean
 	-- Calculate the squared distance between the two circle centers
 	local dx = cx1 - cx2
 	local dy = cy1 - cy2
@@ -188,17 +273,21 @@ local function CheckCircleCircleIntersection(cx1, cy1, radius1, cx2, cy2, radius
 	return distanceSquared <= (combinedRadius * combinedRadius)
 end
 
-local function getNextId(self: LTDG): EntityId
+local function getNextId(self: { NextId: number }): EntityId
 	local id = self.NextId
 	self.NextId += 1
 	return id
 end
 
-if not debug or not debug.profilebegin then -- This is a workaround for the debug library not being available in some environments.
-	debug = {
-		profilebegin = function() end,
-		profileend = function() end,
-	}
+local profileBegin: (name: string) -> ()
+local profileEnd: () -> ()
+
+if debug and debug.profilebegin and debug.profileend then
+	profileBegin = debug.profilebegin
+	profileEnd = debug.profileend
+else
+	profileBegin = function(_name: string) end
+	profileEnd = function() end
 end
 --------------------------------------------------------------------------------
 --// Class //--
@@ -307,6 +396,9 @@ function LTDG.new(config: {
 		ShapeMap = {} :: { [EntityId]: ShapeType },
 		EntityIdToLooseCellIdx = {} :: { [EntityId]: number },
 		DirtyLooseCells = {} :: { [LooseCell]: number },
+		_QueryStamp = 0,
+		_SeenLooseCellStamp = {} :: { [number]: number },
+		_SeenTightCellStamp = {} :: { [number]: number },
 	}, LTDG)
 
 	return self
@@ -318,7 +410,7 @@ end
 
     If you need to iterate over the grid then you should use the `__iter` metamethod instead.
 ]=]
-function LTDG:GetEntities(): { EntityId }
+function LTDG.GetEntities(self: LTDGInternal): { EntityId }
 	local entities = {}
 	for id in self.ShapeMap do
 		table.insert(entities, id)
@@ -331,7 +423,7 @@ end
     @private
     Gets the row index from a given world y-coordinate.
 ]=]
-function LTDG:GetRow(y: number)
+function LTDG.GetRow(self: LTDGInternal, y: number): number
 	local row = (y - self.BottomCornerY) * self.invCellHeight + 1
 	if row < 1 then
 		return 1
@@ -351,7 +443,7 @@ end
     print("Column:", col)
     ```
 ]=]
-function LTDG:GetCol(x: number)
+function LTDG.GetCol(self: LTDGInternal, x: number): number
 	local col = (x - self.BottomCornerX) * self.invCellWidth + 1
 	if col < 1 then
 		return 1
@@ -394,7 +486,7 @@ end
     ```
 ]=]
 function LTDG:InsertRect(position: Vector2, size: Vector2): EntityId
-	debug.profilebegin("LTDG:InsertRect")
+	profileBegin("LTDG:InsertRect")
 	local halfSizeX = size.X * 0.5
 	local halfSizeY = size.Y * 0.5
 	local aabb: AABB = {
@@ -417,7 +509,7 @@ function LTDG:InsertRect(position: Vector2, size: Vector2): EntityId
 	local looseCell = self.LooseGrid[index]
 	-- TODO: Check if this would be more efficient than an array
 	self.DirtyLooseCells[looseCell] = index
-	debug.profileend()
+	profileEnd()
 	return id
 end
 
@@ -431,7 +523,7 @@ end
     ```
 ]=]
 function LTDG:InsertCircle(position: Vector2, radius: number): EntityId
-	debug.profilebegin("LTDG:InsertCircle")
+	profileBegin("LTDG:InsertCircle")
 	local aabb: AABB = {
 		position.X - radius, -- L
 		position.Y - radius, -- B
@@ -451,7 +543,7 @@ function LTDG:InsertCircle(position: Vector2, radius: number): EntityId
 
 	local looseCell = self.LooseGrid[index]
 	self.DirtyLooseCells[looseCell] = index
-	debug.profileend()
+	profileEnd()
 	return id
 end
 
@@ -465,7 +557,7 @@ end
     ```
 ]=]
 function LTDG:InsertPoint(position: Vector2): EntityId
-	debug.profilebegin("LTDG:InsertPoint")
+	profileBegin("LTDG:InsertPoint")
 	local aabb: AABB = {
 		position.X,
 		position.Y,
@@ -485,7 +577,7 @@ function LTDG:InsertPoint(position: Vector2): EntityId
 
 	local looseCell = self.LooseGrid[index]
 	self.DirtyLooseCells[looseCell] = index
-	debug.profileend()
+	profileEnd()
 	return id
 end
 
@@ -495,13 +587,21 @@ end
 
     Updates an entity's position and bounding box in the grid.
 ]=]
-function LTDG:_UpdateEntity(entityId: EntityId, newPos: Vector2, L: number, B: number, R: number, T: number)
+function LTDG._UpdateEntity(
+	self: LTDGInternal,
+	entityId: EntityId,
+	newPos: Vector2,
+	L: number,
+	B: number,
+	R: number,
+	T: number
+)
 	local looseCellIdx = self.EntityIdToLooseCellIdx[entityId]
 	if not looseCellIdx then
 		error("Entity not found: " .. tostring(entityId))
 	end
 
-	local looseCell = self.LooseGrid[looseCellIdx]
+	local looseCell: LooseCell = self.LooseGrid[looseCellIdx]
 	self.DirtyLooseCells[looseCell] = looseCellIdx
 
 	local cX = self:GetCol(newPos.X)
@@ -529,7 +629,7 @@ end
     ```
 ]=]
 function LTDG:UpdateRect(entityId: EntityId, newPosition: Vector2, newSize: Vector2)
-	debug.profilebegin("LTDG:UpdateRect")
+	profileBegin("LTDG:UpdateRect")
 	if self.ShapeMap[entityId] ~= SHAPE_TYPE_RECT then
 		warn("Entity is not a rectangle: " .. tostring(entityId))
 		self.ShapeMap[entityId] = SHAPE_TYPE_RECT -- force it to be a rectangle
@@ -545,7 +645,7 @@ function LTDG:UpdateRect(entityId: EntityId, newPosition: Vector2, newSize: Vect
 		newPosition.X + halfSizeX, -- R
 		newPosition.Y + halfSizeY -- T
 	)
-	debug.profileend()
+	profileEnd()
 end
 
 --[=[
@@ -558,7 +658,7 @@ end
     ```
 ]=]
 function LTDG:UpdateCircle(entityId: EntityId, newPosition: Vector2, newRadius: number)
-	debug.profilebegin("LTDG:UpdateCircle")
+	profileBegin("LTDG:UpdateCircle")
 	if self.ShapeMap[entityId] ~= SHAPE_TYPE_CIRCLE then
 		warn("Entity is not a circle: " .. tostring(entityId))
 		self.ShapeMap[entityId] = SHAPE_TYPE_CIRCLE -- force it to be a circle
@@ -572,7 +672,7 @@ function LTDG:UpdateCircle(entityId: EntityId, newPosition: Vector2, newRadius: 
 		newPosition.X + newRadius, -- R
 		newPosition.Y + newRadius -- T
 	)
-	debug.profileend()
+	profileEnd()
 end
 
 --[=[
@@ -585,7 +685,7 @@ end
     ```
 ]=]
 function LTDG:UpdatePoint(entityId: EntityId, newPosition: Vector2)
-	debug.profilebegin("LTDG:UpdatePoint")
+	profileBegin("LTDG:UpdatePoint")
 	if self.ShapeMap[entityId] ~= SHAPE_TYPE_POINT then
 		warn("Entity is not a point: " .. tostring(entityId))
 		self.ShapeMap[entityId] = SHAPE_TYPE_POINT -- force it to be a point
@@ -599,7 +699,7 @@ function LTDG:UpdatePoint(entityId: EntityId, newPosition: Vector2)
 		newPosition.X, -- R
 		newPosition.Y -- T
 	)
-	debug.profileend()
+	profileEnd()
 end
 
 --[=[
@@ -732,7 +832,8 @@ end
     @private
     Queries entities within a specified rectangular region bounds.
 ]=]
-function LTDG:_QueryRegion(
+function LTDG._QueryRegion(
+	self: LTDGInternal,
 	qL: number,
 	qB: number,
 	qR: number,
@@ -740,22 +841,22 @@ function LTDG:_QueryRegion(
 	queryShapeType: ShapeType?,
 	filterParams: FilterParams?
 ): { EntityId }
-	debug.profilebegin("LTDG:_QueryRegion")
+	profileBegin("LTDG:_QueryRegion")
 	queryShapeType = queryShapeType or SHAPE_TYPE_RECT -- Default to rectangle if not specified
 
-	debug.profilebegin("Calculate Cols and Rows")
+	profileBegin("Calculate Cols and Rows")
 	local tx1 = self:GetCol(qL)
 	local tx2 = self:GetCol(qR)
 	local ty1 = self:GetRow(qB)
 	local ty2 = self:GetRow(qT)
-	debug.profileend()
+	profileEnd()
 
-	debug.profilebegin("Update Loose Cell Extents")
+	profileBegin("Update Loose Cell Extents")
 	for looseCell, looseCellIdx in self.DirtyLooseCells do
 		looseCell:UpdateExtents(self, looseCellIdx)
 		self.DirtyLooseCells[looseCell] = nil -- clear dirty flag
 	end
-	debug.profileend()
+	profileEnd()
 
 	local intersectingEntities: { EntityId } = {}
 
@@ -767,7 +868,7 @@ function LTDG:_QueryRegion(
 	local skipFilter, isFilteredOut = generateFilter(filterParams)
 
 	local function checkLooseCellAgainstCircle(looseCell: LooseCell)
-		debug.profilebegin("Check LooseCell Against Circle")
+		profileBegin("Check LooseCell Against Circle")
 		for entityId, aabb: AABB in looseCell.AABBs do
 			if not skipFilter and isFilteredOut(entityId) then
 				continue -- skip filtered entities
@@ -787,11 +888,11 @@ function LTDG:_QueryRegion(
 				end
 			end
 		end
-		debug.profileend()
+		profileEnd()
 	end
 
 	local function checkLooseCellAgainstRect(looseCell: LooseCell)
-		debug.profilebegin("Check LooseCell Against Rect")
+		profileBegin("Check LooseCell Against Rect")
 		for entityId, aabb: AABB in looseCell.AABBs do
 			if not skipFilter and isFilteredOut(entityId) then
 				continue -- skip filtered entities
@@ -811,7 +912,7 @@ function LTDG:_QueryRegion(
 				end
 			end
 		end
-		debug.profileend()
+		profileEnd()
 	end
 
 	local checkLooseCell = if queryShapeType == SHAPE_TYPE_CIRCLE
@@ -821,19 +922,20 @@ function LTDG:_QueryRegion(
 	local TightGrid = self.TightGrid
 	local LooseGrid = self.LooseGrid
 	local tCols = self.tCols
-	local checkedLooseCells = {}
+	local stamp = self._QueryStamp + 1
+	self._QueryStamp = stamp
+	local seenLooseCellStamp = self._SeenLooseCellStamp
 
-	debug.profilebegin("Check Tight Cells")
+	profileBegin("Check Tight Cells")
 	for ty = ty1 - 1, ty2 - 1 do
 		local trow = ty * tCols
 		for tx = tx1, tx2 do
 			local tightCell = TightGrid[trow + tx]
 			for _, looseCellIdx in tightCell do
-				if checkedLooseCells[looseCellIdx] then
+				if seenLooseCellStamp[looseCellIdx] == stamp then
 					continue -- skip already checked loose cells
-				else
-					checkedLooseCells[looseCellIdx] = true -- mark loose cell as checked
 				end
+				seenLooseCellStamp[looseCellIdx] = stamp -- mark loose cell as checked
 
 				local looseCell: LooseCell = LooseGrid[looseCellIdx]
 				if looseCell:Intersects(qL, qB, qR, qT) then -- if looseCell intersects search area
@@ -842,9 +944,9 @@ function LTDG:_QueryRegion(
 			end
 		end
 	end
-	debug.profileend()
+	profileEnd()
 
-	debug.profileend()
+	profileEnd()
 	return intersectingEntities
 end
 
@@ -894,11 +996,11 @@ end
     ```
 ]=]
 function LTDG:QueryPoint(pos: Vector2, filterParams: FilterParams?): { EntityId }
-	debug.profilebegin("LTDG:QueryPoint")
+	profileBegin("LTDG:QueryPoint")
 	local cX = self:GetCol(pos.X)
 	local cY = self:GetRow(pos.Y)
 	local index = (cY - 1) * self.tCols + cX
-	local looseCell = self.LooseGrid[index]
+	local looseCell: LooseCell = self.LooseGrid[index]
 
 	local intersectingEntities = {}
 	local skipFilter, isFilteredOut = generateFilter(filterParams)
@@ -911,7 +1013,7 @@ function LTDG:QueryPoint(pos: Vector2, filterParams: FilterParams?): { EntityId 
 			table.insert(intersectingEntities, entityId)
 		end
 	end
-	debug.profileend()
+	profileEnd()
 	return intersectingEntities
 end
 
@@ -940,8 +1042,8 @@ end
     print("Closest Entity ID:", closestEntityId)
     ```
 ]=]
-function LTDG:QueryClosestToPoint(point: Vector2, filterParams: FilterParams?): EntityId?
-	debug.profilebegin("LTDG:QueryClosestToPoint")
+function LTDG.QueryClosestToPoint(self: LTDGInternal, point: Vector2, filterParams: FilterParams?): EntityId?
+	profileBegin("LTDG:QueryClosestToPoint")
 
 	-- Utility function to calculate the squared distance from a point to a shape
 	local function calculateDistanceSquaredToShape(aabb: AABB, shapeType: ShapeType): (number, number)
@@ -989,7 +1091,7 @@ function LTDG:QueryClosestToPoint(point: Vector2, filterParams: FilterParams?): 
 
 	-- Track the closest entity and its distance metrics
 	local ShapeMap = self.ShapeMap
-	local closestEntityId = nil
+	local closestEntityId: EntityId? = nil
 	local closestDistanceSquared = math.huge
 	local closestDistanceToCenter = math.huge
 
@@ -1033,12 +1135,14 @@ function LTDG:QueryClosestToPoint(point: Vector2, filterParams: FilterParams?): 
 	local TightGrid = self.TightGrid
 
 	-- Expanding search algorithm
-	local checkedLooseCells = {}
-	local checkedTightCells = {}
+	local stamp = (self._QueryStamp :: number) + 1
+	self._QueryStamp = stamp
+	local seenLooseCellStamp = self._SeenLooseCellStamp
+	local seenTightCellStamp = self._SeenTightCellStamp
 
 	local tightCellIndexCount = 0
-	local tightCellXIndicesToCheck = table.create(4)
-	local tightCellYIndicesToCheck = table.create(4)
+	local tightCellXIndicesToCheck: { number } = {}
+	local tightCellYIndicesToCheck: { number } = {}
 
 	local radius = 0
 	while true do
@@ -1053,10 +1157,10 @@ function LTDG:QueryClosestToPoint(point: Vector2, filterParams: FilterParams?): 
 			-- Top row
 			if startY > 0 then
 				local tightCellIndex = (startY - 1) * tCols + x
-				checkedTightCells[tightCellIndex] = true -- mark tight cell as checked
+				seenTightCellStamp[tightCellIndex] = stamp -- mark tight cell as checked
 				for _, looseCellIndex in TightGrid[tightCellIndex] do
-					if not checkedLooseCells[looseCellIndex] then
-						checkedLooseCells[looseCellIndex] = true -- mark loose cell as checked
+					if seenLooseCellStamp[looseCellIndex] ~= stamp then
+						seenLooseCellStamp[looseCellIndex] = stamp -- mark loose cell as checked
 						if checkLooseCell(LooseGrid[looseCellIndex]) then
 							tightCellIndexCount += 1
 							tightCellYIndicesToCheck[tightCellIndexCount] = startY -- mark tight cell as checked
@@ -1069,10 +1173,10 @@ function LTDG:QueryClosestToPoint(point: Vector2, filterParams: FilterParams?): 
 			-- Bottom row
 			if endY <= tRows then
 				local tightCellIndex = (endY - 1) * tCols + x
-				checkedTightCells[tightCellIndex] = true -- mark tight cell as checked
+				seenTightCellStamp[tightCellIndex] = stamp -- mark tight cell as checked
 				for _, looseCellIndex in TightGrid[tightCellIndex] do
-					if not checkedLooseCells[looseCellIndex] then
-						checkedLooseCells[looseCellIndex] = true -- mark loose cell as checked
+					if seenLooseCellStamp[looseCellIndex] ~= stamp then
+						seenLooseCellStamp[looseCellIndex] = stamp -- mark loose cell as checked
 						if checkLooseCell(LooseGrid[looseCellIndex]) then
 							tightCellIndexCount += 1
 							tightCellYIndicesToCheck[tightCellIndexCount] = endY -- mark tight cell as checked
@@ -1088,10 +1192,10 @@ function LTDG:QueryClosestToPoint(point: Vector2, filterParams: FilterParams?): 
 			-- Left column
 			if startX > 0 then
 				local tightCellIndex = (y - 1) * tCols + startX
-				checkedTightCells[tightCellIndex] = true -- mark tight cell as checked
+				seenTightCellStamp[tightCellIndex] = stamp -- mark tight cell as checked
 				for _, looseCellIndex in TightGrid[tightCellIndex] do
-					if not checkedLooseCells[looseCellIndex] then
-						checkedLooseCells[looseCellIndex] = true -- mark loose cell as checked
+					if seenLooseCellStamp[looseCellIndex] ~= stamp then
+						seenLooseCellStamp[looseCellIndex] = stamp -- mark loose cell as checked
 						if checkLooseCell(LooseGrid[looseCellIndex]) then
 							tightCellIndexCount += 1
 							tightCellYIndicesToCheck[tightCellIndexCount] = y -- mark tight cell as checked
@@ -1104,10 +1208,10 @@ function LTDG:QueryClosestToPoint(point: Vector2, filterParams: FilterParams?): 
 			-- Right column
 			if endX <= tCols then
 				local tightCellIndex = (y - 1) * tCols + endX
-				checkedTightCells[tightCellIndex] = true -- mark tight cell as checked
+				seenTightCellStamp[tightCellIndex] = stamp -- mark tight cell as checked
 				for _, looseCellIndex in TightGrid[tightCellIndex] do
-					if not checkedLooseCells[looseCellIndex] then
-						checkedLooseCells[looseCellIndex] = true -- mark loose cell as checked
+					if seenLooseCellStamp[looseCellIndex] ~= stamp then
+						seenLooseCellStamp[looseCellIndex] = stamp -- mark loose cell as checked
 						if checkLooseCell(LooseGrid[looseCellIndex]) then
 							tightCellIndexCount += 1
 							tightCellYIndicesToCheck[tightCellIndexCount] = y -- mark tight cell as checked
@@ -1128,11 +1232,12 @@ function LTDG:QueryClosestToPoint(point: Vector2, filterParams: FilterParams?): 
 						continue -- skip out of bounds cells
 					end
 					local tightCellIndex = (ny - 1) * tCols + nx
-					if not checkedTightCells[tightCellIndex] then
-						checkedTightCells[tightCellIndex] = true -- mark tight cell as checked
-						for _, looseCellIndex in TightGrid[tightCellIndex] do
-							if not checkedLooseCells[looseCellIndex] then
-								checkedLooseCells[looseCellIndex] = true -- mark loose cell as checked
+					if seenTightCellStamp[tightCellIndex] ~= stamp then
+						seenTightCellStamp[tightCellIndex] = stamp -- mark tight cell as checked
+						local tightCell: TightCell = TightGrid[tightCellIndex]
+						for _, looseCellIndex in tightCell do
+							if seenLooseCellStamp[looseCellIndex] ~= stamp then
+								seenLooseCellStamp[looseCellIndex] = stamp -- mark loose cell as checked
 								checkLooseCell(LooseGrid[looseCellIndex])
 							end
 						end
@@ -1149,7 +1254,7 @@ function LTDG:QueryClosestToPoint(point: Vector2, filterParams: FilterParams?): 
 		radius += 1
 	end
 
-	debug.profileend()
+	profileEnd()
 	return closestEntityId
 end
 
@@ -1175,22 +1280,13 @@ end
     end
     ```
 ]=]
-function LTDG:Raycast(
-	origin: Vector2,
-	direction: Vector2,
-	filterParams: FilterParams?
-): {
-	Normal: Vector2,
-	Position: Vector2,
-	Distance: number,
-	EntityId: EntityId,
-}?
-	debug.profilebegin("LTDG:Raycast")
+function LTDG.Raycast(self: LTDGInternal, origin: Vector2, direction: Vector2, filterParams: FilterParams?): RaycastHit?
+	profileBegin("LTDG:Raycast")
 
 	local skipFilter, isFilteredOut = generateFilter(filterParams)
 
 	-- Initialize variables for tracking the closest hit
-	local closestHit = nil
+	local closestHit: RaycastHit? = nil
 	local closestDistance = math.huge
 
 	-- Localize frequently accessed properties for performance
@@ -1210,27 +1306,28 @@ function LTDG:Raycast(
 	end
 
 	-- Track checked loose cells to avoid redundant checks
-	local checkedLooseCells = {}
+	local checkedLooseCells: { [number]: true } = {}
 
 	-- Grid traversal algorithm to find intersected tight cells
-	local function traverseGrid(origin, directionUnit)
-		local col, row = self:GetCol(origin.X), self:GetRow(origin.Y)
+	local function traverseGrid(rayOrigin: Vector2, rayDirectionUnit: Vector2): () -> number?
+		local col: number = self:GetCol(rayOrigin.X)
+		local row: number = self:GetRow(rayOrigin.Y)
 
 		-- If the ray starts outside the grid bounds, calculate the first intersection point within the grid
 		if col < 1 or col > tCols or row < 1 or row > tRows then
 			local tMinX, tMinY = -math.huge, -math.huge
-			if directionUnit.X ~= 0 then
-				if directionUnit.X > 0 then
-					tMinX = ((1 - 1) * cWidth - origin.X) / directionUnit.X
+			if rayDirectionUnit.X ~= 0 then
+				if rayDirectionUnit.X > 0 then
+					tMinX = ((1 - 1) * cWidth - rayOrigin.X) / rayDirectionUnit.X
 				else
-					tMinX = ((tCols - 1) * cWidth + cWidth - origin.X) / directionUnit.X
+					tMinX = ((tCols - 1) * cWidth + cWidth - rayOrigin.X) / rayDirectionUnit.X
 				end
 			end
-			if directionUnit.Y ~= 0 then
-				if directionUnit.Y > 0 then
-					tMinY = ((1 - 1) * cHeight - origin.Y) / directionUnit.Y
+			if rayDirectionUnit.Y ~= 0 then
+				if rayDirectionUnit.Y > 0 then
+					tMinY = ((1 - 1) * cHeight - rayOrigin.Y) / rayDirectionUnit.Y
 				else
-					tMinY = ((tRows - 1) * cHeight + cHeight - origin.Y) / directionUnit.Y
+					tMinY = ((tRows - 1) * cHeight + cHeight - rayOrigin.Y) / rayDirectionUnit.Y
 				end
 			end
 
@@ -1241,30 +1338,31 @@ function LTDG:Raycast(
 				end -- No valid starting point within the grid
 			end
 
-			origin = origin + directionUnit * tMin
-			col, row = self:GetCol(origin.X), self:GetRow(origin.Y)
+			rayOrigin = rayOrigin + rayDirectionUnit * tMin
+			col = self:GetCol(rayOrigin.X)
+			row = self:GetRow(rayOrigin.Y)
 		end
 
-		local endPoint = origin + direction
+		local endPoint = rayOrigin + direction
 		local endCol = self:GetCol(endPoint.X)
 		local endRow = self:GetRow(endPoint.Y)
 
 		-- Determine the step direction (+1 or -1) for X and Y
-		local stepX = if directionUnit.X > 0 then 1 else -1
-		local stepY = if directionUnit.Y > 0 then 1 else -1
+		local stepX = if rayDirectionUnit.X > 0 then 1 else -1
+		local stepY = if rayDirectionUnit.Y > 0 then 1 else -1
 
 		-- Calculate tDeltaX and tDeltaY (distance to cross one cell in X and Y)
 		-- Calculate tDeltaX and tDeltaY (distance to cross one cell in X and Y)
-		local tDeltaX = if directionUnit.X ~= 0 then math.abs(cWidth / directionUnit.X) else math.huge
-		local tDeltaY = if directionUnit.Y ~= 0 then math.abs(cHeight / directionUnit.Y) else math.huge
+		local tDeltaX = if rayDirectionUnit.X ~= 0 then math.abs(cWidth / rayDirectionUnit.X) else math.huge
+		local tDeltaY = if rayDirectionUnit.Y ~= 0 then math.abs(cHeight / rayDirectionUnit.Y) else math.huge
 
 		-- Calculate tMaxX and tMaxY (time to first grid boundary in X and Y)
-		local tMaxX = if directionUnit.X > 0
-			then ((col - 1) * cWidth + cWidth - origin.X) / directionUnit.X
-			else (origin.X - (col - 1) * cWidth) / -directionUnit.X
-		local tMaxY = if directionUnit.Y > 0
-			then ((row - 1) * cHeight + cHeight - origin.Y) / directionUnit.Y
-			else (origin.Y - (row - 1) * cHeight) / -directionUnit.Y
+		local tMaxX = if rayDirectionUnit.X > 0
+			then ((col - 1) * cWidth + cWidth - rayOrigin.X) / rayDirectionUnit.X
+			else (rayOrigin.X - (col - 1) * cWidth) / -rayDirectionUnit.X
+		local tMaxY = if rayDirectionUnit.Y > 0
+			then ((row - 1) * cHeight + cHeight - rayOrigin.Y) / rayDirectionUnit.Y
+			else (rayOrigin.Y - (row - 1) * cHeight) / -rayDirectionUnit.Y
 
 		local lastIteration = false
 		return function()
@@ -1321,7 +1419,7 @@ function LTDG:Raycast(
 					warn(entityId, "Unknown shape type: " .. tostring(shapeType))
 				end
 
-				if hit then
+				if hit and hitPos and normal then
 					local distance = (hitPos - origin).Magnitude
 					if distance <= maxDistance and distance < closestDistance then
 						closestDistance = distance
@@ -1330,7 +1428,7 @@ function LTDG:Raycast(
 							Position = hitPos,
 							Distance = distance,
 							EntityId = entityId,
-						}
+						} :: RaycastHit
 					end
 				end
 			end
@@ -1341,10 +1439,14 @@ function LTDG:Raycast(
 		end
 	end
 
-	debug.profileend()
+	profileEnd()
 	return closestHit
 end
 
+local normalUp = Vector2.new(0, 1)
+local normalDown = Vector2.new(0, -1)
+local normalLeft = Vector2.new(-1, 0)
+local normalRight = Vector2.new(1, 0)
 -- Helper function to calculate ray-AABB intersection
 function LTDG:_RayAABBIntersection(
 	origin: Vector2,
@@ -1372,13 +1474,13 @@ function LTDG:_RayAABBIntersection(
 	local hitPos = origin + direction.Unit * tMin
 	local normal = Vector2.zero
 	if tMin == t1 then
-		normal = Vector2.new(-1, 0)
+		normal = normalDown
 	elseif tMin == t2 then
-		normal = Vector2.new(1, 0)
+		normal = normalRight
 	elseif tMin == t3 then
-		normal = Vector2.new(0, -1)
+		normal = normalUp
 	elseif tMin == t4 then
-		normal = Vector2.new(0, 1)
+		normal = normalLeft
 	end
 
 	return true, hitPos, normal
@@ -1481,7 +1583,7 @@ end
     print("Render Model:", renderModel)
     ```
 ]=]
-function LTDG:Draw(): Instance
+function LTDG.Draw(self: LTDGInternal): Instance
 	if self._LastRender then
 		self._LastRender:Destroy()
 	end
