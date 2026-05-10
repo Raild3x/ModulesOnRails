@@ -47,4 +47,4 @@ classes = ["CmdrHandler", "PermissionsHandler", "CmdrServer", "CmdrClient", "Cmd
 
 [[classOrder]]
 section = "Data Structures"
-classes = ["Queue", "Heap", "LooseTightDoubleGrid"]
+classes = ["Queue", "Heap", "LooseTightDoubleGrid", "Quadtree"]
