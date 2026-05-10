@@ -1486,19 +1486,32 @@ function LTDG:Draw(): Instance
             looseCellPart.Parent = RenderModel
 
             local selectionBox = Instance.new("SelectionBox")
-            selectionBox.LineThickness = 0.1
+            selectionBox.LineThickness = 0.05
             selectionBox.Adornee = looseCellPart
             selectionBox.Parent = looseCellPart
 
             for id, aabb: AABB in cell.AABBs do
                 local aabbPart = looseCellPart:Clone()
+                local shapeType = self.ShapeMap[id]
+                if shapeType == SHAPE_TYPE_CIRCLE then
+                    aabbPart.Shape = Enum.PartType.Cylinder
+                    aabbPart.Size = Vector3.new(0.1, aabb[3] - aabb[1], aabb[4] - aabb[2])
+                    print(aabb[3] - aabb[1], aabb[4] - aabb[2], aabb)
+                    aabbPart.Position = Vector3.new( 
+                        (aabb[3] + aabb[1])/2,
+                        1.5, 
+                        (aabb[4] + aabb[2])/2
+                    )
+                    aabbPart.Orientation = Vector3.new(0, 0, 90)
+                else
+                    aabbPart.Size = Vector3.new(aabb[3] - aabb[1], 0.1, aabb[4] - aabb[2])
+                    aabbPart.Position = Vector3.new(
+                        (aabb[3] + aabb[1])/2, 
+                        1.5, 
+                        (aabb[4] + aabb[2])/2
+                    )
+                end
                 aabbPart.Name = "AABB_"..id
-                aabbPart.Size = Vector3.new(aabb[3] - aabb[1], 0.1, aabb[4] - aabb[2])
-                aabbPart.Position = Vector3.new(
-                    (aabb[3] + aabb[1])/2, 
-                    1.5, 
-                    (aabb[4] + aabb[2])/2
-                )
                 aabbPart.Transparency = 0.75
                 aabbPart.Color = Color3.fromRGB(255, 0, 0)
                 aabbPart.Parent = RenderModel
