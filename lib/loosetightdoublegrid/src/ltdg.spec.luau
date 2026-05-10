@@ -1,6 +1,7 @@
-local LooseTightDoubleGrid = require("./init")
-local LooseCell = require("LooseCell")
+local LooseTightDoubleGrid = require(script.Parent)
+local LooseCell = require("./LooseCell")
 
+local Vector2 = Vector2
 if not Vector2 then
 	local vector2 = {}
 	vector2.__index = function(self, key)
@@ -16,12 +17,9 @@ if not Vector2 then
 		end
 		return rawget(vector2, key)
 	end
-	
-	function vector2.new(x, y)
-		return setmetatable(
-			{ X = x or 0, Y = y or 0 },
-			vector2
-		)
+
+	function vector2.new(x: number, y: number)
+		return setmetatable({ X = x or 0, Y = y or 0 }, vector2)
 	end
 
 	function vector2:__add(other)
@@ -36,6 +34,10 @@ if not Vector2 then
 		return vector2.new(self.X * scalar, self.Y * scalar)
 	end
 
+	function vector2:__eq(other)
+		return self.X == other.X and self.Y == other.Y
+	end
+
 	function vector2:Dot(other)
 		return self.X * other.X + self.Y * other.Y
 	end
@@ -45,13 +47,15 @@ if not Vector2 then
 	Vector2 = vector2
 end
 
+local debug = debug
 if not debug or not debug.profilebegin then -- This is a workaround for the debug library not being available in the vscode env.
-    debug = {
-        profilebegin = function() end,
-        profileend = function() end,
-    }
+	debug = {
+		profilebegin = function() end,
+		profileend = function() end,
+	}
 end
 
+local Enum = Enum
 if not Enum then
 	Enum = {
 		RaycastFilterType = {
@@ -61,24 +65,35 @@ if not Enum then
 	}
 end
 
-local test_suite = function(tiniest)
+local test_suite = function(tiniest: tiniest)
 	local describe = tiniest.describe
 	local test = tiniest.test
 	local expect = tiniest.expect
 
 	local function createGenericGrid()
-		return LooseTightDoubleGrid.new({
+		return LooseTightDoubleGrid.new {
 			Position = Vector2.new(0, 0),
 			Size = Vector2.new(10, 10),
 			CellSize = 2,
-		})
+		}
+	end
+
+	local function checkVectorsEqual(v1, v2)
+		if v1 == v2 then
+			return
+		end
+		expect(v1).exists()
+		expect(v2).exists()
+		expect(v1.X).is(v2.X)
+		expect(v1.Y).is(v2.Y)
 	end
 
 	describe("LooseTightDoubleGrid", function()
 		describe("Initialization", function()
 			test("should initialize with correct properties", function()
 				local grid = createGenericGrid()
-				expect(grid.Position).is_shallow_equal(Vector2.new(0, 0))
+				checkVectorsEqual(grid.Position, Vector2.new(0, 0))
+				checkVectorsEqual(grid.Size, Vector2.new(10, 10))
 				expect(grid.tCols).is(10)
 				expect(grid.tRows).is(10)
 				expect(grid.cWidth).is(2)
@@ -154,64 +169,64 @@ local test_suite = function(tiniest)
 			describe("Query Region", function()
 				test("should return entities fully contained within a single loose cell", function()
 					local grid = createGenericGrid()
-				
+
 					-- Insert entities into the grid
 					local id1 = grid:InsertRect(Vector2.new(1, 1), Vector2.new(1, 1)) -- Fully within one loose cell
 					local id2 = grid:InsertRect(Vector2.new(3, 3), Vector2.new(1, 1)) -- Outside the query region
-				
+
 					-- Query a region that only overlaps with id1
 					local entities = grid:_QueryRegion(0.5, 0.5, 1.5, 1.5)
 					expect(entities).has_value(id1)
 					expect(entities).never_has_value(id2)
 				end)
-	
+
 				test("should return entities spanning multiple loose cells", function()
 					local grid = createGenericGrid()
-				
+
 					-- Insert entities into the grid
 					local id1 = grid:InsertRect(Vector2.new(1, 1), Vector2.new(1, 1)) -- In one cell
 					local id2 = grid:InsertRect(Vector2.new(3, 3), Vector2.new(2, 2)) -- Spans multiple cells
-				
+
 					-- Query a region that overlaps both entities
 					local entities = grid:_QueryRegion(0, 0, 4, 4)
 					expect(entities).has_value(id1)
 					expect(entities).has_value(id2)
 				end)
-	
+
 				test("should return an empty result when no entities are in the region", function()
 					local grid = createGenericGrid()
-				
+
 					-- Insert entities outside the query region
 					grid:InsertRect(Vector2.new(5, 5), Vector2.new(1, 1))
-				
+
 					-- Query a region with no entities
 					local entities = grid:_QueryRegion(0, 0, 1, 1)
 					expect(#entities).is(0)
 				end)
-	
+
 				test("should return entities when the region touches the edge of a loose cell", function()
 					local grid = createGenericGrid()
-				
+
 					-- Insert entities into the grid
 					local id1 = grid:InsertRect(Vector2.new(2, 2), Vector2.new(1, 1)) -- On the edge of a loose cell
-				
+
 					-- Query a region that touches the edge of the loose cell
 					local entities = grid:_QueryRegion(1.5, 1.5, 2.5, 2.5)
 					expect(entities).has_value(id1)
 				end)
-	
+
 				test("should handle regions larger than the grid", function()
 					local grid = createGenericGrid()
-				
+
 					-- Insert entities into the grid
 					local id1 = grid:InsertRect(Vector2.new(5, 5), Vector2.new(1, 1))
-				
+
 					-- Query a region larger than the grid
 					local entities = grid:_QueryRegion(-10, -10, 20, 20)
 					expect(entities).has_value(id1)
 				end)
 			end)
-	
+
 			describe("Query Specific Shapes", function()
 				test("should query entities in a rectangular region", function()
 					local grid = createGenericGrid()
@@ -221,7 +236,7 @@ local test_suite = function(tiniest)
 					expect(entities).has_value(id1)
 					expect(entities).never_has_value(id2)
 				end)
-	
+
 				test("should query entities in a circular region", function()
 					local grid = createGenericGrid()
 					local id1 = grid:InsertCircle(Vector2.new(5, 5), 2)
@@ -230,7 +245,7 @@ local test_suite = function(tiniest)
 					expect(entities).has_value(id1)
 					expect(entities).never_has_value(id2)
 				end)
-	
+
 				test("should query entities at a specific point", function()
 					local grid = createGenericGrid()
 					local id1 = grid:InsertPoint(Vector2.new(5, 5))
@@ -239,36 +254,36 @@ local test_suite = function(tiniest)
 					expect(entities).has_value(id1)
 					expect(entities).never_has_value(id2)
 				end)
-	
+
 				test("should correctly identify point entities at a specific point", function()
 					local grid = createGenericGrid()
-				
+
 					-- Insert a point entity
 					local id = grid:InsertPoint(Vector2.new(5, 5))
-				
+
 					-- Query the exact point
 					local entities = grid:QueryPoint(Vector2.new(5, 5))
 					expect(entities).has_value(id)
-				
+
 					-- Query a point outside the entity's bounds
 					local emptyEntities = grid:QueryPoint(Vector2.new(6, 6))
 					expect(#emptyEntities).is(0)
 				end)
-		
+
 				test("should correctly identify overlapping entities", function()
 					local grid = createGenericGrid()
-				
+
 					-- Insert overlapping entities
 					local id1 = grid:InsertRect(Vector2.new(5, 5), Vector2.new(4, 4))
 					local id2 = grid:InsertRect(Vector2.new(6, 6), Vector2.new(4, 4))
-				
+
 					-- Query a region that overlaps both entities
 					local entities = grid:QueryRect(Vector2.new(5, 5), Vector2.new(6, 6))
 					expect(entities).has_value(id1)
 					expect(entities).has_value(id2)
 				end)
 			end)
-	
+
 			describe("Circle Queries", function()
 				test("should correctly query entities in a circular region", function()
 					local grid = createGenericGrid()
@@ -278,14 +293,14 @@ local test_suite = function(tiniest)
 					expect(entities).has_value(id1)
 					expect(entities).never_has_value(id2)
 				end)
-			
+
 				test("should handle circle-rectangle intersections", function()
 					local grid = createGenericGrid()
 					local id = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
 					local entities = grid:QueryCircle(Vector2.new(5, 5), 2)
 					expect(entities).has_value(id)
 				end)
-			
+
 				test("should handle circle-circle intersections", function()
 					local grid = createGenericGrid()
 					local id1 = grid:InsertCircle(Vector2.new(5, 5), 2)
@@ -302,7 +317,7 @@ local test_suite = function(tiniest)
 					local closestEntityId = grid:QueryClosestToPoint(Vector2.new(5, 5))
 					expect(closestEntityId).is(nil)
 				end)
-		
+
 				test("should return the closest entity when multiple entities are present", function()
 					local grid = createGenericGrid()
 					local rectId = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
@@ -310,15 +325,18 @@ local test_suite = function(tiniest)
 					local closestEntityId = grid:QueryClosestToPoint(Vector2.new(7, 5))
 					expect(closestEntityId).is(rectId)
 				end)
-		
-				test("should return the entity containing the point whose center is closest when inside multiple shapes", function()
-					local grid = createGenericGrid()
-					local rectId = grid:InsertRect(Vector2.new(5, 5), Vector2.new(4, 4))
-					local circleId = grid:InsertCircle(Vector2.new(9, 5), 3)
-					local closestEntityId = grid:QueryClosestToPoint(Vector2.new(6, 5))
-					expect(closestEntityId).is(rectId) -- Rect is prioritized due to center distance tie-breaking
-				end)
-		
+
+				test(
+					"should return the entity containing the point whose center is closest when inside multiple shapes",
+					function()
+						local grid = createGenericGrid()
+						local rectId = grid:InsertRect(Vector2.new(5, 5), Vector2.new(4, 4))
+						local circleId = grid:InsertCircle(Vector2.new(9, 5), 3)
+						local closestEntityId = grid:QueryClosestToPoint(Vector2.new(6, 5))
+						expect(closestEntityId).is(rectId) -- Rect is prioritized due to center distance tie-breaking
+					end
+				)
+
 				test("should return the closest point entity when multiple points are present", function()
 					local grid = createGenericGrid()
 					local pointId1 = grid:InsertPoint(Vector2.new(5, 5))
@@ -326,7 +344,7 @@ local test_suite = function(tiniest)
 					local closestEntityId = grid:QueryClosestToPoint(Vector2.new(6, 6))
 					expect(closestEntityId).is(pointId1)
 				end)
-		
+
 				test("should handle overlapping entities correctly", function()
 					local grid = createGenericGrid()
 					local rectId = grid:InsertRect(Vector2.new(5, 5), Vector2.new(4, 4))
@@ -334,14 +352,14 @@ local test_suite = function(tiniest)
 					local closestEntityId = grid:QueryClosestToPoint(Vector2.new(6, 5))
 					expect(closestEntityId).is(circleId) -- Circle internal pos is closer to the query point
 				end)
-		
+
 				test("should handle entities on the edge of the grid", function()
 					local grid = createGenericGrid()
 					local rectId = grid:InsertRect(Vector2.new(0, 0), Vector2.new(2, 2))
 					local closestEntityId = grid:QueryClosestToPoint(Vector2.new(0, 0))
 					expect(closestEntityId).is(rectId)
 				end)
-		
+
 				test("should handle entities with the same distance to the query point", function()
 					local grid = createGenericGrid()
 					local rectId = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
@@ -349,7 +367,7 @@ local test_suite = function(tiniest)
 					local closestEntityId = grid:QueryClosestToPoint(Vector2.new(5, 5))
 					expect(closestEntityId).is(rectId) -- Rect is prioritized due to tie-breaking
 				end)
-		
+
 				-- test("should handle a large number of entities efficiently", function()
 				-- 	local grid = createGenericGrid()
 				-- 	for i = 1, 1000 do
@@ -358,14 +376,14 @@ local test_suite = function(tiniest)
 				-- 	local closestEntityId = grid:QueryClosestToPoint(Vector2.new(5, 5))
 				-- 	expect(closestEntityId).is_not(nil) -- Ensure it returns a valid entity
 				-- end)
-		
+
 				test("should handle points exactly on the edge of a circle", function()
 					local grid = createGenericGrid()
 					local circleId = grid:InsertCircle(Vector2.new(5, 5), 2)
 					local closestEntityId = grid:QueryClosestToPoint(Vector2.new(7, 5))
 					expect(closestEntityId).is(circleId)
 				end)
-		
+
 				test("should handle points exactly on the edge of a rectangle", function()
 					local grid = createGenericGrid()
 					local rectId = grid:InsertRect(Vector2.new(5, 5), Vector2.new(4, 4))
@@ -533,38 +551,38 @@ local test_suite = function(tiniest)
 				local grid = createGenericGrid()
 				local id = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
 				local position = grid:GetEntityPosition(id)
-				expect(position).is_shallow_equal(Vector2.new(5, 5))
+				checkVectorsEqual(position, Vector2.new(5, 5))
 			end)
-		
+
 			test("should return the correct size of an entity", function()
 				local grid = createGenericGrid()
 				local id = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
 				local size = grid:GetEntitySize(id)
-				expect(size).is_shallow_equal(Vector2.new(2, 2))
+				checkVectorsEqual(size, Vector2.new(2, 2))
 			end)
-		
+
 			test("should return the correct position and size of an entity", function()
 				local grid = createGenericGrid()
 				local id = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
 				local position, size = grid:GetEntityPositionAndSize(id)
-				expect(position).is_shallow_equal(Vector2.new(5, 5))
-				expect(size).is_shallow_equal(Vector2.new(2, 2))
+				checkVectorsEqual(position, Vector2.new(5, 5))
+				checkVectorsEqual(size, Vector2.new(2, 2))
 			end)
-		
+
 			test("should throw an error when getting position of a non-existent entity", function()
 				local grid = createGenericGrid()
 				expect(function()
 					grid:GetEntityPosition(999)
 				end).fails()
 			end)
-		
+
 			test("should throw an error when getting size of a non-existent entity", function()
 				local grid = createGenericGrid()
 				expect(function()
 					grid:GetEntitySize(999)
 				end).fails()
 			end)
-		
+
 			test("should throw an error when getting position and size of a non-existent entity", function()
 				local grid = createGenericGrid()
 				expect(function()
@@ -581,7 +599,7 @@ local test_suite = function(tiniest)
 				looseCell.r = 10
 				looseCell.t = 10
 				-- print("LooseCell bounds:", looseCell.l, looseCell.r, looseCell.t, looseCell.b)
-	
+
 				-- Test cases for intersection
 				expect(looseCell:Intersects(5, 5, 15, 15)).is(true) -- Partial overlap
 				expect(looseCell:Intersects(0, 0, 10, 10)).is(true) -- Exact overlap
@@ -604,7 +622,7 @@ local test_suite = function(tiniest)
 		describe("Internal Methods", function()
 			test("LTDG:_UpdateEntity should throw an error for non-existent entities", function()
 				local grid = createGenericGrid()
-			
+
 				-- Attempt to update a non-existent entity
 				expect(function()
 					grid:_UpdateEntity(999, Vector2.new(5, 5), 0, 0, 10, 10)
