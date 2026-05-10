@@ -34,6 +34,14 @@ local test_suite = function(tiniest)
 			expect(n1.Position).is(Vector2.new(0, 0))
 			expect(n2.Position).is(Vector2.new(32, 24))
 		end)
+
+		test("normalizes Vector3 input to Vector2 position", function()
+			local tree = Quadtree.new(64)
+			local node = tree:CreateNode(Vector3.new(12, 999, 34), "A")
+
+			expect(node.Position).is(Vector2.new(12, 34))
+			expect(tree:FindFirstNode("A")).is(node)
+		end)
 	end)
 
 	describe("FindFirstNode", function()
@@ -141,6 +149,14 @@ local test_suite = function(tiniest)
 			expect(hasObject(results, "far")).is(false)
 		end)
 
+		test("excludes nodes exactly on the radius boundary", function()
+			local tree = Quadtree.new(64)
+			tree:CreateNode(Vector2.new(5, 0), "edge")
+
+			local results = tree:SearchRadius(Vector2.new(0, 0), 5)
+			expect(hasObject(results, "edge")).is(false)
+		end)
+
 		test("returns an empty array when nothing is in range", function()
 			local tree = Quadtree.new(64)
 			tree:CreateNode(Vector2.new(100, 100), "far")
@@ -161,6 +177,14 @@ local test_suite = function(tiniest)
 			expect(hasObject(values, "insideA")).is(true)
 			expect(hasObject(values, "insideB")).is(true)
 			expect(hasObject(values, "outside")).is(false)
+		end)
+
+		test("skips nodes exactly on the radius boundary", function()
+			local tree = Quadtree.new(64)
+			tree:CreateNode(Vector2.new(5, 0), "edge")
+
+			local values = collectIterator(tree:ForEachInRadius(Vector2.new(0, 0), 5))
+			expect(hasObject(values, "edge")).is(false)
 		end)
 
 		test("returns no nodes when the radius misses every node", function()
@@ -210,6 +234,17 @@ local test_suite = function(tiniest)
 			expect(#topTwo).is(2)
 			expect(topTwo[1].Object).is("n1")
 			expect(topTwo[2].Object).is("n2")
+		end)
+
+		test("returns all matches when maxNodes exceeds the result count", function()
+			local tree = Quadtree.new(64)
+			tree:CreateNode(Vector2.new(1, 0), "n1")
+			tree:CreateNode(Vector2.new(3, 0), "n2")
+
+			local nearest = tree:GetNearest(Vector2.new(0, 0), 10, 10)
+			expect(#nearest).is(2)
+			expect(nearest[1].Object).is("n1")
+			expect(nearest[2].Object).is("n2")
 		end)
 
 		test("returns an empty array when no nodes are in range", function()
