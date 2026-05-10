@@ -22,12 +22,12 @@ export type Quadtree<T> = {
 
 --[[
 	Internal quadtree structure with spatial hashing.
-	Regions uses Vector2 keys derived from grid-aligned positions for O(1) lookups.
+	Regions uses string hash keys derived from grid-aligned positions for O(1) lookups.
 	This enables efficient spatial partitioning without storing all regions in an array.
 ]]
 type QuadtreeInternal<T> = Quadtree<T> & {
 	Size: number,
-	Regions: { [Vector2]: Region<T> },
+	Regions: { [string]: Region<T> },
 	_getRegion: (self: QuadtreeInternal<T>, maxLevel: number, position: Vector2) -> Region<T>,
 }
 
@@ -84,6 +84,10 @@ local function RoundTo(x: number, mult: number): number
 	return math.round(x / mult) * mult
 end
 
+local function GetTopRegionKey(position: Vector2, size: number): string
+	return `{RoundTo(position.X, size)}:{RoundTo(position.Y, size)}`
+end
+
 local function SwapRemove(tbl: { any }, index: number)
 	local n = #tbl
 	tbl[index] = tbl[n]
@@ -104,13 +108,14 @@ end
 
 --[=[
 	Retrieves or creates a top-level region using spatial hashing.
-	The Vector2 key is derived from the grid-aligned position, enabling O(1) lookups
+	The string key is derived from the grid-aligned position, enabling O(1) lookups
 	and efficient sparse storage of only populated grid cells.
 ]=]
 local function GetTopRegion<T>(quadtree: QuadtreeInternal<T>, position: Vector2, create: boolean): Region<T>
 	local size = quadtree.Size
 	local origin = Vector2.new(RoundTo(position.X, size), RoundTo(position.Y, size))
-	local region = quadtree.Regions[origin]
+	local regionKey = GetTopRegionKey(position, size)
+	local region = quadtree.Regions[regionKey]
 	if not region and create then
 		region = {
 			Regions = {},
@@ -120,7 +125,7 @@ local function GetTopRegion<T>(quadtree: QuadtreeInternal<T>, position: Vector2,
 			Center = origin,
 		}
 		table.freeze(region)
-		quadtree.Regions[origin] = region :: Region<T>
+		quadtree.Regions[regionKey] = region :: Region<T>
 	end
 	return region :: Region<T>
 end
@@ -169,7 +174,7 @@ Quadtree.__index = Quadtree
 local function CreateQuadtree<T>(topRegionSize: number?): Quadtree<T>
 	local self = (setmetatable({}, Quadtree) :: unknown) :: QuadtreeInternal<T>
 	self.Size = if topRegionSize then topRegionSize else DEFAULT_TOP_REGION_SIZE
-	self.Regions = {} :: { [Vector2]: Region<T> }
+	self.Regions = {} :: { [string]: Region<T> }
 	return self
 end
 
