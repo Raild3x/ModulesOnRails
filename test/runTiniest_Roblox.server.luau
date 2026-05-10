@@ -62,5 +62,6 @@
 local tiniest = require("./tiniest/tiniest_for_roblox").configure {}
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local tests = tiniest.collect_tests_from_hierarchy(ReplicatedStorage.src.t)
+local PACKAGE_TO_TEST = "loosetightdoublegrid"
+local tests = tiniest.collect_tests_from_hierarchy(ReplicatedStorage.src:FindFirstChild(PACKAGE_TO_TEST))
 tiniest.run_tests(tests, {})
