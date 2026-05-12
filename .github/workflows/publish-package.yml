@@ -36,6 +36,9 @@ permissions:
   contents: write
   pull-requests: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   # Resolve whether the version bump is major / minor / patch / none.
   # On PRs, reads semver labels (e.g. "semver:patch") from the event payload.

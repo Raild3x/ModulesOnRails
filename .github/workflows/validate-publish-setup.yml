@@ -11,6 +11,9 @@ on:
 permissions:
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   # Pure-Python checks: no toolchain required. Validates that every package
   # under lib/ is correctly structured and that the publish action/workflow
@@ -59,6 +62,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
 
       # Install Rokit and make the wally binary available on PATH.
       - name: Setup Rokit and verify Wally
