@@ -141,13 +141,17 @@ type LTDGInternal = {
 		self: LTDGInternal,
 		origin: Vector2,
 		direction: Vector2,
-		aabb: AABB
+		l: number,
+		b: number,
+		r: number,
+		t: number
 	) -> (boolean, Vector2?, Vector2?),
 	_RayPointIntersection: (
 		self: LTDGInternal,
 		origin: Vector2,
 		direction: Vector2,
-		aabb: AABB
+		l: number,
+		b: number
 	) -> (boolean, Vector2?, Vector2?),
 }
 
@@ -282,7 +286,6 @@ end
 
 local profileBegin: (name: string) -> ()
 local profileEnd: () -> ()
-
 if debug and debug.profilebegin and debug.profileend then
 	profileBegin = debug.profilebegin
 	profileEnd = debug.profileend
@@ -759,10 +762,17 @@ function LTDG:GetEntitySize(id: EntityId): Vector2
 		error("Entity not found: " .. tostring(id))
 	end -- entity not found
 
-	local looseCell = self.LooseGrid[looseCellIdx]
-	local aabb: AABB = looseCell.AABBs[id]
+	local looseCell: LooseCell = self.LooseGrid[looseCellIdx]
+	local flatIndex = looseCell.EntityIds[id]
+	if not flatIndex then
+		error("Entity not found: " .. tostring(id))
+	end
+	local flatAABBs = looseCell.FlatAABBs
 
-	return Vector2.new(aabb[3] - aabb[1], aabb[4] - aabb[2]) :: any
+	return Vector2.new(
+		flatAABBs[flatIndex + 2] - flatAABBs[flatIndex],
+		flatAABBs[flatIndex + 3] - flatAABBs[flatIndex + 1]
+	) :: any
 end
 
 --[=[
@@ -780,10 +790,17 @@ function LTDG:GetEntityPosition(id: EntityId): Vector2
 		error("Entity not found: " .. tostring(id))
 	end -- entity not found
 
-	local looseCell = self.LooseGrid[looseCellIdx]
-	local aabb: AABB = looseCell.AABBs[id]
+	local looseCell: LooseCell = self.LooseGrid[looseCellIdx]
+	local flatIndex = looseCell.EntityIds[id]
+	if not flatIndex then
+		error("Entity not found: " .. tostring(id))
+	end
+	local flatAABBs = looseCell.FlatAABBs
 
-	return Vector2.new((aabb[1] + aabb[3]) * 0.5, (aabb[2] + aabb[4]) * 0.5) :: any
+	return Vector2.new(
+		(flatAABBs[flatIndex] + flatAABBs[flatIndex + 2]) * 0.5,
+		(flatAABBs[flatIndex + 1] + flatAABBs[flatIndex + 3]) * 0.5
+	) :: any
 end
 
 --[=[
@@ -803,11 +820,22 @@ function LTDG:GetEntityPositionAndSize(id: EntityId): (Vector2, Vector2)
 		error("Entity not found: " .. tostring(id))
 	end -- entity not found
 
-	local looseCell = self.LooseGrid[looseCellIdx]
-	local aabb: AABB = looseCell.AABBs[id]
+	local looseCell: LooseCell = self.LooseGrid[looseCellIdx]
+	local flatIndex = looseCell.EntityIds[id]
+	if not flatIndex then
+		error("Entity not found: " .. tostring(id))
+	end
+	local flatAABBs = looseCell.FlatAABBs
 
-	return Vector2.new((aabb[1] + aabb[3]) / 2, (aabb[2] + aabb[4]) / 2) :: any,
-		Vector2.new(aabb[3] - aabb[1], aabb[4] - aabb[2]) :: any
+	local pos = Vector2.new(
+		(flatAABBs[flatIndex] + flatAABBs[flatIndex + 2]) * 0.5,
+		(flatAABBs[flatIndex + 1] + flatAABBs[flatIndex + 3]) * 0.5
+	) :: any
+	local size = Vector2.new(
+		flatAABBs[flatIndex + 2] - flatAABBs[flatIndex],
+		flatAABBs[flatIndex + 3] - flatAABBs[flatIndex + 1]
+	) :: any
+	return pos, size
 end
 
 --[=[
@@ -870,12 +898,13 @@ function LTDG._QueryRegion(
 
 	local function checkLooseCellAgainstCircle(looseCell: LooseCell)
 		profileBegin("Check LooseCell Against Circle")
-		for entityId, aabb: AABB in looseCell.AABBs do
+		local flatAABBs = looseCell.FlatAABBs
+		for entityId, i in looseCell.EntityIds do
 			if not skipFilter and isFilteredOut(entityId) then
 				continue -- skip filtered entities
 			end
 
-			local l, b, r, t = aabb[1], aabb[2], aabb[3], aabb[4]
+			local l, b, r, t = flatAABBs[i], flatAABBs[i + 1], flatAABBs[i + 2], flatAABBs[i + 3]
 			if CheckRectRectIntersection(l, b, r, t, qL, qB, qR, qT) then
 				if ShapeMap[entityId] == SHAPE_TYPE_CIRCLE then
 					local cx = (l + r) * 0.5
@@ -894,12 +923,13 @@ function LTDG._QueryRegion(
 
 	local function checkLooseCellAgainstRect(looseCell: LooseCell)
 		profileBegin("Check LooseCell Against Rect")
-		for entityId, aabb: AABB in looseCell.AABBs do
+		local flatAABBs = looseCell.FlatAABBs
+		for entityId, i in looseCell.EntityIds do
 			if not skipFilter and isFilteredOut(entityId) then
 				continue -- skip filtered entities
 			end
 
-			local l, b, r, t = aabb[1], aabb[2], aabb[3], aabb[4]
+			local l, b, r, t = flatAABBs[i], flatAABBs[i + 1], flatAABBs[i + 2], flatAABBs[i + 3]
 			if CheckRectRectIntersection(l, b, r, t, qL, qB, qR, qT) then
 				if ShapeMap[entityId] == SHAPE_TYPE_CIRCLE then
 					local cx = (l + r) * 0.5
@@ -1006,11 +1036,17 @@ function LTDG:QueryPoint(pos: Vector2, filterParams: FilterParams?): { EntityId 
 	local intersectingEntities = {}
 	local skipFilter, isFilteredOut = generateFilter(filterParams)
 
-	for entityId, aabb: AABB in looseCell.AABBs do
+	local flatAABBs = looseCell.FlatAABBs
+	for entityId, i in looseCell.EntityIds do
 		if not skipFilter and isFilteredOut(entityId) then
 			continue
 		end
-		if pos.X >= aabb[1] and pos.X <= aabb[3] and pos.Y >= aabb[2] and pos.Y <= aabb[4] then
+		if
+			pos.X >= flatAABBs[i]
+			and pos.X <= flatAABBs[i + 2]
+			and pos.Y >= flatAABBs[i + 1]
+			and pos.Y <= flatAABBs[i + 3]
+		then
 			table.insert(intersectingEntities, entityId)
 		end
 	end
@@ -1047,8 +1083,13 @@ function LTDG.QueryClosestToPoint(self: LTDGInternal, point: Vector2, filterPara
 	profileBegin("LTDG:QueryClosestToPoint")
 
 	-- Utility function to calculate the squared distance from a point to a shape
-	local function calculateDistanceSquaredToShape(aabb: AABB, shapeType: ShapeType): (number, number)
-		local l, b, r, t = aabb[1], aabb[2], aabb[3], aabb[4]
+	local function calculateDistanceSquaredToShape(
+		l: number,
+		b: number,
+		r: number,
+		t: number,
+		shapeType: ShapeType
+	): (number, number)
 		-- Center of the AABB
 		local centerX = (l + r) * 0.5
 		local centerY = (b + t) * 0.5
@@ -1101,14 +1142,21 @@ function LTDG.QueryClosestToPoint(self: LTDGInternal, point: Vector2, filterPara
 	-- Function to check all entities in a loose cell
 	local function checkLooseCell(looseCell: LooseCell)
 		local didFind = false
-		for entityId, aabb: AABB in looseCell.AABBs do
+		local flatAABBs = looseCell.FlatAABBs
+		for entityId, i in looseCell.EntityIds do
 			if not skipFilter and isFilteredOut(entityId) then
 				continue -- Skip filtered entities
 			end
 
 			didFind = true
 			local shapeType = ShapeMap[entityId]
-			local distanceSquaredToEdge, distanceSquaredToCenter = calculateDistanceSquaredToShape(aabb, shapeType)
+			local distanceSquaredToEdge, distanceSquaredToCenter = calculateDistanceSquaredToShape(
+				flatAABBs[i],
+				flatAABBs[i + 1],
+				flatAABBs[i + 2],
+				flatAABBs[i + 3],
+				shapeType
+			)
 
 			-- Compare based on primary metric (edge distance), then secondary metric (center distance)
 			if
@@ -1401,21 +1449,25 @@ function LTDG.Raycast(self: LTDGInternal, origin: Vector2, direction: Vector2, f
 			local looseCell = LooseGrid[looseCellIndex]
 
 			-- Check each entity in the loose cell for ray intersection
-			for entityId, aabb: AABB in looseCell.AABBs do
+			local flatAABBs = looseCell.FlatAABBs
+			for entityId, i in looseCell.EntityIds do
 				if not skipFilter and isFilteredOut(entityId) then
 					continue
 				end
 
 				local shapeType = ShapeMap[entityId]
 				local hit, hitPos, normal = false, nil, nil
+				local l = flatAABBs[i]
+				local b = flatAABBs[i + 1]
+				local r = flatAABBs[i + 2]
+				local t = flatAABBs[i + 3]
 
 				if shapeType == SHAPE_TYPE_RECT then
-					hit, hitPos, normal =
-						self:_RayAABBIntersection(origin, directionUnit, aabb[1], aabb[2], aabb[3], aabb[4])
+					hit, hitPos, normal = self:_RayAABBIntersection(origin, directionUnit, l, b, r, t)
 				elseif shapeType == SHAPE_TYPE_CIRCLE then
-					hit, hitPos, normal = self:_RayCircleIntersection(origin, directionUnit, aabb)
+					hit, hitPos, normal = self:_RayCircleIntersection(origin, directionUnit, l, b, r, t)
 				elseif shapeType == SHAPE_TYPE_POINT then
-					hit, hitPos, normal = self:_RayPointIntersection(origin, directionUnit, aabb)
+					hit, hitPos, normal = self:_RayPointIntersection(origin, directionUnit, l, b)
 				else
 					warn(entityId, "Unknown shape type: " .. tostring(shapeType))
 				end
@@ -1488,10 +1540,17 @@ function LTDG:_RayAABBIntersection(
 end
 
 -- Helper function to calculate ray-circle intersection
-function LTDG:_RayCircleIntersection(origin: Vector2, direction: Vector2, aabb: AABB): (boolean, Vector2?, Vector2?)
-	local cx = (aabb[1] + aabb[3]) * 0.5
-	local cy = (aabb[2] + aabb[4]) * 0.5
-	local radius = (aabb[3] - aabb[1]) * 0.5
+function LTDG:_RayCircleIntersection(
+	origin: Vector2,
+	direction: Vector2,
+	l: number,
+	b: number,
+	r: number,
+	t: number
+): (boolean, Vector2?, Vector2?)
+	local cx = (l + r) * 0.5
+	local cy = (b + t) * 0.5
+	local radius = (r - l) * 0.5
 
 	local oc = Vector2.new(origin.X - cx, origin.Y - cy)
 	local a = direction:Dot(direction)
@@ -1514,9 +1573,12 @@ function LTDG:_RayCircleIntersection(origin: Vector2, direction: Vector2, aabb: 
 end
 
 -- Helper function to calculate ray-point intersection
-function LTDG:_RayPointIntersection(origin: Vector2, direction: Vector2, aabb: AABB): (boolean, Vector2?, Vector2?)
-	local px, py = aabb[1], aabb[2] -- Point coordinates
-
+function LTDG:_RayPointIntersection(
+	origin: Vector2,
+	direction: Vector2,
+	px: number,
+	py: number
+): (boolean, Vector2?, Vector2?)
 	-- Vector from ray origin to the point
 	local toPointX = px - origin.X
 	local toPointY = py - origin.Y
@@ -1637,11 +1699,16 @@ function LTDG.Draw(self: LTDGInternal): Instance
 			selectionBox.Adornee = looseCellPart
 			selectionBox.Parent = looseCellPart
 
-			for id, aabb: AABB in cell.AABBs do
+			for id, flatIndex in cell.EntityIds do
+				local flatAABBs = cell.FlatAABBs
+				local lAabb = flatAABBs[flatIndex]
+				local bAabb = flatAABBs[flatIndex + 1]
+				local rAabb = flatAABBs[flatIndex + 2]
+				local tAabb = flatAABBs[flatIndex + 3]
 				local aabbPart = looseCellPart:Clone()
 				aabbPart.Name = "AABB_" .. id
-				aabbPart.Size = Vector3.new(aabb[3] - aabb[1], 0.1, aabb[4] - aabb[2])
-				aabbPart.Position = Vector3.new((aabb[3] + aabb[1]) / 2, 1.5, (aabb[4] + aabb[2]) / 2)
+				aabbPart.Size = Vector3.new(rAabb - lAabb, 0.1, tAabb - bAabb)
+				aabbPart.Position = Vector3.new((rAabb + lAabb) / 2, 1.5, (tAabb + bAabb) / 2)
 				aabbPart.Transparency = 0.75
 				aabbPart.Color = Color3.fromRGB(255, 0, 0)
 				aabbPart.Parent = RenderModel

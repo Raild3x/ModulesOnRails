@@ -18,8 +18,16 @@ type GridLike = {
 type TightCellOperation = (tightCell: TightCell, looseCellIndex: number) -> any
 
 export type LooseCell = {
-	EntityIds: { [EntityId]: true },
-	AABBs: { [EntityId]: AABB },
+	-- EntityIds maps entity id -> starting index in FlatAABBs.
+	-- This keeps lookups and updates O(1) when LTDG APIs are called with an EntityId.
+	EntityIds: { [EntityId]: number },
+	-- FlatAABBs stores packed coordinates in stride-4 layout: {L, B, R, T, ...}
+	-- Packed numeric storage reduces table overhead during hot query/raycast loops.
+	FlatAABBs: { number },
+	-- FlatEntityIds maps slot -> entity id (reverse mapping for EntityIds).
+	-- It is required for O(1) swap-remove: when we move the tail AABB into a removed slot,
+	-- we must know which entity moved so EntityIds can be updated without searching.
+	FlatEntityIds: { EntityId },
 	Dirty: boolean,
 	x: number,
 	y: number,
@@ -39,6 +47,14 @@ local profilebegin, profileend = function(label: string) end, function() end
 if debug and debug.profilebegin and debug.profileend then
 	profilebegin, profileend = debug.profilebegin, debug.profileend
 end
+
+local FLAT_AABB_STRIDE = 4 -- {L, B, R, T}
+
+-- Invariant:
+--   let slot = n (1-based), flatIndex = (slot - 1) * FLAT_AABB_STRIDE + 1
+--   FlatEntityIds[slot] = entityId  <=>  EntityIds[entityId] = flatIndex
+-- This paired mapping is what allows flat coordinate storage while preserving O(1)
+-- entity-addressed updates/getters and O(1) removals via swap-remove.
 
 --------------------------------------------------------------------------------
 --// Util Functions //--
@@ -76,7 +92,8 @@ function LooseCell.new(l: number, b: number, r: number, t: number): LooseCell
 
 	local self = setmetatable({
 		EntityIds = {},
-		AABBs = {},
+		FlatAABBs = {},
+		FlatEntityIds = {},
 		Dirty = false,
 		x = x,
 		y = y,
@@ -95,29 +112,61 @@ function LooseCell.Intersects(self: LooseCell, left: number, bottom: number, rig
 end
 
 function LooseCell.Insert(self: LooseCell, id: EntityId, aabb: AABB)
-	self.AABBs[id] = aabb
-	self.EntityIds[id] = true
+	local flat = self.FlatAABBs
+	local writeIndex = #flat + 1
+	self.EntityIds[id] = writeIndex
+	self.FlatEntityIds[#self.FlatEntityIds + 1] = id
+	flat[writeIndex] = aabb[1]
+	flat[writeIndex + 1] = aabb[2]
+	flat[writeIndex + 2] = aabb[3]
+	flat[writeIndex + 3] = aabb[4]
+
 	self.Dirty = true
 end
 
 function LooseCell.Remove(self: LooseCell, id: EntityId)
-	if self.AABBs[id] then
-		self.AABBs[id] = nil
+	local removeIndex = self.EntityIds[id]
+	if removeIndex then
+		local flat = self.FlatAABBs
+		local flatEntityIds = self.FlatEntityIds
+		local tailStart = #flat - (FLAT_AABB_STRIDE - 1)
+		local removeSlot = math.floor((removeIndex - 1) / FLAT_AABB_STRIDE) + 1
+		local tailSlot = #flatEntityIds
+
+		if removeIndex ~= tailStart then
+			flat[removeIndex] = flat[tailStart]
+			flat[removeIndex + 1] = flat[tailStart + 1]
+			flat[removeIndex + 2] = flat[tailStart + 2]
+			flat[removeIndex + 3] = flat[tailStart + 3]
+
+			local movedEntityId = flatEntityIds[tailSlot] :: EntityId
+			flatEntityIds[removeSlot] = movedEntityId
+			self.EntityIds[movedEntityId] = removeIndex
+		end
+
+		flat[tailStart] = nil
+		flat[tailStart + 1] = nil
+		flat[tailStart + 2] = nil
+		flat[tailStart + 3] = nil
+		flatEntityIds[tailSlot] = nil
 		self.EntityIds[id] = nil
+
 		self.Dirty = true
 	end
 end
 
 -- Currently equivalent to Remove, but could potentially be optimized in the future?
 function LooseCell.Update(self: LooseCell, id: EntityId, l: number, b: number, r: number, t: number)
-	local aabb = self.AABBs[id]
-	if not aabb then
+	local writeIndex = self.EntityIds[id]
+	if not writeIndex then
 		return
 	end
-	aabb[1] = l
-	aabb[2] = b
-	aabb[3] = r
-	aabb[4] = t
+	local flat = self.FlatAABBs
+	flat[writeIndex] = l
+	flat[writeIndex + 1] = b
+	flat[writeIndex + 2] = r
+	flat[writeIndex + 3] = t
+
 	self.Dirty = true
 end
 
@@ -136,21 +185,26 @@ function LooseCell.UpdateExtents(self: LooseCell, grid: GridLike, idx: number)
 	-- TODO: Only check the adjusted AABBs. However, the overhead of adding the adjusted aabbs might not be worth it
 
 	profilebegin("Calculate New Extents")
-	for _, aabb: AABB in self.AABBs do
-		if aabb[1] < l then
-			l = aabb[1]
+	local flat = self.FlatAABBs
+	for i = 1, #flat, FLAT_AABB_STRIDE do
+		local faL = flat[i]
+		local faB = flat[i + 1]
+		local faR = flat[i + 2]
+		local faT = flat[i + 3]
+		if faL < l then
+			l = faL
 		end
-		if aabb[2] < b then
-			b = aabb[2]
+		if faB < b then
+			b = faB
 		end
-		if aabb[3] > r then
-			r = aabb[3]
+		if faR > r then
+			r = faR
 		end
-		if aabb[4] > t then
-			t = aabb[4]
+		if faT > t then
+			t = faT
 		end
 	end
-	if not next(self.AABBs) then
+	if #flat == 0 then
 		l, b, r, t = self.x, self.y, self.x, self.y
 	end
 	self.l, self.b, self.r, self.t = l, b, r, t
