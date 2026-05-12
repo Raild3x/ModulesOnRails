@@ -1,3 +1,5 @@
+#!/bin/sh
+
 local fs = require("@lune/fs")
 local io = require("@lune/stdio")
 local process = require("@lune/process")
@@ -23,8 +25,59 @@ local function writeLastPackage(packageName)
 	fs.writeFile(lastPackageFile, packageName)
 end
 
--- Prompt the user for the directory name
-local dirName = io.prompt("text", "Enter the name of a directory inside lib: ")
+local function printUsage()
+	print("Usage:")
+	print("  ./tests.luau package=<package-name>")
+	print("  ./tests.luau package=last")
+	print("  ./tests.luau help")
+	print("")
+	print("Lune:")
+	print("  lune run tests.luau package=<package-name>")
+	print("  lune run tests.luau package=last")
+	print("  lune run tests.luau help")
+	print("")
+	print("Examples:")
+	print("  ./tests.luau package=tablemanager")
+	print("  ./tests.luau package=last")
+	print("  ./tests.luau help")
+end
+
+local args = process.args or {}
+local arg1 = args[1]
+
+if arg1 == "help" then
+	printUsage()
+	process.exit(0)
+end
+
+local dirName: string? = nil
+
+-- If no arguments, prompt for input
+if #args == 0 then
+	dirName = io.prompt("text", "Enter the name of a directory inside lib (or 'last'): ")
+else
+	-- Exactly one argument expected
+	if #args ~= 1 then
+		print("Expected exactly one argument.")
+		printUsage()
+		process.exit(1)
+	end
+
+	local prefix = "package="
+	if not arg1 or string.sub(arg1, 1, #prefix) ~= prefix then
+		print("Invalid argument: " .. (arg1 or ""))
+		print("Expected `package=<package-name>`, `package=last`, or `help`.")
+		printUsage()
+		process.exit(1)
+	end
+
+	dirName = string.sub(arg1, #prefix + 1)
+	if dirName == "" then
+		print("Package name cannot be empty.")
+		printUsage()
+		process.exit(1)
+	end
+end
 
 -- Handle "last" input
 if not dirName or dirName == "last" or dirName == "" then

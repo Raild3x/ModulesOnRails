@@ -38,63 +38,33 @@ jobs:
           ref: main
           fetch-depth: 0
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
       - name: Resolve version change from PR labels
         id: version
         shell: bash
         run: |
           set -euo pipefail
-
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION_CHANGE="${{ inputs.version_change }}"
-          else
-            LABELS='${{ toJson(github.event.pull_request.labels.*.name) }}'
-            VERSION_CHANGE="none"
-
-            if echo "$LABELS" | jq -e '.[] | test("(^|:|/|-)major$|^major$|semver:major|release:major")' >/dev/null; then
-              VERSION_CHANGE="major"
-            elif echo "$LABELS" | jq -e '.[] | test("(^|:|/|-)minor$|^minor$|semver:minor|release:minor")' >/dev/null; then
-              VERSION_CHANGE="minor"
-            elif echo "$LABELS" | jq -e '.[] | test("(^|:|/|-)patch$|^patch$|semver:patch|release:patch")' >/dev/null; then
-              VERSION_CHANGE="patch"
-            fi
-          fi
-
-          echo "version_change=$VERSION_CHANGE" >> "$GITHUB_OUTPUT"
-          echo "Selected version change: $VERSION_CHANGE"
+          python scripts/publish_resolve_version_change.py \
+            --event-name "${{ github.event_name }}" \
+            --event-path "$GITHUB_EVENT_PATH" \
+            --dispatch-version-change "${{ inputs.version_change }}"
 
       - name: Detect changed packages
         id: changed
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD || true)
-          else
-            BASE_SHA="${{ github.event.pull_request.base.sha }}"
-            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-            CHANGED_FILES=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
-          fi
-
-          mapfile -t CHANGED_PACKAGES < <(
-            echo "$CHANGED_FILES" \
-              | awk -F/ '/^lib\/[^/]+\// {print $2}' \
-              | sort -u
-          )
-
-          if [ ${#CHANGED_PACKAGES[@]} -eq 0 ]; then
-            echo "has_changes=false" >> "$GITHUB_OUTPUT"
-            echo "No changed packages under lib/."
-          else
-            echo "has_changes=true" >> "$GITHUB_OUTPUT"
-            printf '%s\n' "${CHANGED_PACKAGES[@]}" > changed-packages.txt
-            echo "Changed packages: ${CHANGED_PACKAGES[*]}"
-          fi
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
+          python scripts/publish_detect_changed_packages.py \
+            --event-name "${{ github.event_name }}" \
+            --repository "${{ github.repository }}" \
+            --pr-number "${{ github.event.pull_request.number || 0 }}" \
+            --changed-packages-file changed-packages.txt
 
       - name: Setup Rokit
         uses: raild3x/setup-rokit@v0.1.0

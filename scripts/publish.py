@@ -116,9 +116,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--yes",
         action="store_true",
-        help="Auto-accept prompts not explicitly controlled by other flags.",
+        help="Auto-accept prompts and publish without an explicit publish prompt.",
     )
     return parser.parse_args()
+
+
+def is_ci_environment() -> bool:
+    """Return True when running in CI environments."""
+    ci = os.getenv("CI", "").strip().lower()
+    return ci not in {"", "0", "false", "no"} or os.getenv("GITHUB_ACTIONS") == "true"
 
 
 def main():
@@ -176,10 +182,10 @@ def main():
 
     if args.no_publish:
         publish_now = False
-    elif args.publish:
+    elif args.publish or args.yes:
         publish_now = True
-    elif args.package_name is not None or args.version_change is not None or args.yes:
-        # In CLI mode, default to publishing so workflows can run non-interactively.
+    elif is_ci_environment():
+        # In CI, default to publishing to avoid interactive prompts.
         publish_now = True
     else:
         publish_now = input("Do you want to publish the package now? (y/n): ").strip().lower() == "y"

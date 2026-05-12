@@ -19,9 +19,6 @@ jobs:
       - name: Run generateReadMe.py
         run: python scripts/generateReadMe.py
 
-      - name: Debugging
-        run: echo "Repository URL; https://x-access-token:${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${{ github.repository }}.git"
-
       - name: Commit README update
         run: |
           git remote set-url origin https://git:${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git
