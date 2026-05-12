@@ -5,6 +5,9 @@ name: CI - Lint and Docs
 on:
   [push]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   # Run Selene static analysis across all source files in lib/.
   lint:

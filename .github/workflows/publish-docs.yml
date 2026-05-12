@@ -1,18 +1,33 @@
-# Manually triggered workflow that regenerates README.md, commits it, then
-# builds and deploys the Moonwave documentation site to GitHub Pages.
+# Regenerates README.md and deploys the Moonwave documentation site to GitHub Pages.
+# Triggers automatically after 'Publish Packages' completes successfully, and can
+# also be run manually as a break-glass when docs need rebuilding without a publish.
 name: publish docs
 
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: ["Publish Packages"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   # Generate README.md from wally.toml metadata and commit the result.
   generate_readme:
     name: Generate README
     runs-on: ubuntu-latest
+    # When triggered by workflow_run, only proceed if the upstream workflow succeeded.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -24,31 +39,39 @@ jobs:
 
       - name: Commit README update
         run: |
-          git remote set-url origin https://git:${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git config --global user.name "GitHub Actions"
+          set -euo pipefail
+          if git diff --quiet -- README.md; then
+            echo "README.md unchanged."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add README.md
-          git commit -m "Update README from GitHub Actions"
-          git push https://git:${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git
-        env:
-          PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
-          
+          git commit -m "docs: regenerate README"
+          git push origin HEAD:${{ github.ref_name }}
+
   # Build the Moonwave docs site and push the generated output to the gh-pages branch.
+  # Must run after generate_readme so moonwave picks up the updated README.
   build:
     name: Build and deploy docs
     runs-on: ubuntu-latest
-    #needs: generate_readme
+    needs: generate_readme
     steps:
+      # Fetch the branch head, not the workflow trigger SHA, so the README
+      # commit from generate_readme is included before moonwave runs.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
       - uses: actions/setup-node@v4
         with:
           node-version: 20
       - run: npm i -g moonwave@latest
-      - name: Publish
-        run: |
-          git remote set-url origin https://git:${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git
-          git config --global user.email "support+actions@github.com"
-          git config --global user.name "github-actions-bot"
-          moonwave build --publish
+      - name: Build and publish docs
         env:
-          PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config http.https://github.com/.extraheader "AUTHORIZATION: basic $(printf 'x-access-token:%s' "${GITHUB_TOKEN}" | base64 -w0)"
+          moonwave build --publish

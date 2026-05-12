@@ -3,6 +3,7 @@ gitSourceBranch = "main"
 [docusaurus]
 url = "https://raild3x.github.io"
 baseUrl = "/ModulesOnRails"
+onBrokenAnchors = "warn" # or "throw"
 
 
 [[classOrder]]
