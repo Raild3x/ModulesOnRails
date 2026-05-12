@@ -24,7 +24,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python scripts/validate_publish_setup.py --check packages
+          python scripts/workflow_actions/validate_publish_setup.py --check packages
 
       - name: Setup Rokit
         uses: raild3x/setup-rokit@v0.1.0
