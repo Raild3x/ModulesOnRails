@@ -1554,20 +1554,20 @@ function LTDG:_RayCircleIntersection(
 
 	local oc = Vector2.new(origin.X - cx, origin.Y - cy)
 	local a = direction:Dot(direction)
-	local b = 2 * oc:Dot(direction)
-	local c = oc:Dot(oc) - radius * radius
+	local rayB = 2 * oc:Dot(direction)
+	local rayC = oc:Dot(oc) - radius * radius
 
-	local discriminant = b * b - 4 * a * c
+	local discriminant = rayB * rayB - 4 * a * rayC
 	if discriminant < 0 then
 		return false, nil, nil
 	end
 
-	local t = (-b - math.sqrt(discriminant)) / (2 * a)
-	if t < 0 then
+	local hitTime = (-rayB - math.sqrt(discriminant)) / (2 * a)
+	if hitTime < 0 then
 		return false, nil, nil
 	end
 
-	local hitPos = origin + direction.Unit * t
+	local hitPos = origin + direction.Unit * hitTime
 	local normal = (hitPos - Vector2.new(cx, cy)).Unit
 	return true, hitPos, normal
 end
