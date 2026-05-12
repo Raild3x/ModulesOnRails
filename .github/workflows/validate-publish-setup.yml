@@ -2,6 +2,8 @@ name: Validate Publish Setup
 
 on:
   push:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   workflow_dispatch:
 
 permissions:
@@ -14,6 +16,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -54,10 +58,15 @@ jobs:
       - name: Test wally login from package directory
         shell: bash
         env:
-          WALLY_TOKEN: dummy-test-token-12345
+          WALLY_TOKEN: ${{ secrets.WALLY_TOKEN }}
         run: |
           set -euo pipefail
           echo "Testing wally login flow..."
+
+          if [ -z "${WALLY_TOKEN:-}" ]; then
+            echo "✗ WALLY_TOKEN secret is not configured" >&2
+            exit 1
+          fi
           
           first_pkg=$(find lib -maxdepth 1 -mindepth 1 -type d | sort | head -n 1)
           if [ -z "$first_pkg" ]; then
@@ -85,13 +94,14 @@ jobs:
           trap "rm -rf '$temp_home'" EXIT
           
           echo "Running wally login from $pkg_name directory..."
-          (export HOME="$temp_home" && cd "$first_pkg" && wally login --token "$WALLY_TOKEN" 2>&1 || true)
+          (export HOME="$temp_home" && cd "$first_pkg" && wally login --token "$WALLY_TOKEN")
           
           # Check if auth config was created
           if [ -f "$temp_home/.wally/credentials.toml" ] || [ -f "$temp_home/.config/wally/credentials.toml" ]; then
             echo "✓ wally login succeeded and created credentials"
           else
-            echo "✓ wally login command executed from package directory"
+            echo "✗ wally login succeeded but credentials file was not created" >&2
+            exit 1
           fi
 
       - name: Verify publish action inputs
@@ -107,6 +117,7 @@ jobs:
           python scripts/workflow_actions/validate_publish_setup.py --check workflow-inputs
 
       - name: Resolve detected version type
+        if: github.event_name != 'push'
         id: version_preview
         shell: bash
         run: |
@@ -117,6 +128,7 @@ jobs:
             --dispatch-version-change none
 
       - name: Detect changed packages for preview
+        if: github.event_name != 'push'
         id: changed_preview
         shell: bash
         env:
@@ -125,11 +137,13 @@ jobs:
           set -euo pipefail
           python scripts/workflow_actions/publish_detect_changed_packages.py \
             --event-name "${{ github.event_name }}" \
+            --event-path "$GITHUB_EVENT_PATH" \
             --repository "${{ github.repository }}" \
             --pr-number "${{ github.event.pull_request.number || 0 }}" \
             --changed-packages-file changed-packages.txt
 
       - name: Preview package version updates
+        if: github.event_name != 'push'
         shell: bash
         run: |
           set -euo pipefail

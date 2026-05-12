@@ -15,6 +15,7 @@ from pathlib import Path
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Detect changed packages under lib/.")
     parser.add_argument("--event-name", required=True, help="GitHub event name.")
+    parser.add_argument("--event-path", help="Path to GitHub event payload JSON.")
     parser.add_argument("--repository", required=True, help="GitHub repository in owner/name format.")
     parser.add_argument("--pr-number", type=int, default=0, help="Pull request number for PR events.")
     parser.add_argument(
@@ -28,6 +29,18 @@ def parse_args() -> argparse.Namespace:
 def run_git_changed_files() -> list[str]:
     completed = subprocess.run(
         ["git", "diff", "--name-only", "HEAD~1", "HEAD"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        return []
+    return [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+
+
+def run_git_changed_files_between(base: str, head: str) -> list[str]:
+    completed = subprocess.run(
+        ["git", "diff", "--name-only", base, head],
         check=False,
         capture_output=True,
         text=True,
@@ -109,7 +122,21 @@ def write_output(name: str, value: str) -> None:
 def main() -> int:
     args = parse_args()
 
-    if args.event_name in {"workflow_dispatch", "push"}:
+    if args.event_name == "push":
+        changed_files = []
+        if args.event_path:
+            try:
+                event = json.loads(Path(args.event_path).read_text(encoding="utf-8"))
+                base = str(event.get("before", "")).strip()
+                head = str(event.get("after", "")).strip()
+                if base and head and set(base) != {"0"}:
+                    changed_files = run_git_changed_files_between(base, head)
+            except Exception:
+                changed_files = []
+
+        if not changed_files:
+            changed_files = run_git_changed_files()
+    elif args.event_name == "workflow_dispatch":
         changed_files = run_git_changed_files()
     else:
         token = os.getenv("GITHUB_TOKEN", "")
