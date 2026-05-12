@@ -63,7 +63,8 @@
 --// Imports //--
 local LooseCell = require("./LooseCell")
 local TightCell = require("./TightCell")
-local Vector2 = require("./Vector2")
+local Vector2 = require("./Shims/Vector2")
+local Enum = require("./Shims/Enum")
 
 --// Types //--
 type LooseCell = LooseCell.LooseCell
@@ -101,7 +102,7 @@ local SHAPE_TYPE_POINT: ShapeType = "p"
     The `FilterType` determines whether the filter is inclusive or exclusive. Uses RaycastFilterType for consistency with Roblox's raycasting system.
 ]=]
 export type FilterParams = {
-	FilterList: { EntityId },
+	FilterList: { EntityId }?,
 	CustomFilter: ((EntityId) -> boolean)?,
 	FilterType: Enum.RaycastFilterType?,
 }
@@ -171,7 +172,6 @@ local function generateFilter(filterParams: FilterParams?): (boolean, (EntityId)
 	local filterSet: { [EntityId]: true }? = nil
 
 	if filterList then
-		table.freeze(filterList)
 		filterSet = {}
 		for _, entityId in ipairs(filterList) do
 			filterSet[entityId] = true
@@ -253,7 +253,7 @@ local function CheckCircleRectIntersection(
 	local cornerDistanceSquared = (distanceX - rectWidth) * (distanceX - rectWidth)
 		+ (distanceY - rectHeight) * (distanceY - rectHeight)
 
-	return cornerDistanceSquared <= (circleRadius * circleRadius)
+	return cornerDistanceSquared <= (circleRadius * 2) * (circleRadius * 2)
 end
 
 local function CheckCircleCircleIntersection(
@@ -375,7 +375,7 @@ function LTDG.new(config: {
 		TG[i] = TightCell.new(i)
 		--LN[i] = Node.new();
 		local l = bottomCornerX + (i - 1) % width * cellWidth
-		local b = bottomCornerY + ((math.floor((i - 1) / height)) % height) * cellHeight
+		local b = bottomCornerY + ((math.floor((i - 1) / width)) % height) * cellHeight
 		LG[i] = LooseCell.new(l, b, l + cellWidth, b + cellHeight)
 		--if i%20==0 then print() end
 	end
@@ -934,9 +934,9 @@ function LTDG._QueryRegion(
 			local tightCell = TightGrid[trow + tx]
 			for _, looseCellIdx in tightCell do
 				if seenLooseCellStamp[looseCellIdx] == stamp then
-					continue -- skip already checked loose cells
+					continue
 				end
-				seenLooseCellStamp[looseCellIdx] = stamp -- mark loose cell as checked
+				seenLooseCellStamp[looseCellIdx] = stamp
 
 				local looseCell: LooseCell = LooseGrid[looseCellIdx]
 				if looseCell:Intersects(qL, qB, qR, qT) then -- if looseCell intersects search area

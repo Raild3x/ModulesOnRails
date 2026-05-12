@@ -1,24 +1,21 @@
 local LooseTightDoubleGrid = require("./ltdg")
 local LooseCell = require("./LooseCell")
-local Vector2 = require("./Vector2")
+local Vector2 = require("./Shims/Vector2")
+local Enum = require("./Shims/Enum")
 
-local debug = debug
-if not debug or not debug.profilebegin then -- This is a workaround for the debug library not being available in the vscode env.
-	debug = {
-		profilebegin = function() end,
-		profileend = function() end,
+local profilebegin, profileend = function(label: string) end, function() end
+if debug and debug.profilebegin and debug.profileend then
+	profilebegin, profileend = debug.profilebegin, debug.profileend
+end
+
+local task = task
+if not task then
+	task = {
+		wait = function(num: number) end,
 	}
 end
 
-local Enum = Enum
-if not Enum then
-	Enum = {
-		RaycastFilterType = {
-			Include = 1,
-			Exclude = 2,
-		},
-	}
-end
+local DO_BENCHMARKS = true
 
 local test_suite = function(tiniest: tiniest)
 	local describe = tiniest.describe
@@ -116,7 +113,7 @@ local test_suite = function(tiniest: tiniest)
 			}
 		end
 
-		local sampleCount = 11
+		local sampleCount = 100
 		local trimPercent = 0.05
 		local totalSamplesMs = {}
 		local perOpSamplesUs = {}
@@ -132,6 +129,9 @@ local test_suite = function(tiniest: tiniest)
 			totalSamplesMs[sampleIndex] = elapsed * 1000
 			perOpSamplesUs[sampleIndex] = elapsed * 1000000 / iterations
 			totalChecksum += checksum
+			if sampleIndex % 2 == 0 then
+				task.wait()
+			end
 		end
 
 		local totalMsStats = calculateStats(totalSamplesMs, trimPercent)
@@ -338,6 +338,35 @@ local test_suite = function(tiniest: tiniest)
 				expect(entities).never_has_value(id2)
 			end)
 
+			test("should query moved rectangle only at its new location", function()
+				local grid = createGenericGrid()
+				local id = grid:InsertRect(Vector2.new(1, 1), Vector2.new(2, 2))
+
+				grid:UpdateRect(id, Vector2.new(8, 1), Vector2.new(2, 2))
+
+				local oldEntities = grid:QueryRect(Vector2.new(1, 1), Vector2.new(2, 2))
+				expect(oldEntities).never_has_value(id)
+
+				local newEntities = grid:QueryRect(Vector2.new(8, 1), Vector2.new(2, 2))
+				expect(newEntities).has_value(id)
+			end)
+
+			test("should query final location after multiple rectangle moves", function()
+				local grid = createGenericGrid()
+				local id = grid:InsertRect(Vector2.new(1, 1), Vector2.new(2, 2))
+
+				grid:UpdateRect(id, Vector2.new(8, 1), Vector2.new(2, 2))
+				grid:UpdateRect(id, Vector2.new(8, 8), Vector2.new(2, 2))
+				grid:UpdateRect(id, Vector2.new(2, 8), Vector2.new(2, 2))
+				grid:UpdateRect(id, Vector2.new(6, 6), Vector2.new(2, 2))
+
+				local staleEntities = grid:QueryRect(Vector2.new(1, 1), Vector2.new(2, 2))
+				expect(staleEntities).never_has_value(id)
+
+				local finalEntities = grid:QueryRect(Vector2.new(6, 6), Vector2.new(2, 2))
+				expect(finalEntities).has_value(id)
+			end)
+
 			test("should query entities in a circular region", function()
 				local grid = createGenericGrid()
 				local id1 = grid:InsertCircle(Vector2.new(5, 5), 2)
@@ -393,6 +422,42 @@ local test_suite = function(tiniest: tiniest)
 				local entities = grid:QueryCircle(Vector2.new(5, 5), 2.12)
 				expect(entities).has_value(id1)
 				expect(entities).never_has_value(id2)
+			end)
+
+			test("should query moved circle only at its new location", function()
+				local grid = createGenericGrid()
+				local id = grid:InsertCircle(Vector2.new(2, 8), 1)
+
+				grid:UpdateCircle(id, Vector2.new(8, 8), 1)
+
+				local oldEntities = grid:QueryCircle(Vector2.new(2, 8), 1.2)
+				expect(oldEntities).never_has_value(id)
+
+				local newEntities = grid:QueryCircle(Vector2.new(8, 8), 1.2)
+				expect(newEntities).has_value(id)
+			end)
+
+			test("should honor filters for moved circles", function()
+				local grid = createGenericGrid()
+				local includeId = grid:InsertCircle(Vector2.new(1, 1), 1)
+				local excludeId = grid:InsertCircle(Vector2.new(1, 1), 1)
+
+				grid:UpdateCircle(includeId, Vector2.new(6, 6), 1)
+				grid:UpdateCircle(excludeId, Vector2.new(8, 6), 1)
+
+				local includeEntities = grid:QueryCircle(Vector2.new(7, 6), 3, {
+					FilterList = { excludeId },
+					FilterType = Enum.RaycastFilterType.Exclude,
+				})
+				expect(includeEntities).has_value(includeId)
+				expect(includeEntities).never_has_value(excludeId)
+
+				local onlyFarEntities = grid:QueryCircle(Vector2.new(7, 6), 3, {
+					FilterList = { excludeId },
+					FilterType = Enum.RaycastFilterType.Include,
+				})
+				expect(onlyFarEntities).has_value(excludeId)
+				expect(onlyFarEntities).never_has_value(includeId)
 			end)
 
 			test("should handle circle-rectangle intersections", function()
@@ -630,6 +695,112 @@ local test_suite = function(tiniest: tiniest)
 			local hit = grid:Raycast(Vector2.new(-10, -10), Vector2.new(5, 5)) -- Starts outside and misses
 			expect(hit).is(nil)
 		end)
+
+		test("should raycast a moved rectangle at its new position and miss its old position", function()
+			local grid = createGenericGrid()
+			local id = grid:InsertRect(Vector2.new(1, 1), Vector2.new(2, 2))
+
+			grid:UpdateRect(id, Vector2.new(8, 1), Vector2.new(2, 2))
+
+			local oldPosHit = grid:Raycast(Vector2.new(0, 1), Vector2.new(3, 0))
+			expect(oldPosHit).is(nil)
+
+			local newPosHit = grid:Raycast(Vector2.new(6, 1), Vector2.new(4, 0))
+			expect(newPosHit).is_not(nil)
+			expect(newPosHit.EntityId).is(id)
+		end)
+
+		test("should raycast a moved circle after crossing cells", function()
+			local grid = createGenericGrid()
+			local id = grid:InsertCircle(Vector2.new(2, 8), 1)
+
+			grid:UpdateCircle(id, Vector2.new(8, 8), 1)
+
+			local hit = grid:Raycast(Vector2.new(6, 8), Vector2.new(4, 0))
+			expect(hit).is_not(nil)
+			expect(hit.EntityId).is(id)
+		end)
+
+		test("should raycast a moved point and not hit the stale location", function()
+			local grid = createGenericGrid()
+			local id = grid:InsertPoint(Vector2.new(2, 2))
+
+			grid:UpdatePoint(id, Vector2.new(7, 7))
+
+			local staleHit = grid:Raycast(Vector2.new(1, 2), Vector2.new(2, 0))
+			expect(staleHit).is(nil)
+
+			local movedHit = grid:Raycast(Vector2.new(6, 7), Vector2.new(2, 0))
+			expect(movedHit).is_not(nil)
+			expect(movedHit.EntityId).is(id)
+		end)
+
+		test("should return nearest moved entity when multiple moved entities lie on the same ray", function()
+			local grid = createGenericGrid()
+			local nearId = grid:InsertRect(Vector2.new(1, 5), Vector2.new(2, 2))
+			local farId = grid:InsertRect(Vector2.new(1, 5), Vector2.new(2, 2))
+
+			grid:UpdateRect(nearId, Vector2.new(6, 5), Vector2.new(2, 2))
+			grid:UpdateRect(farId, Vector2.new(9, 5), Vector2.new(2, 2))
+
+			local hit = grid:Raycast(Vector2.new(0, 5), Vector2.new(12, 0))
+			expect(hit).is_not(nil)
+			expect(hit.EntityId).is(nearId)
+		end)
+
+		test("should not raycast an entity after it is moved and then removed", function()
+			local grid = createGenericGrid()
+			local id = grid:InsertRect(Vector2.new(2, 2), Vector2.new(2, 2))
+
+			grid:UpdateRect(id, Vector2.new(8, 8), Vector2.new(2, 2))
+			expect(grid:Remove(id)).is(true)
+
+			local oldPathHit = grid:Raycast(Vector2.new(0, 2), Vector2.new(4, 0))
+			expect(oldPathHit).is(nil)
+
+			local newPathHit = grid:Raycast(Vector2.new(6, 8), Vector2.new(4, 0))
+			expect(newPathHit).is(nil)
+		end)
+
+		test("should raycast using final location after many cross-cell moves", function()
+			local grid = createGenericGrid()
+			local id = grid:InsertRect(Vector2.new(1, 1), Vector2.new(2, 2))
+
+			grid:UpdateRect(id, Vector2.new(8, 1), Vector2.new(2, 2))
+			grid:UpdateRect(id, Vector2.new(8, 8), Vector2.new(2, 2))
+			grid:UpdateRect(id, Vector2.new(1, 8), Vector2.new(2, 2))
+			grid:UpdateRect(id, Vector2.new(6, 6), Vector2.new(2, 2))
+
+			local staleHorizontalHit = grid:Raycast(Vector2.new(0, 1), Vector2.new(4, 0))
+			expect(staleHorizontalHit).is(nil)
+
+			local finalPosHit = grid:Raycast(Vector2.new(4, 6), Vector2.new(4, 0))
+			expect(finalPosHit).is_not(nil)
+			expect(finalPosHit.EntityId).is(id)
+		end)
+
+		test("should respect include and exclude filters for moved entities", function()
+			local grid = createGenericGrid()
+			local includeId = grid:InsertRect(Vector2.new(1, 4), Vector2.new(2, 2))
+			local excludeId = grid:InsertRect(Vector2.new(1, 4), Vector2.new(2, 2))
+
+			grid:UpdateRect(includeId, Vector2.new(6, 4), Vector2.new(2, 2))
+			grid:UpdateRect(excludeId, Vector2.new(9, 4), Vector2.new(2, 2))
+
+			local includeHit = grid:Raycast(Vector2.new(0, 4), Vector2.new(12, 0), {
+				FilterList = { excludeId },
+				FilterType = Enum.RaycastFilterType.Exclude,
+			})
+			expect(includeHit).is_not(nil)
+			expect(includeHit.EntityId).is(includeId)
+
+			local onlyFarHit = grid:Raycast(Vector2.new(0, 4), Vector2.new(12, 0), {
+				FilterList = { excludeId },
+				FilterType = Enum.RaycastFilterType.Include,
+			})
+			expect(onlyFarHit).is_not(nil)
+			expect(onlyFarHit.EntityId).is(excludeId)
+		end)
 	end)
 
 	describe("Edge Cases", function()
@@ -644,6 +815,242 @@ local test_suite = function(tiniest: tiniest)
 			expect(function()
 				grid:UpdateRect(999, Vector2.new(5, 5), Vector2.new(2, 2))
 			end).fails()
+		end)
+
+		describe("FilterParams optional FilterList", function()
+			test("should allow CustomFilter without FilterList in QueryRect", function()
+				local grid = createGenericGrid()
+				local id1 = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+				local id2 = grid:InsertRect(Vector2.new(8, 8), Vector2.new(2, 2))
+				local entities = grid:QueryRect(Vector2.new(5, 5), Vector2.new(10, 10), {
+					CustomFilter = function(entityId)
+						return entityId == id1
+					end,
+					FilterType = Enum.RaycastFilterType.Include,
+				})
+				expect(entities).has_value(id1)
+				expect(entities).never_has_value(id2)
+			end)
+
+			test("should allow CustomFilter without FilterList in QueryCircle", function()
+				local grid = createGenericGrid()
+				local id1 = grid:InsertCircle(Vector2.new(5, 5), 2)
+				local id2 = grid:InsertCircle(Vector2.new(8, 8), 2)
+				local entities = grid:QueryCircle(Vector2.new(5, 5), 5, {
+					CustomFilter = function(entityId)
+						return entityId == id1
+					end,
+					FilterType = Enum.RaycastFilterType.Include,
+				})
+				expect(entities).has_value(id1)
+				expect(entities).never_has_value(id2)
+			end)
+
+			test("should allow FilterType without FilterList (defaults to Include) in Raycast", function()
+				local grid = createGenericGrid()
+				local id1 = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+				local id2 = grid:InsertRect(Vector2.new(8, 5), Vector2.new(2, 2))
+				local hit = grid:Raycast(Vector2.new(0, 5), Vector2.new(10, 0), {
+					CustomFilter = function(entityId)
+						return entityId == id1
+					end,
+				})
+				expect(hit).is_not(nil)
+				expect(hit.EntityId).is(id1)
+			end)
+		end)
+
+		describe("Circle-Rectangle corner intersection", function()
+			test("should detect circle just touching rectangle corner", function()
+				local grid = createGenericGrid()
+				-- Rectangle centered at (5, 5) with size 2x2, so corners at (4,4), (6,4), (4,6), (6,6)
+				local rectId = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+				-- Circle with radius ≈ 1.414 at (3, 3) should barely touch corner at (4, 4)
+				local circleId = grid:InsertCircle(Vector2.new(3, 3), 1.415)
+				local entities = grid:QueryCircle(Vector2.new(3, 3), 1.415)
+				expect(entities).has_value(rectId)
+			end)
+
+			test("should not detect circle when just missing rectangle corner", function()
+				local grid = createGenericGrid()
+				local rectId = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+				-- Circle with radius slightly less than diagonal distance to corner should miss
+				local circleId = grid:InsertCircle(Vector2.new(3, 3), 1.413)
+				local entities = grid:QueryCircle(Vector2.new(3, 3), 1.413)
+				expect(entities).never_has_value(rectId)
+			end)
+
+			test("should correctly handle circle-rect corner collision at each corner", function()
+				local grid = createGenericGrid()
+				local rectId = grid:InsertRect(Vector2.new(5, 5), Vector2.new(2, 2))
+
+				-- Test bottom-left corner (4, 4)
+				expect(grid:QueryCircle(Vector2.new(3, 3), 1.415)).has_value(rectId)
+
+				-- Test bottom-right corner (6, 4)
+				expect(grid:QueryCircle(Vector2.new(7, 3), 1.415)).has_value(rectId)
+
+				-- Test top-right corner (6, 6)
+				expect(grid:QueryCircle(Vector2.new(7, 7), 1.415)).has_value(rectId)
+
+				-- Test top-left corner (4, 6)
+				expect(grid:QueryCircle(Vector2.new(3, 7), 1.415)).has_value(rectId)
+			end)
+
+			test("should handle very small rectangles with corner collisions", function()
+				local grid = createGenericGrid()
+				local rectId = grid:InsertRect(Vector2.new(5, 5), Vector2.new(0.2, 0.2))
+				-- Small rect with corners at (4.9, 4.9), (5.1, 4.9), etc.
+				-- Circle at (4.8, 4.8) with radius 0.15 should catch corner at (4.9, 4.9)
+				local entities = grid:QueryCircle(Vector2.new(4.8, 4.8), 0.15)
+				expect(entities).has_value(rectId)
+			end)
+
+			test("should handle tall rectangles (height > width) with corner intersections", function()
+				local grid = createGenericGrid()
+				-- Tall narrow rectangle
+				local rectId = grid:InsertRect(Vector2.new(5, 5), Vector2.new(1, 4))
+				-- Circle approaching from the side should detect corner collision
+				local circleId = grid:InsertCircle(Vector2.new(3, 7), 2.25)
+				local entities = grid:QueryCircle(Vector2.new(3, 7), 2.25)
+				expect(entities).has_value(rectId)
+			end)
+		end)
+
+		describe("Non-square grid initialization", function()
+			test("should correctly initialize wide rectangular grid (width > height)", function()
+				local grid = LooseTightDoubleGrid.new {
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(10, 5),
+					CellSize = 2,
+				}
+				expect(grid.tCols).is(10)
+				expect(grid.tRows).is(5)
+
+				-- Verify cells are positioned correctly by inserting entities
+				-- in different rows to check they're in the right loose cells
+				local id1 = grid:InsertRect(Vector2.new(-8, -4), Vector2.new(1, 1))
+				local id2 = grid:InsertRect(Vector2.new(-8, 2), Vector2.new(1, 1))
+
+				-- Query at first row's position should find id1, not id2
+				local row1Entities = grid:QueryRect(Vector2.new(-8, -4), Vector2.new(1, 1))
+				expect(row1Entities).has_value(id1)
+
+				-- Query at second row's position should find id2, not id1
+				local row2Entities = grid:QueryRect(Vector2.new(-8, 2), Vector2.new(1, 1))
+				expect(row2Entities).has_value(id2)
+			end)
+
+			test("should correctly initialize tall rectangular grid (height > width)", function()
+				local grid = LooseTightDoubleGrid.new {
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(5, 10),
+					CellSize = 2,
+				}
+				expect(grid.tCols).is(5)
+				expect(grid.tRows).is(10)
+
+				-- Insert entities at different column positions
+				local id1 = grid:InsertRect(Vector2.new(-4, 0), Vector2.new(1, 1))
+				local id2 = grid:InsertRect(Vector2.new(2, 0), Vector2.new(1, 1))
+
+				-- Query at first column's position should find id1, not id2
+				local col1Entities = grid:QueryRect(Vector2.new(-4, 0), Vector2.new(1, 1))
+				expect(col1Entities).has_value(id1)
+
+				-- Query at second column's position should find id2, not id1
+				local col2Entities = grid:QueryRect(Vector2.new(2, 0), Vector2.new(1, 1))
+				expect(col2Entities).has_value(id2)
+			end)
+
+			test("should correctly place entities across multiple cells in non-square grid", function()
+				local grid = LooseTightDoubleGrid.new {
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(8, 4),
+					CellSize = 2,
+				}
+
+				-- Insert a large entity spanning multiple cells
+				-- Rectangle at (0, 0) with size (8, 4) spans from (-4, -2) to (4, 2)
+				local id = grid:InsertRect(Vector2.new(0, 0), Vector2.new(8, 4))
+
+				-- Query various regions that overlap with the entity
+				-- Query at left side should find it
+				expect(grid:QueryRect(Vector2.new(-2, 0), Vector2.new(2, 2))).has_value(id)
+				-- Query at center should find it
+				expect(grid:QueryRect(Vector2.new(0, 0), Vector2.new(2, 2))).has_value(id)
+				-- Query at right side should find it
+				expect(grid:QueryRect(Vector2.new(2, 0), Vector2.new(2, 2))).has_value(id)
+			end)
+
+			test("should correctly query rectangular grid after entity updates", function()
+				local grid = LooseTightDoubleGrid.new {
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(12, 6),
+					CellSize = 2,
+				}
+
+				local id = grid:InsertRect(Vector2.new(-8, -3), Vector2.new(2, 2))
+
+				-- Should find at original location
+				local originalLocation = grid:QueryRect(Vector2.new(-8, -3), Vector2.new(3, 3))
+				expect(originalLocation).has_value(id)
+
+				-- Move to new location
+				grid:UpdateRect(id, Vector2.new(6, 3), Vector2.new(2, 2))
+
+				-- Should not find at original location
+				local staleLocation = grid:QueryRect(Vector2.new(-8, -3), Vector2.new(3, 3))
+				expect(staleLocation).never_has_value(id)
+
+				-- Should find at new location
+				local newLocation = grid:QueryRect(Vector2.new(6, 3), Vector2.new(3, 3))
+				expect(newLocation).has_value(id)
+			end)
+
+			test("should maintain spatial coherence in very wide grid", function()
+				local grid = LooseTightDoubleGrid.new {
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(20, 2),
+					CellSize = 2,
+				}
+
+				-- Place entities at opposite ends
+				local leftId = grid:InsertRect(Vector2.new(-18, 0), Vector2.new(1, 1))
+				local rightId = grid:InsertRect(Vector2.new(18, 0), Vector2.new(1, 1))
+
+				-- Left query should only find left entity
+				local leftQuery = grid:QueryRect(Vector2.new(-18, 0), Vector2.new(5, 5))
+				expect(leftQuery).has_value(leftId)
+				expect(leftQuery).never_has_value(rightId)
+
+				-- Right query should only find right entity
+				local rightQuery = grid:QueryRect(Vector2.new(18, 0), Vector2.new(5, 5))
+				expect(rightQuery).has_value(rightId)
+				expect(rightQuery).never_has_value(leftId)
+			end)
+
+			test("should maintain spatial coherence in very tall grid", function()
+				local grid = LooseTightDoubleGrid.new {
+					Position = Vector2.new(0, 0),
+					Size = Vector2.new(2, 20),
+					CellSize = 2,
+				}
+
+				-- Place entities at opposite ends
+				local bottomId = grid:InsertRect(Vector2.new(0, -18), Vector2.new(1, 1))
+				local topId = grid:InsertRect(Vector2.new(0, 18), Vector2.new(1, 1))
+
+				-- Bottom query should only find bottom entity
+				local bottomQuery = grid:QueryRect(Vector2.new(0, -18), Vector2.new(5, 5))
+				expect(bottomQuery).has_value(bottomId)
+				expect(bottomQuery).never_has_value(topId)
+
+				-- Top query should only find top entity
+				local topQuery = grid:QueryRect(Vector2.new(0, 18), Vector2.new(5, 5))
+				expect(topQuery).has_value(topId)
+				expect(topQuery).never_has_value(bottomId)
+			end)
 		end)
 	end)
 
@@ -714,6 +1121,10 @@ local test_suite = function(tiniest: tiniest)
 		local PERF_QUERY_COUNT = 3000
 		local PERF_UPDATE_COUNT = 7000
 		local PERF_RAYCAST_COUNT = 3000
+
+		if DO_BENCHMARKS then
+			return
+		end
 
 		-- Paste comparison results directly under each benchmark:
 		-- BEFORE: total avg=___ms | median=___ms | trim5%=___ms | perOp avg=___us | median=___us | trim5%=___us
@@ -950,6 +1361,64 @@ local test_suite = function(tiniest: tiniest)
 			expect(iteratedEntities[id1]).is("r")
 			expect(iteratedEntities[id2]).is("c")
 			expect(iteratedEntities[id3]).is("p")
+		end)
+	end)
+
+	-- createGenericGrid(): Position=(0,0), Size=(10,10), CellSize=2
+	-- World span x∈[-10,10], y∈[-10,10]; each tight cell is 2×2 world units.
+	-- Column/row boundaries at every even integer:
+	--   Col 4: x∈[-4,-2)  Col 5: x∈[-2,0)  Col 6: x∈[0,2)  Col 7: x∈[2,4)
+	--   Row 4: y∈[-4,-2)  Row 5: y∈[-2,0)  Row 6: y∈[0,2)  Row 7: y∈[2,4)
+	-- A LooseCell is assigned by entity centre; its AABB can extend into neighbouring
+	-- tight cells. UpdateExtents must INSERT the loose cell into those neighbours so
+	-- queries that cross into them can reach the entity.
+	describe("TightCell registration", function()
+		test("entity is findable via the left neighbouring tight cells after initial insert", function()
+			local grid = createGenericGrid()
+			-- Centre (0,0) → LooseCell col 6.  AABB {-1,-1, 1,1} extends left into col 5.
+			-- UpdateExtents must INSERT (not remove) the loose cell into col-5 tight cells.
+			local id = grid:InsertRect(Vector2.new(0, 0), Vector2.new(2, 2))
+			-- Query confined to col 5, row 6 – does not touch the entity's home col-6 tight cells.
+			local entities = grid:QueryRect(Vector2.new(-1, 1), Vector2.new(1, 1))
+			expect(entities).has_value(id)
+		end)
+
+		test("entity is findable via the right neighbouring tight cells after initial insert", function()
+			local grid = createGenericGrid()
+			-- Centre (1.5,0) → LooseCell col 6.  AABB {0.5,-1, 2.5,1} extends right into col 7.
+			-- UpdateExtents must INSERT the loose cell into col-7 tight cells.
+			local id = grid:InsertRect(Vector2.new(1.5, 0), Vector2.new(2, 2))
+			-- Query confined to col 7, rows 5–6 – does not touch the entity's home col-6 tight cells.
+			local entities = grid:QueryRect(Vector2.new(2.5, 0), Vector2.new(0.5, 1))
+			expect(entities).has_value(id)
+		end)
+
+		test("entity is findable in newly covered tight cells after AABB expands left and right via update", function()
+			local grid = createGenericGrid()
+			-- Initial insert: AABB {-1,-1, 1,1} → LooseCell covers cols 5–6.
+			local id = grid:InsertRect(Vector2.new(0, 0), Vector2.new(2, 2))
+			-- Grow: AABB {-3,-1, 3,1} → expands into col 4 (left) and col 7 (right).
+			grid:UpdateRect(id, Vector2.new(0, 0), Vector2.new(6, 2))
+			-- Newly added left column (col 4, x∈[-4,-2)).
+			local left = grid:QueryRect(Vector2.new(-3, 0), Vector2.new(1, 2))
+			expect(left).has_value(id)
+			-- Newly added right column (col 7, x∈[2,4)).
+			local right = grid:QueryRect(Vector2.new(2.5, 0), Vector2.new(0.5, 2))
+			expect(right).has_value(id)
+		end)
+
+		test("entity is findable in newly covered tight cells after AABB expands top and bottom via update", function()
+			local grid = createGenericGrid()
+			-- Initial insert: AABB {-1,-1, 1,1} → LooseCell covers rows 5–6.
+			local id = grid:InsertRect(Vector2.new(0, 0), Vector2.new(2, 2))
+			-- Grow: AABB {-1,-3, 1,3} → expands into row 7 (top) and row 4 (bottom).
+			grid:UpdateRect(id, Vector2.new(0, 0), Vector2.new(2, 6))
+			-- Newly added top row (row 7, y∈[2,4)).
+			local top = grid:QueryRect(Vector2.new(0.5, 2.5), Vector2.new(1, 1))
+			expect(top).has_value(id)
+			-- Newly added bottom row (row 4, y∈[-4,-2)).
+			local bottom = grid:QueryRect(Vector2.new(0.5, -3), Vector2.new(1, 1))
+			expect(bottom).has_value(id)
 		end)
 	end)
 end

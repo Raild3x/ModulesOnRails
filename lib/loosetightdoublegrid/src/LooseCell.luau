@@ -35,6 +35,11 @@ export type LooseCell = {
 	UpdateExtents: (self: LooseCell, grid: GridLike, idx: number) -> (),
 }
 
+local profilebegin, profileend = function(label: string) end, function() end
+if debug and debug.profilebegin and debug.profileend then
+	profilebegin, profileend = debug.profilebegin, debug.profileend
+end
+
 --------------------------------------------------------------------------------
 --// Util Functions //--
 --------------------------------------------------------------------------------
@@ -130,7 +135,7 @@ function LooseCell.UpdateExtents(self: LooseCell, grid: GridLike, idx: number)
 	local l, b, r, t = math.huge, math.huge, -math.huge, -math.huge
 	-- TODO: Only check the adjusted AABBs. However, the overhead of adding the adjusted aabbs might not be worth it
 
-	debug.profilebegin("Calculate New Extents")
+	profilebegin("Calculate New Extents")
 	for _, aabb: AABB in self.AABBs do
 		if aabb[1] < l then
 			l = aabb[1]
@@ -149,7 +154,7 @@ function LooseCell.UpdateExtents(self: LooseCell, grid: GridLike, idx: number)
 		l, b, r, t = self.x, self.y, self.x, self.y
 	end
 	self.l, self.b, self.r, self.t = l, b, r, t
-	debug.profileend()
+	profileend()
 	-- print(idx, "New extents: ", "L:", l, "R:", r, "T:", t, "B:", b)
 
 	local nL, nR, nT, nB = grid:GetCol(self.l), grid:GetCol(self.r), grid:GetRow(self.t), grid:GetRow(self.b)
@@ -170,20 +175,20 @@ function LooseCell.UpdateExtents(self: LooseCell, grid: GridLike, idx: number)
 		end
 	end
 
-	debug.profilebegin("Process Changed TightCells")
+	profilebegin("Process Changed TightCells")
 	if nL ~= oL then
 		if nL < oL then
-			processSide(nL, oL - 1, nB, nT, TightCell.remove)
+			processSide(nL, oL - 1, nB, nT, TightCell.insert) -- expanded left: add new left strip
 		elseif nL > oL then
-			processSide(oR + 1, nR, nB, nT, TightCell.insert)
+			processSide(oL, nL - 1, nB, nT, TightCell.remove) -- shrank left: drop old left strip
 		end
 	end
 
 	if nR ~= oR then
 		if nR < oR then
-			processSide(nR + 1, oR, nB, nT, TightCell.remove)
+			processSide(nR + 1, oR, nB, nT, TightCell.remove) -- shrank right: drop old right strip
 		elseif nR > oR then
-			processSide(oL, nL - 1, nB, nT, TightCell.insert)
+			processSide(oR + 1, nR, nB, nT, TightCell.insert) -- expanded right: add new right strip
 		end
 	end
 
@@ -202,7 +207,7 @@ function LooseCell.UpdateExtents(self: LooseCell, grid: GridLike, idx: number)
 			processSide(nL, nR, nB, oB - 1, TightCell.insert)
 		end
 	end
-	debug.profileend()
+	profileend()
 end
 
 return LooseCell
