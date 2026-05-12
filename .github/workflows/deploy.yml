@@ -1,0 +1,31 @@
+name: deploy
+
+on:
+  [push]
+
+jobs:
+  lint:
+    name: "Selene lint"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Rokit
+        uses: raild3x/setup-rokit@v0.1.0
+      - name: Run Selene
+        run: selene lib
+
+  docs-build:
+    name: "Can build docs"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Moonwave
+        run: npm i -g moonwave@latest
+      - name: Build docs
+        run: moonwave build
