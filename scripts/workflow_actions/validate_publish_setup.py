@@ -4,12 +4,85 @@ Validate publish setup by checking package structure and workflow configuration.
 Ensures all packages are properly configured for publishing with Wally.
 """
 
-import sys
+import argparse
 import json
 import re
-import argparse
+import sys
 from pathlib import Path
 from typing import List, Tuple
+
+# ---------------------------------------------------------------------------
+# Local shared utilities (scripts/_common.py)
+# ---------------------------------------------------------------------------
+# Insert scripts/ onto sys.path so _common is importable from this subdirectory.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from _common import increment_version
+
+
+def validate_wally_ready() -> bool:
+    """Check that the first package under lib/ has the structure Wally needs.
+
+    This is intended to run AFTER the Wally binary has been verified on PATH.
+    It performs three jobs:
+
+    1. Locates the first alphabetical package directory under ``lib/``.
+    2. Confirms that ``wally.toml`` and ``src/`` are present.
+    3. Creates ``default.project.json`` if it is absent — Wally requires this
+       file to be present before it will publish or login from a package dir.
+    4. Reads and prints the package ``name`` and ``version`` from wally.toml
+       so the workflow log shows which package is being used as the probe.
+
+    Returns ``True`` if all checks pass, ``False`` otherwise.
+    """
+    lib_dir = Path("lib")
+    if not lib_dir.is_dir():
+        print("✗ lib/ directory not found")
+        return False
+
+    packages = sorted([d for d in lib_dir.iterdir() if d.is_dir()])
+    if not packages:
+        print("✗ No package directories found under lib/")
+        return False
+
+    pkg_dir = packages[0]
+    pkg_name = pkg_dir.name
+    print(f"Checking package: {pkg_name}")
+
+    # Verify wally.toml is present.
+    if not (pkg_dir / "wally.toml").is_file():
+        print(f"✗ {pkg_name}: missing wally.toml")
+        return False
+    print("✓ wally.toml present")
+
+    # Verify src/ directory is present.
+    if not (pkg_dir / "src").is_dir():
+        print(f"✗ {pkg_name}: missing src/ directory")
+        return False
+    print("✓ src/ directory present")
+
+    # Create default.project.json if absent (required by wally).
+    default_proj = pkg_dir / "default.project.json"
+    if not default_proj.is_file():
+        print(f"Creating default.project.json for {pkg_name}...")
+        default_proj.write_text(
+            f'{{\n    "name": "{pkg_name}",\n    "tree": {{\n        "$path": "src"\n    }}\n}}\n',
+            encoding="utf-8",
+        )
+        print("✓ default.project.json created")
+    else:
+        print("✓ default.project.json present")
+
+    # Parse and display package name + version.
+    content = (pkg_dir / "wally.toml").read_text(encoding="utf-8")
+    name_match = re.search(r'^name\s*=\s*"([^"]+)"', content, re.MULTILINE)
+    ver_match = re.search(r'^version\s*=\s*"([^"]+)"', content, re.MULTILINE)
+
+    if not name_match or not ver_match:
+        print("✗ Could not parse package info from wally.toml")
+        return False
+
+    print(f"✓ Package: {name_match.group(1)} @ {ver_match.group(1)}")
+    return True
 
 
 def find_packages() -> List[Path]:
@@ -156,28 +229,6 @@ def validate_workflow_inputs() -> bool:
     return all_valid
 
 
-def increment_version(version: str, increment_type: str) -> str:
-    """Increment semantic version by major, minor, or patch."""
-    parts = version.split(".")
-    if len(parts) != 3:
-        raise ValueError(f"Invalid semantic version: {version}")
-
-    major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
-    if increment_type == "major":
-        major += 1
-        minor = 0
-        patch = 0
-    elif increment_type == "minor":
-        minor += 1
-        patch = 0
-    elif increment_type == "patch":
-        patch += 1
-    else:
-        raise ValueError(f"Invalid increment type: {increment_type}")
-
-    return f"{major}.{minor}.{patch}"
-
-
 def validate_version_preview(version_change: str, changed_packages_file: str) -> bool:
     """Echo detected version type and preview package version updates."""
     print(f"Detected version type: {version_change}")
@@ -256,7 +307,7 @@ def main():
     parser = argparse.ArgumentParser(description="Validate publish setup configuration.")
     parser.add_argument(
         "--check",
-        choices=["packages", "action-inputs", "workflow-inputs", "version-preview", "all"],
+        choices=["packages", "action-inputs", "workflow-inputs", "version-preview", "wally-ready", "all"],
         default="all",
         help="Which check to run (default: all)"
     )
@@ -285,6 +336,9 @@ def main():
             return 0 if result else 1
         elif args.check == "version-preview":
             result = validate_version_preview(args.version_change, args.changed_packages_file)
+            return 0 if result else 1
+        elif args.check == "wally-ready":
+            result = validate_wally_ready()
             return 0 if result else 1
         else:  # all
             return run_all_checks()

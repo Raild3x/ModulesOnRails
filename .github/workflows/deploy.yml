@@ -1,9 +1,12 @@
-name: deploy
+# Continuous-integration checks run on every push.
+# Validates that the codebase lints cleanly and that the documentation can be built.
+name: CI - Lint and Docs
 
 on:
   [push]
 
 jobs:
+  # Run Selene static analysis across all source files in lib/.
   lint:
     name: "Selene lint"
     runs-on: ubuntu-latest
@@ -15,6 +18,7 @@ jobs:
       - name: Run Selene
         run: selene lib
 
+  # Verify that the Moonwave documentation build succeeds (does not deploy).
   docs-build:
     name: "Can build docs"
     runs-on: ubuntu-latest
@@ -29,3 +33,17 @@ jobs:
         run: npm i -g moonwave@latest
       - name: Build docs
         run: moonwave build
+
+  # Verify that the README generation script runs without errors.
+  read-me:
+    name: "Can generate README"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Generate README
+        run: python scripts/generateReadMe.py

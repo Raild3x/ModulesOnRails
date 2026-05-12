@@ -1,3 +1,5 @@
+# Run on every push and PR to catch publish configuration issues early.
+# Also triggered manually so contributors can preview what a publish run would do.
 name: Validate Publish Setup
 
 on:
@@ -24,109 +26,45 @@ jobs:
         with:
           python-version: '3.x'
 
+      # Ensure all packages under lib/ have the required files
+      # (wally.toml with name+version, src/ directory, etc.).
       - name: Validate package structure
         shell: bash
         run: |
           set -euo pipefail
           python scripts/workflow_actions/validate_publish_setup.py --check packages
 
-      - name: Setup Rokit
-        uses: raild3x/setup-rokit@v0.1.0
+      # Install Rokit and make the wally binary available on PATH.
+      - name: Setup Rokit and verify Wally
+        uses: ./.github/actions/verify-wally
 
-      - name: Verify Wally is available
+      # Delegates per-package structure checks (wally.toml, src/, default.project.json
+      # creation) to Python, keeping the bash layer thin.  Then confirms the wally
+      # binary itself is responsive after PATH is set by the step above.
+      - name: Validate package structure for Wally
         shell: bash
         run: |
           set -euo pipefail
-          echo "Checking Wally installation..."
-          
-          if command -v wally >/dev/null 2>&1; then
-            wally --version
-            echo "✓ wally available in PATH"
-            exit 0
-          fi
-
-          if [ -x .rokit/bin/wally ]; then
-            echo "$PWD/.rokit/bin" >> "$GITHUB_PATH"
-            ./.rokit/bin/wally --version
-            echo "✓ wally available from .rokit/bin"
-            exit 0
-          fi
-
-          echo "✗ wally not found"
-          exit 1
-
-      - name: Test wally is available and configured
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "Testing wally configuration..."
-          
-          first_pkg=$(find lib -maxdepth 1 -mindepth 1 -type d | sort | head -n 1)
-          if [ -z "$first_pkg" ]; then
-            echo "✗ No package directories found"
-            exit 1
-          fi
-          
-          pkg_name=$(basename "$first_pkg")
-          echo "Testing with package: $pkg_name"
-          
-          # Verify wally is installed
+          python scripts/workflow_actions/validate_publish_setup.py --check wally-ready
+          # Confirm the wally binary is responsive now that PATH is configured.
           wally --version
-          
-          # Verify package structure for publishing
-          echo "Checking package structure required for publishing:"
-          if [ ! -f "$first_pkg/wally.toml" ]; then
-            echo "✗ $pkg_name is missing wally.toml"
-            exit 1
-          fi
-          echo "✓ wally.toml present"
-          
-          if [ ! -d "$first_pkg/src" ]; then
-            echo "✗ $pkg_name is missing src/ directory"
-            exit 1
-          fi
-          echo "✓ src/ directory present"
-          
-          # Create default.project.json if missing (required by wally)
-          if [ ! -f "$first_pkg/default.project.json" ]; then
-            echo "Creating default.project.json for $pkg_name..."
-            printf '{\n    "name": "%s",\n    "tree": {\n        "$path": "src"\n    }\n}\n' "$pkg_name" > "$first_pkg/default.project.json"
-            echo "✓ default.project.json created"
-          else
-            echo "✓ default.project.json already present"
-          fi
-          
-          # Extract and display package name and version
-          pkg_full_name=$(grep -E '^\s*name\s*=' "$first_pkg/wally.toml" | head -1 | sed 's/.*"\([^"]*\)".*/\1/')
-          pkg_version=$(grep -E '^\s*version\s*=' "$first_pkg/wally.toml" | head -1 | sed 's/.*"\([^"]*\)".*/\1/')
-          
-          if [ -n "$pkg_full_name" ] && [ -n "$pkg_version" ]; then
-            echo "✓ Package: $pkg_full_name @ $pkg_version"
-          else
-            echo "✗ Could not parse package info from wally.toml"
-            exit 1
-          fi
-          
-          # Test wally functionality with default.project.json in place
-          echo "Testing wally with proper project structure..."
-          if (cd "$first_pkg" && wally login --help > /dev/null 2>&1); then
-            echo "✓ wally is functional"
-          else
-            echo "⚠ wally may have issues, but the package structure is correct"
-          fi
 
+      # Verify the composite publish action declares all expected inputs.
       - name: Verify publish action inputs
         shell: bash
         run: |
           set -euo pipefail
           python scripts/workflow_actions/validate_publish_setup.py --check action-inputs
 
+      # Verify the publish workflow passes those inputs through to the action.
       - name: Verify workflow passes inputs to action
         shell: bash
         run: |
           set -euo pipefail
           python scripts/workflow_actions/validate_publish_setup.py --check workflow-inputs
 
+      # Detect the semver label on the PR (or dispatch override) and preview
+      # which versions would change — without actually publishing anything.
       - name: Resolve detected version type
         if: github.event_name != 'push'
         id: version_preview
@@ -138,6 +76,7 @@ jobs:
             --event-path "$GITHUB_EVENT_PATH" \
             --dispatch-version-change none
 
+      # Show which packages would be bumped and to which version.
       - name: Detect changed packages for preview
         if: github.event_name != 'push'
         id: changed_preview
@@ -153,6 +92,7 @@ jobs:
             --pr-number "${{ github.event.pull_request.number || 0 }}" \
             --changed-packages-file changed-packages.txt
 
+      # Print a dry-run summary: "Will update X from 1.2.3 to 1.2.4".
       - name: Preview package version updates
         if: github.event_name != 'push'
         shell: bash

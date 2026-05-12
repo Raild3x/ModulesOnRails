@@ -5,48 +5,16 @@ Sets up proper linting by installing dependencies and generating types.
 """
 
 import os
-import sys
-import subprocess
 import shutil
+import sys
 from pathlib import Path
 
-
-SRC_DIR = Path("lib")
-IGNORE_LIST = ["src", "default.project.json", "wally.toml"]
-
-
-def find_project_root() -> Path:
-    """Find and change to the project root directory."""
-    current_dir = Path.cwd()
-    while current_dir != current_dir.parent:
-        if (current_dir / SRC_DIR).is_dir():
-            os.chdir(current_dir)
-            return current_dir
-        current_dir = current_dir.parent
-    return Path.cwd()
-
-
-def clear_package_dir(package_dir: Path):
-    """Remove all files/directories except those in IGNORE_LIST."""
-    for item in package_dir.iterdir():
-        if item.name not in IGNORE_LIST:
-            if item.is_dir():
-                shutil.rmtree(item)
-            else:
-                item.unlink()
-
-
-def run_command(cmd: list, error_msg: str) -> bool:
-    """Run a command and return True if successful."""
-    try:
-        subprocess.run(cmd, check=True)
-        return True
-    except subprocess.CalledProcessError:
-        print(f"Error: {error_msg}")
-        return False
-    except FileNotFoundError:
-        print(f"Error: Command not found - {cmd[0]}")
-        return False
+# ---------------------------------------------------------------------------
+# Local shared utilities (scripts/_common.py)
+# ---------------------------------------------------------------------------
+# Insert scripts/ onto sys.path so _common is importable regardless of cwd.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _common import SRC_DIR, WALLY_IGNORE_LIST, find_project_root, clear_package_dir, run_command
 
 
 def setup_package(package_dir: Path) -> bool:

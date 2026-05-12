@@ -7,9 +7,17 @@ import argparse
 import json
 import os
 import subprocess
+import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Local shared utilities (scripts/_common.py)
+# ---------------------------------------------------------------------------
+# Insert scripts/ onto sys.path so _common is importable from this subdirectory.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from _common import write_github_output
 
 
 def parse_args() -> argparse.Namespace:
@@ -148,14 +156,14 @@ def main() -> int:
     out_path = Path(args.changed_packages_file)
 
     if not changed_packages:
-        write_output("has_changes", "false")
+        write_github_output("has_changes", "false")
         print("No changed packages under lib/.")
         if out_path.exists():
             out_path.unlink()
         return 0
 
     out_path.write_text("\n".join(changed_packages) + "\n", encoding="utf-8")
-    write_output("has_changes", "true")
+    write_github_output("has_changes", "true")
     print(f"Changed packages: {' '.join(changed_packages)}")
     return 0
 
