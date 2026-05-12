@@ -1,4 +1,5 @@
 -- Passthrough file
+-- This is just here to allow me to test easier with Lune since Roblox messed up Rojo init.luau paths.
 
 local LTDG = require(script.ltdg)
 
