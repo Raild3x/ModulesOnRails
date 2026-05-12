@@ -87,7 +87,7 @@ export type EntityId = LooseCell.EntityId
     @within LooseTightDoubleGrid
     @type ShapeType string
     The type of shape for an entity in the grid.
-    Use the ShapeType enum for comparisions as the raw values are subject to change.
+    Use the ShapeType enum for comparisons as the raw values are subject to change.
 ]=]
 export type ShapeType = "c" | "r" | "p"
 local SHAPE_TYPE_CIRCLE: ShapeType = "c"
