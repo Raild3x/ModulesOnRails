@@ -1,5 +1,3 @@
-#!/bin/sh
-
 local fs = require("@lune/fs")
 local io = require("@lune/stdio")
 local process = require("@lune/process")

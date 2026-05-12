@@ -185,8 +185,8 @@ def main():
     elif args.publish or args.yes:
         publish_now = True
     elif is_ci_environment():
-        # In CI, default to publishing to avoid interactive prompts.
-        publish_now = True
+        print("Error: In CI, publishing intent must be explicit. Use --publish or --no-publish.")
+        return 1
     else:
         publish_now = input("Do you want to publish the package now? (y/n): ").strip().lower() == "y"
 

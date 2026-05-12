@@ -1122,7 +1122,7 @@ local test_suite = function(tiniest: tiniest)
 		local PERF_UPDATE_COUNT = 7000
 		local PERF_RAYCAST_COUNT = 3000
 
-		if DO_BENCHMARKS then
+		if DO_BENCHMARKS == false then
 			return
 		end
 

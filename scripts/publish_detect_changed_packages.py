@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import subprocess
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -59,12 +60,32 @@ def fetch_pr_changed_files(repository: str, pr_number: int, token: str) -> list[
             headers={
                 "Authorization": f"Bearer {token}",
                 "Accept": "application/vnd.github+json",
+                "User-Agent": "modules-on-rails-publish-workflow/1.0",
             },
         )
-        with urllib.request.urlopen(request) as response:
-            payload = json.load(response)
-            changed_files.extend(str(item.get("filename", "")).strip() for item in payload)
-            url = parse_next_link(response.headers.get("Link", ""))
+        try:
+            with urllib.request.urlopen(request) as response:
+                payload = json.load(response)
+                changed_files.extend(str(item.get("filename", "")).strip() for item in payload)
+                url = parse_next_link(response.headers.get("Link", ""))
+        except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8", errors="replace")
+            except Exception:
+                body = "<unable to read error body>"
+
+            raise RuntimeError(
+                "GitHub API request failed while fetching PR changed files: "
+                f"HTTP {e.code}. "
+                "Ensure GITHUB_TOKEN has required permissions (for example, pull-requests: read). "
+                f"URL: {url}. Response: {body}"
+            ) from e
+        except urllib.error.URLError as e:
+            raise RuntimeError(
+                "GitHub API request failed while fetching PR changed files due to a network error: "
+                f"{e.reason}. URL: {url}"
+            ) from e
 
     return [path for path in changed_files if path]
 
