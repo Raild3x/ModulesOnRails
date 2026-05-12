@@ -55,6 +55,12 @@ jobs:
               exit 1
             fi
             echo "✓ $pkg_name has src/ directory"
+
+            if [ ! -f "$pkg_dir/default.project.json" ]; then
+              echo "✗ $pkg_name missing default.project.json"
+              exit 1
+            fi
+            echo "✓ $pkg_name has default.project.json"
           done
 
       - name: Setup Rokit
