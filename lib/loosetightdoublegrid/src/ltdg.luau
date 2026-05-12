@@ -1348,10 +1348,11 @@ function LTDG.Raycast(self: LTDGInternal, origin: Vector2, direction: Vector2, f
 
 	-- Calculate the maximum distance of the ray
 	local maxDistance = direction.Magnitude
-	local directionUnit = direction.Unit
 	if maxDistance <= 0 then
 		warn("Ray direction has zero magnitude. This may result in unexpected behavior!")
+		return nil
 	end
+	local directionUnit = direction.Unit
 
 	-- Track checked loose cells to avoid redundant checks
 	local checkedLooseCells: { [number]: true } = {}
