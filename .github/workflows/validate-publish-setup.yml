@@ -93,8 +93,14 @@ jobs:
           temp_home=$(mktemp -d)
           trap "rm -rf '$temp_home'" EXIT
           
+          # Pre-create config directories so wally can write credentials
+          mkdir -p "$temp_home/.wally" "$temp_home/.config/wally"
+          
           echo "Running wally login from $pkg_name directory..."
-          (export HOME="$temp_home" && cd "$first_pkg" && wally login --token "$WALLY_TOKEN")
+          if ! (export HOME="$temp_home" && cd "$first_pkg" && wally login --token "$WALLY_TOKEN" 2>&1); then
+            echo "✗ wally login failed (see error above)" >&2
+            exit 1
+          fi
           
           # Check if auth config was created
           if [ -f "$temp_home/.wally/credentials.toml" ] || [ -f "$temp_home/.config/wally/credentials.toml" ]; then
