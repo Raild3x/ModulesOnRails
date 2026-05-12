@@ -7,7 +7,12 @@ local TightCell = require("./TightCell")
 
 --// Types //--
 export type EntityId = number
-export type AABB = { number } -- {L, B, R, T}
+export type AABB = {
+	l: number,
+	b: number,
+	r: number,
+	t: number,
+}
 type TightCell = TightCell.TightCell
 type GridLike = {
 	GetCol: (self: GridLike | any, x: number) -> number,
@@ -37,7 +42,7 @@ export type LooseCell = {
 	t: number,
 
 	Intersects: (self: LooseCell, left: number, bottom: number, right: number, top: number) -> boolean,
-	Insert: (self: LooseCell, id: EntityId, aabb: AABB) -> (),
+	Insert: (self: LooseCell, id: EntityId, l: number, b: number, r: number, t: number) -> (),
 	Remove: (self: LooseCell, id: EntityId) -> (),
 	Update: (self: LooseCell, id: EntityId, l: number, b: number, r: number, t: number) -> (),
 	UpdateExtents: (self: LooseCell, grid: GridLike, idx: number) -> (),
@@ -111,15 +116,15 @@ function LooseCell.Intersects(self: LooseCell, left: number, bottom: number, rig
 	return CheckCollision(self.l, self.b, self.r, self.t, left, bottom, right, top)
 end
 
-function LooseCell.Insert(self: LooseCell, id: EntityId, aabb: AABB)
+function LooseCell.Insert(self: LooseCell, id: EntityId, l: number, b: number, r: number, t: number)
 	local flat = self.FlatAABBs
 	local writeIndex = #flat + 1
 	self.EntityIds[id] = writeIndex
 	self.FlatEntityIds[#self.FlatEntityIds + 1] = id
-	flat[writeIndex] = aabb[1]
-	flat[writeIndex + 1] = aabb[2]
-	flat[writeIndex + 2] = aabb[3]
-	flat[writeIndex + 3] = aabb[4]
+	flat[writeIndex] = l
+	flat[writeIndex + 1] = b
+	flat[writeIndex + 2] = r
+	flat[writeIndex + 3] = t
 
 	self.Dirty = true
 end

@@ -21,7 +21,7 @@
     - **Spatial Queries**: Efficiently retrieving entities within a specific region.
     - **Dynamic Environments**: Managing entities that frequently move or change size.
 
-    ![LooseTightDoubleGrid with 500k Agents](..\loosetightdoublegrid\LTDG_with_500k_Agents.gif)
+    ![LooseTightDoubleGrid with 500k Agents](../loosetightdoublegrid/LTDG_with_500k_Agents.gif)
 
     ## Example Usage
     ```lua
@@ -69,7 +69,12 @@ local Enum = require("./Shims/Enum")
 --// Types //--
 type LooseCell = LooseCell.LooseCell
 type TightCell = TightCell.TightCell
-export type AABB = LooseCell.AABB -- Stored in the order of {L,B,R,T} (Liberty!), can also be anvisioned as a ccw rotation of the sides.
+export type AABB = {
+	l: number,
+	b: number,
+	r: number,
+	t: number,
+}
 export type EntityId = LooseCell.EntityId
 --[=[
     @within LooseTightDoubleGrid
@@ -493,12 +498,10 @@ function LTDG:InsertRect(position: Vector2, size: Vector2): EntityId
 	profileBegin("LTDG:InsertRect")
 	local halfSizeX = size.X * 0.5
 	local halfSizeY = size.Y * 0.5
-	local aabb: AABB = {
-		position.X - halfSizeX, -- L
-		position.Y - halfSizeY, -- B
-		position.X + halfSizeX, -- R
-		position.Y + halfSizeY, -- T
-	}
+	local l = position.X - halfSizeX
+	local b = position.Y - halfSizeY
+	local r = position.X + halfSizeX
+	local t = position.Y + halfSizeY
 
 	local id = getNextId(self)
 
@@ -508,7 +511,7 @@ function LTDG:InsertRect(position: Vector2, size: Vector2): EntityId
 
 	self.ShapeMap[id] = SHAPE_TYPE_RECT
 	self.EntityIdToLooseCellIdx[id] = index
-	self.LooseGrid[index]:Insert(id, aabb)
+	self.LooseGrid[index]:Insert(id, l, b, r, t)
 
 	local looseCell = self.LooseGrid[index]
 	-- TODO: Check if this would be more efficient than an array
@@ -528,12 +531,10 @@ end
 ]=]
 function LTDG:InsertCircle(position: Vector2, radius: number): EntityId
 	profileBegin("LTDG:InsertCircle")
-	local aabb: AABB = {
-		position.X - radius, -- L
-		position.Y - radius, -- B
-		position.X + radius, -- R
-		position.Y + radius, -- T
-	}
+	local l = position.X - radius
+	local b = position.Y - radius
+	local r = position.X + radius
+	local t = position.Y + radius
 
 	local id = getNextId(self)
 
@@ -543,7 +544,7 @@ function LTDG:InsertCircle(position: Vector2, radius: number): EntityId
 
 	self.ShapeMap[id] = SHAPE_TYPE_CIRCLE
 	self.EntityIdToLooseCellIdx[id] = index
-	self.LooseGrid[index]:Insert(id, aabb)
+	self.LooseGrid[index]:Insert(id, l, b, r, t)
 
 	local looseCell = self.LooseGrid[index]
 	self.DirtyLooseCells[looseCell] = index
@@ -562,12 +563,10 @@ end
 ]=]
 function LTDG:InsertPoint(position: Vector2): EntityId
 	profileBegin("LTDG:InsertPoint")
-	local aabb: AABB = {
-		position.X,
-		position.Y,
-		position.X,
-		position.Y,
-	}
+	local l = position.X
+	local b = position.Y
+	local r = position.X
+	local t = position.Y
 
 	local id = getNextId(self)
 
@@ -577,7 +576,7 @@ function LTDG:InsertPoint(position: Vector2): EntityId
 
 	self.ShapeMap[id] = SHAPE_TYPE_POINT
 	self.EntityIdToLooseCellIdx[id] = index
-	self.LooseGrid[index]:Insert(id, aabb)
+	self.LooseGrid[index]:Insert(id, l, b, r, t)
 
 	local looseCell = self.LooseGrid[index]
 	self.DirtyLooseCells[looseCell] = index
@@ -615,7 +614,7 @@ function LTDG._UpdateEntity(
 	if newIndex ~= looseCellIdx then
 		looseCell:Remove(entityId) -- remove from old cell
 		local newLooseCell = self.LooseGrid[newIndex]
-		newLooseCell:Insert(entityId, { L, B, R, T })
+		newLooseCell:Insert(entityId, L, B, R, T)
 		self.EntityIdToLooseCellIdx[entityId] = newIndex
 		self.DirtyLooseCells[newLooseCell] = newIndex
 	else
