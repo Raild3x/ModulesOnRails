@@ -1,0 +1,149 @@
+# Triggered when a PR labelled major/minor/patch is merged into main, or manually
+# via workflow_dispatch.  Detects which lib/ packages changed, bumps their
+# versions, publishes to Wally, regenerates the README, and rebuilds the docs.
+name: Publish Packages
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version_change:
+        description: "Override version change (major|minor|patch|none)"
+        required: false
+        type: choice
+        default: patch
+        options:
+          - major
+          - minor
+          - patch
+          - none
+
+concurrency:
+  group: publish-${{ github.event.pull_request.number || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  publish:
+    name: Publish Changed Packages
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # Resolve whether the version bump is major / minor / patch / none.
+      # On PRs, this reads semver labels (e.g. "semver:patch") from the event
+      # payload.  On workflow_dispatch, it uses the manual input override.
+      - name: Resolve version change from PR labels
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          DISPATCH_ARGS=()
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            DISPATCH_ARGS=(--dispatch-version-change "${{ inputs.version_change }}")
+          fi
+
+          python scripts/workflow_actions/publish_resolve_version_change.py \
+            --event-name "${{ github.event_name }}" \
+            --event-path "$GITHUB_EVENT_PATH" \
+            "${DISPATCH_ARGS[@]}"
+
+      # Determine which packages under lib/ were modified in this run.
+      # Writes changed package names to changed-packages.txt for subsequent steps.
+      - name: Detect changed packages
+        id: changed
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          python scripts/workflow_actions/publish_detect_changed_packages.py \
+            --event-name "${{ github.event_name }}" \
+            --repository "${{ github.repository }}" \
+            --pr-number "${{ github.event.pull_request.number || 0 }}" \
+            --changed-packages-file changed-packages.txt
+
+      # Install Rokit and verify the wally binary is on PATH before any
+      # publish step attempts to call it.
+      - name: Setup Rokit and verify Wally
+        uses: ./.github/actions/verify-wally
+
+      # Bump versions, authenticate with Wally, and publish each changed package.
+      # Also commits the updated wally.toml version lines back to main.
+      - name: Publish and persist versions
+        if: steps.changed.outputs.has_changes == 'true' && steps.version.outputs.version_change != 'none'
+        uses: ./.github/actions/publish-packages
+        with:
+          changed-packages-file: changed-packages.txt
+          version-change: ${{ steps.version.outputs.version_change }}
+          wally-token: ${{ secrets.WALLY_TOKEN }}
+
+      # Regenerate README.md to reflect the new package versions.
+      - name: Generate README
+        if: steps.changed.outputs.has_changes == 'true' && steps.version.outputs.version_change != 'none'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/generateReadMe.py
+
+      # Commit the updated README only when lines actually changed.
+      - name: Commit README update
+        if: steps.changed.outputs.has_changes == 'true' && steps.version.outputs.version_change != 'none'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- README.md; then
+            echo "README.md unchanged."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "docs: regenerate README"
+          git push origin HEAD:main
+
+      # Rebuild and deploy the Moonwave documentation site.
+      - name: Setup Node.js
+        if: steps.changed.outputs.has_changes == 'true' && steps.version.outputs.version_change != 'none'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Publish docs
+        if: steps.changed.outputs.has_changes == 'true' && steps.version.outputs.version_change != 'none'
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm i -g moonwave@latest
+          moonwave build --publish
+
+      - name: Summary
+        shell: bash
+        run: |
+          if [ "${{ steps.changed.outputs.has_changes }}" != "true" ]; then
+            echo "### ⏭️ Skipped: no changed packages under lib/." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "${{ steps.version.outputs.version_change }}" = "none" ]; then
+            echo "### ⏭️ Skipped: no semver label found (major/minor/patch)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### ✅ Published changed packages with version change: ${{ steps.version.outputs.version_change }}" >> "$GITHUB_STEP_SUMMARY"
+            echo "### ✅ Regenerated README.md" >> "$GITHUB_STEP_SUMMARY"
+            echo "### ✅ Published docs via Moonwave" >> "$GITHUB_STEP_SUMMARY"
+          fi

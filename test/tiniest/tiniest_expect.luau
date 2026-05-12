@@ -68,7 +68,7 @@ local function fail(message: string?): never
 		line = line,
 		source = source,
 		message = "Expectation not met" .. if message == nil then "" else `, because:\n{message}`,
-		trace = debug.traceback(nil, 11), -- This is the traceback when an expectation fails
+		trace = debug.traceback(nil, 4), -- This is the traceback when an expectation fails
 		code = {
 			snippet = `expect({tiniest_quote(context.target)}).{context.test}({param_list})`,
 			line = line,
@@ -406,34 +406,52 @@ function tiniest_expect.expect(a: any)
 	local function specSatisfied(spec: OutputSpec, captured: outputCapture.CapturedOutput): boolean
 		if spec.print ~= nil then
 			if spec.print == true then
-				if #captured.prints == 0 then return false end
+				if #captured.prints == 0 then
+					return false
+				end
 			elseif typeof(spec.print) == "string" then
-				if findMatch(captured.prints, spec.print :: string) == nil then return false end
+				if findMatch(captured.prints, spec.print :: string) == nil then
+					return false
+				end
 			else
 				for _, p in spec.print :: { string } do
-					if findMatch(captured.prints, p) == nil then return false end
+					if findMatch(captured.prints, p) == nil then
+						return false
+					end
 				end
 			end
 		end
 		if spec.warn ~= nil then
 			if spec.warn == true then
-				if #captured.warns == 0 then return false end
+				if #captured.warns == 0 then
+					return false
+				end
 			elseif typeof(spec.warn) == "string" then
-				if findMatch(captured.warns, spec.warn :: string) == nil then return false end
+				if findMatch(captured.warns, spec.warn :: string) == nil then
+					return false
+				end
 			else
 				for _, p in spec.warn :: { string } do
-					if findMatch(captured.warns, p) == nil then return false end
+					if findMatch(captured.warns, p) == nil then
+						return false
+					end
 				end
 			end
 		end
 		if spec.error ~= nil then
 			if spec.error == true then
-				if #captured.errors == 0 then return false end
+				if #captured.errors == 0 then
+					return false
+				end
 			elseif typeof(spec.error) == "string" then
-				if findMatch(captured.errors, spec.error :: string) == nil then return false end
+				if findMatch(captured.errors, spec.error :: string) == nil then
+					return false
+				end
 			else
 				for _, p in spec.error :: { string } do
-					if findMatch(captured.errors, p) == nil then return false end
+					if findMatch(captured.errors, p) == nil then
+						return false
+					end
 				end
 			end
 		end
@@ -445,34 +463,52 @@ function tiniest_expect.expect(a: any)
 	local function specViolated(spec: OutputSpec, captured: outputCapture.CapturedOutput): boolean
 		if spec.print ~= nil then
 			if spec.print == true then
-				if #captured.prints > 0 then return true end
+				if #captured.prints > 0 then
+					return true
+				end
 			elseif typeof(spec.print) == "string" then
-				if findMatch(captured.prints, spec.print :: string) ~= nil then return true end
+				if findMatch(captured.prints, spec.print :: string) ~= nil then
+					return true
+				end
 			else
 				for _, p in spec.print :: { string } do
-					if findMatch(captured.prints, p) ~= nil then return true end
+					if findMatch(captured.prints, p) ~= nil then
+						return true
+					end
 				end
 			end
 		end
 		if spec.warn ~= nil then
 			if spec.warn == true then
-				if #captured.warns > 0 then return true end
+				if #captured.warns > 0 then
+					return true
+				end
 			elseif typeof(spec.warn) == "string" then
-				if findMatch(captured.warns, spec.warn :: string) ~= nil then return true end
+				if findMatch(captured.warns, spec.warn :: string) ~= nil then
+					return true
+				end
 			else
 				for _, p in spec.warn :: { string } do
-					if findMatch(captured.warns, p) ~= nil then return true end
+					if findMatch(captured.warns, p) ~= nil then
+						return true
+					end
 				end
 			end
 		end
 		if spec.error ~= nil then
 			if spec.error == true then
-				if #captured.errors > 0 then return true end
+				if #captured.errors > 0 then
+					return true
+				end
 			elseif typeof(spec.error) == "string" then
-				if findMatch(captured.errors, spec.error :: string) ~= nil then return true end
+				if findMatch(captured.errors, spec.error :: string) ~= nil then
+					return true
+				end
 			else
 				for _, p in spec.error :: { string } do
-					if findMatch(captured.errors, p) ~= nil then return true end
+					if findMatch(captured.errors, p) ~= nil then
+						return true
+					end
 				end
 			end
 		end

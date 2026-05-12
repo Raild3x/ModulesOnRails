@@ -4,38 +4,23 @@ Publish a Wally package with version management.
 Handles version incrementing, publishing, and rebuilding sourcemaps.
 """
 
+import argparse
 import os
-import sys
 import re
-import subprocess
-import shutil
+import sys
 from pathlib import Path
 from typing import Optional
 
+# ---------------------------------------------------------------------------
+# Local shared utilities (scripts/_common.py)
+# ---------------------------------------------------------------------------
+# Insert scripts/ onto sys.path so _common is importable regardless of cwd.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _common import SRC_DIR, WALLY_IGNORE_LIST, find_project_root, clear_package_dir, increment_version, run_command
 
-SRC_DIR = Path("lib")
-IGNORE_LIST = ["src", "default.project.json", "wally.toml", "README.md"]
-
-
-def find_project_root() -> Path:
-    """Find and change to the project root directory."""
-    current_dir = Path.cwd()
-    while current_dir != current_dir.parent:
-        if (current_dir / SRC_DIR).is_dir():
-            os.chdir(current_dir)
-            return current_dir
-        current_dir = current_dir.parent
-    return Path.cwd()
-
-
-def clear_package_dir(package_dir: Path):
-    """Remove all files/directories except those in IGNORE_LIST."""
-    for item in package_dir.iterdir():
-        if item.name not in IGNORE_LIST:
-            if item.is_dir():
-                shutil.rmtree(item)
-            else:
-                item.unlink()
+# Publish also needs to preserve README.md when cleaning the package directory
+# (it may have been committed alongside the package source).
+PUBLISH_IGNORE_LIST = WALLY_IGNORE_LIST + ["README.md"]
 
 
 def get_current_version(wally_toml: Path) -> Optional[str]:
@@ -52,41 +37,53 @@ def update_version(wally_toml: Path, old_version: str, new_version: str):
     wally_toml.write_text(new_content, encoding="utf-8")
 
 
-def increment_version(version: str, increment_type: str) -> str:
-    """Increment version based on type (major, minor, patch)."""
-    parts = version.split(".")
-    major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
+def parse_args() -> argparse.Namespace:
+    """Parse command line arguments for interactive/non-interactive publishing."""
+    parser = argparse.ArgumentParser(
+        description="Publish a Wally package with optional non-interactive arguments."
+    )
+    parser.add_argument(
+        "--package-name",
+        type=str,
+        help="Package name under lib/ to publish (for example: heap).",
+    )
+    parser.add_argument(
+        "--version-change",
+        type=str,
+        choices=["major", "minor", "patch", "none"],
+        help="Version bump type. Use 'none' to skip version increment.",
+    )
+    parser.add_argument(
+        "--publish",
+        action="store_true",
+        help="Publish package without prompting.",
+    )
+    parser.add_argument(
+        "--no-publish",
+        action="store_true",
+        help="Skip publishing without prompting.",
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Auto-accept prompts and publish without an explicit publish prompt.",
+    )
+    return parser.parse_args()
 
-    if increment_type == "major":
-        major += 1
-        minor = 0
-        patch = 0
-    elif increment_type == "minor":
-        minor += 1
-        patch = 0
-    elif increment_type == "patch":
-        patch += 1
-    else:
-        raise ValueError(f"Invalid increment type: {increment_type}")
 
-    return f"{major}.{minor}.{patch}"
-
-
-def run_command(cmd: list, error_msg: str = None) -> bool:
-    """Run a command and return True if successful."""
-    try:
-        subprocess.run(cmd, check=True)
-        return True
-    except subprocess.CalledProcessError:
-        if error_msg:
-            print(f"Error: {error_msg}")
-        return False
-    except FileNotFoundError:
-        print(f"Error: Command not found - {cmd[0]}")
-        return False
+def is_ci_environment() -> bool:
+    """Return True when running in CI environments."""
+    ci = os.getenv("CI", "").strip().lower()
+    return ci not in {"", "0", "false", "no"} or os.getenv("GITHUB_ACTIONS") == "true"
 
 
 def main():
+    args = parse_args()
+
+    if args.publish and args.no_publish:
+        print("Error: --publish and --no-publish cannot be used together.")
+        return 1
+
     original_dir = find_project_root()
 
     # Check if source directory exists
@@ -95,7 +92,7 @@ def main():
         return 1
 
     # Prompt for package name
-    package_name = input("Enter the package name: ").strip()
+    package_name = args.package_name or input("Enter the package name: ").strip()
     
     package_dir = SRC_DIR / package_name
     if not package_dir.is_dir():
@@ -115,12 +112,16 @@ def main():
 
     print(f"Current version: {current_version}")
 
-    # Prompt to increment version
-    should_increment = input("Do you want to increment the version? (y/n): ").strip().lower()
+    increment_type = args.version_change
+    if increment_type is None:
+        # Prompt to increment version
+        should_increment = "y" if args.yes else input("Do you want to increment the version? (y/n): ").strip().lower()
+        if should_increment == "y":
+            increment_type = input("Do you want to increment the version by major, minor, or patch? ").strip().lower()
+        else:
+            increment_type = "none"
 
-    if should_increment == "y":
-        increment_type = input("Do you want to increment the version by major, minor, or patch? ").strip().lower()
-        
+    if increment_type != "none":
         try:
             new_version = increment_version(current_version, increment_type)
             update_version(wally_toml, current_version, new_version)
@@ -129,14 +130,22 @@ def main():
             print(str(e))
             return 1
 
-    # Prompt to publish
-    publish = input("Do you want to publish the package now? (y/n): ").strip().lower()
-    if publish != "y":
+    if args.no_publish:
+        publish_now = False
+    elif args.publish or args.yes:
+        publish_now = True
+    elif is_ci_environment():
+        print("Error: In CI, publishing intent must be explicit. Use --publish or --no-publish.")
+        return 1
+    else:
+        publish_now = input("Do you want to publish the package now? (y/n): ").strip().lower() == "y"
+
+    if not publish_now:
         print("Publishing skipped.")
         return 0
 
     print("Clearing the package directory...")
-    clear_package_dir(package_dir)
+    clear_package_dir(package_dir, PUBLISH_IGNORE_LIST)
 
     # Create default.project.json
     default_project = package_dir / "default.project.json"

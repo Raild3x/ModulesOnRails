@@ -9,7 +9,7 @@ ModulesOnRails is a collection of Wally packages to streamline Roblox developmen
 | [CmdrHandler](https://raild3x.github.io/ModulesOnRails/api/CmdrHandler) | `CmdrHandler = "raild3x/cmdrhandler@0.2.2"` | A wrapper for eveara/quenty's Cmdr library. |
 | [Component](https://raild3x.github.io/ModulesOnRails/api/Component) | `Component = "raild3x/component@0.2.0"` | A fork of Sleitnick's Component class for Roblox. |
 | [Heap](https://raild3x.github.io/ModulesOnRails/api/Heap) | `Heap = "raild3x/heap@2.1.3"` | A generic min/max heap implementation in Luau. |
-| [Loose-Tight-Double-Grid](https://raild3x.github.io/ModulesOnRails/api/LooseTightDoubleGrid) | `Loose-Tight-Double-Grid = "raild3x/loosetightdoublegrid@1.2.0"` | A spatial partitioning system to query varied size entities in 2d space. |
+| [Loose-Tight-Double-Grid](https://raild3x.github.io/ModulesOnRails/api/LooseTightDoubleGrid) | `Loose-Tight-Double-Grid = "raild3x/loosetightdoublegrid@1.2.1"` | A spatial partitioning system to query varied size entities in 2d space. |
 | [NetWire](https://raild3x.github.io/ModulesOnRails/api/NetWire) | `NetWire = "raild3x/netwire@0.3.4"` | A networking library based off of sleitnicks comm library. |
 | [ObjectCache](https://raild3x.github.io/ModulesOnRails/api/ObjectCache) | `ObjectCache = "raild3x/objectcache@0.0.2"` | A fork of Pyseph's ObjectCache module, with some additional features. |
 | [ProbabilityDistributor](https://raild3x.github.io/ModulesOnRails/api/ProbabilityDistributor) | `ProbabilityDistributor = "raild3x/probabilitydistributor@1.0.6"` | A class for distributing probability. |
