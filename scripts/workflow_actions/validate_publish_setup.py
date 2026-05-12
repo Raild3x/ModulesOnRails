@@ -29,6 +29,9 @@ def validate_wally_ready() -> bool:
     2. Confirms that ``wally.toml`` and ``src/`` are present.
     3. Creates ``default.project.json`` if it is absent — Wally requires this
        file to be present before it will publish or login from a package dir.
+       **The file is deleted again after the check** so it is never left in the
+       working tree, which would cause the publish-detection script to flag this
+       package as having uncommitted changes and queue it for publishing.
     4. Reads and prints the package ``name`` and ``version`` from wally.toml
        so the workflow log shows which package is being used as the probe.
 
@@ -61,28 +64,38 @@ def validate_wally_ready() -> bool:
     print("✓ src/ directory present")
 
     # Create default.project.json if absent (required by wally).
+    # Track whether WE created it so we can remove it afterward — leaving a
+    # generated file in the working tree would cause publish_detect_changed_packages
+    # to flag this package as having changes and queue it for publishing.
     default_proj = pkg_dir / "default.project.json"
+    created_default_proj = False
     if not default_proj.is_file():
-        print(f"Creating default.project.json for {pkg_name}...")
+        print(f"Creating temporary default.project.json for {pkg_name}...")
         default_proj.write_text(
             f'{{\n    "name": "{pkg_name}",\n    "tree": {{\n        "$path": "src"\n    }}\n}}\n',
             encoding="utf-8",
         )
-        print("✓ default.project.json created")
+        created_default_proj = True
+        print("✓ default.project.json created (will be removed after check)")
     else:
         print("✓ default.project.json present")
 
-    # Parse and display package name + version.
-    content = (pkg_dir / "wally.toml").read_text(encoding="utf-8")
-    name_match = re.search(r'^name\s*=\s*"([^"]+)"', content, re.MULTILINE)
-    ver_match = re.search(r'^version\s*=\s*"([^"]+)"', content, re.MULTILINE)
+    try:
+        # Parse and display package name + version.
+        content = (pkg_dir / "wally.toml").read_text(encoding="utf-8")
+        name_match = re.search(r'^name\s*=\s*"([^"]+)"', content, re.MULTILINE)
+        ver_match = re.search(r'^version\s*=\s*"([^"]+)"', content, re.MULTILINE)
 
-    if not name_match or not ver_match:
-        print("✗ Could not parse package info from wally.toml")
-        return False
+        if not name_match or not ver_match:
+            print("✗ Could not parse package info from wally.toml")
+            return False
 
-    print(f"✓ Package: {name_match.group(1)} @ {ver_match.group(1)}")
-    return True
+        print(f"✓ Package: {name_match.group(1)} @ {ver_match.group(1)}")
+        return True
+    finally:
+        if created_default_proj and default_proj.is_file():
+            default_proj.unlink()
+            print(f"Removed temporary default.project.json for {pkg_name}")
 
 
 def find_packages() -> List[Path]:
