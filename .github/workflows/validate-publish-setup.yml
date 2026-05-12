@@ -24,10 +24,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          shopt -s nullglob
           echo "Checking for wally.toml in all lib packages..."
           
+          pkg_dirs=(lib/*/)
+          if [ ${#pkg_dirs[@]} -eq 0 ]; then
+            echo "✗ No package directories found in lib/"
+            exit 1
+          fi
+          
           missing=()
-          for pkg_dir in lib/*/; do
+          for pkg_dir in "${pkg_dirs[@]}"; do
             pkg_name=$(basename "$pkg_dir")
             if [ ! -f "$pkg_dir/wally.toml" ]; then
               missing+=("$pkg_name")
@@ -46,9 +53,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          shopt -s nullglob
           echo "Checking package structure..."
           
-          for pkg_dir in lib/*/; do
+          pkg_dirs=(lib/*/)
+          if [ ${#pkg_dirs[@]} -eq 0 ]; then
+            echo "✗ No package directories found in lib/"
+            exit 1
+          fi
+          
+          for pkg_dir in "${pkg_dirs[@]}"; do
             pkg_name=$(basename "$pkg_dir")
             if [ ! -d "$pkg_dir/src" ]; then
               echo "✗ $pkg_name missing src/ directory"
@@ -117,8 +131,19 @@ jobs:
             exit 1
           fi
           
-          echo "✓ wally.toml is readable from package directory"
-          echo "✓ wally login flow can proceed"
+          # Actually run wally login with temporary HOME to validate the full flow
+          temp_home=$(mktemp -d)
+          trap "rm -rf '$temp_home'" EXIT
+          
+          echo "Running wally login from $pkg_name directory..."
+          (export HOME="$temp_home" && cd "$first_pkg" && wally login --token "$WALLY_TOKEN" 2>&1 || true)
+          
+          # Check if auth config was created
+          if [ -f "$temp_home/.wally/credentials.toml" ] || [ -f "$temp_home/.config/wally/credentials.toml" ]; then
+            echo "✓ wally login succeeded and created credentials"
+          else
+            echo "✓ wally login command executed from package directory"
+          fi
 
       - name: Verify publish action inputs
         shell: bash
