@@ -49,10 +49,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          DISPATCH_ARGS=()
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            DISPATCH_ARGS=(--dispatch-version-change "${{ inputs.version_change }}")
+          fi
+
           python scripts/publish_resolve_version_change.py \
             --event-name "${{ github.event_name }}" \
             --event-path "$GITHUB_EVENT_PATH" \
-            --dispatch-version-change "${{ inputs.version_change }}"
+            "${DISPATCH_ARGS[@]}"
 
       - name: Detect changed packages
         id: changed

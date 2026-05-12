@@ -817,7 +817,7 @@ local test_suite = function(tiniest: tiniest)
 		test("should handle rays starting far into negative coordinate space", function()
 			local grid = createGenericGrid()
 			local id = grid:InsertRect(Vector2.new(0, 0), Vector2.new(2, 2))
-			
+
 			-- Ray starting far in negative space, traversing positive direction
 			-- This tests the unreachable boundary condition at line 1361
 			local hit = grid:Raycast(Vector2.new(-100, 0), Vector2.new(200, 0))
@@ -828,7 +828,7 @@ local test_suite = function(tiniest: tiniest)
 		test("should handle rays starting far in positive coordinate space outside grid", function()
 			local grid = createGenericGrid()
 			local id = grid:InsertRect(Vector2.new(0, 0), Vector2.new(2, 2))
-			
+
 			-- Ray starting way outside positive space, traveling back toward grid
 			local hit = grid:Raycast(Vector2.new(100, 0), Vector2.new(-200, 0))
 			expect(hit).is_not(nil)
@@ -837,22 +837,22 @@ local test_suite = function(tiniest: tiniest)
 
 		test("should handle rays starting outside all four quadrants of negative space", function()
 			local grid = createGenericGrid()
-			
+
 			-- Place simple entities at cardinal directions to ensure hits
 			local centerId = grid:InsertRect(Vector2.new(0, 0), Vector2.new(1, 1))
-			
+
 			-- SW quadrant: start far negative, travel toward center
 			local swHit = grid:Raycast(Vector2.new(-50, -50), Vector2.new(100, 100))
 			expect(swHit).is_not(nil)
-			
+
 			-- S quadrant: start far south, travel north through center
 			local sHit = grid:Raycast(Vector2.new(0, -50), Vector2.new(0, 100))
 			expect(sHit).is_not(nil)
-			
+
 			-- W quadrant: start far west, travel east through center
 			local wHit = grid:Raycast(Vector2.new(-50, 0), Vector2.new(100, 0))
 			expect(wHit).is_not(nil)
-			
+
 			-- NE quadrant: start far positive, travel toward center
 			local neHit = grid:Raycast(Vector2.new(50, 50), Vector2.new(-100, -100))
 			expect(neHit).is_not(nil)
@@ -862,10 +862,10 @@ local test_suite = function(tiniest: tiniest)
 			-- This test exposes DDA offset bug where gridlines calculated as (col-1)*cWidth
 			-- without BottomCornerX offset, causing misalignment from actual grid boundaries
 			local grid = createGenericGrid()
-			
+
 			-- Place entity at grid boundary area where offset matters
 			local id = grid:InsertRect(Vector2.new(-5, -5), Vector2.new(1, 1))
-			
+
 			-- Ray at 45 degrees from far negative space
 			-- The bug would cause DDA to compute wrong gridline boundaries,
 			-- potentially missing this entity
@@ -878,7 +878,7 @@ local test_suite = function(tiniest: tiniest)
 			-- Place entity exactly at a cell edge in y
 			local grid = createGenericGrid()
 			local id = grid:InsertRect(Vector2.new(0, -3), Vector2.new(1, 1))
-			
+
 			-- Ray traveling along y=-3 (should be a cell boundary)
 			-- DDA offset bug could cause this to miss due to boundary misalignment
 			local hit = grid:Raycast(Vector2.new(-10, -3), Vector2.new(20, 0))
@@ -889,7 +889,7 @@ local test_suite = function(tiniest: tiniest)
 		test("should handle rays aligned with cell boundaries (vertical)", function()
 			local grid = createGenericGrid()
 			local id = grid:InsertRect(Vector2.new(-3, 0), Vector2.new(1, 1))
-			
+
 			-- Ray traveling along x=-3 (should be a cell boundary)
 			local hit = grid:Raycast(Vector2.new(-3, -10), Vector2.new(0, 20))
 			expect(hit).is_not(nil)
@@ -900,7 +900,7 @@ local test_suite = function(tiniest: tiniest)
 			-- Offset bug manifests most at boundary crossings with certain direction vectors
 			local grid = createGenericGrid()
 			local id = grid:InsertRect(Vector2.new(-4.5, -4.5), Vector2.new(1, 1))
-			
+
 			-- Ray with fractional direction components (normalized 45-degree)
 			local direction = Vector2.new(1, 1)
 			local magnitude = math.sqrt(direction.X * direction.X + direction.Y * direction.Y)
@@ -914,10 +914,10 @@ local test_suite = function(tiniest: tiniest)
 		test("should correctly handle ray starting outside, approaching grid edge at angle", function()
 			local grid = createGenericGrid()
 			local id = grid:InsertRect(Vector2.new(-4, -4), Vector2.new(2, 2))
-			
+
 			-- Ray starts outside negative space, approaches at 45-degree angle (equals x and y components)
 			-- This tests coordinate space handling with non-standard directions
-			local hit = grid:Raycast(Vector2.new(-20, -20), Vector2.new(40, 40))  -- 45 degree angle
+			local hit = grid:Raycast(Vector2.new(-20, -20), Vector2.new(40, 40)) -- 45 degree angle
 			expect(hit).is_not(nil)
 			expect(hit.EntityId).is(id)
 		end)
@@ -929,18 +929,18 @@ local test_suite = function(tiniest: tiniest)
 			local _id2 = grid:InsertRect(Vector2.new(-2, 0), Vector2.new(1, 1))
 			local id3 = grid:InsertRect(Vector2.new(0, 0), Vector2.new(1, 1))
 			local _id4 = grid:InsertRect(Vector2.new(2, 0), Vector2.new(1, 1))
-			
+
 			-- Ray from far negative should hit the closest entity
 			-- Bug: DDA offset would cause it to visit wrong cells
 			local hit = grid:Raycast(Vector2.new(-50, 0), Vector2.new(100, 0))
 			expect(hit).is_not(nil)
-			expect(hit.EntityId).is(id1)  -- Should be id1 (closest), not None, not id3
+			expect(hit.EntityId).is(id1) -- Should be id1 (closest), not None, not id3
 		end)
 
 		test("should handle rays starting at negative grid corner", function()
 			local grid = createGenericGrid()
 			local id = grid:InsertRect(Vector2.new(-4, -4), Vector2.new(2, 2))
-			
+
 			-- Ray starting at the calculated grid bottom-left corner
 			local hit = grid:Raycast(Vector2.new(-5, -5), Vector2.new(10, 10))
 			expect(hit).is_not(nil)
@@ -949,18 +949,18 @@ local test_suite = function(tiniest: tiniest)
 
 		test("should handle rays starting just outside grid with multiple cell crossings", function()
 			local grid = createGenericGrid()
-			
+
 			-- Create a diagonal line of entities across the grid
 			local id1 = grid:InsertRect(Vector2.new(-3, -3), Vector2.new(1, 1))
 			local _id2 = grid:InsertRect(Vector2.new(-1, -1), Vector2.new(1, 1))
 			local id3 = grid:InsertRect(Vector2.new(1, 1), Vector2.new(1, 1))
 			local _id4 = grid:InsertRect(Vector2.new(3, 3), Vector2.new(1, 1))
-			
+
 			-- Ray starting just outside grid, traveling diagonally
 			-- Tests that DDA correctly handles cell transitions despite offset
 			local hit = grid:Raycast(Vector2.new(-10, -10), Vector2.new(20, 20))
 			expect(hit).is_not(nil)
-			expect(hit.EntityId).is(id1)  -- Closest to ray origin
+			expect(hit.EntityId).is(id1) -- Closest to ray origin
 		end)
 	end)
 
