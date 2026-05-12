@@ -9,6 +9,7 @@ import sys
 import re
 import subprocess
 import shutil
+import argparse
 from pathlib import Path
 from typing import Optional
 
@@ -86,7 +87,53 @@ def run_command(cmd: list, error_msg: str = None) -> bool:
         return False
 
 
+def parse_args() -> argparse.Namespace:
+    """Parse command line arguments for interactive/non-interactive publishing."""
+    parser = argparse.ArgumentParser(
+        description="Publish a Wally package with optional non-interactive arguments."
+    )
+    parser.add_argument(
+        "--package-name",
+        type=str,
+        help="Package name under lib/ to publish (for example: heap).",
+    )
+    parser.add_argument(
+        "--version-change",
+        type=str,
+        choices=["major", "minor", "patch", "none"],
+        help="Version bump type. Use 'none' to skip version increment.",
+    )
+    parser.add_argument(
+        "--publish",
+        action="store_true",
+        help="Publish package without prompting.",
+    )
+    parser.add_argument(
+        "--no-publish",
+        action="store_true",
+        help="Skip publishing without prompting.",
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Auto-accept prompts and publish without an explicit publish prompt.",
+    )
+    return parser.parse_args()
+
+
+def is_ci_environment() -> bool:
+    """Return True when running in CI environments."""
+    ci = os.getenv("CI", "").strip().lower()
+    return ci not in {"", "0", "false", "no"} or os.getenv("GITHUB_ACTIONS") == "true"
+
+
 def main():
+    args = parse_args()
+
+    if args.publish and args.no_publish:
+        print("Error: --publish and --no-publish cannot be used together.")
+        return 1
+
     original_dir = find_project_root()
 
     # Check if source directory exists
@@ -95,7 +142,7 @@ def main():
         return 1
 
     # Prompt for package name
-    package_name = input("Enter the package name: ").strip()
+    package_name = args.package_name or input("Enter the package name: ").strip()
     
     package_dir = SRC_DIR / package_name
     if not package_dir.is_dir():
@@ -115,12 +162,16 @@ def main():
 
     print(f"Current version: {current_version}")
 
-    # Prompt to increment version
-    should_increment = input("Do you want to increment the version? (y/n): ").strip().lower()
+    increment_type = args.version_change
+    if increment_type is None:
+        # Prompt to increment version
+        should_increment = "y" if args.yes else input("Do you want to increment the version? (y/n): ").strip().lower()
+        if should_increment == "y":
+            increment_type = input("Do you want to increment the version by major, minor, or patch? ").strip().lower()
+        else:
+            increment_type = "none"
 
-    if should_increment == "y":
-        increment_type = input("Do you want to increment the version by major, minor, or patch? ").strip().lower()
-        
+    if increment_type != "none":
         try:
             new_version = increment_version(current_version, increment_type)
             update_version(wally_toml, current_version, new_version)
@@ -129,9 +180,17 @@ def main():
             print(str(e))
             return 1
 
-    # Prompt to publish
-    publish = input("Do you want to publish the package now? (y/n): ").strip().lower()
-    if publish != "y":
+    if args.no_publish:
+        publish_now = False
+    elif args.publish or args.yes:
+        publish_now = True
+    elif is_ci_environment():
+        print("Error: In CI, publishing intent must be explicit. Use --publish or --no-publish.")
+        return 1
+    else:
+        publish_now = input("Do you want to publish the package now? (y/n): ").strip().lower() == "y"
+
+    if not publish_now:
         print("Publishing skipped.")
         return 0
 

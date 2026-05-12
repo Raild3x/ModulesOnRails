@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """
+THIS FILE IS DEPRECATED, WE USE TINIEST NOW. This script is left for reference and will be removed in the future.
 Run tests for the project.
 Initializes submodules, creates test place if needed, and optionally opens Roblox Studio.
 """
