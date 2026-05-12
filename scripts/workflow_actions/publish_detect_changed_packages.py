@@ -109,7 +109,7 @@ def write_output(name: str, value: str) -> None:
 def main() -> int:
     args = parse_args()
 
-    if args.event_name == "workflow_dispatch":
+    if args.event_name in {"workflow_dispatch", "push"}:
         changed_files = run_git_changed_files()
     else:
         token = os.getenv("GITHUB_TOKEN", "")

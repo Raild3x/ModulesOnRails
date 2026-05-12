@@ -20,62 +20,11 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Check all packages have wally.toml
+      - name: Validate package structure
         shell: bash
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          echo "Checking for wally.toml in all lib packages..."
-          
-          pkg_dirs=(lib/*/)
-          if [ ${#pkg_dirs[@]} -eq 0 ]; then
-            echo "✗ No package directories found in lib/"
-            exit 1
-          fi
-          
-          missing=()
-          for pkg_dir in "${pkg_dirs[@]}"; do
-            pkg_name=$(basename "$pkg_dir")
-            if [ ! -f "$pkg_dir/wally.toml" ]; then
-              missing+=("$pkg_name")
-            else
-              echo "✓ $pkg_name has wally.toml"
-            fi
-          done
-          
-          if [ ${#missing[@]} -gt 0 ]; then
-            echo "✗ Missing wally.toml in: ${missing[*]}"
-            exit 1
-          fi
-          echo "✓ All packages have wally.toml"
-
-      - name: Verify package structure (src + default.project.json)
-        shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          echo "Checking package structure..."
-          
-          pkg_dirs=(lib/*/)
-          if [ ${#pkg_dirs[@]} -eq 0 ]; then
-            echo "✗ No package directories found in lib/"
-            exit 1
-          fi
-          
-          for pkg_dir in "${pkg_dirs[@]}"; do
-            pkg_name=$(basename "$pkg_dir")
-            if [ ! -d "$pkg_dir/src" ]; then
-              echo "✗ $pkg_name missing src/ directory"
-              exit 1
-            fi
-            echo "✓ $pkg_name has src/ directory"
-
-            if [ ! -f "$pkg_dir/default.project.json" ]; then
-              echo "✗ $pkg_name missing default.project.json"
-              exit 1
-            fi
-            echo "✓ $pkg_name has default.project.json"
-          done
+          python scripts/validate_publish_setup.py --check packages
 
       - name: Setup Rokit
         uses: raild3x/setup-rokit@v0.1.0
@@ -149,41 +98,45 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "Checking publish action configuration..."
-          
-          action_file=".github/actions/publish-packages/action.yml"
-          
-          # Check for required inputs
-          for input in changed-packages-file version-change wally-token; do
-            if grep -q "^ *$input:" "$action_file"; then
-              echo "✓ Action has input: $input"
-            else
-              echo "✗ Action missing input: $input"
-              exit 1
-            fi
-          done
-          
-          echo "✓ All required inputs defined in action"
+          python scripts/workflow_actions/validate_publish_setup.py --check action-inputs
 
       - name: Verify workflow passes inputs to action
         shell: bash
         run: |
           set -euo pipefail
-          echo "Checking workflow step passes all inputs..."
-          
-          workflow_file=".github/workflows/publish-package.yml"
-          
-          # Check for input passing in the workflow
-          for input in changed-packages-file version-change wally-token; do
-            if grep -q "^[[:space:]]*$input:" "$workflow_file"; then
-              echo "✓ Workflow passes input: $input"
-            else
-              echo "✗ Workflow missing input: $input"
-              exit 1
-            fi
-          done
-          
-          echo "✓ All inputs passed in workflow"
+          python scripts/workflow_actions/validate_publish_setup.py --check workflow-inputs
+
+      - name: Resolve detected version type
+        id: version_preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/workflow_actions/publish_resolve_version_change.py \
+            --event-name "${{ github.event_name }}" \
+            --event-path "$GITHUB_EVENT_PATH" \
+            --dispatch-version-change none
+
+      - name: Detect changed packages for preview
+        id: changed_preview
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          python scripts/workflow_actions/publish_detect_changed_packages.py \
+            --event-name "${{ github.event_name }}" \
+            --repository "${{ github.repository }}" \
+            --pr-number "${{ github.event.pull_request.number || 0 }}" \
+            --changed-packages-file changed-packages.txt
+
+      - name: Preview package version updates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/workflow_actions/validate_publish_setup.py \
+            --check version-preview \
+            --version-change "${{ steps.version_preview.outputs.version_change }}" \
+            --changed-packages-file changed-packages.txt
 
       - name: Summary
         shell: bash

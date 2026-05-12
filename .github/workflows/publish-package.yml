@@ -54,7 +54,7 @@ jobs:
             DISPATCH_ARGS=(--dispatch-version-change "${{ inputs.version_change }}")
           fi
 
-          python scripts/publish_resolve_version_change.py \
+          python scripts/workflow_actions/publish_resolve_version_change.py \
             --event-name "${{ github.event_name }}" \
             --event-path "$GITHUB_EVENT_PATH" \
             "${DISPATCH_ARGS[@]}"
@@ -66,7 +66,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          python scripts/publish_detect_changed_packages.py \
+          python scripts/workflow_actions/publish_detect_changed_packages.py \
             --event-name "${{ github.event_name }}" \
             --repository "${{ github.repository }}" \
             --pr-number "${{ github.event.pull_request.number || 0 }}" \
