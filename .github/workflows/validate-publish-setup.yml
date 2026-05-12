@@ -90,14 +90,7 @@ jobs:
           # Create default.project.json if missing (required by wally)
           if [ ! -f "$first_pkg/default.project.json" ]; then
             echo "Creating default.project.json for $pkg_name..."
-            cat > "$first_pkg/default.project.json" <<EOF
-{
-    "name": "$pkg_name",
-    "tree": {
-        "\$path": "src"
-    }
-}
-EOF
+            printf '{\n    "name": "%s",\n    "tree": {\n        "$path": "src"\n    }\n}\n' "$pkg_name" > "$first_pkg/default.project.json"
             echo "✓ default.project.json created"
           else
             echo "✓ default.project.json already present"
