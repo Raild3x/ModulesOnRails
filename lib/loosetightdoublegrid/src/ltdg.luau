@@ -69,12 +69,6 @@ local Enum = require("./Shims/Enum")
 --// Types //--
 type LooseCell = LooseCell.LooseCell
 type TightCell = TightCell.TightCell
-export type AABB = {
-	l: number,
-	b: number,
-	r: number,
-	t: number,
-}
 export type EntityId = LooseCell.EntityId
 --[=[
     @within LooseTightDoubleGrid
