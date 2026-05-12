@@ -12,14 +12,15 @@ permissions:
   contents: read
 
 jobs:
-  validate:
-    name: Validate Publish Configuration
+  # Pure-Python checks: no toolchain required. Validates that every package
+  # under lib/ is correctly structured and that the publish action/workflow
+  # declare the expected inputs. Runs in parallel with validate-wally.
+  validate-structure:
+    name: Validate Package Structure
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -33,21 +34,6 @@ jobs:
         run: |
           set -euo pipefail
           python scripts/workflow_actions/validate_publish_setup.py --check packages
-
-      # Install Rokit and make the wally binary available on PATH.
-      - name: Setup Rokit and verify Wally
-        uses: ./.github/actions/verify-wally
-
-      # Delegates per-package structure checks (wally.toml, src/, default.project.json
-      # creation) to Python, keeping the bash layer thin.  Then confirms the wally
-      # binary itself is responsive after PATH is set by the step above.
-      - name: Validate package structure for Wally
-        shell: bash
-        run: |
-          set -euo pipefail
-          python scripts/workflow_actions/validate_publish_setup.py --check wally-ready
-          # Confirm the wally binary is responsive now that PATH is configured.
-          wally --version
 
       # Verify the composite publish action declares all expected inputs.
       - name: Verify publish action inputs
@@ -63,10 +49,53 @@ jobs:
           set -euo pipefail
           python scripts/workflow_actions/validate_publish_setup.py --check workflow-inputs
 
-      # Detect the semver label on the PR (or dispatch override) and preview
-      # which versions would change — without actually publishing anything.
+          
+  # Toolchain check: installs Rokit, verifies wally is on PATH, and ensures
+  # the first package directory has the structure wally requires.
+  # Runs in parallel with validate-structure.
+  validate-wally:
+    name: Validate Wally Setup
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Install Rokit and make the wally binary available on PATH.
+      - name: Setup Rokit and verify Wally
+        uses: ./.github/actions/verify-wally
+
+      # Confirm wally.toml and src/ are present in the first package directory,
+      # then verify the wally binary responds.
+      - name: Validate package structure for Wally
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/workflow_actions/validate_publish_setup.py --check wally-ready
+          wally --version
+
+
+  # Dry-run preview: resolve the semver label and show which packages would be
+  # bumped and to which version. Skipped on plain pushes (no PR context).
+  # Waits for both parallel jobs above so this only runs when everything is green.
+  validate-preview:
+    name: Preview Version Changes
+    runs-on: ubuntu-latest
+    needs: [validate-structure, validate-wally]
+    if: github.event_name != 'push'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # Detect the semver label on the PR (or dispatch override) without
+      # actually publishing anything.
       - name: Resolve detected version type
-        if: github.event_name != 'push'
         id: version_preview
         shell: bash
         run: |
@@ -76,9 +105,8 @@ jobs:
             --event-path "$GITHUB_EVENT_PATH" \
             --dispatch-version-change none
 
-      # Show which packages would be bumped and to which version.
+      # Show which packages changed in this PR.
       - name: Detect changed packages for preview
-        if: github.event_name != 'push'
         id: changed_preview
         shell: bash
         env:
@@ -94,7 +122,6 @@ jobs:
 
       # Print a dry-run summary: "Will update X from 1.2.3 to 1.2.4".
       - name: Preview package version updates
-        if: github.event_name != 'push'
         shell: bash
         run: |
           set -euo pipefail
@@ -102,14 +129,3 @@ jobs:
             --check version-preview \
             --version-change "${{ steps.version_preview.outputs.version_change }}" \
             --changed-packages-file changed-packages.txt
-
-      - name: Summary
-        shell: bash
-        run: |
-          echo ""
-          echo "✅ Publish setup validation complete!"
-          echo ""
-          echo "Next steps:"
-          echo "  1. Ensure WALLY_TOKEN secret is set in repository settings"
-          echo "  2. Create/merge a PR with lib/* changes to trigger publishing"
-          echo "  3. Or manually trigger workflow with workflow_dispatch"
