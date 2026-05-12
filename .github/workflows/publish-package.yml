@@ -1,0 +1,176 @@
+name: Publish Packages
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version_change:
+        description: "Override version change (major|minor|patch|none)"
+        required: false
+        type: choice
+        default: patch
+        options:
+          - major
+          - minor
+          - patch
+          - none
+
+concurrency:
+  group: publish-${{ github.event.pull_request.number || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Publish Changed Packages
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Resolve version change from PR labels
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION_CHANGE="${{ inputs.version_change }}"
+          else
+            LABELS='${{ toJson(github.event.pull_request.labels.*.name) }}'
+            VERSION_CHANGE="none"
+
+            if echo "$LABELS" | jq -e '.[] | test("(^|:|/|-)major$|^major$|semver:major|release:major")' >/dev/null; then
+              VERSION_CHANGE="major"
+            elif echo "$LABELS" | jq -e '.[] | test("(^|:|/|-)minor$|^minor$|semver:minor|release:minor")' >/dev/null; then
+              VERSION_CHANGE="minor"
+            elif echo "$LABELS" | jq -e '.[] | test("(^|:|/|-)patch$|^patch$|semver:patch|release:patch")' >/dev/null; then
+              VERSION_CHANGE="patch"
+            fi
+          fi
+
+          echo "version_change=$VERSION_CHANGE" >> "$GITHUB_OUTPUT"
+          echo "Selected version change: $VERSION_CHANGE"
+
+      - name: Detect changed packages
+        id: changed
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD || true)
+          else
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+            CHANGED_FILES=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+          fi
+
+          mapfile -t CHANGED_PACKAGES < <(
+            echo "$CHANGED_FILES" \
+              | awk -F/ '/^lib\/[^/]+\// {print $2}' \
+              | sort -u
+          )
+
+          if [ ${#CHANGED_PACKAGES[@]} -eq 0 ]; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "No changed packages under lib/."
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            printf '%s\n' "${CHANGED_PACKAGES[@]}" > changed-packages.txt
+            echo "Changed packages: ${CHANGED_PACKAGES[*]}"
+          fi
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Setup Rokit
+        uses: raild3x/setup-rokit@v0.1.0
+
+      - name: Verify Wally is available
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v wally >/dev/null 2>&1; then
+            wally --version
+            exit 0
+          fi
+
+          if [ -x .rokit/bin/wally ]; then
+            echo "$PWD/.rokit/bin" >> "$GITHUB_PATH"
+            ./.rokit/bin/wally --version
+            exit 0
+          fi
+
+          echo "wally not found. Ensure rokit.toml includes wally and setup-rokit installs tools." >&2
+          exit 1
+
+      - name: Publish and persist versions
+        if: steps.changed.outputs.has_changes == 'true' && steps.version.outputs.version_change != 'none'
+        uses: ./.github/actions/publish-packages
+        with:
+          changed-packages-file: changed-packages.txt
+          version-change: ${{ steps.version.outputs.version_change }}
+          wally-token: ${{ secrets.WALLY_TOKEN }}
+
+      - name: Generate README
+        if: steps.changed.outputs.has_changes == 'true' && steps.version.outputs.version_change != 'none'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/generateReadMe.py
+
+      - name: Commit README update
+        if: steps.changed.outputs.has_changes == 'true' && steps.version.outputs.version_change != 'none'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- README.md; then
+            echo "README.md unchanged."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "docs: regenerate README [skip ci]"
+          git push origin HEAD:main
+
+      - name: Setup Node.js
+        if: steps.changed.outputs.has_changes == 'true' && steps.version.outputs.version_change != 'none'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Publish docs
+        if: steps.changed.outputs.has_changes == 'true' && steps.version.outputs.version_change != 'none'
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm i -g moonwave@latest
+          moonwave build --publish
+
+      - name: Summary
+        shell: bash
+        run: |
+          if [ "${{ steps.changed.outputs.has_changes }}" != "true" ]; then
+            echo "### ⏭️ Skipped: no changed packages under lib/." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "${{ steps.version.outputs.version_change }}" = "none" ]; then
+            echo "### ⏭️ Skipped: no semver label found (major/minor/patch)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### ✅ Published changed packages with version change: ${{ steps.version.outputs.version_change }}" >> "$GITHUB_STEP_SUMMARY"
+            echo "### ✅ Regenerated README.md" >> "$GITHUB_STEP_SUMMARY"
+            echo "### ✅ Published docs via Moonwave" >> "$GITHUB_STEP_SUMMARY"
+          fi

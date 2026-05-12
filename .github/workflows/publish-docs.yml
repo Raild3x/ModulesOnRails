@@ -1,9 +1,7 @@
 name: publish docs
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 jobs:
   generate_readme:
@@ -13,14 +11,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Bash
-        run: sudo apt-get install -y bash
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
 
-      - name: Set execute permission for script
-        run: chmod +x scripts/generateReadMe.sh
-
-      - name: Run generateReadMe.sh
-        run: scripts/generateReadMe.sh
+      - name: Run generateReadMe.py
+        run: python scripts/generateReadMe.py
 
       - name: Debugging
         run: echo "Repository URL; https://x-access-token:${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${{ github.repository }}.git"
