@@ -1,4 +1,4 @@
--- This file is just here so I can test the Vector2 type in Lune. Its ignored in actual Roblox Code.
+-- This file is just here so I can test the Vector2 type in Lune. It's ignored in actual Roblox Code.
 
 if Vector2 then
 	return Vector2
