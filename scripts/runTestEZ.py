@@ -1,44 +1,27 @@
 #!/usr/bin/env python3
 """
-THIS FILE IS DEPRECATED, WE USE TINIEST NOW. This script is left for reference and will be removed in the future.
-Run tests for the project.
-Initializes submodules, creates test place if needed, and optionally opens Roblox Studio.
+DEPRECATED: This script is no longer in use.
+
+The project now uses Tiniest for testing.  This file is kept for historical
+reference only and will be removed in a future cleanup.
+
+Previously used to: initialize git submodules, create a test Roblox place file
+(``TestEz Companion.rbxl``), and optionally open it in Roblox Studio for TestEZ.
 """
 
 import os
 import sys
-import subprocess
 from pathlib import Path
 from typing import Optional
 
+# ---------------------------------------------------------------------------
+# Local shared utilities (scripts/_common.py)
+# ---------------------------------------------------------------------------
+# Insert scripts/ onto sys.path so _common is importable regardless of cwd.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _common import find_project_root, run_command
 
-SRC_DIR = Path("lib")
 TEST_PLACE = "TestEz Companion.rbxl"
-
-
-def find_project_root() -> Path:
-    """Find and change to the project root directory."""
-    current_dir = Path.cwd()
-    while current_dir != current_dir.parent:
-        if (current_dir / SRC_DIR).is_dir():
-            os.chdir(current_dir)
-            return current_dir
-        current_dir = current_dir.parent
-    return Path.cwd()
-
-
-def run_command(cmd: list, error_msg: str = None) -> bool:
-    """Run a command and return True if successful."""
-    try:
-        subprocess.run(cmd, check=True)
-        return True
-    except subprocess.CalledProcessError:
-        if error_msg:
-            print(f"Error: {error_msg}")
-        return False
-    except FileNotFoundError:
-        print(f"Error: Command not found - {cmd[0]}")
-        return False
 
 
 def main():

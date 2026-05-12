@@ -1,7 +1,7 @@
 {
   "scripts": {
     "readme": "python scripts/generateReadMe.py",
-    "setup": "python scripts/setup.py",
+    "setup": "python scripts/setup_package_for_testing.py",
     "clear": "python scripts/clearPackages.py",
     "publish": "python scripts/publish.py",
     "test": "python scripts/runTests.py",

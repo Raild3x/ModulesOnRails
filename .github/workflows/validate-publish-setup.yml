@@ -1,0 +1,115 @@
+# Run on every push and PR to catch publish configuration issues early.
+# Also triggered manually so contributors can preview what a publish run would do.
+name: Validate Publish Setup
+
+on:
+  push:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate Publish Configuration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # Ensure all packages under lib/ have the required files
+      # (wally.toml with name+version, src/ directory, etc.).
+      - name: Validate package structure
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/workflow_actions/validate_publish_setup.py --check packages
+
+      # Install Rokit and make the wally binary available on PATH.
+      - name: Setup Rokit and verify Wally
+        uses: ./.github/actions/verify-wally
+
+      # Delegates per-package structure checks (wally.toml, src/, default.project.json
+      # creation) to Python, keeping the bash layer thin.  Then confirms the wally
+      # binary itself is responsive after PATH is set by the step above.
+      - name: Validate package structure for Wally
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/workflow_actions/validate_publish_setup.py --check wally-ready
+          # Confirm the wally binary is responsive now that PATH is configured.
+          wally --version
+
+      # Verify the composite publish action declares all expected inputs.
+      - name: Verify publish action inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/workflow_actions/validate_publish_setup.py --check action-inputs
+
+      # Verify the publish workflow passes those inputs through to the action.
+      - name: Verify workflow passes inputs to action
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/workflow_actions/validate_publish_setup.py --check workflow-inputs
+
+      # Detect the semver label on the PR (or dispatch override) and preview
+      # which versions would change — without actually publishing anything.
+      - name: Resolve detected version type
+        if: github.event_name != 'push'
+        id: version_preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/workflow_actions/publish_resolve_version_change.py \
+            --event-name "${{ github.event_name }}" \
+            --event-path "$GITHUB_EVENT_PATH" \
+            --dispatch-version-change none
+
+      # Show which packages would be bumped and to which version.
+      - name: Detect changed packages for preview
+        if: github.event_name != 'push'
+        id: changed_preview
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          python scripts/workflow_actions/publish_detect_changed_packages.py \
+            --event-name "${{ github.event_name }}" \
+            --event-path "$GITHUB_EVENT_PATH" \
+            --repository "${{ github.repository }}" \
+            --pr-number "${{ github.event.pull_request.number || 0 }}" \
+            --changed-packages-file changed-packages.txt
+
+      # Print a dry-run summary: "Will update X from 1.2.3 to 1.2.4".
+      - name: Preview package version updates
+        if: github.event_name != 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/workflow_actions/validate_publish_setup.py \
+            --check version-preview \
+            --version-change "${{ steps.version_preview.outputs.version_change }}" \
+            --changed-packages-file changed-packages.txt
+
+      - name: Summary
+        shell: bash
+        run: |
+          echo ""
+          echo "✅ Publish setup validation complete!"
+          echo ""
+          echo "Next steps:"
+          echo "  1. Ensure WALLY_TOKEN secret is set in repository settings"
+          echo "  2. Create/merge a PR with lib/* changes to trigger publishing"
+          echo "  3. Or manually trigger workflow with workflow_dispatch"

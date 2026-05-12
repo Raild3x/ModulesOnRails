@@ -4,10 +4,18 @@ Generate README.md from wally.toml files in the lib directory.
 """
 
 import os
-import subprocess
 import re
+import subprocess
+import sys
 from pathlib import Path
-from typing import Optional, Tuple, Dict
+from typing import Dict, Optional, Tuple
+
+# ---------------------------------------------------------------------------
+# Local shared utilities (scripts/_common.py)
+# ---------------------------------------------------------------------------
+# Insert scripts/ onto sys.path so _common is importable regardless of cwd.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _common import SRC_DIR, find_project_root, parse_wally_toml
 
 
 def get_git_remote_info() -> Tuple[Optional[str], Optional[str]]:
@@ -31,41 +39,6 @@ def get_git_remote_info() -> Tuple[Optional[str], Optional[str]]:
     print(f"Error: Could not parse remote URL: {remote_url}")
     return None, None
 
-
-def parse_wally_toml(file_path: Path) -> Dict[str, Dict[str, str]]:
-    """Parse a wally.toml file and extract relevant fields organized by section."""
-    config = {
-        "package": {},
-        "custom": {},
-    }
-    current_section = None
-    
-    with open(file_path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            
-            # Skip empty lines and comments
-            if not line or line.startswith("#"):
-                continue
-            
-            # Check for section headers
-            if line.startswith("[") and line.endswith("]"):
-                current_section = line[1:-1]
-                if current_section not in config:
-                    config[current_section] = {}
-                continue
-            
-            # Parse key-value pairs (ignore inline comments)
-            if "=" in line:
-                key, value = line.split("=", 1)
-                key = key.strip()
-                value = value.split("#")[0].strip().strip('"').strip("'")  # Remove inline comments
-                
-                # Store in the appropriate section
-                if current_section and current_section in config:
-                    config[current_section][key] = value
-    
-    return config
 
 
 def get_config_value(config: Dict[str, Dict[str, str]], key: str, default: str = "") -> str:
@@ -98,19 +71,11 @@ def generate_table_row(config: Dict[str, Dict[str, str]], docs_link: str) -> str
 
 
 def main():
-    src_dir = Path("lib")
-    
-    # Find project root by looking for the lib directory
-    current_dir = Path.cwd()
-    while current_dir != current_dir.parent:
-        if (current_dir / src_dir).is_dir():
-            os.chdir(current_dir)
-            break
-        current_dir = current_dir.parent
-    
+    find_project_root()
+
     # Check if source directory exists
-    if not src_dir.is_dir():
-        print(f"Error: Source directory {src_dir} does not exist.")
+    if not SRC_DIR.is_dir():
+        print(f"Error: Source directory {SRC_DIR} does not exist.")
         return 1
     
     # Get repository info
@@ -131,7 +96,7 @@ def main():
     print("\nGenerating README.md...")
     
     # Iterate through package directories
-    for package_dir in sorted(src_dir.iterdir()):
+    for package_dir in sorted(SRC_DIR.iterdir()):
         if not package_dir.is_dir():
             continue
         

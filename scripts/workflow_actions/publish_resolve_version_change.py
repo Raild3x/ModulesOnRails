@@ -7,7 +7,15 @@ import argparse
 import json
 import os
 import re
+import sys
 from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Local shared utilities (scripts/_common.py)
+# ---------------------------------------------------------------------------
+# Insert scripts/ onto sys.path so _common is importable from this subdirectory.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from _common import write_github_output
 
 
 MAJOR_PATTERN = re.compile(r"(^|:|/|-)major$|^major$|semver:major|release:major")
@@ -45,13 +53,6 @@ def resolve_from_labels(labels: list[str]) -> str:
     return "none"
 
 
-def write_output(name: str, value: str) -> None:
-    github_output = os.getenv("GITHUB_OUTPUT")
-    if github_output:
-        with open(github_output, "a", encoding="utf-8") as f:
-            f.write(f"{name}={value}\n")
-
-
 def main() -> int:
     args = parse_args()
 
@@ -66,7 +67,7 @@ def main() -> int:
         ]
         version_change = resolve_from_labels(labels)
 
-    write_output("version_change", version_change)
+    write_github_output("version_change", version_change)
     print(f"Selected version change: {version_change}")
     return 0
 

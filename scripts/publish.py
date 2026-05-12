@@ -4,39 +4,23 @@ Publish a Wally package with version management.
 Handles version incrementing, publishing, and rebuilding sourcemaps.
 """
 
-import os
-import sys
-import re
-import subprocess
-import shutil
 import argparse
+import os
+import re
+import sys
 from pathlib import Path
 from typing import Optional
 
+# ---------------------------------------------------------------------------
+# Local shared utilities (scripts/_common.py)
+# ---------------------------------------------------------------------------
+# Insert scripts/ onto sys.path so _common is importable regardless of cwd.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _common import SRC_DIR, WALLY_IGNORE_LIST, find_project_root, clear_package_dir, increment_version, run_command
 
-SRC_DIR = Path("lib")
-IGNORE_LIST = ["src", "default.project.json", "wally.toml", "README.md"]
-
-
-def find_project_root() -> Path:
-    """Find and change to the project root directory."""
-    current_dir = Path.cwd()
-    while current_dir != current_dir.parent:
-        if (current_dir / SRC_DIR).is_dir():
-            os.chdir(current_dir)
-            return current_dir
-        current_dir = current_dir.parent
-    return Path.cwd()
-
-
-def clear_package_dir(package_dir: Path):
-    """Remove all files/directories except those in IGNORE_LIST."""
-    for item in package_dir.iterdir():
-        if item.name not in IGNORE_LIST:
-            if item.is_dir():
-                shutil.rmtree(item)
-            else:
-                item.unlink()
+# Publish also needs to preserve README.md when cleaning the package directory
+# (it may have been committed alongside the package source).
+PUBLISH_IGNORE_LIST = WALLY_IGNORE_LIST + ["README.md"]
 
 
 def get_current_version(wally_toml: Path) -> Optional[str]:
@@ -51,40 +35,6 @@ def update_version(wally_toml: Path, old_version: str, new_version: str):
     content = wally_toml.read_text(encoding="utf-8")
     new_content = content.replace(f'version = "{old_version}"', f'version = "{new_version}"')
     wally_toml.write_text(new_content, encoding="utf-8")
-
-
-def increment_version(version: str, increment_type: str) -> str:
-    """Increment version based on type (major, minor, patch)."""
-    parts = version.split(".")
-    major, minor, patch = int(parts[0]), int(parts[1]), int(parts[2])
-
-    if increment_type == "major":
-        major += 1
-        minor = 0
-        patch = 0
-    elif increment_type == "minor":
-        minor += 1
-        patch = 0
-    elif increment_type == "patch":
-        patch += 1
-    else:
-        raise ValueError(f"Invalid increment type: {increment_type}")
-
-    return f"{major}.{minor}.{patch}"
-
-
-def run_command(cmd: list, error_msg: str = None) -> bool:
-    """Run a command and return True if successful."""
-    try:
-        subprocess.run(cmd, check=True)
-        return True
-    except subprocess.CalledProcessError:
-        if error_msg:
-            print(f"Error: {error_msg}")
-        return False
-    except FileNotFoundError:
-        print(f"Error: Command not found - {cmd[0]}")
-        return False
 
 
 def parse_args() -> argparse.Namespace:
@@ -195,7 +145,7 @@ def main():
         return 0
 
     print("Clearing the package directory...")
-    clear_package_dir(package_dir)
+    clear_package_dir(package_dir, PUBLISH_IGNORE_LIST)
 
     # Create default.project.json
     default_project = package_dir / "default.project.json"

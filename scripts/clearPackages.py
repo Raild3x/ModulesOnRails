@@ -6,33 +6,14 @@ Removes all files except src, default.project.json, and wally.toml.
 
 import os
 import sys
-import shutil
 from pathlib import Path
 
-
-SRC_DIR = Path("lib")
-IGNORE_LIST = ["src", "default.project.json", "wally.toml"]
-
-
-def find_project_root() -> Path:
-    """Find and change to the project root directory."""
-    current_dir = Path.cwd()
-    while current_dir != current_dir.parent:
-        if (current_dir / SRC_DIR).is_dir():
-            os.chdir(current_dir)
-            return current_dir
-        current_dir = current_dir.parent
-    return Path.cwd()
-
-
-def clear_package_dir(package_dir: Path):
-    """Remove all files/directories except those in IGNORE_LIST."""
-    for item in package_dir.iterdir():
-        if item.name not in IGNORE_LIST:
-            if item.is_dir():
-                shutil.rmtree(item)
-            else:
-                item.unlink()
+# ---------------------------------------------------------------------------
+# Local shared utilities (scripts/_common.py)
+# ---------------------------------------------------------------------------
+# Insert scripts/ onto sys.path so _common is importable regardless of cwd.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _common import SRC_DIR, WALLY_IGNORE_LIST, find_project_root, clear_package_dir
 
 
 def main():
