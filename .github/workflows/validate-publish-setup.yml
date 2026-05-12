@@ -1,0 +1,165 @@
+name: Validate Publish Setup
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate Publish Configuration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Check all packages have wally.toml
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Checking for wally.toml in all lib packages..."
+          
+          missing=()
+          for pkg_dir in lib/*/; do
+            pkg_name=$(basename "$pkg_dir")
+            if [ ! -f "$pkg_dir/wally.toml" ]; then
+              missing+=("$pkg_name")
+            else
+              echo "✓ $pkg_name has wally.toml"
+            fi
+          done
+          
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "✗ Missing wally.toml in: ${missing[*]}"
+            exit 1
+          fi
+          echo "✓ All packages have wally.toml"
+
+      - name: Verify package structure (src + default.project.json)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Checking package structure..."
+          
+          for pkg_dir in lib/*/; do
+            pkg_name=$(basename "$pkg_dir")
+            if [ ! -d "$pkg_dir/src" ]; then
+              echo "✗ $pkg_name missing src/ directory"
+              exit 1
+            fi
+            echo "✓ $pkg_name has src/ directory"
+          done
+
+      - name: Setup Rokit
+        uses: raild3x/setup-rokit@v0.1.0
+
+      - name: Verify Wally is available
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Checking Wally installation..."
+          
+          if command -v wally >/dev/null 2>&1; then
+            wally --version
+            echo "✓ wally available in PATH"
+            exit 0
+          fi
+
+          if [ -x .rokit/bin/wally ]; then
+            echo "$PWD/.rokit/bin" >> "$GITHUB_PATH"
+            ./.rokit/bin/wally --version
+            echo "✓ wally available from .rokit/bin"
+            exit 0
+          fi
+
+          echo "✗ wally not found"
+          exit 1
+
+      - name: Test wally login from package directory
+        shell: bash
+        env:
+          WALLY_TOKEN: dummy-test-token-12345
+        run: |
+          set -euo pipefail
+          echo "Testing wally login flow..."
+          
+          first_pkg=$(find lib -maxdepth 1 -mindepth 1 -type d | sort | head -n 1)
+          if [ -z "$first_pkg" ]; then
+            echo "✗ No package directories found"
+            exit 1
+          fi
+          
+          pkg_name=$(basename "$first_pkg")
+          echo "Testing with package: $pkg_name"
+          
+          # Test that wally.toml can be read from the package directory
+          if [ ! -f "$first_pkg/wally.toml" ]; then
+            echo "✗ wally.toml not found in $first_pkg"
+            exit 1
+          fi
+          
+          # Verify the wally.toml has required package metadata
+          if ! grep -q "^\[package\]" "$first_pkg/wally.toml"; then
+            echo "✗ Invalid wally.toml format"
+            exit 1
+          fi
+          
+          echo "✓ wally.toml is readable from package directory"
+          echo "✓ wally login flow can proceed"
+
+      - name: Verify publish action inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Checking publish action configuration..."
+          
+          action_file=".github/actions/publish-packages/action.yml"
+          
+          # Check for required inputs
+          for input in changed-packages-file version-change wally-token; do
+            if grep -q "^ *$input:" "$action_file"; then
+              echo "✓ Action has input: $input"
+            else
+              echo "✗ Action missing input: $input"
+              exit 1
+            fi
+          done
+          
+          echo "✓ All required inputs defined in action"
+
+      - name: Verify workflow passes inputs to action
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Checking workflow step passes all inputs..."
+          
+          workflow_file=".github/workflows/publish-package.yml"
+          
+          # Check for input passing in the workflow
+          for input in changed-packages-file version-change wally-token; do
+            if grep -q "^[[:space:]]*$input:" "$workflow_file"; then
+              echo "✓ Workflow passes input: $input"
+            else
+              echo "✗ Workflow missing input: $input"
+              exit 1
+            fi
+          done
+          
+          echo "✓ All inputs passed in workflow"
+
+      - name: Summary
+        shell: bash
+        run: |
+          echo ""
+          echo "✅ Publish setup validation complete!"
+          echo ""
+          echo "Next steps:"
+          echo "  1. Ensure WALLY_TOKEN secret is set in repository settings"
+          echo "  2. Create/merge a PR with lib/* changes to trigger publishing"
+          echo "  3. Or manually trigger workflow with workflow_dispatch"

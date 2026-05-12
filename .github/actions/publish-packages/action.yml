@@ -34,7 +34,14 @@ runs:
         WALLY_TOKEN: ${{ inputs.wally-token }}
       run: |
         set -euo pipefail
-        wally login --token "$WALLY_TOKEN"
+        # wally 0.3.2 reads ./wally.toml to determine the registry; run from a
+        # package directory so that file is present.
+        first_pkg=$(find lib -maxdepth 1 -mindepth 1 -type d | sort | head -n 1)
+        if [ -z "$first_pkg" ]; then
+          echo "No package directories found under lib/" >&2
+          exit 1
+        fi
+        (cd "$first_pkg" && wally login --token "$WALLY_TOKEN")
 
     - name: Publish changed packages
       shell: bash
