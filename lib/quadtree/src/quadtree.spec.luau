@@ -1,9 +1,9 @@
-local Quadtree = require(script.Parent)
-
 local test_suite = function(tiniest)
 	local describe = tiniest.describe
 	local test = tiniest.test
 	local expect = tiniest.expect
+
+	local Quadtree = require("./quadtree")
 
 	local function hasObject(nodes, object): boolean
 		for _, node in ipairs(nodes) do
@@ -253,6 +253,334 @@ local test_suite = function(tiniest)
 
 			local nearest = tree:GetNearest(Vector2.new(0, 0), 10)
 			expect(#nearest).is(0)
+		end)
+	end)
+
+	-- ── Cross-region and sub-region Radius correctness ──────────────────────────
+	--
+	-- The previous tests only placed nodes inside a single top-level grid cell,
+	-- so the sub-region Radius value never affected which regions were visited—the
+	-- per-node distance check always produced the right answer regardless of how
+	-- wide the bounding circle was.
+	--
+	-- The Radius field is used in GetRegionsInRadius to prune sub-regions whose
+	-- bounding circles do not overlap the search circle.  If Radius were larger
+	-- than the true circumradius (√2·size/2) extra regions are scanned (wasted
+	-- work).  If it were *smaller* valid regions could be pruned and in-radius
+	-- nodes silently missed.
+	--
+	-- The tests below address three gaps:
+	--   1. Cross-top-level-region traversal (nodes in different grid cells).
+	--   2. Near-boundary geometry: a node inside the search radius whose leaf
+	--      sub-region center is *outside* the search circle, so the bounding-circle
+	--      overlap check is the only thing that prevents the region from being
+	--      wrongly pruned.
+	--   3. Correct exclusion of nodes that are just outside the search radius but
+	--      share a sub-region with an in-radius node.
+	-- ────────────────────────────────────────────────────────────────────────────
+
+	describe("cross-region traversal", function()
+		-- With topRegionSize=64, math.round(x/64)*64 determines the top-region
+		-- grid cell.  Positions above ~32 or below ~-32 fall into adjacent cells.
+
+		test("SearchRadius returns nodes from two adjacent top-level regions", function()
+			local tree = Quadtree.new(64)
+			-- math.round(10/64)*64 = 0  → top region (0,0)
+			-- math.round(60/64)*64 = 64 → top region (64,0)
+			tree:CreateNode(Vector2.new(10, 0), "A")
+			tree:CreateNode(Vector2.new(60, 0), "B")
+			tree:CreateNode(Vector2.new(200, 0), "C")
+
+			-- DEBUG: verify nodes are stored, then show all search results
+			local allNodes = tree:GetAllNodes()
+			print(string.format("[DEBUG cross-region/SearchRadius] total nodes in tree: %d", #allNodes))
+			for _, n in ipairs(allNodes) do
+				print(
+					string.format(
+						"  node Object=%s Position=(%.2f,%.2f)",
+						tostring(n.Object),
+						n.Position.X,
+						n.Position.Y
+					)
+				)
+			end
+
+			Quadtree._setDebugRegions(true)
+			local results = tree:SearchRadius(Vector2.new(35, 0), 30)
+			Quadtree._setDebugRegions(false)
+			-- A: dist 25 < 30 ✓   B: dist 25 < 30 ✓   C: dist 165 > 30 ✗
+			print(string.format("[DEBUG cross-region/SearchRadius] results count: %d", #results))
+			for _, n in ipairs(results) do
+				local dist = math.sqrt((n.Position.X - 35) ^ 2 + (n.Position.Y - 0) ^ 2)
+				print(
+					string.format(
+						"  result Object=%s Position=(%.2f,%.2f) distFromCenter=%.4f",
+						tostring(n.Object),
+						n.Position.X,
+						n.Position.Y,
+						dist
+					)
+				)
+			end
+			print(
+				string.format(
+					"[DEBUG] hasA=%s hasB=%s hasC=%s",
+					tostring(hasObject(results, "A")),
+					tostring(hasObject(results, "B")),
+					tostring(hasObject(results, "C"))
+				)
+			)
+
+			expect(hasObject(results, "A")).is(true)
+			expect(hasObject(results, "B")).is(true)
+			expect(hasObject(results, "C")).is(false)
+			expect(#results).is(2)
+		end)
+
+		test("SearchRadius spans positive and negative top-level regions", function()
+			local tree = Quadtree.new(64)
+			-- math.round(-33/64)*64 = -64 → top region (-64,0)
+			-- math.round( 10/64)*64 =   0 → top region (0,0)
+			tree:CreateNode(Vector2.new(-33, 0), "neg")
+			tree:CreateNode(Vector2.new(10, 0), "pos")
+			tree:CreateNode(Vector2.new(-200, 0), "far")
+
+			local results = tree:SearchRadius(Vector2.new(0, 0), 34)
+			expect(hasObject(results, "neg")).is(true) -- dist 33 < 34
+			expect(hasObject(results, "pos")).is(true) -- dist 10 < 34
+			expect(hasObject(results, "far")).is(false) -- dist 200 > 34
+			expect(#results).is(2)
+		end)
+
+		test("SearchRadius finds nodes in all four diagonal top-level regions", function()
+			local tree = Quadtree.new(64)
+			-- Each node is at dist √(33²+33²) ≈ 46.67 from origin, in its own
+			-- top-level grid cell (math.round(±33/64) = ±1).
+			tree:CreateNode(Vector2.new(33, 33), "Q1") -- top region ( 64, 64)
+			tree:CreateNode(Vector2.new(-33, 33), "Q2") -- top region (-64, 64)
+			tree:CreateNode(Vector2.new(-33, -33), "Q3") -- top region (-64,-64)
+			tree:CreateNode(Vector2.new(33, -33), "Q4") -- top region ( 64,-64)
+			tree:CreateNode(Vector2.new(100, 0), "out")
+
+			local results = tree:SearchRadius(Vector2.new(0, 0), 50)
+			expect(hasObject(results, "Q1")).is(true)
+			expect(hasObject(results, "Q2")).is(true)
+			expect(hasObject(results, "Q3")).is(true)
+			expect(hasObject(results, "Q4")).is(true)
+			expect(hasObject(results, "out")).is(false)
+			expect(#results).is(4)
+		end)
+
+		test("ForEachInRadius spans adjacent top-level regions", function()
+			local tree = Quadtree.new(64)
+			tree:CreateNode(Vector2.new(10, 0), "A") -- top region (0,0)
+			tree:CreateNode(Vector2.new(60, 0), "B") -- top region (64,0)
+
+			Quadtree._setDebugRegions(true)
+			local values = collectIterator(tree:ForEachInRadius(Vector2.new(35, 0), 30))
+			Quadtree._setDebugRegions(false)
+			print(string.format("[DEBUG ForEachInRadius] results count: %d", #values))
+			for _, n in ipairs(values) do
+				local dist = math.sqrt((n.Position.X - 35) ^ 2 + (n.Position.Y - 0) ^ 2)
+				print(
+					string.format(
+						"  result Object=%s Position=(%.2f,%.2f) distFromCenter=%.4f",
+						tostring(n.Object),
+						n.Position.X,
+						n.Position.Y,
+						dist
+					)
+				)
+			end
+			print(
+				string.format(
+					"[DEBUG] hasA=%s hasB=%s",
+					tostring(hasObject(values, "A")),
+					tostring(hasObject(values, "B"))
+				)
+			)
+
+			expect(hasObject(values, "A")).is(true)
+			expect(hasObject(values, "B")).is(true)
+			expect(#values).is(2)
+		end)
+
+		test("GetNearest returns cross-region nodes in ascending distance order", function()
+			local tree = Quadtree.new(64)
+			tree:CreateNode(Vector2.new(10, 0), "close") -- top region (0,0)
+			tree:CreateNode(Vector2.new(60, 0), "far") -- top region (64,0)
+
+			local nearest = tree:GetNearest(Vector2.new(0, 0), 100, 2)
+			expect(#nearest).is(2)
+			expect(nearest[1].Object).is("close") -- dist 10
+			expect(nearest[2].Object).is("far") -- dist 60
+		end)
+	end)
+
+	describe("sub-region bounding-radius correctness", function()
+		-- topRegionSize=64, MAX_SUB_REGIONS=4 → leaf size = 64/2^3 = 8
+		-- Leaf circumradius = √2·(8/2) = √2·4 ≈ 5.66
+		--
+		-- The critical geometry used here:
+		--   A node at (24,0) lands in the leaf region centred at (28,−4).
+		--   Distance from origin to that leaf centre ≈ 28.28.
+		--   With search radius 27 the leaf centre is *outside* the search circle
+		--   (28.28 > 27), so the bounding-circle overlap is the sole reason the
+		--   leaf is scanned.  threshold = 27 + 5.66 = 32.66 > 28.28 → scanned ✓
+		--   If Radius were 0 the leaf would be pruned and the node silently lost.
+
+		test("node is found when its leaf sub-region center is outside the search circle", function()
+			local tree = Quadtree.new(64)
+			-- Leaf for (24,0): centre (28,−4), dist from origin ≈ 28.28 > 27
+			tree:CreateNode(Vector2.new(24, 0), "target")
+
+			local results = tree:SearchRadius(Vector2.new(0, 0), 27)
+			expect(hasObject(results, "target")).is(true) -- dist 24 < 27 ✓
+		end)
+
+		test("node just outside search radius that shares a leaf with an in-radius node is excluded", function()
+			-- (24,0) and (31,0) trace to the same leaf region.
+			-- Only (24,0) is within radius 27; (31,0) must be excluded.
+			local tree = Quadtree.new(64)
+			tree:CreateNode(Vector2.new(24, 0), "inside")
+			tree:CreateNode(Vector2.new(31, 0), "outside")
+
+			local results = tree:SearchRadius(Vector2.new(0, 0), 27)
+			expect(hasObject(results, "inside")).is(true)
+			expect(hasObject(results, "outside")).is(false)
+			expect(#results).is(1)
+		end)
+
+		test("node near the far corner of its leaf sub-region is still returned", function()
+			-- The circumradius guarantees a node at any corner of its leaf region
+			-- is never farther from the leaf centre than Radius.
+			-- Place a node near (32,0)—boundary of the level-2 sub-region split—
+			-- and verify it is found with a radius that just covers it.
+			local tree = Quadtree.new(64)
+			tree:CreateNode(Vector2.new(29, 0), "corner-near")
+			tree:CreateNode(Vector2.new(31, 0), "corner-out")
+
+			local results = tree:SearchRadius(Vector2.new(0, 0), 30)
+			expect(hasObject(results, "corner-near")).is(true) -- dist 29 < 30
+			expect(hasObject(results, "corner-out")).is(false) -- dist 31 > 30
+		end)
+
+		test("high-density cluster spanning multiple leaf sub-regions returns all in-radius nodes", function()
+			-- Many nodes close together force the traversal to visit several
+			-- distinct leaf regions.  All must be returned when the search radius
+			-- covers all of them.
+			local tree = Quadtree.new(64)
+			local positions = {
+				Vector2.new(1, 0),
+				Vector2.new(-1, 0),
+				Vector2.new(0, 1),
+				Vector2.new(0, -1),
+				Vector2.new(2, 2),
+				Vector2.new(-2, 2),
+				Vector2.new(2, -2),
+				Vector2.new(-2, -2),
+				Vector2.new(3, 0),
+				Vector2.new(0, 3),
+				Vector2.new(-3, 0),
+				Vector2.new(0, -3),
+			}
+			for i, pos in ipairs(positions) do
+				tree:CreateNode(pos, i)
+			end
+
+			-- DEBUG: show all leaf regions each node actually landed in
+			print("[DEBUG high-density] all nodes and their positions:")
+			for _, n in ipairs(tree:GetAllNodes()) do
+				print(
+					string.format("  Object=%s storedPos=(%.2f,%.2f)", tostring(n.Object), n.Position.X, n.Position.Y)
+				)
+			end
+
+			-- Max distance across all positions is 3 (< 5), all must be found.
+			Quadtree._setDebugRegions(true)
+			local results = tree:SearchRadius(Vector2.new(0, 0), 5)
+			Quadtree._setDebugRegions(false)
+			print(
+				string.format(
+					"[DEBUG high-density] SearchRadius(0,0,5) returned %d nodes (expected %d)",
+					#results,
+					#positions
+				)
+			)
+			-- Report which indices are missing
+			local foundSet = {}
+			for _, n in ipairs(results) do
+				foundSet[n.Object] = true
+			end
+			for i = 1, #positions do
+				if not foundSet[i] then
+					print(string.format("  MISSING index=%d pos=(%.2f,%.2f)", i, positions[i].X, positions[i].Y))
+				end
+			end
+
+			expect(#results).is(#positions)
+		end)
+
+		test(
+			"nodes outside the search radius in sub-regions the inflated Radius would have scanned are still excluded",
+			function()
+				-- This guards the correctness of the per-node check even when the
+				-- bounding-circle pruning lets a region through.
+				local tree = Quadtree.new(64)
+				tree:CreateNode(Vector2.new(0, 0), "inside")
+				tree:CreateNode(Vector2.new(60, 0), "outside") -- same top region as (64,0)... actually:
+				-- math.round(60/64)=1 → top region (64,0).  dist=60 > 50.
+				tree:CreateNode(Vector2.new(-60, 0), "outside2") -- top region (-64,0)
+
+				local results = tree:SearchRadius(Vector2.new(0, 0), 50)
+				expect(hasObject(results, "inside")).is(true)
+				expect(hasObject(results, "outside")).is(false)
+				expect(hasObject(results, "outside2")).is(false)
+				expect(#results).is(1)
+			end
+		)
+
+		test("Vector3 input produces correct cross-region results", function()
+			local tree = Quadtree.new(64)
+			-- Vector3: X/Z are used, Y is dropped
+			tree:CreateNode(Vector3.new(10, 999, 0), "A") -- → (10,0), top region (0,0)
+			tree:CreateNode(Vector3.new(60, 0, 0), "B") -- → (60,0), top region (64,0)
+
+			-- DEBUG: confirm Vector3 nodes stored with correct 2-D positions
+			print("[DEBUG Vector3 cross-region] stored node positions:")
+			for _, n in ipairs(tree:GetAllNodes()) do
+				print(
+					string.format("  Object=%s storedPos=(%.2f,%.2f)", tostring(n.Object), n.Position.X, n.Position.Y)
+				)
+			end
+
+			Quadtree._setDebugRegions(true)
+			local results = tree:SearchRadius(Vector2.new(35, 0), 30)
+			Quadtree._setDebugRegions(false)
+			print(string.format("[DEBUG Vector3 cross-region] results count: %d", #results))
+			for _, n in ipairs(results) do
+				local dist = math.sqrt((n.Position.X - 35) ^ 2 + (n.Position.Y - 0) ^ 2)
+				print(
+					string.format(
+						"  result Object=%s Position=(%.2f,%.2f) dist=%.4f",
+						tostring(n.Object),
+						n.Position.X,
+						n.Position.Y,
+						dist
+					)
+				)
+			end
+			print(
+				string.format(
+					"[DEBUG] hasA=%s hasB=%s",
+					tostring(hasObject(results, "A")),
+					tostring(hasObject(results, "B"))
+				)
+			)
+
+			expect(hasObject(results, "A")).is(true)
+			expect(hasObject(results, "B")).is(true)
+			expect(#results).is(2)
 		end)
 	end)
 end

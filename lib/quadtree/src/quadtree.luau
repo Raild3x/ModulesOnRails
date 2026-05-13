@@ -238,7 +238,12 @@ local function IsPointInBox(point: Vector2, boxCenter: Vector2, boxSize: number)
 end
 
 local function RoundTo(x: number, mult: number): number
-	return math.round(x / mult) * mult
+	local rounded = math.round(x / mult) * mult
+	-- Normalize signed zero so hash keys never diverge between "-0" and "0".
+	if rounded == 0 then
+		return 0
+	end
+	return rounded
 end
 
 local function DistanceSquared(a: Vector2, b: Vector2): number
@@ -279,7 +284,7 @@ local function GetTopRegion<T>(quadtree: QuadtreeInternal<T>, position: Vector2,
 			Regions = {},
 			Level = 1,
 			Size = size,
-			Radius = math.sqrt(size * size + size * size),
+			Radius = math.sqrt(2) * size / 2,
 			Center = origin,
 		}
 		table.freeze(region)
@@ -288,18 +293,35 @@ local function GetTopRegion<T>(quadtree: QuadtreeInternal<T>, position: Vector2,
 	return region :: Region<T>
 end
 
+-- When set to true, GetRegionsInRadius emits diagnostic output.
+-- Toggled by individual spec tests; never set in production code.
+local _debugRegions = false
+
 local function GetRegionsInRadius<T>(quadtree: QuadtreeInternal<T>, position: Vector2, radius: number): { Region<T> }
 	local regionsFound = {}
-	local function ScanRegions(regions: { Region<T> })
+	local function ScanRegions(regions: { Region<T> }, depth: number)
 		-- Find regions that have overlapping radius values
+		if _debugRegions then
+			print(string.format("[DEBUG ScanRegions] depth=%d regionCount=%d", depth, #regions))
+		end
 		for _, region in ipairs(regions) do
 			local distanceSq = DistanceSquared(position, region.Center)
 			local threshold = radius + region.Radius
-			if distanceSq < (threshold * threshold) then
+			local passes = distanceSq < (threshold * threshold)
+			if _debugRegions then
+				print(string.format(
+					"[DEBUG ScanRegions]   level=%d center=(%.2f,%.2f) size=%.2f radius=%.4f distSq=%.4f threshold=%.4f threshSq=%.4f passes=%s hasNodes=%s",
+					region.Level, region.Center.X, region.Center.Y,
+					region.Size, region.Radius,
+					distanceSq, threshold, threshold * threshold,
+					tostring(passes), tostring(region.Nodes ~= nil)
+				))
+			end
+			if passes then
 				if region.Nodes then
 					table.insert(regionsFound, region)
 				else
-					ScanRegions(region.Regions)
+					ScanRegions(region.Regions, depth + 1)
 				end
 			end
 		end
@@ -308,20 +330,42 @@ local function GetRegionsInRadius<T>(quadtree: QuadtreeInternal<T>, position: Ve
 	local startRegions = {}
 	local size = quadtree.Size
 	local maxOffset = math.ceil(radius / size)
+	if _debugRegions then
+		print(string.format("[DEBUG GetRegionsInRadius] searchPos=(%.2f,%.2f) radius=%.2f size=%.2f maxOffset=%d", position.X, position.Y, radius, size, maxOffset))
+	end
 
 	-- Adjusted logic for quadtree (2D spatial relationships only)
 	for x = -maxOffset, maxOffset do
 		for y = -maxOffset, maxOffset do
 			local offset = Vector2.new(x * size, y * size)
-			local startRegion = GetTopRegion(quadtree, position + offset, false)
+			local lookupPos = position + offset
+			local startRegion = GetTopRegion(quadtree, lookupPos, false)
+			if _debugRegions then
+				print(string.format(
+					"[DEBUG GetRegionsInRadius] offset=(%d,%d) lookupPos=(%.2f,%.2f) topRegionFound=%s",
+					x, y, lookupPos.X, lookupPos.Y, tostring(startRegion ~= nil)
+				))
+			end
 			if startRegion and not startRegions[startRegion] then
+				if _debugRegions then
+					print(string.format("[DEBUG GetRegionsInRadius]   -> scanning topRegion center=(%.2f,%.2f) subRegionCount=%d",
+						startRegion.Center.X, startRegion.Center.Y, #startRegion.Regions))
+				end
 				startRegions[startRegion] = true
-				ScanRegions(startRegion.Regions)
+				ScanRegions(startRegion.Regions, 2)
 			end
 		end
 	end
 
+	if _debugRegions then
+		print(string.format("[DEBUG GetRegionsInRadius] total leaf regions found: %d", #regionsFound))
+	end
 	return regionsFound
+end
+
+-- Exposed so spec tests can enable targeted diagnostics without polluting other test output.
+local function _setDebugRegions(enabled: boolean)
+	_debugRegions = enabled
 end
 
 --------------------------------------------------------------------------------
@@ -682,8 +726,8 @@ function Quadtree._getRegion<T>(self: QuadtreeInternal<T>, maxLevel: number, pos
 				Regions = {},
 				Level = level,
 				Size = size,
-				-- Radius represents the spherical radius that contains the entirety of the cube region
-				Radius = math.sqrt(size * size + size * size),
+				-- Radius represents the distance from the region center to its farthest corner
+				Radius = math.sqrt(2) * size / 2,
 				Center = center,
 				Parent = regionParent,
 				Nodes = if level == MAX_SUB_REGIONS then {} else nil,
@@ -714,4 +758,5 @@ Quadtree.__iter = Quadtree.ForEachNode
 
 return {
 	new = CreateQuadtree,
+	_setDebugRegions = _setDebugRegions,
 }
