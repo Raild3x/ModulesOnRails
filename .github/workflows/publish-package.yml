@@ -1,6 +1,14 @@
 # Triggered when a PR labelled major/minor/patch is merged into main, or manually
 # via workflow_dispatch.  Detects which lib/ packages changed, bumps their
-# versions, publishes to Wally, regenerates the README, and rebuilds the docs.
+# versions, and publishes to Wally.
+#
+# README regeneration and docs deployment are handled automatically by the
+# 'publish docs' workflow, which triggers via workflow_run on completion.
+#
+# Job graph:
+#   resolve-version ─┐
+#                    ├─► publish
+#   detect-changes  ─┘
 name: Publish Packages
 
 on:
@@ -28,28 +36,33 @@ permissions:
   contents: write
   pull-requests: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
-  publish:
-    name: Publish Changed Packages
+  # Resolve whether the version bump is major / minor / patch / none.
+  # On PRs, reads semver labels (e.g. "semver:patch") from the event payload.
+  # On workflow_dispatch, uses the manual input override.
+  # Runs in parallel with detect-changes.
+  resolve-version:
+    name: Resolve Version Change
+    runs-on: ubuntu-latest
     if: |
       (github.event_name == 'workflow_dispatch' && github.ref_name == 'main') ||
       (github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
-    runs-on: ubuntu-latest
+    outputs:
+      version_change: ${{ steps.version.outputs.version_change }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: main
-          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
 
-      # Resolve whether the version bump is major / minor / patch / none.
-      # On PRs, this reads semver labels (e.g. "semver:patch") from the event
-      # payload.  On workflow_dispatch, it uses the manual input override.
       - name: Resolve version change from PR labels
         id: version
         shell: bash
@@ -65,8 +78,34 @@ jobs:
             --event-path "$GITHUB_EVENT_PATH" \
             "${DISPATCH_ARGS[@]}"
 
-      # Determine which packages under lib/ were modified in this run.
-      # Writes changed package names to changed-packages.txt for subsequent steps.
+      - name: Summary
+        shell: bash
+        run: |
+          echo "Version change resolved: ${{ steps.version.outputs.version_change }}" >> "$GITHUB_STEP_SUMMARY"
+
+  # Determine which packages under lib/ were modified in this PR.
+  # Uploads the result as an artifact for the publish job to consume.
+  # Runs in parallel with resolve-version.
+  detect-changes:
+    name: Detect Changed Packages
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
+    outputs:
+      has_changes: ${{ steps.changed.outputs.has_changes }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
       - name: Detect changed packages
         id: changed
         shell: bash
@@ -80,70 +119,75 @@ jobs:
             --pr-number "${{ github.event.pull_request.number || 0 }}" \
             --changed-packages-file changed-packages.txt
 
+      # Only upload when packages actually changed — the script deletes the file
+      # when there are no changes, so an unconditional upload would fail.
+      - name: Upload changed packages list
+        if: steps.changed.outputs.has_changes == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: changed-packages
+          path: changed-packages.txt
+          retention-days: 1
+
+      - name: Summary
+        shell: bash
+        run: |
+          if [ "${{ steps.changed.outputs.has_changes }}" = "true" ]; then
+            echo "Changed packages detected:" >> "$GITHUB_STEP_SUMMARY"
+            cat changed-packages.txt >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No changed packages detected under lib/." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # Install Rokit + wally, download the changed-packages artifact, then
+  # authenticate, bump versions, and publish each changed package to Wally.
+  publish:
+    name: Publish Changed Packages
+    runs-on: ubuntu-latest
+    needs: [resolve-version, detect-changes]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
       # Install Rokit and verify the wally binary is on PATH before any
       # publish step attempts to call it.
       - name: Setup Rokit and verify Wally
         uses: ./.github/actions/verify-wally
 
+      # Only download when the detect-changes job found packages to publish.
+      # The artifact won't exist otherwise, and download-artifact would hard-fail.
+      - name: Download changed packages list
+        if: needs.detect-changes.outputs.has_changes == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: changed-packages
+
       # Bump versions, authenticate with Wally, and publish each changed package.
       # Also commits the updated wally.toml version lines back to main.
       - name: Publish and persist versions
-        if: steps.changed.outputs.has_changes == 'true' && steps.version.outputs.version_change != 'none'
+        if: needs.detect-changes.outputs.has_changes == 'true' && needs.resolve-version.outputs.version_change != 'none'
         uses: ./.github/actions/publish-packages
         with:
           changed-packages-file: changed-packages.txt
-          version-change: ${{ steps.version.outputs.version_change }}
+          version-change: ${{ needs.resolve-version.outputs.version_change }}
           wally-token: ${{ secrets.WALLY_TOKEN }}
-
-      # Regenerate README.md to reflect the new package versions.
-      - name: Generate README
-        if: steps.changed.outputs.has_changes == 'true' && steps.version.outputs.version_change != 'none'
-        shell: bash
-        run: |
-          set -euo pipefail
-          python scripts/generateReadMe.py
-
-      # Commit the updated README only when lines actually changed.
-      - name: Commit README update
-        if: steps.changed.outputs.has_changes == 'true' && steps.version.outputs.version_change != 'none'
-        shell: bash
-        run: |
-          set -euo pipefail
-          if git diff --quiet -- README.md; then
-            echo "README.md unchanged."
-            exit 0
-          fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add README.md
-          git commit -m "docs: regenerate README"
-          git push origin HEAD:main
-
-      # Rebuild and deploy the Moonwave documentation site.
-      - name: Setup Node.js
-        if: steps.changed.outputs.has_changes == 'true' && steps.version.outputs.version_change != 'none'
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Publish docs
-        if: steps.changed.outputs.has_changes == 'true' && steps.version.outputs.version_change != 'none'
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm i -g moonwave@latest
-          moonwave build --publish
 
       - name: Summary
         shell: bash
         run: |
-          if [ "${{ steps.changed.outputs.has_changes }}" != "true" ]; then
+          if [ "${{ needs.detect-changes.outputs.has_changes }}" != "true" ]; then
             echo "### ⏭️ Skipped: no changed packages under lib/." >> "$GITHUB_STEP_SUMMARY"
-          elif [ "${{ steps.version.outputs.version_change }}" = "none" ]; then
+          elif [ "${{ needs.resolve-version.outputs.version_change }}" = "none" ]; then
             echo "### ⏭️ Skipped: no semver label found (major/minor/patch)." >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "### ✅ Published changed packages with version change: ${{ steps.version.outputs.version_change }}" >> "$GITHUB_STEP_SUMMARY"
-            echo "### ✅ Regenerated README.md" >> "$GITHUB_STEP_SUMMARY"
-            echo "### ✅ Published docs via Moonwave" >> "$GITHUB_STEP_SUMMARY"
+            echo "### ✅ Published changed packages with version change: ${{ needs.resolve-version.outputs.version_change }}" >> "$GITHUB_STEP_SUMMARY"
           fi
+
