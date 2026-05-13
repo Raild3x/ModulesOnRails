@@ -48,7 +48,7 @@ jobs:
     name: Resolve Version Change
     runs-on: ubuntu-latest
     if: |
-      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_dispatch' && github.ref_name == 'main') ||
       (github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
     outputs:
       version_change: ${{ steps.version.outputs.version_change }}

@@ -7,9 +7,21 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
   workflow_dispatch:
+    inputs:
+      version_change:
+        description: "Preview version change (major|minor|patch|none)"
+        required: false
+        type: choice
+        default: none
+        options:
+          - major
+          - minor
+          - patch
+          - none
 
 permissions:
   contents: read
+  pull-requests: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -108,10 +120,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          DISPATCH_ARGS=()
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            DISPATCH_ARGS=(--dispatch-version-change "${{ inputs.version_change }}")
+          fi
           python scripts/workflow_actions/publish_resolve_version_change.py \
             --event-name "${{ github.event_name }}" \
             --event-path "$GITHUB_EVENT_PATH" \
-            --dispatch-version-change none
+            "${DISPATCH_ARGS[@]}"
 
       # Show which packages changed in this PR.
       - name: Detect changed packages for preview
