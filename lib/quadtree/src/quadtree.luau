@@ -225,6 +225,25 @@ type NodeInternal<T> = {
 local MAX_SUB_REGIONS = 4
 local DEFAULT_TOP_REGION_SIZE = 512
 
+local function IsFinitePositiveNumber(value: number): boolean
+	return value > 0 and value == value and value ~= math.huge and value ~= -math.huge
+end
+
+local function AssertActiveNode<T>(node: NodeInternal<T>)
+	if node.Region == nil then
+		error("node is not active in this quadtree")
+	end
+end
+
+local function IsRegionOwnedByTree<T>(quadtree: QuadtreeInternal<T>, region: Region<T>): boolean
+	local topRegion = region
+	while topRegion.Parent do
+		topRegion = topRegion.Parent
+	end
+	local topRegionKey = topRegion.Center.X .. ":" .. topRegion.Center.Y
+	return quadtree.Regions[topRegionKey] == topRegion
+end
+
 local function ResolvePosition(position: Vector): Vector2
 	return if typeof(position) == "Vector3" then Vector2.new(position.X, position.Z) else position
 end
@@ -362,6 +381,9 @@ Quadtree.__index = Quadtree
 ]=]
 local function CreateQuadtree<T>(topRegionSize: number?): Quadtree<T>
 	local self = (setmetatable({}, Quadtree) :: unknown) :: QuadtreeInternal<T>
+	if topRegionSize ~= nil and not IsFinitePositiveNumber(topRegionSize) then
+		error("topRegionSize must be a positive finite number")
+	end
 	self.Size = if topRegionSize then topRegionSize else DEFAULT_TOP_REGION_SIZE
 	self.Regions = {} :: { [string]: Region<T> }
 	return self
@@ -457,14 +479,46 @@ end
 	```
 ]=]
 function Quadtree:ChangeNodePosition<T>(node: NodeInternal<T>, position: Vector)
+	AssertActiveNode(node)
 	local posV2 = ResolvePosition(position)
-	node.Position = posV2
+	local oldRegion = node.Region :: Region<T>
+	if not IsRegionOwnedByTree(self, oldRegion) then
+		error("node is not active in this quadtree")
+	end
 	local newRegion = self:_getRegion(MAX_SUB_REGIONS, posV2)
-	if newRegion == node.Region then
+	if newRegion == oldRegion then
+		node.Position = posV2
 		return
 	end
+
+	local oldNodes = oldRegion.Nodes :: { NodeInternal<T> }
+	local oldIndex = table.find(oldNodes, node)
+	if oldIndex == nil then
+		error("node is not active in this quadtree")
+	end
+	SwapRemove(oldNodes, oldIndex)
+	if #oldNodes == 0 then
+		local region: Region<T>? = oldRegion
+		while region do
+			local parent = region.Parent
+			local numNodes = CountNodesInRegion(region)
+			if numNodes == 0 then
+				if parent then
+					local regionIndex = table.find(parent.Regions, region)
+					if regionIndex then
+						SwapRemove(parent.Regions, regionIndex)
+					end
+				else
+					local topRegionKey = region.Center.X .. ":" .. region.Center.Y
+					self.Regions[topRegionKey] = nil
+				end
+			end
+			region = parent
+		end
+	end
+
+	node.Position = posV2
 	table.insert(newRegion.Nodes, node)
-	self:RemoveNode(node)
 	node.Region = newRegion
 end
 
@@ -475,6 +529,9 @@ end
 	Clears all regions and nodes from the quadtree.
 ]=]
 function Quadtree:ClearAllNodes()
+	for _, node in ipairs(self:GetAllNodes()) do
+		(node :: NodeInternal<any>).Region = nil
+	end
 	table.clear(self.Regions)
 end
 
@@ -663,6 +720,9 @@ end
 	@private
 ]=]
 function Quadtree._getRegion<T>(self: QuadtreeInternal<T>, maxLevel: number, position: Vector2): Region<T>
+	if maxLevel < 2 then
+		error("maxLevel must be >= 2")
+	end
 	local function GetRegion(regionParent: Region<T>?, regions: { Region<T> }, level: number): Region<T>
 		local region: Region<T>? = nil
 		-- Find region that contains the position:

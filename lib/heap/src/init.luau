@@ -26,10 +26,10 @@
 	```
 	```lua title="Max Heap"
 	local maxHeap = Heap.max()
-	minHeap:Push("A", 5)
-	minHeap:Push("B", 2)
-	minHeap:Push("C", 8)
-	minHeap:Push("D", 4)
+	maxHeap:Push("A", 5)
+	maxHeap:Push("B", 2)
+	maxHeap:Push("C", 8)
+	maxHeap:Push("D", 4)
 
 	local poppedValue, costOfPoppedValue = maxHeap:Pop() -- pops off the top value
 	print(poppedValue, costOfPoppedValue) -- C 8

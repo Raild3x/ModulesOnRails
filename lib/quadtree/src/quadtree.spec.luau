@@ -23,6 +23,18 @@ local test_suite = function(tiniest)
 		return results
 	end
 
+	describe("constructor validation", function()
+		test("rejects non-positive or non-finite topRegionSize values", function()
+			for _, invalidSize in ipairs { 0, -1, 0 / 0, math.huge, -math.huge } do
+				local ok, err = pcall(function()
+					(Quadtree :: any).new(invalidSize)
+				end)
+				expect(ok).is(false)
+				expect(type(err)).is("string")
+			end
+		end)
+	end)
+
 	describe("CreateNode", function()
 		test("creates a node and increments the count", function()
 			local tree = Quadtree.new(64)
@@ -140,6 +152,36 @@ local test_suite = function(tiniest)
 			expect(tree:FindFirstNode("steady")).is(node)
 			expect(tree:CountNodes()).is(1)
 		end)
+
+		test("rejects changing a node that was already removed", function()
+			local tree = Quadtree.new(64)
+			local node = tree:CreateNode(Vector2.new(0, 0), "stale")
+			tree:RemoveNode(node)
+
+			local ok, err = pcall(function()
+				tree:ChangeNodePosition(node, Vector2.new(100, 0))
+			end)
+
+			expect(ok).is(false)
+			expect(type(err)).is("string")
+			expect(tree:CountNodes()).is(0)
+			expect(tree:FindFirstNode("stale")).is(nil)
+		end)
+
+		test("rejects changing a node from a different quadtree", function()
+			local treeA = Quadtree.new(64)
+			local treeB = Quadtree.new(64)
+			local node = treeA:CreateNode(Vector2.new(0, 0), "foreign")
+
+			local ok, err = pcall(function()
+				treeB:ChangeNodePosition(node, Vector2.new(100, 0))
+			end)
+
+			expect(ok).is(false)
+			expect(type(err)).is("string")
+			expect(treeA:FindFirstNode("foreign")).is(node)
+			expect(treeB:CountNodes()).is(0)
+		end)
 	end)
 
 	describe("ClearAllNodes", function()
@@ -152,6 +194,33 @@ local test_suite = function(tiniest)
 
 			expect(tree:CountNodes()).is(0)
 			expect(#tree:GetAllNodes()).is(0)
+		end)
+
+		test("invalidates stale node handles so they cannot remove new nodes", function()
+			local tree = Quadtree.new(64)
+			local staleNode = tree:CreateNode(Vector2.new(8, 8), "old")
+
+			tree:ClearAllNodes()
+			local freshNode = tree:CreateNode(Vector2.new(8, 8), "new")
+
+			expect(tree:RemoveNode(staleNode)).is(false)
+			expect(tree:FindFirstNode("new")).is(freshNode)
+			expect(tree:CountNodes()).is(1)
+		end)
+
+		test("invalidates stale node handles so they cannot be repositioned", function()
+			local tree = Quadtree.new(64)
+			local staleNode = tree:CreateNode(Vector2.new(8, 8), "old")
+
+			tree:ClearAllNodes()
+
+			local ok, err = pcall(function()
+				tree:ChangeNodePosition(staleNode, Vector2.new(100, 100))
+			end)
+
+			expect(ok).is(false)
+			expect(type(err)).is("string")
+			expect(tree:CountNodes()).is(0)
 		end)
 	end)
 
@@ -303,6 +372,18 @@ local test_suite = function(tiniest)
 
 			expect(region.Level).is(5)
 			expect(region.Nodes).is_not(nil)
+		end)
+
+		test("rejects maxLevel values less than 2", function()
+			local tree = Quadtree.new(64)
+			for _, invalidLevel in ipairs { 1, 0, -1 } do
+				local ok, err = pcall(function()
+					(tree :: any):_getRegion(invalidLevel, Vector2.new(0, 0))
+				end)
+
+				expect(ok).is(false)
+				expect(type(err)).is("string")
+			end
 		end)
 	end)
 

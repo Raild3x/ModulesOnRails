@@ -200,42 +200,41 @@ def main():
     # and create a temporary passthrough init.luau that re-exports it.
     src_dir = package_dir / "src"
     temp_init: Optional[Path] = None
-    if src_dir.is_dir() and not (src_dir / "init.luau").is_file() and not (src_dir / "init.lua").is_file():
-        for ext in (".luau", ".lua"):
-            candidate = src_dir / f"{package_name}{ext}"
-            if candidate.is_file():
-                exported_types = find_exported_types(candidate)
-                init_content = generate_passthrough_init(candidate.stem, exported_types)
-                temp_init = (src_dir / "init.luau").resolve()
-                temp_init.write_text(init_content, encoding="utf-8")
-                print(f"Created temporary passthrough init.luau (entrypoint: {candidate.name}).")
-                break
-        else:
-            print(
-                f"Error: src/ has no init.luau, init.lua, or a '{package_name}[.luau|.lua]' "
-                "entrypoint file. Cannot publish."
-            )
-            return 1
+    publish_success: Optional[bool] = None
+    try:
+        if src_dir.is_dir() and not (src_dir / "init.luau").is_file() and not (src_dir / "init.lua").is_file():
+            for ext in (".luau", ".lua"):
+                candidate = src_dir / f"{package_name}{ext}"
+                if candidate.is_file():
+                    exported_types = find_exported_types(candidate)
+                    init_content = generate_passthrough_init(candidate.stem, exported_types)
+                    temp_init = (src_dir / "init.luau").resolve()
+                    temp_init.write_text(init_content, encoding="utf-8")
+                    print(f"Created temporary passthrough init.luau (entrypoint: {candidate.name}).")
+                    break
+            else:
+                print(
+                    f"Error: src/ has no init.luau, init.lua, or a '{package_name}[.luau|.lua]' "
+                    "entrypoint file. Cannot publish."
+                )
+                return 1
 
-    # Change to package directory and publish
-    os.chdir(package_dir)
-
-    publish_success = run_command(["wally", "publish"])
-
-    # Clean up temporary passthrough init.luau
-    if temp_init and temp_init.is_file():
-        temp_init.unlink()
-        print("Cleaned up temporary init.luau.")
+        # Change to package directory and publish
+        os.chdir(package_dir)
+        publish_success = run_command(["wally", "publish"])
+    finally:
+        os.chdir(original_dir)
+        if temp_init and temp_init.is_file():
+            temp_init.unlink()
+            print("Cleaned up temporary init.luau.")
+        if default_project.is_file():
+            default_project.unlink()
+            print("default.project.json deleted.")
 
     if publish_success:
         print("Package published successfully.")
     else:
         print("Package publishing failed.")
-
-    # Delete default.project.json
-    os.chdir(original_dir)
-    default_project.unlink()
-    print("default.project.json deleted.")
 
     # Rebuild sourcemap using setup script
     # print("Rebuilding sourcemap...")
