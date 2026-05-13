@@ -2,7 +2,7 @@
 name = "raild3x/quadtree"
 description = "A spatial partitioning system to query points in a 2D space. Refactored from Sleitnick's Octree package."
 authors = ["Logan Hunt (Raildex)", "Sleitnick"]
-version = "0.0.2"
+version = "0.0.3"
 license = "MIT"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
