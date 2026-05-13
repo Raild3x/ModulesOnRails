@@ -1,6 +1,6 @@
 [package]
 name = "raild3x/quadtree"
-description = "A spatial partitioning system to query points in a 2D space. Refactored from sleitnicks Octree package."
+description = "A spatial partitioning system to query points in a 2D space. Refactored from Sleitnick's Octree package."
 authors = ["Logan Hunt (Raildex)", "Sleitnick"]
 version = "0.0.2"
 license = "MIT"

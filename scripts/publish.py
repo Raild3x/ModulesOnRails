@@ -210,6 +210,12 @@ def main():
                 temp_init.write_text(init_content, encoding="utf-8")
                 print(f"Created temporary passthrough init.luau (entrypoint: {candidate.name}).")
                 break
+        else:
+            print(
+                f"Error: src/ has no init.luau, init.lua, or a '{package_name}[.luau|.lua]' "
+                "entrypoint file. Cannot publish."
+            )
+            return 1
 
     # Change to package directory and publish
     os.chdir(package_dir)

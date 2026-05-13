@@ -4,6 +4,7 @@ local test_suite = function(tiniest)
 	local expect = tiniest.expect
 
 	local Quadtree = require("./quadtree")
+	print("Running Quadtree tests...", Quadtree)
 
 	local function hasObject(nodes, object): boolean
 		for _, node in ipairs(nodes) do
@@ -82,6 +83,37 @@ local test_suite = function(tiniest)
 
 			expect(tree:RemoveNode(node)).is(false)
 			expect(tree:CountNodes()).is(0)
+		end)
+
+		test("removes empty top-level regions after deleting the last node", function()
+			local tree = Quadtree.new(64)
+			local node = tree:CreateNode(Vector2.new(1000, 0), "value")
+
+			expect(tree:RemoveNode(node)).is(true)
+			expect(tree:CountNodes()).is(0)
+
+			local regions = (tree :: any).Regions
+			local topRegionCount = 0
+			for _ in pairs(regions) do
+				topRegionCount += 1
+			end
+			expect(topRegionCount).is(0)
+		end)
+
+		test("does not retain empty top-level regions after moving then removing a node", function()
+			local tree = Quadtree.new(64)
+			local node = tree:CreateNode(Vector2.new(0, 0), "value")
+			tree:ChangeNodePosition(node, Vector2.new(1000, 0))
+
+			expect(tree:RemoveNode(node)).is(true)
+			expect(tree:CountNodes()).is(0)
+
+			local regions = (tree :: any).Regions
+			local topRegionCount = 0
+			for _ in pairs(regions) do
+				topRegionCount += 1
+			end
+			expect(topRegionCount).is(0)
 		end)
 	end)
 
@@ -256,6 +288,24 @@ local test_suite = function(tiniest)
 		end)
 	end)
 
+	describe("_getRegion", function()
+		test("allocates Nodes on the requested maxLevel leaf", function()
+			local tree = Quadtree.new(64)
+			local region = (tree :: any):_getRegion(3, Vector2.new(10, 10))
+
+			expect(region.Level).is(3)
+			expect(region.Nodes).is_not(nil)
+		end)
+
+		test("supports maxLevel values greater than the default depth", function()
+			local tree = Quadtree.new(64)
+			local region = (tree :: any):_getRegion(5, Vector2.new(10, 10))
+
+			expect(region.Level).is(5)
+			expect(region.Nodes).is_not(nil)
+		end)
+	end)
+
 	-- ── Cross-region and sub-region Radius correctness ──────────────────────────
 	--
 	-- The previous tests only placed nodes inside a single top-level grid cell,
@@ -290,46 +340,8 @@ local test_suite = function(tiniest)
 			tree:CreateNode(Vector2.new(10, 0), "A")
 			tree:CreateNode(Vector2.new(60, 0), "B")
 			tree:CreateNode(Vector2.new(200, 0), "C")
-
-			-- DEBUG: verify nodes are stored, then show all search results
-			local allNodes = tree:GetAllNodes()
-			print(string.format("[DEBUG cross-region/SearchRadius] total nodes in tree: %d", #allNodes))
-			for _, n in ipairs(allNodes) do
-				print(
-					string.format(
-						"  node Object=%s Position=(%.2f,%.2f)",
-						tostring(n.Object),
-						n.Position.X,
-						n.Position.Y
-					)
-				)
-			end
-
-			Quadtree._setDebugRegions(true)
 			local results = tree:SearchRadius(Vector2.new(35, 0), 30)
-			Quadtree._setDebugRegions(false)
 			-- A: dist 25 < 30 ✓   B: dist 25 < 30 ✓   C: dist 165 > 30 ✗
-			print(string.format("[DEBUG cross-region/SearchRadius] results count: %d", #results))
-			for _, n in ipairs(results) do
-				local dist = math.sqrt((n.Position.X - 35) ^ 2 + (n.Position.Y - 0) ^ 2)
-				print(
-					string.format(
-						"  result Object=%s Position=(%.2f,%.2f) distFromCenter=%.4f",
-						tostring(n.Object),
-						n.Position.X,
-						n.Position.Y,
-						dist
-					)
-				)
-			end
-			print(
-				string.format(
-					"[DEBUG] hasA=%s hasB=%s hasC=%s",
-					tostring(hasObject(results, "A")),
-					tostring(hasObject(results, "B")),
-					tostring(hasObject(results, "C"))
-				)
-			)
 
 			expect(hasObject(results, "A")).is(true)
 			expect(hasObject(results, "B")).is(true)
@@ -376,29 +388,7 @@ local test_suite = function(tiniest)
 			tree:CreateNode(Vector2.new(10, 0), "A") -- top region (0,0)
 			tree:CreateNode(Vector2.new(60, 0), "B") -- top region (64,0)
 
-			Quadtree._setDebugRegions(true)
 			local values = collectIterator(tree:ForEachInRadius(Vector2.new(35, 0), 30))
-			Quadtree._setDebugRegions(false)
-			print(string.format("[DEBUG ForEachInRadius] results count: %d", #values))
-			for _, n in ipairs(values) do
-				local dist = math.sqrt((n.Position.X - 35) ^ 2 + (n.Position.Y - 0) ^ 2)
-				print(
-					string.format(
-						"  result Object=%s Position=(%.2f,%.2f) distFromCenter=%.4f",
-						tostring(n.Object),
-						n.Position.X,
-						n.Position.Y,
-						dist
-					)
-				)
-			end
-			print(
-				string.format(
-					"[DEBUG] hasA=%s hasB=%s",
-					tostring(hasObject(values, "A")),
-					tostring(hasObject(values, "B"))
-				)
-			)
 
 			expect(hasObject(values, "A")).is(true)
 			expect(hasObject(values, "B")).is(true)
@@ -488,35 +478,8 @@ local test_suite = function(tiniest)
 				tree:CreateNode(pos, i)
 			end
 
-			-- DEBUG: show all leaf regions each node actually landed in
-			print("[DEBUG high-density] all nodes and their positions:")
-			for _, n in ipairs(tree:GetAllNodes()) do
-				print(
-					string.format("  Object=%s storedPos=(%.2f,%.2f)", tostring(n.Object), n.Position.X, n.Position.Y)
-				)
-			end
-
 			-- Max distance across all positions is 3 (< 5), all must be found.
-			Quadtree._setDebugRegions(true)
 			local results = tree:SearchRadius(Vector2.new(0, 0), 5)
-			Quadtree._setDebugRegions(false)
-			print(
-				string.format(
-					"[DEBUG high-density] SearchRadius(0,0,5) returned %d nodes (expected %d)",
-					#results,
-					#positions
-				)
-			)
-			-- Report which indices are missing
-			local foundSet = {}
-			for _, n in ipairs(results) do
-				foundSet[n.Object] = true
-			end
-			for i = 1, #positions do
-				if not foundSet[i] then
-					print(string.format("  MISSING index=%d pos=(%.2f,%.2f)", i, positions[i].X, positions[i].Y))
-				end
-			end
 
 			expect(#results).is(#positions)
 		end)
@@ -545,38 +508,7 @@ local test_suite = function(tiniest)
 			-- Vector3: X/Z are used, Y is dropped
 			tree:CreateNode(Vector3.new(10, 999, 0), "A") -- → (10,0), top region (0,0)
 			tree:CreateNode(Vector3.new(60, 0, 0), "B") -- → (60,0), top region (64,0)
-
-			-- DEBUG: confirm Vector3 nodes stored with correct 2-D positions
-			print("[DEBUG Vector3 cross-region] stored node positions:")
-			for _, n in ipairs(tree:GetAllNodes()) do
-				print(
-					string.format("  Object=%s storedPos=(%.2f,%.2f)", tostring(n.Object), n.Position.X, n.Position.Y)
-				)
-			end
-
-			Quadtree._setDebugRegions(true)
 			local results = tree:SearchRadius(Vector2.new(35, 0), 30)
-			Quadtree._setDebugRegions(false)
-			print(string.format("[DEBUG Vector3 cross-region] results count: %d", #results))
-			for _, n in ipairs(results) do
-				local dist = math.sqrt((n.Position.X - 35) ^ 2 + (n.Position.Y - 0) ^ 2)
-				print(
-					string.format(
-						"  result Object=%s Position=(%.2f,%.2f) dist=%.4f",
-						tostring(n.Object),
-						n.Position.X,
-						n.Position.Y,
-						dist
-					)
-				)
-			end
-			print(
-				string.format(
-					"[DEBUG] hasA=%s hasB=%s",
-					tostring(hasObject(results, "A")),
-					tostring(hasObject(results, "B"))
-				)
-			)
 
 			expect(hasObject(results, "A")).is(true)
 			expect(hasObject(results, "B")).is(true)
