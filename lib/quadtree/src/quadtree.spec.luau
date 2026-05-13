@@ -387,6 +387,108 @@ local test_suite = function(tiniest)
 		end)
 	end)
 
+	describe("region set management", function()
+		test("populates RegionSet when regions are created", function()
+			local tree = Quadtree.new(64)
+			tree:CreateNode(Vector2.new(10, 10), "A")
+			tree:CreateNode(Vector2.new(50, 50), "B")
+
+			local regionSet = (tree :: any).RegionSet
+			local regionCount = 0
+			for _ in pairs(regionSet) do
+				regionCount += 1
+			end
+
+			expect(regionCount).is_not(0)
+		end)
+
+		test("removes regions from RegionSet when regions are empty and deleted", function()
+			local tree = Quadtree.new(64)
+			local node = tree:CreateNode(Vector2.new(10, 10), "A")
+
+			local regionSetBefore = (tree :: any).RegionSet
+			local countBefore = 0
+			for _ in pairs(regionSetBefore) do
+				countBefore += 1
+			end
+
+			tree:RemoveNode(node)
+
+			local regionSetAfter = (tree :: any).RegionSet
+			local countAfter = 0
+			for _ in pairs(regionSetAfter) do
+				countAfter += 1
+			end
+
+			expect(countAfter).is(0)
+			expect(countBefore).is_not(0)
+		end)
+
+		test("clears RegionSet on ClearAllNodes", function()
+			local tree = Quadtree.new(64)
+			tree:CreateNode(Vector2.new(10, 10), "A")
+			tree:CreateNode(Vector2.new(60, 60), "B")
+
+			local regionSetBefore = (tree :: any).RegionSet
+			local countBefore = 0
+			for _ in pairs(regionSetBefore) do
+				countBefore += 1
+			end
+
+			tree:ClearAllNodes()
+
+			local regionSetAfter = (tree :: any).RegionSet
+			local countAfter = 0
+			for _ in pairs(regionSetAfter) do
+				countAfter += 1
+			end
+
+			expect(countBefore).is_not(0)
+			expect(countAfter).is(0)
+		end)
+
+		test("validates region ownership using RegionSet on ChangeNodePosition", function()
+			local treeA = Quadtree.new(64)
+			local treeB = Quadtree.new(64)
+			local nodeA = treeA:CreateNode(Vector2.new(10, 10), "A")
+
+			-- treeA's region should be in treeA's RegionSet
+			expect((nodeA :: any).Region).is_not(nil)
+			expect((treeA :: any).RegionSet[(nodeA :: any).Region]).is(true)
+
+			-- treeB's RegionSet should not contain treeA's region
+			expect((treeB :: any).RegionSet[(nodeA :: any).Region]).is_not(true)
+
+			-- Attempting to use nodeA in treeB should fail
+			local ok, err = pcall(function()
+				treeB:ChangeNodePosition(nodeA, Vector2.new(100, 100))
+			end)
+
+			expect(ok).is(false)
+			expect(type(err)).is("string")
+		end)
+
+		test("keeps regions in RegionSet when moving nodes within the tree", function()
+			local tree = Quadtree.new(64)
+			local node = tree:CreateNode(Vector2.new(10, 10), "A")
+
+			local regionSetCount1 = 0
+			for _ in pairs((tree :: any).RegionSet) do
+				regionSetCount1 += 1
+			end
+
+			tree:ChangeNodePosition(node, Vector2.new(100, 100))
+
+			local regionSetCount2 = 0
+			for _ in pairs((tree :: any).RegionSet) do
+				regionSetCount2 += 1
+			end
+
+			-- Region set should still have entries (may differ due to restructuring)
+			expect(regionSetCount2).is_not(0)
+		end)
+	end)
+
 	-- ── Cross-region and sub-region Radius correctness ──────────────────────────
 	--
 	-- The previous tests only placed nodes inside a single top-level grid cell,

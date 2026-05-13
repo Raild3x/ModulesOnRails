@@ -169,10 +169,12 @@ export type Quadtree<T> = {
 	Internal quadtree structure with spatial hashing.
 	Regions uses string hash keys derived from grid-aligned positions for O(1) lookups.
 	This enables efficient spatial partitioning without storing all regions in an array.
+	RegionSet provides O(1) ownership validation: if a region is in the set, it belongs to this tree.
 ]]
 type QuadtreeInternal<T> = Quadtree<T> & {
 	Size: number,
 	Regions: { [string]: Region<T> },
+	RegionSet: { [Region<T>]: boolean },
 	_getRegion: (self: QuadtreeInternal<T>, maxLevel: number, position: Vector2) -> Region<T>,
 }
 
@@ -236,12 +238,7 @@ local function AssertActiveNode<T>(node: NodeInternal<T>)
 end
 
 local function IsRegionOwnedByTree<T>(quadtree: QuadtreeInternal<T>, region: Region<T>): boolean
-	local topRegion = region
-	while topRegion.Parent do
-		topRegion = topRegion.Parent
-	end
-	local topRegionKey = topRegion.Center.X .. ":" .. topRegion.Center.Y
-	return quadtree.Regions[topRegionKey] == topRegion
+	return quadtree.RegionSet[region] == true
 end
 
 local function ResolvePosition(position: Vector): Vector2
@@ -292,6 +289,7 @@ end
 	Retrieves or creates a top-level region using spatial hashing.
 	The string key is derived from the grid-aligned position, enabling O(1) lookups
 	and efficient sparse storage of only populated grid cells.
+	When created, the region is added to RegionSet for O(1) ownership validation.
 ]]
 local function GetTopRegion<T>(quadtree: QuadtreeInternal<T>, position: Vector2, create: boolean): Region<T>
 	local size = quadtree.Size
@@ -308,6 +306,7 @@ local function GetTopRegion<T>(quadtree: QuadtreeInternal<T>, position: Vector2,
 		}
 		table.freeze(region)
 		quadtree.Regions[regionKey] = region :: Region<T>
+		quadtree.RegionSet[region :: Region<T>] = true
 	end
 	return region :: Region<T>
 end
@@ -386,6 +385,7 @@ local function CreateQuadtree<T>(topRegionSize: number?): Quadtree<T>
 	end
 	self.Size = if topRegionSize then topRegionSize else DEFAULT_TOP_REGION_SIZE
 	self.Regions = {} :: { [string]: Region<T> }
+	self.RegionSet = {} :: { [Region<T>]: boolean }
 	return self
 end
 
@@ -448,6 +448,7 @@ function Quadtree.RemoveNode<T>(self: QuadtreeInternal<T>, node: NodeInternal<T>
 			local parent = region.Parent
 			local numNodes = CountNodesInRegion(region)
 			if numNodes == 0 then
+				self.RegionSet[region] = nil
 				if parent then
 					local regionIndex = table.find(parent.Regions, region)
 					if regionIndex then
@@ -503,6 +504,7 @@ function Quadtree:ChangeNodePosition<T>(node: NodeInternal<T>, position: Vector)
 			local parent = region.Parent
 			local numNodes = CountNodesInRegion(region)
 			if numNodes == 0 then
+				self.RegionSet[region] = nil
 				if parent then
 					local regionIndex = table.find(parent.Regions, region)
 					if regionIndex then
@@ -528,11 +530,12 @@ end
 	@return ()
 	Clears all regions and nodes from the quadtree.
 ]=]
-function Quadtree:ClearAllNodes()
-	for _, node in ipairs(self:GetAllNodes()) do
-		(node :: NodeInternal<any>).Region = nil
+function Quadtree.ClearAllNodes<T>(self: QuadtreeInternal<T>)
+	for _, node: NodeInternal<T> in self:GetAllNodes() do
+		node.Region = nil
 	end
 	table.clear(self.Regions)
+	table.clear(self.RegionSet)
 end
 
 --[=[
@@ -757,6 +760,7 @@ function Quadtree._getRegion<T>(self: QuadtreeInternal<T>, maxLevel: number, pos
 				Nodes = if level == maxLevel then {} else nil,
 			} :: Region<T>
 			table.insert(regions, newRegion)
+			self.RegionSet[newRegion] = true
 			region = newRegion
 		end
 		if level == maxLevel then

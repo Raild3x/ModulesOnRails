@@ -240,7 +240,7 @@ def main():
     # print("Rebuilding sourcemap...")
     # run_command([sys.executable, "scripts/setup.py", package_name])
 
-    return 0
+    return 0 if publish_success else 1
 
 
 if __name__ == "__main__":
