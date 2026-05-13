@@ -23,6 +23,50 @@ from _common import SRC_DIR, WALLY_IGNORE_LIST, find_project_root, clear_package
 PUBLISH_IGNORE_LIST = WALLY_IGNORE_LIST + ["README.md"]
 
 
+def find_exported_types(src_file: Path) -> list[tuple[str, str]]:
+    """Return (type_name, type_params_str) pairs for every `export type` in a Luau file.
+
+    type_params_str includes the angle brackets, e.g. "<T>" or "<T, U>", or is an
+    empty string when the type has no type parameters.
+    """
+    content = src_file.read_text(encoding="utf-8")
+    # Handles one level of nesting inside type params, e.g. <Foo<T>>.
+    pattern = re.compile(
+        r'^export\s+type\s+(\w+)((?:\s*<(?:[^<>]|<[^<>]*>)*>)?)\s*=',
+        re.MULTILINE,
+    )
+    results: list[tuple[str, str]] = []
+    for match in pattern.finditer(content):
+        name = match.group(1)
+        params = match.group(2).strip() if match.group(2) else ""
+        results.append((name, params))
+    return results
+
+
+def generate_passthrough_init(module_stem: str, exported_types: list[tuple[str, str]]) -> str:
+    """Return the text of a passthrough init.luau that re-exports *module_stem*.
+
+    The generated file:
+    * requires the sibling module via ``script.<module_stem>``
+    * re-exports every exported type so callers can reference them without
+      going through the internal module path
+    * returns the module table unchanged
+    """
+    lines = [
+        "--!strict",
+        "-- AUTO-GENERATED passthrough -- temporary, do not commit.",
+        f"local Module = require(script.{module_stem})",
+        "",
+    ]
+    for type_name, type_params in exported_types:
+        lines.append(f"export type {type_name}{type_params} = Module.{type_name}{type_params}")
+    if exported_types:
+        lines.append("")
+    lines.append("return Module")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def get_current_version(wally_toml: Path) -> Optional[str]:
     """Extract the current version from wally.toml."""
     content = wally_toml.read_text(encoding="utf-8")
@@ -152,10 +196,32 @@ def main():
     default_project.write_text(f'''{{\n    "name": "{package_name}",\n    "tree": {{\n        "$path": "src"\n    }}\n}}\n''', encoding="utf-8")
     print("default.project.json created.")
 
+    # If src/ has no init.luau / init.lua, look for a file named after the package
+    # and create a temporary passthrough init.luau that re-exports it.
+    src_dir = package_dir / "src"
+    temp_init: Optional[Path] = None
+    if src_dir.is_dir() and not (src_dir / "init.luau").is_file() and not (src_dir / "init.lua").is_file():
+        for ext in (".luau", ".lua"):
+            candidate = src_dir / f"{package_name}{ext}"
+            if candidate.is_file():
+                exported_types = find_exported_types(candidate)
+                init_content = generate_passthrough_init(candidate.stem, exported_types)
+                temp_init = (src_dir / "init.luau").resolve()
+                temp_init.write_text(init_content, encoding="utf-8")
+                print(f"Created temporary passthrough init.luau (entrypoint: {candidate.name}).")
+                break
+
     # Change to package directory and publish
     os.chdir(package_dir)
-    
-    if run_command(["wally", "publish"]):
+
+    publish_success = run_command(["wally", "publish"])
+
+    # Clean up temporary passthrough init.luau
+    if temp_init and temp_init.is_file():
+        temp_init.unlink()
+        print("Cleaned up temporary init.luau.")
+
+    if publish_success:
         print("Package published successfully.")
     else:
         print("Package publishing failed.")
@@ -166,8 +232,8 @@ def main():
     print("default.project.json deleted.")
 
     # Rebuild sourcemap using setup script
-    print("Rebuilding sourcemap...")
-    run_command([sys.executable, "scripts/setup.py", package_name])
+    # print("Rebuilding sourcemap...")
+    # run_command([sys.executable, "scripts/setup.py", package_name])
 
     return 0
 

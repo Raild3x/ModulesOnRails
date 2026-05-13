@@ -141,6 +141,25 @@ def check_default_project_json(pkg_dir: Path) -> Tuple[bool, str]:
     return False, "Cannot generate default.project.json (no src/ directory)"
 
 
+def check_src_entrypoint(pkg_dir: Path) -> Tuple[bool, str]:
+    """Check that src/ has a usable entrypoint: init.luau/init.lua, or a
+    package-named file that publish.py can generate a passthrough init for."""
+    src_dir = pkg_dir / "src"
+    if not src_dir.is_dir():
+        return False, "No src/ directory"
+
+    for name in ("init.luau", "init.lua"):
+        if (src_dir / name).is_file():
+            return True, f"Has {name}"
+
+    pkg_name = pkg_dir.name
+    for ext in (".luau", ".lua"):
+        if (src_dir / f"{pkg_name}{ext}").is_file():
+            return True, f"Has {pkg_name}{ext} (passthrough will be generated)"
+
+    return False, "No init.luau, init.lua, or package-named entrypoint found in src/"
+
+
 def validate_packages() -> bool:
     """Validate all packages in lib/."""
     print("Checking package structure...")
@@ -154,6 +173,7 @@ def validate_packages() -> bool:
         ("wally.toml", check_wally_toml),
         ("src/ directory", check_src_directory),
         ("default.project.json", check_default_project_json),
+        ("src entrypoint", check_src_entrypoint),
     ]
     
     for pkg_dir in packages:
