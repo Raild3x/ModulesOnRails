@@ -38,6 +38,11 @@
 	```
 ]=]
 
+-- Import geometric predicates.
+local Geometric3dUtils = require(script.Parent:WaitForChild("Geometric3dUtils"))
+local circumSphereContains = Geometric3dUtils.circumSphereContains
+local orient3d = Geometric3dUtils.orient3d
+
 --------------------------------------------------------------------------------
 --// Types //--
 --------------------------------------------------------------------------------
@@ -86,152 +91,6 @@ export type Delaunay3dObject = {
 	GetAdjacentVertices: (self: Delaunay3dObject, id: string) -> { Vector3 },
 	GetTetrahedronsContaining: (self: Delaunay3dObject, point: Vector3) -> { Tetrahedron },
 }
-
---------------------------------------------------------------------------------
---// Geometric Predicates //--
---------------------------------------------------------------------------------
-
--- 3×3 determinant, Sarrus / cofactor expansion on row 0.
-local function det3(
-	a: number,
-	b: number,
-	c: number,
-	d: number,
-	e: number,
-	f: number,
-	g: number,
-	h: number,
-	i: number
-): number
-	return a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
-end
-
--- 4×4 determinant, Laplace expansion along row 0.
-local function det4(
-	a00: number,
-	a01: number,
-	a02: number,
-	a03: number,
-	a10: number,
-	a11: number,
-	a12: number,
-	a13: number,
-	a20: number,
-	a21: number,
-	a22: number,
-	a23: number,
-	a30: number,
-	a31: number,
-	a32: number,
-	a33: number
-): number
-	return a00 * det3(a11, a12, a13, a21, a22, a23, a31, a32, a33)
-		- a01 * det3(a10, a12, a13, a20, a22, a23, a30, a32, a33)
-		+ a02 * det3(a10, a11, a13, a20, a21, a23, a30, a31, a33)
-		- a03 * det3(a10, a11, a12, a20, a21, a22, a30, a31, a32)
-end
-
---[[
-	orient3d(A, B, C, D)
-
-	Returns the signed volume of tetrahedron ABCD (up to a positive constant factor):
-	  > 0  →  D lies on the positive (CCW-when-viewed-from-above) side of plane ABC.
-	  < 0  →  D lies on the negative side.
-	  = 0  →  A, B, C, D are coplanar (degenerate tetrahedron).
-
-	Definition:  det3( B-A, C-A, D-A )
-	This matches the Shewchuk / CGAL orient3d sign convention.
-]]
-local function orient3d(a: Vector3, b: Vector3, c: Vector3, d: Vector3): number
-	return det3(b.X - a.X, b.Y - a.Y, b.Z - a.Z, c.X - a.X, c.Y - a.Y, c.Z - a.Z, d.X - a.X, d.Y - a.Y, d.Z - a.Z)
-end
-
---[[
-	inSphereRaw(A, B, C, D, P)
-
-	Evaluates Shewchuk's 4×4 in-sphere determinant in the translated frame of P:
-	  rows are  (A-P, |A-P|²),  (B-P, |B-P|²),  (C-P, |C-P|²),  (D-P, |D-P|²).
-
-	Semantics (verified numerically):
-	  For *positively-oriented* ABCD:  < 0 iff P lies strictly inside the circumsphere.
-	  For *negatively-oriented* ABCD:  the sign is flipped.
-
-	→  Always combine with orient3d to obtain an orientation-independent result:
-	       circumSphereContains ⟺  inSphereRaw * orient3d < 0
-]]
-local function inSphereRaw(a: Vector3, b: Vector3, c: Vector3, d: Vector3, p: Vector3): number
-	local ax, ay, az = a.X - p.X, a.Y - p.Y, a.Z - p.Z
-	local bx, by, bz = b.X - p.X, b.Y - p.Y, b.Z - p.Z
-	local cx, cy, cz = c.X - p.X, c.Y - p.Y, c.Z - p.Z
-	local dx, dy, dz = d.X - p.X, d.Y - p.Y, d.Z - p.Z
-	return det4(
-		ax,
-		ay,
-		az,
-		ax * ax + ay * ay + az * az,
-		bx,
-		by,
-		bz,
-		bx * bx + by * by + bz * bz,
-		cx,
-		cy,
-		cz,
-		cx * cx + cy * cy + cz * cz,
-		dx,
-		dy,
-		dz,
-		dx * dx + dy * dy + dz * dz
-	)
-end
-
---[[
-	circumSphereContains(A, B, C, D, P)
-
-	Returns true iff point P lies strictly inside the circumsphere of tetrahedron ABCD.
-	Orientation-independent: uses inSphereRaw × orient3d so that the result is the same
-	regardless of the winding order of ABCD.
-	Returns false for degenerate (coplanar) tetrahedra.
-]]
-local function circumSphereContains(a: Vector3, b: Vector3, c: Vector3, d: Vector3, p: Vector3): boolean
-	local o = orient3d(a, b, c, d)
-	if o == 0 then
-		return false -- degenerate — no well-defined circumsphere
-	end
-	return inSphereRaw(a, b, c, d, p) * o < 0
-end
-
---------------------------------------------------------------------------------
---// Hashing Utilities //--
---------------------------------------------------------------------------------
-
-local function v3Key(v: Vector3): string
-	return `{v.X},{v.Y},{v.Z}`
-end
-
--- Canonical (permutation-independent) key for a triangular face.
-local function _triKey(a: Vector3, b: Vector3, c: Vector3): string
-	local ka, kb, kc = v3Key(a), v3Key(b), v3Key(c)
-	-- Sort three strings ascending (3-element sort network).
-	if ka > kb then
-		ka, kb = kb, ka
-	end
-	if kb > kc then
-		kb, kc = kc, kb
-	end
-	if ka > kb then
-		ka, kb = kb, ka
-	end
-	return `{ka}|{kb}|{kc}`
-end
-
--- Canonical (permutation-independent) key for an edge.
-local function _edgeKey(a: Vector3, b: Vector3): string
-	local ka, kb = v3Key(a), v3Key(b)
-	if ka > kb then
-		ka, kb = kb, ka
-	end
-	return `{ka}|{kb}`
-end
 
 --------------------------------------------------------------------------------
 --// Numeric Key Canonicalization (Opt#2) //--
@@ -335,20 +194,6 @@ local function makeSuperTetrahedron(centre: Vector3, M: number): (Vector3, Vecto
 		centre + Vector3.new(s, -s, -s)
 end
 
-local function appendFlatTetrahedron(flat: { Vector3 }, a: Vector3, b: Vector3, c: Vector3, d: Vector3)
-	local ti = #flat
-	flat[ti + 1] = a
-	flat[ti + 2] = b
-	flat[ti + 3] = c
-	flat[ti + 4] = d
-end
-
-local function appendFlatEdge(flat: { Vector3 }, u: Vector3, v: Vector3)
-	local ei = #flat
-	flat[ei + 1] = u
-	flat[ei + 2] = v
-end
-
 type FaceRecord = {
 	Count: number,
 	Start: number,
@@ -422,86 +267,6 @@ local function markEdgeSeen(root: { [number]: { [number]: boolean } }, ia: numbe
 	return true
 end
 
-local function _buildHullFlatData(flatTets: { Vector3 }): ({ Vector3 }, { Vector3 }, { Vector3 })
-	local posToId: { [Vector3]: number } = {}
-	local nextId = 0
-
-	local function ensurePosId(pos: Vector3): number
-		local id = posToId[pos]
-		if id ~= nil then
-			return id
-		end
-		nextId += 1
-		posToId[pos] = nextId
-		return nextId
-	end
-
-	local faceRecords: { [number]: { [number]: { [number]: FaceRecord } } } = {}
-	local faceBuffer: { Vector3 } = {}
-	local edgeSeen: { [number]: { [number]: boolean } } = {}
-	local hullVerticesSeen: { [Vector3]: boolean } = {}
-	local hullVertices: { Vector3 } = {}
-	local hullTriangles: { Vector3 } = {}
-	local hullEdges: { Vector3 } = {}
-
-	local function addHullVertex(v: Vector3)
-		if hullVerticesSeen[v] then
-			return
-		end
-		hullVerticesSeen[v] = true
-		hullVertices[#hullVertices + 1] = v
-	end
-
-	local function addBoundaryFace(u: Vector3, v: Vector3, w: Vector3, iu: number, iv: number, iw: number)
-		local ia, ib, ic = canonicalTriKey(iu, iv, iw)
-		local record = getFaceRecord(faceRecords, ia, ib, ic)
-		record.Count += 1
-		if record.Count == 1 then
-			local fi = #faceBuffer
-			faceBuffer[fi + 1] = u
-			faceBuffer[fi + 2] = v
-			faceBuffer[fi + 3] = w
-			record.Start = fi + 1
-		end
-	end
-
-	for i = 1, #flatTets, 4 do
-		local a, b, c, d = flatTets[i], flatTets[i + 1], flatTets[i + 2], flatTets[i + 3]
-		local ida, idb, idc, idd = ensurePosId(a), ensurePosId(b), ensurePosId(c), ensurePosId(d)
-		addBoundaryFace(a, b, c, ida, idb, idc)
-		addBoundaryFace(a, b, d, ida, idb, idd)
-		addBoundaryFace(a, c, d, ida, idc, idd)
-		addBoundaryFace(b, c, d, idb, idc, idd)
-	end
-
-	local function addHullEdge(u: Vector3, v: Vector3, iu: number, iv: number)
-		local ia, ib = canonicalEdgeKey(iu, iv)
-		if markEdgeSeen(edgeSeen, ia, ib) then
-			appendFlatEdge(hullEdges, u, v)
-			addHullVertex(u)
-			addHullVertex(v)
-		end
-	end
-
-	for _, level2 in faceRecords do
-		for _, level3 in level2 do
-			for _, record in level3 do
-				if record.Count == 1 then
-					local startIndex = record.Start
-					local u, v, w = faceBuffer[startIndex], faceBuffer[startIndex + 1], faceBuffer[startIndex + 2]
-					local iu, iv, iw = ensurePosId(u), ensurePosId(v), ensurePosId(w)
-					table.move(faceBuffer, startIndex, startIndex + 2, #hullTriangles + 1, hullTriangles)
-					addHullEdge(u, v, iu, iv)
-					addHullEdge(u, w, iu, iw)
-					addHullEdge(v, w, iv, iw)
-				end
-			end
-		end
-	end
-
-	return hullVertices, hullTriangles, hullEdges
-end
-
 --------------------------------------------------------------------------------
 --// Bowyer–Watson Insertion Step //--
 --------------------------------------------------------------------------------
@@ -566,7 +331,7 @@ local function insertPoint(flatTets: { Vector3 }, p: Vector3): { Vector3 }
 			addBoundaryFace(b, c, d, idb, idc, idd)
 		else
 			-- Good tet: keep as-is.
-			appendFlatTetrahedron(result, a, b, c, d)
+			table.move(flatTets, i, i + 3, #result + 1, result)
 		end
 	end
 
@@ -773,7 +538,7 @@ local function _buildFlatMesh(
 		local idd = ensurePosId(d)
 
 		-- Flat tetrahedron entry.
-		appendFlatTetrahedron(outFlatTets, a, b, c, d)
+		table.move(flatTets, i, i + 3, #outFlatTets + 1, outFlatTets)
 
 		-- Unique triangular faces + edges (using numeric keys).
 		addTri(a, b, c, ida, idb, idc)
@@ -899,70 +664,6 @@ local function boxHullEdgesFlat(flatEdges: { Vector3 }): { Edge }
 		result[ri] = edge
 		ri += 1
 	end
-	return result
-end
-
---------------------------------------------------------------------------------
---// Lazy Boxed Array Builders //--
---------------------------------------------------------------------------------
-
---[[
-	Box flat stride-4 array into Tetrahedron tuple array.
-	Cached after first build to avoid rebuilding on repeated calls.
-]]
-local function boxTetrahedra(self: Delaunay3dInternal): { Tetrahedron }
-	if self._BoxedTetrahedra then
-		return self._BoxedTetrahedra
-	end
-	local flat = self._FlatTetrahedra
-	local result: { Tetrahedron } = table.create(#flat / 4) :: any
-	local ri = 1
-	for i = 1, #flat, 4 do
-		local tet: Tetrahedron = { flat[i], flat[i + 1], flat[i + 2], flat[i + 3] }
-		result[ri] = tet
-		ri += 1
-	end
-	self._BoxedTetrahedra = result
-	return result
-end
-
---[[
-	Box flat stride-3 array into Triangle tuple array.
-	Cached after first build to avoid rebuilding on repeated calls.
-]]
-local function boxTriangles(self: Delaunay3dInternal): { Triangle }
-	if self._BoxedTriangles then
-		return self._BoxedTriangles
-	end
-	local flat = self._FlatTriangles
-	local result: { Triangle } = table.create(#flat / 3) :: any
-	local ri = 1
-	for i = 1, #flat, 3 do
-		local tri: Triangle = { flat[i], flat[i + 1], flat[i + 2] }
-		result[ri] = tri
-		ri += 1
-	end
-	self._BoxedTriangles = result
-	return result
-end
-
---[[
-	Box flat stride-2 array into Edge tuple array.
-	Cached after first build to avoid rebuilding on repeated calls.
-]]
-local function boxEdges(self: Delaunay3dInternal): { Edge }
-	if self._BoxedEdges then
-		return self._BoxedEdges
-	end
-	local flat = self._FlatEdges
-	local result: { Edge } = table.create(#flat / 2) :: any
-	local ri = 1
-	for i = 1, #flat, 2 do
-		local edge: Edge = { flat[i], flat[i + 1] }
-		result[ri] = edge
-		ri += 1
-	end
-	self._BoxedEdges = result
 	return result
 end
 
@@ -1135,7 +836,22 @@ end
 ]=]
 function Delaunay3d.GetEdges(self: Delaunay3dInternal): { Edge }
 	self:_Flush()
-	return boxEdges(self)
+	local boxed = self._BoxedEdges
+	if boxed ~= nil then
+		return boxed
+	end
+
+	-- Box flat stride-2 edges and cache for repeated accessor calls.
+	local flat = self._FlatEdges
+	local result: { Edge } = table.create(#flat / 2) :: any
+	local ri = 1
+	for i = 1, #flat, 2 do
+		local edge: Edge = { flat[i], flat[i + 1] }
+		result[ri] = edge
+		ri += 1
+	end
+	self._BoxedEdges = result
+	return result
 end
 
 --[=[
@@ -1143,7 +859,22 @@ end
 ]=]
 function Delaunay3d.GetTriangles(self: Delaunay3dInternal): { Triangle }
 	self:_Flush()
-	return boxTriangles(self)
+	local boxed = self._BoxedTriangles
+	if boxed ~= nil then
+		return boxed
+	end
+
+	-- Box flat stride-3 triangles and cache for repeated accessor calls.
+	local flat = self._FlatTriangles
+	local result: { Triangle } = table.create(#flat / 3) :: any
+	local ri = 1
+	for i = 1, #flat, 3 do
+		local tri: Triangle = { flat[i], flat[i + 1], flat[i + 2] }
+		result[ri] = tri
+		ri += 1
+	end
+	self._BoxedTriangles = result
+	return result
 end
 
 --[=[
@@ -1151,78 +882,27 @@ end
 ]=]
 function Delaunay3d.GetTetrahedrons(self: Delaunay3dInternal): { Tetrahedron }
 	self:_Flush()
-	return boxTetrahedra(self)
+	local boxed = self._BoxedTetrahedra
+	if boxed ~= nil then
+		return boxed
+	end
+
+	-- Box flat stride-4 tetrahedra and cache for repeated accessor calls.
+	local flat = self._FlatTetrahedra
+	local result: { Tetrahedron } = table.create(#flat / 4) :: any
+	local ri = 1
+	for i = 1, #flat, 4 do
+		local tet: Tetrahedron = { flat[i], flat[i + 1], flat[i + 2], flat[i + 3] }
+		result[ri] = tet
+		ri += 1
+	end
+	self._BoxedTetrahedra = result
+	return result
 end
 
---[=[
-	Returns the current hull vertex positions.
-]=]
-function Delaunay3d.GetHullVertices(self: Delaunay3dInternal): { Vector3 }
-	self:_Flush()
-	if not self._HullVertices then
-		local hullVertices, hullTrianglesFlat, hullEdgesFlat = _buildHullFlatData(self._FlatTetrahedra)
-		self._HullVertices = hullVertices
-		self._HullTrianglesFlat = hullTrianglesFlat
-		self._HullEdgesFlat = hullEdgesFlat
-		self._BoxedHullTriangles = nil
-		self._BoxedHullEdges = nil
-	end
-	local hullVertices = self._HullVertices
-	if hullVertices == nil then
-		local computedHullVertices, hullTrianglesFlat, hullEdgesFlat = _buildHullFlatData(self._FlatTetrahedra)
-		self._HullVertices = computedHullVertices
-		self._HullTrianglesFlat = hullTrianglesFlat
-		self._HullEdgesFlat = hullEdgesFlat
-		self._BoxedHullTriangles = nil
-		self._BoxedHullEdges = nil
-		hullVertices = computedHullVertices
-	end
-	return hullVertices :: { Vector3 }
-end
-
---[=[
-	Returns all hull triangles as tuple arrays `{ [1], [2], [3] }`.
-]=]
-function Delaunay3d.GetHullTriangles(self: Delaunay3dInternal): { Triangle }
-	self:_Flush()
-	local hullTrianglesFlat = self._HullTrianglesFlat
-	if hullTrianglesFlat == nil then
-		local hullVertices, computedHullTrianglesFlat, hullEdgesFlat = _buildHullFlatData(self._FlatTetrahedra)
-		self._HullVertices = hullVertices
-		self._HullTrianglesFlat = computedHullTrianglesFlat
-		self._HullEdgesFlat = hullEdgesFlat
-		hullTrianglesFlat = computedHullTrianglesFlat
-	end
-	assert(hullTrianglesFlat ~= nil, "Delaunay3d.GetHullTriangles: hull cache was not initialized")
-	local boxedHullTriangles = self._BoxedHullTriangles
-	if boxedHullTriangles == nil then
-		boxedHullTriangles = boxHullTrianglesFlat(hullTrianglesFlat)
-		self._BoxedHullTriangles = boxedHullTriangles
-	end
-	return boxedHullTriangles :: { Triangle }
-end
-
---[=[
-	Returns all hull edges as tuple arrays `{ [1], [2] }`.
-]=]
-function Delaunay3d.GetHullEdges(self: Delaunay3dInternal): { Edge }
-	self:_Flush()
-	local hullEdgesFlat = self._HullEdgesFlat
-	if hullEdgesFlat == nil then
-		local hullVertices, hullTrianglesFlat, computedHullEdgesFlat = _buildHullFlatData(self._FlatTetrahedra)
-		self._HullVertices = hullVertices
-		self._HullTrianglesFlat = hullTrianglesFlat
-		self._HullEdgesFlat = computedHullEdgesFlat
-		hullEdgesFlat = computedHullEdgesFlat
-	end
-	assert(hullEdgesFlat ~= nil, "Delaunay3d.GetHullEdges: hull cache was not initialized")
-	local boxedHullEdges = self._BoxedHullEdges
-	if boxedHullEdges == nil then
-		boxedHullEdges = boxHullEdgesFlat(hullEdgesFlat)
-		self._BoxedHullEdges = boxedHullEdges
-	end
-	return boxedHullEdges :: { Edge }
-end
+--------------------------------------------------------------------------------
+--// Special Accessors //--
+--------------------------------------------------------------------------------
 
 --[=[
 	Zero-alloc iterator over all edges.
@@ -1358,52 +1038,159 @@ function Delaunay3d.GetTetrahedronsContaining(self: Delaunay3dInternal, point: V
 end
 
 --------------------------------------------------------------------------------
---// Shared Flat Array Boxers (no caching) //--
+--// Hull Accessors //--
 --------------------------------------------------------------------------------
 
---[[
-	Box flat stride-4 array into Tetrahedron tuple array.
-	Standalone version for use in static methods; does not cache.
-]]
-local function _boxFlatTetrahedra(flatTets: { Vector3 }): { Tetrahedron }
-	local result: { Tetrahedron } = table.create(#flatTets / 4) :: any
-	local ri = 1
+local function _buildHullFlatData(flatTets: { Vector3 }): ({ Vector3 }, { Vector3 }, { Vector3 })
+	local posToId: { [Vector3]: number } = {}
+	local nextId = 0
+
+	local function ensurePosId(pos: Vector3): number
+		local id = posToId[pos]
+		if id ~= nil then
+			return id
+		end
+		nextId += 1
+		posToId[pos] = nextId
+		return nextId
+	end
+
+	local faceRecords: { [number]: { [number]: { [number]: FaceRecord } } } = {}
+	local faceBuffer: { Vector3 } = {}
+	local edgeSeen: { [number]: { [number]: boolean } } = {}
+	local hullVerticesSeen: { [Vector3]: boolean } = {}
+	local hullVertices: { Vector3 } = {}
+	local hullTriangles: { Vector3 } = {}
+	local hullEdges: { Vector3 } = {}
+
+	local function addHullVertex(v: Vector3)
+		if hullVerticesSeen[v] then
+			return
+		end
+		hullVerticesSeen[v] = true
+		hullVertices[#hullVertices + 1] = v
+	end
+
+	local function addBoundaryFace(u: Vector3, v: Vector3, w: Vector3, iu: number, iv: number, iw: number)
+		local ia, ib, ic = canonicalTriKey(iu, iv, iw)
+		local record = getFaceRecord(faceRecords, ia, ib, ic)
+		record.Count += 1
+		if record.Count == 1 then
+			local fi = #faceBuffer
+			faceBuffer[fi + 1] = u
+			faceBuffer[fi + 2] = v
+			faceBuffer[fi + 3] = w
+			record.Start = fi + 1
+		end
+	end
+
 	for i = 1, #flatTets, 4 do
-		local tet: Tetrahedron = { flatTets[i], flatTets[i + 1], flatTets[i + 2], flatTets[i + 3] }
-		result[ri] = tet
-		ri += 1
+		local a, b, c, d = flatTets[i], flatTets[i + 1], flatTets[i + 2], flatTets[i + 3]
+		local ida, idb, idc, idd = ensurePosId(a), ensurePosId(b), ensurePosId(c), ensurePosId(d)
+		addBoundaryFace(a, b, c, ida, idb, idc)
+		addBoundaryFace(a, b, d, ida, idb, idd)
+		addBoundaryFace(a, c, d, ida, idc, idd)
+		addBoundaryFace(b, c, d, idb, idc, idd)
 	end
-	return result
+
+	local function addHullEdge(u: Vector3, v: Vector3, iu: number, iv: number)
+		local ia, ib = canonicalEdgeKey(iu, iv)
+		if markEdgeSeen(edgeSeen, ia, ib) then
+			local ei = #hullEdges
+			hullEdges[ei + 1] = u
+			hullEdges[ei + 2] = v
+			addHullVertex(u)
+			addHullVertex(v)
+		end
+	end
+
+	for _, level2 in faceRecords do
+		for _, level3 in level2 do
+			for _, record in level3 do
+				if record.Count == 1 then
+					local startIndex = record.Start
+					local u, v, w = faceBuffer[startIndex], faceBuffer[startIndex + 1], faceBuffer[startIndex + 2]
+					local iu, iv, iw = ensurePosId(u), ensurePosId(v), ensurePosId(w)
+					table.move(faceBuffer, startIndex, startIndex + 2, #hullTriangles + 1, hullTriangles)
+					addHullEdge(u, v, iu, iv)
+					addHullEdge(u, w, iu, iw)
+					addHullEdge(v, w, iv, iw)
+				end
+			end
+		end
+	end
+
+	return hullVertices, hullTriangles, hullEdges
 end
 
---[[
-	Box flat stride-3 array into Triangle tuple array.
-	Standalone version for use in static methods; does not cache.
-]]
-local function _boxFlatTriangles(flatTris: { Vector3 }): { Triangle }
-	local result: { Triangle } = table.create(#flatTris / 3) :: any
-	local ri = 1
-	for i = 1, #flatTris, 3 do
-		local tri: Triangle = { flatTris[i], flatTris[i + 1], flatTris[i + 2] }
-		result[ri] = tri
-		ri += 1
+--[=[
+	Returns the current hull vertex positions.
+]=]
+function Delaunay3d.GetHullVertices(self: Delaunay3dInternal): { Vector3 }
+	self:_Flush()
+	if not self._HullVertices then
+		local hullVertices, hullTrianglesFlat, hullEdgesFlat = _buildHullFlatData(self._FlatTetrahedra)
+		self._HullVertices = hullVertices
+		self._HullTrianglesFlat = hullTrianglesFlat
+		self._HullEdgesFlat = hullEdgesFlat
+		self._BoxedHullTriangles = nil
+		self._BoxedHullEdges = nil
 	end
-	return result
+	local hullVertices = self._HullVertices
+	if hullVertices == nil then
+		local computedHullVertices, hullTrianglesFlat, hullEdgesFlat = _buildHullFlatData(self._FlatTetrahedra)
+		self._HullVertices = computedHullVertices
+		self._HullTrianglesFlat = hullTrianglesFlat
+		self._HullEdgesFlat = hullEdgesFlat
+		self._BoxedHullTriangles = nil
+		self._BoxedHullEdges = nil
+		hullVertices = computedHullVertices
+	end
+	return hullVertices :: { Vector3 }
 end
 
---[[
-	Box flat stride-2 array into Edge tuple array.
-	Standalone version for use in static methods; does not cache.
-]]
-local function _boxFlatEdges(flatEdges: { Vector3 }): { Edge }
-	local result: { Edge } = table.create(#flatEdges / 2) :: any
-	local ri = 1
-	for i = 1, #flatEdges, 2 do
-		local edge: Edge = { flatEdges[i], flatEdges[i + 1] }
-		result[ri] = edge
-		ri += 1
+--[=[
+	Returns all hull triangles as tuple arrays `{ [1], [2], [3] }`.
+]=]
+function Delaunay3d.GetHullTriangles(self: Delaunay3dInternal): { Triangle }
+	self:_Flush()
+	local hullTrianglesFlat = self._HullTrianglesFlat
+	if hullTrianglesFlat == nil then
+		local hullVertices, computedHullTrianglesFlat, hullEdgesFlat = _buildHullFlatData(self._FlatTetrahedra)
+		self._HullVertices = hullVertices
+		self._HullTrianglesFlat = computedHullTrianglesFlat
+		self._HullEdgesFlat = hullEdgesFlat
+		hullTrianglesFlat = computedHullTrianglesFlat
 	end
-	return result
+	assert(hullTrianglesFlat ~= nil, "Delaunay3d.GetHullTriangles: hull cache was not initialized")
+	local boxedHullTriangles = self._BoxedHullTriangles
+	if boxedHullTriangles == nil then
+		boxedHullTriangles = boxHullTrianglesFlat(hullTrianglesFlat)
+		self._BoxedHullTriangles = boxedHullTriangles
+	end
+	return boxedHullTriangles :: { Triangle }
+end
+
+--[=[
+	Returns all hull edges as tuple arrays `{ [1], [2] }`.
+]=]
+function Delaunay3d.GetHullEdges(self: Delaunay3dInternal): { Edge }
+	self:_Flush()
+	local hullEdgesFlat = self._HullEdgesFlat
+	if hullEdgesFlat == nil then
+		local hullVertices, hullTrianglesFlat, computedHullEdgesFlat = _buildHullFlatData(self._FlatTetrahedra)
+		self._HullVertices = hullVertices
+		self._HullTrianglesFlat = hullTrianglesFlat
+		self._HullEdgesFlat = computedHullEdgesFlat
+		hullEdgesFlat = computedHullEdgesFlat
+	end
+	assert(hullEdgesFlat ~= nil, "Delaunay3d.GetHullEdges: hull cache was not initialized")
+	local boxedHullEdges = self._BoxedHullEdges
+	if boxedHullEdges == nil then
+		boxedHullEdges = boxHullEdgesFlat(hullEdgesFlat)
+		self._BoxedHullEdges = boxedHullEdges
+	end
+	return boxedHullEdges :: { Edge }
 end
 
 --------------------------------------------------------------------------------
@@ -1448,12 +1235,34 @@ function Delaunay3d.Triangulate(vertices: { Vector3 }): TriangulationResult
 
 	local flatTets, flatTris, flatEdges = _buildFlatMesh(Tetrahedrons, superKeys)
 
-	-- Box flat arrays using shared helpers.
+	-- Box flat arrays into tuple arrays for static return payload.
+	local tetrahedra: { Tetrahedron } = table.create(#flatTets / 4) :: any
+	local triResult: { Triangle } = table.create(#flatTris / 3) :: any
+	local edgeResult: { Edge } = table.create(#flatEdges / 2) :: any
+
+	local ri = 1
+	for i = 1, #flatTets, 4 do
+		tetrahedra[ri] = { flatTets[i], flatTets[i + 1], flatTets[i + 2], flatTets[i + 3] }
+		ri += 1
+	end
+
+	ri = 1
+	for i = 1, #flatTris, 3 do
+		triResult[ri] = { flatTris[i], flatTris[i + 1], flatTris[i + 2] }
+		ri += 1
+	end
+
+	ri = 1
+	for i = 1, #flatEdges, 2 do
+		edgeResult[ri] = { flatEdges[i], flatEdges[i + 1] }
+		ri += 1
+	end
+
 	return {
 		Vertices = vertices,
-		Tetrahedra = _boxFlatTetrahedra(flatTets),
-		Triangles = _boxFlatTriangles(flatTris),
-		Edges = _boxFlatEdges(flatEdges),
+		Tetrahedra = tetrahedra,
+		Triangles = triResult,
+		Edges = edgeResult,
 	}
 end
 
