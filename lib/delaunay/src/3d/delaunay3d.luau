@@ -1,4 +1,5 @@
 --!strict
+--!native
 -- Authors: Logan Hunt (Raildex)
 -- Revised: May 2026
 --[=[
@@ -410,10 +411,7 @@ local function insertPoint(flatTets: { Vector3 }, p: Vector3): { Vector3 }
 
 	for i = 1, #flatTets, 4 do
 		local a, b, c, d = flatTets[i], flatTets[i + 1], flatTets[i + 2], flatTets[i + 3]
-		local ida = ensurePosId(a)
-		local idb = ensurePosId(b)
-		local idc = ensurePosId(c)
-		local idd = ensurePosId(d)
+		local ida, idb, idc, idd = ensurePosId(a), ensurePosId(b), ensurePosId(c), ensurePosId(d)
 		if circumSphereContains(a, b, c, d, p) then
 			-- Bad tet: register its four faces using numeric keys.
 			addBoundaryFace(a, b, c, ida, idb, idc)
@@ -422,7 +420,11 @@ local function insertPoint(flatTets: { Vector3 }, p: Vector3): { Vector3 }
 			addBoundaryFace(b, c, d, idb, idc, idd)
 		else
 			-- Good tet: keep as-is.
-			table.move(flatTets, i, i + 3, #result + 1, result)
+			local ri = #result
+			result[ri + 1] = a
+			result[ri + 2] = b
+			result[ri + 3] = c
+			result[ri + 4] = d
 		end
 	end
 
@@ -433,7 +435,9 @@ local function insertPoint(flatTets: { Vector3 }, p: Vector3): { Vector3 }
 				if record.Count == 1 then
 					local startIndex = record.Start
 					local ri = #result
-					table.move(faceBuffer, startIndex, startIndex + 2, ri + 1, result)
+					result[ri + 1] = faceBuffer[startIndex]
+					result[ri + 2] = faceBuffer[startIndex + 1]
+					result[ri + 3] = faceBuffer[startIndex + 2]
 					result[ri + 4] = p
 				end
 			end
@@ -551,6 +555,10 @@ function Delaunay3d.new(initialPoints: { Vector3 }?): Delaunay3dObject
 	return self
 end
 
+--------------------------------------------------------------------------------
+--// Private Methods //--
+--------------------------------------------------------------------------------
+
 local function clearDerivedCaches(self: Delaunay3dInternal)
 	table.clear(self._Boxed)
 	table.clear(self._Hull)
@@ -651,7 +659,11 @@ local function buildFlatMesh(
 		local idd = ensurePosId(d)
 
 		-- Flat tetrahedron entry.
-		table.move(flatTets, i, i + 3, #outFlatTets + 1, outFlatTets)
+		local oti = #outFlatTets
+		outFlatTets[oti + 1] = a
+		outFlatTets[oti + 2] = b
+		outFlatTets[oti + 3] = c
+		outFlatTets[oti + 4] = d
 
 		-- Unique triangular faces + edges (using numeric keys).
 		addTri(a, b, c, ida, idb, idc)
@@ -1302,7 +1314,10 @@ local function _buildHullFlatData(flatTets: { Vector3 }): ({ Vector3 }, { Vector
 					local startIndex = record.Start
 					local u, v, w = faceBuffer[startIndex], faceBuffer[startIndex + 1], faceBuffer[startIndex + 2]
 					local iu, iv, iw = ensurePosId(u), ensurePosId(v), ensurePosId(w)
-					table.move(faceBuffer, startIndex, startIndex + 2, #hullTriangles + 1, hullTriangles)
+					local hi = #hullTriangles
+					hullTriangles[hi + 1] = u
+					hullTriangles[hi + 2] = v
+					hullTriangles[hi + 3] = w
 					addHullEdge(u, v, iu, iv)
 					addHullEdge(u, w, iu, iw)
 					addHullEdge(v, w, iv, iw)

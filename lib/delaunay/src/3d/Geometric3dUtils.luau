@@ -1,4 +1,5 @@
 --!strict
+--!native
 --[=[
 	Geometric3dUtils
 	
