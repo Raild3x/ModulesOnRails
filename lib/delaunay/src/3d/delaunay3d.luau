@@ -817,32 +817,6 @@ function Delaunay3d._Flush(self: Delaunay3dInternal)
 end
 
 --------------------------------------------------------------------------------
---// Lazy Hull Boxers //--
---------------------------------------------------------------------------------
-
-local function boxHullTrianglesFlat(flatTris: { Vector3 }): { Triangle }
-	local result: { Triangle } = table.create(#flatTris / 3) :: any
-	local ri = 1
-	for i = 1, #flatTris, 3 do
-		local tri: Triangle = { flatTris[i], flatTris[i + 1], flatTris[i + 2] }
-		result[ri] = tri
-		ri += 1
-	end
-	return result
-end
-
-local function boxHullEdgesFlat(flatEdges: { Vector3 }): { Edge }
-	local result: { Edge } = table.create(#flatEdges / 2) :: any
-	local ri = 1
-	for i = 1, #flatEdges, 2 do
-		local edge: Edge = { flatEdges[i], flatEdges[i + 1] }
-		result[ri] = edge
-		ri += 1
-	end
-	return result
-end
-
---------------------------------------------------------------------------------
 --// Phase 4 — Mutation methods //--
 --------------------------------------------------------------------------------
 
@@ -1049,8 +1023,7 @@ function Delaunay3d.GetEdges(self: Delaunay3dInternal): { Edge }
 	local result: { Edge } = table.create(#flat / 2) :: any
 	local ri = 1
 	for i = 1, #flat, 2 do
-		local edge: Edge = { flat[i], flat[i + 1] }
-		result[ri] = edge
+		result[ri] = { flat[i], flat[i + 1] }
 		ri += 1
 	end
 	self._Boxed.Edges = result
@@ -1072,8 +1045,7 @@ function Delaunay3d.GetTriangles(self: Delaunay3dInternal): { Triangle }
 	local result: { Triangle } = table.create(#flat / 3) :: any
 	local ri = 1
 	for i = 1, #flat, 3 do
-		local tri: Triangle = { flat[i], flat[i + 1], flat[i + 2] }
-		result[ri] = tri
+		result[ri] = { flat[i], flat[i + 1], flat[i + 2] }
 		ri += 1
 	end
 	self._Boxed.Triangles = result
@@ -1095,8 +1067,7 @@ function Delaunay3d.GetTetrahedrons(self: Delaunay3dInternal): { Tetrahedron }
 	local result: { Tetrahedron } = table.create(#flat / 4) :: any
 	local ri = 1
 	for i = 1, #flat, 4 do
-		local tet: Tetrahedron = { flat[i], flat[i + 1], flat[i + 2], flat[i + 3] }
-		result[ri] = tet
+		result[ri] = { flat[i], flat[i + 1], flat[i + 2], flat[i + 3] }
 		ri += 1
 	end
 	self._Boxed.Tetrahedra = result
@@ -1244,7 +1215,29 @@ end
 --// Hull Accessors //--
 --------------------------------------------------------------------------------
 
-local function _buildHullFlatData(flatTets: { Vector3 }): ({ Vector3 }, { Vector3 }, { Vector3 })
+local function boxHullTrianglesFlat(flatTris: { Vector3 }): { Triangle }
+	local result: { Triangle } = table.create(#flatTris / 3) :: any
+	local ri = 1
+	for i = 1, #flatTris, 3 do
+		local tri: Triangle = { flatTris[i], flatTris[i + 1], flatTris[i + 2] }
+		result[ri] = tri
+		ri += 1
+	end
+	return result
+end
+
+local function boxHullEdgesFlat(flatEdges: { Vector3 }): { Edge }
+	local result: { Edge } = table.create(#flatEdges / 2) :: any
+	local ri = 1
+	for i = 1, #flatEdges, 2 do
+		local edge: Edge = { flatEdges[i], flatEdges[i + 1] }
+		result[ri] = edge
+		ri += 1
+	end
+	return result
+end
+
+local function buildHullFlatData(flatTets: { Vector3 }): ({ Vector3 }, { Vector3 }, { Vector3 })
 	local posToId: { [Vector3]: number } = {}
 	local nextId = 0
 
@@ -1335,7 +1328,7 @@ end
 function Delaunay3d.GetHullVertices(self: Delaunay3dInternal): { Vector3 }
 	self:_Flush()
 	if not self._Hull.Vertices then
-		local hullVertices, hullTrianglesFlat, hullEdgesFlat = _buildHullFlatData(self._Flat.Tetrahedra)
+		local hullVertices, hullTrianglesFlat, hullEdgesFlat = buildHullFlatData(self._Flat.Tetrahedra)
 		self._Hull.Vertices = hullVertices
 		self._Hull.TrianglesFlat = hullTrianglesFlat
 		self._Hull.EdgesFlat = hullEdgesFlat
@@ -1344,7 +1337,7 @@ function Delaunay3d.GetHullVertices(self: Delaunay3dInternal): { Vector3 }
 	end
 	local hullVertices = self._Hull.Vertices
 	if hullVertices == nil then
-		local computedHullVertices, hullTrianglesFlat, hullEdgesFlat = _buildHullFlatData(self._Flat.Tetrahedra)
+		local computedHullVertices, hullTrianglesFlat, hullEdgesFlat = buildHullFlatData(self._Flat.Tetrahedra)
 		self._Hull.Vertices = computedHullVertices
 		self._Hull.TrianglesFlat = hullTrianglesFlat
 		self._Hull.EdgesFlat = hullEdgesFlat
@@ -1362,7 +1355,7 @@ function Delaunay3d.GetHullTriangles(self: Delaunay3dInternal): { Triangle }
 	self:_Flush()
 	local hullTrianglesFlat = self._Hull.TrianglesFlat
 	if hullTrianglesFlat == nil then
-		local hullVertices, computedHullTrianglesFlat, hullEdgesFlat = _buildHullFlatData(self._Flat.Tetrahedra)
+		local hullVertices, computedHullTrianglesFlat, hullEdgesFlat = buildHullFlatData(self._Flat.Tetrahedra)
 		self._Hull.Vertices = hullVertices
 		self._Hull.TrianglesFlat = computedHullTrianglesFlat
 		self._Hull.EdgesFlat = hullEdgesFlat
@@ -1384,7 +1377,7 @@ function Delaunay3d.GetHullEdges(self: Delaunay3dInternal): { Edge }
 	self:_Flush()
 	local hullEdgesFlat = self._Hull.EdgesFlat
 	if hullEdgesFlat == nil then
-		local hullVertices, hullTrianglesFlat, computedHullEdgesFlat = _buildHullFlatData(self._Flat.Tetrahedra)
+		local hullVertices, hullTrianglesFlat, computedHullEdgesFlat = buildHullFlatData(self._Flat.Tetrahedra)
 		self._Hull.Vertices = hullVertices
 		self._Hull.TrianglesFlat = hullTrianglesFlat
 		self._Hull.EdgesFlat = computedHullEdgesFlat
