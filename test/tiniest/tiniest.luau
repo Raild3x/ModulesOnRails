@@ -34,6 +34,7 @@ export type ErrorReport = {
 		snippet: string,
 		line: string,
 	}?,
+	context: { { label: string, value: any } }?,
 }
 
 export type Test = {
