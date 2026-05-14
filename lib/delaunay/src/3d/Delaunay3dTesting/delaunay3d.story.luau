@@ -1,6 +1,6 @@
 --!strict
 local RunService = game:GetService("RunService")
-local Delaunay3d = require(script.Parent.Parent.delaunay3d)
+local Delaunay3d = require(script.Parent.Parent.Delaunay3d)
 local DrawTriangle3d = require(script.Parent.Parent.Parent.DrawTriangle3d)
 
 local DRAW_TRIANGLES = true
@@ -21,8 +21,8 @@ return function()
 
 	local parts: { Part } = {}
 	local attachments: { Attachment } = {}
-	local pointIds: { string } = table.create(pointCount)
-	local lastPositions: { Vector3 } = table.create(pointCount)
+	local pointIds: { string } = table.create(pointCount) :: any
+	local lastPositions: { Vector3 } = table.create(pointCount) :: any
 	local delaunay = Delaunay3d.new()
 
 	for i = 1, pointCount do

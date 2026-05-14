@@ -12,7 +12,7 @@
 ]=]
 
 return function(t: tiniest)
-	local Delaunay3d = require(script.Parent.Parent.delaunay3d)
+	local Delaunay3d = require(script.Parent.Parent.Delaunay3d)
 
 	local context = t.context
 	local describe = t.describe
@@ -61,7 +61,7 @@ return function(t: tiniest)
 	end
 
 	-- Counts how many tetrahedra each triangular face appears in
-	local function buildFaceCountMap(tets: { { A: Vector3, B: Vector3, C: Vector3, D: Vector3 } }): { [string]: number }
+	local function buildFaceCountMap(tets: { { Vector3 } }): { [string]: number }
 		local counts: { [string]: number } = {}
 		for _, tet in tets do
 			local a, b, c, d = tet[1], tet[2], tet[3], tet[4]
@@ -73,7 +73,7 @@ return function(t: tiniest)
 	end
 
 	-- Builds the set of unique edge keys from a tetrahedra list
-	local function buildEdgeSet(tets: { { A: Vector3, B: Vector3, C: Vector3, D: Vector3 } }): { [string]: boolean }
+	local function buildEdgeSet(tets: { { Vector3 } }): { [string]: boolean }
 		local set: { [string]: boolean } = {}
 		for _, tet in tets do
 			local a, b, c, d = tet[1], tet[2], tet[3], tet[4]
@@ -88,11 +88,11 @@ return function(t: tiniest)
 	end
 
 	-- Returns true if vertex v equals one of the tet's four corners (FuzzyEq)
-	local function tetHasVertexFuzzy(tet: any, v: Vector3): boolean
+	local function tetHasVertexFuzzy(tet: { Vector3 }, v: Vector3): boolean
 		return v:FuzzyEq(tet[1]) or v:FuzzyEq(tet[2]) or v:FuzzyEq(tet[3]) or v:FuzzyEq(tet[4])
 	end
 
-	local function tetHasVertex(tet: any, p: Vector3): boolean
+	local function tetHasVertex(tet: { Vector3 }, p: Vector3): boolean
 		return p:FuzzyEq(tet[1]) or p:FuzzyEq(tet[2]) or p:FuzzyEq(tet[3]) or p:FuzzyEq(tet[4])
 	end
 
@@ -232,7 +232,7 @@ return function(t: tiniest)
 
 	local function generatePointCloud(seed: number, count: number): { Vector3 }
 		local rng = Random.new(seed)
-		local points: { Vector3 } = table.create(count)
+		local points: { Vector3 } = table.create(count) :: any
 		for i = 1, count do
 			points[i] = Vector3.new(rng:NextNumber(-500, 500), rng:NextNumber(-500, 500), rng:NextNumber(-500, 500))
 		end
@@ -660,6 +660,45 @@ return function(t: tiniest)
 				expect(#instance:GetVertices()).is(4)
 			end
 		)
+
+		test("queued AddPoint then RemovePoint of same unique position is a no-op on triangulation", function()
+			local instance = Delaunay3d.new()
+			instance:AddPoint(Vector3.new(0, 0, 0))
+			instance:AddPoint(Vector3.new(1, 0, 0))
+			instance:AddPoint(Vector3.new(0, 1, 0))
+			instance:AddPoint(Vector3.new(0, 0, 1))
+
+			local baselineTets = #instance:GetTetrahedrons()
+			local baselineTris = #instance:GetTriangles()
+			local baselineEdges = #instance:GetEdges()
+
+			local tempId = instance:AddPoint(Vector3.new(2, 2, 2), "temp")
+			instance:RemovePoint(tempId)
+
+			expect(#instance:GetVertices()).is(4)
+			expect(#instance:GetTetrahedrons()).is(baselineTets)
+			expect(#instance:GetTriangles()).is(baselineTris)
+			expect(#instance:GetEdges()).is(baselineEdges)
+		end)
+
+		test("queued AddPoint operations are applied on first read after batch", function()
+			local instance = Delaunay3d.new()
+			instance:AddPoint(Vector3.new(0, 0, 0))
+			instance:AddPoint(Vector3.new(1, 0, 0))
+			instance:AddPoint(Vector3.new(0, 1, 0))
+			instance:AddPoint(Vector3.new(0, 0, 1))
+
+			local before = #instance:GetTetrahedrons()
+
+			instance:AddPoint(Vector3.new(1, 1, 0))
+			instance:AddPoint(Vector3.new(1, 0, 1))
+			instance:AddPoint(Vector3.new(0, 1, 1))
+
+			-- First read flushes the queued insertions.
+			local after = #instance:GetTetrahedrons()
+			expect(after >= before).is(true)
+			expect(#instance:GetVertices()).is(7)
+		end)
 
 		test("MovePoint updates vertex position in-place", function()
 			local instance = Delaunay3d.new()
