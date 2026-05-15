@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import sys
+from datetime import date
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
@@ -152,14 +153,17 @@ def main():
 | Package | Latest Version | Description |
 |---------|----------------|-------------|
 """
-        readme_content += "\n".join(unreleased_packages) + "\n"
+    readme_content += "\n".join(unreleased_packages) + "\n"
     
+    readme_content += f"\n---\n\n*Last Modified: {date.today().strftime('%B %d, %Y')}*\n"
+
     # Write README file
     readme_file = Path("README.md")
     with open(readme_file, "w", encoding="utf-8") as f:
         f.write(readme_content)
     
     print("\nREADME.md has been generated successfully.")
+    print(readme_content)
     return 0
 
 

@@ -5,6 +5,7 @@ local tiniest_expect = require("./tiniest_expect")
 local tiniest_time = require("./tiniest_time")
 local tiniest_snapshot = require("./tiniest_snapshot")
 local tiniest_pretty = require("./tiniest_pretty")
+local tiniest_context = require("./tiniest_context")
 local tiniest = require("./tiniest")
 
 local require: any = require
@@ -76,6 +77,7 @@ function tiniest_for_lune.configure(options: Options)
 	end
 
 	self.expect = tiniest_expect.expect
+	self.context = tiniest_context
 
 	local tiniest_time = tiniest_time.configure {
 		get_timestamp = os.clock,
@@ -97,7 +99,7 @@ function tiniest_for_lune.configure(options: Options)
 	self.format_run = tiniest_pretty.format_run
 
 	local tiniest = tiniest.configure {
-		plugins = { tiniest_time :: any, tiniest_snapshot, tiniest_pretty },
+		plugins = { tiniest_time :: any, tiniest_snapshot, tiniest_context :: any, tiniest_pretty },
 	}
 	self.describe = tiniest.describe
 	self.test = tiniest.test
