@@ -1,3 +1,7 @@
+-- This file is specifically for running packages that are Roblox agnostic.
+-- It should not be used for packages that require Roblox services or APIs, as they are unavailable in this environment.
+-- Instead, those packages should be run via the tiniest Roblox Studio test runner manually.
+
 local fs = require("@lune/fs")
 local io = require("@lune/stdio")
 local process = require("@lune/process")

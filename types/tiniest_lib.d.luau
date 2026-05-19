@@ -63,4 +63,5 @@ export type tiniest = {
 	context: context,
 	test: (name: string, fn: () -> ()) -> (),
 	describe: (name: string, fn: () -> ()) -> (),
+	FOCUS: () -> (),
 }

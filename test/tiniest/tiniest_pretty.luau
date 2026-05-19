@@ -218,7 +218,7 @@ function tiniest_pretty.configure(options: Options)
 			title(
 				`{paint.pass(`{run_result.status_tally.pass} passed`)}, {paint.fail(
 					`{run_result.status_tally.fail} failed`
-				)}`
+				)}, {paint.dim(`{run_result.status_tally.skipped} skipped`)}`
 			)
 		)
 		if #line_items > 0 then

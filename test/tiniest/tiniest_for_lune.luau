@@ -102,6 +102,7 @@ function tiniest_for_lune.configure(options: Options)
 		plugins = { tiniest_time :: any, tiniest_snapshot, tiniest_context :: any, tiniest_pretty },
 	}
 	self.describe = tiniest.describe
+	self.FOCUS = tiniest.FOCUS
 	self.test = tiniest.test
 	self.collect_tests = tiniest.collect_tests
 	self.run_tests = tiniest.run_tests

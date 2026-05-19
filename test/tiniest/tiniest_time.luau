@@ -40,7 +40,7 @@ function tiniest_time.configure(options: Options)
 	local self = {}
 	self.is_tiniest_plugin = true
 
-	local start_times = {}
+	local start_times: { [Test | { Test }]: number? } = {}
 
 	function self.before_run(tests: { Test }, _): ()
 		start_times[tests] = options.get_timestamp()
@@ -48,7 +48,16 @@ function tiniest_time.configure(options: Options)
 
 	function self.after_run(original_run_result: tiniest.RunResult, _): ()
 		local run_result = original_run_result :: RunResult
-		run_result.duration = options.get_timestamp() - start_times[run_result.tests]
+		local start_time = start_times[run_result.tests]
+		if start_time then
+			run_result.duration = options.get_timestamp() - start_time
+		else
+			warn(
+				"[tiniest_time] Warning: Missing start time for test run. Duration will be reported as -1.",
+				run_result.tests
+			)
+			run_result.duration = -1
+		end
 		start_times[run_result.tests] = nil
 	end
 
@@ -58,7 +67,16 @@ function tiniest_time.configure(options: Options)
 
 	function self.after_test(test: Test, original_run_result: tiniest.TestRunResult, _): ()
 		local run_result = original_run_result :: TestRunResult
-		run_result.duration = options.get_timestamp() - start_times[test]
+		local start_time = start_times[test]
+		if start_time then
+			run_result.duration = options.get_timestamp() - start_time
+		else
+			warn(
+				"[tiniest_time] Warning: Missing start time for test. Duration will be reported as -1.",
+				table.concat(test.labels, " > ")
+			)
+			run_result.duration = -1
+		end
 		start_times[test] = nil
 	end
 
