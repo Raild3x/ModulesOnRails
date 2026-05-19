@@ -63,9 +63,11 @@
 local CDTUtils = require("./CDTUtils")
 local Predicates = require("./Predicates")
 local KDLocatorModule = require("./KDLocator")
+local DelaunayTriangleSetModule = require("./DelaunayTriangleSet")
 
 type Triangle = CDTUtils.Triangle
 type KDLocator = KDLocatorModule.KDLocator
+type DelaunayTriangleSet = DelaunayTriangleSetModule.DelaunayTriangleSet
 
 -- ── Locals aliased for performance / readability ──────────────────────────────
 local NO_VERTEX = CDTUtils.NO_VERTEX
@@ -107,11 +109,22 @@ end
 -- ── Type definitions ──────────────────────────────────────────────────────────
 
 --[=[
+	A point-in-time copy of the triangulation with super-triangle geometry
+	stripped.  Returned by `CDT:snapshot()` and safe to read after further
+	insertions because it owns its own arrays.
+]=]
+export type CDTSnapshot = {
+	vertices: { Vector2 },
+	triangles: { Triangle },
+}
+
+--[=[
 	Public CDT interface exposed to consumers.
 
-	After calling `insertVertices` (and optionally `insertEdges`) followed by
-	one of the `erase*` methods, `vertices` and `triangles` hold the
-	finalized triangulation with super-triangle vertices removed.
+	Call `insertVertices` (and optionally `insertEdges`) any number of times,
+	use `snapshot` to read the current state without locking the CDT, then
+	continue inserting.  Call one of the `erase*` methods as a final step
+	when no further insertions are needed.
 ]=]
 export type CDT = {
 	-- Accessible after finalization.
@@ -124,6 +137,7 @@ export type CDT = {
 	-- Public methods.
 	insertVertices: (self: CDT, verts: { Vector2 }) -> (),
 	insertEdges: (self: CDT, edges: { { number } }) -> (),
+	snapshot: (self: CDT, mode: ("SuperTriangle" | "OuterTriangles" | "OuterTrianglesAndHoles")?) -> CDTSnapshot,
 	eraseSuperTriangle: (self: CDT) -> (),
 	eraseOuterTriangles: (self: CDT) -> (),
 	eraseOuterTrianglesAndHoles: (self: CDT) -> (),
@@ -131,7 +145,7 @@ export type CDT = {
 
 -- Internal type: adds private fields not exposed to consumers.
 type CDTInternal = {
-	_vertTris: { number },
+	_triSet: DelaunayTriangleSet,
 	_locator: KDLocator,
 	_isFinalized: boolean,
 } & CDT
@@ -144,135 +158,20 @@ CDT.__index = CDT
 --- Construct a new, empty CDT.
 function CDT.new(): CDT
 	local self = setmetatable({}, CDT) :: any
-	self.vertices = {} :: { Vector2 }
-	self.triangles = {} :: { Triangle }
 	self.fixedEdges = {} :: { [number]: boolean }
 	self.overlapCount = {} :: { [number]: number }
 	self.pieceToOriginals = {} :: { [number]: { number } }
-	self._vertTris = {} :: { number }
+	self._triSet = DelaunayTriangleSetModule.new()
 	self._locator = KDLocatorModule.new()
 	self._isFinalized = false
 	return self :: any
 end
 
--- ── Infrastructure helpers ──────────────────────────────────────────────────
-
--- Append vertex `pos`, recording `iT` as its initial adjacent triangle.
-local function addNewVertex(self: CDTInternal, pos: Vector2, iT: number)
-	local idx = #self.vertices + 1
-	self.vertices[idx] = pos
-	self._vertTris[idx] = iT
-end
-
--- Append triangle `t`; return its 1-based index.
-local function addTriangle(self: CDTInternal, t: Triangle): number
-	local idx = #self.triangles + 1
-	self.triangles[idx] = t
-	return idx
-end
-
--- Record `iT` as the canonical adjacent triangle for vertex `v`.
-local function setAdjTri(self: CDTInternal, v: number, iT: number)
-	self._vertTris[v] = iT
-end
-
--- Find and replace `oldN` with `newN` in the neighbor list of triangle `iT`.
--- No-op when `iT` is NO_NEIGHBOR.
-local function changeNeighbor(self: CDTInternal, iT: number, oldN: number, newN: number)
-	if iT == NO_NEIGHBOR then
-		return
-	end
-	local nn = self.triangles[iT].neighbors
-	if nn[1] == oldN then
-		nn[1] = newN
-	elseif nn[2] == oldN then
-		nn[2] = newN
-	else
-		nn[3] = newN
-	end
-end
-
--- Return true when undirected edge (a, b) already exists in the triangulation.
-local function hasEdge(self: CDTInternal, a: number, b: number): boolean
-	local triStart = self._vertTris[a]
-	if triStart == NO_NEIGHBOR then
-		return false
-	end
-	local iT = triStart
-	repeat
-		local iTNext, iV = nextTriAndVert(self.triangles[iT], a)
-		if iV == b then
-			return true
-		end
-		iT = iTNext
-	until iT == triStart or iT == NO_NEIGHBOR
-	return false
-end
-
--- Return (iT, iTNext) — the two triangles sharing edge (a, b),
--- or (NO_NEIGHBOR, NO_NEIGHBOR) when the edge is absent.
-local function edgeTriangles(self: CDTInternal, a: number, b: number): (number, number)
-	local triStart = self._vertTris[a]
-	if triStart == NO_NEIGHBOR then
-		return NO_NEIGHBOR, NO_NEIGHBOR
-	end
-	local iT = triStart
-	repeat
-		local iTNext, iV = nextTriAndVert(self.triangles[iT], a)
-		if iV == b then
-			return iT, iTNext
-		end
-		iT = iTNext
-	until iT == triStart
-	return NO_NEIGHBOR, NO_NEIGHBOR
-end
-
 -- Register vertex `iV` with the KD-locator (no-op when locator is empty).
 local function tryAddVertexToLocator(self: CDTInternal, iV: number)
 	if not self._locator:isEmpty() then
-		self._locator:addPoint(iV, self.vertices)
+		self._locator:addPoint(iV, self._triSet.vertices)
 	end
-end
-
--- Initialize the KD-locator from the current vertex array — if not yet done.
-local function tryInitLocator(self: CDTInternal)
-	if #self.vertices > 0 and self._locator:isEmpty() then
-		self._locator:initialize(self.vertices)
-	end
-end
-
---[=[
-	Insert the 3 super-triangle vertices and the single covering triangle.
-
-	The super-triangle is an equilateral-like triangle that entirely covers
-	the bounding box supplied by the caller.  All subsequent user vertices
-	are guaranteed to lie strictly inside it.
-
-	Super-triangle geometry (matches CDT C++ addSuperTriangle):
-	  r = max(2 * max(w, h), 1)   -- half-height ; ≥ 1 for degenerate input
-	  R = 2 * r                   -- excircle radius
-	  v1 = (cx - R·cos30, cy - r)
-	  v2 = (cx + R·cos30, cy - r)
-	  v3 = (cx,           cy + R)
-]=]
-local function addSuperTriangle(self: CDTInternal, minX: number, minY: number, maxX: number, maxY: number)
-	local cx = (minX + maxX) * 0.5
-	local cy = (minY + maxY) * 0.5
-	local w = maxX - minX
-	local h = maxY - minY
-	local r = math.max(2 * math.max(w, h), 1)
-	local R = 2 * r
-	local shiftX = R * 0.8660254037844386 -- R · √3/2  (= R · cos 30°)
-
-	local sv1 = Vector2.new(cx - shiftX, cy - r)
-	local sv2 = Vector2.new(cx + shiftX, cy - r)
-	local sv3 = Vector2.new(cx, cy + R)
-
-	-- Triangle 1 is the sole initial triangle; all three super-vertices point to it.
-	addNewVertex(self, sv1, 1)
-	addNewVertex(self, sv2, 1)
-	addNewVertex(self, sv3, 1)
-	addTriangle(self, makeTriangle(1, 2, 3, NO_NEIGHBOR, NO_NEIGHBOR, NO_NEIGHBOR))
 end
 
 -- ── Vertex insertion ────────────────────────────────────────────────────────
@@ -288,15 +187,16 @@ end
 	Returns the triangle index.
 ]=]
 local function walkTriangles(self: CDTInternal, startVertex: number, pos: Vector2): number
-	local currTri = self._vertTris[startVertex]
+	local ts = self._triSet
+	local currTri = ts._vertTris[startVertex]
 	while true do
-		local t = self.triangles[currTri]
+		local t = ts.triangles[currTri]
 		local found = true
 		local offset = math.random(0, 2) -- randomise which edge is checked first
 		for i_ = 0, 2 do
 			local i = (i_ + offset) % 3 + 1 -- random slot in {1, 2, 3}
-			local vStart = self.vertices[t.vertices[i]]
-			local vEnd = self.vertices[t.vertices[ccw(i)]]
+			local vStart = ts.vertices[t.vertices[i]]
+			local vEnd = ts.vertices[t.vertices[ccw(i)]]
 			if locatePointLine(pos, vStart, vEnd) == "Right" and t.neighbors[i] ~= NO_NEIGHBOR then
 				currTri = t.neighbors[i]
 				found = false
@@ -321,11 +221,12 @@ end
 	Throws on unreachable geometry (Outside) or duplicate vertices.
 ]=]
 local function walkingSearchTrianglesAt(self: CDTInternal, iV: number, startVert: number): (number, number)
-	local v = self.vertices[iV]
+	local ts = self._triSet
+	local v = ts.vertices[iV]
 	local iT = walkTriangles(self, startVert, v)
-	local t = self.triangles[iT]
+	local t = ts.triangles[iT]
 	local loc =
-		locatePointTriangle(v, self.vertices[t.vertices[1]], self.vertices[t.vertices[2]], self.vertices[t.vertices[3]])
+		locatePointTriangle(v, ts.vertices[t.vertices[1]], ts.vertices[t.vertices[2]], ts.vertices[t.vertices[3]])
 	if loc == "Outside" then
 		error(string.format("CDT: no containing triangle found for vertex %d", iV))
 	end
@@ -363,13 +264,12 @@ end
 	Returns the triStack {iT, iNewT1, iNewT2} for Delaunay flip processing.
 ]=]
 local function insertVertexInsideTriangle(self: CDTInternal, v: number, iT: number): { number }
-	local iNewT1 =
-		addTriangle(self, makeTriangle(NO_VERTEX, NO_VERTEX, NO_VERTEX, NO_NEIGHBOR, NO_NEIGHBOR, NO_NEIGHBOR))
-	local iNewT2 =
-		addTriangle(self, makeTriangle(NO_VERTEX, NO_VERTEX, NO_VERTEX, NO_NEIGHBOR, NO_NEIGHBOR, NO_NEIGHBOR))
+	local ts = self._triSet
+	local iNewT1 = ts:addTriangle(makeTriangle(NO_VERTEX, NO_VERTEX, NO_VERTEX, NO_NEIGHBOR, NO_NEIGHBOR, NO_NEIGHBOR))
+	local iNewT2 = ts:addTriangle(makeTriangle(NO_VERTEX, NO_VERTEX, NO_VERTEX, NO_NEIGHBOR, NO_NEIGHBOR, NO_NEIGHBOR))
 
 	-- Snapshot current triangle before mutating it.
-	local t = self.triangles[iT]
+	local t = ts.triangles[iT]
 	local v1 = t.vertices[1]
 	local v2 = t.vertices[2]
 	local v3 = t.vertices[3]
@@ -377,14 +277,14 @@ local function insertVertexInsideTriangle(self: CDTInternal, v: number, iT: numb
 	local n2 = t.neighbors[2]
 	local n3 = t.neighbors[3]
 
-	self.triangles[iNewT1] = makeTriangle(v2, v3, v, n2, iNewT2, iT)
-	self.triangles[iNewT2] = makeTriangle(v3, v1, v, n3, iT, iNewT1)
-	self.triangles[iT] = makeTriangle(v1, v2, v, n1, iNewT1, iNewT2)
+	ts.triangles[iNewT1] = makeTriangle(v2, v3, v, n2, iNewT2, iT)
+	ts.triangles[iNewT2] = makeTriangle(v3, v1, v, n3, iT, iNewT1)
+	ts.triangles[iT] = makeTriangle(v1, v2, v, n1, iNewT1, iNewT2)
 
-	setAdjTri(self, v, iT)
-	setAdjTri(self, v3, iNewT1)
-	changeNeighbor(self, n2, iT, iNewT1)
-	changeNeighbor(self, n3, iT, iNewT2)
+	ts:setAdjTri(v, iT)
+	ts:setAdjTri(v3, iNewT1)
+	ts:changeNeighbor(n2, iT, iNewT1)
+	ts:changeNeighbor(n3, iT, iNewT2)
 
 	return { iT, iNewT1, iNewT2 }
 end
@@ -415,13 +315,12 @@ local function insertVertexOnEdge(
 	iT2: number,
 	handleFixed: boolean
 ): { number }
-	local iTnew1 =
-		addTriangle(self, makeTriangle(NO_VERTEX, NO_VERTEX, NO_VERTEX, NO_NEIGHBOR, NO_NEIGHBOR, NO_NEIGHBOR))
-	local iTnew2 =
-		addTriangle(self, makeTriangle(NO_VERTEX, NO_VERTEX, NO_VERTEX, NO_NEIGHBOR, NO_NEIGHBOR, NO_NEIGHBOR))
+	local ts = self._triSet
+	local iTnew1 = ts:addTriangle(makeTriangle(NO_VERTEX, NO_VERTEX, NO_VERTEX, NO_NEIGHBOR, NO_NEIGHBOR, NO_NEIGHBOR))
+	local iTnew2 = ts:addTriangle(makeTriangle(NO_VERTEX, NO_VERTEX, NO_VERTEX, NO_NEIGHBOR, NO_NEIGHBOR, NO_NEIGHBOR))
 
 	-- From iT1: find the vertex/neighbor pair on each side of the shared edge.
-	local t1 = self.triangles[iT1]
+	local t1 = ts.triangles[iT1]
 	local i1 = opposedVertexInd(t1.neighbors, iT2)
 	local v1 = t1.vertices[i1]
 	local v2 = t1.vertices[ccw(i1)]
@@ -429,22 +328,22 @@ local function insertVertexOnEdge(
 	local n4 = t1.neighbors[cw(i1)]
 
 	-- From iT2: symmetric extraction.
-	local t2 = self.triangles[iT2]
+	local t2 = ts.triangles[iT2]
 	local i2 = opposedVertexInd(t2.neighbors, iT1)
 	local v3 = t2.vertices[i2]
 	local v4 = t2.vertices[ccw(i2)]
 	local n3 = t2.neighbors[i2]
 	local n2 = t2.neighbors[cw(i2)]
 
-	self.triangles[iT1] = makeTriangle(v, v1, v2, iTnew1, n1, iT2)
-	self.triangles[iT2] = makeTriangle(v, v2, v3, iT1, n2, iTnew2)
-	self.triangles[iTnew1] = makeTriangle(v, v4, v1, iTnew2, n4, iT1)
-	self.triangles[iTnew2] = makeTriangle(v, v3, v4, iT2, n3, iTnew1)
+	ts.triangles[iT1] = makeTriangle(v, v1, v2, iTnew1, n1, iT2)
+	ts.triangles[iT2] = makeTriangle(v, v2, v3, iT1, n2, iTnew2)
+	ts.triangles[iTnew1] = makeTriangle(v, v4, v1, iTnew2, n4, iT1)
+	ts.triangles[iTnew2] = makeTriangle(v, v3, v4, iT2, n3, iTnew1)
 
-	setAdjTri(self, v, iT1)
-	setAdjTri(self, v4, iTnew1)
-	changeNeighbor(self, n4, iT1, iTnew1)
-	changeNeighbor(self, n3, iT2, iTnew2)
+	ts:setAdjTri(v, iT1)
+	ts:setAdjTri(v4, iTnew1)
+	ts:changeNeighbor(n4, iT1, iTnew1)
+	ts:changeNeighbor(n3, iT2, iTnew2)
 
 	-- Split a fixed edge that lies on the shared edge being subdivided.
 	if handleFixed and self.fixedEdges[edgeKey(v2, v4)] then
@@ -476,7 +375,8 @@ local function edgeFlipInfo(
 	iT: number,
 	iV1: number
 ): (number, number, number, number, number, number, number, number)
-	local t = self.triangles[iT]
+	local ts = self._triSet
+	local t = ts.triangles[iT]
 	local tv = t.vertices
 	local tn = t.neighbors
 
@@ -497,7 +397,7 @@ local function edgeFlipInfo(
 
 	-- From iTopo, find which slot points back to iT, then extract
 	-- the opposed vertex (iV3) and outer neighbors (n2, n4).
-	local tOpo = self.triangles[iTopo]
+	local tOpo = ts.triangles[iTopo]
 	local tov = tOpo.vertices
 	local ton = tOpo.neighbors
 	local j: number
@@ -532,10 +432,11 @@ local function isFlipNeeded(self: CDTInternal, iV1: number, iV2: number, iV3: nu
 		return false
 	end
 
-	local v1 = self.vertices[iV1]
-	local v2 = self.vertices[iV2]
-	local v3 = self.vertices[iV3]
-	local v4 = self.vertices[iV4]
+	local verts = self._triSet.vertices
+	local v1 = verts[iV1]
+	local v2 = verts[iV2]
+	local v3 = verts[iV3]
+	local v4 = verts[iV4]
 	local N = N_SUPER_VERTS -- super-triangle vertices are indices 1..N
 
 	-- iV1 is a super-triangle vertex (flip-candidate edge touches super-tri).
@@ -603,13 +504,14 @@ local function flipEdge(
 	n3: number,
 	n4: number
 )
-	self.triangles[iT] = makeTriangle(v4, v1, v3, n3, iTopo, n4)
-	self.triangles[iTopo] = makeTriangle(v2, v3, v1, n2, iT, n1)
-	changeNeighbor(self, n1, iT, iTopo)
-	changeNeighbor(self, n4, iTopo, iT)
+	local ts = self._triSet
+	ts.triangles[iT] = makeTriangle(v4, v1, v3, n3, iTopo, n4)
+	ts.triangles[iTopo] = makeTriangle(v2, v3, v1, n2, iT, n1)
+	ts:changeNeighbor(n1, iT, iTopo)
+	ts:changeNeighbor(n4, iTopo, iT)
 	if not self._isFinalized then
-		setAdjTri(self, v4, iT)
-		setAdjTri(self, v2, iTopo)
+		ts:setAdjTri(v4, iT)
+		ts:setAdjTri(v2, iTopo)
 	end
 end
 
@@ -644,12 +546,13 @@ end
 	Mirrors CDT C++ findDelaunayPoint (0-indexed there; Luau uses 1-indexed).
 ]=]
 local function findDelaunayPoint(self: CDTInternal, poly: { number }, iA: number, iB: number): number
-	local a = self.vertices[poly[iA]]
-	local b = self.vertices[poly[iB]]
+	local verts = self._triSet.vertices
+	local a = verts[poly[iA]]
+	local b = verts[poly[iB]]
 	local out = iA + 1
-	local c = self.vertices[poly[out]]
+	local c = verts[poly[out]]
 	for i = iA + 1, iB - 1 do
-		local v = self.vertices[poly[i]]
+		local v = verts[poly[i]]
 		if isInCircumcircle(v, a, b, c) then
 			out = i
 			c = v
@@ -694,7 +597,8 @@ local function tppIteration(
 	local iParent = task[4]
 	local iInParent = task[5] -- Luau 1-indexed neighbor slot of parent
 
-	local t = self.triangles[iT]
+	local ts = self._triSet
+	local t = ts.triangles[iT]
 	local iC = findDelaunayPoint(self, poly, iA, iB)
 	local a = poly[iA]
 	local b = poly[iB]
@@ -712,7 +616,7 @@ local function tppIteration(
 		local outerTri = outerTris[ekBC]
 		if outerTri ~= nil and outerTri ~= NO_NEIGHBOR then
 			t.neighbors[2] = outerTri
-			changeNeighborByEdge(self.triangles[outerTri], c, b, iT)
+			changeNeighborByEdge(ts.triangles[outerTri], c, b, iT)
 		else
 			outerTris[ekBC] = iT
 		end
@@ -730,19 +634,19 @@ local function tppIteration(
 		local outerTri = outerTris[ekCA]
 		if outerTri ~= nil and outerTri ~= NO_NEIGHBOR then
 			t.neighbors[3] = outerTri
-			changeNeighborByEdge(self.triangles[outerTri], c, a, iT)
+			changeNeighborByEdge(ts.triangles[outerTri], c, a, iT)
 		else
 			outerTris[ekCA] = iT
 		end
 	end
 
 	-- Finalise: wire iT into parent, set back-reference, assign vertices, update adj tri.
-	self.triangles[iParent].neighbors[iInParent] = iT
+	ts.triangles[iParent].neighbors[iInParent] = iT
 	t.neighbors[1] = iParent -- C++ n[0]: across base edge a-b
 	t.vertices[1] = a
 	t.vertices[2] = b
 	t.vertices[3] = c
-	setAdjTri(self, c, iT)
+	ts:setAdjTri(c, iT)
 end
 
 --[=[
@@ -782,8 +686,9 @@ end
 
 -- Insert a single vertex (by index) and restore the Delaunay property.
 local function insertVertex(self: CDTInternal, iV: number)
-	local v = self.vertices[iV]
-	local walkStart = self._locator:nearPoint(v, self.vertices)
+	local ts = self._triSet
+	local v = ts.vertices[iV]
+	local walkStart = self._locator:nearPoint(v, ts.vertices)
 	local iT, iT2 = walkingSearchTrianglesAt(self, iV, walkStart)
 	local triStack: { number }
 	if iT2 == NO_NEIGHBOR then
@@ -814,7 +719,8 @@ function CDT.insertVertices(self: CDTInternal, verts: { Vector2 })
 		return
 	end
 
-	local isFirstCall = (#self.vertices == 0)
+	local ts = self._triSet
+	local isFirstCall = (#ts.vertices == 0)
 
 	if isFirstCall then
 		-- Compute bounding box of the incoming vertices.
@@ -835,32 +741,26 @@ function CDT.insertVertices(self: CDTInternal, verts: { Vector2 })
 				maxY = y
 			end
 		end
-		addSuperTriangle(self, minX, minY, maxX, maxY)
+		ts:addSuperTriangle(minX, minY, maxX, maxY)
 	end
 
-	tryInitLocator(self)
+	if #ts.vertices > 0 and self._locator:isEmpty() then
+		self._locator:initialize(ts.vertices)
+	end
 
 	-- Append all new vertices first so indices are stable during insertion.
-	local nExistingVerts = #self.vertices
+	local nExistingVerts = #ts.vertices
 	for _, v in verts do
-		addNewVertex(self, v, NO_NEIGHBOR)
+		ts:addVertex(v, NO_NEIGHBOR)
 	end
 
 	-- Insert and Delaunay-restore each new vertex.
-	for iV = nExistingVerts + 1, #self.vertices do
+	for iV = nExistingVerts + 1, #ts.vertices do
 		insertVertex(self, iV)
 	end
 end
 
 -- ── Constrained edge insertion ───────────────────────────────────────────────
-
--- Advance _vertTris[v] one step clockwise (CDT C++ pivotVertexTriangleCW).
--- Uses t.next(v).first = t.neighbors[ vertexInd(t.vertices, v) ].
-local function pivotVertexTriangleCW(self: CDTInternal, v: number)
-	local iT = self._vertTris[v]
-	local t = self.triangles[iT]
-	self._vertTris[v] = t.neighbors[vertexInd(t.vertices, v)]
-end
 
 --[=[
 	Mark undirected edge (iA, iB) as fixed.
@@ -947,8 +847,7 @@ end
 ]=]
 local function addSplitEdgeVertex(self: CDTInternal, pos: Vector2, iT: number, iTopo: number): number
 	-- Allocate but don't link to a triangle yet (NO_NEIGHBOR).
-	local iSplit = #self.vertices + 1
-	addNewVertex(self, pos, NO_NEIGHBOR)
+	local iSplit = self._triSet:addVertex(pos, NO_NEIGHBOR)
 	-- Insert on the shared edge; pass handleFixed=false to avoid recursion.
 	local triStack = insertVertexOnEdge(self, iSplit, iT, iTopo, false)
 	tryAddVertexToLocator(self, iSplit)
@@ -974,16 +873,17 @@ local function intersectedTriangle(
 	b: Vector2,
 	tol: number
 ): (number, number, number)
-	local startTri = self._vertTris[iA]
+	local ts = self._triSet
+	local startTri = ts._vertTris[iA]
 	local iT = startTri
 	repeat
-		local t = self.triangles[iT]
+		local t = ts.triangles[iT]
 		local i = vertexInd(t.vertices, iA)
 		local iP2 = t.vertices[ccw(i)]
-		local orientP2 = orient2D(self.vertices[iP2], a, b)
+		local orientP2 = orient2D(ts.vertices[iP2], a, b)
 		if orientP2 < 0 then -- Right
 			local iP1 = t.vertices[cw(i)]
-			local orientP1 = orient2D(self.vertices[iP1], a, b)
+			local orientP1 = orient2D(ts.vertices[iP1], a, b)
 			if orientP1 == 0 then -- OnLine exactly
 				return NO_NEIGHBOR, iP1, iP1
 			end
@@ -993,11 +893,11 @@ local function intersectedTriangle(
 					local absP1 = math.abs(orientP1)
 					local absP2 = math.abs(orientP2)
 					if absP1 <= absP2 then
-						if absP1 / math.abs(orient2D(self.vertices[iP1], a, b)) <= tol then
+						if absP1 / math.abs(orient2D(ts.vertices[iP1], a, b)) <= tol then
 							return NO_NEIGHBOR, iP1, iP1
 						end
 					else
-						if absP2 / math.abs(orient2D(self.vertices[iP2], a, b)) <= tol then
+						if absP2 / math.abs(orient2D(ts.vertices[iP2], a, b)) <= tol then
 							return NO_NEIGHBOR, iP2, iP2
 						end
 					end
@@ -1034,13 +934,14 @@ local function insertEdgeIteration(
 	end
 
 	-- Edge already exists in triangulation: just mark it fixed and return.
-	if hasEdge(self, iA, iB) then
+	if self._triSet:hasEdge(iA, iB) then
 		fixEdge(self, iA, iB, iOrigA, iOrigB)
 		return
 	end
 
-	local a = self.vertices[iA]
-	local b = self.vertices[iB]
+	local ts = self._triSet
+	local a = ts.vertices[iA]
+	local b = ts.vertices[iB]
 	local iBOriginal = iB -- saved to detect on-line vertex splits
 
 	local iT, iVL, iVR = intersectedTriangle(self, iA, a, b, 0)
@@ -1052,7 +953,7 @@ local function insertEdgeIteration(
 		return
 	end
 
-	local t = self.triangles[iT]
+	local t = ts.triangles[iT]
 	local intersected: { number } = { iT }
 	local polyL: { number } = { iA, iVL }
 	local polyR: { number } = { iA, iVR }
@@ -1063,13 +964,13 @@ local function insertEdgeIteration(
 
 	while not triContainsVertex(t, iB) do
 		local iTopo = opposedTri(t, iV)
-		local tOpo = self.triangles[iTopo]
+		local tOpo = ts.triangles[iTopo]
 		local iVopo = opposedVert(tOpo, iT)
 
 		-- Intersecting fixed edges are not allowed in this port.
 		if self.fixedEdges[edgeKey(iVL, iVR)] then
 			-- TryResolve: split the intersecting fixed edge at the crossing point.
-			local newPos = intersectionPosition(a, b, self.vertices[iVL], self.vertices[iVR])
+			local newPos = intersectionPosition(a, b, ts.vertices[iVL], ts.vertices[iVR])
 			local iNewVert = addSplitEdgeVertex(self, newPos, iT, iTopo)
 			splitFixedEdge(self, iVL, iVR, iNewVert)
 			table.insert(remaining, { iA, iNewVert })
@@ -1077,7 +978,7 @@ local function insertEdgeIteration(
 			return
 		end
 
-		local loc = locatePointLine(self.vertices[iVopo], a, b)
+		local loc = locatePointLine(ts.vertices[iVopo], a, b)
 		if loc == "Left" then
 			local ek = edgeKey(polyL[#polyL], iVopo)
 			local outer = edgeNbr(tOpo, polyL[#polyL], iVopo)
@@ -1106,7 +1007,7 @@ local function insertEdgeIteration(
 
 		table.insert(intersected, iTopo)
 		iT = iTopo
-		t = self.triangles[iT]
+		t = ts.triangles[iT]
 	end
 
 	-- Wire in the final outer edges reaching iB.
@@ -1116,11 +1017,11 @@ local function insertEdgeIteration(
 	table.insert(polyR, iB)
 
 	-- Ensure iA / iB have valid adj triangles outside the intersected set.
-	if self._vertTris[iA] == intersected[1] then
-		pivotVertexTriangleCW(self, iA)
+	if ts._vertTris[iA] == intersected[1] then
+		ts:pivotVertexTriangleCW(iA)
 	end
-	if self._vertTris[iB] == intersected[#intersected] then
-		pivotVertexTriangleCW(self, iB)
+	if ts._vertTris[iB] == intersected[#intersected] then
+		ts:pivotVertexTriangleCW(iB)
 	end
 
 	-- Reverse polyR so both polys run iA → iB.
@@ -1206,53 +1107,19 @@ local function remapEdgeKey(k: number): number
 end
 
 --[=[
-	Compact the triangle array by removing the indices in `toErase` and
-	remapping all surviving neighbor references.
-	Corresponds to CDT C++ removeTriangles.
-]=]
-local function removeTriangles(self: CDTInternal, toErase: { [number]: boolean })
-	if next(toErase) == nil then
-		return
-	end
-	local oldTris = self.triangles
-	local newTris: { Triangle } = {}
-	local triMap: { [number]: number } = {}
-	local iTnew = 0
-	for iT = 1, #oldTris do
-		if not toErase[iT] then
-			iTnew += 1
-			triMap[iT] = iTnew
-			newTris[iTnew] = oldTris[iT]
-		end
-	end
-	-- Remap neighbor indices in surviving triangles.
-	for _, t in newTris do
-		local nn = t.neighbors
-		for s = 1, 3 do
-			local n = nn[s]
-			if toErase[n] then
-				nn[s] = NO_NEIGHBOR
-			elseif n ~= NO_NEIGHBOR then
-				nn[s] = triMap[n] :: number
-			end
-		end
-	end
-	self.triangles = newTris
-end
-
---[=[
 	Finalize the triangulation: clear adjacency, strip super-triangle
 	vertices, remap edge key tables, remove the given triangles, and
 	subtract N_SUPER_VERTS from every remaining triangle vertex index.
 	Corresponds to CDT C++ finalizeTriangulation.
 ]=]
 local function finalizeTriangulation(self: CDTInternal, toErase: { [number]: boolean })
+	local ts = self._triSet
 	-- Clear per-vertex triangle cache (marks triangulation as finalized).
-	table.clear(self._vertTris)
+	table.clear(ts._vertTris)
 
 	-- Remove super-triangle vertices (always at front: slots 1..N_SUPER_VERTS).
 	for _ = 1, N_SUPER_VERTS do
-		table.remove(self.vertices, 1)
+		table.remove(ts.vertices, 1)
 	end
 
 	-- Remap fixed edges: subtract N_SUPER_VERTS from both vertex indices.
@@ -1281,10 +1148,10 @@ local function finalizeTriangulation(self: CDTInternal, toErase: { [number]: boo
 	self.pieceToOriginals = newP2O
 
 	-- Remove erased triangles and remap neighbor indices.
-	removeTriangles(self, toErase)
+	ts:removeTriangles(toErase)
 
 	-- Subtract N_SUPER_VERTS from every vertex slot in surviving triangles.
-	for _, t in self.triangles do
+	for _, t in ts.triangles do
 		local vv = t.vertices
 		for s = 1, 3 do
 			vv[s] -= N_SUPER_VERTS
@@ -1292,6 +1159,9 @@ local function finalizeTriangulation(self: CDTInternal, toErase: { [number]: boo
 	end
 
 	self._isFinalized = true
+	-- Expose finalized data as top-level fields for public consumers.
+	self.vertices = ts.vertices
+	self.triangles = ts.triangles
 end
 
 --[=[
@@ -1299,11 +1169,12 @@ end
 	crossing a fixed edge.  Corresponds to CDT C++ growToBoundary.
 ]=]
 local function growToBoundary(self: CDTInternal, seeds: { number }): { [number]: boolean }
+	local ts = self._triSet
 	local traversed: { [number]: boolean } = {}
 	while #seeds > 0 do
 		local iT = table.remove(seeds) :: number
 		traversed[iT] = true
-		local t = self.triangles[iT]
+		local t = ts.triangles[iT]
 		for ns = 1, 3 do
 			-- n[ns] is across edge v[ns]–v[ccw(ns)].
 			local opEdge = edgeKey(t.vertices[ns], t.vertices[ccw(ns)])
@@ -1330,6 +1201,7 @@ local function peelLayer(
 	layerDepth: number,
 	triDepths: { [number]: number }
 ): { [number]: number }
+	local ts = self._triSet
 	local behindBoundary: { [number]: number } = {}
 	while #seeds > 0 do
 		local iT = table.remove(seeds) :: number
@@ -1338,7 +1210,7 @@ local function peelLayer(
 		end
 		-- Erase from behindBoundary: this triangle is processed now, not later.
 		(behindBoundary :: any)[iT] = nil
-		local t = self.triangles[iT]
+		local t = ts.triangles[iT]
 		for ns = 1, 3 do
 			local iN = t.neighbors[ns]
 			if iN == NO_NEIGHBOR or (triDepths[iN] or math.huge) <= layerDepth then
@@ -1364,13 +1236,14 @@ end
 	Corresponds to CDT C++ calculateTriangleDepths.
 ]=]
 local function calculateTriangleDepths(self: CDTInternal): { [number]: number }
+	local ts = self._triSet
 	local INF = math.huge
 	local triDepths: { [number]: number } = {}
-	for iT = 1, #self.triangles do
+	for iT = 1, #ts.triangles do
 		triDepths[iT] = INF
 	end
 	-- Seed from the first super-triangle vertex's adjacent triangle.
-	local seeds: { number } = { self._vertTris[1] }
+	local seeds: { number } = { ts._vertTris[1] }
 	local layerDepth = 0
 	local deepestSeedDepth = 0
 	local seedsByDepth: { [number]: { [number]: boolean } } = {}
@@ -1398,6 +1271,92 @@ local function calculateTriangleDepths(self: CDTInternal): { [number]: number }
 	return triDepths
 end
 
+-- ── Non-destructive snapshot ────────────────────────────────────────────────
+
+--[=[
+	Return a copy of the current triangulation state with super-triangle
+	geometry stripped, **without** modifying or locking the CDT.
+
+	The CDT remains fully open for further `insertVertices` / `insertEdges`
+	calls after this returns.  The snapshot owns its own arrays and is
+	unaffected by subsequent mutations to the CDT.
+
+	`mode` controls which triangles are excluded (default `"SuperTriangle"`):
+	- `"SuperTriangle"`          — drop every triangle that touches a super-triangle vertex.
+	- `"OuterTriangles"`         — flood-fill outer region from super-vertex 1, stopping at fixed edges.
+	- `"OuterTrianglesAndHoles"` — even-depth triangles (outer/holes) are dropped; odd-depth kept.
+]=]
+function CDT.snapshot(
+	self: CDTInternal,
+	mode: ("SuperTriangle" | "OuterTriangles" | "OuterTrianglesAndHoles")?
+): CDTSnapshot
+	local ts = self._triSet
+	local tris = ts.triangles
+	local nTris = #tris
+
+	-- 1. Compute which (old-indexed) triangles to exclude.
+	local toErase: { [number]: boolean } = {}
+	local resolvedMode = mode or "SuperTriangle"
+	if resolvedMode == "SuperTriangle" then
+		for iT = 1, nTris do
+			if touchesSuperTriangle(tris[iT]) then
+				toErase[iT] = true
+			end
+		end
+	elseif resolvedMode == "OuterTriangles" then
+		local seeds: { number } = { ts._vertTris[1] }
+		toErase = growToBoundary(self, seeds)
+	else -- OuterTrianglesAndHoles
+		local triDepths = calculateTriangleDepths(self)
+		for iT = 1, nTris do
+			if triDepths[iT] % 2 == 0 then
+				toErase[iT] = true
+			end
+		end
+	end
+
+	-- 2. Build remapped copies of surviving triangles.
+	--    Vertex indices are shifted down by N_SUPER_VERTS to strip the
+	--    super-triangle prefix; neighbor indices are left as old values
+	--    for now and fixed in the pass below.
+	local triMap: { [number]: number } = {}
+	local snapTris: { Triangle } = {}
+	local iTnew = 0
+	for iT = 1, nTris do
+		if not toErase[iT] then
+			iTnew += 1
+			triMap[iT] = iTnew
+			local orig = tris[iT]
+			local vv = orig.vertices
+			local nn = orig.neighbors
+			-- Copy with vertex indices remapped; neighbors will be fixed next.
+			snapTris[iTnew] =
+				makeTriangle(vv[1] - N_SUPER_VERTS, vv[2] - N_SUPER_VERTS, vv[3] - N_SUPER_VERTS, nn[1], nn[2], nn[3])
+		end
+	end
+	-- Fix neighbor slots: old-index → new-index, erased → NO_NEIGHBOR.
+	for _, t in snapTris do
+		local nn = t.neighbors
+		for s = 1, 3 do
+			local n = nn[s]
+			if toErase[n] then
+				nn[s] = NO_NEIGHBOR
+			elseif n ~= NO_NEIGHBOR then
+				nn[s] = triMap[n] :: number
+			end
+		end
+	end
+
+	-- 3. Copy vertices, skipping the N_SUPER_VERTS super-triangle entries.
+	local origVerts = ts.vertices
+	local snapVerts: { Vector2 } = {}
+	for iV = N_SUPER_VERTS + 1, #origVerts do
+		snapVerts[iV - N_SUPER_VERTS] = origVerts[iV]
+	end
+
+	return { vertices = snapVerts, triangles = snapTris }
+end
+
 -- ── Public erasure methods ──────────────────────────────────────────────────────
 
 --[=[
@@ -1411,9 +1370,10 @@ function CDT.eraseSuperTriangle(self: CDTInternal)
 	if self._isFinalized then
 		error("CDT: triangulation already finalized")
 	end
+	local ts = self._triSet
 	local toErase: { [number]: boolean } = {}
-	for iT = 1, #self.triangles do
-		if touchesSuperTriangle(self.triangles[iT]) then
+	for iT = 1, #ts.triangles do
+		if touchesSuperTriangle(ts.triangles[iT]) then
 			toErase[iT] = true
 		end
 	end
@@ -1428,7 +1388,7 @@ function CDT.eraseOuterTriangles(self: CDTInternal)
 	if self._isFinalized then
 		error("CDT: triangulation already finalized")
 	end
-	local seeds: { number } = { self._vertTris[1] }
+	local seeds: { number } = { self._triSet._vertTris[1] }
 	local toErase = growToBoundary(self, seeds)
 	finalizeTriangulation(self, toErase)
 end
@@ -1444,7 +1404,7 @@ function CDT.eraseOuterTrianglesAndHoles(self: CDTInternal)
 	end
 	local triDepths = calculateTriangleDepths(self)
 	local toErase: { [number]: boolean } = {}
-	for iT = 1, #self.triangles do
+	for iT = 1, #self._triSet.triangles do
 		if triDepths[iT] % 2 == 0 then
 			toErase[iT] = true
 		end

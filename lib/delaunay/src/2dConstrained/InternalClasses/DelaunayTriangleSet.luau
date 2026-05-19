@@ -1,7 +1,7 @@
 --!strict
 --!native
 
-local Janitor = require("../../Janitor")
+local Janitor = require("../../../Janitor")
 local DelaunayTriangleEdge = require("./DelaunayTriangleEdge")
 local DelaunayTriangle = require("./DelaunayTriangle")
 local Triangle2d = require("../Utils/Triangle2dUtil")
@@ -607,10 +607,43 @@ function DelaunayTriangleSet.FindTriangleThatContainsPoint(
 	end
 
 	if checkedTriangles >= tCount and tCount > 1 then
-		local triangleVisual =
-			DrawUtil.DrawTriangle(self:GetTrianglePoints(triangleIndex) :: any, BrickColor.Yellow().Color)
-		local pointVisual = DrawUtil.DrawPoint(point, BrickColor.Red().Color, 2)
-		print(self, "Visuals:", triangleVisual, pointVisual)
+		-- Fallback: if walking failed (usually due numeric ambiguity/cycles),
+		-- do a deterministic linear scan over all triangles.
+		for candidateTriangleIndex = 1, tCount do
+			local candidateBaseIndex = (candidateTriangleIndex - 1) * 3
+			local containsPoint = true
+
+			for i = 1, 3 do
+				local vertexA = Points[TriangleVertices[candidateBaseIndex + i]]
+				local vertexB = Points[TriangleVertices[candidateBaseIndex + (i % 3) + 1]]
+				if DelaunayUtil.IsPointToTheRightOfEdge(vertexA, vertexB, point) then
+					containsPoint = false
+					break
+				end
+			end
+
+			if containsPoint then
+				debug.profileend()
+				warn(
+					"Had to fallback to linear scan to find triangle containing point. This may indicate numerical instability or very small triangles. Consider adding more robust handling for such cases.",
+					"Point:",
+					point,
+					"TriangleIndexFound:",
+					candidateTriangleIndex,
+					"StartTriangle:",
+					startTriangle
+				)
+				return candidateTriangleIndex
+			end
+		end
+
+		for i = 1, tCount do
+			local triangleVisual = DrawUtil.DrawTriangle(self:GetTrianglePoints(i) :: any, BrickColor.Gray().Color)
+			triangleVisual.Name = "Triangle_" .. i .. "_At_Time_Of_Failure"
+		end
+		local pointVisual = DrawUtil.DrawPoint(point, BrickColor.Red().Color, 3)
+		pointVisual.Name = "Point We Failed to Find Triangle For!"
+		print(self, "Visuals:", pointVisual)
 		error(
 			("Unable to find a triangle that contains the point (%f, %f), starting at triangle %d. Are you generating very small triangles?"):format(
 				point.X,

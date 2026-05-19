@@ -25,12 +25,10 @@ end
 	True if the point is on the right side; False if the point is on the left side or is contained in the edge.
 ]=]
 function Util.IsPointToTheRightOfEdge(eStart: Vector2, eEnd: Vector2, p: Vector2): boolean
-	local aToB = (eEnd - eStart).Unit
-	local aToP = (p - eStart).Unit
-	local ab_x_p = aToB:Cross(aToP)
-	return ab_x_p < -0.0001 -- The tolerance is used to avoid floating point errors
-	-- local determinant = (eEnd.X - eStart.X) * (p.Y - eStart.Y) - (eEnd.Y - eStart.Y) * (p.X - eStart.X)
-	-- return determinant < -0.0001 -- Due to extremely small negative values were causing wrong results, a tolerance is used instead of zero
+	-- Determinant-based side test is more stable than using normalized vectors.
+	-- Using .Unit can produce NaN on zero-length vectors and amplify numerical noise.
+	local determinant = (eEnd.X - eStart.X) * (p.Y - eStart.Y) - (eEnd.Y - eStart.Y) * (p.X - eStart.X)
+	return determinant < -0.0001 -- Due to extremely small negative values were causing wrong results, a tolerance is used instead of zero
 end
 
 assert(
@@ -149,7 +147,8 @@ function Util.CreateSuperTriangle(points: { Vector2 }): { Vector2 }
 
 	local dx = maxX - minX
 	local dy = maxY - minY
-	local dmax = math.max(dx, dy)
+	local SCALE = 100 -- Scale factor to ensure the super triangle is sufficiently large to encompass all points
+	local dmax = math.max(dx, dy) * SCALE
 
 	local midX = (minX + maxX) / 2
 	local midY = (minY + maxY) / 2

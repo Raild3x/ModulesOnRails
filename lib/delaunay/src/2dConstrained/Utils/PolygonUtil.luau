@@ -26,18 +26,21 @@ local function drawLine(a: Vector2, b: Vector2, color: Color3?, size: number?)
 	if DEBUG then
 		return DrawUtil.DrawLine(a, b, color or Color3.fromRGB(0, 255, 255), size or 0.2)
 	end
+	return nil
 end
 
 local function drawPoint(p: Vector2, color: Color3?, size: number?)
 	if DEBUG then
 		return DrawUtil.DrawPoint(p, color or Color3.fromRGB(255, 0, 0), size or 1)
 	end
+	return nil
 end
 
 local function drawRay(a: Vector2, b: Vector2, color: Color3?, size: number?)
 	if DEBUG then
 		return DrawUtil.DrawRay(a, b - a, color or Color3.fromRGB(255, 217, 0), size or 0.5)
 	end
+	return nil
 end
 
 local function drawPolygonOutline(polygon: Polygon, color: Color3?)
@@ -48,6 +51,7 @@ local function drawPolygonOutline(polygon: Polygon, color: Color3?)
 			drawLine(p1, p2, color)
 		end
 	end
+	return nil
 end
 
 --------------------------------------------------------------------------------

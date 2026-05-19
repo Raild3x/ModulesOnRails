@@ -16,7 +16,8 @@ local DrawTriangle = require("../DrawTriangle3d")
 local DelaunayTriangle = require("./InternalClasses/DelaunayTriangle")
 
 local ConstrainedDelaunayTriangulation = require("./ConstrainedDelaunayTriangulation")
-local BaseObject = require("../../BaseObject")
+local Janitor = require("../../Janitor")
+local Signal = require("../../Signal")
 
 type ConstrainedDelaunayTriangulation = ConstrainedDelaunayTriangulation.ConstrainedDelaunayTriangulation
 type DelaunayTriangleSet = ConstrainedDelaunayTriangulation.DelaunayTriangleSet
@@ -26,6 +27,7 @@ type Vector = Vector2 | Vector3
 type Polygon = { Vector2 }
 type Triangle = { Vector2 }
 
+-- User can provide whatever identifier they want for points and polygons, it will be used as the key in the PointMap and PolygonHoles respectively
 type PointId = any
 type PolygonId = any
 
@@ -103,21 +105,36 @@ end
 --// Class Types //--
 --------------------------------------------------------------------------------
 
+type NavSignal<T...> = Signal.ClassicSignal<T...>
+
 export type NavMesh = {
+	-- Signals
+	PointAdded: NavSignal<Vector2, PointId>,
+	PointRemoved: NavSignal<Vector2, PointId>,
+	HoleAdded: NavSignal<Polygon>,
+	HoleRemoved: NavSignal<Polygon>,
+	Dirtied: NavSignal<>,
+
+	Destroy: (self: NavMesh) -> (),
+
 	AddPoint: (self: NavMesh, point: Vector, customId: PointId?) -> PointId,
+	GetPoints: (self: NavMesh) -> { Vector2 },
+	GetPointCount: (self: NavMesh) -> number,
+
 	RemovePointById: (self: NavMesh, pointId: PointId) -> boolean,
 	AddHole: (self: NavMesh, holePolygon: Polygon, customId: PolygonId?) -> PolygonId,
 	RemoveHole: (self: NavMesh, holePolygon: Polygon, compareContents: boolean?) -> Polygon?,
 	ClearAllHoles: (self: NavMesh) -> (),
 	GetMergedHoles: (self: NavMesh) -> { Polygon },
 	GetTriangulation: (self: NavMesh) -> { Triangle },
-} & BaseObject.BaseObject
+}
 
 type NavMeshInternal = {
 	PointMap: { [PointId]: Vector2 },
 	PolygonHoles: { Polygon },
 	MergedPolygonHoles: { Polygon },
 	Triangulator: ConstrainedDelaunayTriangulation,
+	_Janitor: Janitor.Janitor,
 	_CachedTriangles: { Triangle }?,
 	_TriangulationDirty: boolean,
 	_HolesDirty: boolean,
@@ -130,7 +147,7 @@ type NavMeshInternal = {
 --// CLASS //--
 --------------------------------------------------------------------------------
 
-local NavMesh = setmetatable({}, BaseObject)
+local NavMesh = {}
 NavMesh.ClassName = "NavMesh"
 NavMesh.__index = NavMesh
 
@@ -138,31 +155,33 @@ function NavMesh.new(config: {
 	MaxTriangleArea: number?,
 }?): NavMesh
 	local cfg = config or {} :: any
-	local self = setmetatable(BaseObject.new(), NavMesh) :: any
-
-	self._DEBUG = true
-	self._TriangulationDirty = true
-	self._HolesDirty = true
-	self._PointIdCounter = 0
-	self._TesselationSize = cfg.MaxTriangleArea
-
-	self.PointMap = {} :: {
-		[string]: Vector2,
-	}
-
-	self.PolygonHoles = {} :: { Polygon }
-	self.MergedPolygonHoles = {} :: { Polygon }
-	self.Triangulator = ConstrainedDelaunayTriangulation.new()
-
-	self:RegisterSignal("PointAdded")
-	self:RegisterSignal("PointRemoved")
-
-	self:RegisterSignal("HoleAdded")
-	self:RegisterSignal("HoleRemoved")
-
-	self:RegisterSignal("Dirtied")
+	local self = setmetatable({
+		_Janitor = Janitor.new(),
+		_TriangulationDirty = true,
+		_HolesDirty = true,
+		_PointIdCounter = 0,
+		_TesselationSize = cfg.MaxTriangleArea,
+		PointMap = {} :: { [string]: Vector2 },
+		PolygonHoles = {} :: { Polygon },
+		MergedPolygonHoles = {} :: { Polygon },
+		Triangulator = ConstrainedDelaunayTriangulation.new(),
+		PointAdded = Signal.new() :: NavSignal<Vector2, PointId>,
+		PointRemoved = Signal.new() :: NavSignal<Vector2, PointId>,
+		HoleAdded = Signal.new() :: NavSignal<Polygon>,
+		HoleRemoved = Signal.new() :: NavSignal<Polygon>,
+		Dirtied = Signal.new() :: NavSignal<>,
+	}, NavMesh) :: any
 
 	return self :: NavMesh
+end
+
+function NavMesh.Destroy(self: NavMeshInternal)
+	self.PointAdded:Destroy()
+	self.PointRemoved:Destroy()
+	self.HoleAdded:Destroy()
+	self.HoleRemoved:Destroy()
+	self.Dirtied:Destroy()
+	self._Janitor:Destroy()
 end
 
 --[=[
@@ -201,8 +220,8 @@ function NavMesh.AddPoint(self: NavMeshInternal, point: Vector, customId: PointI
 	self.PointMap[pointId] = point
 
 	self._TriangulationDirty = true
-	self:FireSignal("PointAdded", point, pointId)
-	self:FireSignal("Dirtied")
+	self.PointAdded:Fire(point, pointId)
+	self.Dirtied:Fire()
 
 	return pointId
 end
@@ -218,8 +237,8 @@ function NavMesh.RemovePointById(self: NavMeshInternal, pointId: PointId): boole
 	local point = self.PointMap[pointId]
 	self._TriangulationDirty = true
 	self.PointMap[pointId] = nil
-	self:FireSignal("PointRemoved", point, pointId)
-	self:FireSignal("Dirtied")
+	self.PointRemoved:Fire(point, pointId)
+	self.Dirtied:Fire()
 
 	return true
 end
@@ -286,8 +305,8 @@ function NavMesh.AddHole(self: NavMeshInternal, holePolygon: Polygon, customId: 
 	self._TriangulationDirty = true
 
 	table.insert(self.PolygonHoles, holePolygon)
-	self:FireSignal("HoleAdded", holePolygon)
-	self:FireSignal("Dirtied")
+	self.HoleAdded:Fire(holePolygon)
+	self.Dirtied:Fire()
 
 	return polygonId
 end
@@ -304,8 +323,8 @@ function NavMesh.RemoveHole(self: NavMeshInternal, holePolygon: Polygon, compare
 	if idx then
 		self._HolesDirty = true
 		self._TriangulationDirty = true
-		self:FireSignal("HoleRemoved", holePolygon)
-		self:FireSignal("Dirtied")
+		self.HoleRemoved:Fire(holePolygon)
+		self.Dirtied:Fire()
 		return holePolygon
 	end
 	return nil
@@ -324,9 +343,9 @@ function NavMesh.ClearAllHoles(self: NavMeshInternal)
 		self.PolygonHoles[i] = nil
 		self._HolesDirty = true
 		self._TriangulationDirty = true
-		self:FireSignal("HoleRemoved", polygon)
+		self.HoleRemoved:Fire(polygon)
 	end
-	self:FireSignal("Dirtied")
+	self.Dirtied:Fire()
 end
 
 --[=[
@@ -349,6 +368,17 @@ function NavMesh.GetPoints(self: NavMeshInternal): { Vector2 }
 		table.insert(points, point)
 	end
 	return points
+end
+
+--[=[
+	
+]=]
+function NavMesh.GetPointCount(self: NavMeshInternal): number
+	local count = 0
+	for _ in pairs(self.PointMap) do
+		count += 1
+	end
+	return count
 end
 
 --[=[
@@ -384,7 +414,7 @@ function NavMesh.IsPointOnMesh(self: NavMeshInternal, point: Vector, excludeHole
 	assert(typeof(point) == "Vector2", "Given point must be a Vector2")
 
 	self:_Triangulate()
-	if #self.Points == 0 then
+	if #self:GetPoints() == 0 then
 		return false -- No points in the mesh
 	end
 
@@ -534,7 +564,7 @@ end
 	
 ]=]
 function NavMesh.ClearRender(self: NavMeshInternal)
-	self:RemoveTask("RenderModel")
+	self._Janitor:Remove("RenderModel")
 end
 
 --[=[
@@ -551,9 +581,9 @@ function NavMesh.Render(
 	}
 
 	-- Setup the render model or fetch the existing one
-	local RenderModel: Model & any = self:GetTask("RenderModel")
+	local RenderModel: Model & any = self._Janitor:Get("RenderModel")
 	if RenderModel and RenderModel.Parent then
-		RenderModel = self:GetTask("RenderModel")
+		-- already have a valid model, use it
 	else
 		local newRenderModel = Instance.new("Model")
 		newRenderModel.Name = "NavMesh_Render"
@@ -575,7 +605,7 @@ function NavMesh.Render(
 		HolesFolder.Name = "Holes"
 		HolesFolder.Parent = newRenderModel
 
-		RenderModel = self:AddTask(newRenderModel, nil, "RenderModel")
+		RenderModel = self._Janitor:Add(newRenderModel, nil, "RenderModel")
 	end
 
 	------------------------------------------------------------------------------------------

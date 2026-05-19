@@ -284,19 +284,69 @@ local function pointInPolygon(pt: Vector2, polygon: Polygon): boolean
 	return inside
 end
 
+-- Andrew's monotone chain O(n log n) convex hull.
+-- Returns vertices in CCW order (standard math orientation).
+local function computeConvexHull(pts: { Vector2 }): { Vector2 }
+	local n = #pts
+	if n < 3 then
+		return table.clone(pts)
+	end
+
+	local sorted = table.clone(pts)
+	table.sort(sorted, function(a, b)
+		return if a.X ~= b.X then a.X < b.X else a.Y < b.Y
+	end)
+
+	local function cross(O: Vector2, A: Vector2, B: Vector2): number
+		return (A.X - O.X) * (B.Y - O.Y) - (A.Y - O.Y) * (B.X - O.X)
+	end
+
+	local lower: { Vector2 } = {}
+	for _, p in sorted do
+		while #lower >= 2 and cross(lower[#lower - 1], lower[#lower], p) <= 0 do
+			table.remove(lower)
+		end
+		table.insert(lower, p)
+	end
+
+	local upper: { Vector2 } = {}
+	for i = n, 1, -1 do
+		local p = sorted[i]
+		while #upper >= 2 and cross(upper[#upper - 1], upper[#upper], p) <= 0 do
+			table.remove(upper)
+		end
+		table.insert(upper, p)
+	end
+
+	-- Remove duplicated endpoints shared between lower and upper.
+	table.remove(lower)
+	table.remove(upper)
+
+	local hull: { Vector2 } = {}
+	for _, p in lower do
+		table.insert(hull, p)
+	end
+	for _, p in upper do
+		table.insert(hull, p)
+	end
+	return hull
+end
+
 --[=[
 	Build (or rebuild) the CDT triangulation from the current state and
 	cache the result.  Idempotent when `_dirty` is false.
 
 	Algorithm:
-	1. Collect all mesh points plus all hole vertex positions into a
-	   flat vertex array, deduplicating by coordinate.
-	2. Feed the array to CDT.insertVertices.
-	3. Build edge pairs for each hole polygon and feed to CDT.insertEdges
-	   (0-based indices, as expected by the CDT API).
-	4. Erase outer/hole triangles via eraseOuterTrianglesAndHoles (or
-	   eraseSuperTriangle when no holes are present).
-	5. Convert finalized CDT.triangles → { Triangle2d } and cache.
+	1. Collect all mesh points and all hole vertices into a flat vertex array
+	   (deduplicating by coordinate) and feed it to CDT.insertVertices.
+	2. Constrain the convex hull of the mesh points as the outer boundary.
+	   This tells eraseOuterTrianglesAndHoles where the mesh ends, so that
+	   any hole vertices that lie outside the hull end up in depth-0 triangles
+	   (which are erased) rather than stretching the hull outward.
+	3. Constrain each hole polygon's edges via CDT.insertEdges.
+	4. Call eraseOuterTrianglesAndHoles, which uses depth counting across fixed
+	   edges: depth-0 (outside hull) erased, depth-1 (inside hull, outside
+	   holes) kept, depth-2 (inside holes) erased.  No post-filter needed.
 ]=]
 local function triangulate(self: NavMesh2dInternal)
 	if not self._dirty then
@@ -332,95 +382,70 @@ local function triangulate(self: NavMesh2dInternal)
 		return idx
 	end
 
-	-- Mesh points are registered first to anchor stable indices.
-	-- Simultaneously compute the mesh AABB so we can reject holes that lie
-	-- fully outside the mesh region (which would otherwise expand the CDT hull).
-	local meshMinX, meshMaxX = math.huge, -math.huge
-	local meshMinY, meshMaxY = math.huge, -math.huge
+	-- Register mesh points first (anchors stable indices) and collect for hull.
+	local meshPointsArr: { Vector2 } = {}
 	for _, pt in self._points do
 		addVert(pt)
-		if pt.X < meshMinX then
-			meshMinX = pt.X
-		end
-		if pt.X > meshMaxX then
-			meshMaxX = pt.X
-		end
-		if pt.Y < meshMinY then
-			meshMinY = pt.Y
-		end
-		if pt.Y > meshMaxY then
-			meshMaxY = pt.Y
-		end
+		table.insert(meshPointsArr, pt)
 	end
 
-	-- Build hole edge lists (insertEdges uses 0-based vertex indices).
-	local holeEdges: { { number } } = {}
+	-- Pre-register all hole vertices before calling insertVertices.  They are
+	-- inserted unclipped — vertices outside the mesh hull will land in depth-0
+	-- triangles and be removed by eraseOuterTrianglesAndHoles.
 	for _, hole in self._holes do
-		if #hole < 3 then
-			continue -- degenerate hole; skip
-		end
-		-- Skip holes every vertex of which lies outside the mesh AABB.  Such holes
-		-- cannot intersect the triangulation and would only expand the convex hull.
-		local anyInside = false
-		for _, pt in hole do
-			if pt.X >= meshMinX and pt.X <= meshMaxX and pt.Y >= meshMinY and pt.Y <= meshMaxY then
-				anyInside = true
-				break
+		if #hole >= 3 then
+			for _, pt in hole do
+				addVert(pt)
 			end
-		end
-		if not anyInside then
-			continue
-		end
-		local holeIdx: { number } = {}
-		for _, pt in hole do
-			table.insert(holeIdx, addVert(pt))
-		end
-		local n = #holeIdx
-		for i = 1, n do
-			local a = holeIdx[i] - 1 -- convert to 0-based
-			local b = holeIdx[i % n + 1] - 1
-			table.insert(holeEdges, { a, b })
 		end
 	end
 
 	cdt:insertVertices(allVerts)
 
-	if #holeEdges > 0 then
-		-- Constrain hole boundary edges so the CDT never produces a triangle that
-		-- straddles a hole boundary.  This makes the centroid test below exact.
-		cdt:insertEdges(holeEdges)
+	-- Build the full constrained edge list.
+	local allEdges: { { number } } = {}
+
+	-- Outer boundary: constrain the convex hull of the mesh points.
+	-- This establishes the depth-0/depth-1 boundary so triangles created from
+	-- out-of-hull hole vertices are depth-0 and get erased automatically.
+	local meshHull = computeConvexHull(meshPointsArr)
+	local hn = #meshHull
+	for i = 1, hn do
+		local ptA = meshHull[i]
+		local ptB = meshHull[i % hn + 1]
+		local a = coordToIdx[string.format("%.10g,%.10g", ptA.X, ptA.Y)] - 1
+		local b = coordToIdx[string.format("%.10g,%.10g", ptB.X, ptB.Y)] - 1
+		table.insert(allEdges, { a, b })
 	end
 
-	-- Always erase only the super-triangle fan.  Triangles outside the convex hull
-	-- of the user vertices are never produced by the Delaunay algorithm itself, so
-	-- no extra outer-boundary constraint is needed.
-	cdt:eraseSuperTriangle()
+	-- Hole boundaries: establish depth-1/depth-2 boundaries inside the hull.
+	for _, hole in self._holes do
+		if #hole < 3 then
+			continue
+		end
+		local n = #hole
+		for i = 1, n do
+			local ptA = hole[i]
+			local ptB = hole[i % n + 1]
+			local a = coordToIdx[string.format("%.10g,%.10g", ptA.X, ptA.Y)] - 1
+			local b = coordToIdx[string.format("%.10g,%.10g", ptB.X, ptB.Y)] - 1
+			table.insert(allEdges, { a, b })
+		end
+	end
 
-	-- Convert surviving CDT triangles to { Vector2 } triples, skipping any whose
-	-- centroid falls inside a registered hole polygon.  Because hole boundary edges
-	-- are constrained above, no triangle ever straddles a hole boundary, so a
-	-- centroid test is sufficient and exact.
+	if #allEdges > 0 then
+		cdt:insertEdges(allEdges)
+	end
+
+	-- Depth counting: depth-0 (outside hull) and depth-2 (inside holes) erased;
+	-- depth-1 (inside hull, outside holes) kept.  No centroid filter needed.
+	cdt:eraseOuterTrianglesAndHoles()
+
 	local tris: { Triangle2d } = {}
 	local verts = cdt.vertices
 	for _, tri in cdt.triangles do
 		local vv = tri.vertices
-		local v1, v2, v3 = verts[vv[1]], verts[vv[2]], verts[vv[3]]
-		if #holeEdges > 0 then
-			local cx = (v1.X + v2.X + v3.X) / 3
-			local cy = (v1.Y + v2.Y + v3.Y) / 3
-			local centroid = Vector2.new(cx, cy)
-			local inHole = false
-			for _, hole in self._holes do
-				if #hole >= 3 and pointInPolygon(centroid, hole) then
-					inHole = true
-					break
-				end
-			end
-			if inHole then
-				continue
-			end
-		end
-		table.insert(tris, { v1, v2, v3 })
+		table.insert(tris, { verts[vv[1]], verts[vv[2]], verts[vv[3]] })
 	end
 	self._cachedTriangles = tris
 end

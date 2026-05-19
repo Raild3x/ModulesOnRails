@@ -3,7 +3,8 @@
 	@class DrawTriangle3d
 	Utility for drawing triangles in 3D space using wedge parts.
 
-	`DrawTriangle3d` provides functions to create and update triangle models composed of two wedge parts.
+	`DrawTriangle3d` provides functions to create and update triangle models composed of wedge parts.
+	Triangles larger than Roblox's part size limit are automatically split into multiple sub-triangles.
 	### Example
 
 	```lua
@@ -83,6 +84,8 @@ export type TriangleConfig = {
 --// Util //--
 --------------------------------------------------------------------------------
 
+local MAX_PART_SIZE = 2048
+
 local WEDGE_TEMPLATE = Instance.new("WedgePart")
 do
 	WEDGE_TEMPLATE.Size = Vector3.one
@@ -111,24 +114,155 @@ local function reorderPointsForLongestLine(p1: Vector3, p2: Vector3, p3: Vector3
 	end
 end
 
--- Actual assertions commented out for performance, but this at least gives us type safety in the function signatures
+local DrawTriangle3d = {}
+
+local function getTriangleEdgeLengths(points: { Vector3 }): (number, number, number)
+	local p1, p2, p3 = points[1], points[2], points[3]
+	return (p2 - p1).Magnitude, (p3 - p2).Magnitude, (p3 - p1).Magnitude
+end
+
+local function isTriangleWithinPartLimit(points: { Vector3 }): boolean
+	local d12, d23, d13 = getTriangleEdgeLengths(points)
+	return d12 <= MAX_PART_SIZE and d23 <= MAX_PART_SIZE and d13 <= MAX_PART_SIZE
+end
+
+local function splitOversizedTriangle(points: { Vector3 }): { { Vector3 } }
+	local result: { { Vector3 } } = {}
+	local stack: { { Vector3 } } = { points }
+
+	while #stack > 0 do
+		local trianglePoints = table.remove(stack)
+		if trianglePoints == nil then
+			continue
+		end
+
+		if isTriangleWithinPartLimit(trianglePoints) then
+			table.insert(result, trianglePoints)
+		else
+			local p1, p2, p3 = trianglePoints[1], trianglePoints[2], trianglePoints[3]
+			local d12, d23, d13 = getTriangleEdgeLengths(trianglePoints)
+
+			if d12 >= d23 and d12 >= d13 then
+				local midpoint = (p1 + p2) / 2
+				table.insert(stack, { midpoint, p2, p3 })
+				table.insert(stack, { p1, midpoint, p3 })
+			elseif d23 >= d12 and d23 >= d13 then
+				local midpoint = (p2 + p3) / 2
+				table.insert(stack, { p1, midpoint, p3 })
+				table.insert(stack, { p1, p2, midpoint })
+			else
+				local midpoint = (p1 + p3) / 2
+				table.insert(stack, { p1, p2, midpoint })
+				table.insert(stack, { midpoint, p2, p3 })
+			end
+		end
+	end
+
+	return result
+end
+
 local function assertTriangleModel(model: Model): (WedgePart, WedgePart)
-	-- assert(
-	-- 	model:IsA("Model") and #model:GetChildren() == 2,
-	-- 	"Invalid model structure (should contain exactly 2 WedgeParts)"
-	-- )
-
 	local wedge1, wedge2 = (model :: any).T1, (model :: any).T2
-	-- assert(wedge1:IsA("WedgePart") and wedge2:IsA("WedgePart"), "Model must contain WedgeParts")
-
 	return wedge1, wedge2
+end
+
+local function getTriangleStyleSource(model: Model): WedgePart
+	local directWedge1 = (model :: any).T1
+	if directWedge1 then
+		return directWedge1
+	end
+
+	for _, child in ipairs(model:GetChildren()) do
+		if child:IsA("Model") then
+			local childWedge1 = (child :: any).T1
+			if childWedge1 then
+				return childWedge1
+			end
+		end
+	end
+
+	error("Triangle model does not contain any wedge parts")
+end
+
+local function copyStyleFromModel(model: Model): TriangleConfig
+	local wedge1 = getTriangleStyleSource(model)
+	return {
+		Thickness = wedge1.Size.X,
+		Transparency = wedge1.Transparency,
+		Color = wedge1.Color,
+		Material = wedge1.Material,
+		CanCollide = wedge1.CanCollide,
+		CanTouch = wedge1.CanTouch,
+		CanQuery = wedge1.CanQuery,
+		Locked = wedge1.Locked,
+		Anchored = wedge1.Anchored,
+	}
+end
+
+local function buildTriangleLeafModel(triangleModel: Model, points: { Vector3 }, config: TriangleConfig)
+	local wedge1CF, wedge1Size, wedge2CF, wedge2Size = DrawTriangle3d.calculateCFramesAndSizes(points, config.Thickness)
+
+	local wedge1 = WEDGE_TEMPLATE:Clone()
+	wedge1.Name = "T1"
+	wedge1.Size = wedge1Size
+	wedge1.CFrame = wedge1CF
+	wedge1.Parent = triangleModel
+
+	local wedge2 = wedge1:Clone()
+	wedge2.Name = "T2"
+	wedge2.Size = wedge2Size
+	wedge2.CFrame = wedge2CF
+	wedge2.Parent = triangleModel
+
+	if config.Anchored == false then
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = wedge1
+		weld.Part1 = wedge2
+		weld.Parent = triangleModel
+
+		wedge1.Anchored = false
+		wedge2.Anchored = false
+	end
+
+	DrawTriangle3d.style(triangleModel, config)
+end
+
+local function populateTriangleModel(triangleModel: Model, points: { Vector3 }, config: TriangleConfig)
+	triangleModel:ClearAllChildren()
+
+	local trianglePieces = splitOversizedTriangle(points)
+	if #trianglePieces == 1 then
+		triangleModel:SetAttribute("DrawTriangle3dComposite", nil)
+		buildTriangleLeafModel(triangleModel, trianglePieces[1], config)
+		return
+	end
+
+	triangleModel:SetAttribute("DrawTriangle3dComposite", true)
+
+	local anchorPart: WedgePart? = nil
+	for index, trianglePiece in ipairs(trianglePieces) do
+		local segmentModel = Instance.new("Model")
+		segmentModel.Name = `TriangleSegment{index}`
+		buildTriangleLeafModel(segmentModel, trianglePiece, config)
+		segmentModel.Parent = triangleModel
+
+		if config.Anchored == false then
+			local segmentWedge1 = (segmentModel :: any).T1 :: WedgePart
+			if anchorPart == nil then
+				anchorPart = segmentWedge1
+			else
+				local weld = Instance.new("WeldConstraint")
+				weld.Part0 = anchorPart
+				weld.Part1 = segmentWedge1
+				weld.Parent = triangleModel
+			end
+		end
+	end
 end
 
 --------------------------------------------------------------------------------
 --// Class //--
 --------------------------------------------------------------------------------
-
-local DrawTriangle3d = {}
 
 -- Updates an existing triangle model with new vertex positions
 local function updateTriangle(points: { Vector3 }, model: Model)
@@ -173,10 +307,13 @@ function DrawTriangle3d.calculateCFramesAndSizes(
 end
 
 --[=[
-	Creates a triangle model using two wedge parts.
+	Creates a triangle model using wedge parts.
 
-	If `config.Anchored` is set to `false`, the two wedges will be welded together and unanchored, 
-	allowing the triangle to move as a single unit while still being affected by physics.
+	Triangles that exceed Roblox's part size limit are split into multiple smaller triangle models.
+
+	If `config.Anchored` is set to `false`, the wedges in each segment will be welded together, and
+	segmented triangles will also be chained together so the triangle moves as a single unit while
+	still being affected by physics.
 ]=]
 function DrawTriangle3d.create(points: { Vector3 }, config: TriangleConfig?): Model
 	assert(#points == 3, "Triangle must have exactly 3 points")
@@ -187,33 +324,7 @@ function DrawTriangle3d.create(points: { Vector3 }, config: TriangleConfig?): Mo
 	local triangleContainerModel = Instance.new("Model")
 	triangleContainerModel.Name = cfg.Name or "TriangleModel"
 
-	-- Compute wedge transformations
-	local wedge1CF, wedge1Size, wedge2CF, wedge2Size = DrawTriangle3d.calculateCFramesAndSizes(points, cfg.Thickness)
-
-	-- Create wedge parts
-	local wedge1 = WEDGE_TEMPLATE:Clone()
-	wedge1.Name = "T1"
-	wedge1.Size = wedge1Size
-	wedge1.CFrame = wedge1CF
-	wedge1.Parent = triangleContainerModel
-
-	local wedge2 = wedge1:Clone()
-	wedge2.Name = "T2"
-	wedge2.Size = wedge2Size
-	wedge2.CFrame = wedge2CF
-	wedge2.Parent = triangleContainerModel
-
-	if cfg.Anchored == false then
-		local weld = Instance.new("WeldConstraint")
-		weld.Part0 = wedge1
-		weld.Part1 = wedge2
-		weld.Parent = triangleContainerModel
-
-		wedge1.Anchored = false
-		wedge2.Anchored = false
-	end
-
-	DrawTriangle3d.style(triangleContainerModel, cfg)
+	populateTriangleModel(triangleContainerModel, points, cfg)
 
 	triangleContainerModel.Parent = cfg.Parent or workspace
 	return triangleContainerModel
@@ -223,6 +334,15 @@ end
     Styles an existing triangle model with the given configuration
 ]=]
 function DrawTriangle3d.style(triangleModel: Model, config: StyleConfig)
+	if triangleModel:GetAttribute("DrawTriangle3dComposite") == true then
+		for _, child in ipairs(triangleModel:GetChildren()) do
+			if child:IsA("Model") then
+				DrawTriangle3d.style(child, config)
+			end
+		end
+		return
+	end
+
 	local wedge1: any, wedge2: any = assertTriangleModel(triangleModel)
 
 	local thickness = config.Thickness
@@ -261,7 +381,11 @@ end
 ]=]
 function DrawTriangle3d.render(points: { Vector3 }, existingModel: Model?): Model
 	if existingModel then
-		updateTriangle(points, existingModel)
+		if existingModel:GetAttribute("DrawTriangle3dComposite") == true or not isTriangleWithinPartLimit(points) then
+			populateTriangleModel(existingModel, points, copyStyleFromModel(existingModel))
+		else
+			updateTriangle(points, existingModel)
+		end
 		return existingModel
 	else
 		return DrawTriangle3d.create(points)
@@ -299,24 +423,37 @@ end
 function DrawTriangle3d.bulkRenderViaIterator(nextTriangle: () -> ({ Vector3 }?, Model?))
 	local parts: { BasePart } = {}
 	local cframes: { CFrame } = {}
+	local deferredUpdates: { { points: { Vector3 }, model: Model } } = {}
 	while true do
 		local points, model = nextTriangle()
 		if not points or not model then
 			break
 		end
 
-		local wedge1, wedge2 = assertTriangleModel(model)
-		local w1CF, w1Size, w2CF, w2Size = DrawTriangle3d.calculateCFramesAndSizes(points, wedge1.Size.X)
+		if model:GetAttribute("DrawTriangle3dComposite") == true or not isTriangleWithinPartLimit(points) then
+			table.insert(deferredUpdates, {
+				points = points,
+				model = model,
+			})
+		else
+			local wedge1, wedge2 = assertTriangleModel(model)
+			local w1CF, w1Size, w2CF, w2Size = DrawTriangle3d.calculateCFramesAndSizes(points, wedge1.Size.X)
 
-		table.insert(parts, wedge1)
-		table.insert(parts, wedge2)
+			table.insert(parts, wedge1)
+			table.insert(parts, wedge2)
 
-		table.insert(cframes, w1CF)
-		table.insert(cframes, w2CF)
+			table.insert(cframes, w1CF)
+			table.insert(cframes, w2CF)
 
-		wedge1.Size = w1Size
-		wedge2.Size = w2Size
+			wedge1.Size = w1Size
+			wedge2.Size = w2Size
+		end
 	end
+
+	for _, update in ipairs(deferredUpdates) do
+		DrawTriangle3d.render(update.points, update.model)
+	end
+
 	workspace:BulkMoveTo(parts, cframes, Enum.BulkMoveMode.FireCFrameChanged)
 end
 

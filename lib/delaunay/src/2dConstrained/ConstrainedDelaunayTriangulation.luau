@@ -50,7 +50,7 @@ type CDT = {
 }
 export type ConstrainedDelaunayTriangulation = CDT
 
-type CDTInternal = {
+export type CDTInternal = {
 	_PointCloudBounds: bounds?,
 	_CachedTriangles: { Triangle2d }?,
 
@@ -76,14 +76,21 @@ type CDTInternal = {
 } & CDT
 
 -- Toggle on to make debug rendering easier
-local DISABLE_NORMALIZATION = false
+local DISABLE_NORMALIZATION = true
 
 local NOT_FOUND = -1
 local NO_ADJACENT_TRIANGLE = -1
+local MAX_SUPPORTED_POINTS = 10_000
 
 local profilebegin = debug.profilebegin
 local profileend = debug.profileend
-local IsPointInCircumcircle = Triangle2dUtil.IsPointInCircumcircle
+
+local function edgeKey(a: number, b: number)
+	if a < b then
+		return b * MAX_SUPPORTED_POINTS + a
+	end
+	return a * MAX_SUPPORTED_POINTS + b
+end
 
 --------------------------------------------------------------------------------
 --// Class //--
@@ -395,8 +402,19 @@ function ConstrainedDelaunayTriangulation._FulfillDelaunayConstraint(
 	-- warn("Fulfill Delaunay Constraint", adjacentTrianglesToProcess, adjacentTriangleEdges)
 	local TriangleSet: DelaunayTriangleSet = self.TriangleSet
 	local Points = TriangleSet.Points
+	local lastCreatedEdgeKey: number? = nil
+
+	local currentAttempt = 0
+	local MAX_ATTEMPTS = 100
 
 	while #adjacentTrianglesToProcess > 0 do
+		currentAttempt = currentAttempt + 1
+		if currentAttempt > MAX_ATTEMPTS then
+			warn(
+				"Max attempts reached in _FulfillDelaunayConstraint, possible infinite loop. Stopping further processing."
+			)
+			break
+		end
 		profilebegin("Process triangle")
 		local CURRENT_TRIANGLE_INDEX = table.remove(adjacentTrianglesToProcess) :: number -- TODO: Make these table removals more efficient
 		local OPPOSITE_TRIANGLE_EDGE_INDEX = table.remove(adjacentTriangleEdges) :: number
@@ -415,13 +433,39 @@ function ConstrainedDelaunayTriangulation._FulfillDelaunayConstraint(
 
 		local triangleVertexNotInEdge = Points[triangle.Points[NOT_IN_EDGE_VERTEX_INDEX]]
 
-		if IsPointInCircumcircle(triangleVertexNotInEdge, TriangleSet:GetTrianglePoints(OPPOSITE_TRIANGLE_INDEX)) then
-			profilebegin("Add to Stacks")
-
+		if
+			Triangle2dUtil.IsPointInCircumcircle(
+				triangleVertexNotInEdge,
+				TriangleSet:GetTrianglePoints(OPPOSITE_TRIANGLE_INDEX)
+			)
+		then
 			local oppositeTriangle = TriangleSet:GetDelaunayTriangle(OPPOSITE_TRIANGLE_INDEX)
 
 			-- Finds the edge of the opposite triangle that is shared with the other triangle, this edge will be swapped
 			local sharedEdgeVertexLocalIndex = self:GetSharedEdge(oppositeTriangle, CURRENT_TRIANGLE_INDEX)
+
+			do -- SAFETY LOGIC FOR DETECTING INFINITE BACKPEDALS
+				-- If the shared edge vertex index is not found, it means the triangles are not adjacent. This can happen after an edge swap that modifies the adjacency, so we skip processing this triangle. However, if this happens repeatedly for the same triangle, it could indicate an infinite loop, so we log a warning.
+				if sharedEdgeVertexLocalIndex == NO_ADJACENT_TRIANGLE then
+					profileend()
+					continue
+				end
+
+				local sharedEdgeVertexA = triangle.Points[OPPOSITE_TRIANGLE_EDGE_INDEX]
+				local sharedEdgeVertexB = triangle.Points[OPPOSITE_TRIANGLE_EDGE_INDEX % 3 + 1]
+				local currentSharedEdgeKey = edgeKey(sharedEdgeVertexA, sharedEdgeVertexB)
+
+				-- Immediate backflip lockout: do not flip the edge that was just created by the previous swap.
+				if lastCreatedEdgeKey ~= nil and currentSharedEdgeKey == lastCreatedEdgeKey then
+					profileend()
+					continue
+				end
+
+				local oppositeVertex = (sharedEdgeVertexLocalIndex + 1) % 3 + 1
+				local createdEdgeVertexA = triangle.Points[NOT_IN_EDGE_VERTEX_INDEX]
+				local createdEdgeVertexB = oppositeTriangle.Points[oppositeVertex]
+				lastCreatedEdgeKey = edgeKey(createdEdgeVertexA, createdEdgeVertexB)
+			end
 
 			-- Helper function to add triangles to the stack
 			local function addToStack(triangleIndex, edgeIndex)
@@ -442,8 +486,6 @@ function ConstrainedDelaunayTriangulation._FulfillDelaunayConstraint(
 			local nextEdgeIndex = if NOT_IN_EDGE_VERTEX_INDEX == 3 then 1 else NOT_IN_EDGE_VERTEX_INDEX + 1
 			addToStack(triangle.AdjacentTriangles[NOT_IN_EDGE_VERTEX_INDEX], NOT_IN_EDGE_VERTEX_INDEX)
 			addToStack(triangle.AdjacentTriangles[nextEdgeIndex], nextEdgeIndex)
-
-			profileend()
 
 			-- Swap edges
 			self:_SwapEdges(
@@ -648,10 +690,10 @@ function ConstrainedDelaunayTriangulation._AddConstrainedEdgeToTriangulation(
 			intersectedTriangle = TriangleSet:GetDelaunayTriangle(currentEdge.TriangleIndex)
 
 			-- Check the new diagonal against the intersecting edge
-			local newTriangleSharedEdgeVertexA = (currentEdge.EdgeIndex + 1) % 3 + 1
-			local newTriangleSharedEdgeVertexB = newTriangleSharedEdgeVertexA % 3 + 1
-			local newTriangleSharedEdgeIndexA = intersectedTriangle.Points[newTriangleSharedEdgeVertexA]
-			local newTriangleSharedEdgeIndexB = intersectedTriangle.Points[newTriangleSharedEdgeVertexB]
+			local newTriangleSharedEdgeLocalIndexA = (currentEdge.EdgeIndex + 1) % 3 + 1
+			local newTriangleSharedEdgeLocalIndexB = newTriangleSharedEdgeLocalIndexA % 3 + 1
+			local newTriangleSharedEdgeIndexA = intersectedTriangle.Points[newTriangleSharedEdgeLocalIndexA]
+			local newTriangleSharedEdgeIndexB = intersectedTriangle.Points[newTriangleSharedEdgeLocalIndexB]
 
 			local newEdge =
 				DelaunayTriangleEdge.new(NOT_FOUND, NOT_FOUND, newTriangleSharedEdgeIndexA, newTriangleSharedEdgeIndexB)
@@ -718,7 +760,7 @@ end
     -- TODO: OPTIMIZE
     Finds the outline of the triangulation excluding the supertriangle.
 ]=]
-function ConstrainedDelaunayTriangulation.GetOutlinePolygon(self: CDTInternal): { Vector2 }
+function ConstrainedDelaunayTriangulation.GetOutlinePolygon(self: CDTInternal, slowMode: boolean?): { Vector2 }
 	local outlinePolygon = {}
 
 	local TriangleSet: DelaunayTriangleSet = self.TriangleSet
@@ -746,15 +788,55 @@ function ConstrainedDelaunayTriangulation.GetOutlinePolygon(self: CDTInternal): 
 		return outlinePolygon
 	end
 
+	local attempts = 0
 	local currentTriangleIndex = externalTriangleIndex
-	repeat
+	repeat -- Walk around the outline of the triangulation, starting from an external triangle, until we get back to the starting triangle
+		attempts = attempts + 1
 		local triangle = TriangleSet:GetDelaunayTriangle(currentTriangleIndex)
+		if slowMode then
+			DrawUtil.DrawTriangle(TriangleSet:GetTrianglePoints(currentTriangleIndex) :: any, Color3.new(1, 0, 0))
+			task.wait(1)
+		end
 		local outerVertexIndex = NOT_FOUND
 		for i, pointIdx in triangle.Points do
 			if pointIdx >= 1 and pointIdx <= 3 then
 				outerVertexIndex = i
 				break
 			end
+		end
+		if outerVertexIndex == NOT_FOUND then
+			warn(
+				self,
+				attempts,
+				"Failed to find outer vertex in triangle",
+				currentTriangleIndex,
+				"| Triangle vertices:",
+				"a",
+				triangle.Points[1],
+				"b",
+				triangle.Points[2],
+				"c",
+				triangle.Points[3],
+				"| Points:",
+				"a",
+				Points[triangle.Points[1]],
+				"b",
+				Points[triangle.Points[2]],
+				"c",
+				Points[triangle.Points[3]]
+			)
+			warn(
+				"  Context: externalTriangleIndex was",
+				externalTriangleIndex,
+				"| Current outline polygon length:",
+				#outlinePolygon
+			)
+			if not slowMode then
+				self:GetOutlinePolygon(true)
+				print("DONE")
+				task.wait(10)
+			end
+			break
 		end
 
 		local nextVertexLocalIndex = if outerVertexIndex == 3 then 1 else outerVertexIndex + 1
@@ -770,6 +852,28 @@ function ConstrainedDelaunayTriangulation.GetOutlinePolygon(self: CDTInternal): 
 			table.insert(outlinePolygon, Points[nextVertexIndex])
 			currentTriangleIndex = triangle.AdjacentTriangles[previousVertexLocalIndex]
 		else
+			-- -- Only 1 supertriangle vertex: move to the opposite triangle with a boundary check
+			-- -- Guard: ensure next triangle also has a supertriangle vertex before proceeding
+			-- local nextTriangleIndex = triangle.AdjacentTriangles[outerVertexIndex]
+			-- if nextTriangleIndex > 0 and nextTriangleIndex ~= NOT_FOUND then
+			-- 	print("Checking next triangle for supertriangle vertex to avoid wandering inward")
+			-- 	local nextTriangle = TriangleSet:GetDelaunayTriangle(nextTriangleIndex)
+			-- 	local hasSupertriangle = false
+			-- 	for _, pt in nextTriangle.Points do
+			-- 		if pt >= 1 and pt <= 3 then
+			-- 			hasSupertriangle = true
+			-- 			break
+			-- 		end
+			-- 	end
+			-- 	if not hasSupertriangle then
+			-- 		warn(
+			-- 			"Outline traversal would wander inward: next triangle",
+			-- 			nextTriangleIndex,
+			-- 			"has no supertriangle vertices. Halting to avoid infinite loop."
+			-- 		)
+			-- 		break
+			-- 	end
+			-- end
 			-- skip triangles with only 1 supertriangle vertex
 			table.insert(outlinePolygon, Points[previousVertexIndex])
 			currentTriangleIndex = triangle.AdjacentTriangles[outerVertexIndex]

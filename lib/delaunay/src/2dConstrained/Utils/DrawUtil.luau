@@ -1,4 +1,4 @@
-local DEBUG_HEIGHT = 50
+local DEBUG_HEIGHT = 1
 
 local Util = {}
 
@@ -10,6 +10,13 @@ local function getDebugParent()
 		debugParent.Parent = workspace
 	end
 	return debugParent
+end
+
+function Util.ClearDebugDrawings()
+	local debugParent = workspace:FindFirstChild("DelaunayUtilDebug")
+	if debugParent then
+		debugParent:ClearAllChildren()
+	end
 end
 
 function Util.DrawPoint(position: Vector2 | Vector3, _color: Color3?, _size: number?): Instance
@@ -57,6 +64,7 @@ function Util.DrawLine(start: Vector2 | Vector3, finish: Vector2 | Vector3, _col
 	line.Transparency = 0.5
 	line.Anchored = true
 	line.CanCollide = false
+	line.Locked = true
 	line.Position = (start + finish) / 2
 	line.CFrame = CFrame.lookAt(line.Position, finish)
 	line.Parent = getDebugParent()
@@ -89,7 +97,7 @@ function Util.DrawRay(
 	parent.Parent = getDebugParent()
 	-- Debris:AddItem(parent, 120)
 
-	local width = _width or 0.2
+	local width = _width or 0.1
 	local color = _color or Color3.fromRGB(255, 150, 0)
 	local transparency = 0.5
 
@@ -99,6 +107,7 @@ function Util.DrawRay(
 	line.Material = Enum.Material.Neon
 	line.Anchored = true
 	line.CanCollide = false
+	line.Locked = true
 	line.Transparency = transparency
 	line.CFrame = CFrame.lookAlong(start + direction / 2, direction)
 	line.Parent = parent
@@ -136,12 +145,12 @@ function Util.DrawTriangle(triangle: { Vector2 | Vector3 }, _color: Color3?): In
 		end
 	end
 
-	local tModel = DrawTriangle.createTriangleModel(triangle, {
+	local tModel = DrawTriangle.create(triangle, {
 		Color = _color,
 		Thickness = 0.1,
 		Transparency = 0.5,
+		Parent = getDebugParent(),
 	})
-	tModel.Parent = getDebugParent()
 	-- Debris:AddItem(tModel, 120)
 
 	return tModel

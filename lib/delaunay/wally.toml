@@ -14,3 +14,8 @@ formattedName = "Delaunay"
 docsLink = "Delaunay"
 
 [dependencies]
+BaseObject = "raild3x/baseobject@0.2.2"
+
+Janitor = "howmanysmall/janitor@1.17.0"
+Promise = "howmanysmall/typed-promise@4.0.3"
+Signal = "howmanysmall/better-signal@2.1.0"

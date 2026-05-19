@@ -32,7 +32,7 @@ export type PointBinGrid = {
 	DrawPointAddition: (self: PointBinGrid, point: Vector2, columnIndex: number, rowIndex: number) -> (),
 }
 
-type PointBinGridInternal = {
+export type PointBinGridInternal = {
 	Cells: { { Vector2 }? },
 	m_cellSize: Vector2,
 	m_gridSize: Vector2,
@@ -76,12 +76,21 @@ PointBinGrid.__index = PointBinGrid
 function PointBinGrid.new(cellsPerSide: number, gridSize: Vector2): PointBinGrid
 	debug.profilebegin("Create PointBinGrid")
 	local self = setmetatable({}, PointBinGrid)
+
+	-- Handle degenerate point clouds (collinear or single point)
+	-- If either dimension is 0, use a single cell grid to avoid binning errors
+	if gridSize.X == 0 or gridSize.Y == 0 then
+		warn("Degenerate grid size detected. Using a single cell grid to avoid binning errors.")
+		cellsPerSide = 1
+		gridSize = Vector2.new(1, 1) -- Use unit size for arithmetic; single cell means all points bin together
+	end
+
 	self.Cells = table.create(cellsPerSide * cellsPerSide) -- Array of bins (each bin is a table of Vector2 points)
 	self.m_cellSize = gridSize / cellsPerSide
 	self.m_gridSize = gridSize
 	self.m_cellsPerSide = cellsPerSide
 
-	-- Initialize empty bins
+	-- Initialize empty bins (Doesnt table.create already do this?)
 	for i = 1, cellsPerSide * cellsPerSide do
 		self.Cells[i] = nil
 	end
