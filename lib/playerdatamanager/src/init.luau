@@ -79,7 +79,6 @@ else
 end
 
 local DEFAULT_MANAGER_NAME = "DefaultManager"
-CurrentContextModule.DEFAULT_MANAGER_NAME = DEFAULT_MANAGER_NAME
 
 --------------------------------------------------------------------------------
 --// Class //--

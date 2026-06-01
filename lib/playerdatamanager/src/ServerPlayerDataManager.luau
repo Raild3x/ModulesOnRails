@@ -3,52 +3,16 @@
 --[=[
     @class ServerPlayerDataManager
 
-    The Server side class for the PlayerDataManager package
+    The Server side class for the PlayerDataManager package.
 
-    ## Default Manager System
-    
-    By default, the ServerPlayerDataManager automatically creates a "DEFAULT_MANAGER" that maps to 
-    the DEFAULT_MANAGER field in your data schema. This allows methods like GetManager() to work 
-    without specifying a manager name.
-
-    ## Save Callback System
-    
-    The ServerPlayerDataManager now supports priority-based save callbacks through `OnSave` and `OnLastSave` methods.
-    Callbacks are executed in priority order (highest numbers first), allowing you to control the sequence of save operations.
-    
-    ### Priority Constants
-    ```lua
-    SPDM.SAVE_PRIORITY.HIGHEST  -- 1000
-    SPDM.SAVE_PRIORITY.HIGH     -- 500  
-    SPDM.SAVE_PRIORITY.NORMAL   -- 0 (default)
-    SPDM.SAVE_PRIORITY.LOW      -- -500
-    SPDM.SAVE_PRIORITY.LOWEST   -- -1000
-    ```
-    
-    ### Usage Examples
-    ```lua
-    -- High priority callback (runs first)
-    SPDM:OnLastSave(player, function(profile)
-        profile.Data.LastSeen = DateTime.now().UnixTimestamp
-    end, SPDM.SAVE_PRIORITY.HIGH)
-    
-    -- Normal priority callback (runs after high priority)
-    SPDM:OnLastSave(player, function(profile)
-        profile.Data.SessionCount += 1
-    end) -- Default priority
-    
-    -- Low priority callback (runs last)
-    SPDM:OnLastSave(player, function(profile)
-        profile.Data.DataVersion = "1.0.0"
-    end, SPDM.SAVE_PRIORITY.LOW)
-    ```
+    This class now uses constructed instances so each namespace can have an
+    independent manager registry, lifecycle, and replication scope.
 ]=]
 
 const Players = game:GetService("Players")
 
 --// Imports //--
 const Packages = script.Parent.Parent
-const Symbol = require(Packages.Symbol)
 const Signal = require(Packages.Signal)
 const Janitor = require(Packages.Janitor)
 const Promise = require(Packages.Promise)
@@ -58,52 +22,77 @@ const TableReplicator = require(Packages.TableReplicator)
 
 --// Types //--
 type table = { [any]: any }
-type Promise = Promise.Promise
+type PromiseObject = typeof(Promise.new(function() end))
 type Janitor = Janitor.Janitor
 type TableManager = TableManager.TableManager
 type TableReplicator = TableReplicator.ServerTableReplicator
-type Profile = table --PlayerProfileManager.Profile
-type PlayerProfileManager = table --PlayerProfileManager.PlayerProfileManager
-type Connection = any
+type PlayerProfileManager = table -- PlayerProfileManager.PlayerProfileManager
 
-type SaveCallback = {
-	callback: (profile: Profile) -> (),
-	priority: number,
-	connection: any,
+type Connection = {
+	Disconnect: (self: Connection) -> (),
+	Destroy: (self: Connection) -> (),
+}
+
+type DataProvider = (player: Player) -> PromiseObject
+
+type ManagerConfig = {
+	Data: table,
+	ReplicationTargets: "All" | "None" | "Self" | "self" | Player | { Player }?,
+	Tags: table?,
+	Parent: Instance?,
+	Client: table?,
+}
+
+type ManagerTemplate = {
+	ConfigGenerator: (player: Player, data: table) -> ManagerConfig,
+}
+
+type PlayerDataEntry = {
+	Replicators: { [string]: TableReplicator },
+	AllManagersReady: boolean,
+	ForEachJanitors: { Janitor },
 }
 
 type SPDM_Internal = {
+	ClassName: string,
+	_DEBUG: boolean,
 	DEFAULT_MANAGER_NAME: string?,
-	PlayerDataReady: any,
+	ManagerReady: any,
 	ManagerRegistered: any,
-	-- Methods used via self within the class body:
-	Start: (self: SPDM_Internal, ppm: PlayerProfileManager) -> (),
-	RegisterManager: (self: SPDM_Internal, managerName: string, configGenerator: any) -> (),
+	PlayerDataReady: any,
+	_name: string,
+	_dataProvider: DataProvider,
+	_playerData: { [Player]: PlayerDataEntry },
+	_managerTemplates: { [string]: ManagerTemplate },
+	_replicatorTokens: { [string]: any },
+	_started: boolean,
+	new: (name: string, dataProvider: DataProvider) -> SPDM_Internal,
+	fromPPM: (name: string, ppm: PlayerProfileManager) -> SPDM_Internal,
+	_getToken: (self: SPDM_Internal, managerName: string) -> any,
+	_setupPlayerDataManagers: (self: SPDM_Internal, player: Player, data: table) -> ({ PromiseObject }, Janitor),
+	_refreshRegisteredManagersFolder: (self: SPDM_Internal) -> (),
+	Start: (self: SPDM_Internal) -> (),
+	RegisterManager: (
+		self: SPDM_Internal,
+		managerName: string,
+		configGenerator: (player: Player, data: table) -> ManagerConfig
+	) -> (),
+	GetManager: (self: SPDM_Internal, player: Player, managerName: string?) -> TableManager?,
+	PromiseManager: (self: SPDM_Internal, player: Player, managerName: string?) -> PromiseObject,
+	GetReplicator: (self: SPDM_Internal, player: Player, managerName: string?) -> TableReplicator?,
+	IsManagerRegistered: (self: SPDM_Internal, managerName: string?) -> boolean,
+	IsManagerReady: (self: SPDM_Internal, player: Player, managerName: string?) -> boolean,
 	IsPlayerReady: (self: SPDM_Internal, player: Player) -> boolean,
-	GetProfile: (self: SPDM_Internal, player: Player) -> Profile?,
-	GetPlayerProfileManager: (self: SPDM_Internal) -> PlayerProfileManager,
-	OnPlayerReady: (self: SPDM_Internal, player: Player) -> Promise,
+	OnPlayerReady: (self: SPDM_Internal, player: Player) -> PromiseObject,
+	ForEachPlayer: (self: SPDM_Internal, func: (player: Player, janitor: Janitor) -> ()) -> Connection,
+	IsStarted: (self: SPDM_Internal) -> boolean,
+	DisableDefaultManager: (self: SPDM_Internal) -> (),
+	SetDefaultManagerName: (self: SPDM_Internal, managerName: string) -> (),
 	[any]: any,
 }
 
 --// Constants //--
 const DEFAULT_TIMEOUT = 60
-const KEY_PPM = Symbol("PlayerProfileManager")
-
--- Priority constants for save callbacks
-const SAVE_PRIORITY = {
-	HIGHEST = 1000,
-	HIGH = 500,
-	NORMAL = 0,
-	LOW = -500,
-	LOWEST = -1000,
-}
-
---// Volatiles //--
-local STARTED = false -- DO NOT TOUCH
-const PlayerData = {}
-const ManagerTemplates = {}
-const PlayerSaveCallbacks = {} -- Store save callbacks per player
 
 --------------------------------------------------------------------------------
 --// Service Def //--
@@ -112,57 +101,7 @@ const PlayerSaveCallbacks = {} -- Store save callbacks per player
 local ServerPlayerDataManager = {}
 ServerPlayerDataManager.ClassName = "ServerPlayerDataManager"
 ServerPlayerDataManager.__index = ServerPlayerDataManager
-
---[=[
-    @within ServerPlayerDataManager
-    @prop SAVE_PRIORITY table
-    Priority constants for save callbacks. Higher numbers execute first.
-    
-    ```lua
-    SPDM.SAVE_PRIORITY.HIGHEST  -- 1000
-    SPDM.SAVE_PRIORITY.HIGH     -- 500
-    SPDM.SAVE_PRIORITY.NORMAL   -- 0 (default)
-    SPDM.SAVE_PRIORITY.LOW      -- -500
-    SPDM.SAVE_PRIORITY.LOWEST   -- -1000
-    ```
-]=]
-ServerPlayerDataManager.SAVE_PRIORITY = SAVE_PRIORITY
-
---[=[
-    @private
-    @within ServerPlayerDataManager
-    @prop _DEBUG boolean
-    Whether or not to print debug messages.
-]=]
-ServerPlayerDataManager._DEBUG = false
-
---[=[
-    @within ServerPlayerDataManager
-    @prop DEFAULT_MANAGER_NAME string?
-    The default internal manager name. Set to nil to disable default manager functionality.
-]=]
--- ServerPlayerDataManager.DEFAULT_MANAGER_NAME = "DEFAULT_MANAGER"
-
---[=[
-    @within ServerPlayerDataManager
-    @prop ManagerReady Signal<player: Player, managerName: string, manager: TableManager>
-    A signal that fires when a manager is ready for a Player.
-]=]
-ServerPlayerDataManager.ManagerReady = Signal.new()
-
---[=[
-    @within ServerPlayerDataManager
-    @prop ManagerRegistered Signal<managerName: string>
-    A signal that fires when a new manager is registered.
-]=]
-ServerPlayerDataManager.ManagerRegistered = Signal.new()
-
---[=[
-    @within ServerPlayerDataManager
-    @prop PlayerDataReady Signal<Player>
-    A signal that fires when a Player's data is ready to be used.
-]=]
-ServerPlayerDataManager.PlayerDataReady = Signal.new()
+ServerPlayerDataManager.DEFAULT_MANAGER_NAME = "DefaultManager"
 
 --------------------------------------------------------------------------------
 
@@ -186,140 +125,101 @@ local function assertValidManagerName(managerName: any)
 	end
 end
 
-local function debugPrint(...)
-	if ServerPlayerDataManager._DEBUG then
+local function debugPrint(self: SPDM_Internal, ...)
+	if self._DEBUG then
 		print("[📤 SPDM]", ...)
 	end
 end
 
--- Cache and fetch the class token for a given name
-const ReplicatorClassTokens = {}
-local function upsertToken(name: string)
-	if not ReplicatorClassTokens[name] then
-		ReplicatorClassTokens[name] = TableReplicator.Token(name)
-	end
-	return ReplicatorClassTokens[name]
+--------------------------------------------------------------------------------
+--// Constructors //--
+--------------------------------------------------------------------------------
+
+function ServerPlayerDataManager.new(name: string, dataProvider: DataProvider): SPDM_Internal
+	assert(typeof(name) == "string" and #name > 0, "[📤] Expected a non-empty string for name.")
+	assert(typeof(dataProvider) == "function", "[📤] Expected dataProvider to be a function.")
+
+	local self = setmetatable({}, ServerPlayerDataManager) :: any
+	self._name = name
+	self._dataProvider = dataProvider
+	self._playerData = {}
+	self._managerTemplates = {}
+	self._replicatorTokens = {}
+	self._started = false
+
+	self._DEBUG = false
+	self.DEFAULT_MANAGER_NAME = ServerPlayerDataManager.DEFAULT_MANAGER_NAME
+
+	self.ManagerReady = Signal.new()
+	self.ManagerRegistered = Signal.new()
+	self.PlayerDataReady = Signal.new()
+
+	return self
 end
 
--- Helper function to execute callbacks in priority order
-local function executeSaveCallbacks(player: Player, profile: Profile, callbackType: string)
-	local callbacks = PlayerSaveCallbacks[player] and PlayerSaveCallbacks[player][callbackType]
-	if not callbacks or #callbacks == 0 then
-		return
-	end
+function ServerPlayerDataManager.fromPPM(name: string, ppm: PlayerProfileManager): SPDM_Internal
+	assert(ppm, "[📤] PlayerProfileManager is required for fromPPM.")
+	assert(ppm.ClassName == "PlayerProfileManager", "[📤] fromPPM expected a valid PlayerProfileManager instance.")
 
-	-- Sort callbacks by priority (highest first)
-	table.sort(callbacks, function(a, b)
-		return a.priority > b.priority
+	return ServerPlayerDataManager.new(name, function(player: Player)
+		return ppm:PromiseProfile(player):andThen(function(profile)
+			assert(typeof(profile.Data) == "table", "[📤] fromPPM expected profile.Data to be a table.")
+			return profile.Data
+		end)
 	end)
-
-	-- Execute callbacks in priority order
-	for _, callbackData in ipairs(callbacks) do
-		local success, err = pcall(callbackData.callback, profile)
-		if not success then
-			warn(`[📤] Save callback failed for {player.Name}: {err}`)
-		end
-	end
 end
 
--- Helper function to add a save callback with priority
-local function addSaveCallback(
+--------------------------------------------------------------------------------
+--// Private Methods //--
+--------------------------------------------------------------------------------
+
+function ServerPlayerDataManager._getToken(self: SPDM_Internal, managerName: string)
+	local tokenName = `{self._name}/{managerName}`
+	if not self._replicatorTokens[tokenName] then
+		self._replicatorTokens[tokenName] = TableReplicator.Token(tokenName)
+	end
+	return self._replicatorTokens[tokenName]
+end
+
+function ServerPlayerDataManager._setupPlayerDataManagers(
+	self: SPDM_Internal,
 	player: Player,
-	callbackType: string,
-	callback: (profile: Profile) -> (),
-	priority: number
-): any
-	if not PlayerSaveCallbacks[player] then
-		PlayerSaveCallbacks[player] = {
-			OnSave = {},
-			OnLastSave = {},
-		}
-	end
-
-	local callbackData = {
-		callback = callback,
-		priority = priority,
-		connection = nil, -- Will be set later if needed
-	}
-
-	table.insert(PlayerSaveCallbacks[player][callbackType], callbackData)
-
-	-- Return a connection-like object for cleanup
-	local connection = {
-		Disconnect = function()
-			local callbacks = PlayerSaveCallbacks[player] and PlayerSaveCallbacks[player][callbackType]
-			if callbacks then
-				local idx = table.find(callbacks, callbackData)
-				if idx then
-					table.remove(callbacks, idx)
-				end
-			end
-		end,
-	}
-	connection.Destroy = connection.Disconnect
-
-	callbackData.connection = connection
-	return connection
-end
-
-local function setupPlayerDataManagers(player: Player, profile: Profile)
-	debugPrint("Setting up player data managers for", player)
+	data: table
+): ({ PromiseObject }, Janitor)
+	debugPrint(self, "Setting up player data managers for", player)
 
 	local jani = Janitor.new()
-	local Replicators = {}
-	PlayerData[player] = {
-		Replicators = Replicators,
+	local replicators = {}
+	self._playerData[player] = {
+		Replicators = replicators,
 		AllManagersReady = false,
+		ForEachJanitors = {},
 	}
-
-	-- Initialize save callbacks for this player
-	PlayerSaveCallbacks[player] = {
-		OnSave = {},
-		OnLastSave = {},
-	}
-
-	-- Setup save callback execution
-	local saveConnection = profile.OnSave:Connect(function()
-		executeSaveCallbacks(player, profile, "OnSave")
-	end)
-
-	local lastSaveConnection = profile.OnLastSave:Connect(function()
-		executeSaveCallbacks(player, profile, "OnLastSave")
-	end)
-
-	jani:Add(function()
-		saveConnection:Disconnect()
-		lastSaveConnection:Disconnect()
-		PlayerSaveCallbacks[player] = nil
-	end)
 
 	local managerReadyPromises = {}
-
-	-- ...existing code...
-	for name, data in ManagerTemplates do
-		local generateConfig = data.ConfigGenerator
+	for name, template in self._managerTemplates do
+		local generateConfig = template.ConfigGenerator
 		table.insert(
 			managerReadyPromises,
 			jani:AddPromise(Promise.new(function(resolve)
-				local config = generateConfig(player, profile)
+				local config = generateConfig(player, data)
 				assert(typeof(config.Data) == "table", "The Data function must return a table. Failed for: " .. name)
 
-				-- reconcile the replication targets
 				local rTargets = config.ReplicationTargets
 				if typeof(rTargets) == "string" and string.lower(rTargets) == "self" then
 					rTargets = player
 				elseif not config.Parent and not rTargets then
 					warn(
-						`[📤] ReplicationTargets is not set for {name} manager. Defaulting to '{player.Name}'. To ensure 'nil' replication targets, set ReplicationTargets to 'None'.`
+						`[📤] ReplicationTargets is not set for {name} manager. Defaulting to '{player.Name}'. To ensure nil replication targets, set ReplicationTargets to 'None'.`
 					)
 					rTargets = player
-				elseif typeof(rTargets) == "string" and string.lower(rTargets) == "None" then
+				elseif typeof(rTargets) == "string" and string.lower(rTargets) == "none" then
 					rTargets = nil
 				end
 
 				local tm = TableManager.new(config.Data)
 				local tr = TableReplicator.new {
-					ClassToken = upsertToken(name),
+					ClassToken = self:_getToken(name),
 					TableManager = tm,
 					ReplicationTargets = rTargets,
 					Parent = config.Parent,
@@ -333,178 +233,134 @@ local function setupPlayerDataManagers(player: Player, profile: Profile)
 					tm:Destroy()
 				end)
 
-				Replicators[name] = tr
-				ServerPlayerDataManager.ManagerReady:Fire(player, name, tm)
+				replicators[name] = tr
+				self.ManagerReady:Fire(player, name, tm)
 				resolve(tm)
 			end))
 		)
 	end
 
+	jani:Add(function()
+		local entry = self._playerData[player]
+		if entry then
+			for _, forEachJani in ipairs(entry.ForEachJanitors) do
+				forEachJani:Destroy()
+			end
+		end
+		self._playerData[player] = nil
+	end)
+
 	return managerReadyPromises, jani
+end
+
+function ServerPlayerDataManager._refreshRegisteredManagersFolder(self: SPDM_Internal)
+	local rootFolder = script.Parent:FindFirstChild("RegisteredServerManagers")
+	if not rootFolder then
+		rootFolder = Instance.new("Folder")
+		rootFolder.Name = "RegisteredServerManagers"
+		rootFolder.Parent = script.Parent
+	end
+
+	local namespaceFolder = rootFolder:FindFirstChild(self._name)
+	if not namespaceFolder then
+		namespaceFolder = Instance.new("Folder")
+		namespaceFolder.Name = self._name
+		namespaceFolder.Parent = rootFolder
+	end
+
+	for _, child in ipairs(namespaceFolder:GetChildren()) do
+		child:Destroy()
+	end
+
+	for name in self._managerTemplates do
+		local manager = Instance.new("BoolValue")
+		manager.Name = name
+		manager.Parent = namespaceFolder
+	end
 end
 
 --------------------------------------------------------------------------------
 --// Start Method //--
 --------------------------------------------------------------------------------
 
---[=[
-    Starts the service and sets up all the Player's data managers.
-    ```lua
-    local PlayerDataManager = require(Packages.PlayerDataManager).Server
-    
-    local PPM = PlayerProfileManager.new(yourProfileConfig)
-    PlayerDataManager:Start(PPM)
-    ```
-]=]
-function ServerPlayerDataManager.Start(self: SPDM_Internal, ppm: PlayerProfileManager)
-	assert(ppm, "PlayerProfileManager is not set. Please set it before calling Start.")
-	assert(
-		ppm.ClassName == "PlayerProfileManager",
-		"PlayerProfileManager is not a valid PlayerProfileManager instance."
-	)
-	ServerPlayerDataManager[KEY_PPM] = ppm
+function ServerPlayerDataManager.Start(self: SPDM_Internal)
+	if self._started then
+		warn("[📤] ServerPlayerDataManager has already started. Do not call Start multiple times.")
+		return
+	end
 
-	-- Initialize the default manager if it's enabled and doesn't exist
 	if self.DEFAULT_MANAGER_NAME then
-		if not ManagerTemplates[self.DEFAULT_MANAGER_NAME] then
-			if not ppm._config.DefaultDataSchema[self.DEFAULT_MANAGER_NAME] then
-				error(`[📤] No table at index '{self.DEFAULT_MANAGER_NAME}' found in the DefaultDataSchema.`)
-			end
-			debugPrint("Default Manager not registered. Registering Default Manager.")
-
-			self:RegisterManager(self.DEFAULT_MANAGER_NAME, function(player: Player, profile: Profile)
+		if not self._managerTemplates[self.DEFAULT_MANAGER_NAME] then
+			debugPrint(self, "Default Manager not registered. Registering Default Manager.")
+			self:RegisterManager(self.DEFAULT_MANAGER_NAME, function(player: Player, resolvedData: table): ManagerConfig
 				return {
-					Data = profile.Data[self.DEFAULT_MANAGER_NAME],
+					Data = resolvedData[self.DEFAULT_MANAGER_NAME],
 					ReplicationTargets = player,
 				}
 			end)
 		else
-			debugPrint("Default Manager already registered.")
+			debugPrint(self, "Default Manager already registered.")
 		end
 	else
-		debugPrint("Default Manager disabled (DEFAULT_MANAGER_NAME is nil).")
+		debugPrint(self, "Default Manager disabled (DEFAULT_MANAGER_NAME is nil).")
 	end
 
-	-- Mark the service as started so no more managers can be registered
-	STARTED = true
-
-	-- Override the Start method so that it can only be called once
-	self.Start = function()
-		warn("[📤] ServerPlayerDataManager has already started. Do not call Start multiple times.")
-	end
-
-	debugPrint("ServerPlayerDataManager has started!")
-
-	--------------------------------------------------------------------------------
-	-- Grab the profile for each Player and setup their managers
-	local function Setup(plr: Player, profile: Profile, jani: Janitor)
-		local readyPromises, cleanup = setupPlayerDataManagers(plr, profile)
-
-		jani:Add(cleanup)
-		jani:Add(function()
-			PlayerData[plr] = nil
-		end)
-
-		Promise.all(readyPromises):andThen(function()
-			PlayerData[plr].AllManagersReady = true
-			self.PlayerDataReady:Fire(plr)
-			debugPrint(`{plr.Name}'s PlayerData is now ready.`)
-		end)
-	end
+	self._started = true
+	debugPrint(self, "ServerPlayerDataManager has started!")
 
 	RailUtil.Player.forEachPlayer(function(plr: Player, jani: Janitor)
-		jani:AddPromise(ppm:PromiseProfile(plr):andThen(function(profile: Profile)
-			Setup(plr, profile, jani)
+		jani:AddPromise(self._dataProvider(plr):andThen(function(resolvedData: table)
+			assert(typeof(resolvedData) == "table", "[📤] dataProvider must resolve a table.")
+
+			local readyPromises, cleanup = self:_setupPlayerDataManagers(plr, resolvedData)
+			jani:Add(cleanup)
+
+			Promise.all(readyPromises):andThen(function()
+				local entry = self._playerData[plr]
+				if not entry then
+					return
+				end
+				entry.AllManagersReady = true
+				self.PlayerDataReady:Fire(plr)
+				debugPrint(self, `{plr.Name}'s PlayerData is now ready.`)
+			end)
 		end))
 	end)
 
-	--------------------------------------------------------------------------------
-
-	-- Setup a list
-	local ManagersListFolder = Instance.new("Folder")
-	ManagersListFolder.Name = "RegisteredServerManagers"
-	for name in ManagerTemplates do
-		local manager = Instance.new("BoolValue")
-		manager.Name = name
-		manager.Parent = ManagersListFolder
-	end
-	ManagersListFolder.Parent = script.Parent
+	self:_refreshRegisteredManagersFolder()
 end
 
 --------------------------------------------------------------------------------
 --// Public Methods //--
 --------------------------------------------------------------------------------
 
---[=[
-    Registers a manager config generator for new managers to use during construction.
-
-    ```lua
-    SPDM:RegisterManager("Settings", function(player, profile)
-        return {
-            Data = profile.Data.Settings;
-            ReplicationTargets = player;
-            Tags = {UserId = player.UserId};
-        }
-    end)
-    ```
-
-    :::note UserId tag
-    All managers are automatically reconciled with the UserId tag being set to the Player's UserId. `{UserId = player.UserId}`.
-    Don't modify this tag unless you know what you're doing as it can break autosetup features.
-    :::
-
-    :::warning Modifying the given table
-    Do not modify a table after passing it. Treat it as frozen. Doing so can cause potential
-    desyncs between players.
-    :::
-
-    :::warning Registering after Start
-    You are not allowed to register managers after the service has started. Doing so will result in an error.
-    :::
-]=]
 function ServerPlayerDataManager.RegisterManager(
 	self: SPDM_Internal,
 	managerName: string,
-	configGenerator: (
-		player: Player,
-		profile: Profile
-	) -> {
-		Data: table,
-		ReplicationTargets: "All" | "None" | Player | { Player },
-		Tags: table?,
-		Parent: table?,
-		Client: table?,
-	}
+	configGenerator: (player: Player, data: table) -> ManagerConfig
 )
-	assert(not STARTED, "[📤] Cannot register data containers after the service has started.")
-	assert(not ManagerTemplates[managerName], "[📤] Manager already exists with name: " .. managerName)
-	ManagerTemplates[managerName] = {
+	assert(not self._started, "[📤] Cannot register data containers after the service has started.")
+	assertValidManagerName(managerName)
+	assert(typeof(configGenerator) == "function", "[📤] Expected configGenerator to be a function.")
+	assert(not self._managerTemplates[managerName], "[📤] Manager already exists with name: " .. managerName)
+	self._managerTemplates[managerName] = {
 		ConfigGenerator = configGenerator,
 	}
-	debugPrint("Registered Manager:", managerName)
+	debugPrint(self, "Registered Manager:", managerName)
 	self.ManagerRegistered:Fire(managerName)
 end
 
---[=[
-    Fetches one of the given Player's TableManagers. If one is not specified then it will assume the default one.
-    Will return nil if the player's data is not ready, the manager does not exist, or no default manager is configured.
-    ```lua
-    local defaultManager = SPDM:GetManager(Players.Raildex)
-    assert(defaultManager, "Player data is not ready yet or no default manager configured.")
-    defaultManager:Set("Volume", 0.5)
-    ```
-]=]
 function ServerPlayerDataManager.GetManager(self: SPDM_Internal, player: Player, managerName: string?): TableManager?
 	managerName = managerName or self.DEFAULT_MANAGER_NAME
 
-	-- Check if trying to access default manager when it's disabled
 	if not managerName then
 		warn("[📤] No manager name provided and DEFAULT_MANAGER_NAME is disabled (nil).")
 		return nil
 	end
 
 	assertValidManagerName(managerName)
-	if not PlayerData[player] then
+	local entry = self._playerData[player]
+	if not entry then
 		assertPlayer(player)
 		warn(
 			`[📤] Failed to get {player.Name}'s TableManager '{managerName}'. Their player data has not yet begun initializing!`
@@ -512,8 +368,8 @@ function ServerPlayerDataManager.GetManager(self: SPDM_Internal, player: Player,
 		return nil
 	end
 
-	local Replicator = PlayerData[player].Replicators[managerName]
-	if not Replicator then
+	local replicator = entry.Replicators[managerName]
+	if not replicator then
 		if not self:IsPlayerReady(player) then
 			warn(
 				`[📤] Failed to get {player.Name}'s TableManager '{managerName}'. Their player data is in the process of readying. \n`,
@@ -522,7 +378,7 @@ function ServerPlayerDataManager.GetManager(self: SPDM_Internal, player: Player,
 		else
 			warn(
 				`[📤] Failed to get {player.Name}'s TableManager '{managerName}'. The manager does not exist. Check to ensure it was registered properly. Current Managers: `,
-				RailUtil.Table.Keys(ManagerTemplates),
+				RailUtil.Table.Keys(self._managerTemplates),
 				"\n",
 				debug.traceback()
 			)
@@ -530,30 +386,21 @@ function ServerPlayerDataManager.GetManager(self: SPDM_Internal, player: Player,
 		return nil
 	end
 
-	return Replicator:GetTableManager()
+	return replicator:GetTableManager()
 end
 
---[=[
-    Promises a TableManager for a given player. If a managerName is not specified then it will assume the default one.
-    Will reject if no default manager is configured.
-    ```lua
-    SPDM:PromiseManager(Players.Raildex, "Settings"):andThen(function(manager)
-        manager:Set("Volume", 0.5)
-    end)
-    ```
-]=]
-function ServerPlayerDataManager.PromiseManager(self: SPDM_Internal, player: Player, managerName: string?): Promise
+function ServerPlayerDataManager.PromiseManager(self: SPDM_Internal, player: Player, managerName: string?): PromiseObject
 	managerName = managerName or self.DEFAULT_MANAGER_NAME
 
-	-- Check if trying to access default manager when it's disabled
 	if not managerName then
 		return Promise.reject("[📤] No manager name provided and DEFAULT_MANAGER_NAME is disabled (nil).")
 	end
 
 	assertPlayer(player)
 	assertValidManagerName(managerName)
-	if PlayerData[player] and PlayerData[player].Replicators[managerName] then
-		return Promise.resolve(PlayerData[player].Replicators[managerName]:GetTableManager())
+	local entry = self._playerData[player]
+	if entry and entry.Replicators[managerName] then
+		return Promise.resolve(entry.Replicators[managerName]:GetTableManager())
 	end
 
 	return Promise.fromEvent(self.ManagerReady, function(readiedPlayer: Player, readiedManager: string)
@@ -563,13 +410,6 @@ function ServerPlayerDataManager.PromiseManager(self: SPDM_Internal, player: Pla
 	end)
 end
 
---[=[
-    Returns the TableReplicator associated with a Player's Manager. If a manager name is not specified then it will assume the default one.
-    Will return nil if no default manager is configured.
-    ```lua
-    local replicator = SPDM:GetReplicator(Players.Raildex, "Settings")
-    ```
-]=]
 function ServerPlayerDataManager.GetReplicator(
 	self: SPDM_Internal,
 	player: Player,
@@ -577,7 +417,6 @@ function ServerPlayerDataManager.GetReplicator(
 ): TableReplicator?
 	managerName = managerName or self.DEFAULT_MANAGER_NAME
 
-	-- Check if trying to access default manager when it's disabled
 	if not managerName then
 		warn("[📤] No manager name provided and DEFAULT_MANAGER_NAME is disabled (nil).")
 		return nil
@@ -589,94 +428,50 @@ function ServerPlayerDataManager.GetReplicator(
 		warn(`[📤] Failed to get {player.Name}'s TableReplicator. Their player data is not ready.`)
 		return nil
 	end
-	return PlayerData[player].Replicators[managerName]
+	local entry = self._playerData[player]
+	return if entry then entry.Replicators[managerName] else nil
 end
 
---[=[
-    Checks whether or not a given manager is registered. If one is not specified then it will assume the default one.
-    Returns false if no default manager is configured.
-]=]
 function ServerPlayerDataManager.IsManagerRegistered(self: SPDM_Internal, managerName: string?): boolean
 	managerName = managerName or self.DEFAULT_MANAGER_NAME
-
-	-- Check if trying to access default manager when it's disabled
 	if not managerName then
 		return false
 	end
-
 	assertValidManagerName(managerName)
-	return ManagerTemplates[managerName] ~= nil
+	return self._managerTemplates[managerName] ~= nil
 end
 
---[=[
-    Checks whether or not a given player's manager is ready. If one is not specified then it will assume the default one.
-    Returns false if no default manager is configured.
-    ```lua
-    if SPDM:IsManagerReady(Players.Raildex, "Settings") then
-        local settings = SPDM:GetManager(Players.Raildex, "Settings")
-    end
-    ```
-]=]
 function ServerPlayerDataManager.IsManagerReady(self: SPDM_Internal, player: Player, managerName: string?): boolean
 	managerName = managerName or self.DEFAULT_MANAGER_NAME
-
-	-- Check if trying to access default manager when it's disabled
 	if not managerName then
 		return false
 	end
-
 	assertPlayer(player)
 	assertValidManagerName(managerName)
-	return PlayerData[player] and PlayerData[player].Replicators[managerName] ~= nil
+	local entry = self._playerData[player]
+	return entry ~= nil and entry.Replicators[managerName] ~= nil
 end
 
---[=[
-    Checks whether or not a given player's data is ready
-]=]
 function ServerPlayerDataManager.IsPlayerReady(self: SPDM_Internal, player: Player): boolean
 	assertPlayer(player)
-	return PlayerData[player] ~= nil and PlayerData[player].AllManagersReady
+	local entry = self._playerData[player]
+	return entry ~= nil and entry.AllManagersReady
 end
--- ServerPlayerDataManager.IsReady = ServerPlayerDataManager.IsPlayerReady
 
---[=[
-    Promise that resolves when the player's data is ready to be used.
-]=]
-function ServerPlayerDataManager.OnPlayerReady(self: SPDM_Internal, player: Player): Promise
+function ServerPlayerDataManager.OnPlayerReady(self: SPDM_Internal, player: Player): PromiseObject
 	assertPlayer(player)
 	if self:IsPlayerReady(player) then
 		return Promise.resolve()
 	end
-	-- TODO: Check if the player has left the game
 	return Promise.fromEvent(self.PlayerDataReady, function(readiedPlayer: Player)
 		return readiedPlayer == player
 	end):timeout(DEFAULT_TIMEOUT, `[📤] PlayerData failed to become ready in time [{DEFAULT_TIMEOUT} Seconds].`)
 end
--- ServerPlayerDataManager.OnReady = ServerPlayerDataManager.OnPlayerReady
 
---[=[
-    @unreleased This method is not complete and is subject to change.
-
-    Runs a function for all existing loaded player data and all future player data. Passes a janitor that
-    runs its cleanup immediately prior to the final save of the player data.
-
-    :::note Implicit Yield
-    The callback is invoked inside `RailUtil.Player.forEachPlayer`. If the player's data is not yet
-    ready, this internally yields (via `:await()`) until it becomes ready before running `func`.
-    :::
-
-    ```lua
-    SPDM:ForEachPlayer(function(player, janitor)
-        local defaultManager = SPDM:GetManager(player)
-        defaultManager:Set("Volume", 0.5)
-    end)
-    ```
-]=]
 function ServerPlayerDataManager.ForEachPlayer(
 	self: SPDM_Internal,
 	func: (player: Player, janitor: Janitor) -> ()
 ): Connection
-	local traceback = debug.traceback("", 2)
 	assert(typeof(func) == "function", "[📤] Expected a function for the first argument. Got Type: " .. typeof(func))
 	return RailUtil.Player.forEachPlayer(function(player: Player, jani: Janitor)
 		if not self:IsPlayerReady(player) then
@@ -684,150 +479,36 @@ function ServerPlayerDataManager.ForEachPlayer(
 		end
 
 		if self:IsPlayerReady(player) then
-			local saveJani = Janitor.new()
-			local profile = self:GetProfile(player) :: Profile
-			assert(profile:IsActive(), player.Name .. "'s profile is not active.")
+			local callbackJani = Janitor.new()
+			jani:Add(function()
+				callbackJani:Destroy()
+			end)
 
-			local thread = nil
-			local conn = profile.OnLastSave:Connect(function(reason: string)
-				debugPrint("Final save executing for:", player, "| Reason:", reason, traceback)
-				saveJani:Destroy()
-				task.cancel(thread)
-			end)
-			saveJani:Add(function()
-				conn:Disconnect() -- Janitor wont let me give disconnect as a method to a non rbxscriptsignal
-			end)
-			thread = task.spawn(func, player, saveJani)
+			local entry = self._playerData[player]
+			if entry then
+				table.insert(entry.ForEachJanitors, callbackJani)
+			end
+
+			task.spawn(func, player, callbackJani)
 		end
 	end)
 end
 
---[=[
-    Returns whether or not the ServerPlayerDataManager has been started.
-    ```lua
-    if SPDM:IsStarted() then
-        print("SPDM has been started!")
-    end
-    ```
-]=]
 function ServerPlayerDataManager.IsStarted(self: SPDM_Internal): boolean
-	return STARTED
+	return self._started
 end
 
---[=[
-    Returns the PlayerProfileManager instance that is being used by the ServerPlayerDataManager.
-    Will error if called prior to Starting the service.
-]=]
-function ServerPlayerDataManager.GetPlayerProfileManager(self: SPDM_Internal): PlayerProfileManager
-	assert(STARTED, "[📤] SPDM has not yet been started.")
-	return ServerPlayerDataManager[KEY_PPM]
-end
-
---[=[
-    Returns the Profile for a given player.
-]=]
-function ServerPlayerDataManager.GetProfile(self: SPDM_Internal, player: Player): Profile?
-	assertPlayer(player)
-	local ppm = self:GetPlayerProfileManager()
-	return ppm:GetProfile(player)
-end
-
---[=[
-	Connects a callback to the OnSave event of a given player. This will run the callback
-	whenever the player's data is saved (not just on the final save).
-	
-	@param player Player -- The player to attach the callback to
-	@param callback function -- The callback to run on save
-	@param priority number? -- Execution priority (higher numbers execute first, default: 0)
-	@return Connection -- Connection object that can be disconnected
-]=]
-function ServerPlayerDataManager.OnSave(
-	self: SPDM_Internal,
-	player: Player,
-	callback: (profile: Profile) -> (),
-	priority: number?
-): Connection?
-	assertPlayer(player)
-	assert(
-		typeof(callback) == "function",
-		"[📤] Expected a function for the callback. Got Type: " .. typeof(callback)
-	)
-
-	local profile = self:GetProfile(player)
-	if not profile then
-		warn("[📤] Player's profile is not active.")
-		return nil
-	end
-
-	return addSaveCallback(player, "OnSave", callback, priority or SAVE_PRIORITY.NORMAL)
-end
-
---[=[
-	Connects a callback to the OnLastSave event of a given player. This will run the callback immediately
-	prior to the final save of the player's data. This is useful for handling data that needs to be serialized.
-	
-	@param player Player -- The player to attach the callback to
-	@param callback function -- The callback to run on last save
-	@param priority number? -- Execution priority (higher numbers execute first, default: 0)
-	@return Connection -- Connection object that can be disconnected
-]=]
-function ServerPlayerDataManager.OnLastSave(
-	self: SPDM_Internal,
-	player: Player,
-	callback: (profile: Profile) -> (),
-	priority: number?
-): Connection?
-	assertPlayer(player)
-	assert(
-		typeof(callback) == "function",
-		"[📤] Expected a function for the callback. Got Type: " .. typeof(callback)
-	)
-
-	local profile = self:GetProfile(player)
-	if not profile then
-		warn("[📤] Player's profile is not active.")
-		return nil
-	end
-
-	return addSaveCallback(player, "OnLastSave", callback, priority or SAVE_PRIORITY.NORMAL)
-end
-
---[=[
-    Disables the default manager functionality. This prevents automatic registration
-    of the default manager and requires explicit manager names for all operations.
-    
-    Must be called before Start() to take effect.
-    
-    ```lua
-    SPDM:DisableDefaultManager()
-    SPDM:Start(PlayerProfileManager)
-    
-    -- Now all operations require explicit manager names
-    local settings = SPDM:GetManager(player, "Settings") -- Must specify "Settings"
-    ```
-]=]
 function ServerPlayerDataManager.DisableDefaultManager(self: SPDM_Internal)
-	assert(not STARTED, "[📤] Cannot disable default manager after the service has started.")
+	assert(not self._started, "[📤] Cannot disable default manager after the service has started.")
 	self.DEFAULT_MANAGER_NAME = nil
-	debugPrint("Default Manager disabled.")
+	debugPrint(self, "Default Manager disabled.")
 end
 
---[=[
-    Sets a custom default manager name. This allows you to change which manager
-    is used as the default instead of "DEFAULT_MANAGER".
-    
-    Must be called before Start() to take effect.
-    
-    ```lua
-    SPDM:SetDefaultManagerName("PlayerData")
-    SPDM:Start(PlayerProfileManager)
-    ```
-]=]
 function ServerPlayerDataManager.SetDefaultManagerName(self: SPDM_Internal, managerName: string)
-	assert(not STARTED, "[📤] Cannot change default manager name after the service has started.")
+	assert(not self._started, "[📤] Cannot change default manager name after the service has started.")
 	assertValidManagerName(managerName)
 	self.DEFAULT_MANAGER_NAME = managerName
-	debugPrint("Default Manager name set to:", managerName)
+	debugPrint(self, "Default Manager name set to:", managerName)
 end
 
 export type ServerPlayerDataManager = typeof(ServerPlayerDataManager)
