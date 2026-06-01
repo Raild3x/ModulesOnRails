@@ -1,63 +1,80 @@
-# Project Overview
+# ModulesOnRails Copilot Instructions
 
-This codebase contains the source for various Roblox Wally modules.
+## Goal
+This repository contains multiple Roblox Wally modules. Favor consistency inside the package you are editing over consistency with the rest of the repository.
 
-## Repository Structure
+## Priority Order
+1. Follow the local style of the current package first.
+2. Follow these repository-wide standards second.
+3. Keep existing behavior unless the change explicitly requires behavior changes.
 
-- `/lib`: Contains the source code for the game.
-- `/test`: Contains our testing framework `tiniest`.
-- `/scripts`: Contains various scripts for development and testing purposes.
+## Repository Layout
+- `/lib`: Source for packages.
+- `/test`: Test harness and stories, including tiniest usage.
+- `/scripts`: Development, setup, and publish scripts.
 
-Some packages are old and use outdated code styles and practices. When working on a particular package, try and follow the code style within that package and avoid looking outside of it so we dont end up mixing something old into something new.
+## Package Layout
+- `/src`: Package source.
+- `/wally.toml`: Package configuration.
 
-## Package Structure
+If a package is pure Luau and has multiple modules, do not use `init.luau` as the entry point. This keeps the package friendly for `lune` testing.
 
-- `/src`: Contains the source code for the package.
-- `/wally.toml`: The configuration file for the package within Wally.
+Publishing will generate an `init.luau` re-export automatically. Non-pure-Luau packages may use `init.luau` directly.
 
-If the package would consist of more than one module and is pure luau based, then
-it should avoid using `init.luau` style entry points. This is to allow testing via `lune`.
-When publishing, our build process will automatically create an `init.luau` file that re-exports all modules in the package. If the package is not pure luau based, then it can use an `init.luau` file as an entry point.
+## Setup For Development
+Use `npm run setup <package-name>` when deeper local package context is needed. This installs dependencies and arranges them similarly to live usage, improving autocomplete, linting, and diagnostics in VS Code.
 
-We can use `npm run setup <package-name>` to set up a package for development. This will install any needed wally dependencies and reorganize them in a fashion similar to how they would be used
-in a live environment. This is not required to be able to work on a package, but it can be helpful as it will provide better autocompletion, linting, and error checking in VSCode.
-
-## Coding Standards
-
-- Use PascalCase for class names, table fields, method names.
+## Luau Style Rules
+- Use PascalCase for class names, table fields, and method names.
 - Use camelCase for variable names.
 - Use SCREAMING_SNAKE_CASE for constants.
-- Private fields and methods should be prefixed with an underscore (_).
-- All non inferred parameters and functions should be type defined.
-- Luau "Classes" should have a public type def and an internal type def. The internal type def will just union the public type def with any private fields and methods.
-- Luau Class Methods should explicitly define `self` as the first parameter, utilizing the internal type def. We will use dot syntax for method declarations, but they should still be called with colon syntax. This is to allow for better type checking and inference.
-- Used moonwave style --- for single line comments and --[=[]=] for multi-line comments for public documentation. Private documentation should keep with just -- and --[[]] style.
-- When adjusting code, ensure we keep any existing comments or debug parts. Only remove them if  specifically asked or they become outdated with new functionality.
+- Prefix private fields and methods with `_`.
+- Add explicit types for non-inferred parameters and function signatures.
+- For Luau classes, define both a public type and an internal type.
+- Internal type should extend public type with private fields and methods.
+- Declare class methods with dot syntax and explicit `self: InternalType`.
+- Call those methods with colon syntax.
+- Keep existing comments and debug logic unless removal is explicitly requested or the content is now outdated.
+- Methods/functions that yield or could potentially yield should be either suffixed with `Async` or return as a Promise to prevent unexpected behavior.
 
-## Constants
-In Luau, variables can be declared as constants using the const keyword. The const keyword will prevent a variable from being reassigned after its declaration. The const keyword should <i>always</i> be used whenever declaring a variable that never changes. The const keyword does not apply to the inside of tables, so a table that's edited later can still be const. Constant variables assigned at the base scope level should be written using SCREAMING_SNAKE_CASE. Constant tables at the base scope should use const and regular camelCase if they're edited later in the script - they should only use SCREAMING_SNAKE_CASE if they aren't edited later in the script. If we declare a variable and then immediately write to it, we consider that constant even if we may not be able to use the const keyword.
+## Documentation Style
+- Public single-line docs: `---`
+- Public multi-line docs: `--[=[]=]`
+- Private single-line comments: `--`
+- Private multi-line comments: `--[[]]`
 
-Data Type	Scope	Usage Pattern	Declaration Policy
-non-table	Base	Never reassigned	const with SCREAMING_SNAKE_CASE
-non-table	Base	Assigned immediately	local with SCREAMING_SNAKE_CASE
-non-table	Base	Assigned programmatically	local with camelCase
-table	Base	Never reassigned, and contents never reassigned	const with SCREAMING_SNAKE_CASE
-table	Base	Never reassigned, and contents may be reassigned	const with camelCase
-table	Base	Assigned immediately, and contents never reassigned	local with SCREAMING_SNAKE_CASE
-table	Base	Assigned immediately, and contents may be reassigned	local with camelCase
-table	Base	Assigned programmatically	local with camelCase
-any	Inner	Never reassigned	const with camelCase
-any	Inner	Assigned immediately	local with camelCase
-any	Inner	Assigned programmatically	local with camelCase
+## Constant Policy
+Use `const` whenever a variable binding is never reassigned.
 
-## Testing
-- Use tiniest for testing. TestEZ is deprecated.
-- Testing should be done by making `.spec.luau` files.
-- If the package is pure Luau code then it can be run in VSCode via `/tests.luau`.
-- If the package is not pure Luau code, then it must be tested manually by the developer. You do not have the ability to run Roblox code, so you will need to rely on the developer to run the tests and provide you with the output. You can use this output to help debug any issues that arise.
+Important notes:
+- `const` protects the variable binding, not table contents.
+- Base-scope constants should use SCREAMING_SNAKE_CASE unless they are mutable-content tables.
+- If a variable is declared and immediately assigned later, treat it as non-const for policy purposes.
 
-## Debugging
+Declaration matrix:
 
-While debugging, the user has the ability to copy and paste the output contents to help inform you. Always use plenty of prints, warnings, and errors so that you can extract value from the output. Never assume you know what the problem is without running a test and using the output to confirm it.
+| Data Type | Scope | Usage Pattern | Declaration Policy |
+| --- | --- | --- | --- |
+| non-table | Base | Never reassigned | const with SCREAMING_SNAKE_CASE |
+| non-table | Base | Assigned immediately | local with SCREAMING_SNAKE_CASE |
+| non-table | Base | Assigned programmatically | local with camelCase |
+| table | Base | Never reassigned, contents never reassigned | const with SCREAMING_SNAKE_CASE |
+| table | Base | Never reassigned, contents may be reassigned | const with camelCase |
+| table | Base | Assigned immediately, contents never reassigned | local with SCREAMING_SNAKE_CASE |
+| table | Base | Assigned immediately, contents may be reassigned | local with camelCase |
+| table | Base | Assigned programmatically | local with camelCase |
+| any | Inner | Never reassigned | const with camelCase |
+| any | Inner | Assigned immediately | local with camelCase |
+| any | Inner | Assigned programmatically | local with camelCase |
 
-Respect the user's time. When adding prints and warnings to help debug, add no less than three distinct pieces of information to the output. Think ahead about what decision you might make in the future and anticipate the information you'll need at that point. Don't be afraid to add copious amounts of prints and warnings to get as much context into the output as possible.
+## Testing Rules
+- Use tiniest for tests. TestEZ is deprecated.
+- Create tests in `.spec.luau` files.
+- For pure Luau packages, run tests through `tests.luau` in VS Code.
+- For non-pure-Luau packages, rely on developer-run manual testing and provided output.
+
+## Debugging Rules
+- Never assume root cause without validating with test output.
+- Add rich diagnostics when debugging: use prints, warnings, and errors.
+- Include at least 3 distinct pieces of information in debug output.
+- Prefer extra context over minimal logs so follow-up decisions can be made from one run.
