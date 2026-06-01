@@ -36,6 +36,8 @@ Use `npm run setup <package-name>` when deeper local package context is needed. 
 - Call those methods with colon syntax.
 - Keep existing comments and debug logic unless removal is explicitly requested or the content is now outdated.
 - Methods/functions that yield or could potentially yield should be either suffixed with `Async` or return as a Promise to prevent unexpected behavior.
+- Avoid magic numbers. That is, numbers with no obvious underlying meaning. You can attribute meaning to a number by assigning it to a variable or constant with a descriptive name, or by writing a comment explaining what the number's purpose is.
+- Packages should always have relative paths for their requires. Never require another module with an absolute path.
 
 ## Documentation Style
 - Public single-line docs: `---`
@@ -51,6 +53,7 @@ Important notes:
 - Base-scope constants should use SCREAMING_SNAKE_CASE unless they are mutable-content tables.
 - If a variable is declared and immediately assigned later, treat it as non-const for policy purposes.
 - Exceptions to the constant naming policy may be made when justified by readability, practicality, or consistency with existing code. Ex: Roblox services and required modules should be consts at the base scope, but they should be PascalCase even though they are never reassigned.
+- local functions should almost always be const.
 
 Declaration matrix:
 
@@ -78,3 +81,7 @@ Declaration matrix:
 - Add rich diagnostics when debugging: use prints, warnings, and errors.
 - Include at least 3 distinct pieces of information in debug output.
 - Prefer extra context over minimal logs so follow-up decisions can be made from one run.
+
+## Planning
+- While planning, you must should come up with a flowchart to explain the current way things work and a separate flowchart to explain the new proposal. If a plan includes multiple separate changes, you need multiple separate before and after flowcharts.
+- You must always include a list of to-dos in the final plan and they should be broken into discrete tasks that an agent can be tasked with.

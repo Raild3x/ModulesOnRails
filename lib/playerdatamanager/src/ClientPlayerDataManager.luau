@@ -1,18 +1,26 @@
--- Logan Hunt (Raildex)
--- Aug 20, 2024
+--!strict
+-- Authors: Logan Hunt (Raildex)
+-- August 20, 2024
 --[=[
     @class ClientPlayerDataManager
 
-    This class is used to provide a simple unified interface for accessing PlayerData. It requires
-    registering what data it should expect and then you can access the data's managers once they have replicated.
+    This class provides a constructed, namespace-aware interface for accessing player data replicated from the server.
+    Each ClientPlayerDataManager instance is paired with a ServerPlayerDataManager via a shared namespace string.
 
+    Key Features:
+    - Constructed instances with namespace isolation (multiple instances can coexist)
+    - Automatic discovery of server-registered managers via namespace folder structure
+    - Promise-based API for safe asynchronous access
+    - Direct signal fields for lifecycle events
+
+    Basic Usage:
     ```lua
-    local PlayerDataManager = require(Packages.PlayerDataManager).Client
+    local PlayerDataManager = require(Packages.PlayerDataManager)
+    local cpdm = PlayerDataManager.Client.new("PlayerData")
 
-    PlayerDataManager:Start():await() -- wait for all managers to be ready
+    cpdm:Start():await() -- wait for all managers to be ready
 
-    local currencyManager = PlayerDataManager:GetManager("Currency")
-
+    local currencyManager = cpdm:GetManager("Currency")
     currencyManager:Observe("Robux", function(money)
         print("My premium currency is:", money)
     end)
@@ -21,149 +29,222 @@
     :::tip Usage with ROAM
     If you are using ROAM then you can set it up easily with the following format:
     ```lua
-    local PlayerDataController = require(Packages.PlayerDataManager).Client
+    local PlayerDataManager = require(Packages.PlayerDataManager)
+    local cpdm = PlayerDataManager.Client.new("PlayerData")
 
-    
-    function PlayerDataController:RoamInit()
+    function cpdm:RoamInit()
         task.wait() -- optional frame delay to allow for other services to register if they need to
         local startProm = self:Start()
         startProm:await() -- yield roam to prevent Start until all managers are ready. This is optional, but makes it safer to access managers.
     end
-    
-    ---------------------------------------------------------------------
-    
-    local Roam = require(Packages.Roam)
-    Roam.registerService(PlayerDataController, "PlayerDataController")
 
-    return PlayerDataController
+    local Roam = require(Packages.Roam)
+    Roam.registerService(cpdm, "PlayerDataController")
+
+    return cpdm
     ```
     :::
 ]=]
 
 --// Services //--
-local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+const Players = game:GetService("Players")
 
 --// Imports //--
-local Packages = ReplicatedStorage.src.Packages
-local Signal = require(Packages.Signal)
-local Janitor = require(Packages.Janitor)
-local Promise = require(Packages.Promise)
-local TableManager = require(Packages.TableManager)
-local TableReplicator = require(Packages.TableReplicator)
+const Packages = script.Parent.Parent
+const Signal = require(Packages.Signal)
+const Janitor = require(Packages.Janitor)
+const Promise = require(Packages.Promise)
+const SharedUtil = require(script.Parent.SharedUtil)
+const TableManager = require(Packages.TableManager)
+const TableReplicator = require(Packages.TableReplicator)
 
 --// Types //--
 type table = { [any]: any }
-type Promise = typeof(Promise.new(function() end))
+type PromiseObject = Promise.Promise
 type Janitor = Janitor.Janitor
 type TableManager = TableManager.TableManager
 type TableReplicator = TableReplicator.ClientTableReplicator
-type TableReplicatorSingleton = TableReplicator.TableReplicatorSingleton
+type Connection = {
+	Disconnect: (self: Connection) -> (),
+	Destroy: (self: Connection) -> (),
+}
+type ManagerReadySignal = Signal.Signal<(name: string, manager: TableManager) -> (), string, TableManager>
+type PlayerDataReadySignal = Signal.VoidSignal
+type NamespaceLostSignal = Signal.VoidSignal
+type LifecycleState = "idle" | "starting" | "ready" | "unavailable" | "destroyed"
 
---// Constants //--
-local LocalPlayer = Players.LocalPlayer
+--[=[
+    @type ClientPlayerDataManager
+    @within ClientPlayerDataManager
+    Public interface for `ClientPlayerDataManager` instances.
+]=]
+export type ClientPlayerDataManager = {
+	ClassName: string,
+	new: (name: string) -> ClientPlayerDataManager,
+	-- lifecycle signals (connect directly on the instance)
+	PlayerDataReady: PlayerDataReadySignal,
+	ManagerReady: ManagerReadySignal,
+	NamespaceLost: NamespaceLostSignal,
+	-- status
+	IsReady: (self: ClientPlayerDataManager) -> boolean,
+	OnReady: (self: ClientPlayerDataManager) -> PromiseObject,
+	OnUnavailable: (self: ClientPlayerDataManager) -> PromiseObject,
+	-- manager access
+	GetManager: (self: ClientPlayerDataManager, managerName: string?) -> TableManager?,
+	GetReplicator: (self: ClientPlayerDataManager, managerName: string?) -> TableReplicator?,
+	PromiseManager: (self: ClientPlayerDataManager, managerName: string?) -> PromiseObject,
+	-- lifecycle
+	Start: (self: ClientPlayerDataManager) -> PromiseObject,
+	Destroy: (self: ClientPlayerDataManager) -> (),
+}
 
---// Volatiles //--
-local Singletons = {}
-local Replicators = {}
+type CPDM_Internal = ClientPlayerDataManager & {
+	-- fields
+	_name: string,
+	_replicators: { [string]: TableReplicator },
+	_ready: boolean,
+	_lifecycleState: LifecycleState,
+	_serverManagersRegistered: PromiseObject?,
+	_janitor: Janitor,
+	_DEBUG: boolean?,
+	DEFAULT_MANAGER_NAME: string,
+	-- private methods
+	_handleNamespaceLost: (self: CPDM_Internal) -> (),
+	_getToken: (self: CPDM_Internal, managerName: string) -> string,
+}
 
--- FLAGS
-local READY = false
+-- Constants
+const REGISTERED_MANAGERS_FOLDER_NAME = SharedUtil.REGISTERED_MANAGERS_FOLDER_NAME
+const ACTIVE_NAMESPACE_REGISTRY_FOLDER_NAME = SharedUtil.ACTIVE_NAMESPACE_REGISTRY_FOLDER_NAME
+const LocalPlayer = Players.LocalPlayer
 
---// Class //--
+--[=[
+    Creates a new ClientPlayerDataManager instance scoped to a namespace.
+    All managers discovered by this instance will be namespaced under the provided `name`.
+    
+    ```lua
+    local cpdm = ClientPlayerDataManager.new("PlayerData")
+    cpdm:Start():await()
+    ```
+]=]
 local ClientPlayerDataManager = {}
 ClientPlayerDataManager.ClassName = "ClientPlayerDataManager"
 ClientPlayerDataManager.__index = ClientPlayerDataManager
-ClientPlayerDataManager._DEBUG = false
+
+function ClientPlayerDataManager.new(namespace: string): ClientPlayerDataManager
+	assert(
+		type(namespace) == "string" and #namespace > 0,
+		"[📥] ClientPlayerDataManager.new() requires a non-empty namespace string"
+	)
+
+	local reservation = SharedUtil.reserveFolderNamespace(ACTIVE_NAMESPACE_REGISTRY_FOLDER_NAME, namespace)
+
+	local self = (setmetatable({}, ClientPlayerDataManager) :: any) :: CPDM_Internal
+
+	self._name = namespace
+	self._replicators = {}
+	self._ready = false
+	self._lifecycleState = "idle"
+	self._janitor = Janitor.new()
+	self.DEFAULT_MANAGER_NAME = SharedUtil.DEFAULT_MANAGER_NAME
+
+	-- Instance-level lifecycle signals
+	self.PlayerDataReady = self._janitor:Add(Signal.new() :: any) :: PlayerDataReadySignal
+	self.ManagerReady = self._janitor:Add(Signal.new() :: any) :: ManagerReadySignal
+	self.NamespaceLost = self._janitor:Add(Signal.new() :: any) :: NamespaceLostSignal
+	self._janitor:Add(reservation)
+
+	return (self :: any) :: ClientPlayerDataManager
+end
 
 --------------------------------------------------------------------------------
---// Util Functions //--
+--// Private Methods //--
 --------------------------------------------------------------------------------
 
-local function debugPrint(...)
-	if ClientPlayerDataManager._DEBUG then
-		print("[📥 DEBUG]", ...)
+-- Generates a namespace-scoped token for the given manager name.
+function ClientPlayerDataManager._getToken(self: CPDM_Internal, managerName: string): string
+	return SharedUtil.getTokenName(self._name, managerName)
+end
+
+-- Transitions this instance into an unavailable state when the server namespace is removed.
+function ClientPlayerDataManager._handleNamespaceLost(self: CPDM_Internal)
+	if self._lifecycleState == "destroyed" or self._lifecycleState == "unavailable" then
+		return
 	end
-end
 
-local DEFAULT_CONDITION_FN = function(replicator: TableReplicator): boolean
-	return tostring(replicator:GetTag("UserId")) == tostring(LocalPlayer.UserId)
+	self._replicators = {}
+	self._ready = false
+	self._lifecycleState = "unavailable"
+	self._serverManagersRegistered = nil
+	self.NamespaceLost:Fire()
 end
 
 --------------------------------------------------------------------------------
---// Service Core //--
+--// Lifecycle Management //--
 --------------------------------------------------------------------------------
 
 --[=[
-    @within ClientPlayerDataManager
-    @prop DEFAULT_MANAGER_NAME string
-    The default internal manager name.
+    @tag yields
+    Starts the auto-listening process for server-registered managers.
+    Discovers managers in the namespace-scoped folder: `RegisteredServerManagers/{name}/`
+    
+    Must be called before accessing managers.
+    
+    Returns a promise that resolves when all managers are ready.
 ]=]
+function ClientPlayerDataManager:Start(): PromiseObject
+	assert(
+		not self._serverManagersRegistered,
+		`[📥] ClientPlayerDataManager('{self._name}') has already been started`
+	)
+	assert(self._lifecycleState ~= "destroyed", `[📥] ClientPlayerDataManager('{self._name}') is destroyed.`)
 
---[=[
-    @within ClientPlayerDataManager
-    @prop PlayerDataReady Signal<Player>
-    A signal that fires when a Player's data is ready to be used.
-]=]
-ClientPlayerDataManager.PlayerDataReady = Signal.new()
+	self._lifecycleState = "starting"
 
---[=[
-    @within ClientPlayerDataManager
-    @prop ManagerReady Signal<string, TableManager>
-    A signal that fires when a manager is ready to be used.
-]=]
-ClientPlayerDataManager.ManagerReady = Signal.new()
+	self._serverManagersRegistered = Promise.new(function(resolve)
+		-- Navigate to namespace-scoped folder
+		local registeredRoot = script.Parent:WaitForChild(REGISTERED_MANAGERS_FOLDER_NAME)
+		local managersListFolder = registeredRoot:WaitForChild(self._name)
+		self._janitor:Add(
+			managersListFolder.AncestryChanged:Connect(function(_, parent)
+				if not parent then
+					self:_handleNamespaceLost()
+				end
+			end),
+			"Disconnect"
+		)
 
---[=[
-    Starts the auto-listening process for server registered managers. If you need custom behavior for fetching managers
-    then you should use `RegisterManager` prior to calling this. Registering new managers after calling this method will
-    result in unexpected behavior.
-]=]
-function ClientPlayerDataManager:Start()
-	debugPrint("Starting ClientPlayerDataManager")
-	self._ServerManagersRegistered = Promise.new(function(resolve)
-		local managersListFolder = script.Parent:WaitForChild("RegisteredServerManagers")
-
-		local managerProms = {}
+		local managerProms: { PromiseObject } = {}
 
 		for _, managerObj in managersListFolder:GetChildren() do
 			local managerName = managerObj.Name
+			local expectedToken = self:_getToken(managerName)
 
-			local preregistered = Singletons[managerName]
-			if preregistered then
-				table.insert(
-					managerProms,
-					preregistered:PromiseTableManager():andThen(function(manager)
-						self.ManagerReady:Fire(managerName, manager)
-					end)
-				)
-				continue
-			end
-
+			-- Wait for replicator with namespace-scoped token
 			local prom = TableReplicator.promiseFirstReplicator(function(replicator)
-				return replicator:GetTokenName() == managerName and DEFAULT_CONDITION_FN(replicator)
+				local tokenMatches = replicator:GetTokenName() == expectedToken
+				local userIdMatches = tostring(replicator:GetTag("UserId")) == tostring(LocalPlayer.UserId)
+				return tokenMatches and userIdMatches
 			end):andThen(function(replicator)
-				debugPrint("Client received replicator for '" .. managerName .. "'")
-				Replicators[managerName] = replicator
+				self._replicators[managerName] = replicator
 				self.ManagerReady:Fire(managerName, replicator:GetTableManager())
 			end)
 
 			table.insert(managerProms, prom)
 		end
 
+		-- Wait for all managers to be ready
 		Promise.all(managerProms):andThen(resolve)
 	end):andThen(function()
-		READY = true
-		debugPrint("All client managers are ready.")
+		if self._lifecycleState == "unavailable" then
+			return
+		end
+		self._ready = true
+		self._lifecycleState = "ready"
 		self.PlayerDataReady:Fire()
 	end)
 
-	self.Start = function()
-		warn("[📥] ClientPlayerDataManager has already been started.")
-		return self._ServerManagersRegistered
-	end
-
-	return self._ServerManagersRegistered
+	return self._serverManagersRegistered
 end
 
 --------------------------------------------------------------------------------
@@ -171,16 +252,17 @@ end
 --------------------------------------------------------------------------------
 
 --[=[
-    Gets the TableManager associated with the given name.
-    ```lua
-    cpdm:Start():await() -- wait for all managers to be ready
+    Gets the TableManager associated with the given manager name.
+    Returns nil if the manager is not ready or has been destroyed.
     
+    ```lua
+    cpdm:Start():await()
     local currencyManager = cpdm:GetManager("Currency")
-
     currencyManager:Observe("Robux", function(money)
         print("My premium currency is:", money)
     end)
     ```
+    
     :::warn
     This method will return nil if the data has not been replicated yet or the
     client is in the process of shutting down.
@@ -189,63 +271,77 @@ end
 function ClientPlayerDataManager:GetManager(managerName: string?): TableManager?
 	assert(self:IsReady(), "[📥] Don't use :GetManager() before the data has replicated")
 	managerName = managerName or self.DEFAULT_MANAGER_NAME
-	assert(typeof(managerName) == "string", "[📥] Expected 'managerName' to be a string, got " .. typeof(managerName))
-	local singleton = Singletons[managerName]
-	if singleton then
-		return singleton:GetTableManager()
-	end
-	local replicator = Replicators[managerName]
+	assert(typeof(managerName) == "string", `[📥] Expected 'managerName' to be a string, got {typeof(managerName)}`)
+
+	local replicator = self._replicators[managerName]
 	if not replicator then
-		warn("[📥] '" .. (managerName :: string) .. "' is not a registered manager.")
+		warn(`[📥] '{managerName}' is not a registered manager`)
+		return nil
 	end
+
 	if replicator.IsDestroyed then
-		warn("[📥] '" .. (managerName :: string) .. "' replicator is destroyed. Returning nil.")
+		warn(`[📥] '{managerName}' replicator is destroyed. Returning nil.`)
+		return nil
 	end
+
 	return replicator:GetTableManager()
 end
 
 --[=[
-    Gets the TableReplicator associated with the given name.
-
-    This will return nil if the data has not been replicated yet or the 
-    client is in the process of shutting down.
+    Gets the TableReplicator associated with the given manager name.
+    Returns nil if the replicator is not ready or has been destroyed.
 ]=]
 function ClientPlayerDataManager:GetReplicator(managerName: string?): TableReplicator?
 	assert(self:IsReady(), "[📥] Don't use :GetReplicator() before the data has replicated")
 	managerName = managerName or self.DEFAULT_MANAGER_NAME
-	assert(typeof(managerName) == "string", "[📥] Expected 'managerName' to be a string, got " .. typeof(managerName))
-	local replicator = Replicators[managerName]
+	assert(typeof(managerName) == "string", `[📥] Expected 'managerName' to be a string, got {typeof(managerName)}`)
+
+	local replicator = self._replicators[managerName]
 	if not replicator then
-		warn("[📥] '" .. (managerName :: string) .. "' is not a registered replicator.")
+		warn(`[📥] '{managerName}' is not a registered replicator`)
+		return nil
 	end
+
 	if replicator.IsDestroyed then
-		warn("[📥] '" .. (managerName :: string) .. "' replicator is destroyed. Returning nil.")
+		warn(`[📥] '{managerName}' replicator is destroyed. Returning nil.`)
+		return nil
 	end
+
 	return replicator
 end
 
 --[=[
-    Promises the TableManager associated with the given name. If it doesnt exist when called then
-    it will wait for it to be replicated and then will resolve.
-    @return Promise<TableManager>
+    Promises the TableManager associated with the given manager name.
+    If it doesn't exist when called, waits for it to be discovered and replicated.
+    
     ```lua
-    ClientPlayerDataManager:PromiseManager("Currency")
-    :andThen(function(manager: TableManager)
+    cpdm:PromiseManager("Currency"):andThen(function(manager: TableManager)
         manager:Observe("Robux", function(money)
             print("My premium currency is:", money)
         end)
     end)
     ```
+
+    @return PromiseObject
 ]=]
-function ClientPlayerDataManager:PromiseManager(managerName: string?): Promise
-	local singleton = Singletons[managerName]
-	if singleton then
-		return singleton:PromiseTableManager()
+function ClientPlayerDataManager:PromiseManager(managerName: string?): PromiseObject
+	managerName = managerName or self.DEFAULT_MANAGER_NAME
+
+	if self._lifecycleState == "destroyed" then
+		return Promise.reject(`[📥] ClientPlayerDataManager('{self._name}') is destroyed.`)
 	end
-	local replicator = Replicators[managerName]
-	if replicator then
+
+	if self._lifecycleState == "unavailable" then
+		return Promise.reject(
+			`[📥] Namespace '{self._name}' became unavailable because its ServerPlayerDataManager was destroyed.`
+		)
+	end
+
+	local replicator = self._replicators[managerName]
+	if replicator and not replicator.IsDestroyed then
 		return Promise.resolve(replicator:GetTableManager())
 	end
+
 	return Promise.fromEvent(self.ManagerReady, function(name)
 		return name == managerName
 	end):andThen(function(_, manager)
@@ -253,17 +349,21 @@ function ClientPlayerDataManager:PromiseManager(managerName: string?): Promise
 	end)
 end
 
+--------------------------------------------------------------------------------
+--// Status Methods //--
+--------------------------------------------------------------------------------
+
 --[=[
-    Checks if all the managers have replicated and are ready to be used.
+    Checks if all the managers have been discovered and are ready to be used.
 ]=]
 function ClientPlayerDataManager:IsReady(): boolean
-	return READY
+	return self._ready
 end
 
 --[=[
-    Returns a promise that resolves when all player managers have been replicated.
+    Returns a promise that resolves when all player managers have been discovered and replicated.
 ]=]
-function ClientPlayerDataManager:OnReady(): Promise
+function ClientPlayerDataManager:OnReady(): PromiseObject
 	if self:IsReady() then
 		return Promise.resolve()
 	end
@@ -271,27 +371,28 @@ function ClientPlayerDataManager:OnReady(): Promise
 end
 
 --[=[
-    `GetImmediate` returns a special manager, in the form of a `TableReplicatorSingleton`, that can be accessed
-    prior to the data being replicated. In order to use this you must pre-registered it with `:RegisterManager()`.
-    ```lua
-    cpdm:RegisterManager("Currency", {
-        Tickets = 100,
-        Robux = 25
-    })
-    
-    local immediateCurrencyManager = cpdm:GetImmediate("Currency")
-
-    immediateCurrencyManager:Observe("Robux", function(money)
-        print("My premium currency is:", money)
-    end)
-    ```
+	Returns a promise that resolves when the associated server namespace becomes unavailable.
 ]=]
-function ClientPlayerDataManager:GetImmediate(managerName: string?): TableReplicatorSingleton
-	local s = Singletons[managerName]
-	assert(s, `[📥] '{managerName}' is not a registered singleton.`)
-	return s
+function ClientPlayerDataManager:OnUnavailable(): PromiseObject
+	if self._lifecycleState == "unavailable" or self._lifecycleState == "destroyed" then
+		return Promise.resolve()
+	end
+	return Promise.fromEvent(self.NamespaceLost)
 end
 
-export type ClientPlayerDataManager = typeof(ClientPlayerDataManager)
+--------------------------------------------------------------------------------
+--// Cleanup //--
+--------------------------------------------------------------------------------
+
+--[=[
+    Destroys the ClientPlayerDataManager instance and all associated signals and connections.
+]=]
+function ClientPlayerDataManager:Destroy()
+	self._lifecycleState = "destroyed"
+	self._ready = false
+	self._replicators = {}
+	self._serverManagersRegistered = nil
+	self._janitor:Destroy()
+end
 
 return ClientPlayerDataManager

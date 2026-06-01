@@ -62,6 +62,7 @@ local RunService = game:GetService("RunService")
 --// Imports //--
 local ClientModule = script.ClientPlayerDataManager
 local ServerModule = script.ServerPlayerDataManager
+local SharedUtil = require(script.SharedUtil)
 local Client: typeof(require(script.ClientPlayerDataManager)) = nil
 local Server: typeof(require(script.ServerPlayerDataManager)) = nil
 
@@ -77,8 +78,6 @@ else
 	CurrentContextModule = require(ServerModule)
 	Server = CurrentContextModule
 end
-
-local DEFAULT_MANAGER_NAME = "DefaultManager"
 
 --------------------------------------------------------------------------------
 --// Class //--
@@ -111,7 +110,7 @@ local DEFAULT_MANAGER_NAME = "DefaultManager"
 local Manager = {
 	Client = Client,
 	Server = Server,
-	DEFAULT_MANAGER_NAME = DEFAULT_MANAGER_NAME,
+	DEFAULT_MANAGER_NAME = SharedUtil.DEFAULT_MANAGER_NAME,
 }
 
 setmetatable(Manager, {
