@@ -7,15 +7,14 @@
 
     A robust and easy-to-use player profile management system built on top of ProfileStore.
     This class handles player data loading, saving, migration, and cleanup automatically.
-    
+
     Key Features:
     - Automatic retry logic for failed loads
-    - Data migration system with version tracking
+    - Data migration system with version tracking and chain validation
     - Robust error handling and edge case management
-    - Singleton pattern for easy access across your game
     - Mock support for testing
-    - Comprehensive event system for profile lifecycle
-    
+    - Direct signal fields for profile lifecycle events
+
     Basic Usage:
     ```lua
     local manager = PlayerProfileManager.new({
@@ -25,13 +24,18 @@
             Level = 1
         }
     })
-    
+
     -- Get a player's profile
     local profile = manager:GetProfile(player)
     if profile then
         profile.Data.Coins += 100
     end
-    
+
+    -- Listen to lifecycle events
+    manager.PlayerProfileReleasing:Connect(function(userId, profile)
+        print(userId .. " is leaving")
+    end)
+
     -- Or wait for it to load
     manager:PromiseProfile(player):andThen(function(profile)
         profile.Data.Level += 1
@@ -40,169 +44,401 @@
 ]=]
 
 --// Services //--
-local Players = game:GetService("Players")
+const Players = game:GetService("Players")
+const MemoryStoreService = game:GetService("MemoryStoreService")
 
 --// Imports //--
-local Packages = script.Parent
-local ProfileTypeDef = require(script.ProfileTypeDef)
-local ProfileStore = require(Packages.ProfileStore)
-local RailUtil = require(Packages.RailUtil)
-local Promise = require(Packages.Promise)
-local BaseObject = require(Packages.BaseObject)
-local T = require(Packages.T)
-
-local SuperClass = BaseObject
+const Packages = script.Parent
+const ProfileTypeDef = require(script.ProfileTypeDef)
+const ProfileStore = require(Packages.ProfileStore)
+const Janitor = require(Packages.Janitor)
+const Signal = require(Packages.Signal)
+const RailUtil = require(Packages.RailUtil)
+const Promise = require(Packages.Promise)
+const T = require(Packages.T)
 
 --// Types //--
 type table = { [any]: any }
 type Promise = Promise.Promise
+type Janitor = Janitor.Janitor
 export type Profile = ProfileTypeDef.Profile
+export type ProfileStore = ProfileTypeDef.ProfileStore
+
+-- Typed signal aliases used throughout the module
+type LoadSuccessSignal = Signal.Signal<(userId: number) -> (), number>
+type LoadFailureSignal = Signal.Signal<(userId: number, err: string) -> (), number, string>
+type ReleasingSignal = Signal.Signal<(userId: number, profile: Profile) -> (), number, Profile>
+type WipeLockValue = {
+	acquiredAt: number,
+	initiator: string,
+}
+type WipeLockMap = {
+	UpdateAsync: (
+		self: WipeLockMap,
+		key: string,
+		transform: (existingValue: WipeLockValue?) -> WipeLockValue,
+		expiration: number
+	) -> WipeLockValue?,
+	GetAsync: (self: WipeLockMap, key: string) -> WipeLockValue?,
+	RemoveAsync: (self: WipeLockMap, key: string) -> (),
+}
 
 --[=[
     @interface DataMigrator
     @within PlayerProfileManager
-    .FromVersion string
-    .ToVersion string
-    .Migrate (profileData: table, profileOwner: Player) -> (table)
+    .FromVersion string | number
+    .ToVersion string | number
+    .Migrate (profileData: TFrom, userId: number) -> TTo
 
-    Used to Transform data from one version to another
+    Used to transform data from one version to another. Migrators must form a
+    complete, unbroken chain from the oldest stored version to the current
+    `DefaultDataSchema.__VERSION`. Gaps, duplicates, or a chain that does not
+    terminate at the current version will cause an error at construction time.
+
     ```lua
-    -- Turn all the deprecated currency 'Candy' into the new currency 'Gems' at a  1:10 rate
+    -- Convert the deprecated 'Candy' currency into 'Gems' at a 1:10 rate
     local migrator = {
         FromVersion = "0.0.1",
-        ToVersion = "0.0.2"
-        Migrate = function(data: table, plr: Player)
-            if not data.Gems then
-                data.Gems = 0
-            end
-
-            local candy = data.Candy or 0
-            data.Gems += candy * 10
+        ToVersion = "0.0.2",
+        Migrate = function(data: table, _userId: number)
+            data.Gems = (data.Gems or 0) + (data.Candy or 0) * 10
             data.Candy = nil
-
             return data
-        end
+        end,
     }
     ```
 ]=]
 type DataVersion = string | number
-export type DataMigrator<F = table, T = table> = {
+export type DataMigrator<TFrom = table, TTo = table> = {
 	FromVersion: DataVersion,
 	ToVersion: DataVersion,
-	Migrate: (profileData: F, profileOwner: Player) -> T,
+	Migrate: (profileData: TFrom, userId: number) -> TTo,
 }
 
-local ConfigType = {
-	DataStoreKey = T.optional(T.string) :: string?,
-	DefaultDataSchema = T.table :: { [string]: any },
-	UseMock = T.optional(T.boolean) :: boolean?,
-	Migrator = T.optional(T.array(T.table)) :: { DataMigrator }?,
-	GetPlayerKeyCallback = T.optional(T.callback) :: ((userId: number) -> string)?,
-	ReconcileCallback = T.optional(T.callback) :: ((Player, Profile) -> ())?,
-	OnProfileLoadFailureCallback = T.optional(T.callback) :: ((Player, string) -> ())?,
-
-	Debug = T.optional(T.boolean) :: boolean?,
+-- Runtime validator table. Fields are T-checker functions — no type casts needed
+-- since PPM_Config is declared explicitly below.
+const ConfigType = {
+	DataStoreKey = T.optional(T.string),
+	DefaultDataSchema = T.table,
+	UseMock = T.optional(T.boolean),
+	Migrator = T.optional(T.array(T.table)),
+	GetPlayerKeyCallback = T.optional(T.callback),
+	ReconcileCallback = T.optional(T.callback),
+	OnProfileLoadFailureCallback = T.optional(T.callback),
+	Debug = T.optional(T.boolean),
+	DebugProfileUserId = T.optional(T.number),
 }
-local ConfigInterface = T.interface(ConfigType)
+const ConfigInterface = T.interface(ConfigType)
 
 --[=[
     @within PlayerProfileManager
     @interface PPM_Config
     .DefaultDataSchema table
     .UseMock boolean?
-    .Migrator {DataMigrator}
+    .Migrator {DataMigrator}?
     .DataStoreKey string?
-    .GetPlayerKeyCallback ((player: Player) -> (string))?
+    .GetPlayerKeyCallback ((userId: number) -> string)?
     .ReconcileCallback ((player: Player, profile: Profile) -> ())?
     .OnProfileLoadFailureCallback ((player: Player, err: string) -> ())?
+    .Debug boolean?
+    .DebugProfileUserId number?
 
-    - **DataStoreKey** is the internal Key used for the PlayerData's DataStore.
-    - **DefaultDataSchema** is a template table that is used for reconciling the player's profile with. It is what new players are given if they dont have existing data.
-    - **UseMock** determines whether or not a Mock ProfileStore will be used.
-    - **Migrator** is a table of DataMigrators that are used to transform data from one version to another.
-
-    - **GetPlayerKeyCallback** is a callback that is used to fetch the Key that each player's data is mapped to.
-    - **ReconcileCallback** is a callback that is called when the system attempts to reconcile the players profile. It will default to calling Profile:Reconcile if not provided.
-    - **OnProfileLoadFailureCallback** is a callback that is called if the player's data fails to load. It will default to kicking the player if not provided.
+    - **DataStoreKey** — DataStore key for player data. Defaults to `"PPM_PlayerData"`.
+    - **DefaultDataSchema** — Template used to reconcile and initialize profiles.
+    - **UseMock** — Use a mock ProfileStore (useful for testing in Studio).
+    - **Migrator** — Ordered chain of DataMigrators. Must be contiguous from oldest version to `DefaultDataSchema.__VERSION`.
+    - **GetPlayerKeyCallback** — Override the per-player DataStore key (defaults to `"Player_{userId}"`).
+    - **ReconcileCallback** — Called during profile load. Defaults to `profile:Reconcile()`.
+    - **OnProfileLoadFailureCallback** — Called when all retries fail. Defaults to kicking the player.
+    - **Debug** — Enables verbose debug logging.
+    - **DebugProfileUserId** — When set, all userId lookups return this value instead (for testing with a specific profile).
 ]=]
-export type PPM_Config = typeof(ConfigType)
+export type PPM_Config = {
+	DataStoreKey: string?,
+	DefaultDataSchema: { [string]: any },
+	UseMock: boolean?,
+	Migrator: { DataMigrator }?,
+	GetPlayerKeyCallback: ((userId: number) -> string)?,
+	ReconcileCallback: ((Player, Profile) -> ())?,
+	OnProfileLoadFailureCallback: ((Player, string) -> ())?,
+	Debug: boolean?,
+	DebugProfileUserId: number?,
+}
+
+--[=[
+    @type PlayerProfileManager
+    @within PlayerProfileManager
+    Public interface for `PlayerProfileManager` instances.
+]=]
+export type PlayerProfileManager = {
+	ClassName: string,
+	new: (config: PPM_Config) -> PlayerProfileManager,
+	-- lifecycle signals (connect directly on the instance)
+	PlayerProfileLoadSuccess: LoadSuccessSignal,
+	PlayerProfileLoadFailure: LoadFailureSignal,
+	PlayerProfileReleasing: ReleasingSignal,
+	-- status
+	IsLoaded: (self: PlayerProfileManager, playerOrUserId: Player | number) -> boolean,
+	IsLoading: (self: PlayerProfileManager, playerOrUserId: Player | number) -> boolean,
+	OnLoaded: (self: PlayerProfileManager, playerOrUserId: Player | number) -> Promise,
+	GetPlayerStatus: (
+		self: PlayerProfileManager,
+		playerOrUserId: Player | number
+	) -> {
+		isLoaded: boolean,
+		isLoading: boolean,
+		profile: Profile?,
+	},
+	-- profile access
+	GetProfile: (self: PlayerProfileManager, playerOrUserId: Player | number) -> Profile?,
+	PromiseProfile: (self: PlayerProfileManager, playerOrUserId: Player | number) -> Promise,
+	WipeProfile: (self: PlayerProfileManager, userId: number) -> Promise,
+	-- lifecycle
+	Destroy: (self: PlayerProfileManager) -> (),
+}
+
+--[=[
+    @type PPM_Internal
+    @within PlayerProfileManager
+    @private
+    Extends `PlayerProfileManager` with private fields and methods.
+    Use dot syntax with an explicit `self: PPM_Internal` parameter for full type coverage.
+    ```lua
+    function PlayerProfileManager.SomeMethod(self: PPM_Internal, ...)
+        ...
+    end
+    ```
+]=]
+type PPM_Internal = PlayerProfileManager & {
+	-- fields
+	_janitor: Janitor,
+	_config: PPM_Config,
+	_isMock: boolean,
+	_profileStore: ProfileStore,
+	_PlayerProfileStorage: { [number]: Profile },
+	_LoadingPlayers: { [number]: boolean },
+	_reconcileCallback: (Player, Profile) -> (),
+	_loadFailureCallback: (Player, string) -> (),
+	_debugUserId: number?,
+	-- private methods
+	_setupCallbacks: (self: PPM_Internal) -> (),
+	_initializeProfileStore: (self: PPM_Internal) -> (),
+	_initializeWipeLocking: (self: PPM_Internal) -> (),
+	_startPlayerManagement: (self: PPM_Internal) -> (),
+	_reconcileProfile: (self: PPM_Internal, playerOrUserId: Player | number, profile: Profile) -> (),
+	_migrateProfileData: (self: PPM_Internal, userId: number, profile: Profile) -> (),
+	_generatePlayerKey: (self: PPM_Internal, playerOrUserId: Player | number | string) -> string,
+	_attemptLoadProfile: (self: PPM_Internal, playerOrUserId: Player | number) -> Promise,
+	_createPlayerData: (self: PPM_Internal, playerOrUserId: Player | number) -> Promise,
+	_setupProfileSession: (self: PPM_Internal, playerOrUserId: Player | number, profile: Profile) -> (),
+	_DebugPrint: (self: PPM_Internal, ...any) -> (),
+	_getUserId: (self: PPM_Internal, playerOrUserId: Player | number) -> number,
+	-- wipe state tracking
+	_wipeLockMap: WipeLockMap?,
+	_wipeLocksAcquired: { [number]: boolean },
+	-- wipe methods
+	_acquireWipeLockAsync: (self: PPM_Internal, userId: number) -> boolean,
+	_isWipeLockedAsync: (self: PPM_Internal, userId: number) -> boolean,
+	_releaseWipeLockAsync: (self: PPM_Internal, userId: number) -> (),
+	_endProfileSession: (self: PPM_Internal, userId: number, profile: Profile, reason: string) -> (),
+	_sendWipeResetMessageAsync: (self: PPM_Internal, userId: number) -> boolean,
+}
 
 -- Constants
-local RETRY_PROFILE_LOAD_DELAY = 3
-local RETRY_PROFILE_LOAD_ATTEMPTS = 5
-local VERSION_KEY = "__VERSION"
-local DEFAULT_DATA_STORE_KEY = "PPM_PlayerData"
-
--- Debug profile constants
-local DEBUG_USER_ID = 12345
-local DEBUG_PROFILE_ACTIVE = false -- Will be set by external systems
+const RETRY_PROFILE_LOAD_DELAY = 3
+const RETRY_PROFILE_LOAD_ATTEMPTS = 5
+const VERSION_KEY = "__VERSION"
+const DEFAULT_DATA_STORE_KEY = "PPM_PlayerData"
+-- Wipe profile constants
+const WIPE_LOCK_TTL_SECONDS = 120
+const WIPE_LOCK_MAP_NAME = "PPM_WipeLocks"
+const WIPE_RETRY_ATTEMPTS = 3
+const WIPE_RETRY_DELAY = 1
+const WIPE_RESET_KICK_MESSAGE = "Your player data is being reset. Please rejoin in a moment."
+const WIPE_MESSAGE_KIND = "ProfileWipeReset"
 
 --------------------------------------------------------------------------------
---// CLASS //--
+--// Local Functions //--
 --------------------------------------------------------------------------------
 
-local PlayerProfileManager = setmetatable({}, SuperClass)
+--[[
+    Resolves a `Player | number` to a `Player?`.
+    Avoids `::` casts inside if-then-else expressions, which Luau does not support.
+]]
+const function resolvePlayer(playerOrUserId: Player | number): Player?
+	if typeof(playerOrUserId) == "Instance" then
+		return playerOrUserId :: Player
+	end
+	return Players:GetPlayerByUserId(playerOrUserId :: number)
+end
+
+--[[
+    Finds the migrator whose FromVersion matches `fromVersion`, or nil if none.
+    Duplicate detection is handled upfront by `validateMigratorChain`.
+]]
+const function lookupMigrator(migrators: { DataMigrator }, fromVersion: DataVersion): DataMigrator?
+	for _, migration in ipairs(migrators) do
+		if migration.FromVersion == fromVersion then
+			return migration
+		end
+	end
+	return nil
+end
+
+--[[
+    Validates that `migrators` form a complete, linear chain ending at `targetVersion`.
+    Errors at construction time so misconfiguration surfaces immediately rather than
+    during a live player load.
+]]
+const function validateMigratorChain(migrators: { DataMigrator }, targetVersion: DataVersion)
+	if #migrators == 0 then
+		return
+	end
+
+	-- Build fromVersion -> migrator map; detect duplicates
+	local fromMap: { [DataVersion]: DataMigrator } = {}
+	for _, migration in ipairs(migrators) do
+		if fromMap[migration.FromVersion] then
+			error(
+				`[👤] Duplicate migrator for version '{migration.FromVersion}'. Each version must have exactly one migrator.`
+			)
+		end
+		fromMap[migration.FromVersion] = migration
+	end
+
+	-- Collect all ToVersions into a set
+	local toVersionSet: { [DataVersion]: boolean } = {}
+	for _, migration in ipairs(migrators) do
+		toVersionSet[migration.ToVersion] = true
+	end
+
+	-- Entry point: a FromVersion that is not the ToVersion of any other migrator
+	local entryVersion: DataVersion? = nil
+	local entryCount = 0
+	for fromVersion in fromMap do
+		if not toVersionSet[fromVersion] then
+			entryVersion = fromVersion
+			entryCount += 1
+		end
+	end
+
+	if entryCount == 0 then
+		error("[👤] Migrator chain has a cycle — no entry point found.")
+	end
+	if entryCount > 1 then
+		error("[👤] Migrator chain has multiple disconnected entry points. The chain must be linear.")
+	end
+
+	-- Walk the chain from entry to end
+	local visited: { [DataVersion]: boolean } = {}
+	local current: DataVersion = entryVersion :: DataVersion
+	while fromMap[current] do
+		if visited[current] then
+			error(`[👤] Migrator chain has a cycle at version '{current}'.`)
+		end
+		visited[current] = true
+		current = (fromMap[current] :: DataMigrator).ToVersion
+	end
+
+	-- Chain must terminate at the target schema version
+	if current ~= targetVersion then
+		error(
+			`[👤] Migrator chain ends at '{current}' but DefaultDataSchema["{VERSION_KEY}"] is '{targetVersion}'. The chain must end at the current schema version.`
+		)
+	end
+
+	-- All migrators must be reachable (no orphaned branches)
+	local visitedCount = 0
+	for _ in visited do
+		visitedCount += 1
+	end
+	if visitedCount ~= #migrators then
+		error("[👤] Migrator chain has orphaned (unreachable) migrators.")
+	end
+end
+
+--------------------------------------------------------------------------------
+--// Class //--
+--------------------------------------------------------------------------------
+
+const PlayerProfileManager = {}
 PlayerProfileManager.ClassName = "PlayerProfileManager"
 PlayerProfileManager.__index = PlayerProfileManager
 
-PlayerProfileManager.DEBUG_USER_ID = DEBUG_USER_ID
-PlayerProfileManager.DEBUG_PROFILE_ACTIVE = DEBUG_PROFILE_ACTIVE
-
 --[=[
-    Creates a new PlayerProfileManager. Takes a config table, see PPM_Config for more info on the individual
-    fields it supports.
+    Creates a new PlayerProfileManager. Takes a config table — see `PPM_Config` for details.
 
     ```lua
-    PlayerProfileManager.start({
+    local manager = PlayerProfileManager.new({
         DefaultDataSchema = {
-            __VERSION = "0.0.0";
-            Currency = 0;
-        };
+            __VERSION = "0.0.0",
+            Currency = 0,
+        },
     })
     ```
 ]=]
 function PlayerProfileManager.new(config: PPM_Config): PlayerProfileManager
-	-- Validate configuration
 	assert(ConfigInterface(config))
 
-	local self = setmetatable(SuperClass.new(), PlayerProfileManager)
+	local self = (setmetatable({}, PlayerProfileManager) :: any) :: PPM_Internal
 
-	-- Initialize signals
-	self:RegisterSignal("PlayerProfileLoadFailure")
-	self:RegisterSignal("PlayerProfileLoadSuccess")
-	self:RegisterSignal("PlayerProfileReleasing")
-
-	-- Initialize storage
+	self._janitor = Janitor.new()
 	self._PlayerProfileStorage = {} :: { [number]: Profile }
-
-	-- Initialize loading state tracking
 	self._LoadingPlayers = {} :: { [number]: boolean }
-
-	-- Store configuration
+	self._wipeLocksAcquired = {} :: { [number]: boolean }
 	self._config = config
 	self._isMock = config.UseMock or false
+	self._debugUserId = config.DebugProfileUserId or nil
+	if self._debugUserId then
+		warn(`[👤] DebugProfileUserId is active — all userId lookups return {self._debugUserId} (single-player testing only)`)
+	end
 
-	-- Set up callback functions with defaults
+	-- Lifecycle signals — directly accessible fields with full types
+	self.PlayerProfileLoadSuccess = (Signal.new() :: any) :: LoadSuccessSignal
+	self.PlayerProfileLoadFailure = (Signal.new() :: any) :: LoadFailureSignal
+	self.PlayerProfileReleasing = (Signal.new() :: any) :: ReleasingSignal
+	self._janitor:Add(self.PlayerProfileLoadSuccess, "Destroy")
+	self._janitor:Add(self.PlayerProfileLoadFailure, "Destroy")
+	self._janitor:Add(self.PlayerProfileReleasing, "Destroy")
+
+	-- Validate migration chain upfront so misconfiguration errors at construction
+	if config.Migrator and #config.Migrator > 0 then
+		validateMigratorChain(config.Migrator, config.DefaultDataSchema[VERSION_KEY])
+	end
+
 	self:_setupCallbacks()
-
-	-- Initialize ProfileStore
 	self:_initializeProfileStore()
-
-	-- Start managing existing and joining players
+	self:_initializeWipeLocking()
 	self:_startPlayerManagement()
 
-	return self
+	return (self :: any) :: PlayerProfileManager
 end
 
 --[=[
     @private
-    Sets up callback functions with sensible defaults
+    Initializes the MemoryStore-backed wipe lock map for delete-in-progress tracking.
 ]=]
-function PlayerProfileManager:_setupCallbacks()
-	self._reconcileCallback = self._config.ReconcileCallback or function(_: Player, profile)
-		profile:Reconcile()
+function PlayerProfileManager._initializeWipeLocking(self: PPM_Internal)
+	local ok, result = pcall(function()
+		return MemoryStoreService:GetHashMap(WIPE_LOCK_MAP_NAME)
+	end)
+	if ok then
+		self._wipeLockMap = (result :: any) :: WipeLockMap
+		self:_DebugPrint(`Wipe lock MemoryStore initialized: {WIPE_LOCK_MAP_NAME}`)
+	else
+		warn(`[👤] Failed to initialize wipe lock MemoryStore: {result}`)
+		self._wipeLockMap = nil
 	end
+end
 
+--[=[
+    @private
+]=]
+function PlayerProfileManager._setupCallbacks(self: PPM_Internal)
+	self._reconcileCallback = self._config.ReconcileCallback
+		or function(_: Player, profile: Profile)
+			profile:Reconcile()
+		end
 	self._loadFailureCallback = self._config.OnProfileLoadFailureCallback
 		or function(player: Player, err: string)
 			player:Kick(
@@ -215,24 +451,21 @@ end
 
 --[=[
     @private
-    Initializes the ProfileStore with appropriate settings
 ]=]
-function PlayerProfileManager:_initializeProfileStore()
-	local DatastoreKey = self._config.DataStoreKey or DEFAULT_DATA_STORE_KEY
-	self._profileStore = ProfileStore.New(DatastoreKey, self._config.DefaultDataSchema)
-
+function PlayerProfileManager._initializeProfileStore(self: PPM_Internal)
+	const datastoreKey = self._config.DataStoreKey or DEFAULT_DATA_STORE_KEY
+	const store = ProfileStore.New(datastoreKey, self._config.DefaultDataSchema)
+	self._profileStore = ((if self._isMock then store.Mock else store) :: any) :: ProfileStore
 	if self._isMock then
-		self._profileStore = self._profileStore.Mock
 		self:_DebugPrint("Using Mock ProfileStore for testing")
 	end
 end
 
 --[=[
     @private
-    Starts managing player lifecycle events
 ]=]
-function PlayerProfileManager:_startPlayerManagement()
-	self:AddTask(RailUtil.Player.forEachPlayer(function(player, janitor)
+function PlayerProfileManager._startPlayerManagement(self: PPM_Internal)
+	self._janitor:Add(RailUtil.Player.forEachPlayer(function(player: Player, janitor)
 		janitor:AddPromise(self:_createPlayerData(player))
 	end))
 end
@@ -240,100 +473,93 @@ end
 --[=[
     @private
 ]=]
-function PlayerProfileManager:_reconcileProfile(player: Player, profile: Profile)
-	self:_DebugPrint(`Reconciling {player.Name}'s profile.`)
+function PlayerProfileManager._reconcileProfile(self: PPM_Internal, playerOrUserId: Player | number, profile: Profile)
+	local userId = self:_getUserId(playerOrUserId)
+	local player = resolvePlayer(playerOrUserId)
+	if not player then
+		warn(`[👤] Skipping reconcile for userId {userId} — player not in game`)
+		return
+	end
+	self:_DebugPrint(`Reconciling profile for {player.Name}.`)
 	self._reconcileCallback(player, profile)
 end
 
 --[=[
     @private
-    Looks up a migrator function for a specific version with validation
+    Walks the migration chain until the profile version matches the schema version.
+    Relies on `validateMigratorChain` having verified the chain is complete at construction.
 ]=]
-function PlayerProfileManager:_lookupMigrator(fromVersion: DataVersion): DataMigrator?
-	if not self._config.Migrator or #self._config.Migrator == 0 then
-		return nil
-	end
-
-	local migrator = nil
-	for _, migration in ipairs(self._config.Migrator) do
-		if migration.FromVersion == fromVersion then
-			if migrator then
-				error(
-					`[👤] Multiple migrators found for version {fromVersion}. Each version should have exactly one migrator.`
-				)
-			end
-			migrator = migration
-		end
-	end
-
-	return migrator
-end
-
---[=[
-    @private
-    Attempts to migrate the player's profile data to the latest version.
-]=]
-function PlayerProfileManager:_migrateProfileData(player: Player, profile: Profile)
+function PlayerProfileManager._migrateProfileData(self: PPM_Internal, userId: number, profile: Profile)
 	if not self._config.Migrator then
 		return
 	end
 
-	-- Handle migrations
-	while profile.Data[VERSION_KEY] and profile.Data[VERSION_KEY] ~= self._config.DefaultDataSchema[VERSION_KEY] do
+	local migrators = self._config.Migrator
+
+	while
+		profile.Data[VERSION_KEY] ~= nil
+		and profile.Data[VERSION_KEY] ~= self._config.DefaultDataSchema[VERSION_KEY]
+	do
 		local currentVersion = profile.Data[VERSION_KEY]
+		local migrator = lookupMigrator(migrators, currentVersion)
 
-		local migrator = self:_lookupMigrator(currentVersion)
-
-		if migrator then
-			local nextVersion = migrator.ToVersion
-
-			self:_DebugPrint(`Migrating {player.Name}'s data from {currentVersion} to {nextVersion}`)
-
-			local newData
-			local ok, err = pcall(function()
-				newData = migrator.Migrate(profile.Data, player)
-
-				local MigratorName = currentVersion .. " -> " .. nextVersion
-				if not newData then
-					warn(
-						`[👤] Migrator[{MigratorName}] did not return new data, assuming same table. Have your migrator return a table to silence this warning.`
-					)
-				else
-					assert(type(newData) == "table", `[👤] Migrator[{MigratorName}] must return a table`)
-				end
-			end)
-
-			if not ok then
-				error(`[👤] Error migrating {player.Name}'s data: {err}`)
-			else
-				newData[VERSION_KEY] = nextVersion
-				profile.Data = newData
-			end
-		else
-			error(`[👤] No migrator found to migrate {player.Name}'s data from version '{currentVersion}'.`)
+		if not migrator then
+			error(`[👤] No migrator found for userId {userId}'s data version '{currentVersion}'.`)
 		end
+
+		local nextVersion = migrator.ToVersion
+		self:_DebugPrint(`Migrating userId {userId}'s data from {currentVersion} to {nextVersion}`)
+
+		local newData: table?
+		local ok, err = pcall(function()
+			newData = migrator.Migrate(profile.Data, userId)
+			local migratorName = `{currentVersion} -> {nextVersion}`
+			if not newData then
+				warn(
+					`[👤] Migrator[{migratorName}] returned nil — assuming same table. Return the modified table to silence this warning.`
+				)
+			else
+				assert(type(newData) == "table", `[👤] Migrator[{migratorName}] must return a table`)
+			end
+		end)
+
+		if not ok then
+			error(`[👤] Error migrating userId {userId}'s data: {err}`)
+		end
+
+		-- Mutate the existing data table in-place so ProfileStore's internal reference stays valid.
+		-- If the migrator returned a distinct table, copy its contents back into the original.
+		if newData and newData ~= profile.Data then
+			for k in profile.Data do
+				profile.Data[k] = nil
+			end
+			for k, v in newData do
+				profile.Data[k] = v
+			end
+		end
+		profile.Data[VERSION_KEY] = nextVersion
 	end
 end
 
 --[=[
     @private
-    Generates a unique key for the player's profile data
+    Generates the DataStore key for a player.
 ]=]
-function PlayerProfileManager:_generatePlayerKey(playerOrUserId: Player | number | string): string
+function PlayerProfileManager._generatePlayerKey(self: PPM_Internal, playerOrUserId: Player | number | string): string
 	local userId: number
 
 	if type(playerOrUserId) == "number" then
 		userId = playerOrUserId
 	elseif type(playerOrUserId) == "string" then
-		local convertedUserId = tonumber(playerOrUserId)
-		assert(convertedUserId, "Invalid string userId provided to _generatePlayerKey")
-		userId = convertedUserId
+		local converted = tonumber(playerOrUserId)
+		assert(converted, "Invalid string userId provided to _generatePlayerKey")
+		userId = converted
 	else
 		assert(
-			typeof(playerOrUserId) == "Instance" and playerOrUserId:IsA("Player"),
-			"Invalid argument provided to _generatePlayerKey - expected Player, number, or string"
+			typeof(playerOrUserId) == "Instance" and (playerOrUserId :: Player):IsA("Player"),
+			"Invalid argument provided to _generatePlayerKey — expected Player, number, or string"
 		)
-		userId = playerOrUserId.UserId
+		userId = (playerOrUserId :: Player).UserId
 	end
 
 	if userId <= 0 then
@@ -345,21 +571,27 @@ end
 
 --[=[
     @private
-    Attempts to load and initialize a single profile for the given player
+    Single attempt to start a ProfileStore session for the given player.
 ]=]
-function PlayerProfileManager:_attemptLoadProfile(player: Player): Promise
+function PlayerProfileManager._attemptLoadProfile(self: PPM_Internal, playerOrUserId: Player | number): Promise
 	return Promise.new(function(resolve, reject)
-		local userId = self:_getUserId(player)
-		-- Early exit check - player left before we started
-		if not player:IsDescendantOf(Players) then
+		local userId = self:_getUserId(playerOrUserId)
+		local player = resolvePlayer(playerOrUserId)
+
+		-- Preflight: check if profile is in the process of being wiped
+		if self:_isWipeLockedAsync(userId) then
+			reject("Profile is being reset — please rejoin in a moment")
+			return
+		end
+
+		if not player or not player:IsDescendantOf(Players) then
 			reject("Player left before profile loading started")
 			return
 		end
 
 		local playerKey = self:_generatePlayerKey(userId)
-		self:_DebugPrint(`Attempting to load profile with key: {playerKey}`)
+		self:_DebugPrint(`Attempting to load profile for {player.Name} with key: {playerKey}`)
 
-		-- Start the ProfileStore session
 		local profile = self._profileStore:StartSessionAsync(playerKey, {
 			Cancel = function()
 				return player.Parent ~= Players
@@ -371,20 +603,17 @@ function PlayerProfileManager:_attemptLoadProfile(player: Player): Promise
 			return
 		end
 
-		-- GDPR compliance
 		profile:AddUserId(userId)
 
-		-- Check if player left during loading
 		if not player:IsDescendantOf(Players) then
 			profile:EndSession()
 			reject("Player left while profile was loading")
 			return
 		end
 
-		-- Apply data migrations and reconciliation
 		local success, err = pcall(function()
-			self:_migrateProfileData(player, profile)
-			self:_reconcileProfile(player, profile)
+			self:_migrateProfileData(userId, profile)
+			self:_reconcileProfile(playerOrUserId, profile)
 		end)
 
 		if not success then
@@ -393,7 +622,6 @@ function PlayerProfileManager:_attemptLoadProfile(player: Player): Promise
 			return
 		end
 
-		-- Final check before resolving
 		if player.Parent == Players then
 			self:_DebugPrint(`Profile successfully loaded for {player.Name}`)
 			resolve(profile)
@@ -406,118 +634,112 @@ end
 
 --[=[
     @private
-    Main entry point for loading a player's profile data with retry logic
+    Loads a player's profile with retry logic. Main entry point from `_startPlayerManagement`.
 ]=]
-function PlayerProfileManager:_createPlayerData(player: Player): Promise
-	local userId = self:_getUserId(player)
+function PlayerProfileManager._createPlayerData(self: PPM_Internal, playerOrUserId: Player | number): Promise
+	local userId = self:_getUserId(playerOrUserId)
 
-	-- Prevent duplicate loading attempts
 	if self._LoadingPlayers[userId] then
-		self:_DebugPrint(`Profile already loading for {player.Name}, skipping duplicate attempt`)
+		self:_DebugPrint(`Profile already loading for userId {userId}, skipping duplicate attempt`)
 		return Promise.reject("Profile already being loaded")
 	end
 
-	-- Mark as loading
 	self._LoadingPlayers[userId] = true
-	self:_DebugPrint(`Starting profile load for {player.Name}`)
+	self:_DebugPrint(`Starting profile load for userId {userId}`)
 
 	return Promise.retryWithDelay(function()
-		local prom = self:_attemptLoadProfile(player)
+		local prom = self:_attemptLoadProfile(playerOrUserId)
 		prom:catch(function(err)
-			warn(`[👤] Failed to load profile for {player.Name}: {err}`)
+			warn(`[👤] Failed to load profile for userId {userId}: {err}`)
 			warn(`[👤] Retrying in {RETRY_PROFILE_LOAD_DELAY} seconds...`)
 		end)
 		return prom
 	end, RETRY_PROFILE_LOAD_ATTEMPTS, RETRY_PROFILE_LOAD_DELAY)
 		:andThen(function(profile)
-			return self:_setupProfileSession(player, profile)
+			self:_setupProfileSession(playerOrUserId, profile)
 		end)
 		:andThen(function()
-			self:_DebugPrint(`Successfully loaded profile for {player.Name}`)
-			self:FireSignal("PlayerProfileLoadSuccess", userId)
+			self:_DebugPrint(`Successfully loaded profile for userId {userId}`)
+			self.PlayerProfileLoadSuccess:Fire(userId)
 		end)
 		:catch(function(err)
-			self:FireSignal("PlayerProfileLoadFailure", userId, err)
-			self._loadFailureCallback(player, err)
+			self.PlayerProfileLoadFailure:Fire(userId, err)
+			local player = resolvePlayer(playerOrUserId)
+			if player then
+				self._loadFailureCallback(player, err)
+			end
 		end)
 		:finally(function()
-			-- Always clear loading state
 			self._LoadingPlayers[userId] = nil
 		end)
 end
 
 --[=[
     @private
-    Sets up the profile session and event handlers after successful load
+    Stores the profile and wires up session-end / player-leaving cleanup handlers.
 ]=]
-function PlayerProfileManager:_setupProfileSession(player: Player, profile: Profile): Promise
-	return Promise.new(function(resolve)
-		local userId = self:_getUserId(player)
-		-- Store the profile
-		self._PlayerProfileStorage[userId] = profile
+function PlayerProfileManager._setupProfileSession(
+	self: PPM_Internal,
+	playerOrUserId: Player | number,
+	profile: Profile
+)
+	local userId = self:_getUserId(playerOrUserId)
+	local player = resolvePlayer(playerOrUserId)
 
-		-- Handle profile session end during play
-		profile.OnSessionEnd:Connect(function()
-			self:_DebugPrint(`Profile session ended for {player.Name}`)
-			self:FireSignal("PlayerProfileReleasing", player, profile)
-			self._PlayerProfileStorage[userId] = nil
+	self._PlayerProfileStorage[userId] = profile
 
-			-- Only kick if the player is still in the game
-			if player.Parent == Players then
-				player:Kick("Profile session ended - Please rejoin")
-			end
-		end)
-
-		-- Handle player leaving
-		local playerRemovingConnection
-		playerRemovingConnection = Players.PlayerRemoving:Connect(function(removingPlayer)
-			if removingPlayer == player then
-				playerRemovingConnection:Disconnect()
-				self:_DebugPrint(`Cleaning up profile for leaving player {player.Name}`)
-				self:FireSignal("PlayerProfileReleasing", userId, profile)
-
-				profile:EndSession()
-
-				-- Clean up mock data if needed
-				if self._isMock then
-					self._profileStore:RemoveAsync(self:_generatePlayerKey(userId))
-					self:_DebugPrint(`Removed mock profile for {player.Name}`)
+	-- Register message handler to process cross-server wipe reset notifications
+	profile:MessageHandler(function(message, processed)
+		if type(message) == "table" then
+			const messageTable = message :: { [string]: any }
+			const kind = messageTable.kind
+			const messageUserId = messageTable.userId
+			if type(kind) == "string" and type(messageUserId) == "number" then
+				if kind == WIPE_MESSAGE_KIND and messageUserId == userId then
+					self:_DebugPrint(`Received wipe reset message for userId {userId} from cross-server`)
+					processed() -- Mark message as handled
+					if player and player.Parent == Players then
+						player:Kick(WIPE_RESET_KICK_MESSAGE)
+					end
 				end
 			end
-		end)
-
-		resolve()
+		end
 	end)
+
+	profile.OnSessionEnd:Connect(function()
+		self:_DebugPrint(`Profile session ended for userId {userId}`)
+		-- Guard against double-fire: _endProfileSession may have already released the profile
+		if self._PlayerProfileStorage[userId] then
+			self.PlayerProfileReleasing:Fire(userId, profile)
+			self._PlayerProfileStorage[userId] = nil
+		end
+		if player and player.Parent == Players then
+			player:Kick("Profile session ended — please rejoin")
+		end
+	end)
+
+	-- Use a keyed Add so the connection can be removed from the janitor on player leave,
+	-- preventing stale disconnected connections from accumulating over the server lifetime.
+	const connKey = `PlayerRemoving_{userId}`
+	self._janitor:Add(
+		Players.PlayerRemoving:Connect(function(removingPlayer: Player)
+			if removingPlayer == player then
+				self._janitor:Remove(connKey)
+				self:_DebugPrint(`Cleaning up profile for leaving player userId {userId}`)
+				self:_endProfileSession(userId, profile, "player_leaving")
+				if self._isMock then
+					self._profileStore:RemoveAsync(self:_generatePlayerKey(userId))
+					self:_DebugPrint(`Removed mock profile for userId {userId}`)
+				end
+			end
+		end),
+		"Disconnect",
+		connKey
+	)
 end
 
---[=[
-    @private
-    Generates a promise that will reject when the player leaves or the profile fails to load.
-]=]
-function PlayerProfileManager:_PromisePlayerLoadEventFailure(player: Player | number): Promise
-	local userId = self:_getUserId(player)
-	return Promise.fromEvent(self:GetSignal("PlayerProfileLoadFailure"), function(loadedUserId: number)
-		return loadedUserId == userId
-	end):andThen(function()
-		return Promise.reject("Failed to load profile for " .. tostring(player))
-	end)
-end
 
---[=[
-    @private
-    Generates a promise that will resolve when the player's profile is loaded.
-]=]
-function PlayerProfileManager:_PromisePlayerLoadEventSuccess(player: Player | number): Promise
-	if self:IsLoaded(player) then
-		return Promise.resolve()
-	end
-	local userId = self:_getUserId(player)
-	return Promise.fromEvent(self:GetSignal("PlayerProfileLoadSuccess"), function(loadedUserId: number)
-		return loadedUserId == userId
-	end)
-end
-
-function PlayerProfileManager:_DebugPrint(...)
+function PlayerProfileManager._DebugPrint(self: PPM_Internal, ...)
 	if self._config.Debug then
 		print("[👤]", ...)
 	end
@@ -525,188 +747,366 @@ end
 
 --[=[
     @private
-    Helper function to safely extract userId from Player or number
+    Extracts a userId from a `Player | number`. When `DebugProfileUserId` is configured,
+    always returns that value regardless of the input.
 ]=]
-function PlayerProfileManager:_getUserId(player: Player | number): number
-	if DEBUG_PROFILE_ACTIVE then
-		warn("[👤] Debug profile active - returning debug userId")
-		return DEBUG_USER_ID
+function PlayerProfileManager._getUserId(self: PPM_Internal, playerOrUserId: Player | number): number
+	if self._debugUserId then
+		return self._debugUserId
 	end
-	if type(player) == "number" then
-		return player
-	else
-		return player.UserId
+	if type(playerOrUserId) == "number" then
+		return playerOrUserId
 	end
+	return (playerOrUserId :: Player).UserId
 end
-
---------------------------------------------------------------------------------
---// Public Methods //--
---------------------------------------------------------------------------------
-
---[=[
-    Returns whether or not the player's profile is currently loaded.
-
-    ```lua
-    local isLoaded = PlayerProfileManager:IsLoaded(player)
-    ```
-
-    @param player Player
-    @return boolean
-]=]
-function PlayerProfileManager:IsLoaded(player: Player | number): boolean
-	local userId = self:_getUserId(player)
-	return self._PlayerProfileStorage[userId] ~= nil
-end
-
---[=[
-    Returns a promise that will resolve when the player's profile is loaded.
-    Rejects if the player leaves or the profile fails to load.
-
-    ```lua
-    PlayerProfileManager:OnLoaded(player):andThen(function()
-        print("Profile loaded for " .. player.Name)
-    end)
-    ```
-
-    @param player Player | number
-    @return Promise<()>
-]=]
-function PlayerProfileManager:OnLoaded(player: Player | number): Promise
-	return Promise.race {
-		self:_PromisePlayerLoadEventFailure(player),
-		self:_PromisePlayerLoadEventSuccess(player),
-	}
-end
-
---------------------------------------------------------------------------------
---// Public Methods //--
---------------------------------------------------------------------------------
 
 --[=[
     @private
-    @unreleased
-    STUB: This method is not yet implemented.
-    Wipes the player's profile from the data store.
-    Use this in cases where you need to reset a player's data or
-    comply with a right to erasure request.
+    Attempts to acquire a MemoryStore-backed delete-in-progress lock for the given userId.
+    Returns true if the lock was successfully acquired, false if already locked.
 ]=]
-function PlayerProfileManager:WipeProfile(_userId: number): Promise
-	return Promise.reject("WipeProfile method is not yet implemented")
+function PlayerProfileManager._acquireWipeLockAsync(self: PPM_Internal, userId: number): boolean
+	if not self._wipeLockMap then
+		self:_DebugPrint(`Failed to acquire wipe lock for userId {userId}: MemoryStore unavailable`)
+		return false
+	end
+
+	const lockKey = `user_{userId}`
+	local didAcquire = false
+	const ok, result = pcall(function()
+		return self._wipeLockMap:UpdateAsync(lockKey, function(existingValue: WipeLockValue?): WipeLockValue
+			-- If already locked, keep the existing value and mark as not acquired.
+			if existingValue ~= nil then
+				return existingValue
+			end
+			didAcquire = true
+			-- Return the new lock value
+			return { acquiredAt = os.time(), initiator = game.JobId }
+		end, WIPE_LOCK_TTL_SECONDS)
+	end)
+
+	if ok and result ~= nil and didAcquire then
+		self._wipeLocksAcquired[userId] = true
+		self:_DebugPrint(`Acquired wipe lock for userId {userId}`)
+		return true
+	else
+		self:_DebugPrint(`Failed to acquire wipe lock for userId {userId}: already locked or MemoryStore error`)
+		return false
+	end
 end
 
 --[=[
-    Returns the player's profile, if it exists. May return nil if this players profile is not loaded.
+    @private
+    Checks if a delete-in-progress lock exists for the given userId.
+    Returns true if locked, false if not locked or MemoryStore unavailable.
+]=]
+function PlayerProfileManager._isWipeLockedAsync(self: PPM_Internal, userId: number): boolean
+	if not self._wipeLockMap then
+		return false
+	end
+
+	const lockKey = `user_{userId}`
+	const ok, result = pcall(function()
+		return self._wipeLockMap:GetAsync(lockKey)
+	end)
+
+	if ok then
+		return result ~= nil
+	end
+	return false
+end
+
+--[=[
+    @private
+    Releases the delete-in-progress lock for the given userId.
+    Safe to call even if lock is not held.
+]=]
+function PlayerProfileManager._releaseWipeLockAsync(self: PPM_Internal, userId: number): ()
+	if not self._wipeLockMap then
+		return
+	end
+
+	self._wipeLocksAcquired[userId] = nil
+	const lockKey = `user_{userId}`
+	const ok = pcall(function()
+		self._wipeLockMap:RemoveAsync(lockKey)
+	end)
+
+	if ok then
+		self:_DebugPrint(`Released wipe lock for userId {userId}`)
+	else
+		warn(`[👤] Failed to release wipe lock for userId {userId}`)
+	end
+end
+
+--[=[
+    @private
+    Shared session-ending logic that fires PlayerProfileReleasing signal once,
+    calls profile:EndSession(), and cleans up in-memory storage.
+    This ensures consistent release semantics across player-leave and wipe paths.
+]=]
+function PlayerProfileManager._endProfileSession(
+	self: PPM_Internal,
+	userId: number,
+	profile: Profile,
+	reason: string
+): ()
+	self:_DebugPrint(`Ending profile session for userId {userId} (reason: {reason})`)
+	self.PlayerProfileReleasing:Fire(userId, profile)
+	profile:EndSession()
+	self._PlayerProfileStorage[userId] = nil
+end
+
+--[=[
+    @private
+    Sends a cross-server reset notification via ProfileStore messaging.
+    Called during WipeProfile to alert other servers to kick the user.
+]=]
+function PlayerProfileManager._sendWipeResetMessageAsync(self: PPM_Internal, userId: number): boolean
+	const playerKey = self:_generatePlayerKey(userId)
+	const message = {
+		kind = WIPE_MESSAGE_KIND,
+		userId = userId,
+		requestId = `{game.JobId}_{os.time()}_{math.random()}`,
+		issuedAt = os.time(),
+	}
+
+	const ok, result = pcall(function()
+		return self._profileStore:MessageAsync(playerKey, message)
+	end)
+
+	if ok and result then
+		self:_DebugPrint(`Sent wipe reset message for userId {userId}`)
+		return true
+	else
+		self:_DebugPrint(`Failed to send wipe reset message for userId {userId}: {if ok then result else "error"}`)
+		return false
+	end
+end
+
+--------------------------------------------------------------------------------
+--// Public Methods //--
+--------------------------------------------------------------------------------
+
+--[=[
+    Destroys the manager, cleans up all signals and connections.
+]=]
+function PlayerProfileManager.Destroy(self: PPM_Internal)
+	-- Release any wipe locks still held by this server instance so they don't
+	-- block future loads until the TTL expires.
+	for userId in self._wipeLocksAcquired do
+		self:_releaseWipeLockAsync(userId)
+	end
+	self._janitor:Destroy()
+end
+
+--[=[
+    Returns `true` if the player's profile is currently loaded and accessible.
 
     ```lua
-    local profile: Profile? = PlayerProfileManager:GetProfile(player)
+    if manager:IsLoaded(player) then
+        manager:GetProfile(player).Data.Coins += 100
+    end
     ```
 
-    @param player Player | number
-    @return Profile?
+    @param playerOrUserId Player | number
+    @return boolean
 ]=]
-function PlayerProfileManager:GetProfile(player: Player | number): Profile?
-	assert(getmetatable(self) == PlayerProfileManager, "Must call using the Singleton instance.")
-	local userId = self:_getUserId(player)
-	return self._PlayerProfileStorage[userId]
+function PlayerProfileManager.IsLoaded(self: PPM_Internal, playerOrUserId: Player | number): boolean
+	return self._PlayerProfileStorage[self:_getUserId(playerOrUserId)] ~= nil
 end
 
 --[=[
-    Returns a promise that resolves with the player's profile when it is ready.
-    Rejects if the player leaves or the profile fails to load.
+    Returns `true` if the player's profile is currently being loaded.
+
+    @param playerOrUserId Player | number
+    @return boolean
+]=]
+function PlayerProfileManager.IsLoading(self: PPM_Internal, playerOrUserId: Player | number): boolean
+	return self._LoadingPlayers[self:_getUserId(playerOrUserId)] == true
+end
+
+--[=[
+    Returns a Promise that resolves once the player's profile is ready.
+    Rejects if the load fails or the player leaves before loading completes.
 
     ```lua
-    PlayerProfileManager:PromiseProfile(player):andThen(function(profile: Profile)
-        print("Profile loaded for " .. player.Name)
+    manager:OnLoaded(player):andThen(function()
+        print("Profile ready for " .. player.Name)
     end)
     ```
 
-    @param player Player | number
+    @param playerOrUserId Player | number
+    @return Promise<()>
+]=]
+function PlayerProfileManager.OnLoaded(self: PPM_Internal, playerOrUserId: Player | number): Promise
+	local userId = self:_getUserId(playerOrUserId)
+	if self:IsLoaded(playerOrUserId) then
+		return Promise.resolve()
+	end
+	return Promise.race {
+		Promise.fromEvent(self.PlayerProfileLoadSuccess :: any, function(loadedUserId: number)
+			return loadedUserId == userId
+		end),
+		Promise.fromEvent(self.PlayerProfileLoadFailure :: any, function(loadedUserId: number)
+			return loadedUserId == userId
+		end):andThen(function()
+			return Promise.reject("Failed to load profile for userId " .. tostring(userId))
+		end),
+	}
+end
+
+--[=[
+    Returns the player's profile if loaded, otherwise `nil`.
+
+    ```lua
+    local profile: Profile? = manager:GetProfile(player)
+    ```
+
+    @param playerOrUserId Player | number
+    @return Profile?
+]=]
+function PlayerProfileManager.GetProfile(self: PPM_Internal, playerOrUserId: Player | number): Profile?
+	assert(self.ClassName == "PlayerProfileManager", "Must be called on a PlayerProfileManager instance.")
+	return self._PlayerProfileStorage[self:_getUserId(playerOrUserId)]
+end
+
+--[=[
+    Returns a Promise that resolves with the player's profile when it is ready.
+    Rejects if the load fails or the player leaves.
+
+    ```lua
+    manager:PromiseProfile(player):andThen(function(profile: Profile)
+        profile.Data.Level += 1
+    end)
+    ```
+
+    @param playerOrUserId Player | number
     @return Promise<Profile>
 ]=]
-function PlayerProfileManager:PromiseProfile(player: Player | number): Promise
-	assert(getmetatable(self) == PlayerProfileManager, "Must call using the Singleton instance.")
-
-	return self:OnLoaded(player):andThen(function()
-		return self:GetProfile(player)
+function PlayerProfileManager.PromiseProfile(self: PPM_Internal, playerOrUserId: Player | number): Promise
+	assert(self.ClassName == "PlayerProfileManager", "Must be called on a PlayerProfileManager instance.")
+	return self:OnLoaded(playerOrUserId):andThen(function()
+		local profile = self:GetProfile(playerOrUserId)
+		if not profile then
+			return Promise.reject("Profile was unloaded before it could be returned")
+		end
+		return profile
 	end)
 end
 
 --[=[
-    Returns whether the player's profile is currently being loaded.
-    
-    ```lua
-    local isLoading = PlayerProfileManager:IsLoading(player)
-    ```
-    
-    @param player Player | number
-    @return boolean
-]=]
-function PlayerProfileManager:IsLoading(player: Player | number): boolean
-	local userId = self:_getUserId(player)
-	return self._LoadingPlayers[userId] == true
-end
+    Returns a snapshot of the player's current profile state.
 
---[=[
-    Returns detailed status information about a player's profile state.
-    
     ```lua
-    local status = PlayerProfileManager:GetPlayerStatus(player)
+    local status = manager:GetPlayerStatus(player)
     if status.isLoaded then
-        print("Profile is ready!")
+        print("Ready:", status.profile.Data.Coins)
     elseif status.isLoading then
-        print("Profile is still loading...")
-    else
-        print("Profile not loaded yet")
+        print("Still loading...")
     end
     ```
-    
-    @param player Player | number
-    @return {isLoaded: boolean, isLoading: boolean, profile: Profile?}
+
+    @param playerOrUserId Player | number
+    @return { isLoaded: boolean, isLoading: boolean, profile: Profile? }
 ]=]
-function PlayerProfileManager:GetPlayerStatus(
-	player: Player | number
+function PlayerProfileManager.GetPlayerStatus(
+	self: PPM_Internal,
+	playerOrUserId: Player | number
 ): { isLoaded: boolean, isLoading: boolean, profile: Profile? }
 	return {
-		isLoaded = self:IsLoaded(player),
-		isLoading = self:IsLoading(player),
-		profile = self:GetProfile(player),
+		isLoaded = self:IsLoaded(playerOrUserId),
+		isLoading = self:IsLoading(playerOrUserId),
+		profile = self:GetProfile(playerOrUserId),
 	}
 end
 
 --[=[
-    Enables debug profile mode where a specific userId's profile data will be used
-    for testing purposes.
+    Wipes a player's profile from the DataStore (right-to-erasure / data reset).
     
-    @param userId number -- The userId whose profile data to use for testing
-]=]
-function PlayerProfileManager:EnableDebugProfile(userId: number)
-	DEBUG_USER_ID = userId
-	DEBUG_PROFILE_ACTIVE = true
-	self:_DebugPrint(`Debug profile enabled. Using UserId: {userId}`)
-end
+    This operation:
+    - Acquires a delete-in-progress lock to prevent concurrent operations and load races
+    - Sends a cross-server notification to kick any active sessions
+    - Ends any local active profile session
+    - Erases the profile data from the DataStore with bounded retries
+    - Releases the lock to allow future loads (or on failure, via finally)
+    
+    **Returns**: Promise that resolves when the profile is successfully erased, or rejects with error.
+    
+    **Rejects if**:
+    - userId is invalid (non-positive)
+    - Delete already in progress (lock exists)
+    - Profile is currently loading (would race with StartSessionAsync)
+    - RemoveAsync fails after retries
 
---[=[
-    Disables debug profile mode, returning to normal profile loading behavior.
-]=]
-function PlayerProfileManager:DisableDebugProfile()
-	DEBUG_PROFILE_ACTIVE = false
-	self:_DebugPrint("Debug profile disabled.")
-end
+    ```lua
+    manager:WipeProfile(userId):andThen(function()
+        print("Profile wiped successfully")
+    end):catch(function(err)
+        warn("Wipe failed:", err)
+    end)
+    ```
 
---[=[
-    Returns whether debug profile mode is currently active.
+    @param userId number
+    @return Promise
 ]=]
-function PlayerProfileManager:IsDebugProfileActive(): boolean
-	return DEBUG_PROFILE_ACTIVE
-end
+function PlayerProfileManager.WipeProfile(self: PPM_Internal, userId: number): Promise
+	-- Validate userId
+	if type(userId) ~= "number" or userId % 1 ~= 0 or userId <= 0 then
+		return Promise.reject(`[👤] Invalid userId: {userId}`)
+	end
 
---[=[
-    Returns the userId being used for debug profile mode.
-]=]
-function PlayerProfileManager:GetDebugUserId(): number
-	return DEBUG_USER_ID
-end
+	self:_DebugPrint(`WipeProfile initiated for userId {userId}`)
 
-export type PlayerProfileManager = typeof(PlayerProfileManager)
+	-- Reject if profile is currently loading (would race with StartSessionAsync)
+	if self._LoadingPlayers[userId] then
+		return Promise.reject(`[👤] Cannot wipe profile for userId {userId}: profile is currently loading`)
+	end
+
+	-- Attempt to acquire the delete-in-progress lock
+	if not self:_acquireWipeLockAsync(userId) then
+		return Promise.reject(`[👤] Cannot wipe profile for userId {userId}: delete already in progress`)
+	end
+
+	-- Send cross-server wipe reset notification
+	self:_sendWipeResetMessageAsync(userId)
+
+	-- End local active session if present
+	local profile = self._PlayerProfileStorage[userId]
+	if profile then
+		self:_DebugPrint(`Ending active profile session for userId {userId} prior to wipe`)
+		self:_endProfileSession(userId, profile, "profile_wipe")
+	end
+
+	-- Generate the player key for removal
+	local playerKey = self:_generatePlayerKey(userId)
+
+	-- RemoveAsync with bounded retries; lock is always released via :finally
+	return Promise.retryWithDelay(function()
+		return Promise.new(function(removeResolve, removeReject)
+			local ok, result = pcall(function()
+				return self._profileStore:RemoveAsync(playerKey)
+			end)
+
+			if not ok then
+				removeReject(`[👤] RemoveAsync error for userId {userId}: {result}`)
+				return
+			end
+
+			if result == true then
+				self:_DebugPrint(`RemoveAsync succeeded for userId {userId}`)
+				removeResolve()
+			else
+				removeReject(`[👤] RemoveAsync returned false for userId {userId}`)
+			end
+		end)
+	end, WIPE_RETRY_ATTEMPTS, WIPE_RETRY_DELAY)
+		:tap(function()
+			self:_DebugPrint(`Successfully wiped profile for userId {userId}`)
+		end)
+		:finally(function()
+			self:_releaseWipeLockAsync(userId)
+		end)
+end
 
 return PlayerProfileManager

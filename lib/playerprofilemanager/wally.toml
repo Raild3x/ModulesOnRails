@@ -18,7 +18,9 @@ unreleased = true
 [dependencies]
 Signal = "howmanysmall/better-signal@2.1.0"
 Promise = "howmanysmall/typed-promise@^4.0.3"
-BaseObject = "raild3x/baseobject@^0"
+Janitor = "howmanysmall/janitor@^1.18"
 RailUtil = "raild3x/railutil@^1"
 T = "raild3x/t@^1"
+
+[server-dependencies]
 ProfileStore = "lm-loleris/profilestore@1.0.3"
