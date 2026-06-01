@@ -68,7 +68,8 @@ Declaration matrix:
 | any | Inner | Assigned programmatically | local with camelCase |
 
 ## Testing Rules
-- Use tiniest for tests. TestEZ is deprecated.
+- Use tiniest for tests. Analyze the examples under `/test/tiniest` for reference.
+- TestEZ is deprecated in this codebase. NEVER use TestEZ or its syntax. They do not exist.
 - Create tests in `.spec.luau` files.
 - For pure Luau packages, run tests through `tests.luau` in VS Code.
 - For non-pure-Luau packages, rely on developer-run manual testing and provided output.

@@ -1,6 +1,7 @@
 
 *.rbxl
 *.rbxl.lock
+__pycache__
 
 src/baseobject/*
 !src/baseobject/baseobject
