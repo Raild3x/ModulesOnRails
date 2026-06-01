@@ -67,6 +67,19 @@ export type ProfileStore = ProfileTypeDef.ProfileStore
 type LoadSuccessSignal = Signal.Signal<(userId: number) -> (), number>
 type LoadFailureSignal = Signal.Signal<(userId: number, err: string) -> (), number, string>
 type ReleasingSignal = Signal.Signal<(userId: number, profile: Profile) -> (), number, Profile>
+type SaveCallbackType = "OnSave" | "OnLastSave"
+type SaveCallback = {
+	callback: (profile: Profile) -> (),
+	priority: number,
+}
+type SaveCallbackBuckets = {
+	OnSave: { SaveCallback },
+	OnLastSave: { SaveCallback },
+}
+type SaveCallbackConnection = {
+	Disconnect: () -> (),
+	Destroy: () -> (),
+}
 type WipeLockValue = {
 	acquiredAt: number,
 	initiator: string,
@@ -175,6 +188,13 @@ export type PPM_Config = {
 export type PlayerProfileManager = {
 	ClassName: string,
 	new: (config: PPM_Config) -> PlayerProfileManager,
+	SAVE_PRIORITY: {
+		HIGHEST: number,
+		HIGH: number,
+		NORMAL: number,
+		LOW: number,
+		LOWEST: number,
+	},
 	-- lifecycle signals (connect directly on the instance)
 	PlayerProfileLoadSuccess: LoadSuccessSignal,
 	PlayerProfileLoadFailure: LoadFailureSignal,
@@ -194,6 +214,18 @@ export type PlayerProfileManager = {
 	-- profile access
 	GetProfile: (self: PlayerProfileManager, playerOrUserId: Player | number) -> Profile?,
 	PromiseProfile: (self: PlayerProfileManager, playerOrUserId: Player | number) -> Promise,
+	OnSave: (
+		self: PlayerProfileManager,
+		playerOrUserId: Player | number,
+		callback: (profile: Profile) -> (),
+		priority: number?
+	) -> SaveCallbackConnection,
+	OnLastSave: (
+		self: PlayerProfileManager,
+		playerOrUserId: Player | number,
+		callback: (profile: Profile) -> (),
+		priority: number?
+	) -> SaveCallbackConnection,
 	WipeProfile: (self: PlayerProfileManager, userId: number) -> Promise,
 	-- lifecycle
 	Destroy: (self: PlayerProfileManager) -> (),
@@ -224,6 +256,7 @@ type PPM_Internal = PlayerProfileManager & {
 	_loadFailureCallback: (userId: number, err: string) -> (),
 	_debugUserId: number?,
 	_wipeLockMapName: string,
+	_SaveCallbacks: { [number]: SaveCallbackBuckets },
 	-- private methods
 	_setupCallbacks: (self: PPM_Internal) -> (),
 	_initializeProfileStore: (self: PPM_Internal) -> (),
@@ -235,6 +268,14 @@ type PPM_Internal = PlayerProfileManager & {
 	_attemptLoadProfile: (self: PPM_Internal, userId: number, player: Player?) -> Promise,
 	_createPlayerData: (self: PPM_Internal, playerOrUserId: Player | number) -> Promise,
 	_setupProfileSession: (self: PPM_Internal, userId: number, profile: Profile) -> (),
+	_executeSaveCallbacks: (self: PPM_Internal, userId: number, callbackType: SaveCallbackType) -> (),
+	_addSaveCallback: (
+		self: PPM_Internal,
+		userId: number,
+		callbackType: SaveCallbackType,
+		callback: (profile: Profile) -> (),
+		priority: number
+	) -> SaveCallbackConnection,
 	_DebugPrint: (self: PPM_Internal, ...any) -> (),
 	_getUserId: (self: PPM_Internal, playerOrUserId: Player | number) -> number,
 	-- wipe state tracking
@@ -261,6 +302,13 @@ const WIPE_RETRY_ATTEMPTS = 3
 const WIPE_RETRY_DELAY = 2
 const WIPE_RESET_KICK_MESSAGE = "Your player data is being reset. Please rejoin in a moment."
 const WIPE_MESSAGE_KIND = "ProfileWipeReset"
+const SAVE_PRIORITY = {
+	HIGHEST = 1000,
+	HIGH = 500,
+	NORMAL = 0,
+	LOW = -500,
+	LOWEST = -1000,
+}
 
 --------------------------------------------------------------------------------
 --// Local Functions //--
@@ -390,6 +438,7 @@ end
 const PlayerProfileManager = {}
 PlayerProfileManager.ClassName = "PlayerProfileManager"
 PlayerProfileManager.__index = PlayerProfileManager
+PlayerProfileManager.SAVE_PRIORITY = SAVE_PRIORITY
 
 --[=[
     Creates a new PlayerProfileManager. Takes a config table — see `PPM_Config` for details.
@@ -412,6 +461,7 @@ function PlayerProfileManager.new(config: PPM_Config): PlayerProfileManager
 	self._PlayerProfileStorage = {} :: { [number]: Profile }
 	self._LoadingPlayers = {} :: { [number]: boolean }
 	self._wipeLocksAcquired = {} :: { [number]: boolean }
+	self._SaveCallbacks = {} :: { [number]: SaveCallbackBuckets }
 	self._config = config
 	self._dataStoreKey = config.DataStoreKey or DEFAULT_DATA_STORE_KEY
 	self._isMock = config.UseMock or false
@@ -711,6 +761,20 @@ function PlayerProfileManager._setupProfileSession(self: PPM_Internal, userId: n
 	local player = resolvePlayer(userId)
 
 	self._PlayerProfileStorage[userId] = profile
+	if not self._SaveCallbacks[userId] then
+		self._SaveCallbacks[userId] = {
+			OnSave = {},
+			OnLastSave = {},
+		}
+	end
+
+	local onSaveConnection = profile.OnSave:Connect(function()
+		self:_executeSaveCallbacks(userId, "OnSave")
+	end)
+
+	local onLastSaveConnection = profile.OnLastSave:Connect(function()
+		self:_executeSaveCallbacks(userId, "OnLastSave")
+	end)
 
 	-- Register message handler to process cross-server wipe reset notifications
 	profile:MessageHandler(function(message, processed)
@@ -727,6 +791,8 @@ function PlayerProfileManager._setupProfileSession(self: PPM_Internal, userId: n
 	end)
 
 	profile.OnSessionEnd:Connect(function()
+		onSaveConnection:Disconnect()
+		onLastSaveConnection:Disconnect()
 		self:_DebugPrint(`Profile session ended for userId {userId}`)
 		-- Guard against double-fire: _endProfileSession may have already released the profile
 		if self._PlayerProfileStorage[userId] then
@@ -873,6 +939,87 @@ function PlayerProfileManager._endProfileSession(
 	self.PlayerProfileReleasing:Fire(userId, profile)
 	profile:EndSession()
 	self._PlayerProfileStorage[userId] = nil
+	self._SaveCallbacks[userId] = nil
+end
+
+--[=[
+	@private
+	Runs registered save callbacks for a user in descending priority order.
+]=]
+function PlayerProfileManager._executeSaveCallbacks(self: PPM_Internal, userId: number, callbackType: SaveCallbackType)
+	local profile = self._PlayerProfileStorage[userId]
+	if not profile then
+		return
+	end
+
+	local callbackBuckets = self._SaveCallbacks[userId]
+	if not callbackBuckets then
+		return
+	end
+
+	local callbacks = callbackBuckets[callbackType]
+	if #callbacks == 0 then
+		return
+	end
+
+	-- Highest priority runs first.
+	table.sort(callbacks, function(a, b)
+		return a.priority > b.priority
+	end)
+
+	for _, callbackData in ipairs(callbacks) do
+		local success, err = pcall(callbackData.callback, profile)
+		if not success then
+			warn(`[👤] {callbackType} callback failed for userId {userId}: {err}`)
+		end
+	end
+end
+
+--[=[
+	@private
+	Registers a prioritized save callback for a user and returns a removable connection.
+]=]
+function PlayerProfileManager._addSaveCallback(
+	self: PPM_Internal,
+	userId: number,
+	callbackType: SaveCallbackType,
+	callback: (profile: Profile) -> (),
+	priority: number
+): SaveCallbackConnection
+	if not self._SaveCallbacks[userId] then
+		self._SaveCallbacks[userId] = {
+			OnSave = {},
+			OnLastSave = {},
+		}
+	end
+
+	local callbackData = {
+		callback = callback,
+		priority = priority,
+	}
+
+	table.insert(self._SaveCallbacks[userId][callbackType], callbackData)
+
+	local connection = {
+		Disconnect = function()
+			local callbackBuckets = self._SaveCallbacks[userId]
+			if not callbackBuckets then
+				return
+			end
+
+			local callbacks = callbackBuckets[callbackType]
+			local idx = table.find(callbacks, callbackData)
+			if idx then
+				table.remove(callbacks, idx)
+			end
+		end,
+		Destroy = function()
+			-- Connection alias for janitor-style cleanup compatibility.
+		end,
+	}
+
+	connection.Destroy = connection.Disconnect
+	return connection
 end
 
 --[=[
@@ -1011,6 +1158,50 @@ function PlayerProfileManager.PromiseProfile(self: PPM_Internal, playerOrUserId:
 		end
 		return profile
 	end)
+end
+
+--[=[
+	Registers a callback for regular profile saves for a specific player.
+
+	Callbacks run in descending priority order. Higher numbers run first.
+
+	@param playerOrUserId Player | number
+	@param callback (profile: Profile) -> ()
+	@param priority number?
+	@return SaveCallbackConnection
+]=]
+function PlayerProfileManager.OnSave(
+	self: PPM_Internal,
+	playerOrUserId: Player | number,
+	callback: (profile: Profile) -> (),
+	priority: number?
+): SaveCallbackConnection
+	assert(type(callback) == "function", "[👤] Expected callback to be a function")
+	local userId = self:_getUserId(playerOrUserId)
+	assert(IsValidUserId(userId), `[👤] Invalid userId: {userId}`)
+	return self:_addSaveCallback(userId, "OnSave", callback, priority or SAVE_PRIORITY.NORMAL)
+end
+
+--[=[
+	Registers a callback for final profile save for a specific player.
+
+	Callbacks run in descending priority order. Higher numbers run first.
+
+	@param playerOrUserId Player | number
+	@param callback (profile: Profile) -> ()
+	@param priority number?
+	@return SaveCallbackConnection
+]=]
+function PlayerProfileManager.OnLastSave(
+	self: PPM_Internal,
+	playerOrUserId: Player | number,
+	callback: (profile: Profile) -> (),
+	priority: number?
+): SaveCallbackConnection
+	assert(type(callback) == "function", "[👤] Expected callback to be a function")
+	local userId = self:_getUserId(playerOrUserId)
+	assert(IsValidUserId(userId), `[👤] Invalid userId: {userId}`)
+	return self:_addSaveCallback(userId, "OnLastSave", callback, priority or SAVE_PRIORITY.NORMAL)
 end
 
 --[=[

@@ -50,6 +50,7 @@ Important notes:
 - `const` protects the variable binding, not table contents.
 - Base-scope constants should use SCREAMING_SNAKE_CASE unless they are mutable-content tables.
 - If a variable is declared and immediately assigned later, treat it as non-const for policy purposes.
+- Exceptions to the constant naming policy may be made when justified by readability, practicality, or consistency with existing code. Ex: Roblox services and required modules should be consts at the base scope, but they should be PascalCase even though they are never reassigned.
 
 Declaration matrix:
 
@@ -57,12 +58,10 @@ Declaration matrix:
 | --- | --- | --- | --- |
 | non-table | Base | Never reassigned | const with SCREAMING_SNAKE_CASE |
 | non-table | Base | Assigned immediately | local with SCREAMING_SNAKE_CASE |
-| non-table | Base | Assigned programmatically | local with camelCase |
+| non-table | Base | Assigned programmatically | local with PascalCase |
 | table | Base | Never reassigned, contents never reassigned | const with SCREAMING_SNAKE_CASE |
-| table | Base | Never reassigned, contents may be reassigned | const with camelCase |
-| table | Base | Assigned immediately, contents never reassigned | local with SCREAMING_SNAKE_CASE |
-| table | Base | Assigned immediately, contents may be reassigned | local with camelCase |
-| table | Base | Assigned programmatically | local with camelCase |
+| table | Base | Never reassigned, contents may be reassigned | const with PascalCase |
+| table | Base | Assigned programmatically | local with PascalCase |
 | any | Inner | Never reassigned | const with camelCase |
 | any | Inner | Assigned immediately | local with camelCase |
 | any | Inner | Assigned programmatically | local with camelCase |

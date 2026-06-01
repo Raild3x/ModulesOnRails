@@ -4,7 +4,11 @@
     Uses Tiniest test framework for Lune compatibility.
 ]]
 
-return function()
+return function(tiniest: tiniest)
+	local expect = tiniest.expect
+	local describe = tiniest.describe
+	local test = tiniest.test
+
 	local PPM = require(script.Parent)
 	local _Profile = require(script.Parent.ProfileTypeDef)
 
@@ -13,6 +17,54 @@ return function()
 		Coins = 0,
 		Level = 1,
 	}
+
+	describe("PlayerProfileManager key isolation", function()
+		it("should reject a duplicate active default DataStoreKey", function()
+			local manager = PPM.new {
+				DefaultDataSchema = TEST_SCHEMA,
+				UseMock = true,
+				Debug = false,
+			}
+
+			local success, err = pcall(function()
+				PPM.new {
+					DefaultDataSchema = TEST_SCHEMA,
+					UseMock = true,
+					Debug = false,
+				}
+			end)
+
+			expect(success).to.equal(false)
+			expect(tostring(err)).to.include("DataStoreKey")
+			manager:Destroy()
+		end)
+
+		it("should isolate wipe locks for managers with different DataStoreKeys", function()
+			local managerA: any = PPM.new {
+				DataStoreKey = "PPM_Test_A",
+				DefaultDataSchema = TEST_SCHEMA,
+				UseMock = true,
+				Debug = false,
+			}
+			local managerB: any = PPM.new {
+				DataStoreKey = "PPM_Test_B",
+				DefaultDataSchema = TEST_SCHEMA,
+				UseMock = true,
+				Debug = false,
+			}
+
+			local acquiredA = managerA:_acquireWipeLockAsync(12345)
+			local acquiredB = managerB:_acquireWipeLockAsync(12345)
+
+			expect(acquiredA).to.equal(true)
+			expect(acquiredB).to.equal(true)
+
+			managerA:_releaseWipeLockAsync(12345)
+			managerB:_releaseWipeLockAsync(12345)
+			managerA:Destroy()
+			managerB:Destroy()
+		end)
+	end)
 
 	describe("PlayerProfileManager.WipeProfile", function()
 		local manager: any
