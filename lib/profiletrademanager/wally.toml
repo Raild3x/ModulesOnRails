@@ -1,0 +1,20 @@
+[package]
+name = "raild3x/profiletrademanager"
+description = "Handles the exchanging of data between two profiles"
+authors = ["Logan Hunt (Raildex)"]
+version = "0.1.0"
+license = "MIT"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+
+[custom]
+# The properly capitalized and spaced name of the library
+formattedName = "ProfileTradeManager"
+# The intro page for the documentation
+docsLink = "ProfileTradeManager"
+
+[dependencies]
+Signal = "howmanysmall/better-signal@2.1.0"
+Promise = "howmanysmall/typed-promise@^4.0.3"
+Janitor = "howmanysmall/janitor@^1.18"
+T = "raild3x/t@^1"
