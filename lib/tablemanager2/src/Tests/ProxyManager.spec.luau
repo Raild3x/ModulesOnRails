@@ -1,4 +1,4 @@
---!nonstrict
+--!strict
 --[=[
 	@class ProxyManager_new.spec
 	
@@ -15,7 +15,7 @@
 	is tested at the TableManager integration level.
 ]=]
 
-return function(t)
+return function(t: tiniest)
 	local ProxyManager = require(script.Parent.Parent.ProxyManager)
 	local ChangeDetector = require(script.Parent.Parent.ChangeDetector)
 

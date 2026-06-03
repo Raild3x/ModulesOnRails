@@ -1,5 +1,4 @@
---!nonstrict
-local Stats = game:GetService("Stats")
+--!strict
 --[=[
 	@class TableManager_new.spec
 	
@@ -15,7 +14,7 @@ local Stats = game:GetService("Stats")
 	- Metadata structure validation
 ]=]
 
-return function(t)
+return function(t: tiniest)
 	local TableManager = require(script.Parent.Parent)
 
 	local test = t.test

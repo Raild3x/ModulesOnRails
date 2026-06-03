@@ -148,14 +148,14 @@ export type ProxyManager = {
 --// Module //--
 --------------------------------------------------------------------------------
 
-local ProxyManager = {}
-local ProxyManager_MT = { __index = ProxyManager }
+const ProxyManager = {}
+const ProxyManager_MT = { __index = ProxyManager }
 
 --[=[
 	Creates a new ProxyManager instance.
 ]=]
 function ProxyManager.new(): ProxyManager
-	local self = setmetatable({} :: any, ProxyManager_MT) :: ProxyManager
+	const self = setmetatable({} :: any, ProxyManager_MT) :: ProxyManager
 
 	self._proxyMeta = {}
 	self._originalToProxy = {}
@@ -165,13 +165,13 @@ function ProxyManager.new(): ProxyManager
 	-- Create the shared metatable for all proxies
 	self._sharedMetatable = {
 		__index = function(proxy, key)
-			local meta = self._proxyMeta[proxy]
+			const meta = self._proxyMeta[proxy]
 			if not meta then
 				error("Proxy metadata not found - proxy may have been destroyed")
 			end
 
-			local originalTable = meta.Original
-			local value = originalTable[key]
+			const originalTable = meta.Original
+			const value = originalTable[key]
 
 			-- Return nested proxy for tables
 			if type(value) == "table" then
@@ -181,7 +181,7 @@ function ProxyManager.new(): ProxyManager
 				end
 
 				-- Create new proxy for nested table (inherit root table)
-				local nestedPath = table.clone(meta.Path)
+				const nestedPath = table.clone(meta.Path)
 				table.insert(nestedPath, key)
 				return self:CreateProxy(value, nestedPath, meta.RootTable)
 			end
@@ -191,19 +191,19 @@ function ProxyManager.new(): ProxyManager
 		end,
 
 		__newindex = function(proxy, key, value)
-			local meta = self._proxyMeta[proxy]
+			const meta = self._proxyMeta[proxy]
 			if not meta then
 				error("Proxy metadata not found - proxy may have been destroyed")
 			end
 
-			local originalTable = meta.Original
-			local currentPath = table.clone(meta.Path)
+			const originalTable = meta.Original
+			const currentPath = table.clone(meta.Path)
 			table.insert(currentPath, key)
 
 			-- Special case: Array append (key == length + 1)
 			if meta.IsArray and type(key) == "number" and key == meta.ArrayLength + 1 then
 				-- Unwrap and apply
-				local unwrappedValue = getOriginal(value)
+				const unwrappedValue = getOriginal(value)
 				originalTable[key] = unwrappedValue
 				meta.ArrayLength = key
 
@@ -222,7 +222,7 @@ function ProxyManager.new(): ProxyManager
 			end
 
 			-- 2. Apply the change
-			local unwrappedValue = getOriginal(value)
+			const unwrappedValue = getOriginal(value)
 			originalTable[key] = unwrappedValue
 
 			-- 3. Detect changes (ChangeDetector compares new state against snapshot)
@@ -242,15 +242,15 @@ function ProxyManager.new(): ProxyManager
 		end,
 
 		__iter = function(proxy)
-			local meta = self._proxyMeta[proxy]
+			const meta = self._proxyMeta[proxy]
 			if not meta then
 				error("Proxy metadata not found - proxy may have been destroyed")
 			end
 
 			-- Use next() on the original table, but wrap returned values in proxies
-			local originalTable = meta.Original
+			const originalTable = meta.Original
 			return function(_, key)
-				local nextKey, nextValue = next(originalTable, key)
+				const nextKey, nextValue = next(originalTable, key)
 				if nextKey == nil then
 					return nil, nil
 				end
@@ -274,7 +274,7 @@ function ProxyManager.new(): ProxyManager
 		end,
 
 		__len = function(proxy)
-			local meta = self._proxyMeta[proxy]
+			const meta = self._proxyMeta[proxy]
 			if not meta then
 				error("Proxy metadata not found - proxy may have been destroyed")
 			end
@@ -282,7 +282,7 @@ function ProxyManager.new(): ProxyManager
 		end,
 
 		__tostring = function(proxy)
-			local meta = self._proxyMeta[proxy]
+			const meta = self._proxyMeta[proxy]
 			if not meta then
 				return "TableManager.Data(?)"
 			end
@@ -312,25 +312,33 @@ function ProxyManager:SetArrayInsertedCallback(callback: (path: Path, index: num
 	self._onArrayInserted = callback
 end
 
---[=[
-	Check if a value is a proxy.
-]=]
+--- Check if a value is a proxy.
 function ProxyManager:IsProxy(t: any): boolean
 	return isProxy(t)
 end
 
---[=[
-	Get the original (unwrapped) table from a proxy.
-]=]
+--- Get the original (unwrapped) table from a proxy. If the input is not a proxy, returns it unchanged.
 function ProxyManager:GetOriginal<T>(t: Proxy<T> | T): T
 	return getOriginal(t)
 end
 
---[=[
-	Get the metadata for a proxy.
-]=]
+--- Get the metadata for a proxy.
 function ProxyManager:GetMetadata<T>(proxy: Proxy<T>): ProxyMetadata<T>?
 	return self._proxyMeta[proxy]
+end
+
+--- Get the path from root to this proxy.
+function ProxyManager:GetPath<T>(proxy: Proxy<T>): Path?
+	local meta = self._proxyMeta[proxy]
+	if not meta then
+		return nil
+	end
+	return meta.Path
+end
+
+--- Get the proxy for an original table, if it exists.
+function ProxyManager:GetProxy<T>(original: T): Proxy<T>?
+	return self._originalToProxy[original]
 end
 
 --[=[
@@ -351,17 +359,17 @@ function ProxyManager:CreateProxy<T>(original: T, path: Path, rootTable: { [any]
 	end
 
 	-- For root proxy, original IS the root table
-	local root = rootTable or (original :: any)
+	const root = rootTable or (original :: any)
 
 	-- Create new proxy
-	local proxy = setmetatable({}, self._sharedMetatable) :: any
+	const proxy = setmetatable({}, self._sharedMetatable) :: any
 
 	-- Store bidirectional mapping
 	PROXY_TO_ORIGINAL[proxy] = original
 	self._originalToProxy[original] = proxy
 
 	-- Store metadata
-	local isArr = isArray(original)
+	const isArr = isArray(original)
 	self._proxyMeta[proxy] = {
 		Original = original,
 		Path = table.clone(path),

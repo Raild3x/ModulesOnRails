@@ -62,6 +62,6 @@
 local tiniest = require("./tiniest/tiniest_for_roblox").configure {}
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local PACKAGE_TO_TEST = "quadtree"
+local PACKAGE_TO_TEST = "tablemanager2" -- Change this to the name of the package you want to test
 local tests = tiniest.collect_tests_from_hierarchy(ReplicatedStorage.src:FindFirstChild(PACKAGE_TO_TEST))
 tiniest.run_tests(tests, {})

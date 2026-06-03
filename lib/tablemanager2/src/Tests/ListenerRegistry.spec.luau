@@ -1,4 +1,4 @@
---!nonstrict
+--!strict
 --[=[
 	@class ListenerRegistry_new.spec
 	
@@ -11,7 +11,7 @@
 	- Event data structure handling
 ]=]
 
-return function(t)
+return function(t: tiniest)
 	local ListenerRegistry = require(script.Parent.Parent.ListenerRegistry)
 
 	local test = t.test

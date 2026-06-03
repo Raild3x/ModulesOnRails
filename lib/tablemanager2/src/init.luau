@@ -53,7 +53,7 @@
 	## Usage
 	
 	```lua
-	local manager = TableManager.new({
+	const manager = TableManager.new({
 		player = { health = 100, level = 5 },
 		settings = { volume = 80 }
 	})
@@ -80,11 +80,11 @@
 ]=]
 
 --// Imports //--
-local Signal = require(script.Parent.Signal)
-local ProxyManagerModule = require(script.ProxyManager)
-local ListenerRegistryModule = require(script.ListenerRegistry)
-local ChangeDetectorModule = require(script.ChangeDetector)
-local PathHelpers = require(script.PathHelpers)
+const Signal = require(script.Parent.Signal)
+const ProxyManagerModule = require(script.ProxyManager)
+const ListenerRegistryModule = require(script.ListenerRegistry)
+const ChangeDetectorModule = require(script.ChangeDetector)
+const PathHelpers = require(script.PathHelpers)
 
 --// Types //--
 type Path = PathHelpers.Path
@@ -100,6 +100,7 @@ export type Proxy<T> = ProxyManagerModule.Proxy<T>
 
 export type TableManager<T = any> = {
 	Proxy: Proxy<T>,
+	Raw: T,
 
 	-- Signals (fire once per change)
 	ValueChanged: Signal<(path: Path, newValue: any, oldValue: any?) -> (), Path, any, any?>,
@@ -157,8 +158,9 @@ export type TableManager<T = any> = {
 	-- Helper methods
 	Get: (self: TableManager<T>, path: Path) -> any,
 	Set: (self: TableManager<T>, path: Path, value: any) -> (),
-	Insert: (self: TableManager<T>, path: Path, ...any) -> (),
-	Remove: (self: TableManager<T>, path: Path, index: number) -> any,
+	ArrayInsert: | (self: TableManager<T>, arr: Path | Proxy<any>, newValue: any) -> ()
+		| (self: TableManager<T>, arr: Path | Proxy<any>, index: number, newValue: any) -> (),
+	ArrayRemove: (self: TableManager<T>, arr: Path | Proxy<any>, index: number) -> any,
 	ForceNotify: (self: TableManager<T>, path: Path) -> (),
 	Destroy: (self: TableManager<T>) -> (),
 
@@ -179,14 +181,14 @@ export type TableManager<T = any> = {
 --// Module //--
 --------------------------------------------------------------------------------
 
-local TableManager = {}
-local TableManager_MT = { __index = TableManager }
+const TableManager = {}
+const TableManager_MT = { __index = TableManager }
 
 --[=[
 	Creates a synthetic snapshot for array operations and ForceNotify.
 	These operations bypass normal ChangeDetector flow so we create minimal snapshots.
 ]=]
-local function createSyntheticSnapshot(rootTable: any, path: Path, value: any)
+const function createSyntheticSnapshot(rootTable: any, path: Path, value: any)
 	return {
 		RootTable = rootTable,
 		Path = path,
@@ -199,10 +201,11 @@ end
 	Creates a new TableManager instance.
 ]=]
 function TableManager.new<T>(initialData: T): TableManager<T>
-	local self = setmetatable({} :: any, TableManager_MT) :: TableManager<T>
+	const self = setmetatable({} :: any, TableManager_MT) :: TableManager<T>
 
 	-- Store original data
 	self._originalData = initialData or {}
+	self.Raw = self._originalData
 
 	-- Initialize subsystems
 	self._proxyManager = ProxyManagerModule.new()
@@ -285,10 +288,10 @@ function TableManager.new<T>(initialData: T): TableManager<T>
 	-- Wire up array append callback
 	self._proxyManager:SetArrayInsertedCallback(function(path: Path, index: number, newValue: any)
 		-- Create synthetic metadata for array append
-		local insertPath = table.clone(path)
+		const insertPath = table.clone(path)
 		table.insert(insertPath, index)
 
-		local metadata: ChangeMetadata = {
+		const metadata: ChangeMetadata = {
 			Diff = { type = "added", new = newValue, old = nil, key = index },
 			OriginPath = insertPath,
 			OriginDiff = { type = "added", new = newValue, old = nil, key = index },
@@ -323,13 +326,13 @@ end
 function TableManager:_fireAncestorCallbacksForArrayOp(basePath: Path, originPath: Path, metadata: ChangeMetadata)
 	-- Walk up from basePath to root
 	for i = #basePath, 0, -1 do
-		local ancestorPath = {}
+		const ancestorPath = {}
 		for j = 1, i do
 			table.insert(ancestorPath, basePath[j])
 		end
 
 		-- Create ancestor metadata (Diff = nil)
-		local ancestorMetadata: ChangeMetadata = {
+		const ancestorMetadata: ChangeMetadata = {
 			Diff = nil, -- Ancestor notification
 			OriginPath = originPath,
 			OriginDiff = metadata.OriginDiff,
@@ -412,26 +415,43 @@ end
 --[=[
 	Get the value at a path.
 ]=]
-function TableManager:Get(path: Path): any
-	local parsedPath = PathHelpers.ParsePath(path)
+function TableManager:Get(path: Path, suppressNilPartialPaths: boolean?): any?
+	const parsedPath = PathHelpers.ParsePath(path)
 	local current = self._originalData
-
 	for _, key in parsedPath do
 		if type(current) ~= "table" then
-			return nil
+			if suppressNilPartialPaths then
+				return nil
+			else
+				error(`Path segment {key} is not a table`)
+			end
 		end
 		current = current[key]
 	end
+	return current
+end
 
+function TableManager:GetProxy(path: Path, suppressNilPartialPaths: boolean?): (Proxy<any> | any)?
+	const parsedPath = PathHelpers.ParsePath(path)
+	local current = self.Proxy
+	for _, key in parsedPath do
+		if type(current) ~= "table" then
+			if suppressNilPartialPaths then
+				return nil
+			else
+				error(`Path segment {key} is not a table`)
+			end
+		end
+		current = current[key]
+	end
 	return current
 end
 
 --[=[
 	Set the value at a path.
 ]=]
-function TableManager:Set(path: Path, value: any)
-	local parsedPath = PathHelpers.ParsePath(path)
-
+function TableManager:Set(path: Path, value: any, buildTablesDynamically: boolean?)
+	const parsedPath = PathHelpers.ParsePath(path)
 	if #parsedPath == 0 then
 		error("Cannot set root path")
 	end
@@ -440,33 +460,37 @@ function TableManager:Set(path: Path, value: any)
 	for i = 1, #parsedPath - 1 do
 		parent = parent[parsedPath[i]]
 		if type(parent) ~= "table" then
-			error(`Path segment {parsedPath[i]} is not a table`)
+			if buildTablesDynamically then
+				parent[parsedPath[i]] = {} -- TODO: Change this to use ProxyManager to create a proxy for the new table
+				parent = parent[parsedPath[i]] :: any
+			else
+				error(`Path segment {parsedPath[i]} is not a table`)
+			end
 		end
 	end
 
-	local finalKey = parsedPath[#parsedPath]
-	parent[finalKey] = value
+	parent[parsedPath[#parsedPath]] = value
 end
 
 --[=[
 	Insert value(s) into an array at a specific position or at the end.
 ]=]
-function TableManager:Insert(path: Path, ...): ()
-	local parsedPath = PathHelpers.ParsePath(path)
-	local array = self:Get(parsedPath)
+function TableManager:ArrayInsert(path: Path | Proxy<any>, ...: any): ()
+	const parsedPath = PathHelpers.ParsePath(path)
+	const array = self:GetProxy(parsedPath)
 
 	if type(array) ~= "table" then
 		error("Target is not a table")
 	end
 
-	local proxy = array
-	local meta: ProxyManagerModule.ProxyMetadata? = self._proxyManager:GetMetadata(proxy)
+	const proxy = array
+	const meta: ProxyManagerModule.ProxyMetadata? = self._proxyManager:GetMetadata(proxy)
 
 	if not meta then
 		error("Target is not a proxy")
 	end
 
-	local args = { ... }
+	const args = { ... }
 	local pos: number
 	local values: { any }
 
@@ -480,12 +504,12 @@ function TableManager:Insert(path: Path, ...): ()
 	end
 
 	-- Get original table
-	local original = meta.Original
+	const original = meta.Original
 
 	-- Insert each value
 	for i, value in values do
-		local insertPos = pos + i - 1
-		local unwrappedValue = self._proxyManager:GetOriginal(value)
+		const insertPos = pos + i - 1
+		const unwrappedValue = self._proxyManager:GetOriginal(value)
 
 		-- Shift elements if mid-array insertion
 		if insertPos <= meta.ArrayLength then
@@ -498,10 +522,10 @@ function TableManager:Insert(path: Path, ...): ()
 		original[insertPos] = unwrappedValue
 
 		-- Create synthetic metadata
-		local insertPath = table.clone(parsedPath)
+		const insertPath = table.clone(parsedPath)
 		table.insert(insertPath, insertPos)
 
-		local metadata: ChangeMetadata = {
+		const metadata: ChangeMetadata = {
 			Diff = { type = "added", new = unwrappedValue, old = nil, key = insertPos },
 			OriginPath = insertPath,
 			OriginDiff = { type = "added", new = unwrappedValue, old = nil, key = insertPos },
@@ -525,27 +549,28 @@ function TableManager:Insert(path: Path, ...): ()
 	-- Update metadata
 	meta.ArrayLength = self._proxyManager:GetArrayLength(original)
 end
+TableManager.Insert = TableManager.ArrayInsert
 
 --[=[
 	Remove an element from an array at a specific index.
 ]=]
-function TableManager:Remove(path: Path, index: number): any
-	local parsedPath = PathHelpers.ParsePath(path)
-	local array = self:Get(parsedPath)
+function TableManager:ArrayRemove(path: Path, index: number): any
+	const parsedPath = PathHelpers.ParsePath(path)
+	const array = self:GetProxy(parsedPath)
 
 	if type(array) ~= "table" then
 		error("Target is not a table")
 	end
 
-	local proxy = array
-	local meta: ProxyManagerModule.ProxyMetadata? = self._proxyManager:GetMetadata(proxy)
+	const proxy = array
+	const meta: ProxyManagerModule.ProxyMetadata? = self._proxyManager:GetMetadata(proxy)
 
 	if not meta then
 		error("Target is not a proxy")
 	end
 
-	local original = meta.Original
-	local oldValue = original[index]
+	const original = meta.Original
+	const oldValue = original[index]
 
 	-- Remove the element
 	for i = index, meta.ArrayLength - 1 do
@@ -554,7 +579,7 @@ function TableManager:Remove(path: Path, index: number): any
 	original[meta.ArrayLength] = nil
 
 	-- Create synthetic metadata
-	local removePath = table.clone(parsedPath)
+	const removePath = table.clone(parsedPath)
 	table.insert(removePath, index)
 
 	local metadata: ChangeMetadata = {
@@ -582,6 +607,26 @@ function TableManager:Remove(path: Path, index: number): any
 
 	return oldValue
 end
+TableManager.Remove = TableManager.ArrayRemove
+
+--[=[
+	Holds of firing signals for the duration of the callback, then fires needed signals at the end.
+	Useful for batch operations where you want to suppress intermediate signals and only fire final results.
+]=]
+function TableManager:Batch(fn: () -> ())
+	fn()
+end
+
+--[=[
+	Move an element from one location to another within the same table.
+	This unsets the value at the current path and sets it at the new path, firing appropriate notifications.
+]=]
+function TableManager:MoveTo(currentPath: Path | Proxy<any>, newPath: Path) end
+
+--[=[
+	Swap values at two paths within the same table.
+]=]
+function TableManager:Swap(a: Path | Proxy<any>, b: Path | Proxy<any>) end
 
 --[=[
 	Force notification for a specific path, even if the value hasn't changed.
@@ -602,11 +647,11 @@ end
 	Your listeners can detect this by checking if `metadata.Diff.old == metadata.Diff.new`.
 ]=]
 function TableManager:ForceNotify(path: Path)
-	local parsedPath = PathHelpers.ParsePath(path)
-	local currentValue = self:Get(parsedPath)
+	const parsedPath = PathHelpers.ParsePath(path)
+	const currentValue = self:Get(parsedPath)
 
 	-- Create synthetic metadata for a "changed" event where old == new
-	local metadata: ChangeMetadata = {
+	const metadata: ChangeMetadata = {
 		Diff = {
 			type = "changed",
 			old = currentValue,
@@ -635,12 +680,12 @@ function TableManager:ForceNotify(path: Path)
 
 	-- Fire ancestor callbacks manually (with nil Diff to indicate ancestor notification)
 	for i = #parsedPath - 1, 0, -1 do
-		local ancestorPath = {}
+		const ancestorPath = {}
 		for j = 1, i do
 			table.insert(ancestorPath, parsedPath[j])
 		end
 
-		local ancestorMetadata: ChangeMetadata = {
+		const ancestorMetadata: ChangeMetadata = {
 			Diff = nil, -- Ancestor notification
 			OriginPath = parsedPath,
 			OriginDiff = metadata.OriginDiff,

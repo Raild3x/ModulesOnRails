@@ -1,6 +1,4 @@
-local tiniest_expect = require(script.Parent.Parent.Parent.tiniest.tiniest_expect)
-type expect = tiniest_expect.expect
-
+--!strict
 --[[
 	IMPORTANT: Callback Classification
 	
@@ -17,12 +15,12 @@ type expect = tiniest_expect.expect
 	be treated as ancestor notifications, not leaf changes.
 ]]
 
-return function(t)
+return function(t: tiniest)
 	local ChangeDetector = require(script.Parent.Parent.ChangeDetector)
 
 	local test = t.test
 	local describe = t.describe
-	local expect: expect = t.expect
+	local expect = t.expect
 
 	test("should capture snapshot and detect changes", function()
 		local changes = {}
