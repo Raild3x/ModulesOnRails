@@ -277,7 +277,7 @@ local function assert_node(root: DiffNode?, path: Path, expected: DiffNode, labe
 	local node = get_node(root, path)
 
 	if node == nil then
-		print(`  FAIL: {label} — node not found at path [{table.concat(path :: { string }, ", ")}]`)
+		print(("  FAIL: %s — node not found at path [%s]"):format(label, table.concat(path :: { string }, ", ")))
 		return
 	end
 
@@ -306,7 +306,7 @@ end
 local function assert_node_type(root: DiffNode?, path: Path, expected_type: DiffType, label: string)
 	local node = get_node(root, path)
 	if node == nil then
-		print(`  FAIL: {label} — node not found at path [{table.concat(path :: { string }, ", ")}]`)
+		print(("  FAIL: %s — node not found at path [%s]"):format(label, table.concat(path :: { string }, ", ")))
 		return
 	end
 	if node.type == expected_type then
@@ -351,11 +351,10 @@ local function assert_flat_contains(entries: { DiffEntry }, expected: DiffEntry,
 			end
 		end
 	end
+	local pathStr = table.concat(expected.path :: { string }, ", ")
 	warn(`  FAIL: {label} — entry not found`)
 	warn(
-		`    Expected: type={expected.type}, path=[{table.concat(expected.path :: { string }, ", ")}], old={tostring(
-			expected.old
-		)}, new={tostring(expected.new)}`
+		`    Expected: type={expected.type}, path=[{pathStr}], old={tostring(expected.old)}, new={tostring(expected.new)}`
 	)
 	warn(`    Got {#entries} entries:`)
 	for _, e in ipairs(entries) do
