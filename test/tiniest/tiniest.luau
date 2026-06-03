@@ -12,9 +12,7 @@
 
 local tiniest_plugin = require("./tiniest_plugin")
 
-pcall(function()
-	task = require("@lune/task") -- override for Roblox environment
-end)
+local task: typeof(task) = task or require("@lune/task") :: any
 
 type DescribeContext = {
 	type: "describe",
@@ -521,6 +519,13 @@ function tiniest.configure(options: Options)
 		end
 		FINISHED_SUCCESSFULLY = true
 
+		local tests_run: { Test } = {}
+		for _, test in tests_to_run do
+			if individual[test] ~= nil then
+				table.insert(tests_run, test)
+			end
+		end
+
 		local skipped_count = #tests - tests_executed
 
 		local status_tally = {
@@ -538,7 +543,7 @@ function tiniest.configure(options: Options)
 		end
 
 		local result: RunResult = {
-			tests = tests_to_run,
+			tests = tests_run,
 			status_tally = status_tally,
 			individual = individual,
 		}
