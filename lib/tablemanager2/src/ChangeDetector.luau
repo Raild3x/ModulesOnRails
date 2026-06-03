@@ -150,12 +150,11 @@
 	This allows the detector to remain independent of the event system.
 ]=]
 
-local PathHelpers = require(script.Parent.PathHelpers)
-type Path = PathHelpers.Path
-
-local Diff = require(script.Parent.Diff)
+local Diff = require("./Diff")
+local PathHelpers = require("./PathHelpers")
 
 --// Types //--
+type Path = PathHelpers.Path
 
 --[=[
 	A snapshot object that captures the state of a table at a specific point in time.

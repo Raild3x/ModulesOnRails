@@ -113,7 +113,7 @@
 	```
 ]=]
 
-local PathHelpers = require(script.Parent.PathHelpers)
+local PathHelpers = require("./PathHelpers")
 
 --// Types //--
 type Path = PathHelpers.Path

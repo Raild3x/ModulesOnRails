@@ -5,7 +5,7 @@
 	This demonstrates best practices for working with proxy tables.
 ]=]
 
-local TableManager = require(script.Parent.Parent)
+local TableManager = require("../TableManager")
 
 local tm = TableManager.new {
 	Player = {

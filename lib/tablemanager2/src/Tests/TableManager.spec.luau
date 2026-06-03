@@ -15,7 +15,7 @@
 ]=]
 
 return function(t: tiniest)
-	local TableManager = require(script.Parent.Parent)
+	local TableManager = require("../TableManager")
 
 	local test = t.test
 	local describe = t.describe

@@ -80,11 +80,11 @@
 ]=]
 
 --// Imports //--
-const Signal = require(script.Parent.Signal)
-const ProxyManagerModule = require(script.ProxyManager)
-const ListenerRegistryModule = require(script.ListenerRegistry)
-const ChangeDetectorModule = require(script.ChangeDetector)
-const PathHelpers = require(script.PathHelpers)
+const Signal = require("../Signal")
+const ProxyManagerModule = require("./ProxyManager")
+const ListenerRegistryModule = require("./ListenerRegistry")
+const ChangeDetectorModule = require("./ChangeDetector")
+const PathHelpers = require("./PathHelpers")
 
 --// Types //--
 type Path = PathHelpers.Path

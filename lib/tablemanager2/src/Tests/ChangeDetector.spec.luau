@@ -16,7 +16,7 @@
 ]]
 
 return function(t: tiniest)
-	local ChangeDetector = require(script.Parent.Parent.ChangeDetector)
+	local ChangeDetector = require("../ChangeDetector")
 
 	local test = t.test
 	local describe = t.describe

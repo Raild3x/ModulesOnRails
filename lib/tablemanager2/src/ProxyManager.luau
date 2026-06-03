@@ -34,7 +34,7 @@
 	- __metatable: Protects metatable from external access
 ]=]
 
-local PathHelpers = require(script.Parent.PathHelpers)
+local PathHelpers = require("./PathHelpers")
 type Path = PathHelpers.Path
 
 --[=[

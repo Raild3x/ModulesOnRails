@@ -12,7 +12,7 @@
 ]=]
 
 return function(t: tiniest)
-	local ListenerRegistry = require(script.Parent.Parent.ListenerRegistry)
+	local ListenerRegistry = require("../ListenerRegistry")
 
 	local test = t.test
 	local describe = t.describe

@@ -16,8 +16,8 @@
 ]=]
 
 return function(t: tiniest)
-	local ProxyManager = require(script.Parent.Parent.ProxyManager)
-	local ChangeDetector = require(script.Parent.Parent.ChangeDetector)
+	local ProxyManager = require("../ProxyManager")
+	local ChangeDetector = require("../ChangeDetector")
 
 	local test = t.test
 	local describe = t.describe
