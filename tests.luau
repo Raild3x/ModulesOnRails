@@ -1,3 +1,7 @@
+-- This file is specifically for running packages that are Roblox agnostic.
+-- It should not be used for packages that require Roblox services or APIs, as they are unavailable in this environment.
+-- Instead, those packages should be run via the tiniest Roblox Studio test runner manually.
+
 local fs = require("@lune/fs")
 local io = require("@lune/stdio")
 local process = require("@lune/process")
@@ -124,7 +128,7 @@ local tests = tiniest.collect_tests(function()
 
 	local function describe_from_file(name: string)
 		describe(string.gsub(name, ".luau", ""), function()
-			require(name)(tiniest)
+			require("./" .. string.gsub(name, "%.luau$", ""))(tiniest)
 		end)
 	end
 
@@ -138,4 +142,6 @@ local tests = tiniest.collect_tests(function()
 	end
 end)
 
-tiniest.run_tests(tests, {})
+tiniest.run_tests(tests, {
+	safe_mode = true,
+})
