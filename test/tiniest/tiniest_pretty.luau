@@ -3,6 +3,7 @@
 
 local tiniest_plugin = require("./tiniest_plugin")
 local tiniest = require("./tiniest")
+local tiniest_quote = require("./tiniest_quote")
 type Test = tiniest.Test
 type TestRunResult = tiniest.TestRunResult
 type RunResult = tiniest.RunResult
@@ -177,6 +178,23 @@ function tiniest_pretty.configure(options: Options)
 					)
 					table.insert(lines, empty_margin)
 				end
+				local ctx = (pretty.result :: any).error.context
+				if ctx ~= nil and #ctx > 0 then
+					local max_label_len = 0
+					for _, entry in ctx do
+						local len = string_len(entry.label)
+						if len > max_label_len then
+							max_label_len = len
+						end
+					end
+					table.insert(lines, paint.fail_dim("Context:"))
+					for _, entry in ctx do
+						local padding = string.rep(" ", max_label_len - string_len(entry.label))
+						local label_part = paint.dim(entry.label .. padding)
+						table.insert(lines, `  {label_part} {paint.dim(margin_line)} {tiniest_quote(entry.value)}`)
+					end
+					table.insert(lines, "")
+				end
 				local trace = pretty.result.error.trace:gsub("\n+$", "")
 				table.insert(lines, paint.trace_dim(trace))
 				table.insert(lines, "")
@@ -200,7 +218,7 @@ function tiniest_pretty.configure(options: Options)
 			title(
 				`{paint.pass(`{run_result.status_tally.pass} passed`)}, {paint.fail(
 					`{run_result.status_tally.fail} failed`
-				)}`
+				)}, {paint.dim(`{run_result.status_tally.skipped} skipped`)}`
 			)
 		)
 		if #line_items > 0 then

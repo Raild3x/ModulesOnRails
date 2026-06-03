@@ -32,6 +32,10 @@
 	:::
 ]=]
 
+-- Shims for testing via lune (ignore this in actual Roblox code)
+local Vector2 = Vector2 or require("@Vector2")
+local Vector3 = Vector3 or require("@Vector3")
+
 --[=[
 	@within Quadtree
 	@type Vector Vector2 | Vector3

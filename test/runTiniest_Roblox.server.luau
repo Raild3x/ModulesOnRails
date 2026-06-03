@@ -62,6 +62,11 @@
 local tiniest = require("./tiniest/tiniest_for_roblox").configure {}
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local PACKAGE_TO_TEST = "quadtree"
-local tests = tiniest.collect_tests_from_hierarchy(ReplicatedStorage.src:FindFirstChild(PACKAGE_TO_TEST))
-tiniest.run_tests(tests, {})
+local PACKAGE_TO_TEST = "delaunay" -- Change this to the name of the package you want to test
+local folderToSearch = ReplicatedStorage.src:FindFirstChild(PACKAGE_TO_TEST)
+assert(folderToSearch, "Failed to find package")
+local tests = tiniest.collect_tests_from_hierarchy(folderToSearch.src["2dConstrained_New"])
+tiniest.run_tests(tests, {
+	timeout_diagnostics = "on_error",
+	safe_mode = true,
+})
