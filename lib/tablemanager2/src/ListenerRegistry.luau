@@ -331,7 +331,15 @@ function ListenerRegistry:FireListeners(eventType: EventType, path: Path, eventD
 			success, err = pcall(listener.Callback :: any, eventData.NewValue, eventData.Metadata)
 		elseif eventType == "KeyRemoved" then
 			success, err = pcall(listener.Callback :: any, eventData.OldValue, eventData.Metadata)
-		elseif eventType == "KeyChanged" or eventType == "ValueChanged" then
+		elseif eventType == "KeyChanged" then
+			success, err = pcall(
+				listener.Callback :: any,
+				eventData.Key,
+				eventData.NewValue,
+				eventData.OldValue,
+				eventData.Metadata
+			)
+		elseif eventType == "ValueChanged" then
 			success, err = pcall(listener.Callback :: any, eventData.NewValue, eventData.OldValue, eventData.Metadata)
 		elseif eventType == "ArrayInserted" then
 			success, err = pcall(listener.Callback :: any, eventData.Index, eventData.NewValue, eventData.Metadata)
@@ -439,24 +447,21 @@ function ListenerRegistry:FireListenersExact(eventType: EventType, path: Path, e
 
 		-- Build callback args based on event type
 		local success, err
+		local callback: any, metadata = listener.Callback, eventData.Metadata
 		if eventType == "KeyAdded" then
-			success, err = pcall(listener.Callback :: any, eventData.NewValue, eventData.Metadata)
+			success, err = pcall(callback, eventData.NewValue, metadata)
 		elseif eventType == "KeyRemoved" then
-			success, err = pcall(listener.Callback :: any, eventData.OldValue, eventData.Metadata)
-		elseif eventType == "KeyChanged" or eventType == "ValueChanged" then
-			success, err = pcall(listener.Callback :: any, eventData.NewValue, eventData.OldValue, eventData.Metadata)
+			success, err = pcall(callback, eventData.OldValue, metadata)
+		elseif eventType == "KeyChanged" then
+			success, err = pcall(callback, eventData.Key, eventData.NewValue, eventData.OldValue, metadata)
+		elseif eventType == "ValueChanged" then
+			success, err = pcall(callback, eventData.NewValue, eventData.OldValue, metadata)
 		elseif eventType == "ArrayInserted" then
-			success, err = pcall(listener.Callback :: any, eventData.Index, eventData.NewValue, eventData.Metadata)
+			success, err = pcall(callback, eventData.Index, eventData.NewValue, metadata)
 		elseif eventType == "ArrayRemoved" then
-			success, err = pcall(listener.Callback :: any, eventData.Index, eventData.OldValue, eventData.Metadata)
+			success, err = pcall(callback, eventData.Index, eventData.OldValue, metadata)
 		elseif eventType == "ArraySet" then
-			success, err = pcall(
-				listener.Callback :: any,
-				eventData.Index,
-				eventData.NewValue,
-				eventData.OldValue,
-				eventData.Metadata
-			)
+			success, err = pcall(callback, eventData.Index, eventData.NewValue, eventData.OldValue, metadata)
 		end
 
 		if not success and self._debugMode then
