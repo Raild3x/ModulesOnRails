@@ -1,6 +1,7 @@
 
 *.rbxl
 *.rbxl.lock
+*.pyc
 
 src/baseobject/*
 !src/baseobject/baseobject
