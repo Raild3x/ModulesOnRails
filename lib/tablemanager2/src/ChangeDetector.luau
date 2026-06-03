@@ -204,6 +204,11 @@ export type ChangeDetector = {
 	CheckForChanges: (self: ChangeDetector, snapshot: Snapshot) -> (),
 	CheckForChangesBetween: (self: ChangeDetector, oldValue: any, newValue: any, basePath: Path) -> (),
 	SetDebugMode: (self: ChangeDetector, enabled: boolean) -> (),
+	--- Suspends change detection. While suspended, `CaptureSnapshot` and
+	--- `CheckForChanges` are no-ops (O(1)). Used by `TableManager:Batch()`.
+	Suspend: (self: ChangeDetector) -> (),
+	--- Resumes change detection after a `Suspend` call.
+	Resume: (self: ChangeDetector) -> (),
 }
 
 --[=[
@@ -340,6 +345,10 @@ function ChangeDetector.new(
 		{
 			_callbacks = callbacks,
 			_debugMode = debugMode or false,
+			_suspended = false,
+			-- Sentinel snapshot: a fixed table that CaptureSnapshot returns when
+			-- suspended. CheckForChanges recognises it and returns immediately.
+			_sentinelSnapshot = {} :: any,
 		} :: any,
 		ChangeDetector_MT
 	) :: ChangeDetector
@@ -412,6 +421,12 @@ end
 	```
 ]=]
 function ChangeDetector:CaptureSnapshot(rootTable: { [any]: any }, path: Path): Snapshot
+	-- While suspended, skip all snapshot work and return the sentinel.
+	-- CheckForChanges will recognise it and return immediately too.
+	if self._suspended then
+		return self._sentinelSnapshot
+	end
+
 	if self._debugMode then
 		print("CaptureSnapshot called:")
 		print("  path:", table.concat(path, "."))
@@ -496,6 +511,11 @@ end
 	```
 ]=]
 function ChangeDetector:CheckForChanges(snapshot: Snapshot)
+	-- Sentinel returned by CaptureSnapshot while suspended — nothing to diff.
+	if snapshot == self._sentinelSnapshot then
+		return
+	end
+
 	if not snapshot or not snapshot.RootTable then
 		error("Invalid snapshot object. Must be created with CaptureSnapshot().")
 	end
@@ -619,6 +639,28 @@ end
 ]=]
 function ChangeDetector:SetDebugMode(enabled: boolean)
 	self._debugMode = enabled
+end
+
+--[=[
+	Suspends change detection.
+
+	While suspended, `CaptureSnapshot` returns a cheap sentinel value and
+	`CheckForChanges` is a no-op when given that sentinel. This means every
+	assignment through `ProxyManager.__newindex` costs O(1) instead of performing
+	a full snapshot + diff cycle.
+
+	Used by `TableManager:Suspend()` / `TableManager:Batch()`. Always pair with
+	a matching `Resume()` call.
+]=]
+function ChangeDetector:Suspend()
+	self._suspended = true
+end
+
+--[=[
+	Resumes change detection after a `Suspend` call.
+]=]
+function ChangeDetector:Resume()
+	self._suspended = false
 end
 
 --------------------------------------------------------------------------------
