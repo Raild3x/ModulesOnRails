@@ -154,16 +154,31 @@ def main():
 |---------|----------------|-------------|
 """
     readme_content += "\n".join(unreleased_packages) + "\n"
-    
-    readme_content += f"\n---\n\n*Last Modified: {date.today().strftime('%B %d, %Y')}*\n"
 
-    # Write README file
+    # Compare new body against existing README body (ignoring the date footer).
     readme_file = Path("README.md")
-    with open(readme_file, "w", encoding="utf-8") as f:
-        f.write(readme_content)
-    
+    DATE_FOOTER_RE = re.compile(r"\n---\n\n\*Last Modified:.*?\*\n$", re.DOTALL)
+
+    existing_body = ""
+    existing_date_line = ""
+    if readme_file.is_file():
+        existing_raw = readme_file.read_text(encoding="utf-8")
+        m = DATE_FOOTER_RE.search(existing_raw)
+        if m:
+            existing_body = existing_raw[: m.start()]
+            existing_date_line = m.group(0)
+        else:
+            existing_body = existing_raw
+
+    if readme_content == existing_body:
+        print("\nREADME.md is already up to date. No changes written.")
+        return 0
+
+    # Body changed — append a fresh date footer and write.
+    readme_content += f"\n---\n\n*Last Modified: {date.today().strftime('%B %d, %Y')}*\n"
+    readme_file.write_text(readme_content, encoding="utf-8")
+
     print("\nREADME.md has been generated successfully.")
-    print(readme_content)
     return 0
 
 
