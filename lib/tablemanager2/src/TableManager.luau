@@ -269,7 +269,7 @@ end
 ]=]
 function TableManager.new<T>(initialData: T, config: TableManagerConfig?): TableManager<T>
 	const self = setmetatable({} :: any, TableManager_MT) :: TableManager<T>
-	const resolvedConfig = config or {}
+	const resolvedConfig = config or {} :: { [string]: any? }
 
 	-- Store original data
 	self._originalData = initialData or {}
@@ -677,20 +677,20 @@ end
 --[=[
 	Insert value(s) into an array at a specific position or at the end.
 ]=]
-function TableManager:ArrayInsert(path: Path | Proxy<any>, ...: any): ()
-	const parsedPath = PathHelpers.ParsePath(path)
-	const array = self:GetProxy(parsedPath)
-
-	if type(array) ~= "table" then
-		error("Target is not a table")
+function TableManager:ArrayInsert(pathOrProxy: Path | Proxy<{ any }>, ...: any): ()
+	const proxyManager = self._proxyManager
+	local proxy: Proxy<{ any }>, parsedPath: Path
+	if proxyManager:IsProxy(pathOrProxy) then
+		proxy = pathOrProxy :: Proxy<{ any }>
+		parsedPath = proxyManager:GetPath(proxy)
+	else
+		parsedPath = PathHelpers.ParsePath(pathOrProxy)
+		proxy = self:GetProxy(parsedPath)
 	end
 
-	const proxy = array
-	const meta: ProxyManagerModule.ProxyMetadata? = self._proxyManager:GetMetadata(proxy)
-
-	if not meta then
-		error("Target is not a proxy")
-	end
+	const meta: ProxyManagerModule.ProxyMetadata = proxyManager:GetMetadata(proxy)
+	const array = meta.Original
+	assert(typeof(array) == "table", "Target is not a table")
 
 	-- Determine if a position was provided or default to appending.
 	local pos: number
@@ -705,8 +705,7 @@ function TableManager:ArrayInsert(path: Path | Proxy<any>, ...: any): ()
 	end
 
 	-- Get original table
-	const original = meta.Original
-	const unwrappedValue = self._proxyManager:GetOriginal(newValue)
+	const unwrappedValue = proxyManager:GetOriginal(newValue)
 
 	-- Validate against the schema's element check for this array, if configured.
 	if self._schema then
@@ -732,7 +731,7 @@ function TableManager:ArrayInsert(path: Path | Proxy<any>, ...: any): ()
 		const pathKey = serializeBatchPath(parsedPath)
 		if not self._batchTrackedPaths[pathKey] then
 			self._batchTrackedPaths[pathKey] = table.clone(parsedPath)
-			self._batchRecorder:StartTracking(parsedPath, original)
+			self._batchRecorder:StartTracking(parsedPath, array)
 		end
 		-- Mark this top-level branch as dirtied
 		const branchKey: any = if #parsedPath > 0 then parsedPath[1] else "__root__"
@@ -740,16 +739,16 @@ function TableManager:ArrayInsert(path: Path | Proxy<any>, ...: any): ()
 	end
 
 	-- Insert the value (handles shifting when inserting into the middle).
-	table.insert(original, pos, unwrappedValue)
+	table.insert(array, pos, unwrappedValue)
 	-- Update Key metadata for all proxies that were shifted right by this insert.
-	self._proxyManager:ShiftKeys(original, pos, 1)
+	proxyManager:ShiftKeys(array, pos, 1)
 
 	-- Batch: log the insert and skip fires
 	if self._batchDepth > 0 then
 		if self._batchRecorder then
 			self._batchRecorder:RecordInsert(parsedPath, pos, unwrappedValue)
 		end
-		meta.ArrayLength = self._proxyManager:GetArrayLength(original)
+		meta.ArrayLength = proxyManager:GetArrayLength(array)
 		return
 	end
 
@@ -778,29 +777,27 @@ function TableManager:ArrayInsert(path: Path | Proxy<any>, ...: any): ()
 	self.ArrayInserted:Fire(parsedPath, pos, unwrappedValue)
 
 	-- Update metadata
-	meta.ArrayLength = self._proxyManager:GetArrayLength(original)
+	meta.ArrayLength = proxyManager:GetArrayLength(array)
 end
 TableManager.Insert = TableManager.ArrayInsert
 
 --[=[
 	Remove an element from an array at a specific index.
 ]=]
-function TableManager:ArrayRemove(path: Path, index: number): any
-	const parsedPath = PathHelpers.ParsePath(path)
-	const array = self:GetProxy(parsedPath)
-
-	if type(array) ~= "table" then
-		error("Target is not a table")
+function TableManager:ArrayRemove(pathOrProxy: Path | Proxy<{ any }>, index: number): any
+	const proxyManager = self._proxyManager
+	local proxy: Proxy<{ any }>, parsedPath: Path
+	if proxyManager:IsProxy(pathOrProxy) then
+		proxy = pathOrProxy :: Proxy<{ any }>
+		parsedPath = proxyManager:GetPath(proxy)
+	else
+		parsedPath = PathHelpers.ParsePath(pathOrProxy)
+		proxy = self:GetProxy(parsedPath)
 	end
 
-	const proxy = array
-	const meta: ProxyManagerModule.ProxyMetadata? = self._proxyManager:GetMetadata(proxy)
-
-	if not meta then
-		error("Target is not a proxy")
-	end
-
-	const original = meta.Original
+	const meta: ProxyManagerModule.ProxyMetadata = self._proxyManager:GetMetadata(proxy)
+	const array = meta.Original
+	assert(typeof(array) == "table", "Target is not a table")
 
 	-- Batch: start tracking and log the removal BEFORE mutating, so that
 	-- _computeLiveIds in RecordRemove sees the correct pre-removal id sequence.
@@ -808,7 +805,7 @@ function TableManager:ArrayRemove(path: Path, index: number): any
 		const pathKey = serializeBatchPath(parsedPath)
 		if not self._batchTrackedPaths[pathKey] then
 			self._batchTrackedPaths[pathKey] = table.clone(parsedPath)
-			self._batchRecorder:StartTracking(parsedPath, original)
+			self._batchRecorder:StartTracking(parsedPath, array)
 		end
 		self._batchRecorder:RecordRemove(parsedPath, index)
 		-- Mark this top-level branch as dirtied
@@ -817,15 +814,15 @@ function TableManager:ArrayRemove(path: Path, index: number): any
 	end
 
 	-- Remove the element (handles shifting automatically).
-	const oldValue = table.remove(original, index)
+	const oldValue = table.remove(array, index)
 	-- Shift proxies after the removed slot left by 1. Pass index+1 as fromIndex
 	-- so the removed item's own proxy (if held) keeps its original key rather than
 	-- being shifted to key=0.
-	self._proxyManager:ShiftKeys(original, index + 1, -1)
+	proxyManager:ShiftKeys(array, index + 1, -1)
 
 	-- Batch: skip fires
 	if self._batchDepth > 0 then
-		meta.ArrayLength = self._proxyManager:GetArrayLength(original)
+		meta.ArrayLength = proxyManager:GetArrayLength(array)
 		return oldValue
 	end
 
@@ -854,7 +851,7 @@ function TableManager:ArrayRemove(path: Path, index: number): any
 	self.ArrayRemoved:Fire(parsedPath, index, oldValue)
 
 	-- Update metadata
-	meta.ArrayLength = self._proxyManager:GetArrayLength(original)
+	meta.ArrayLength = self._proxyManager:GetArrayLength(array)
 
 	return oldValue
 end

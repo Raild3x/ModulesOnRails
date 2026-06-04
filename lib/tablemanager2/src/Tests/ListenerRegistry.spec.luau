@@ -4,9 +4,9 @@
 	
 	Unit tests for ListenerRegistry_new to verify:
 	- Listener registration and disconnection
-	- FireListenersExact (exact path matching only)
-	- FireListeners (with path-relation matching)
-	- FireOnDescendantChanges filtering
+	- FireListenersExact (exact path matching)
+	- ListenDepth / ListenDepthStyle filtering
+	- Once auto-disconnect
 	- Multiple listeners on same path
 	- Event data structure handling
 ]=]
@@ -170,66 +170,19 @@ return function(t: tiniest)
 		end)
 	end)
 
-	describe("FireListeners (Path-Relation Matching)", function()
-		test("should fire listener at exact matching path (self)", function()
+	describe("ListenDepth Filtering", function()
+		test("nil depth (default) fires for ancestor notifications at any depth", function()
 			local registry = ListenerRegistry.new(false)
 
 			local fired = false
-			registry:RegisterListener("ValueChanged", { "player", "health" }, function()
-				fired = true
-			end)
-
-			registry:FireListeners("ValueChanged", { "player", "health" }, {
-				NewValue = 50,
-				OldValue = 100,
-				Metadata = {
-					Diff = { type = "changed" },
-					OriginPath = { "player", "health" },
-					OriginDiff = { type = "changed" },
-				},
-			})
-
-			expect(fired).is_true()
-
-			registry:Destroy()
-		end)
-
-		test("should fire parent listener when child changes (relation: child)", function()
-			local registry = ListenerRegistry.new(false)
-
-			local parentFired = false
 			registry:RegisterListener("ValueChanged", { "player" }, function()
-				parentFired = true
-			end, { FireOnDescendantChanges = true })
+				fired = true
+			end) -- depth=nil by default
 
-			-- Fire at child path - parent should fire (descendant notification)
-			registry:FireListeners("ValueChanged", { "player", "health" }, {
-				NewValue = 50,
-				OldValue = 100,
-				Metadata = {
-					Diff = { type = "changed" },
-					OriginPath = { "player", "health" },
-					OriginDiff = { type = "changed" },
-				},
-			})
-
-			expect(parentFired).is_true()
-
-			registry:Destroy()
-		end)
-
-		test("should NOT fire child listener when parent changes (relation: parent)", function()
-			local registry = ListenerRegistry.new(false)
-
-			local childFired = false
-			registry:RegisterListener("ValueChanged", { "player", "health" }, function()
-				childFired = true
-			end)
-
-			-- Fire at parent path - child should NOT fire
-			registry:FireListeners("ValueChanged", { "player" }, {
-				NewValue = { health = 50 },
-				OldValue = { health = 100 },
+			-- Ancestor notification: change originated at ["player", "health"] (depth 1 from listener)
+			registry:FireListenersExact("ValueChanged", { "player" }, {
+				NewValue = nil,
+				OldValue = nil,
 				Metadata = {
 					Diff = nil,
 					OriginPath = { "player", "health" },
@@ -237,49 +190,25 @@ return function(t: tiniest)
 				},
 			})
 
-			expect(childFired).never_is_true()
-
-			registry:Destroy()
-		end)
-	end)
-
-	describe("FireOnDescendantChanges Filtering", function()
-		test("should fire for descendants when FireOnDescendantChanges is true", function()
-			local registry = ListenerRegistry.new(false)
-
-			local fired = false
-			registry:RegisterListener("ValueChanged", { "player" }, function()
-				fired = true
-			end, { FireOnDescendantChanges = true })
-
-			registry:FireListeners("ValueChanged", { "player", "health" }, {
-				NewValue = 50,
-				OldValue = 100,
-				Metadata = {
-					Diff = { type = "changed" },
-					OriginPath = { "player", "health" },
-					OriginDiff = { type = "changed" },
-				},
-			})
-
 			expect(fired).is_true()
 
 			registry:Destroy()
 		end)
 
-		test("should NOT fire for descendants when FireOnDescendantChanges is false", function()
+		test("depth=0 does NOT fire for ancestor notifications", function()
 			local registry = ListenerRegistry.new(false)
 
 			local fired = false
 			registry:RegisterListener("ValueChanged", { "player" }, function()
 				fired = true
-			end, { FireOnDescendantChanges = false })
+			end, { ListenDepth = 0 })
 
-			registry:FireListeners("ValueChanged", { "player", "health" }, {
-				NewValue = 50,
-				OldValue = 100,
+			-- Ancestor notification: change at ["player", "health"] is depth 1 from listener
+			registry:FireListenersExact("ValueChanged", { "player" }, {
+				NewValue = nil,
+				OldValue = nil,
 				Metadata = {
-					Diff = { type = "changed" },
+					Diff = nil,
 					OriginPath = { "player", "health" },
 					OriginDiff = { type = "changed" },
 				},
@@ -290,16 +219,16 @@ return function(t: tiniest)
 			registry:Destroy()
 		end)
 
-		test("should fire for direct change even when FireOnDescendantChanges is false", function()
+		test("depth=0 DOES fire for direct changes (relativeDepth=0)", function()
 			local registry = ListenerRegistry.new(false)
 
 			local fired = false
 			registry:RegisterListener("ValueChanged", { "player" }, function()
 				fired = true
-			end, { FireOnDescendantChanges = false })
+			end, { ListenDepth = 0 })
 
-			-- Direct change at listener's path
-			registry:FireListeners("ValueChanged", { "player" }, {
+			-- Direct change at the listener's exact path (Diff present)
+			registry:FireListenersExact("ValueChanged", { "player" }, {
 				NewValue = { health = 50 },
 				OldValue = { health = 100 },
 				Metadata = {
@@ -310,6 +239,164 @@ return function(t: tiniest)
 			})
 
 			expect(fired).is_true()
+
+			registry:Destroy()
+		end)
+
+		test("depth=1 style='<=' fires for depth-1 ancestor, not depth-2", function()
+			local registry = ListenerRegistry.new(false)
+
+			local fired = false
+			registry:RegisterListener("ValueChanged", { "player" }, function()
+				fired = true
+			end, { ListenDepth = 1, ListenDepthStyle = "<=" })
+
+			-- Depth 1 ancestor: origin at ["player", "health"]
+			registry:FireListenersExact("ValueChanged", { "player" }, {
+				NewValue = nil,
+				OldValue = nil,
+				Metadata = {
+					Diff = nil,
+					OriginPath = { "player", "health" },
+					OriginDiff = { type = "changed" },
+				},
+			})
+
+			expect(fired).is_true()
+
+			fired = false
+
+			-- Depth 2 ancestor: origin at ["player", "stats", "hp"] should NOT fire
+			registry:FireListenersExact("ValueChanged", { "player" }, {
+				NewValue = nil,
+				OldValue = nil,
+				Metadata = {
+					Diff = nil,
+					OriginPath = { "player", "stats", "hp" },
+					OriginDiff = { type = "changed" },
+				},
+			})
+
+			expect(fired).never_is_true()
+
+			registry:Destroy()
+		end)
+
+		test("depth=1 style='==' fires at exactly depth 1, not depth 0", function()
+			local registry = ListenerRegistry.new(false)
+
+			local fired = false
+			registry:RegisterListener("ValueChanged", { "player" }, function()
+				fired = true
+			end, { ListenDepth = 1, ListenDepthStyle = "==" })
+
+			-- Direct change at listener path (depth 0) should NOT fire
+			registry:FireListenersExact("ValueChanged", { "player" }, {
+				NewValue = { health = 50 },
+				OldValue = { health = 100 },
+				Metadata = {
+					Diff = { type = "changed" },
+					OriginPath = { "player" },
+					OriginDiff = { type = "changed" },
+				},
+			})
+
+			expect(fired).never_is_true()
+
+			-- Depth 1 ancestor (origin at ["player", "health"]) SHOULD fire
+			registry:FireListenersExact("ValueChanged", { "player" }, {
+				NewValue = nil,
+				OldValue = nil,
+				Metadata = {
+					Diff = nil,
+					OriginPath = { "player", "health" },
+					OriginDiff = { type = "changed" },
+				},
+			})
+
+			expect(fired).is_true()
+
+			registry:Destroy()
+		end)
+	end)
+
+	describe("Once Option", function()
+		test("fires exactly once then auto-disconnects", function()
+			local registry = ListenerRegistry.new(false)
+
+			local fireCount = 0
+			local conn = registry:RegisterListener("ValueChanged", { "player", "health" }, function()
+				fireCount += 1
+			end, { Once = true })
+
+			local eventData = {
+				NewValue = 50,
+				OldValue = 100,
+				Metadata = {
+					Diff = { type = "changed" },
+					OriginPath = { "player", "health" },
+					OriginDiff = { type = "changed" },
+				},
+			}
+
+			registry:FireListenersExact("ValueChanged", { "player", "health" }, eventData)
+			registry:FireListenersExact("ValueChanged", { "player", "health" }, eventData)
+
+			expect(fireCount).is(1)
+			expect(conn.Connected).never_is_true()
+
+			registry:Destroy()
+		end)
+
+		test("Connected is false immediately after the first fire", function()
+			local registry = ListenerRegistry.new(false)
+
+			local connAfterFire: any = nil
+			local conn: any
+			conn = registry:RegisterListener("ValueChanged", { "player", "health" }, function()
+				connAfterFire = conn
+			end, { Once = true })
+
+			registry:FireListenersExact("ValueChanged", { "player", "health" }, {
+				NewValue = 50,
+				OldValue = 100,
+				Metadata = {
+					Diff = { type = "changed" },
+					OriginPath = { "player", "health" },
+					OriginDiff = { type = "changed" },
+				},
+			})
+
+			-- conn.Connected was already false when the callback ran
+			expect(connAfterFire).exists()
+			expect(connAfterFire.Connected).never_is_true()
+
+			registry:Destroy()
+		end)
+
+		test("re-entrant fire does not double-fire a Once listener", function()
+			local registry = ListenerRegistry.new(false)
+
+			local fireCount = 0
+			local eventData = {
+				NewValue = 50,
+				OldValue = 100,
+				Metadata = {
+					Diff = { type = "changed" },
+					OriginPath = { "player", "health" },
+					OriginDiff = { type = "changed" },
+				},
+			}
+
+			registry:RegisterListener("ValueChanged", { "player", "health" }, function()
+				fireCount += 1
+				-- Re-entrant: fire the same path again inside the callback
+				registry:FireListenersExact("ValueChanged", { "player", "health" }, eventData)
+			end, { Once = true })
+
+			registry:FireListenersExact("ValueChanged", { "player", "health" }, eventData)
+
+			expect(fireCount).is(1)
 
 			registry:Destroy()
 		end)

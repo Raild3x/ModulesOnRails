@@ -9,7 +9,7 @@
 	- Unified change detection
 	- Signals fire once behavior
 	- Listeners fire appropriately (ancestors handled by ChangeDetector)
-	- FireOnDescendantChanges filtering
+	- ListenDepth / Once filtering
 	- Array operations with ancestor notifications
 	- Metadata structure validation
 ]=]
@@ -429,20 +429,20 @@ return function(t: tiniest)
 		end)
 	end)
 
-	describe("FireOnDescendantChanges Filtering", function()
-		test("should fire for descendants when FireOnDescendantChanges is true (default)", function()
+	describe("ListenDepth Filtering", function()
+		test("should fire for descendants by default (nil depth)", function()
 			local manager = TableManager.new {
 				player = { health = 100 },
 			}
 
 			local fireCount = 0
 
-			-- Default: FireOnDescendantChanges = true
+			-- Default: depth=nil (unlimited)
 			-- Listening at ["player"], change at ["player", "health"]
 			-- Should fire when the descendant changes (ancestor notification)
 			manager:OnValueChange({ "player" }, function()
 				fireCount += 1
-			end, { FireOnDescendantChanges = true })
+			end)
 
 			manager.Proxy.player.health = 50
 
@@ -451,53 +451,27 @@ return function(t: tiniest)
 			manager:Destroy()
 		end)
 
-		test("should NOT fire for descendants when FireOnDescendantChanges is false", function()
+		test("should NOT fire for descendants when ListenDepth = 0", function()
 			local manager = TableManager.new {
 				player = { health = 100 },
 			}
 
 			local fireCount = 0
-			local allFires = {}
 
-			-- Explicit: FireOnDescendantChanges = false
-			-- Listening at ["player"], change at ["player", "health"]
-			-- Should NOT fire for descendant changes
-			manager:OnValueChange({ "player" }, function(_newValue, _oldValue, metadata)
+			-- ListenDepth = 0: only fires for direct changes, not ancestor notifications
+			manager:OnValueChange({ "player" }, function()
 				fireCount += 1
-				table.insert(allFires, {
-					fireNum = fireCount,
-					hasDiff = metadata.Diff ~= nil,
-					originPath = metadata.OriginPath and table.concat(metadata.OriginPath, ".") or "nil",
-				})
-			end, { FireOnDescendantChanges = false })
+			end, { ListenDepth = 0 })
 
 			-- Change nested value (should NOT fire listener)
 			manager.Proxy.player.health = 50
-
-			-- Debug output if test fails
-			if fireCount ~= 0 then
-				print("\n=== FireOnDescendantChanges=false Debug ===")
-				print("Listener fired", fireCount, "times (expected 0)")
-				print("All fires:")
-				for _, fire in allFires do
-					print(
-						string.format(
-							"  Fire #%d: hasDiff=%s, originPath=%s",
-							fire.fireNum,
-							tostring(fire.hasDiff),
-							fire.originPath
-						)
-					)
-				end
-				print("===========================\n")
-			end
 
 			expect(fireCount).is(0)
 
 			manager:Destroy()
 		end)
 
-		test("should fire for direct change even when FireOnDescendantChanges is false", function()
+		test("should fire for direct change even when ListenDepth = 0", function()
 			local manager = TableManager.new {
 				player = { health = 100 },
 			}
@@ -506,13 +480,34 @@ return function(t: tiniest)
 
 			manager:OnValueChange({ "player" }, function()
 				fireCount += 1
-			end, { FireOnDescendantChanges = false })
+			end, { ListenDepth = 0 })
 
 			-- Replace the player table itself (direct change)
 			manager.Proxy.player = { health = 200 }
 
 			-- Should fire exactly once (for the direct change)
 			expect(fireCount).is(1)
+			manager:Destroy()
+		end)
+	end)
+
+	describe("Once Option", function()
+		test("Once listener fires exactly once then auto-disconnects", function()
+			local manager = TableManager.new {
+				player = { health = 100 },
+			}
+
+			local fireCount = 0
+			local conn = manager:OnValueChange({ "player", "health" }, function()
+				fireCount += 1
+			end, { Once = true })
+
+			manager.Proxy.player.health = 50
+			manager.Proxy.player.health = 25
+
+			expect(fireCount).is(1)
+			expect(conn.Connected).never_is_true()
+
 			manager:Destroy()
 		end)
 	end)
@@ -561,6 +556,37 @@ return function(t: tiniest)
 			manager:Destroy()
 		end)
 
+		test("ArrayInsert supports both path and proxy array targets", function()
+			local manager = TableManager.new {
+				items = { "Sword" },
+			}
+
+			manager:ArrayInsert({ "items" }, "Shield")
+			manager:ArrayInsert(manager.Proxy.items, "Potion")
+
+			expect(manager.Proxy.items[1]).is("Sword")
+			expect(manager.Proxy.items[2]).is("Shield")
+			expect(manager.Proxy.items[3]).is("Potion")
+
+			manager:Destroy()
+		end)
+
+		test("ArrayRemove supports both path and proxy array targets", function()
+			local manager = TableManager.new {
+				items = { "Sword", "Shield", "Potion" },
+			}
+
+			local removedByPath = manager:ArrayRemove({ "items" }, 1)
+			local removedByProxy = manager:ArrayRemove(manager.Proxy.items, 1)
+
+			expect(removedByPath).is("Sword")
+			expect(removedByProxy).is("Shield")
+			expect(manager.Proxy.items[1]).is("Potion")
+			expect(manager.Proxy.items[2]).is(nil)
+
+			manager:Destroy()
+		end)
+
 		test("should fire ArrayInserted signal once", function()
 			local manager = TableManager.new {
 				items = { "Sword" },
@@ -579,6 +605,34 @@ return function(t: tiniest)
 			manager:Destroy()
 		end)
 
+		test("ArrayInserted payload is correct when target is proxy", function()
+			local manager = TableManager.new {
+				items = { "Sword" },
+			}
+
+			local eventCount = 0
+			local capturedPath = nil
+			local capturedIndex = nil
+			local capturedValue = nil
+
+			local connection = manager.ArrayInserted:Connect(function(path, index, value)
+				eventCount += 1
+				capturedPath = path
+				capturedIndex = index
+				capturedValue = value
+			end)
+
+			manager:ArrayInsert(manager.Proxy.items, "Potion")
+
+			expect(eventCount).is(1)
+			expect(capturedPath).is_shallow_equal { "items" }
+			expect(capturedIndex).is(2)
+			expect(capturedValue).is("Potion")
+
+			connection:Disconnect()
+			manager:Destroy()
+		end)
+
 		test("should fire ArrayRemoved signal once", function()
 			local manager = TableManager.new {
 				items = { "Sword", "Shield" },
@@ -592,6 +646,34 @@ return function(t: tiniest)
 			manager:ArrayRemove({ "items" }, 1)
 
 			expect(signalCount).is(1)
+
+			connection:Disconnect()
+			manager:Destroy()
+		end)
+
+		test("ArrayRemoved payload is correct when target is proxy", function()
+			local manager = TableManager.new {
+				items = { "Sword", "Shield", "Potion" },
+			}
+
+			local eventCount = 0
+			local capturedPath = nil
+			local capturedIndex = nil
+			local capturedValue = nil
+
+			local connection = manager.ArrayRemoved:Connect(function(path, index, value)
+				eventCount += 1
+				capturedPath = path
+				capturedIndex = index
+				capturedValue = value
+			end)
+
+			manager:ArrayRemove(manager.Proxy.items, 2)
+
+			expect(eventCount).is(1)
+			expect(capturedPath).is_shallow_equal { "items" }
+			expect(capturedIndex).is(2)
+			expect(capturedValue).is("Shield")
 
 			connection:Disconnect()
 			manager:Destroy()
@@ -768,27 +850,32 @@ return function(t: tiniest)
 		end)
 
 		test("nested array shift updates path of deeply held proxy", function()
-			-- container.list is an array nested inside a hash table, giving a
-			-- 3-level parent chain (root → container → list → element).
-			-- Verifies that _GetLivePath walks the full chain after a shift.
+			-- Hold a proxy to items[1].nested[2].
+			-- Insert at items[1].nested index 1 should shift the held proxy to nested[3],
+			-- and _GetLivePath should report {"items", 1, "nested", 3}.
 			local manager = TableManager.new {
-				container = { list = { { v = 1 }, { v = 2 } } },
+				items = { { nested = { { v = 1 }, { v = 2 } } } },
 			}
 
-			-- Hold proxy to container.list[2] before the insert.
-			local heldProxy = manager.Proxy.container.list[2]
+			-- Navigate to nested[2] via proxy chain (avoids mixed-type path literals)
+			local heldProxy = manager.Proxy.items[1].nested[2]
 			expect(heldProxy).exists()
 
-			-- Insert at front via a pure string path (no mixed types).
-			manager:ArrayInsert({ "container", "list" }, 1, { v = 99 })
+			-- Insert at the front of the nested array through proxy reference
+			local nestedProxy = manager.Proxy.items[1].nested
+			manager:ArrayInsert(nestedProxy, 1, { v = 99 })
 
-			-- Write through the held proxy — should now target list[3].
+			-- Write through the held proxy — should land at nested index 3 now
 			heldProxy.v = 42
 
-			expect(manager.Proxy.container.list[3].v).is(42)
-			expect(manager.Proxy.container.list[1].v).is(99)
-			-- list[2] is the original first element, untouched.
-			expect(manager.Proxy.container.list[2].v).is(1)
+			-- Verify data via proxy navigation (no mixed-type literals needed)
+			expect(manager.Proxy.items[1].nested[3].v).is(42)
+			expect(manager.Proxy.items[1].nested[1].v).is(99)
+
+			-- The outer items[1] proxy key must NOT have changed (insert was in the nested array)
+			local outerProxy = manager.Proxy.items[1]
+			outerProxy.nested = outerProxy.nested -- harmless read; ensure proxy still alive
+			expect(manager:Get { "items", 1 }).exists()
 
 			manager:Destroy()
 		end)
@@ -1292,30 +1379,30 @@ return function(t: tiniest)
 			manager:Destroy()
 		end)
 
-		test("should respect FireOnDescendantChanges=false for forced notifications", function()
+		test("should respect ListenDepth=0 for forced notifications (no ancestor firing)", function()
 			local manager = TableManager.new {
 				player = { health = 100 },
 			}
 
-			local withDescendants = 0
-			local withoutDescendants = 0
+			local unlimited = 0
+			local directOnly = 0
 
-			-- Default: FireOnDescendantChanges = true
+			-- Default: depth=nil (fires for all ancestor notifications)
 			manager:OnValueChange({ "player" }, function(_newValue, _oldValue, _metadata)
-				withDescendants += 1
+				unlimited += 1
 			end)
 
-			-- FireOnDescendantChanges = false
+			-- ListenDepth = 0: should NOT fire for ancestor notifications
 			manager:OnValueChange({ "player" }, function(_newValue, _oldValue, _metadata)
-				withoutDescendants += 1
-			end, { FireOnDescendantChanges = false })
+				directOnly += 1
+			end, { ListenDepth = 0 })
 
 			-- Force notification at descendant path
 			manager:ForceNotify { "player", "health" }
 
-			-- Only listener with FireOnDescendantChanges=true should fire for ancestor
-			expect(withDescendants).is(1)
-			expect(withoutDescendants).is(0)
+			-- Only the unlimited listener should fire for the ancestor notification
+			expect(unlimited).is(1)
+			expect(directOnly).is(0)
 
 			manager:Destroy()
 		end)

@@ -129,12 +129,19 @@ export type ChangeDetector = {
 export type ProxyManager = {
 	IsProxy: (self: ProxyManager, t: any) -> boolean,
 	GetOriginal: <T>(self: ProxyManager, t: Proxy<T> | T) -> T,
-	GetMetadata: <T>(self: ProxyManager, proxy: Proxy<T>) -> ProxyMetadata<T>?,
+	GetMetadata: <T>(self: ProxyManager, proxy: Proxy<T>) -> ProxyMetadata<T>,
 	--- Returns the live path from root to this proxy by walking the Parent chain. Returns nil if the proxy is unknown.
 	GetPath: <T>(self: ProxyManager, proxy: Proxy<T>) -> Path?,
 	--- Returns the existing proxy for an original table, or nil if none exists.
-	GetProxy: <T>(self: ProxyManager, original: T) -> Proxy<T>?,
-	CreateProxy: <T>(self: ProxyManager, original: T, _path: Path?, rootTable: { [any]: any }?, parentOriginal: any?, key: any?) -> Proxy<T>,
+	GetProxyFromOriginal: <T>(self: ProxyManager, original: T) -> Proxy<T>?,
+	CreateProxy: <T>(
+		self: ProxyManager,
+		original: T,
+		_path: Path?,
+		rootTable: { [any]: any }?,
+		parentOriginal: any?,
+		key: any?
+	) -> Proxy<T>,
 	IsArray: (self: ProxyManager, t: any) -> boolean,
 	GetArrayLength: (self: ProxyManager, t: any) -> number,
 	SetChangeDetector: (self: ProxyManager, changeDetector: ChangeDetector) -> (),
@@ -305,7 +312,7 @@ function ProxyManager.new(): ProxyManager
 						return nextKey, self._originalToProxy[nextValue]
 					end
 
-				local nestedProxy = self:CreateProxy(nextValue, nil, meta.RootTable, meta.Original, nextKey)
+					local nestedProxy = self:CreateProxy(nextValue, nil, meta.RootTable, meta.Original, nextKey)
 					return nextKey, nestedProxy
 				end
 
@@ -397,7 +404,7 @@ function ProxyManager:GetOriginal<T>(t: Proxy<T> | T): T
 end
 
 --- Get the metadata for a proxy.
-function ProxyManager:GetMetadata<T>(proxy: Proxy<T>): ProxyMetadata<T>?
+function ProxyManager:GetMetadata<T>(proxy: Proxy<T>): ProxyMetadata<T>
 	return self._proxyMeta[proxy]
 end
 
@@ -410,7 +417,7 @@ function ProxyManager:GetPath<T>(proxy: Proxy<T>): Path?
 end
 
 --- Get the proxy for an original table, if it exists.
-function ProxyManager:GetProxy<T>(original: T): Proxy<T>?
+function ProxyManager:GetProxyFromOriginal<T>(original: T): Proxy<T>?
 	return self._originalToProxy[original]
 end
 
@@ -450,7 +457,13 @@ end
 	@param parentOriginal -- The unwrapped parent table (nil for root proxy)
 	@param key -- The key under which `original` lives in its parent (nil for root proxy)
 ]=]
-function ProxyManager:CreateProxy<T>(original: T, _path: Path?, rootTable: { [any]: any }?, parentOriginal: any?, key: any?): Proxy<T>
+function ProxyManager:CreateProxy<T>(
+	original: T,
+	_path: Path?,
+	rootTable: { [any]: any }?,
+	parentOriginal: any?,
+	key: any?
+): Proxy<T>
 	if type(original) ~= "table" then
 		return original :: any
 	end

@@ -8,14 +8,14 @@ Proxies in TableManager are implemented as **userdatas** (via weak table trackin
 ### 1. Length Operator
 ```lua
 local tm = TableManager.new { items = {1, 2, 3} }
-print(#tm.Data.items) -- Works! Returns 3
+print(#tm.Proxy.items) -- Works! Returns 3
 ```
 The `__len` metamethod returns `#meta.Original`, so the length operator works transparently.
 
-### 2. Iteration with pairs()
+### 2. Generic Iteration
 ```lua
 local tm = TableManager.new { a = 1, b = 2, c = 3 }
--- ❌ This does NOT work - pairs() doesn't work on userdatas
+-- ❌ This does NOT work - pairs()and ipairs don't work on userdatas
 for key, value in pairs(tm.Data) do
     print(key, value) -- Won't work!
 end
@@ -26,45 +26,31 @@ for key, value in tm.Data do
 end
 ```
 The `__iter` metamethod enables generic for iteration on userdatas.
-
-### 3. Iteration with ipairs()
-```lua
-local tm = TableManager.new { items = {"a", "b", "c"} }
--- ❌ This does NOT work - ipairs() doesn't work on userdatas
-for i, v in ipairs(tm.Data.items) do
-    print(i, v) -- Won't work!
-end
-
--- ✅ Use generic for iteration instead
-for i, v in tm.Data.items do
-    print(i, v) -- Works! Uses __iter metamethod
-end
-```
 Generic for iteration works for both arrays and dictionaries.
 
-### 4. Indexing and Assignment
+### 3. Indexing and Assignment
 ```lua
 local tm = TableManager.new { data = {} }
-tm.Data.data.key = "value"  -- Works! Triggers __newindex
-local val = tm.Data.data.key -- Works! Triggers __index
+tm.Proxy.data.key = "value"  -- Works! Triggers __newindex
+local val = tm.Proxy.data.key -- Works! Triggers __index
 ```
 Standard table operations work via `__index` and `__newindex` metamethods.
 
-### 5. Equality Comparison (proxy-to-proxy)
+### 4. Equality Comparison (proxy-to-proxy)
 ```lua
 local shared = { x = 1 }
 local tm1 = TableManager.new { shared = shared }
 local tm2 = TableManager.new { shared = shared }
-if tm1.Data.shared == tm2.Data.shared then
+if tm1.Proxy.shared == tm2.Proxy.shared then
     -- Works! Proxies wrapping same original are equal
 end
 ```
 The `__eq` metamethod compares the underlying original tables.
 
-### 6. String Conversion
+### 5. String Conversion
 ```lua
 local tm = TableManager.new { nested = { deep = 1 } }
-print(tostring(tm.Data.nested.deep)) 
+print(tostring(tm.Proxy.nested.deep)) 
 -- Prints: "TableManager.Data(nested.deep)"
 ```
 The `__tostring` metamethod provides readable proxy identification.
@@ -75,7 +61,7 @@ The `__tostring` metamethod provides readable proxy identification.
 ```lua
 -- ❌ DON'T DO THIS
 local tm = TableManager.new { items = {} }
-table.insert(tm.Data.items, "value") -- Won't work! items is a proxy, not a table
+table.insert(tm.Proxy.items, "value") -- Won't work! items is a proxy, not a table
 ```
 
 **Solution:** Use TableManager's methods instead:
@@ -143,23 +129,22 @@ print(lookup[tm.Data]) -- Returns nil!
 
 ## Best Practices
 
-### 1. Always Use TableManager Methods for Modifications
+### 1. Always Use TableManager Methods for Array Modifications
 ```lua
 -- ✅ Correct
 tm:Insert({"inventory"}, item)
 tm:Remove({"inventory"})
-tm:Set({"player", "health"}, 100)
 
 -- ❌ Incorrect
-table.insert(tm.Data.inventory, item) -- Won't work
-table.remove(tm.Data.inventory) -- Won't work
+table.insert(tm.Proxy.inventory, item) -- Won't work
+table.remove(tm.Proxy.inventory) -- Won't work
 ```
 
 ### 2. Use # Operator Freely for Length
 ```lua
 -- ✅ This is fine!
-local count = #tm.Data.items
-if #tm.Data.inventory > 10 then
+local count = #tm.Proxy.items
+if #tm.Proxy.inventory > 10 then
     -- This works correctly
 end
 ```
@@ -167,28 +152,28 @@ end
 ### 3. Iterate with Generic For as Normal
 ```lua
 -- ✅ Generic for iteration works correctly
-for key, value in tm.Data.config do 
+for key, value in tm.Proxy.config do 
     print(key, value)
 end
 
-for i, item in tm.Data.items do 
+for i, item in tm.Proxy.items do 
     print(i, item)
 end
 
 -- ❌ Don't use pairs() or ipairs()
--- for k, v in pairs(tm.Data.config) do end -- Won't work!
--- for i, v in ipairs(tm.Data.items) do end -- Won't work!
+-- for k, v in pairs(tm.Proxy.config) do end -- Won't work!
+-- for i, v in ipairs(tm.Proxy.items) do end -- Won't work!
 ```
 
 ### 4. For Equality Checks with Originals, Use ProxyManager
 ```lua
 -- ✅ Correct way to compare proxy with original
-if tm._proxyManager:Equals(tm.Data.something, originalTable) then
+if tm._proxyManager:Equals(tm.Proxy.something, originalTable) then
     -- This works
 end
 
 -- Or unwrap first
-if tm._proxyManager:GetOriginal(tm.Data.something) == originalTable then
+if tm._proxyManager:GetOriginal(tm.Proxy.something) == originalTable then
     -- This also works
 end
 ```

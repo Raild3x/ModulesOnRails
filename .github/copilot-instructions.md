@@ -83,4 +83,5 @@ Declaration matrix:
 - Prefer extra context over minimal logs so follow-up decisions can be made from one run.
 
 ## Planning
-- You must always include a list of to-dos in the final plan and they should be broken into discrete tasks that an agent can be tasked with.
+- Plans should be broken up into phases that can be executed independently without breaking a system. Each phase should have a clear goal and a defined set of tasks.
+- Phases should note touched files and the expected impact on those files. This helps with code review and ensures that changes are intentional and well-understood.

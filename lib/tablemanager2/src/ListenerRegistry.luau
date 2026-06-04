@@ -2,14 +2,15 @@
 --[=[
 	@class ListenerRegistry_new
 	
-	Clean implementation with FireOnDescendantChanges filtering support using a tree structure.
+	Clean implementation with ListenDepth filtering support using a tree structure.
 	
-	## New Features
+	## Features
 	- Tree-based storage: O(path_length) lookup instead of O(total_listeners)
-	- FireOnDescendantChanges option: Control whether listeners fire for descendant changes
+	- ListenDepth option: Control how many descendant levels trigger a listener
+	- ListenDepthStyle option: \"<=\" (within depth) or \"==\" (exact depth only)
+	- Once option: Auto-disconnect after first fire
 	- Unified metadata structure: All events include ChangeMetadata
-	- Cleaner API: Simplified event firing logic
-	- No need for explicit path relation checks - implicit in tree traversal
+	- No ancestor tree-walk in the registry — ChangeDetector handles propagation
 	
 	## Examples
 	
@@ -52,33 +53,32 @@
 	--   → "Health" (fire callback4 - exact match)
 	```
 	
-	### Example 3: Change at {"Players", "Player1"} with FireOnDescendantChanges=false
+	### Example 3: Filtering descendants with ListenDepth
 	```lua
-	-- Register:
-	registry:RegisterListener("ValueChanged", {"Players"}, callback2, {FireOnDescendantChanges = false})
+	-- Register with depth limit (ancestor notifications deeper than this are skipped):
+	registry:RegisterListener("ValueChanged", {"Players"}, callback2, { ListenDepth = 0 })
 	registry:RegisterListener("ValueChanged", {"Players", "Player1"}, callback3)
 	registry:RegisterListener("ValueChanged", {"Players", "Player1", "Health"}, callback4)
 	
-	-- Fire: FireListeners("ValueChanged", {"Players", "Player1", "Health"}, eventData)
+	-- FireListenersExact at {"Players"} as ancestor notification (OriginPath = {"Players", "Player1", "Health"}):
+	-- relativeDepth = #OriginPath - #listenerPath = 3 - 1 = 2
+	-- callback2: depth=0, style="<=": 2 <= 0 → false → SKIPPED
 	
-	-- Listeners that fire:
-	-- 1. callback1 (root, FireOnDescendantChanges=true) - ✓ Fires
-	-- 2. callback2 ({"Players"}, FireOnDescendantChanges=FALSE) - ✗ SKIPPED (doesn't want descendant changes)
-	-- 3. callback3 ({"Players", "Player1"}, FireOnDescendantChanges=true) - ✓ Fires
-	-- 4. callback4 ({"Players", "Player1", "Health"}) - ✓ Fires (exact match)
+	-- FireListenersExact at {"Players", "Player1", "Health"} as direct change:
+	-- relativeDepth = 0 (direct change)
+	-- callback4: depth=nil → always fires ✓
 	```
 	
-	### Example 4: FireListenersExact vs FireListeners
+	### Example 4: Once option
 	```lua
-	-- Same setup as Example 2
+	-- Register a listener that fires exactly once then disconnects:
+	local conn = registry:RegisterListener("ValueChanged", {"player", "health"}, function(newValue)
+		print("Fired once:", newValue)
+	end, { Once = true })
 	
-	-- FireListenersExact("ValueChanged", {"Players", "Player1", "Health"}, eventData)
-	-- Only fires: callback4
-	-- (Used by ChangeDetector which handles ancestor propagation separately)
-	
-	-- FireListeners("ValueChanged", {"Players", "Player1", "Health"}, eventData)
-	-- Fires: callback1, callback2, callback3, callback4
-	-- (Walks the entire path and notifies ancestors)
+	-- First fire: callback runs, conn.Connected becomes false, listener is removed.
+	-- Subsequent fires: listener is gone, callback never runs again.
+	-- conn.Connected == false after the first fire.
 	```
 	
 	### Example 5: Listener Below Change Path (No Notification)
@@ -143,12 +143,17 @@ export type EventData = {
 }
 
 export type ListenerOptions = {
-	-- Whether to fire this listener when a descendant (nested child) changes
-	-- true = Fire for direct changes AND descendant changes (default)
-	-- false = Fire ONLY for direct changes at this exact path
-	-- Example: Listener at {"player"} with FireOnDescendantChanges=false
-	--          will NOT fire when {"player", "health"} changes
-	FireOnDescendantChanges: boolean?,
+	--- Maximum depth of descendant changes that will trigger this listener.
+	--- nil = fire for any depth (default). 0 = fire only for direct changes at the
+	--- registered path. 1 = also fire for changes 1 level below, etc.
+	ListenDepth: number?,
+	--- How the depth is compared against ListenDepth.
+	--- "<=" (default): fire for changes AT OR WITHIN the given depth.
+	--- "==": fire ONLY for changes at EXACTLY the given depth.
+	--- Ignored when ListenDepth is nil.
+	ListenDepthStyle: ("<=" | "==")?,
+	--- When true, the listener automatically disconnects after firing once.
+	Once: boolean?,
 }
 
 export type Connection = {
@@ -158,7 +163,10 @@ export type Connection = {
 
 type Listener = {
 	Callback: (...any) -> (),
-	DescendantChanges: boolean,
+	Depth: number?,
+	DepthStyle: "<=" | "==",
+	Once: boolean,
+	PathLength: number,
 	Connection: Connection,
 }
 
@@ -178,7 +186,6 @@ export type ListenerRegistry = {
 		callback: (...any) -> (),
 		options: ListenerOptions?
 	) -> Connection,
-	FireListeners: (self: ListenerRegistry, eventType: EventType, path: Path, eventData: EventData) -> (),
 	FireListenersExact: (self: ListenerRegistry, eventType: EventType, path: Path, eventData: EventData) -> (),
 	Destroy: (self: ListenerRegistry) -> (),
 
@@ -270,10 +277,9 @@ function ListenerRegistry:RegisterListener(
 	callback: (...any) -> (),
 	options: ListenerOptions?
 ): Connection
-	local descendantChanges = true
-	if options and options.FireOnDescendantChanges ~= nil then
-		descendantChanges = options.FireOnDescendantChanges
-	end
+	local depth: number? = if options then options.ListenDepth else nil
+	local depthStyle: "<=" | "==" = if options and options.ListenDepthStyle then options.ListenDepthStyle else "<="
+	local once: boolean = if options and options.Once == true then true else false
 
 	-- Get the tree for this event type
 	local root = self._listenerTrees[eventType]
@@ -284,7 +290,10 @@ function ListenerRegistry:RegisterListener(
 	-- Create listener first
 	local listener: Listener = {
 		Callback = callback,
-		DescendantChanges = descendantChanges,
+		Depth = depth,
+		DepthStyle = depthStyle,
+		Once = once,
+		PathLength = #path,
 		Connection = nil :: any, -- Will be set below
 	}
 
@@ -317,106 +326,34 @@ function ListenerRegistry:RegisterListener(
 	return connection
 end
 
-function ListenerRegistry:FireListeners(eventType: EventType, path: Path, eventData: EventData)
-	local root = self._listenerTrees[eventType]
-
-	-- Helper to fire a listener with the appropriate callback signature
-	local function fireListener(listener: Listener)
-		if not listener.Connection.Connected then
-			return
-		end
-
-		local success, err
-		if eventType == "KeyAdded" then
-			success, err = pcall(listener.Callback :: any, eventData.NewValue, eventData.Metadata)
-		elseif eventType == "KeyRemoved" then
-			success, err = pcall(listener.Callback :: any, eventData.OldValue, eventData.Metadata)
-		elseif eventType == "KeyChanged" then
-			success, err = pcall(
-				listener.Callback :: any,
-				eventData.Key,
-				eventData.NewValue,
-				eventData.OldValue,
-				eventData.Metadata
-			)
-		elseif eventType == "ValueChanged" then
-			success, err = pcall(listener.Callback :: any, eventData.NewValue, eventData.OldValue, eventData.Metadata)
-		elseif eventType == "ArrayInserted" then
-			success, err = pcall(listener.Callback :: any, eventData.Index, eventData.NewValue, eventData.Metadata)
-		elseif eventType == "ArrayRemoved" then
-			success, err = pcall(listener.Callback :: any, eventData.Index, eventData.OldValue, eventData.Metadata)
-		elseif eventType == "ArraySet" then
-			success, err = pcall(
-				listener.Callback :: any,
-				eventData.Index,
-				eventData.NewValue,
-				eventData.OldValue,
-				eventData.Metadata
-			)
-		end
-
-		if not success and self._debugMode then
-			warn(`ListenerRegistry: Error in {eventType} callback: {err}`)
-		end
+-- Returns true if the listener should fire given how many path segments below the
+-- listener's registered path the change originated.
+-- relativeDepth = 0: change is AT the listener's exact path.
+-- relativeDepth > 0: change originated that many levels deeper (ancestor notification).
+local function shouldFireListener(listener: Listener, relativeDepth: number): boolean
+	if listener.Depth == nil then
+		return true
 	end
-
-	-- Traverse the tree along the path, firing listeners at each level
-	local current = root
-
-	-- Fire root listeners (these listen to everything)
-	for _, listener in current.Listeners do
-		if listener.DescendantChanges then
-			fireListener(listener)
-		end
-	end
-
-	-- Traverse down the path
-	for i, segment in path do
-		local child = current.Children[segment]
-		if not child then
-			break -- No more listeners down this path
-		end
-		current = child
-
-		-- Fire listeners at this node
-		-- If we're at the target path (i == #path), fire all listeners
-		-- If we're not at the target path, only fire listeners with DescendantChanges=true
-		local isTargetPath = i == #path
-		for _, listener in current.Listeners do
-			if isTargetPath or listener.DescendantChanges then
-				fireListener(listener)
-			end
-		end
-	end
-
-	-- If listeners at the target path want descendant changes, also fire them
-	-- This handles cases where a change affects descendants of the listener's path
-	if current then
-		local function fireDescendants(node: ListenerNode)
-			for _, child in node.Children do
-				for _, listener in child.Listeners do
-					if not listener.Connection.Connected then
-						continue
-					end
-					-- These listeners are descendants of the change path
-					-- They should NOT be notified (parent relation case)
-				end
-				fireDescendants(child)
-			end
-		end
-		-- Only traverse descendants if needed (not in this case)
+	if listener.DepthStyle == "==" then
+		return relativeDepth == listener.Depth
+	else -- "<="
+		return relativeDepth <= listener.Depth
 	end
 end
 
 --[=[
 	Fires listeners ONLY at the exact path provided, without any ancestor/descendant matching.
-	
+
 	This is used for ChangeDetector callbacks, which already handle the full notification chain
 	including ancestor propagation. Using this method prevents duplicate notifications.
-	
-	Respects the FireOnDescendantChanges option: if metadata.Diff is nil (ancestor notification),
-	only fires listeners with FireOnDescendantChanges=true.
-	
+
+	Depth filtering: ancestor notifications (metadata.Diff == nil) compute relative depth from
+	metadata.OriginPath against the listener's registered path length. Direct change
+	notifications (Diff present) always use depth 0.
+
+	Once listeners are marked as disconnected before their callback fires (re-entrancy safe),
+	then physically removed from the node in a backward sweep after the fire loop.
+
 	@param eventType The type of event to fire
 	@param path The exact path where listeners should be notified
 	@param eventData The event data to pass to callbacks
@@ -430,24 +367,39 @@ function ListenerRegistry:FireListenersExact(eventType: EventType, path: Path, e
 		return -- No listeners at this path
 	end
 
-	-- Check if this is an ancestor notification (Diff is nil)
+	-- For ancestor notifications (Diff == nil), compute relative depth from OriginPath.
+	-- Direct change notifications always have relativeDepth = 0 (change is at the listener's path).
 	local isAncestorNotification = eventData.Metadata and eventData.Metadata.Diff == nil
+	local baseRelativeDepth: number = 0
+	if isAncestorNotification and eventData.Metadata then
+		baseRelativeDepth = #eventData.Metadata.OriginPath - #path
+		if baseRelativeDepth < 0 then
+			baseRelativeDepth = 0
+		end
+	end
 
-	-- Fire all listeners at this exact node
-	for _, listener in node.Listeners do
+	local listeners = node.Listeners
+	local hasOnceFired = false
+
+	for _, listener in listeners do
 		if not listener.Connection.Connected then
 			continue
 		end
 
-		-- Filter based on DescendantChanges option
-		-- If this is an ancestor notification and listener doesn't want descendant changes, skip
-		if isAncestorNotification and not listener.DescendantChanges then
+		if not shouldFireListener(listener, baseRelativeDepth) then
 			continue
+		end
+
+		-- Mark Once listeners as consumed before firing to guard against re-entrant calls.
+		if listener.Once then
+			listener.Connection.Connected = false
+			hasOnceFired = true
 		end
 
 		-- Build callback args based on event type
 		local success, err
-		local callback: any, metadata = listener.Callback, eventData.Metadata
+		local callback: any = listener.Callback
+		local metadata = eventData.Metadata
 		if eventType == "KeyAdded" then
 			success, err = pcall(callback, eventData.NewValue, metadata)
 		elseif eventType == "KeyRemoved" then
@@ -467,6 +419,17 @@ function ListenerRegistry:FireListenersExact(eventType: EventType, path: Path, e
 		if not success and self._debugMode then
 			warn(`ListenerRegistry: Error in {eventType} callback: {err}`)
 		end
+	end
+
+	-- Backward sweep: physically remove all consumed Once listeners from the node.
+	-- Done after the fire loop to avoid mid-iteration mutation.
+	if hasOnceFired then
+		for i = #listeners, 1, -1 do
+			if listeners[i].Once and not listeners[i].Connection.Connected then
+				table.remove(listeners, i)
+			end
+		end
+		cleanupNode(root, path, 1)
 	end
 end
 
