@@ -679,6 +679,40 @@ return function(t: tiniest)
 			manager:Destroy()
 		end)
 
+		test("table.insert on proxy arrays is rejected", function()
+			local manager = TableManager.new {
+				items = { "Sword", "Shield" },
+			}
+
+			expect(function()
+				table.insert(manager.Proxy.items, "Potion")
+			end).fails_with("invalid argument #1 to 'insert' %(table expected, got userdata%)")
+
+			-- Ensure data was not mutated by the rejected call.
+			expect(manager.Proxy.items[1]).is("Sword")
+			expect(manager.Proxy.items[2]).is("Shield")
+			expect(manager.Proxy.items[3]).is(nil)
+
+			manager:Destroy()
+		end)
+
+		test("table.remove on proxy arrays is rejected", function()
+			local manager = TableManager.new {
+				items = { "Sword", "Shield" },
+			}
+
+			expect(function()
+				table.remove(manager.Proxy.items, 1)
+			end).fails_with("invalid argument #1 to 'remove' %(table expected, got userdata%)")
+
+			-- Ensure data was not mutated by the rejected call.
+			expect(manager.Proxy.items[1]).is("Sword")
+			expect(manager.Proxy.items[2]).is("Shield")
+			expect(manager.Proxy.items[3]).is(nil)
+
+			manager:Destroy()
+		end)
+
 		test("held proxy key updates after insert shifts it", function()
 			-- Hold a proxy to items[1] (a table), then insert before it.
 			-- Writes through the held proxy must land at items[2] (the new index)

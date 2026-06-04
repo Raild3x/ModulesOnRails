@@ -97,6 +97,37 @@ return function(t: tiniest)
 		expect(changes[1].old).is(1)
 	end)
 
+	test("CaptureSnapshot rejects non-table roots", function()
+		local detector = ChangeDetector.new {}
+
+		local ok, err = pcall(function()
+			detector:CaptureSnapshot(123 :: any, {})
+		end)
+
+		expect(ok).is(false)
+		expect(type(err)).is("string")
+		expect((err :: string):find("CaptureSnapshot expects rootTable to be a plain table", 1, true) ~= nil).is_true()
+	end)
+
+	test("CheckForChanges rejects snapshots with non-table RootTable", function()
+		local detector = ChangeDetector.new {}
+
+		local badSnapshot = {
+			RootTable = 123,
+			Path = {},
+			Data = { value = 1, ref = nil, children = nil },
+			Timestamp = os.clock(),
+		}
+
+		local ok, err = pcall(function()
+			detector:CheckForChanges(badSnapshot :: any)
+		end)
+
+		expect(ok).is(false)
+		expect(type(err)).is("string")
+		expect((err :: string):find("Snapshot.RootTable must be a plain table", 1, true) ~= nil).is_true()
+	end)
+
 	test("should support historical diffing with multiple snapshots", function()
 		local detector = ChangeDetector.new {}
 

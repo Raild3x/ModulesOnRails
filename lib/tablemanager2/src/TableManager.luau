@@ -200,7 +200,7 @@ export type TableManager<T = any> = {
 	-- Batch state
 	_batchDepth: number,
 	_batchRecorder: ArrayBatchRecorder?,
-	_batchStartSnapshot: any,
+	_batchStartSnapshot: any?,
 	_batchTrackedPaths: { [string]: Path },
 	_batchDirtyBranches: { [any]: boolean },
 	_batchFlushing: boolean,
@@ -305,10 +305,10 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 
 	-- Initialize subsystems
 	self._proxyManager = ProxyManagerModule.new()
-	self._listenerRegistry = ListenerRegistryModule.new({
+	self._listenerRegistry = ListenerRegistryModule.new {
 		DebugMode = resolvedConfig.ListenerDebugMode == true,
 		FireDeferred = resolvedConfig.ListenersFireDeferred == true,
-	})
+	}
 
 	-- Initialize signals (fire once per change)
 	self.ValueChanged = Signal.new()
@@ -995,9 +995,9 @@ function TableManager:Resume()
 	self._batchDepth = 0
 	if self._batchRecorder then
 		self._batchRecorder:Destroy()
-		self._batchRecorder = nil
+		self._batchRecorder = nil :: any
 	end
-	self._batchStartSnapshot = nil
+	self._batchStartSnapshot = nil :: any
 	table.clear(self._batchTrackedPaths)
 	table.clear(self._batchDirtyBranches)
 end

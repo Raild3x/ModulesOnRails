@@ -233,17 +233,49 @@ local function flatten(root: DiffNode?, path: Path?): { DiffEntry }
 	return result
 end
 
+local function validate_snapshot_node(node: any, breadcrumb: string)
+	if type(node) ~= "table" then
+		error(`Invalid snapshot object for Diff.diffFromSnapshot: expected table at {breadcrumb}.`)
+	end
+
+	if node.children ~= nil and type(node.children) ~= "table" then
+		error(`Invalid snapshot object for Diff.diffFromSnapshot: children must be a table at {breadcrumb}.`)
+	end
+
+	local is_table_value = type(node.value) == "table"
+	if is_table_value and type(node.ref) ~= "table" then
+		error(`Invalid snapshot object for Diff.diffFromSnapshot: table values require table refs at {breadcrumb}.`)
+	end
+
+	if is_table_value and node.children == nil then
+		error(`Invalid snapshot object for Diff.diffFromSnapshot: table values require children at {breadcrumb}.`)
+	end
+
+	if not is_table_value and node.children ~= nil then
+		error(`Invalid snapshot object for Diff.diffFromSnapshot: scalar values cannot have children at {breadcrumb}.`)
+	end
+
+	if node.children then
+		for key, child in pairs(node.children) do
+			validate_snapshot_node(child, `{breadcrumb}.{tostring(key)}`)
+		end
+	end
+end
+
 -- ─── Public API ──────────────────────────────────────────────────────────────
 
-local function diff_from_snapshot(before: Snapshot, after_value: any): DiffNode?
+local function diff_from_snapshot(before: Snapshot, after_value: any, safe_mode: boolean?): DiffNode?
+	if safe_mode then
+		validate_snapshot_node(before, "<root>")
+	end
 	local after = snapshot(after_value)
 	return diff(before.value, after.value, before, after)
 end
 
-local function capture(value: any): (any) -> DiffNode?
+local function capture(value: any): (any, boolean?) -> DiffNode?
 	local before = snapshot(value)
-	return function(after_value: any): DiffNode?
-		return diff_from_snapshot(before, after_value)
+	return function(after_value: any, safe_mode: boolean?): DiffNode?
+		return diff_from_snapshot(before, after_value, safe_mode)
 	end
 end
 

@@ -97,6 +97,26 @@ local function getArrayLength(t: { [any]: any }): number
 	return length
 end
 
+local function isTableLibraryArrayMutationCall(): boolean
+	if type(debug) ~= "table" or type(debug.info) ~= "function" then
+		return false
+	end
+
+	for level = 3, 8 do
+		local source = debug.info(level, "s")
+		if source == nil then
+			break
+		end
+
+		local name = debug.info(level, "n")
+		if source == "[C]" and (name == "insert" or name == "remove") then
+			return true
+		end
+	end
+
+	return false
+end
+
 --// Types //--
 
 --[=[
@@ -224,6 +244,13 @@ function ProxyManager.new(): ProxyManager
 			const meta = self._proxyMeta[proxy]
 			if not meta then
 				error("Proxy metadata not found - proxy may have been destroyed")
+			end
+
+			if meta.IsArray and type(key) == "number" and isTableLibraryArrayMutationCall() then
+				error(
+					"Do not use table.insert/table.remove on proxy arrays. Use TableManager:ArrayInsert() or TableManager:ArrayRemove().",
+					2
+				)
 			end
 
 			const originalTable = meta.Original
@@ -478,7 +505,12 @@ function ProxyManager:CreateProxy<T>(
 	const root = rootTable or (original :: any)
 
 	-- Create new proxy
-	const proxy = setmetatable({}, self._sharedMetatable) :: any
+	const proxy = newproxy(true) :: Proxy<T>
+	local MT = getmetatable(proxy :: any)
+	for k, v in self._sharedMetatable do
+		MT[k] = v
+	end
+	table.freeze(MT) -- Shared metatable is immutable for safety and performance
 
 	-- Store bidirectional mapping
 	PROXY_TO_ORIGINAL[proxy] = original
@@ -545,15 +577,15 @@ end
 	Clean up all proxies and metadata.
 ]=]
 function ProxyManager:Destroy()
-	-- Clear all metadata
-	table.clear(self._proxyMeta)
-	table.clear(self._originalToProxy)
-	table.clear(self._proxiesByParent)
-
 	-- Clear weak table entries (they'll be GC'd automatically, but we can help)
 	for proxy in self._proxyMeta do
 		PROXY_TO_ORIGINAL[proxy] = nil
 	end
+
+	-- Clear all metadata
+	table.clear(self._proxyMeta)
+	table.clear(self._originalToProxy)
+	table.clear(self._proxiesByParent)
 
 	self._changeDetector = nil
 	self._onArrayInserted = nil

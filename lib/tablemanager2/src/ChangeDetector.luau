@@ -427,6 +427,10 @@ function ChangeDetector:CaptureSnapshot(rootTable: { [any]: any }, path: Path): 
 		return self._sentinelSnapshot
 	end
 
+	if type(rootTable) ~= "table" then
+		error("CaptureSnapshot expects rootTable to be a plain table.")
+	end
+
 	if self._debugMode then
 		print("CaptureSnapshot called:")
 		print("  path:", table.concat(path, "."))
@@ -518,6 +522,10 @@ function ChangeDetector:CheckForChanges(snapshot: Snapshot)
 
 	if not snapshot or not snapshot.RootTable then
 		error("Invalid snapshot object. Must be created with CaptureSnapshot().")
+	end
+
+	if type(snapshot.RootTable) ~= "table" then
+		error("Invalid snapshot object. Snapshot.RootTable must be a plain table.")
 	end
 
 	if self._debugMode then
