@@ -83,5 +83,4 @@ Declaration matrix:
 - Prefer extra context over minimal logs so follow-up decisions can be made from one run.
 
 ## Planning
-- While planning, you must should come up with a flowchart to explain the current way things work and a separate flowchart to explain the new proposal. If a plan includes multiple separate changes, you need multiple separate before and after flowcharts.
 - You must always include a list of to-dos in the final plan and they should be broken into discrete tasks that an agent can be tasked with.

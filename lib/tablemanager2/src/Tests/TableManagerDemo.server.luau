@@ -95,7 +95,7 @@ end)
 tm:Insert({ "Inventory", "Potions" }, "Health Potion")
 task.wait()
 print("\nChanging Potion")
-tm.Data.Inventory.Potions[1] = "Super Health Potion"
+tm.Proxy.Inventory.Potions[1] = "Super Health Potion"
 
 -- print("\n========== TABLEMANAGER DEMO ==========\n")
 

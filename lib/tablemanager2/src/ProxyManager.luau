@@ -108,7 +108,8 @@ export type Proxy<T = { [any]: any }> = T & { __proxy: true }
 ]=]
 export type ProxyMetadata<T = { [any]: any }> = {
 	Original: T, -- The unwrapped original table
-	Path: Path, -- Path from root to this table
+	Parent: any?, -- The original (unwrapped) parent table; nil for the root proxy
+	Key: any?, -- The key under which this table lives in its parent; nil for the root proxy
 	IsArray: boolean, -- Whether this table is treated as an array
 	ArrayLength: number, -- Cached length for arrays
 	RootTable: { [any]: any }, -- Reference to the root table for snapshot capture
@@ -129,19 +130,38 @@ export type ProxyManager = {
 	IsProxy: (self: ProxyManager, t: any) -> boolean,
 	GetOriginal: <T>(self: ProxyManager, t: Proxy<T> | T) -> T,
 	GetMetadata: <T>(self: ProxyManager, proxy: Proxy<T>) -> ProxyMetadata<T>?,
-	CreateProxy: <T>(self: ProxyManager, original: T, path: Path, rootTable: { [any]: any }?) -> Proxy<T>,
+	--- Returns the live path from root to this proxy by walking the Parent chain. Returns nil if the proxy is unknown.
+	GetPath: <T>(self: ProxyManager, proxy: Proxy<T>) -> Path?,
+	--- Returns the existing proxy for an original table, or nil if none exists.
+	GetProxy: <T>(self: ProxyManager, original: T) -> Proxy<T>?,
+	CreateProxy: <T>(self: ProxyManager, original: T, _path: Path?, rootTable: { [any]: any }?, parentOriginal: any?, key: any?) -> Proxy<T>,
 	IsArray: (self: ProxyManager, t: any) -> boolean,
 	GetArrayLength: (self: ProxyManager, t: any) -> number,
 	SetChangeDetector: (self: ProxyManager, changeDetector: ChangeDetector) -> (),
 	SetArrayInsertedCallback: (self: ProxyManager, callback: (path: Path, index: number, newValue: any) -> ()) -> (),
+	SetBatchDirectArraySetCallback: (self: ProxyManager, callback: (path: Path, index: number) -> ()) -> (),
+	--- Set the callback fired for every non-array, non-append write during a batch.
+	--- Receives the **parent table's path** (not including the written key) so the
+	--- caller can record which top-level branch was dirtied.
+	SetBatchScalarWrittenCallback: (self: ProxyManager, callback: (parentPath: Path) -> ()) -> (),
+	SetValidateCallback: (self: ProxyManager, callback: (path: Path, value: any) -> (boolean, string?)) -> (),
+	--- Update the Key metadata for all direct child proxies of `arrayOriginal` whose
+	--- numeric key is >= `fromIndex` by adding `delta`. Called by TableManager after
+	--- every ArrayInsert (+1) or ArrayRemove (-1) so held proxies report the correct path.
+	ShiftKeys: (self: ProxyManager, arrayOriginal: { [any]: any }, fromIndex: number, delta: number) -> (),
 	Destroy: (self: ProxyManager) -> (),
 
 	-- Private fields
 	_proxyMeta: { [any]: ProxyMetadata<any> },
 	_originalToProxy: { [any]: Proxy<any> },
+	_proxiesByParent: { [any]: { [any]: true } }, -- parentOriginal → set of child proxies
 	_changeDetector: ChangeDetector?,
 	_onArrayInserted: ((path: Path, index: number, newValue: any) -> ())?,
+	_onBatchDirectArraySet: ((path: Path, index: number) -> ())?,
+	_onBatchScalarWritten: ((parentPath: Path) -> ())?,
+	_onValidateWrite: ((path: Path, value: any) -> (boolean, string?))?,
 	_sharedMetatable: { [any]: any },
+	_GetLivePath: (self: ProxyManager, proxy: Proxy<any>) -> Path,
 }
 
 --------------------------------------------------------------------------------
@@ -159,8 +179,12 @@ function ProxyManager.new(): ProxyManager
 
 	self._proxyMeta = {}
 	self._originalToProxy = {}
+	self._proxiesByParent = {}
 	self._changeDetector = nil
 	self._onArrayInserted = nil
+	self._onBatchDirectArraySet = nil
+	self._onBatchScalarWritten = nil
+	self._onValidateWrite = nil
 
 	-- Create the shared metatable for all proxies
 	self._sharedMetatable = {
@@ -181,9 +205,7 @@ function ProxyManager.new(): ProxyManager
 				end
 
 				-- Create new proxy for nested table (inherit root table)
-				const nestedPath = table.clone(meta.Path)
-				table.insert(nestedPath, key)
-				return self:CreateProxy(value, nestedPath, meta.RootTable)
+				return self:CreateProxy(value, nil, meta.RootTable, meta.Original, key)
 			end
 
 			-- Return raw value for scalars
@@ -197,21 +219,44 @@ function ProxyManager.new(): ProxyManager
 			end
 
 			const originalTable = meta.Original
-			const currentPath = table.clone(meta.Path)
+			const parentPath = self:_GetLivePath(proxy)
+			const currentPath = table.clone(parentPath)
 			table.insert(currentPath, key)
+			const unwrappedValue = getOriginal(value)
+
+			-- Validate writes before any side effects (batch tracking, snapshots, or mutation).
+			if self._onValidateWrite then
+				const ok, err = self._onValidateWrite(currentPath, unwrappedValue)
+				if not ok then
+					if err then
+						error(err, 2)
+					end
+					return
+				end
+			end
 
 			-- Special case: Array append (key == length + 1)
 			if meta.IsArray and type(key) == "number" and key == meta.ArrayLength + 1 then
-				-- Unwrap and apply
-				const unwrappedValue = getOriginal(value)
+				-- Apply
 				originalTable[key] = unwrappedValue
 				meta.ArrayLength = key
 
 				-- Fire array inserted callback directly
 				if self._onArrayInserted then
-					self._onArrayInserted(meta.Path, key, unwrappedValue)
+					self._onArrayInserted(parentPath, key, unwrappedValue)
 				end
 				return
+			end
+
+			-- Non-append numeric assignment on an array: notify the batch recorder
+			-- so it can mark this array path as poisoned (forces Branch A at flush).
+			if meta.IsArray and type(key) == "number" and self._onBatchDirectArraySet then
+				self._onBatchDirectArraySet(parentPath, key)
+			end
+
+			-- Notify the batch system which parent branch was dirtied by this scalar write.
+			if self._onBatchScalarWritten then
+				self._onBatchScalarWritten(parentPath)
 			end
 
 			-- Standard change detection workflow:
@@ -222,7 +267,6 @@ function ProxyManager.new(): ProxyManager
 			end
 
 			-- 2. Apply the change
-			const unwrappedValue = getOriginal(value)
 			originalTable[key] = unwrappedValue
 
 			-- 3. Detect changes (ChangeDetector compares new state against snapshot)
@@ -261,9 +305,7 @@ function ProxyManager.new(): ProxyManager
 						return nextKey, self._originalToProxy[nextValue]
 					end
 
-					local nestedPath = table.clone(meta.Path)
-					table.insert(nestedPath, nextKey)
-					local nestedProxy = self:CreateProxy(nextValue, nestedPath, meta.RootTable)
+				local nestedProxy = self:CreateProxy(nextValue, nil, meta.RootTable, meta.Original, nextKey)
 					return nextKey, nestedProxy
 				end
 
@@ -286,10 +328,11 @@ function ProxyManager.new(): ProxyManager
 			if not meta then
 				return "TableManager.Data(?)"
 			end
-			if #meta.Path == 0 then
+			const livePath = self:_GetLivePath(proxy)
+			if #livePath == 0 then
 				return "TableManager.Data"
 			end
-			return "TableManager.Data(" .. table.concat(meta.Path, ".") .. ")"
+			return "TableManager.Data(" .. table.concat(livePath, ".") .. ")"
 		end,
 
 		__metatable = "Locked",
@@ -312,6 +355,37 @@ function ProxyManager:SetArrayInsertedCallback(callback: (path: Path, index: num
 	self._onArrayInserted = callback
 end
 
+--[=[
+	Set the callback fired when a non-append numeric index is directly assigned on an
+	array proxy (e.g. `proxy[2] = value` when the array already has that slot).
+
+	TableManager uses this to mark the array's batch log as poisoned, which forces
+	Branch A (LCS snapshot diff) at flush time instead of the op-log coalescer.
+]=]
+function ProxyManager:SetBatchDirectArraySetCallback(callback: (path: Path, index: number) -> ())
+	self._onBatchDirectArraySet = callback
+end
+
+--[=[
+	Set the callback fired for every non-array, non-append write through a proxy.
+	Receives the **parent table's path** (the path of the proxy that owns the key
+	that was written, i.e. NOT including the written key itself).
+
+	TableManager uses this during a batch to record which top-level branches were
+	dirtied so that the flush can diff only those branches instead of the whole tree.
+]=]
+function ProxyManager:SetBatchScalarWrittenCallback(callback: (parentPath: Path) -> ())
+	self._onBatchScalarWritten = callback
+end
+
+--[=[
+	Set the callback fired for every proxy write before mutation.
+	Returning `false` prevents the write. If an error message is returned it is raised.
+]=]
+function ProxyManager:SetValidateCallback(callback: (path: Path, value: any) -> (boolean, string?))
+	self._onValidateWrite = callback
+end
+
 --- Check if a value is a proxy.
 function ProxyManager:IsProxy(t: any): boolean
 	return isProxy(t)
@@ -327,13 +401,12 @@ function ProxyManager:GetMetadata<T>(proxy: Proxy<T>): ProxyMetadata<T>?
 	return self._proxyMeta[proxy]
 end
 
---- Get the path from root to this proxy.
+--- Get the live path from root to this proxy by walking the Parent chain.
 function ProxyManager:GetPath<T>(proxy: Proxy<T>): Path?
-	local meta = self._proxyMeta[proxy]
-	if not meta then
+	if not self._proxyMeta[proxy] then
 		return nil
 	end
-	return meta.Path
+	return self:_GetLivePath(proxy)
 end
 
 --- Get the proxy for an original table, if it exists.
@@ -342,13 +415,42 @@ function ProxyManager:GetProxy<T>(original: T): Proxy<T>?
 end
 
 --[=[
+	Walk the Parent chain from `proxy` up to the root and return the assembled path.
+	O(depth). Returns a fresh table each call — safe to mutate.
+]=]
+function ProxyManager:_GetLivePath(proxy: Proxy<any>): Path
+	const meta = self._proxyMeta[proxy]
+	if meta == nil or meta.Parent == nil then
+		return {}
+	end
+
+	const keys: Path = {}
+	local current = meta
+	while current ~= nil and current.Key ~= nil do
+		table.insert(keys, 1, current.Key)
+		if current.Parent == nil then
+			break
+		end
+		const parentProxy = self._originalToProxy[current.Parent]
+		if parentProxy == nil then
+			break
+		end
+		current = self._proxyMeta[parentProxy]
+	end
+
+	return keys
+end
+
+--[=[
 	Create a new proxy for a table at the given path.
 	
 	@param original -- The original table to wrap
 	@param path -- The path from root to this table
 	@param rootTable -- Optional root table reference (defaults to original for root proxy)
+	@param parentOriginal -- The unwrapped parent table (nil for root proxy)
+	@param key -- The key under which `original` lives in its parent (nil for root proxy)
 ]=]
-function ProxyManager:CreateProxy<T>(original: T, path: Path, rootTable: { [any]: any }?): Proxy<T>
+function ProxyManager:CreateProxy<T>(original: T, _path: Path?, rootTable: { [any]: any }?, parentOriginal: any?, key: any?): Proxy<T>
 	if type(original) ~= "table" then
 		return original :: any
 	end
@@ -372,11 +474,20 @@ function ProxyManager:CreateProxy<T>(original: T, path: Path, rootTable: { [any]
 	const isArr = isArray(original)
 	self._proxyMeta[proxy] = {
 		Original = original,
-		Path = table.clone(path),
+		Parent = parentOriginal,
+		Key = key,
 		IsArray = isArr,
 		ArrayLength = if isArr then getArrayLength(original) else 0,
 		RootTable = root,
 	}
+
+	-- Register in parent lookup so ShiftKeys can find child proxies
+	if parentOriginal ~= nil then
+		if not self._proxiesByParent[parentOriginal] then
+			self._proxiesByParent[parentOriginal] = {}
+		end
+		self._proxiesByParent[parentOriginal][proxy] = true
+	end
 
 	return proxy
 end
@@ -396,12 +507,34 @@ function ProxyManager:GetArrayLength(t: any): number
 end
 
 --[=[
+	Update the `Key` metadata for all direct child proxies of `arrayOriginal`
+	whose numeric key is >= `fromIndex` by adding `delta`.
+
+	Call with `delta = 1` after `table.insert(array, pos, value)` and
+	`delta = -1` after `table.remove(array, index)` (passing `index + 1`
+	as `fromIndex` for removes so the removed slot itself is not shifted).
+]=]
+function ProxyManager:ShiftKeys(arrayOriginal: { [any]: any }, fromIndex: number, delta: number)
+	const children = self._proxiesByParent[arrayOriginal]
+	if children == nil then
+		return
+	end
+	for childProxy in children do
+		const meta = self._proxyMeta[childProxy]
+		if meta ~= nil and type(meta.Key) == "number" and meta.Key >= fromIndex then
+			meta.Key += delta
+		end
+	end
+end
+
+--[=[
 	Clean up all proxies and metadata.
 ]=]
 function ProxyManager:Destroy()
 	-- Clear all metadata
 	table.clear(self._proxyMeta)
 	table.clear(self._originalToProxy)
+	table.clear(self._proxiesByParent)
 
 	-- Clear weak table entries (they'll be GC'd automatically, but we can help)
 	for proxy in self._proxyMeta do
@@ -410,6 +543,7 @@ function ProxyManager:Destroy()
 
 	self._changeDetector = nil
 	self._onArrayInserted = nil
+	self._onValidateWrite = nil
 end
 
 return ProxyManager

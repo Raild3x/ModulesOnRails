@@ -97,7 +97,7 @@ return function(t: tiniest)
 
 			expect(meta).exists()
 			expect(meta.Original).is(data)
-			expect(meta.Path).is_shallow_equal {}
+			expect(manager:GetPath(proxy)).is_shallow_equal {}
 
 			manager:Destroy()
 		end)

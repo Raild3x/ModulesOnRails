@@ -15,3 +15,4 @@ docsLink = "TableManager"
 
 [dependencies]
 Signal = "howmanysmall/better-signal@2.1.0"
+T = "raild3x/t@^0.1"
