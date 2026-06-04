@@ -344,6 +344,115 @@ return function(tiniest: tiniest)
 		end)
 	end)
 
+	describe("Check Metadata Introspection", function()
+		test("GetMeta returns nil for leaf checks", function()
+			expect(T.GetMeta(T.string)).is(nil)
+			expect(T.GetMeta(T.number)).is(nil)
+			expect(T.GetMeta(T.integerPositive)).is(nil)
+		end)
+
+		test("GetMeta returns interface metadata and preserves field checks", function()
+			local schema = T.interface {
+				Name = T.string,
+				Health = T.numberConstrained(0, 100),
+			}
+
+			local meta = T.GetMeta(schema)
+			if not meta or meta.kind ~= "interface" then
+				error("Expected metadata for interface schema")
+			end
+
+			expect(meta.kind).is("interface")
+			expect(meta.fields.Name).is(T.string)
+			expect(type(meta.fields.Health)).is("function")
+		end)
+
+		test("GetMeta returns strictInterface and partialInterface kinds", function()
+			local strictSchema = T.strictInterface {
+				Name = T.string,
+			}
+			local partialSchema = T.partialInterface {
+				Name = T.string,
+			}
+
+			local strictMeta = T.GetMeta(strictSchema)
+			local partialMeta = T.GetMeta(partialSchema)
+
+			if not strictMeta or strictMeta.kind ~= "strictInterface" then
+				error("Expected strict interface metadata")
+			end
+			if not partialMeta or partialMeta.kind ~= "partialInterface" then
+				error("Expected metadata for strict/partial interface schemas")
+			end
+
+			expect(strictMeta.kind).is("strictInterface")
+			expect(partialMeta.kind).is("partialInterface")
+			expect(strictMeta.fields.Name).is(T.string)
+			expect(partialMeta.fields.Name).is(T.string)
+		end)
+
+		test("GetMeta returns optional metadata with inner check", function()
+			local optionalString = T.optional(T.string)
+			local meta = T.GetMeta(optionalString)
+			if not meta or meta.kind ~= "optional" then
+				error("Expected metadata for optional check")
+			end
+
+			expect(meta.kind).is("optional")
+			expect(meta.innerCheck).is(T.string)
+		end)
+
+		test("GetMeta returns array metadata with value check", function()
+			local stringArray = T.array(T.string)
+			local meta = T.GetMeta(stringArray)
+			if not meta or meta.kind ~= "array" then
+				error("Expected metadata for array check")
+			end
+
+			expect(meta.kind).is("array")
+			expect(meta.valueCheck).is(T.string)
+		end)
+
+		test("metadata composition supports nested schema traversal", function()
+			local schema = T.interface {
+				Players = T.array(T.optional(T.strictInterface {
+					Name = T.string,
+					Level = T.integerPositive,
+				})),
+			}
+
+			local rootMeta = T.GetMeta(schema)
+			if not rootMeta or rootMeta.kind ~= "interface" then
+				error("Expected root metadata")
+			end
+
+			expect(rootMeta.kind).is("interface")
+			local playersCheck = rootMeta.fields.Players
+			expect(type(playersCheck)).is("function")
+
+			local playersMeta = T.GetMeta(playersCheck)
+			if not playersMeta or playersMeta.kind ~= "array" then
+				error("Expected array metadata for Players")
+			end
+
+			expect(playersMeta.kind).is("array")
+			local optionalMeta = T.GetMeta(playersMeta.valueCheck)
+			if not optionalMeta or optionalMeta.kind ~= "optional" then
+				error("Expected optional metadata for Players item")
+			end
+
+			expect(optionalMeta.kind).is("optional")
+			local itemMeta = T.GetMeta(optionalMeta.innerCheck)
+			if not itemMeta or itemMeta.kind ~= "strictInterface" then
+				error("Expected strict interface metadata for Players item")
+			end
+
+			expect(itemMeta.kind).is("strictInterface")
+			expect(itemMeta.fields.Name).is(T.string)
+			expect(itemMeta.fields.Level).is(T.integerPositive)
+		end)
+	end)
+
 	describe("Roblox Specific Validators", function()
 		test("enum validates EnumItems when available", function()
 			local ok, item = pcall(function()
@@ -558,7 +667,7 @@ return function(tiniest: tiniest)
 
 			-- Create a custom type checker for the class
 			local function instanceOfClass(class)
-				return function(value: unknown)
+				return function(value: unknown): (any, any)
 					local tableSuccess, tableErrMsg = T.table(value)
 					if not tableSuccess then
 						return false, tableErrMsg or ""
@@ -566,7 +675,7 @@ return function(tiniest: tiniest)
 
 					assert(type(value) == "table", "value must be a table")
 
-					local mt = getmetatable(value)
+					local mt = getmetatable(value :: any)
 					if not mt or mt.__index ~= class then
 						return false, "bad member of class"
 					end

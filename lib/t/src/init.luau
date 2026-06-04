@@ -80,6 +80,48 @@ local t = {}
 
 --[=[
 	@within T
+	@type CheckMeta { kind: "interface" | "strictInterface" | "partialInterface", fields: {[any]: Check<any>} } | { kind: "optional", innerCheck: Check<any> } | { kind: "array", valueCheck: Check<any> }
+	Metadata attached to navigable composed checks. Returned by `t.GetMeta`.
+	Leaf checks (e.g. `t.string`, `t.number`) do not have metadata.
+]=]
+export type CheckMeta =
+	{ kind: "interface" | "strictInterface" | "partialInterface", fields: { [any]: Check<any> } }
+	| { kind: "optional", innerCheck: Check<any> }
+	| { kind: "array", valueCheck: Check<any> }
+
+-- Weak-keyed registry mapping check functions to their construction metadata.
+-- Only navigable composed checks are registered; leaf checks are not.
+local CHECK_METADATA: { [Check<any>]: CheckMeta } = setmetatable({} :: any, { __mode = "k" })
+
+-- Attaches construction metadata to a check function and returns it unchanged.
+-- This does not affect the check's runtime behavior in any way.
+local function annotate<T>(fn: T & Check<any>, meta: CheckMeta): T
+	CHECK_METADATA[fn :: any] = meta
+	return fn
+end
+
+--[=[
+	@within T
+	@function GetMeta
+	Returns the construction metadata for a navigable composed check, or `nil` for
+	leaf checks and any check that was not built with a metadata-aware factory.
+
+	```lua
+	local meta = t.GetMeta(t.interface({ x = t.number }))
+	-- meta = { kind = "interface", fields = { x = <check> } }
+
+	print(t.GetMeta(t.string)) --> nil
+	```
+
+	@param check Check -- The check function to inspect
+	@return CheckMeta?
+]=]
+function t.GetMeta(check: Check<any>): CheckMeta?
+	return CHECK_METADATA[check]
+end
+
+--[=[
+	@within T
 	@function type
 	Creates a checker using Lua's native `type()`.
 
@@ -787,7 +829,7 @@ local function t_literal<L>(...: L): Check<L>
 			local value = select(i, ...)
 			literals[i] = t.literal(value)
 		end
-		return t.union(table.unpack(literals, 1, size))
+		return (t :: any).union(table.unpack(literals, 1, size))
 	end
 end
 t.literal = t_literal
@@ -1324,7 +1366,7 @@ t.match = t_match
 ]=]
 local function t_optional<V>(check: Check<V>): Check<V?>
 	assert(t.callback(check))
-	return function(value: any): (boolean, string?)
+	return annotate(function(value: any): (boolean, string?)
 		if value == nil then
 			return true :: any
 		end
@@ -1334,7 +1376,7 @@ local function t_optional<V>(check: Check<V>): Check<V?>
 		else
 			return false, string.format("(optional) %s", errMsg or "")
 		end
-	end
+	end, { kind = "optional", innerCheck = check })
 end
 t.optional = t_optional
 t.maybe = t.optional
@@ -1352,9 +1394,10 @@ t.maybe = t.optional
 
 	@param check Check<V> -- The base check that must pass first
 	@param predicate (value: V) -> (boolean, string?) -- Additional validation applied after `check`
+	@param errorMessage string? -- Fallback error message when predicate returns no message
 	@return Check<V>
 ]=]
-local function t_where<V>(check: Check<V>, predicate: (value: V) -> (boolean, string?)): Check<V>
+local function t_where<V>(check: Check<V>, predicate: (value: V) -> (boolean, string?), errorMessage: string?): Check<V>
 	assert(t.callback(check))
 	assert(t.callback(predicate))
 	return function(value: any): (boolean, string?)
@@ -1368,7 +1411,7 @@ local function t_where<V>(check: Check<V>, predicate: (value: V) -> (boolean, st
 			return true :: any
 		end
 
-		return false, predicateErrMsg or "value failed refinement"
+		return false, predicateErrMsg or errorMessage or "value failed refinement"
 	end
 end
 t.where = t_where
@@ -1570,7 +1613,7 @@ local arrayKeysCheck = t.keys(t.integer)
 local function t_array<V>(check: Check<V>): Check<{ V }>
 	assert(t.callback(check))
 	local valuesCheck = t.values(check)
-	return function(value: any): (boolean, string?)
+	return annotate(function(value: any): (boolean, string?)
 		local keySuccess, keyErrMsg = arrayKeysCheck(value)
 		if keySuccess == false then
 			return false, string.format("[array] %s", keyErrMsg or "")
@@ -1591,7 +1634,7 @@ local function t_array<V>(check: Check<V>): Check<{ V }>
 			return false, string.format("[array] %s", valueErrMsg or "")
 		end
 		return true :: any
-	end
+	end, { kind = "array", valueCheck = check })
 end
 t.array = t_array
 
@@ -1777,7 +1820,7 @@ end
 ]=]
 local function t_interface(checkTable: { [any]: Check<any> }): Check<{ [any]: any }>
 	assert(checkInterface(checkTable))
-	return function(value: { [any]: any }): (boolean, string?)
+	return annotate(function(value: { [any]: any }): (boolean, string?)
 		local tableSuccess, tableErrMsg = t.table(value)
 		if tableSuccess == false then
 			return false, tableErrMsg or ""
@@ -1789,7 +1832,7 @@ local function t_interface(checkTable: { [any]: Check<any> }): Check<{ [any]: an
 			end
 		end
 		return true :: any
-	end
+	end, { kind = "interface", fields = checkTable })
 end
 t.interface = t_interface
 
@@ -1813,7 +1856,7 @@ t.interface = t_interface
 ]=]
 local function t_partialInterface(checkTable: { [any]: Check<any> }): Check<{ [any]: any }>
 	assert(checkInterface(checkTable))
-	return function(value: { [any]: any }): (boolean, string?)
+	return annotate(function(value: { [any]: any }): (boolean, string?)
 		local tableSuccess, tableErrMsg = t.table(value)
 		if tableSuccess == false then
 			return false, tableErrMsg or ""
@@ -1829,7 +1872,7 @@ local function t_partialInterface(checkTable: { [any]: Check<any> }): Check<{ [a
 			end
 		end
 		return true :: any
-	end
+	end, { kind = "partialInterface", fields = checkTable })
 end
 t.partialInterface = t_partialInterface
 
@@ -1851,7 +1894,7 @@ t.partialInterface = t_partialInterface
 ]=]
 local function t_strictInterface(checkTable: { [any]: Check<any> }): Check<{ [any]: any }>
 	assert(checkInterface(checkTable))
-	return function(value: { [any]: any }): (boolean, string?)
+	return annotate(function(value: { [any]: any }): (boolean, string?)
 		local tableSuccess, tableErrMsg = t.table(value)
 		if tableSuccess == false then
 			return false, tableErrMsg or ""
@@ -1875,7 +1918,7 @@ local function t_strictInterface(checkTable: { [any]: Check<any> }): Check<{ [an
 			end
 		end
 		return true :: any
-	end
+	end, { kind = "strictInterface", fields = checkTable })
 end
 t.strictInterface = t_strictInterface
 
