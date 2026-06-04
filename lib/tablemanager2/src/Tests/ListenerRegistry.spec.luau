@@ -18,9 +18,14 @@ return function(t: tiniest)
 	local describe = t.describe
 	local expect = t.expect
 
+	local function fireAndFlush(registry, eventType, path, eventData)
+		registry:FireListenersExact(eventType, path, eventData)
+		task.wait()
+	end
+
 	describe("Listener Registration", function()
 		test("should register a listener and return a connection", function()
-			local registry = ListenerRegistry.new(false)
+			local registry = ListenerRegistry.new { DebugMode = false }
 
 			local connection = registry:RegisterListener("ValueChanged", { "player", "health" }, function() end)
 
@@ -31,7 +36,7 @@ return function(t: tiniest)
 		end)
 
 		test("should allow disconnecting a listener", function()
-			local registry = ListenerRegistry.new(false)
+			local registry = ListenerRegistry.new { DebugMode = false }
 
 			local connection = registry:RegisterListener("ValueChanged", { "player", "health" }, function() end)
 			connection:Disconnect()
@@ -42,7 +47,7 @@ return function(t: tiniest)
 		end)
 
 		test("should not fire disconnected listeners", function()
-			local registry = ListenerRegistry.new(false)
+			local registry = ListenerRegistry.new { DebugMode = false }
 
 			local fireCount = 0
 			local connection = registry:RegisterListener("ValueChanged", { "player", "health" }, function()
@@ -51,7 +56,7 @@ return function(t: tiniest)
 
 			connection:Disconnect()
 
-			registry:FireListenersExact("ValueChanged", { "player", "health" }, {
+			fireAndFlush(registry, "ValueChanged", { "player", "health" }, {
 				NewValue = 50,
 				OldValue = 100,
 				Metadata = {
@@ -69,14 +74,14 @@ return function(t: tiniest)
 
 	describe("FireListenersExact", function()
 		test("should fire listener at exact matching path", function()
-			local registry = ListenerRegistry.new(false)
+			local registry = ListenerRegistry.new { DebugMode = false }
 
 			local fired = false
 			registry:RegisterListener("ValueChanged", { "player", "health" }, function()
 				fired = true
 			end)
 
-			registry:FireListenersExact("ValueChanged", { "player", "health" }, {
+			fireAndFlush(registry, "ValueChanged", { "player", "health" }, {
 				NewValue = 50,
 				OldValue = 100,
 				Metadata = {
@@ -92,7 +97,7 @@ return function(t: tiniest)
 		end)
 
 		test("should NOT fire listener at parent path", function()
-			local registry = ListenerRegistry.new(false)
+			local registry = ListenerRegistry.new { DebugMode = false }
 
 			local fired = false
 			registry:RegisterListener("ValueChanged", { "player" }, function()
@@ -100,7 +105,7 @@ return function(t: tiniest)
 			end)
 
 			-- Fire at child path - should NOT fire parent listener
-			registry:FireListenersExact("ValueChanged", { "player", "health" }, {
+			fireAndFlush(registry, "ValueChanged", { "player", "health" }, {
 				NewValue = 50,
 				OldValue = 100,
 				Metadata = {
@@ -116,7 +121,7 @@ return function(t: tiniest)
 		end)
 
 		test("should NOT fire listener at child path", function()
-			local registry = ListenerRegistry.new(false)
+			local registry = ListenerRegistry.new { DebugMode = false }
 
 			local fired = false
 			registry:RegisterListener("ValueChanged", { "player", "health" }, function()
@@ -124,7 +129,7 @@ return function(t: tiniest)
 			end)
 
 			-- Fire at parent path - should NOT fire child listener
-			registry:FireListenersExact("ValueChanged", { "player" }, {
+			fireAndFlush(registry, "ValueChanged", { "player" }, {
 				NewValue = { health = 50 },
 				OldValue = { health = 100 },
 				Metadata = {
@@ -140,7 +145,7 @@ return function(t: tiniest)
 		end)
 
 		test("should fire multiple listeners on same path", function()
-			local registry = ListenerRegistry.new(false)
+			local registry = ListenerRegistry.new { DebugMode = false }
 
 			local count1 = 0
 			local count2 = 0
@@ -153,7 +158,7 @@ return function(t: tiniest)
 				count2 += 1
 			end)
 
-			registry:FireListenersExact("ValueChanged", { "player", "health" }, {
+			fireAndFlush(registry, "ValueChanged", { "player", "health" }, {
 				NewValue = 50,
 				OldValue = 100,
 				Metadata = {
@@ -172,7 +177,7 @@ return function(t: tiniest)
 
 	describe("ListenDepth Filtering", function()
 		test("nil depth (default) fires for ancestor notifications at any depth", function()
-			local registry = ListenerRegistry.new(false)
+			local registry = ListenerRegistry.new { DebugMode = false }
 
 			local fired = false
 			registry:RegisterListener("ValueChanged", { "player" }, function()
@@ -180,7 +185,7 @@ return function(t: tiniest)
 			end) -- depth=nil by default
 
 			-- Ancestor notification: change originated at ["player", "health"] (depth 1 from listener)
-			registry:FireListenersExact("ValueChanged", { "player" }, {
+			fireAndFlush(registry, "ValueChanged", { "player" }, {
 				NewValue = nil,
 				OldValue = nil,
 				Metadata = {
@@ -196,7 +201,7 @@ return function(t: tiniest)
 		end)
 
 		test("depth=0 does NOT fire for ancestor notifications", function()
-			local registry = ListenerRegistry.new(false)
+			local registry = ListenerRegistry.new { DebugMode = false }
 
 			local fired = false
 			registry:RegisterListener("ValueChanged", { "player" }, function()
@@ -204,7 +209,7 @@ return function(t: tiniest)
 			end, { ListenDepth = 0 })
 
 			-- Ancestor notification: change at ["player", "health"] is depth 1 from listener
-			registry:FireListenersExact("ValueChanged", { "player" }, {
+			fireAndFlush(registry, "ValueChanged", { "player" }, {
 				NewValue = nil,
 				OldValue = nil,
 				Metadata = {
@@ -220,7 +225,7 @@ return function(t: tiniest)
 		end)
 
 		test("depth=0 DOES fire for direct changes (relativeDepth=0)", function()
-			local registry = ListenerRegistry.new(false)
+			local registry = ListenerRegistry.new { DebugMode = false }
 
 			local fired = false
 			registry:RegisterListener("ValueChanged", { "player" }, function()
@@ -228,7 +233,7 @@ return function(t: tiniest)
 			end, { ListenDepth = 0 })
 
 			-- Direct change at the listener's exact path (Diff present)
-			registry:FireListenersExact("ValueChanged", { "player" }, {
+			fireAndFlush(registry, "ValueChanged", { "player" }, {
 				NewValue = { health = 50 },
 				OldValue = { health = 100 },
 				Metadata = {
@@ -244,7 +249,7 @@ return function(t: tiniest)
 		end)
 
 		test("depth=1 style='<=' fires for depth-1 ancestor, not depth-2", function()
-			local registry = ListenerRegistry.new(false)
+			local registry = ListenerRegistry.new { DebugMode = false }
 
 			local fired = false
 			registry:RegisterListener("ValueChanged", { "player" }, function()
@@ -252,7 +257,7 @@ return function(t: tiniest)
 			end, { ListenDepth = 1, ListenDepthStyle = "<=" })
 
 			-- Depth 1 ancestor: origin at ["player", "health"]
-			registry:FireListenersExact("ValueChanged", { "player" }, {
+			fireAndFlush(registry, "ValueChanged", { "player" }, {
 				NewValue = nil,
 				OldValue = nil,
 				Metadata = {
@@ -267,7 +272,7 @@ return function(t: tiniest)
 			fired = false
 
 			-- Depth 2 ancestor: origin at ["player", "stats", "hp"] should NOT fire
-			registry:FireListenersExact("ValueChanged", { "player" }, {
+			fireAndFlush(registry, "ValueChanged", { "player" }, {
 				NewValue = nil,
 				OldValue = nil,
 				Metadata = {
@@ -283,7 +288,7 @@ return function(t: tiniest)
 		end)
 
 		test("depth=1 style='==' fires at exactly depth 1, not depth 0", function()
-			local registry = ListenerRegistry.new(false)
+			local registry = ListenerRegistry.new { DebugMode = false }
 
 			local fired = false
 			registry:RegisterListener("ValueChanged", { "player" }, function()
@@ -291,7 +296,7 @@ return function(t: tiniest)
 			end, { ListenDepth = 1, ListenDepthStyle = "==" })
 
 			-- Direct change at listener path (depth 0) should NOT fire
-			registry:FireListenersExact("ValueChanged", { "player" }, {
+			fireAndFlush(registry, "ValueChanged", { "player" }, {
 				NewValue = { health = 50 },
 				OldValue = { health = 100 },
 				Metadata = {
@@ -304,7 +309,7 @@ return function(t: tiniest)
 			expect(fired).never_is_true()
 
 			-- Depth 1 ancestor (origin at ["player", "health"]) SHOULD fire
-			registry:FireListenersExact("ValueChanged", { "player" }, {
+			fireAndFlush(registry, "ValueChanged", { "player" }, {
 				NewValue = nil,
 				OldValue = nil,
 				Metadata = {
@@ -322,7 +327,7 @@ return function(t: tiniest)
 
 	describe("Once Option", function()
 		test("fires exactly once then auto-disconnects", function()
-			local registry = ListenerRegistry.new(false)
+			local registry = ListenerRegistry.new { DebugMode = false }
 
 			local fireCount = 0
 			local conn = registry:RegisterListener("ValueChanged", { "player", "health" }, function()
@@ -339,8 +344,8 @@ return function(t: tiniest)
 				},
 			}
 
-			registry:FireListenersExact("ValueChanged", { "player", "health" }, eventData)
-			registry:FireListenersExact("ValueChanged", { "player", "health" }, eventData)
+			fireAndFlush(registry, "ValueChanged", { "player", "health" }, eventData)
+			fireAndFlush(registry, "ValueChanged", { "player", "health" }, eventData)
 
 			expect(fireCount).is(1)
 			expect(conn.Connected).never_is_true()
@@ -349,7 +354,7 @@ return function(t: tiniest)
 		end)
 
 		test("Connected is false immediately after the first fire", function()
-			local registry = ListenerRegistry.new(false)
+			local registry = ListenerRegistry.new { DebugMode = false }
 
 			local connAfterFire: any = nil
 			local conn: any
@@ -357,7 +362,7 @@ return function(t: tiniest)
 				connAfterFire = conn
 			end, { Once = true })
 
-			registry:FireListenersExact("ValueChanged", { "player", "health" }, {
+			fireAndFlush(registry, "ValueChanged", { "player", "health" }, {
 				NewValue = 50,
 				OldValue = 100,
 				Metadata = {
@@ -375,7 +380,7 @@ return function(t: tiniest)
 		end)
 
 		test("re-entrant fire does not double-fire a Once listener", function()
-			local registry = ListenerRegistry.new(false)
+			local registry = ListenerRegistry.new { DebugMode = false }
 
 			local fireCount = 0
 			local eventData = {
@@ -394,7 +399,7 @@ return function(t: tiniest)
 				registry:FireListenersExact("ValueChanged", { "player", "health" }, eventData)
 			end, { Once = true })
 
-			registry:FireListenersExact("ValueChanged", { "player", "health" }, eventData)
+			fireAndFlush(registry, "ValueChanged", { "player", "health" }, eventData)
 
 			expect(fireCount).is(1)
 
@@ -404,7 +409,7 @@ return function(t: tiniest)
 
 	describe("Event Data Handling", function()
 		test("should pass correct arguments for ValueChanged", function()
-			local registry = ListenerRegistry.new(false)
+			local registry = ListenerRegistry.new { DebugMode = false }
 
 			local capturedNew = nil
 			local capturedOld = nil
@@ -422,7 +427,7 @@ return function(t: tiniest)
 				OriginDiff = { type = "changed" },
 			}
 
-			registry:FireListenersExact("ValueChanged", { "player", "health" }, {
+			fireAndFlush(registry, "ValueChanged", { "player", "health" }, {
 				NewValue = 50,
 				OldValue = 100,
 				Metadata = testMetadata,
@@ -436,7 +441,7 @@ return function(t: tiniest)
 		end)
 
 		test("should pass correct arguments for KeyAdded", function()
-			local registry = ListenerRegistry.new(false)
+			local registry = ListenerRegistry.new { DebugMode = false }
 
 			local capturedValue = nil
 			local capturedMetadata = nil
@@ -452,7 +457,7 @@ return function(t: tiniest)
 				OriginDiff = { type = "added" },
 			}
 
-			registry:FireListenersExact("KeyAdded", { "player" }, {
+			fireAndFlush(registry, "KeyAdded", { "player" }, {
 				NewValue = 50,
 				Key = "mana",
 				Metadata = testMetadata,
@@ -465,7 +470,7 @@ return function(t: tiniest)
 		end)
 
 		test("should pass correct arguments for ArrayInserted", function()
-			local registry = ListenerRegistry.new(false)
+			local registry = ListenerRegistry.new { DebugMode = false }
 
 			local capturedIndex = nil
 			local capturedValue = nil
@@ -483,7 +488,7 @@ return function(t: tiniest)
 				OriginDiff = { type = "added" },
 			}
 
-			registry:FireListenersExact("ArrayInserted", { "items", 3 }, {
+			fireAndFlush(registry, "ArrayInserted", { "items", 3 }, {
 				Index = 3,
 				NewValue = "Sword",
 				Metadata = testMetadata,
@@ -499,14 +504,14 @@ return function(t: tiniest)
 
 	describe("Edge Cases", function()
 		test("should handle root path (empty array)", function()
-			local registry = ListenerRegistry.new(false)
+			local registry = ListenerRegistry.new { DebugMode = false }
 
 			local fired = false
 			registry:RegisterListener("ValueChanged", {}, function()
 				fired = true
 			end)
 
-			registry:FireListenersExact("ValueChanged", {}, {
+			fireAndFlush(registry, "ValueChanged", {}, {
 				NewValue = { player = { health = 50 } },
 				OldValue = { player = { health = 100 } },
 				Metadata = {
@@ -522,7 +527,7 @@ return function(t: tiniest)
 		end)
 
 		test("should handle multiple disconnections safely", function()
-			local registry = ListenerRegistry.new(false)
+			local registry = ListenerRegistry.new { DebugMode = false }
 
 			local connection = registry:RegisterListener("ValueChanged", { "player" }, function() end)
 
@@ -535,7 +540,7 @@ return function(t: tiniest)
 		end)
 
 		test("should clean up all listeners on Destroy", function()
-			local registry = ListenerRegistry.new(false)
+			local registry = ListenerRegistry.new { DebugMode = false }
 
 			local conn1 = registry:RegisterListener("ValueChanged", { "player" }, function() end)
 			local conn2 = registry:RegisterListener("KeyAdded", { "player" }, function() end)
@@ -544,6 +549,117 @@ return function(t: tiniest)
 
 			expect(conn1.Connected).never_is_true()
 			expect(conn2.Connected).never_is_true()
+		end)
+	end)
+
+	describe("Dispatch Config", function()
+		test("defaults to immediate dispatch when no config is provided", function()
+			local registry = ListenerRegistry.new()
+			local callOrder = {}
+
+			registry:RegisterListener("ValueChanged", { "player", "health" }, function()
+				table.insert(callOrder, "listener")
+			end)
+
+			table.insert(callOrder, "before-fire")
+			registry:FireListenersExact("ValueChanged", { "player", "health" }, {
+				NewValue = 50,
+				OldValue = 100,
+				Metadata = {
+					Diff = { type = "changed" },
+					OriginPath = { "player", "health" },
+					OriginDiff = { type = "changed" },
+				},
+			})
+			table.insert(callOrder, "after-fire")
+
+			task.wait()
+
+			expect(callOrder[1]).is("before-fire")
+			expect(callOrder[2]).is("listener")
+			expect(callOrder[3]).is("after-fire")
+
+			registry:Destroy()
+		end)
+
+		test("fires deferred when FireDeferred=true", function()
+			local registry = ListenerRegistry.new { DebugMode = false, FireDeferred = true }
+			local callOrder = {}
+
+			registry:RegisterListener("ValueChanged", { "player", "health" }, function()
+				table.insert(callOrder, "listener")
+			end)
+
+			table.insert(callOrder, "before-fire")
+			registry:FireListenersExact("ValueChanged", { "player", "health" }, {
+				NewValue = 50,
+				OldValue = 100,
+				Metadata = {
+					Diff = { type = "changed" },
+					OriginPath = { "player", "health" },
+					OriginDiff = { type = "changed" },
+				},
+			})
+			table.insert(callOrder, "after-fire")
+
+			task.wait()
+
+			expect(callOrder[1]).is("before-fire")
+			expect(callOrder[2]).is("after-fire")
+			expect(callOrder[3]).is("listener")
+
+			registry:Destroy()
+		end)
+	end)
+
+	describe("Thread Safety", function()
+		test("listeners that yield do not prevent all callbacks from completing", function()
+			local registry = ListenerRegistry.new { DebugMode = false }
+			local completions = {}
+
+			registry:RegisterListener("ValueChanged", { "player", "health" }, function()
+				task.wait(0.02)
+				table.insert(completions, "slow")
+			end)
+
+			registry:RegisterListener("ValueChanged", { "player", "health" }, function()
+				table.insert(completions, "fast")
+			end)
+
+			registry:FireListenersExact("ValueChanged", { "player", "health" }, {
+				NewValue = 50,
+				OldValue = 100,
+				Metadata = {
+					Diff = { type = "changed" },
+					OriginPath = { "player", "health" },
+					OriginDiff = { type = "changed" },
+				},
+			})
+
+			task.wait(0.05)
+			expect(#completions).is(2)
+
+			registry:Destroy()
+		end)
+
+		test("destroy disconnects consumed once connections", function()
+			local registry = ListenerRegistry.new { DebugMode = false, FireDeferred = true }
+			local onceConnection = registry:RegisterListener("ValueChanged", { "player", "health" }, function() end, {
+				Once = true,
+			})
+
+			registry:FireListenersExact("ValueChanged", { "player", "health" }, {
+				NewValue = 50,
+				OldValue = 100,
+				Metadata = {
+					Diff = { type = "changed" },
+					OriginPath = { "player", "health" },
+					OriginDiff = { type = "changed" },
+				},
+			})
+
+			registry:Destroy()
+			expect(onceConnection.Connected).never_is_true()
 		end)
 	end)
 end

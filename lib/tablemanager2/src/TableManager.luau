@@ -107,6 +107,8 @@ export type Proxy<T> = ProxyManagerModule.Proxy<T>
 export type TableManagerConfig = {
 	Schema: SchemaCheck?,
 	OnValidationFailed: ((path: Path, value: any, err: string) -> ())?,
+	ListenersFireDeferred: boolean?,
+	ListenerDebugMode: boolean?,
 }
 
 export type TableManager<T = any> = {
@@ -264,6 +266,10 @@ local function pathToString(path: Path): string
 	return table.concat(parts, ".")
 end
 
+local function isProxyContainer(proxyManager: ProxyManager, value: any): boolean
+	return type(value) == "table" or proxyManager:IsProxy(value)
+end
+
 --[=[
 	Creates a new TableManager instance.
 ]=]
@@ -299,7 +305,10 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 
 	-- Initialize subsystems
 	self._proxyManager = ProxyManagerModule.new()
-	self._listenerRegistry = ListenerRegistryModule.new(false) -- debugMode = false
+	self._listenerRegistry = ListenerRegistryModule.new({
+		DebugMode = resolvedConfig.ListenerDebugMode == true,
+		FireDeferred = resolvedConfig.ListenersFireDeferred == true,
+	})
 
 	-- Initialize signals (fire once per change)
 	self.ValueChanged = Signal.new()
@@ -637,7 +646,7 @@ function TableManager:GetProxy(path: Path, suppressNilPartialPaths: boolean?): (
 	const parsedPath = PathHelpers.ParsePath(path)
 	local current = self.Proxy
 	for _, key in parsedPath do
-		if type(current) ~= "table" then
+		if not isProxyContainer(self._proxyManager, current) then
 			if suppressNilPartialPaths then
 				return nil
 			else
@@ -661,7 +670,7 @@ function TableManager:Set(path: Path, value: any, buildTablesDynamically: boolea
 	local parent = self.Proxy
 	for i = 1, #parsedPath - 1 do
 		parent = parent[parsedPath[i]]
-		if type(parent) ~= "table" then
+		if not isProxyContainer(self._proxyManager, parent) then
 			if buildTablesDynamically then
 				parent[parsedPath[i]] = {} -- TODO: Change this to use ProxyManager to create a proxy for the new table
 				parent = parent[parsedPath[i]] :: any
@@ -689,8 +698,8 @@ function TableManager:ArrayInsert(pathOrProxy: Path | Proxy<{ any }>, ...: any):
 	end
 
 	const meta: ProxyManagerModule.ProxyMetadata = proxyManager:GetMetadata(proxy)
-	const array = meta.Original
-	assert(typeof(array) == "table", "Target is not a table")
+	const array = proxyManager:GetOriginal(meta.Original)
+	assert(type(array) == "table", "Target is not a table")
 
 	-- Determine if a position was provided or default to appending.
 	local pos: number
@@ -796,8 +805,8 @@ function TableManager:ArrayRemove(pathOrProxy: Path | Proxy<{ any }>, index: num
 	end
 
 	const meta: ProxyManagerModule.ProxyMetadata = self._proxyManager:GetMetadata(proxy)
-	const array = meta.Original
-	assert(typeof(array) == "table", "Target is not a table")
+	const array = proxyManager:GetOriginal(meta.Original)
+	assert(type(array) == "table", "Target is not a table")
 
 	-- Batch: start tracking and log the removal BEFORE mutating, so that
 	-- _computeLiveIds in RecordRemove sees the correct pre-removal id sequence.

@@ -161,6 +161,11 @@ export type Connection = {
 	Connected: boolean,
 }
 
+export type ListenerRegistryConfig = {
+	DebugMode: boolean?,
+	FireDeferred: boolean?,
+}
+
 type Listener = {
 	Callback: (...any) -> (),
 	Depth: number?,
@@ -191,6 +196,7 @@ export type ListenerRegistry = {
 
 	_listenerTrees: { [EventType]: ListenerNode },
 	_debugMode: boolean,
+	_fireDeferred: boolean,
 }
 
 --------------------------------------------------------------------------------
@@ -199,6 +205,63 @@ export type ListenerRegistry = {
 
 local ListenerRegistry = {}
 local ListenerRegistry_MT = { __index = ListenerRegistry }
+
+-- The currently idle thread to run the next listener callback on.
+local freeRunnerThread: thread? = nil
+
+local function executeListenerCallback(
+	callback: (...any) -> (),
+	eventType: EventType,
+	eventData: EventData,
+	debugMode: boolean
+)
+	local success, err
+	local metadata = eventData.Metadata
+	if eventType == "KeyAdded" then
+		success, err = pcall(callback, eventData.NewValue, metadata)
+	elseif eventType == "KeyRemoved" then
+		success, err = pcall(callback, eventData.OldValue, metadata)
+	elseif eventType == "KeyChanged" then
+		success, err = pcall(callback, eventData.Key, eventData.NewValue, eventData.OldValue, metadata)
+	elseif eventType == "ValueChanged" then
+		success, err = pcall(callback, eventData.NewValue, eventData.OldValue, metadata)
+	elseif eventType == "ArrayInserted" then
+		success, err = pcall(callback, eventData.Index, eventData.NewValue, metadata)
+	elseif eventType == "ArrayRemoved" then
+		success, err = pcall(callback, eventData.Index, eventData.OldValue, metadata)
+	elseif eventType == "ArraySet" then
+		success, err = pcall(callback, eventData.Index, eventData.NewValue, eventData.OldValue, metadata)
+	end
+
+	if not success and debugMode then
+		warn(`ListenerRegistry: Error in {eventType} callback: {err}`)
+	end
+end
+
+local function acquireRunnerThreadAndCall(
+	callback: (...any) -> (),
+	eventType: EventType,
+	eventData: EventData,
+	debugMode: boolean
+)
+	local acquiredRunnerThread = freeRunnerThread
+	freeRunnerThread = nil
+	executeListenerCallback(callback, eventType, eventData, debugMode)
+	-- Callback finished. This runner thread can be reused.
+	freeRunnerThread = acquiredRunnerThread
+end
+
+local function runListenerCallbackInFreeThread(
+	callback: (...any) -> (),
+	eventType: EventType,
+	eventData: EventData,
+	debugMode: boolean
+)
+	acquireRunnerThreadAndCall(callback, eventType, eventData, debugMode)
+	while true do
+		acquireRunnerThreadAndCall(coroutine.yield())
+	end
+end
 
 -- Helper to create a new tree node
 local function createNode(): ListenerNode
@@ -254,8 +317,11 @@ local function cleanupNode(root: ListenerNode, path: Path, index: number): boole
 	return #root.Listeners == 0 and next(root.Children) == nil
 end
 
-function ListenerRegistry.new(debugMode: boolean?): ListenerRegistry
+function ListenerRegistry.new(config: ListenerRegistryConfig?): ListenerRegistry
 	local self = setmetatable({} :: any, ListenerRegistry_MT) :: ListenerRegistry
+	local resolvedConfig = config or {} :: ListenerRegistryConfig
+	local debugMode = if resolvedConfig.DebugMode ~= nil then resolvedConfig.DebugMode else false
+	local fireDeferred = if resolvedConfig.FireDeferred == true then true else false
 
 	self._listenerTrees = {
 		ValueChanged = createNode(),
@@ -266,7 +332,8 @@ function ListenerRegistry.new(debugMode: boolean?): ListenerRegistry
 		ArrayRemoved = createNode(),
 		ArraySet = createNode(),
 	}
-	self._debugMode = debugMode or false
+	self._debugMode = debugMode
+	self._fireDeferred = fireDeferred
 
 	return self
 end
@@ -380,6 +447,8 @@ function ListenerRegistry:FireListenersExact(eventType: EventType, path: Path, e
 
 	local listeners = node.Listeners
 	local hasOnceFired = false
+	local debugMode = self._debugMode
+	local fireDeferred = self._fireDeferred
 
 	for _, listener in listeners do
 		if not listener.Connection.Connected then
@@ -396,28 +465,13 @@ function ListenerRegistry:FireListenersExact(eventType: EventType, path: Path, e
 			hasOnceFired = true
 		end
 
-		-- Build callback args based on event type
-		local success, err
-		local callback: any = listener.Callback
-		local metadata = eventData.Metadata
-		if eventType == "KeyAdded" then
-			success, err = pcall(callback, eventData.NewValue, metadata)
-		elseif eventType == "KeyRemoved" then
-			success, err = pcall(callback, eventData.OldValue, metadata)
-		elseif eventType == "KeyChanged" then
-			success, err = pcall(callback, eventData.Key, eventData.NewValue, eventData.OldValue, metadata)
-		elseif eventType == "ValueChanged" then
-			success, err = pcall(callback, eventData.NewValue, eventData.OldValue, metadata)
-		elseif eventType == "ArrayInserted" then
-			success, err = pcall(callback, eventData.Index, eventData.NewValue, metadata)
-		elseif eventType == "ArrayRemoved" then
-			success, err = pcall(callback, eventData.Index, eventData.OldValue, metadata)
-		elseif eventType == "ArraySet" then
-			success, err = pcall(callback, eventData.Index, eventData.NewValue, eventData.OldValue, metadata)
-		end
-
-		if not success and self._debugMode then
-			warn(`ListenerRegistry: Error in {eventType} callback: {err}`)
+		if fireDeferred then
+			task.defer(executeListenerCallback, listener.Callback, eventType, eventData, debugMode)
+		else
+			if not freeRunnerThread then
+				freeRunnerThread = coroutine.create(runListenerCallbackInFreeThread)
+			end
+			task.spawn(freeRunnerThread :: thread, listener.Callback, eventType, eventData, debugMode)
 		end
 	end
 

@@ -47,7 +47,8 @@ local PROXY_TO_ORIGINAL = setmetatable({}, { __mode = "k" })
 	Check if a value is a proxy by looking it up in the weak table.
 ]=]
 local function isProxy(t: any): boolean
-	return type(t) == "table" and PROXY_TO_ORIGINAL[t] ~= nil
+	const valueType = type(t)
+	return (valueType == "table" or valueType == "userdata") and PROXY_TO_ORIGINAL[t] ~= nil
 end
 
 --[=[
