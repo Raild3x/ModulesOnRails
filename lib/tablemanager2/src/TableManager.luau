@@ -113,11 +113,13 @@ type BatchState = {
 
 export type Proxy<T> = ProxyManagerModule.Proxy<T>
 
+export type DuplicateReferenceMode = "error" | "warn" | "allow" | "move" | "copy"
+
 export type TableManagerConfig = {
 	Schema: SchemaCheck?,
 	OnValidationFailed: ((path: Path, value: any, err: string) -> ())?,
 	ListenersFireDeferred: boolean?,
-	DuplicateReferenceMode: ("error" | "warn" | "allow" | "move" | "copy")?, -- Experimental
+	DuplicateReferenceMode: DuplicateReferenceMode?, -- Experimental
 }
 
 export type TableManager<T = { [any]: any }> = {
@@ -184,6 +186,9 @@ export type TableManager<T = { [any]: any }> = {
 	ArrayInsert: (self: TableManager<T>, arr: Path | Proxy<any>, newValue: any) -> ()
 		& (self: TableManager<T>, arr: Path | Proxy<any>, index: number, newValue: any) -> (),
 	ArrayRemove: (self: TableManager<T>, arr: Path | Proxy<any>, index: number) -> any,
+	MoveTo: (self: TableManager<T>, currentPath: Path | Proxy<any>, newPath: Path | Proxy<any>) -> (),
+	CopyTo: (self: TableManager<T>, currentPath: Path | Proxy<any>, newPath: Path) -> (),
+	Swap: (self: TableManager<T>, a: Path | Proxy<any>, b: Path | Proxy<any>) -> (),
 	ForceNotify: (self: TableManager<T>, path: Path) -> (),
 	Batch: (self: TableManager<T>, fn: () -> ()) -> (),
 	--- Manually suspend signal/listener firing. Pair with `Resume()` to flush.
@@ -201,6 +206,7 @@ export type TableManager<T = { [any]: any }> = {
 	_originalData: any,
 	_schema: SchemaCheck?,
 	_onValidationFailed: ((path: Path, value: any, err: string) -> ())?,
+	_duplicateReferenceMode: DuplicateReferenceMode,
 	-- Batch state
 	_batchDepth: number,
 	_batch: BatchState?,
@@ -267,6 +273,85 @@ local function pathToString(path: Path): string
 	return table.concat(parts, ".")
 end
 
+local function resolvePathFromPathOrProxy(self: TableManager, pathOrProxy: Path | Proxy<any>): Path
+	if self._proxyManager:IsProxy(pathOrProxy) then
+		const proxy = pathOrProxy :: Proxy<any>
+		const potentialPath = self._proxyManager:GetPath(proxy)
+		assert(potentialPath, "Proxy does not have a path")
+		return potentialPath
+	end
+	return PathHelpers.ParsePath(pathOrProxy :: Path)
+end
+
+local function resolveArrayPathAndProxy(self: TableManager, pathOrProxy: Path | Proxy<{ any }>): (Path, Proxy<{ any }>)
+	if self._proxyManager:IsProxy(pathOrProxy) then
+		const proxy = pathOrProxy :: Proxy<{ any }>
+		const parsedPath = resolvePathFromPathOrProxy(self, proxy)
+		return parsedPath, proxy
+	end
+
+	const parsedPath = PathHelpers.ParsePath(pathOrProxy :: Path)
+	const proxy = self:GetProxy(parsedPath) :: Proxy<{ any }>
+	return parsedPath, proxy
+end
+
+local function arePathsEqual(a: Path, b: Path): boolean
+	if #a ~= #b then
+		return false
+	end
+	for i = 1, #a do
+		if a[i] ~= b[i] then
+			return false
+		end
+	end
+	return true
+end
+
+local function isPrefixPath(prefix: Path, fullPath: Path): boolean
+	if #prefix > #fullPath then
+		return false
+	end
+	for i = 1, #prefix do
+		if prefix[i] ~= fullPath[i] then
+			return false
+		end
+	end
+	return true
+end
+
+local function getPathParentAndKey(path: Path): (Path, any)
+	local parentPath = table.clone(path)
+	local key = table.remove(parentPath)
+	assert(key ~= nil, "Path requires at least one segment")
+	return parentPath, key
+end
+
+local function getParentOriginalAtPath(self: TableManager, parentPath: Path, opName: string): any
+	local parentOriginal: any = if #parentPath == 0 then self._originalData else self:Get(parentPath)
+	if type(parentOriginal) ~= "table" then
+		error(`{opName} destination parent must be a table`)
+	end
+	return parentOriginal
+end
+
+local function deepCloneValue(value: any, seen: { [any]: any }?): any
+	if type(value) ~= "table" then
+		return value
+	end
+
+	const memo = seen or {}
+	if memo[value] ~= nil then
+		return memo[value]
+	end
+
+	const clone = {}
+	memo[value] = clone
+	for k, v in value do
+		clone[deepCloneValue(k, memo)] = deepCloneValue(v, memo)
+	end
+	return clone
+end
+
 local function fireAncestorValueChangedNotifications(
 	manager: TableManager,
 	basePath: Path,
@@ -330,12 +415,14 @@ end
 function TableManager.new<T>(initialData: T & { [any]: any }, config: TableManagerConfig?): TableManager<T>
 	const self = setmetatable({} :: any, TableManager_MT) :: TableManager<T & { [any]: any }>
 	const resolvedConfig = config or {} :: { [string]: any? }
+	const duplicateReferenceMode: DuplicateReferenceMode = resolvedConfig.DuplicateReferenceMode or "error"
 
 	-- Store original data
 	self._originalData = initialData or {}
 	self.Raw = self._originalData
 	self._schema = resolvedConfig.Schema
 	self._onValidationFailed = resolvedConfig.OnValidationFailed
+	self._duplicateReferenceMode = duplicateReferenceMode
 
 	-- Validate initial data against the root schema at construction time.
 	if self._schema then
@@ -540,6 +627,54 @@ function TableManager.new<T>(initialData: T & { [any]: any }, config: TableManag
 		end
 	end)
 
+	local isMoveInProgress = false
+	self._proxyManager:SetDuplicateTableWriteCallback(function(writePath: Path, existingPath: Path, value: any): boolean
+		if self._duplicateReferenceMode == "allow" then
+			return true
+		end
+
+		const writePathStr = pathToString(writePath)
+		const existingPathStr = pathToString(existingPath)
+		const duplicateMessage =
+			`Duplicate table reference detected: existing at {existingPathStr}, attempted write to {writePathStr}`
+
+		if self._duplicateReferenceMode == "warn" then
+			warn(duplicateMessage)
+			return true
+		end
+
+		if self._duplicateReferenceMode == "move" then
+			if isMoveInProgress then
+				return true
+			end
+
+			isMoveInProgress = true
+			local ok, moveErr = pcall(function()
+				self:MoveTo(existingPath, writePath)
+			end)
+			isMoveInProgress = false
+
+			if not ok then
+				error(`Failed to move duplicate table reference: {tostring(moveErr)}`, 2)
+			end
+
+			if self:Get(writePath) ~= value then
+				error(
+					`DuplicateReferenceMode 'move' is not fully implemented yet. Expected MoveTo to place the value at {writePathStr}`,
+					2
+				)
+			end
+
+			return false
+		end
+
+		if self._duplicateReferenceMode == "copy" then
+			error("DuplicateReferenceMode 'copy' is not implemented yet", 2)
+		end
+
+		error(duplicateMessage, 2)
+	end)
+
 	-- Create root proxy (no parent, no key)
 	self.Proxy = self._proxyManager:CreateProxy(self._originalData, nil, nil, nil, nil)
 
@@ -655,7 +790,8 @@ function TableManager.Get(self: TableManager, path: Path, suppressNilPartialPath
 end
 
 --[=[
-	Gets a Proxy for the table at the given path, or the raw value if it's not a table.
+	Gets a Proxy for the table at the given path, or the raw value if the path
+	doesn't point to a table.
 ]=]
 function TableManager.GetProxy(self: TableManager, path: Path, suppressNilPartialPaths: boolean?): (Proxy<any> | any)?
 	const parsedPath = PathHelpers.ParsePath(path)
@@ -703,16 +839,7 @@ end
 ]=]
 function TableManager.ArrayInsert(self: TableManager, pathOrProxy: Path | Proxy<{ any }>, ...: any): ()
 	const proxyManager = self._proxyManager
-	local proxy: Proxy<{ any }>, parsedPath: Path
-	if proxyManager:IsProxy(pathOrProxy) then
-		proxy = pathOrProxy :: Proxy<{ any }>
-		local potentialPath = proxyManager:GetPath(proxy)
-		assert(potentialPath, "Proxy does not have a path")
-		parsedPath = potentialPath
-	else
-		parsedPath = PathHelpers.ParsePath(pathOrProxy)
-		proxy = self:GetProxy(parsedPath)
-	end
+	local parsedPath, proxy = resolveArrayPathAndProxy(self, pathOrProxy)
 
 	const meta: ProxyManagerModule.ProxyMetadata = proxyManager:GetMetadata(proxy)
 	const array = proxyManager:GetOriginal(meta.Original)
@@ -813,16 +940,7 @@ TableManager.Insert = TableManager.ArrayInsert
 ]=]
 function TableManager.ArrayRemove(self: TableManager, pathOrProxy: Path | Proxy<{ any }>, index: number): any
 	const proxyManager = self._proxyManager
-	local proxy: Proxy<{ any }>, parsedPath: Path
-	if proxyManager:IsProxy(pathOrProxy) then
-		proxy = pathOrProxy :: Proxy<{ any }>
-		local potentialPath = proxyManager:GetPath(proxy)
-		assert(potentialPath, "Proxy does not have a path")
-		parsedPath = potentialPath
-	else
-		parsedPath = PathHelpers.ParsePath(pathOrProxy)
-		proxy = self:GetProxy(parsedPath)
-	end
+	local parsedPath, proxy = resolveArrayPathAndProxy(self, pathOrProxy)
 
 	const meta: ProxyManagerModule.ProxyMetadata = self._proxyManager:GetMetadata(proxy)
 	const array = proxyManager:GetOriginal(meta.Original)
@@ -1087,9 +1205,55 @@ end
 	This unsets the value at the current path and sets it at the new path, firing appropriate notifications.
 	This is specifically useful for moving tables around without breaking proxy references.
 ]=]
-function TableManager.MoveTo(self: TableManager, currentPath: Path | Proxy<any>, newPath: Path)
-	-- TODO: Add this once we get establish how multiple references will work
-	-- Should we batch changes made in this operation?
+function TableManager.MoveTo(self: TableManager, currentPath: Path | Proxy<any>, newPath: Path | Proxy<any>)
+	const sourcePath = resolvePathFromPathOrProxy(self, currentPath)
+	const targetPath = resolvePathFromPathOrProxy(self, newPath)
+
+	if #sourcePath == 0 or #targetPath == 0 then
+		error("MoveTo cannot move the root table")
+	end
+
+	if arePathsEqual(sourcePath, targetPath) then
+		return
+	end
+
+	if isPrefixPath(sourcePath, targetPath) then
+		error("MoveTo cannot move a table into one of its descendants")
+	end
+
+	const sourceValue = self:Get(sourcePath)
+	if type(sourceValue) ~= "table" then
+		error("MoveTo source must be a table")
+	end
+
+	const targetParentPath, targetKey = getPathParentAndKey(targetPath)
+	const targetParentOriginal = getParentOriginalAtPath(self, targetParentPath, "MoveTo")
+
+	const existingProxy = self._proxyManager:GetProxyFromOriginal(sourceValue)
+	local oldParent: any? = nil
+	local oldKey: any? = nil
+	if existingProxy ~= nil then
+		const existingMeta = self._proxyManager:GetMetadata(existingProxy)
+		if existingMeta ~= nil then
+			oldParent = existingMeta.Parent
+			oldKey = existingMeta.Key
+		end
+		self._proxyManager:ReparentProxy(existingProxy, targetParentOriginal, targetKey)
+	end
+
+	const ok, moveErr = pcall(function()
+		self:Batch(function()
+			self:Set(targetPath, sourceValue)
+			self:Set(sourcePath, nil)
+		end)
+	end)
+
+	if not ok then
+		if existingProxy ~= nil then
+			self._proxyManager:ReparentProxy(existingProxy, oldParent, oldKey)
+		end
+		error(moveErr, 2)
+	end
 end
 
 --[=[
@@ -1098,16 +1262,98 @@ end
 	This is specifically useful for copying tables around without breaking proxy references.
 ]=]
 function TableManager.CopyTo(self: TableManager, currentPath: Path | Proxy<any>, newPath: Path)
-	-- TODO: Add this once we get establish how multiple references will work
-	-- Should we batch changes made in this operation?
+	const sourcePath = resolvePathFromPathOrProxy(self, currentPath)
+	const targetPath = resolvePathFromPathOrProxy(self, newPath)
+
+	if #targetPath == 0 then
+		error("CopyTo cannot set the root table")
+	end
+
+	if arePathsEqual(sourcePath, targetPath) then
+		return
+	end
+
+	-- Validate destination parent before any mutation.
+	const targetParentPath = table.clone(targetPath)
+	table.remove(targetParentPath)
+	getParentOriginalAtPath(self, targetParentPath, "CopyTo")
+
+	const sourceValue = self:Get(sourcePath)
+	const copiedValue = deepCloneValue(sourceValue)
+
+	self:Batch(function()
+		self:Set(targetPath, copiedValue)
+	end)
 end
 
 --[=[
 	Swap values at two paths within the same TM.
 ]=]
 function TableManager.Swap(self: TableManager, a: Path | Proxy<any>, b: Path | Proxy<any>)
-	-- TODO:
-	-- Should we batch changes made in this operation?
+	const pathA = resolvePathFromPathOrProxy(self, a)
+	const pathB = resolvePathFromPathOrProxy(self, b)
+
+	if #pathA == 0 or #pathB == 0 then
+		error("Swap cannot target the root table")
+	end
+
+	if arePathsEqual(pathA, pathB) then
+		return
+	end
+
+	if isPrefixPath(pathA, pathB) or isPrefixPath(pathB, pathA) then
+		error("Swap cannot swap ancestor/descendant paths")
+	end
+
+	const parentPathA, keyA = getPathParentAndKey(pathA)
+	const parentPathB, keyB = getPathParentAndKey(pathB)
+	const parentOriginalA = getParentOriginalAtPath(self, parentPathA, "Swap")
+	const parentOriginalB = getParentOriginalAtPath(self, parentPathB, "Swap")
+
+	const valueA = self:Get(pathA)
+	const valueB = self:Get(pathB)
+
+	const proxyA = if type(valueA) == "table" then self._proxyManager:GetProxyFromOriginal(valueA) else nil
+	const proxyB = if type(valueB) == "table" then self._proxyManager:GetProxyFromOriginal(valueB) else nil
+
+	local oldParentA: any? = nil
+	local oldKeyA: any? = nil
+	if proxyA ~= nil then
+		const metaA = self._proxyManager:GetMetadata(proxyA)
+		if metaA ~= nil then
+			oldParentA = metaA.Parent
+			oldKeyA = metaA.Key
+		end
+		self._proxyManager:ReparentProxy(proxyA, parentOriginalB, keyB)
+	end
+
+	local oldParentB: any? = nil
+	local oldKeyB: any? = nil
+	if proxyB ~= nil then
+		const metaB = self._proxyManager:GetMetadata(proxyB)
+		if metaB ~= nil then
+			oldParentB = metaB.Parent
+			oldKeyB = metaB.Key
+		end
+		self._proxyManager:ReparentProxy(proxyB, parentOriginalA, keyA)
+	end
+
+	const ok, swapErr = pcall(function()
+		self:Batch(function()
+			self:Set(pathA, valueB)
+			self:Set(pathB, valueA)
+		end)
+	end)
+
+	if not ok then
+		if proxyA ~= nil then
+			self._proxyManager:ReparentProxy(proxyA, oldParentA, oldKeyA)
+		end
+		if proxyB ~= nil then
+			self._proxyManager:ReparentProxy(proxyB, oldParentB, oldKeyB)
+		end
+		error(swapErr, 2)
+	end
 end
 
 --[=[

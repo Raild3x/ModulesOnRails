@@ -89,6 +89,31 @@ local function classifyTable(t: { [any]: any }): (boolean, number)
 	return false, 0
 end
 
+local function arePathsEqual(a: Path, b: Path): boolean
+	if #a ~= #b then
+		return false
+	end
+
+	for i = 1, #a do
+		if a[i] ~= b[i] then
+			return false
+		end
+	end
+
+	return true
+end
+
+local function getValueAtPath(root: any, path: Path): (any, boolean)
+	local current = root
+	for _, segment in path do
+		if type(current) ~= "table" then
+			return nil, false
+		end
+		current = current[segment]
+	end
+	return current, true
+end
+
 --// Types //--
 
 --[=[
@@ -143,6 +168,11 @@ export type ProxyManager = {
 	--- caller can record which top-level branch was dirtied.
 	SetBatchScalarWrittenCallback: (self: ProxyManager, callback: (parentPath: Path) -> ()) -> (),
 	SetValidateCallback: (self: ProxyManager, callback: (path: Path, value: any) -> (boolean, string?)) -> (),
+	SetDuplicateTableWriteCallback: (
+		self: ProxyManager,
+		callback: (writePath: Path, existingPath: Path, value: any) -> boolean
+	) -> (),
+	ReparentProxy: (self: ProxyManager, proxy: Proxy<any>, newParentOriginal: any?, newKey: any?) -> (),
 	--- Update the Key metadata for all direct child proxies of `arrayOriginal` whose
 	--- numeric key is >= `fromIndex` by adding `delta`. Called by TableManager after
 	--- every ArrayInsert (+1) or ArrayRemove (-1) so held proxies report the correct path.
@@ -158,6 +188,7 @@ export type ProxyManager = {
 	_onBatchDirectArraySet: ((path: Path, index: number) -> ())?,
 	_onBatchScalarWritten: ((parentPath: Path) -> ())?,
 	_onValidateWrite: ((path: Path, value: any) -> (boolean, string?))?,
+	_onDuplicateTableWrite: ((writePath: Path, existingPath: Path, value: any) -> boolean)?,
 	_metatableTemplate: { [any]: any },
 	_GetLivePath: (self: ProxyManager, proxy: Proxy<any>) -> Path,
 }
@@ -183,6 +214,7 @@ function ProxyManager.new(): ProxyManager
 	self._onBatchDirectArraySet = nil
 	self._onBatchScalarWritten = nil
 	self._onValidateWrite = nil
+	self._onDuplicateTableWrite = nil
 
 	-- Create the metatable template copied into each proxy metatable.
 	self._metatableTemplate = {
@@ -221,6 +253,30 @@ function ProxyManager.new(): ProxyManager
 			const currentPath = table.clone(parentPath)
 			table.insert(currentPath, key)
 			const unwrappedValue = getOriginal(value)
+
+			-- Table duplicate checks happen before validation/mutation.
+			-- Orphaned proxies are intentionally treated as regular table assignments.
+			if type(unwrappedValue) == "table" and self._onDuplicateTableWrite then
+				const existingProxy = self._originalToProxy[unwrappedValue]
+				if existingProxy ~= nil then
+					const existingPath = self:_GetLivePath(existingProxy)
+					if not arePathsEqual(existingPath, currentPath) then
+						const existingMeta = self._proxyMeta[existingProxy]
+						local isOrphan = true
+						if existingMeta ~= nil then
+							const liveValue, hasPath = getValueAtPath(existingMeta.RootTable, existingPath)
+							isOrphan = not hasPath or liveValue ~= existingMeta.Original
+						end
+
+						if not isOrphan then
+							const shouldAllow = self._onDuplicateTableWrite(currentPath, existingPath, unwrappedValue)
+							if not shouldAllow then
+								return
+							end
+						end
+					end
+				end
+			end
 
 			-- Validate writes before any side effects (batch tracking, snapshots, or mutation).
 			if self._onValidateWrite then
@@ -384,6 +440,16 @@ function ProxyManager:SetValidateCallback(callback: (path: Path, value: any) -> 
 	self._onValidateWrite = callback
 end
 
+--[=[
+	Set the callback fired when a write would introduce a duplicate table reference.
+	Return `true` to allow the write, `false` to suppress it.
+]=]
+function ProxyManager:SetDuplicateTableWriteCallback(
+	callback: (writePath: Path, existingPath: Path, value: any) -> boolean
+)
+	self._onDuplicateTableWrite = callback
+end
+
 --- Check if a value is a proxy.
 function ProxyManager:IsProxy(t: any): boolean
 	return isProxy(t)
@@ -502,6 +568,37 @@ function ProxyManager:CreateProxy<T>(
 end
 
 --[=[
+	Reparent an existing proxy to a new parent/key without changing its original table.
+]=]
+function ProxyManager:ReparentProxy(proxy: Proxy<any>, newParentOriginal: any?, newKey: any?)
+	const meta = self._proxyMeta[proxy]
+	if meta == nil then
+		error("Proxy metadata not found - proxy may have been destroyed")
+	end
+
+	const oldParent = meta.Parent
+	if oldParent ~= nil then
+		const oldChildren = self._proxiesByParent[oldParent]
+		if oldChildren ~= nil then
+			oldChildren[proxy] = nil
+			if next(oldChildren) == nil then
+				self._proxiesByParent[oldParent] = nil
+			end
+		end
+	end
+
+	meta.Parent = newParentOriginal
+	meta.Key = newKey
+
+	if newParentOriginal ~= nil then
+		if not self._proxiesByParent[newParentOriginal] then
+			self._proxiesByParent[newParentOriginal] = {}
+		end
+		self._proxiesByParent[newParentOriginal][proxy] = true
+	end
+end
+
+--[=[
 	Update the `Key` metadata for all direct child proxies of `arrayOriginal`
 	whose numeric key is >= `fromIndex` by adding `delta`.
 
@@ -539,6 +636,7 @@ function ProxyManager:Destroy()
 	self._changeDetector = nil
 	self._onArrayInserted = nil
 	self._onValidateWrite = nil
+	self._onDuplicateTableWrite = nil
 end
 
 return ProxyManager
