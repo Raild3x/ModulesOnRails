@@ -103,13 +103,21 @@ type Signal<Fn, Args...> = Signal.Signal<Fn, Args...>
 type ArrayBatchRecorder = ArrayBatchRecorderModule.ArrayBatchRecorder
 type SchemaCheck = SchemaNavigatorModule.Check
 
+type BatchState = {
+	Recorder: ArrayBatchRecorder,
+	StartSnapshot: any,
+	TrackedPaths: { [string]: Path },
+	DirtyBranches: { [any]: boolean },
+	Flushing: boolean,
+}
+
 export type Proxy<T> = ProxyManagerModule.Proxy<T>
 
 export type TableManagerConfig = {
 	Schema: SchemaCheck?,
 	OnValidationFailed: ((path: Path, value: any, err: string) -> ())?,
 	ListenersFireDeferred: boolean?,
-	DuplicateReferenceMode: ("error" | "warn" | "allow")?, -- Experimental
+	DuplicateReferenceMode: ("error" | "warn" | "allow" | "move" | "copy")?, -- Experimental
 }
 
 export type TableManager<T = { [any]: any }> = {
@@ -195,11 +203,7 @@ export type TableManager<T = { [any]: any }> = {
 	_onValidationFailed: ((path: Path, value: any, err: string) -> ())?,
 	-- Batch state
 	_batchDepth: number,
-	_batchRecorder: ArrayBatchRecorder?,
-	_batchStartSnapshot: any?,
-	_batchTrackedPaths: { [string]: Path },
-	_batchDirtyBranches: { [any]: boolean },
-	_batchFlushing: boolean,
+	_batch: BatchState?,
 }
 
 --------------------------------------------------------------------------------
@@ -347,11 +351,7 @@ function TableManager.new<T>(initialData: T & { [any]: any }, config: TableManag
 
 	-- Batch state (reset at start of each Suspend/Resume cycle)
 	self._batchDepth = 0
-	self._batchRecorder = nil
-	self._batchStartSnapshot = nil
-	self._batchTrackedPaths = {}
-	self._batchDirtyBranches = {}
-	self._batchFlushing = false
+	self._batch = nil
 
 	-- Initialize subsystems
 	self._proxyManager = ProxyManagerModule.new()
@@ -372,10 +372,11 @@ function TableManager.new<T>(initialData: T & { [any]: any }, config: TableManag
 	-- During batch array flush: suppress numeric-key events on tracked array paths.
 	-- Those arrays will emit their own coalesced events via the array flush.
 	local function shouldSuppressBatchArrayKeyEvent(path: Path, key: any): boolean
-		if not self._batchFlushing or type(key) ~= "number" then
+		const batch = self._batch
+		if batch == nil or not batch.Flushing or type(key) ~= "number" then
 			return false
 		end
-		return self._batchTrackedPaths[serializeBatchPath(path)] ~= nil
+		return batch.TrackedPaths[serializeBatchPath(path)] ~= nil
 	end
 
 	-- Initialize ChangeDetector with callbacks
@@ -463,11 +464,12 @@ function TableManager.new<T>(initialData: T & { [any]: any }, config: TableManag
 		-- The element is already appended to the original table at this point, so we
 		-- reconstruct the pre-append array (original[1..index-1]) for StartTracking.
 		if self._batchDepth > 0 then
-			const recorder = self._batchRecorder
-			if recorder then
+			const batch = self._batch
+			if batch then
+				const recorder = batch.Recorder
 				const pathKey = serializeBatchPath(path)
-				if not self._batchTrackedPaths[pathKey] then
-					self._batchTrackedPaths[pathKey] = table.clone(path)
+				if not batch.TrackedPaths[pathKey] then
+					batch.TrackedPaths[pathKey] = table.clone(path)
 					-- Build a pre-append shallow copy: original[1..index-1]
 					const original = self:Get(path)
 					const preBatch: { any } = table.create(index - 1)
@@ -480,7 +482,9 @@ function TableManager.new<T>(initialData: T & { [any]: any }, config: TableManag
 			end
 			-- Mark this top-level branch as dirtied
 			const branchKey: any = if #path > 0 then path[1] else "__root__"
-			self._batchDirtyBranches[branchKey] = true
+			if batch then
+				batch.DirtyBranches[branchKey] = true
+			end
 			return
 		end
 
@@ -506,11 +510,12 @@ function TableManager.new<T>(initialData: T & { [any]: any }, config: TableManag
 	-- Wire up direct numeric-index write callback (for batch poisoning)
 	self._proxyManager:SetBatchDirectArraySetCallback(function(path: Path, _index: number)
 		if self._batchDepth > 0 then
-			const recorder = self._batchRecorder
-			if recorder then
+			const batch = self._batch
+			if batch then
+				const recorder = batch.Recorder
 				const pathKey = serializeBatchPath(path)
-				if not self._batchTrackedPaths[pathKey] then
-					self._batchTrackedPaths[pathKey] = table.clone(path)
+				if not batch.TrackedPaths[pathKey] then
+					batch.TrackedPaths[pathKey] = table.clone(path)
 					-- StartTracking with the post-mutation array; Branch A will use
 					-- _batchStartSnapshot for the true pre-batch state anyway.
 					const current = self:Get(path)
@@ -529,7 +534,9 @@ function TableManager.new<T>(initialData: T & { [any]: any }, config: TableManag
 	self._proxyManager:SetBatchScalarWrittenCallback(function(parentPath: Path)
 		if self._batchDepth > 0 then
 			const branchKey: any = if #parentPath > 0 then parentPath[1] else "__root__"
-			self._batchDirtyBranches[branchKey] = true
+			if self._batch then
+				self._batch.DirtyBranches[branchKey] = true
+			end
 		end
 	end)
 
@@ -714,7 +721,7 @@ function TableManager.ArrayInsert(self: TableManager, pathOrProxy: Path | Proxy<
 	-- Determine if a position was provided or default to appending.
 	local pos: number
 	local newValue: any
-	if type((...)) == "number" then
+	if select("#", ...) >= 2 then
 		local secondArg
 		pos, secondArg = ...
 		newValue = secondArg
@@ -746,15 +753,16 @@ function TableManager.ArrayInsert(self: TableManager, pathOrProxy: Path | Proxy<
 	end
 
 	-- Batch: start tracking before any mutations so startCopy captures pre-batch state.
-	if self._batchDepth > 0 and self._batchRecorder then
+	if self._batchDepth > 0 and self._batch then
+		const batch = self._batch
 		const pathKey = serializeBatchPath(parsedPath)
-		if not self._batchTrackedPaths[pathKey] then
-			self._batchTrackedPaths[pathKey] = table.clone(parsedPath)
-			self._batchRecorder:StartTracking(parsedPath, array)
+		if not batch.TrackedPaths[pathKey] then
+			batch.TrackedPaths[pathKey] = table.clone(parsedPath)
+			batch.Recorder:StartTracking(parsedPath, array)
 		end
 		-- Mark this top-level branch as dirtied
 		const branchKey: any = if #parsedPath > 0 then parsedPath[1] else "__root__"
-		self._batchDirtyBranches[branchKey] = true
+		batch.DirtyBranches[branchKey] = true
 	end
 
 	-- Insert the value (handles shifting when inserting into the middle).
@@ -764,8 +772,8 @@ function TableManager.ArrayInsert(self: TableManager, pathOrProxy: Path | Proxy<
 
 	-- Batch: log the insert and skip fires
 	if self._batchDepth > 0 then
-		if self._batchRecorder then
-			self._batchRecorder:RecordInsert(parsedPath, pos, unwrappedValue)
+		if self._batch then
+			self._batch.Recorder:RecordInsert(parsedPath, pos, unwrappedValue)
 		end
 		meta.ArrayLength = #array
 		return
@@ -822,16 +830,17 @@ function TableManager.ArrayRemove(self: TableManager, pathOrProxy: Path | Proxy<
 
 	-- Batch: start tracking and log the removal BEFORE mutating, so that
 	-- _computeLiveIds in RecordRemove sees the correct pre-removal id sequence.
-	if self._batchDepth > 0 and self._batchRecorder then
+	if self._batchDepth > 0 and self._batch then
+		const batch = self._batch
 		const pathKey = serializeBatchPath(parsedPath)
-		if not self._batchTrackedPaths[pathKey] then
-			self._batchTrackedPaths[pathKey] = table.clone(parsedPath)
-			self._batchRecorder:StartTracking(parsedPath, array)
+		if not batch.TrackedPaths[pathKey] then
+			batch.TrackedPaths[pathKey] = table.clone(parsedPath)
+			batch.Recorder:StartTracking(parsedPath, array)
 		end
-		self._batchRecorder:RecordRemove(parsedPath, index)
+		batch.Recorder:RecordRemove(parsedPath, index)
 		-- Mark this top-level branch as dirtied
 		const branchKey: any = if #parsedPath > 0 then parsedPath[1] else "__root__"
-		self._batchDirtyBranches[branchKey] = true
+		batch.DirtyBranches[branchKey] = true
 	end
 
 	-- Remove the element (handles shifting automatically).
@@ -909,10 +918,13 @@ function TableManager.Suspend(self: TableManager)
 	end
 	-- Capture the pre-batch snapshot BEFORE suspending ChangeDetector so that
 	-- CheckForChanges at flush time can diff old-vs-current correctly.
-	self._batchStartSnapshot = self._changeDetector:CaptureSnapshot(self._originalData, {})
-	self._batchRecorder = ArrayBatchRecorderModule.new()
-	table.clear(self._batchTrackedPaths)
-	table.clear(self._batchDirtyBranches)
+	self._batch = {
+		Recorder = ArrayBatchRecorderModule.new(),
+		StartSnapshot = self._changeDetector:CaptureSnapshot(self._originalData, {}),
+		TrackedPaths = {},
+		DirtyBranches = {},
+		Flushing = false,
+	}
 	self._batchDepth = 1
 	self._changeDetector:Suspend()
 end
@@ -934,7 +946,12 @@ function TableManager.Resume(self: TableManager)
 
 	-- Re-enable ChangeDetector before the flush so CheckForChanges works normally.
 	self._changeDetector:Resume()
-	self._batchFlushing = true
+	const batch = self._batch
+	if not batch then
+		self._batchDepth = 0
+		return
+	end
+	batch.Flushing = true
 
 	-- Non-array flush: diff only the branches that were actually mutated during
 	-- the batch. This avoids traversing the whole table when only a small subset
@@ -944,11 +961,11 @@ function TableManager.Resume(self: TableManager)
 	--
 	-- The OnKey* callbacks suppress numeric-key events for tracked array paths so
 	-- those are not double-fired by both the non-array and array flush phases.
-	if self._batchStartSnapshot then
-		const rootSnapshot = self._batchStartSnapshot
+	if batch.StartSnapshot then
+		const rootSnapshot = batch.StartSnapshot
 		const rootSnapshotData: any = rootSnapshot.Data -- Diff.Snapshot
 
-		for branchKey in self._batchDirtyBranches do
+		for branchKey in batch.DirtyBranches do
 			if branchKey == "__root__" then
 				-- Root-level scalar assignment: just diff the whole root (rare).
 				self._changeDetector:CheckForChanges(rootSnapshot)
@@ -973,9 +990,9 @@ function TableManager.Resume(self: TableManager)
 	end
 
 	-- Array flush: emit coalesced events for each tracked array path.
-	const recorder = self._batchRecorder
+	const recorder = batch.Recorder
 	if recorder then
-		for _, path in self._batchTrackedPaths do
+		for _, path in batch.TrackedPaths do
 			const log = recorder:GetLog(path)
 			if not log then
 				continue
@@ -988,7 +1005,7 @@ function TableManager.Resume(self: TableManager)
 
 			-- Get the old array from the pre-batch snapshot (always authoritative for
 			-- Branch A; Branch B uses log.startCopy built at StartTracking time).
-			const oldArray: { any } = getSnapshotValue(self._batchStartSnapshot, path) or {}
+			const oldArray: { any } = getSnapshotValue(batch.StartSnapshot, path) or {}
 			const emit = self:_makeEmit(path)
 
 			if log.poisoned or currentArray ~= log.startRef then
@@ -1002,15 +1019,10 @@ function TableManager.Resume(self: TableManager)
 	end
 
 	-- Clear batch state
-	self._batchFlushing = false
+	batch.Flushing = false
 	self._batchDepth = 0
-	if self._batchRecorder then
-		self._batchRecorder:Destroy()
-		self._batchRecorder = nil
-	end
-	self._batchStartSnapshot = nil
-	table.clear(self._batchTrackedPaths)
-	table.clear(self._batchDirtyBranches)
+	batch.Recorder:Destroy()
+	self._batch = nil
 end
 
 --[=[
@@ -1075,15 +1087,27 @@ end
 	This unsets the value at the current path and sets it at the new path, firing appropriate notifications.
 	This is specifically useful for moving tables around without breaking proxy references.
 ]=]
-function TableManager.Move(self: TableManager, currentPath: Path | Proxy<any>, newPath: Path)
+function TableManager.MoveTo(self: TableManager, currentPath: Path | Proxy<any>, newPath: Path)
 	-- TODO: Add this once we get establish how multiple references will work
+	-- Should we batch changes made in this operation?
 end
 
 --[=[
-	Swap values at two paths within the same table.
+	DeepCopy a value from one location to another within the same table.
+	This sets the value at the new path to be the same as the value at the current path, firing appropriate notifications.
+	This is specifically useful for copying tables around without breaking proxy references.
+]=]
+function TableManager.CopyTo(self: TableManager, currentPath: Path | Proxy<any>, newPath: Path)
+	-- TODO: Add this once we get establish how multiple references will work
+	-- Should we batch changes made in this operation?
+end
+
+--[=[
+	Swap values at two paths within the same TM.
 ]=]
 function TableManager.Swap(self: TableManager, a: Path | Proxy<any>, b: Path | Proxy<any>)
 	-- TODO:
+	-- Should we batch changes made in this operation?
 end
 
 --[=[

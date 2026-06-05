@@ -541,6 +541,20 @@ return function(t: tiniest)
 			manager:Destroy()
 		end)
 
+		test("should append numeric value when called with value-only overload", function()
+			local manager = TableManager.new {
+				items = { 10, 20 },
+			}
+
+			manager:ArrayInsert({ "items" }, 42)
+
+			expect(manager.Proxy.items[1]).is(10)
+			expect(manager.Proxy.items[2]).is(20)
+			expect(manager.Proxy.items[3]).is(42)
+
+			manager:Destroy()
+		end)
+
 		test("should handle Remove from array", function()
 			local manager = TableManager.new {
 				items = { "Sword", "Shield", "Potion" },
