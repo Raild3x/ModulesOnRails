@@ -767,7 +767,7 @@ function TableManager.ArrayInsert(self: TableManager, pathOrProxy: Path | Proxy<
 		if self._batchRecorder then
 			self._batchRecorder:RecordInsert(parsedPath, pos, unwrappedValue)
 		end
-		meta.ArrayLength = proxyManager:GetArrayLength(array)
+		meta.ArrayLength = #array
 		return
 	end
 
@@ -796,7 +796,7 @@ function TableManager.ArrayInsert(self: TableManager, pathOrProxy: Path | Proxy<
 	self.ArrayInserted:Fire(parsedPath, pos, unwrappedValue)
 
 	-- Update metadata
-	meta.ArrayLength = proxyManager:GetArrayLength(array)
+	meta.ArrayLength = #array
 end
 TableManager.Insert = TableManager.ArrayInsert
 
@@ -843,7 +843,7 @@ function TableManager.ArrayRemove(self: TableManager, pathOrProxy: Path | Proxy<
 
 	-- Batch: skip fires
 	if self._batchDepth > 0 then
-		meta.ArrayLength = proxyManager:GetArrayLength(array)
+		meta.ArrayLength = #array
 		return oldValue
 	end
 
@@ -866,7 +866,7 @@ function TableManager.ArrayRemove(self: TableManager, pathOrProxy: Path | Proxy<
 	})
 
 	-- Update metadata
-	meta.ArrayLength = self._proxyManager:GetArrayLength(array)
+	meta.ArrayLength = #array
 
 	return oldValue
 end
@@ -963,7 +963,12 @@ function TableManager.Resume(self: TableManager)
 			-- Current live value for this branch.
 			const newBranchValue: any = self._originalData[branchKey]
 
-			self._changeDetector:CheckForChangesBetween(oldBranchValue, newBranchValue, { branchKey })
+			self._changeDetector:CheckForChangesBetween(
+				oldBranchValue,
+				newBranchValue,
+				{ branchKey },
+				self._originalData
+			)
 		end
 	end
 

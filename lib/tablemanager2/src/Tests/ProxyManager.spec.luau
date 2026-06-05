@@ -268,6 +268,40 @@ return function(t: tiniest)
 
 			manager:Destroy()
 		end)
+
+		test("table.insert on proxy arrays is rejected natively", function()
+			local manager = ProxyManager.new()
+
+			local data = { items = { "Sword", "Shield" } }
+			local proxy = manager:CreateProxy(data, {})
+
+			expect(function()
+				table.insert(proxy.items, "Potion")
+			end).fails_with("invalid argument #1 to 'insert' %(table expected, got userdata%)")
+
+			expect(data.items[1]).is("Sword")
+			expect(data.items[2]).is("Shield")
+			expect(data.items[3]).is(nil)
+
+			manager:Destroy()
+		end)
+
+		test("table.remove on proxy arrays is rejected natively", function()
+			local manager = ProxyManager.new()
+
+			local data = { items = { "Sword", "Shield" } }
+			local proxy = manager:CreateProxy(data, {})
+
+			expect(function()
+				table.remove(proxy.items, 1)
+			end).fails_with("invalid argument #1 to 'remove' %(table expected, got userdata%)")
+
+			expect(data.items[1]).is("Sword")
+			expect(data.items[2]).is("Shield")
+			expect(data.items[3]).is(nil)
+
+			manager:Destroy()
+		end)
 	end)
 
 	describe("Edge Cases", function()

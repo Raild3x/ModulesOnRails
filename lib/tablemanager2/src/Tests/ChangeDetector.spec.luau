@@ -88,13 +88,99 @@ return function(t: tiniest)
 
 		local oldTable = { x = 1 }
 		local newTable = { x = 2 }
+		local rootTable = { root = newTable }
 
-		detector:CheckForChangesBetween(oldTable, newTable, { "root" })
+		detector:CheckForChangesBetween(oldTable, newTable, { "root" }, rootTable)
 
 		expect(#changes).is(3) -- {}, {"root"}, {"root", "x"}
 		expect(changes[1].path[1]).is("root")
 		expect(changes[1].new).is(2)
 		expect(changes[1].old).is(1)
+	end)
+
+	test("CheckForChangesBetween fires ancestor callbacks when root table is omitted", function()
+		local valuePaths = {}
+		local detector = ChangeDetector.new {
+			OnValueChanged = function(path, _newValue, _oldValue, _metadata)
+				table.insert(valuePaths, table.concat(path, "."))
+			end,
+		}
+
+		detector:CheckForChangesBetween({ x = 1 }, { x = 2 }, { "root" })
+
+		local sawRootAncestor = false
+		for _, path in valuePaths do
+			if path == "" then
+				sawRootAncestor = true
+				break
+			end
+		end
+
+		expect(sawRootAncestor).is_true()
+	end)
+
+	test("CheckForChangesBetween fires ancestor callbacks with explicit root table", function()
+		local valuePaths = {}
+		local root = { config = { x = 2 } }
+		local detector = ChangeDetector.new {
+			OnValueChanged = function(path, _newValue, _oldValue, _metadata)
+				table.insert(valuePaths, table.concat(path, "."))
+			end,
+		}
+
+		detector:CheckForChangesBetween({ x = 1 }, { x = 2 }, { "config" }, root)
+
+		local sawRootAncestor = false
+		for _, path in valuePaths do
+			if path == "" then
+				sawRootAncestor = true
+				break
+			end
+		end
+
+		expect(sawRootAncestor).is_true()
+	end)
+
+	test("FireDescendantChangedNodes=false suppresses descendantChanged node callbacks", function()
+		local callbackCount = 0
+		local leafCount = 0
+		local detector = ChangeDetector.new {
+			FireDescendantChangedNodes = false,
+			OnValueChanged = function(_path, _newValue, _oldValue, metadata)
+				callbackCount += 1
+				if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
+					leafCount += 1
+				end
+			end,
+		}
+
+		local myTable = { a = { b = 1 } }
+		local snapshot = detector:CaptureSnapshot(myTable, {})
+		myTable.a.b = 2
+
+		detector:CheckForChanges(snapshot)
+
+		expect(callbackCount).is(leafCount)
+		expect(leafCount).is(1)
+	end)
+
+	test("FireDescendantChangedNodes defaults to true", function()
+		local sawDescendantChanged = false
+		local detector = ChangeDetector.new {
+			OnValueChanged = function(_path, _newValue, _oldValue, metadata)
+				if metadata.Diff and metadata.Diff.type == "descendantChanged" then
+					sawDescendantChanged = true
+				end
+			end,
+		}
+
+		local myTable = { a = { b = 1 } }
+		local snapshot = detector:CaptureSnapshot(myTable, {})
+		myTable.a.b = 2
+
+		detector:CheckForChanges(snapshot)
+
+		expect(sawDescendantChanged).is_true()
 	end)
 
 	test("CaptureSnapshot rejects non-table roots", function()

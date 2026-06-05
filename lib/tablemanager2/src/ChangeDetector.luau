@@ -202,7 +202,13 @@ export type Snapshot = {
 export type ChangeDetector = {
 	CaptureSnapshot: (self: ChangeDetector, rootTable: { [any]: any }, path: Path) -> Snapshot,
 	CheckForChanges: (self: ChangeDetector, snapshot: Snapshot) -> (),
-	CheckForChangesBetween: (self: ChangeDetector, oldValue: any, newValue: any, basePath: Path) -> (),
+	CheckForChangesBetween: (
+		self: ChangeDetector,
+		oldValue: any,
+		newValue: any,
+		basePath: Path,
+		rootTable: { [any]: any }?
+	) -> (),
 	SetDebugMode: (self: ChangeDetector, enabled: boolean) -> (),
 	--- Suspends change detection. While suspended, `CaptureSnapshot` and
 	--- `CheckForChanges` are no-ops (O(1)). Used by `TableManager:Batch()`.
@@ -333,6 +339,7 @@ function ChangeDetector.new(
 		OnKeyRemoved: (path: Path, key: any, oldValue: any, metadata: ChangeMetadata) -> ()?,
 		OnKeyChanged: (path: Path, key: any, newValue: any, oldValue: any, metadata: ChangeMetadata) -> ()?,
 		OnValueChanged: (path: Path, newValue: any, oldValue: any?, metadata: ChangeMetadata) -> ()?,
+		FireDescendantChangedNodes: boolean?,
 	},
 	debugMode: boolean?
 ): ChangeDetector
@@ -344,6 +351,7 @@ function ChangeDetector.new(
 	local self = setmetatable(
 		{
 			_callbacks = callbacks,
+			_fireDescendantChangedNodes = callbacks.FireDescendantChangedNodes ~= false,
 			_debugMode = debugMode or false,
 			_suspended = false,
 			-- Sentinel snapshot: a fixed table that CaptureSnapshot returns when
@@ -549,9 +557,25 @@ function ChangeDetector:CheckForChanges(snapshot: Snapshot)
 
 	-- Process the root node if there are changes
 	if rootDiffNode then
+		local rootParentPath: Path = {}
+		local rootKey: any? = nil
+		if #snapshot.Path > 0 then
+			rootParentPath = table.create(#snapshot.Path - 1)
+			table.move(snapshot.Path, 1, #snapshot.Path - 1, 1, rootParentPath)
+			rootKey = snapshot.Path[#snapshot.Path]
+		end
+
 		-- Process all leaf changes via DFS
 		-- Pass the snapshot to all callbacks for context
-		self:_processDiffNode(rootDiffNode, snapshot.Path, snapshot.Path, rootDiffNode, snapshot)
+		self:_processDiffNode(
+			rootDiffNode,
+			snapshot.Path,
+			rootParentPath,
+			rootKey,
+			snapshot.Path,
+			rootDiffNode,
+			snapshot
+		)
 
 		-- Fire ancestor callbacks for the captured level
 		-- The origin is the captured path (where the assignment happened)
@@ -606,7 +630,7 @@ end
 	--   Value: true
 	```
 ]=]
-function ChangeDetector:CheckForChangesBetween(oldValue: any, newValue: any, basePath: Path)
+function ChangeDetector:CheckForChangesBetween(oldValue: any, newValue: any, basePath: Path, rootTable: { [any]: any }?)
 	if self._debugMode then
 		print("CheckForChangesBetween called:")
 		print("  basePath:", table.concat(basePath, "."))
@@ -614,9 +638,29 @@ function ChangeDetector:CheckForChangesBetween(oldValue: any, newValue: any, bas
 		print("  newValue type:", type(newValue))
 	end
 
-	-- Create a temporary snapshot for the old value
-	-- Use a temporary root table that contains the old value at the base path
-	local tempRootTable = newValue -- Use newValue as the "root" since we're comparing against it
+	-- Create a temporary snapshot for the old value.
+	-- If no real root table is provided, synthesize one so ancestor callbacks remain
+	-- backward-compatible and can still navigate values at `basePath`.
+	local tempRootTable: { [any]: any }
+	if rootTable then
+		tempRootTable = rootTable
+	else
+		warn(
+			"No Root Table Provided. Ancestor callbacks will receive a synthetic root with the changed value at the base path."
+		)
+		if #basePath == 0 then
+			tempRootTable = if type(newValue) == "table" then newValue else { __value = newValue }
+		else
+			tempRootTable = {}
+			local cursor: any = tempRootTable
+			for i = 1, #basePath - 1 do
+				local segment = basePath[i]
+				cursor[segment] = {}
+				cursor = cursor[segment]
+			end
+			cursor[basePath[#basePath]] = newValue
+		end
+	end
 	local tempSnapshot: Snapshot = {
 		RootTable = tempRootTable,
 		Path = basePath,
@@ -629,10 +673,18 @@ function ChangeDetector:CheckForChangesBetween(oldValue: any, newValue: any, bas
 
 	-- Process the root node if there are changes
 	if rootDiffNode then
+		local rootParentPath: Path = {}
+		local rootKey: any? = nil
+		if #basePath > 0 then
+			rootParentPath = table.create(#basePath - 1)
+			table.move(basePath, 1, #basePath - 1, 1, rootParentPath)
+			rootKey = basePath[#basePath]
+		end
+
 		-- Process all leaf changes via DFS
 		-- Pass the basePath as both the current path and origin
 		-- Include the temporary snapshot for context
-		self:_processDiffNode(rootDiffNode, basePath, basePath, rootDiffNode, tempSnapshot)
+		self:_processDiffNode(rootDiffNode, basePath, rootParentPath, rootKey, basePath, rootDiffNode, tempSnapshot)
 
 		-- Fire ancestor callbacks for the base level
 		-- The origin is the basePath (where the assignment happened)
@@ -736,6 +788,8 @@ end
 function ChangeDetector:_processDiffNode(
 	node: Diff.DiffNode,
 	nodePath: Path,
+	parentPath: Path,
+	nodeKey: any?,
 	originPath: Path,
 	originDiff: Diff.DiffNode,
 	snapshot: Snapshot
@@ -747,31 +801,30 @@ function ChangeDetector:_processDiffNode(
 		print(`Processing diff node at path: {table.concat(nodePath, ".")}, type: {node.type}`)
 	end
 
-	-- Determine the parent path and key for callbacks
-	local parentPath: Path
-	local nodeKey: any?
-
-	if #nodePath > 0 then
-		parentPath = { unpack(nodePath, 1, #nodePath - 1) }
-		nodeKey = nodePath[#nodePath]
-	else
-		parentPath = {}
-		nodeKey = nil
-	end
-
 	-- Recurse into children if present
 	if node.children then
 		for key, childNode in node.children do
 			local childKey = if key ~= "" then key else nil
 			local childPath = table.clone(nodePath)
+			local childParentPath = parentPath
+			local childNodeKey = childKey
 
 			if childKey then
 				table.insert(childPath, childKey)
+				childParentPath = nodePath
+			else
+				-- Sentinel child ("") represents a scalar replacement at this exact node.
+				-- It keeps the same nodePath and key as its parent node.
+				childNodeKey = nodeKey
 			end
 
 			-- Pass the same origin path, origin diff, and snapshot down through recursion
-			self:_processDiffNode(childNode, childPath, originPath, originDiff, snapshot)
+			self:_processDiffNode(childNode, childPath, childParentPath, childNodeKey, originPath, originDiff, snapshot)
 		end
+	end
+
+	if node.type == "descendantChanged" and not self._fireDescendantChangedNodes then
+		return
 	end
 
 	-- Create metadata for this node

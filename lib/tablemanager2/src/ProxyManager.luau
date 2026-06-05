@@ -57,17 +57,18 @@ end
 ]=]
 local function getOriginal<T>(t: T | Proxy<T>): T
 	if isProxy(t) then
-		return PROXY_TO_ORIGINAL[t] :: any
+		return PROXY_TO_ORIGINAL[t :: Proxy<any>] :: T
 	end
 	return t
 end
 
 --[=[
-	Check if a table is an array (contiguous numeric keys starting at 1).
+	Classify table shape in one pass.
+	Returns whether the table is an array plus its array length when true.
 ]=]
-local function isArray(t: { [any]: any }): boolean
+local function classifyTable(t: { [any]: any }): (boolean, number)
 	if type(t) ~= "table" then
-		return false
+		return false, 0
 	end
 
 	local count = 0
@@ -75,46 +76,17 @@ local function isArray(t: { [any]: any }): boolean
 
 	for key, _ in t do
 		if type(key) ~= "number" or key < 1 or key % 1 ~= 0 then
-			return false
+			return false, 0
 		end
 		count += 1
 		maxIndex = math.max(maxIndex, key)
 	end
 
-	return count == maxIndex
-end
-
---[=[
-	Get the length of an array (highest numeric index).
-]=]
-local function getArrayLength(t: { [any]: any }): number
-	local length = 0
-	for key, _ in t do
-		if type(key) == "number" and key > length then
-			length = key
-		end
-	end
-	return length
-end
-
-local function isTableLibraryArrayMutationCall(): boolean
-	if type(debug) ~= "table" or type(debug.info) ~= "function" then
-		return false
+	if count == maxIndex then
+		return true, maxIndex
 	end
 
-	for level = 3, 8 do
-		local source = debug.info(level, "s")
-		if source == nil then
-			break
-		end
-
-		local name = debug.info(level, "n")
-		if source == "[C]" and (name == "insert" or name == "remove") then
-			return true
-		end
-	end
-
-	return false
+	return false, 0
 end
 
 --// Types //--
@@ -163,8 +135,6 @@ export type ProxyManager = {
 		parentOriginal: any?,
 		key: any?
 	) -> Proxy<T>,
-	IsArray: (self: ProxyManager, t: any) -> boolean,
-	GetArrayLength: (self: ProxyManager, t: any) -> number,
 	SetChangeDetector: (self: ProxyManager, changeDetector: ChangeDetector) -> (),
 	SetArrayInsertedCallback: (self: ProxyManager, callback: (path: Path, index: number, newValue: any) -> ()) -> (),
 	SetBatchDirectArraySetCallback: (self: ProxyManager, callback: (path: Path, index: number) -> ()) -> (),
@@ -246,13 +216,6 @@ function ProxyManager.new(): ProxyManager
 				error("Proxy metadata not found - proxy may have been destroyed")
 			end
 
-			if meta.IsArray and type(key) == "number" and isTableLibraryArrayMutationCall() then
-				error(
-					"Do not use table.insert/table.remove on proxy arrays. Use TableManager:ArrayInsert() or TableManager:ArrayRemove().",
-					2
-				)
-			end
-
 			const originalTable = meta.Original
 			const parentPath = self:_GetLivePath(proxy)
 			const currentPath = table.clone(parentPath)
@@ -311,7 +274,7 @@ function ProxyManager.new(): ProxyManager
 
 			-- 4. Update metadata
 			if meta.IsArray then
-				meta.ArrayLength = getArrayLength(originalTable)
+				meta.ArrayLength = #originalTable
 			end
 		end,
 
@@ -517,13 +480,13 @@ function ProxyManager:CreateProxy<T>(
 	self._originalToProxy[original] = proxy
 
 	-- Store metadata
-	const isArr = isArray(original)
+	const isArr, arrayLength = classifyTable(original)
 	self._proxyMeta[proxy] = {
 		Original = original,
 		Parent = parentOriginal,
 		Key = key,
 		IsArray = isArr,
-		ArrayLength = if isArr then getArrayLength(original) else 0,
+		ArrayLength = arrayLength,
 		RootTable = root,
 	}
 
@@ -536,20 +499,6 @@ function ProxyManager:CreateProxy<T>(
 	end
 
 	return proxy
-end
-
---[=[
-	Check if a table is an array.
-]=]
-function ProxyManager:IsArray(t: any): boolean
-	return isArray(t)
-end
-
---[=[
-	Get the length of an array.
-]=]
-function ProxyManager:GetArrayLength(t: any): number
-	return getArrayLength(t)
 end
 
 --[=[
