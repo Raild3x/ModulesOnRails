@@ -38,6 +38,7 @@ Use `npm run setup <package-name>` when deeper local package context is needed. 
 - Methods/functions that yield or could potentially yield should be either suffixed with `Async` or return as a Promise to prevent unexpected behavior.
 - Avoid magic numbers. That is, numbers with no obvious underlying meaning. You can attribute meaning to a number by assigning it to a variable or constant with a descriptive name, or by writing a comment explaining what the number's purpose is.
 - Packages should always have relative paths for their requires. Never require another module with an absolute path.
+- Avoid forward declaration whenever possible.
 
 ## Documentation Style
 - Public single-line docs: `---`
