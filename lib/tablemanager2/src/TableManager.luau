@@ -88,6 +88,7 @@ const ChangeDetectorModule = require("./ChangeDetector")
 const PathHelpers = require("./PathHelpers")
 const ArrayBatchRecorderModule = require("./ArrayBatchRecorder")
 const ArrayDiffModule = require("./ArrayDiff")
+const Diff = require("./Diff")
 const SchemaNavigatorModule = require("./SchemaNavigator")
 
 --// Types //--
@@ -108,10 +109,10 @@ export type TableManagerConfig = {
 	Schema: SchemaCheck?,
 	OnValidationFailed: ((path: Path, value: any, err: string) -> ())?,
 	ListenersFireDeferred: boolean?,
-	ListenerDebugMode: boolean?,
+	DuplicateReferenceMode: ("error" | "warn" | "allow")?, -- Experimental
 }
 
-export type TableManager<T = any> = {
+export type TableManager<T = { [any]: any }> = {
 	Proxy: Proxy<T>,
 	Raw: T,
 
@@ -170,6 +171,7 @@ export type TableManager<T = any> = {
 
 	-- Helper methods
 	Get: (self: TableManager<T>, path: Path) -> any,
+	GetProxy: (self: TableManager<T>, path: Path) -> Proxy<any> | any,
 	Set: (self: TableManager<T>, path: Path, value: any) -> (),
 	ArrayInsert: (self: TableManager<T>, arr: Path | Proxy<any>, newValue: any) -> ()
 		& (self: TableManager<T>, arr: Path | Proxy<any>, index: number, newValue: any) -> (),
@@ -183,12 +185,6 @@ export type TableManager<T = any> = {
 	Destroy: (self: TableManager<T>) -> (),
 
 	-- Private
-	_fireAncestorCallbacksForArrayOp: (
-		self: TableManager<T>,
-		basePath: Path,
-		originPath: Path,
-		metadata: ChangeMetadata
-	) -> (),
 	_validateWrite: (self: TableManager<T>, path: Path, value: any) -> (boolean, string?),
 	_makeEmit: (self: TableManager<T>, path: Path) -> any,
 	_proxyManager: ProxyManager,
@@ -218,13 +214,14 @@ TableManager.T = T
 
 --[=[
 	Creates a synthetic snapshot for array operations and ForceNotify.
-	These operations bypass normal ChangeDetector flow so we create minimal snapshots.
+	These operations bypass normal ChangeDetector flow, so we create a compatible
+	Snapshot payload using Diff's canonical snapshot builder.
 ]=]
 const function createSyntheticSnapshot(rootTable: any, path: Path, value: any)
 	return {
 		RootTable = rootTable,
 		Path = path,
-		Data = { value = value, ref = value, children = nil }, -- Minimal Diff.Snapshot
+		Data = Diff.snapshot(value),
 		Timestamp = os.clock(),
 	}
 end
@@ -266,15 +263,68 @@ local function pathToString(path: Path): string
 	return table.concat(parts, ".")
 end
 
-local function isProxyContainer(proxyManager: ProxyManager, value: any): boolean
-	return type(value) == "table" or proxyManager:IsProxy(value)
+local function fireAncestorValueChangedNotifications(
+	manager: TableManager,
+	basePath: Path,
+	metadata: ChangeMetadata,
+	includeKeyChanged: boolean?
+)
+	const shouldIncludeKeyChanged = if includeKeyChanged == nil then true else includeKeyChanged
+
+	for i = #basePath, 0, -1 do
+		const ancestorPath = {}
+		for j = 1, i do
+			table.insert(ancestorPath, basePath[j])
+		end
+
+		const ancestorMetadata: ChangeMetadata = {
+			Diff = nil,
+			OriginPath = metadata.OriginPath,
+			OriginDiff = metadata.OriginDiff,
+			Snapshot = metadata.Snapshot,
+		}
+
+		manager._listenerRegistry:FireListenersExact("ValueChanged", ancestorPath, {
+			NewValue = nil,
+			OldValue = nil,
+			Metadata = ancestorMetadata,
+		})
+
+		if shouldIncludeKeyChanged and i < #basePath then
+			const changedKey = basePath[i + 1]
+			manager._listenerRegistry:FireListenersExact("KeyChanged", ancestorPath, {
+				Key = changedKey,
+				NewValue = nil,
+				OldValue = nil,
+				Metadata = ancestorMetadata,
+			})
+		end
+	end
+end
+
+local function fireArrayOperation(
+	manager: TableManager,
+	eventName: "ArrayInserted" | "ArrayRemoved" | "ArraySet",
+	basePath: Path,
+	leafPath: Path,
+	payload: any
+)
+	manager._listenerRegistry:FireListenersExact(eventName, leafPath, payload)
+	fireAncestorValueChangedNotifications(manager, basePath, payload.Metadata)
+	if eventName == "ArrayInserted" then
+		manager.ArrayInserted:Fire(basePath, payload.Index, payload.NewValue)
+	elseif eventName == "ArrayRemoved" then
+		manager.ArrayRemoved:Fire(basePath, payload.Index, payload.OldValue)
+	elseif eventName == "ArraySet" then
+		manager.ArraySet:Fire(basePath, payload.Index, payload.NewValue, payload.OldValue)
+	end
 end
 
 --[=[
 	Creates a new TableManager instance.
 ]=]
-function TableManager.new<T>(initialData: T, config: TableManagerConfig?): TableManager<T>
-	const self = setmetatable({} :: any, TableManager_MT) :: TableManager<T>
+function TableManager.new<T>(initialData: T & { [any]: any }, config: TableManagerConfig?): TableManager<T>
+	const self = setmetatable({} :: any, TableManager_MT) :: TableManager<T & { [any]: any }>
 	const resolvedConfig = config or {} :: { [string]: any? }
 
 	-- Store original data
@@ -306,7 +356,7 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	-- Initialize subsystems
 	self._proxyManager = ProxyManagerModule.new()
 	self._listenerRegistry = ListenerRegistryModule.new {
-		DebugMode = resolvedConfig.ListenerDebugMode == true,
+		DebugMode = false,
 		FireDeferred = resolvedConfig.ListenersFireDeferred == true,
 	}
 
@@ -319,17 +369,22 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	self.ArrayRemoved = Signal.new()
 	self.ArraySet = Signal.new()
 
+	-- During batch array flush: suppress numeric-key events on tracked array paths.
+	-- Those arrays will emit their own coalesced events via the array flush.
+	local function shouldSuppressBatchArrayKeyEvent(path: Path, key: any): boolean
+		if not self._batchFlushing or type(key) ~= "number" then
+			return false
+		end
+		return self._batchTrackedPaths[serializeBatchPath(path)] ~= nil
+	end
+
 	-- Initialize ChangeDetector with callbacks
 	-- NOTE: Use FireListenersExact() to prevent double ancestor propagation
 	-- ChangeDetector already handles ancestor notifications, so we only fire at exact paths
 	self._changeDetector = ChangeDetectorModule.new {
 		OnKeyAdded = function(path: Path, key: any, newValue: any, metadata: ChangeMetadata)
-			-- During batch array flush: suppress numeric-key events on tracked array paths.
-			-- Those arrays will emit their own coalesced events via the array flush.
-			if self._batchFlushing and type(key) == "number" then
-				if self._batchTrackedPaths[serializeBatchPath(path)] then
-					return
-				end
+			if shouldSuppressBatchArrayKeyEvent(path, key) then
+				return
 			end
 
 			-- Fire listeners ONLY at exact path (ChangeDetector handles ancestors)
@@ -346,14 +401,10 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 		end,
 
 		OnKeyRemoved = function(path: Path, key: any, oldValue: any, metadata: ChangeMetadata)
-			-- During batch array flush: suppress numeric-key events on tracked array paths.
-			if self._batchFlushing and type(key) == "number" then
-				if self._batchTrackedPaths[serializeBatchPath(path)] then
-					return
-				end
+			if shouldSuppressBatchArrayKeyEvent(path, key) then
+				return
 			end
 
-			-- Fire listeners ONLY at exact path (ChangeDetector handles ancestors)
 			self._listenerRegistry:FireListenersExact("KeyRemoved", path, {
 				OldValue = oldValue,
 				Key = key,
@@ -367,14 +418,10 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 		end,
 
 		OnKeyChanged = function(path: Path, key: any, newValue: any, oldValue: any, metadata: ChangeMetadata)
-			-- During batch array flush: suppress numeric-key events on tracked array paths.
-			if self._batchFlushing and type(key) == "number" then
-				if self._batchTrackedPaths[serializeBatchPath(path)] then
-					return
-				end
+			if shouldSuppressBatchArrayKeyEvent(path, key) then
+				return
 			end
 
-			-- Fire listeners ONLY at exact path (ChangeDetector handles ancestors)
 			self._listenerRegistry:FireListenersExact("KeyChanged", path, {
 				NewValue = newValue,
 				OldValue = oldValue,
@@ -389,7 +436,6 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 		end,
 
 		OnValueChanged = function(path: Path, newValue: any, oldValue: any?, metadata: ChangeMetadata)
-			-- Fire listeners ONLY at exact path (ChangeDetector handles ancestors)
 			self._listenerRegistry:FireListenersExact("ValueChanged", path, {
 				NewValue = newValue,
 				OldValue = oldValue,
@@ -426,7 +472,7 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 					const original = self:Get(path)
 					const preBatch: { any } = table.create(index - 1)
 					for i = 1, index - 1 do
-						preBatch[i] = (original :: any)[i]
+						preBatch[i] = original[i]
 					end
 					recorder:StartTracking(path, preBatch)
 				end
@@ -450,17 +496,11 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 		}
 
 		-- Fire listeners at inserted element's path ONLY (we handle ancestors separately)
-		self._listenerRegistry:FireListenersExact("ArrayInserted", insertPath, {
+		fireArrayOperation(self, "ArrayInserted", path, insertPath, {
 			Index = index,
 			NewValue = newValue,
 			Metadata = metadata,
 		})
-
-		-- Fire ancestor callbacks manually (with nil Diff to indicate ancestor notification)
-		self:_fireAncestorCallbacksForArrayOp(path, insertPath, metadata)
-
-		-- Fire signal ONCE
-		self.ArrayInserted:Fire(path, index, newValue)
 	end)
 
 	-- Wire up direct numeric-index write callback (for batch poisoning)
@@ -475,7 +515,7 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 					-- _batchStartSnapshot for the true pre-batch state anyway.
 					const current = self:Get(path)
 					if type(current) == "table" then
-						recorder:StartTracking(path, current :: any)
+						recorder:StartTracking(path, current)
 					end
 				end
 				recorder:MarkPoisoned(path)
@@ -499,7 +539,7 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	return self
 end
 
-function TableManager:_validateWrite(path: Path, value: any): (boolean, string?)
+function TableManager._validateWrite(self: TableManager, path: Path, value: any): (boolean, string?)
 	if not self._schema then
 		return true :: any
 	end
@@ -517,53 +557,12 @@ function TableManager:_validateWrite(path: Path, value: any): (boolean, string?)
 
 	return false, message
 end
-
---[=[
-	Fire ancestor callbacks for array operations.
-	Walks up from basePath to root, firing listeners with nil Diff.
-	Uses FireListenersExact to avoid double propagation.
-]=]
-function TableManager:_fireAncestorCallbacksForArrayOp(basePath: Path, originPath: Path, metadata: ChangeMetadata)
-	-- Walk up from basePath to root
-	for i = #basePath, 0, -1 do
-		const ancestorPath = {}
-		for j = 1, i do
-			table.insert(ancestorPath, basePath[j])
-		end
-
-		-- Create ancestor metadata (Diff = nil)
-		const ancestorMetadata: ChangeMetadata = {
-			Diff = nil, -- Ancestor notification
-			OriginPath = originPath,
-			OriginDiff = metadata.OriginDiff,
-			Snapshot = metadata.Snapshot, -- Reuse snapshot from origin
-		}
-
-		-- Fire ValueChanged at ancestor level EXACTLY (no further propagation)
-		self._listenerRegistry:FireListenersExact("ValueChanged", ancestorPath, {
-			NewValue = nil, -- Ancestor can look up if needed
-			OldValue = nil,
-			Metadata = ancestorMetadata,
-		})
-
-		-- For keyed ancestors, also notify that the child key changed.
-		if i < #basePath then
-			const changedKey = basePath[i + 1]
-			self._listenerRegistry:FireListenersExact("KeyChanged", ancestorPath, {
-				Key = changedKey,
-				NewValue = nil,
-				OldValue = nil,
-				Metadata = ancestorMetadata,
-			})
-		end
-	end
-end
-
 --------------------------------------------------------------------------------
 --// Listener Registration //--
 --------------------------------------------------------------------------------
 
-function TableManager:OnValueChange(
+function TableManager.OnValueChange(
+	self: TableManager,
 	path: Path,
 	callback: (newValue: any, oldValue: any?, metadata: ChangeMetadata) -> (),
 	options: ListenerOptions?
@@ -571,7 +570,8 @@ function TableManager:OnValueChange(
 	return self._listenerRegistry:RegisterListener("ValueChanged", PathHelpers.ParsePath(path), callback, options)
 end
 
-function TableManager:OnKeyAdd(
+function TableManager.OnKeyAdd(
+	self: TableManager,
 	path: Path,
 	callback: (newValue: any, metadata: ChangeMetadata) -> (),
 	options: ListenerOptions?
@@ -579,7 +579,8 @@ function TableManager:OnKeyAdd(
 	return self._listenerRegistry:RegisterListener("KeyAdded", PathHelpers.ParsePath(path), callback, options)
 end
 
-function TableManager:OnKeyRemove(
+function TableManager.OnKeyRemove(
+	self: TableManager,
 	path: Path,
 	callback: (oldValue: any, metadata: ChangeMetadata) -> (),
 	options: ListenerOptions?
@@ -587,7 +588,8 @@ function TableManager:OnKeyRemove(
 	return self._listenerRegistry:RegisterListener("KeyRemoved", PathHelpers.ParsePath(path), callback, options)
 end
 
-function TableManager:OnKeyChange(
+function TableManager.OnKeyChange(
+	self: TableManager,
 	path: Path,
 	callback: (key: any, newValue: any, oldValue: any, metadata: ChangeMetadata) -> (),
 	options: ListenerOptions?
@@ -595,7 +597,8 @@ function TableManager:OnKeyChange(
 	return self._listenerRegistry:RegisterListener("KeyChanged", PathHelpers.ParsePath(path), callback, options)
 end
 
-function TableManager:OnArrayInsert(
+function TableManager.OnArrayInsert(
+	self: TableManager,
 	path: Path,
 	callback: (index: number, newValue: any, metadata: ChangeMetadata) -> (),
 	options: ListenerOptions?
@@ -603,7 +606,8 @@ function TableManager:OnArrayInsert(
 	return self._listenerRegistry:RegisterListener("ArrayInserted", PathHelpers.ParsePath(path), callback, options)
 end
 
-function TableManager:OnArrayRemove(
+function TableManager.OnArrayRemove(
+	self: TableManager,
 	path: Path,
 	callback: (index: number, oldValue: any, metadata: ChangeMetadata) -> (),
 	options: ListenerOptions?
@@ -611,7 +615,8 @@ function TableManager:OnArrayRemove(
 	return self._listenerRegistry:RegisterListener("ArrayRemoved", PathHelpers.ParsePath(path), callback, options)
 end
 
-function TableManager:OnArraySet(
+function TableManager.OnArraySet(
+	self: TableManager,
 	path: Path,
 	callback: (index: number, newValue: any, oldValue: any, metadata: ChangeMetadata) -> (),
 	options: ListenerOptions?
@@ -626,7 +631,7 @@ end
 --[=[
 	Get the value at a path.
 ]=]
-function TableManager:Get(path: Path, suppressNilPartialPaths: boolean?): any?
+function TableManager.Get(self: TableManager, path: Path, suppressNilPartialPaths: boolean?): any?
 	const parsedPath = PathHelpers.ParsePath(path)
 	local current = self._originalData
 	for _, key in parsedPath do
@@ -642,11 +647,14 @@ function TableManager:Get(path: Path, suppressNilPartialPaths: boolean?): any?
 	return current
 end
 
-function TableManager:GetProxy(path: Path, suppressNilPartialPaths: boolean?): (Proxy<any> | any)?
+--[=[
+	Gets a Proxy for the table at the given path, or the raw value if it's not a table.
+]=]
+function TableManager.GetProxy(self: TableManager, path: Path, suppressNilPartialPaths: boolean?): (Proxy<any> | any)?
 	const parsedPath = PathHelpers.ParsePath(path)
 	local current = self.Proxy
 	for _, key in parsedPath do
-		if not isProxyContainer(self._proxyManager, current) then
+		if not self._proxyManager:IsProxy(current) then
 			if suppressNilPartialPaths then
 				return nil
 			else
@@ -661,7 +669,7 @@ end
 --[=[
 	Set the value at a path.
 ]=]
-function TableManager:Set(path: Path, value: any, buildTablesDynamically: boolean?)
+function TableManager.Set(self: TableManager, path: Path, value: any, buildTablesDynamically: boolean?)
 	const parsedPath = PathHelpers.ParsePath(path)
 	if #parsedPath == 0 then
 		error("Cannot set root path")
@@ -670,10 +678,10 @@ function TableManager:Set(path: Path, value: any, buildTablesDynamically: boolea
 	local parent = self.Proxy
 	for i = 1, #parsedPath - 1 do
 		parent = parent[parsedPath[i]]
-		if not isProxyContainer(self._proxyManager, parent) then
+		if not self._proxyManager:IsProxy(parent) then
 			if buildTablesDynamically then
 				parent[parsedPath[i]] = {} -- TODO: Change this to use ProxyManager to create a proxy for the new table
-				parent = parent[parsedPath[i]] :: any
+				parent = parent[parsedPath[i]]
 			else
 				error(`Path segment {parsedPath[i]} is not a table`)
 			end
@@ -686,12 +694,14 @@ end
 --[=[
 	Insert value(s) into an array at a specific position or at the end.
 ]=]
-function TableManager:ArrayInsert(pathOrProxy: Path | Proxy<{ any }>, ...: any): ()
+function TableManager.ArrayInsert(self: TableManager, pathOrProxy: Path | Proxy<{ any }>, ...: any): ()
 	const proxyManager = self._proxyManager
 	local proxy: Proxy<{ any }>, parsedPath: Path
 	if proxyManager:IsProxy(pathOrProxy) then
 		proxy = pathOrProxy :: Proxy<{ any }>
-		parsedPath = proxyManager:GetPath(proxy)
+		local potentialPath = proxyManager:GetPath(proxy)
+		assert(potentialPath, "Proxy does not have a path")
+		parsedPath = potentialPath
 	else
 		parsedPath = PathHelpers.ParsePath(pathOrProxy)
 		proxy = self:GetProxy(parsedPath)
@@ -780,7 +790,7 @@ function TableManager:ArrayInsert(pathOrProxy: Path | Proxy<{ any }>, ...: any):
 	})
 
 	-- Fire ancestor callbacks manually
-	self:_fireAncestorCallbacksForArrayOp(parsedPath, insertPath, metadata)
+	fireAncestorValueChangedNotifications(self, parsedPath, metadata)
 
 	-- Fire signal ONCE
 	self.ArrayInserted:Fire(parsedPath, pos, unwrappedValue)
@@ -793,12 +803,14 @@ TableManager.Insert = TableManager.ArrayInsert
 --[=[
 	Remove an element from an array at a specific index.
 ]=]
-function TableManager:ArrayRemove(pathOrProxy: Path | Proxy<{ any }>, index: number): any
+function TableManager.ArrayRemove(self: TableManager, pathOrProxy: Path | Proxy<{ any }>, index: number): any
 	const proxyManager = self._proxyManager
 	local proxy: Proxy<{ any }>, parsedPath: Path
 	if proxyManager:IsProxy(pathOrProxy) then
 		proxy = pathOrProxy :: Proxy<{ any }>
-		parsedPath = proxyManager:GetPath(proxy)
+		local potentialPath = proxyManager:GetPath(proxy)
+		assert(potentialPath, "Proxy does not have a path")
+		parsedPath = potentialPath
 	else
 		parsedPath = PathHelpers.ParsePath(pathOrProxy)
 		proxy = self:GetProxy(parsedPath)
@@ -847,17 +859,11 @@ function TableManager:ArrayRemove(pathOrProxy: Path | Proxy<{ any }>, index: num
 	}
 
 	-- Fire listeners EXACTLY at remove path (we handle ancestors separately)
-	self._listenerRegistry:FireListenersExact("ArrayRemoved", removePath, {
+	fireArrayOperation(self, "ArrayRemoved", parsedPath, removePath, {
 		Index = index,
 		OldValue = oldValue,
 		Metadata = metadata,
 	})
-
-	-- Fire ancestor callbacks manually
-	self:_fireAncestorCallbacksForArrayOp(parsedPath, removePath, metadata)
-
-	-- Fire signal ONCE
-	self.ArrayRemoved:Fire(parsedPath, index, oldValue)
 
 	-- Update metadata
 	meta.ArrayLength = self._proxyManager:GetArrayLength(array)
@@ -874,7 +880,7 @@ TableManager.Remove = TableManager.ArrayRemove
 
 	The callback must not yield.
 ]=]
-function TableManager:Batch(fn: () -> ())
+function TableManager.Batch(self: TableManager, fn: () -> ())
 	if self._batchDepth > 0 then
 		-- Already inside a batch window; run the callback in-place
 		fn()
@@ -897,7 +903,7 @@ end
 
 	Pair with `Resume()`. Nested calls are no-ops (the outermost window wins).
 ]=]
-function TableManager:Suspend()
+function TableManager.Suspend(self: TableManager)
 	if self._batchDepth > 0 then
 		return -- Already suspended; nested Suspend is a no-op
 	end
@@ -921,7 +927,7 @@ end
 	   (LCS `ArrayDiff.emitDiff`) when the op log is poisoned or the array
 	   reference changed, or Branch B (`ArrayBatchRecorder:Coalesce`) otherwise.
 ]=]
-function TableManager:Resume()
+function TableManager.Resume(self: TableManager)
 	if self._batchDepth == 0 then
 		return -- Not suspended
 	end
@@ -955,7 +961,7 @@ function TableManager:Resume()
 				else nil
 
 			-- Current live value for this branch.
-			const newBranchValue: any = (self._originalData :: any)[branchKey]
+			const newBranchValue: any = self._originalData[branchKey]
 
 			self._changeDetector:CheckForChangesBetween(oldBranchValue, newBranchValue, { branchKey })
 		end
@@ -977,15 +983,15 @@ function TableManager:Resume()
 
 			-- Get the old array from the pre-batch snapshot (always authoritative for
 			-- Branch A; Branch B uses log.startCopy built at StartTracking time).
-			const oldArray: { any } = (getSnapshotValue(self._batchStartSnapshot, path) or {}) :: any
+			const oldArray: { any } = getSnapshotValue(self._batchStartSnapshot, path) or {}
 			const emit = self:_makeEmit(path)
 
 			if log.poisoned or currentArray ~= log.startRef then
 				-- Branch A: LCS diff — pre-batch snapshot vs current state
-				ArrayDiffModule.emitDiff(oldArray, currentArray :: any, emit, true)
+				ArrayDiffModule.emitDiff(oldArray, currentArray, emit, true)
 			else
 				-- Branch B: op-log coalescer — net-change semantics with intent honoured
-				recorder:Coalesce(log, currentArray :: any, emit, true)
+				recorder:Coalesce(log, currentArray, emit, true)
 			end
 		end
 	end
@@ -995,19 +1001,20 @@ function TableManager:Resume()
 	self._batchDepth = 0
 	if self._batchRecorder then
 		self._batchRecorder:Destroy()
-		self._batchRecorder = nil :: any
+		self._batchRecorder = nil
 	end
-	self._batchStartSnapshot = nil :: any
+	self._batchStartSnapshot = nil
 	table.clear(self._batchTrackedPaths)
 	table.clear(self._batchDirtyBranches)
 end
 
 --[=[
+	@private
 	Builds the `Emit` interface for a single array path, wiring the three
 	callbacks to fire `ArrayRemoved` / `ArrayInserted` / `ArraySet` signals,
 	exact-path listeners, and ancestor callbacks in the correct order.
 ]=]
-function TableManager:_makeEmit(path: Path): any
+function TableManager._makeEmit(self: TableManager, path: Path)
 	return {
 		removed = function(index: number, oldValue: any)
 			const removedPath = table.clone(path)
@@ -1018,13 +1025,11 @@ function TableManager:_makeEmit(path: Path): any
 				OriginDiff = { type = "removed", new = nil, old = oldValue, key = index },
 				Snapshot = createSyntheticSnapshot(self._originalData, removedPath, nil),
 			}
-			self._listenerRegistry:FireListenersExact("ArrayRemoved", removedPath, {
+			fireArrayOperation(self, "ArrayRemoved", path, removedPath, {
 				Index = index,
 				OldValue = oldValue,
 				Metadata = metadata,
 			})
-			self:_fireAncestorCallbacksForArrayOp(path, removedPath, metadata)
-			self.ArrayRemoved:Fire(path, index, oldValue)
 		end,
 		inserted = function(index: number, newValue: any)
 			const insertedPath = table.clone(path)
@@ -1035,13 +1040,11 @@ function TableManager:_makeEmit(path: Path): any
 				OriginDiff = { type = "added", new = newValue, old = nil, key = index },
 				Snapshot = createSyntheticSnapshot(self._originalData, insertedPath, newValue),
 			}
-			self._listenerRegistry:FireListenersExact("ArrayInserted", insertedPath, {
+			fireArrayOperation(self, "ArrayInserted", path, insertedPath, {
 				Index = index,
 				NewValue = newValue,
 				Metadata = metadata,
 			})
-			self:_fireAncestorCallbacksForArrayOp(path, insertedPath, metadata)
-			self.ArrayInserted:Fire(path, index, newValue)
 		end,
 		set = function(index: number, newValue: any, oldValue: any)
 			const setPath = table.clone(path)
@@ -1052,14 +1055,12 @@ function TableManager:_makeEmit(path: Path): any
 				OriginDiff = { type = "changed", new = newValue, old = oldValue, key = index },
 				Snapshot = createSyntheticSnapshot(self._originalData, setPath, newValue),
 			}
-			self._listenerRegistry:FireListenersExact("ArraySet", setPath, {
+			fireArrayOperation(self, "ArraySet", path, setPath, {
 				Index = index,
 				NewValue = newValue,
 				OldValue = oldValue,
 				Metadata = metadata,
 			})
-			self:_fireAncestorCallbacksForArrayOp(path, setPath, metadata)
-			self.ArraySet:Fire(path, index, newValue, oldValue)
 		end,
 	}
 end
@@ -1067,15 +1068,22 @@ end
 --[=[
 	Move an element from one location to another within the same table.
 	This unsets the value at the current path and sets it at the new path, firing appropriate notifications.
+	This is specifically useful for moving tables around without breaking proxy references.
 ]=]
-function TableManager:MoveTo(currentPath: Path | Proxy<any>, newPath: Path) end
+function TableManager.Move(self: TableManager, currentPath: Path | Proxy<any>, newPath: Path)
+	-- TODO: Add this once we get establish how multiple references will work
+end
 
 --[=[
 	Swap values at two paths within the same table.
 ]=]
-function TableManager:Swap(a: Path | Proxy<any>, b: Path | Proxy<any>) end
+function TableManager.Swap(self: TableManager, a: Path | Proxy<any>, b: Path | Proxy<any>)
+	-- TODO:
+end
 
 --[=[
+	@private
+	@unreleased
 	Force notification for a specific path, even if the value hasn't changed.
 	
 	This is useful for scenarios like:
@@ -1093,7 +1101,7 @@ function TableManager:Swap(a: Path | Proxy<any>, b: Path | Proxy<any>) end
 	Note: This creates a synthetic "changed" diff where old == new.
 	Your listeners can detect this by checking if `metadata.Diff.old == metadata.Diff.new`.
 ]=]
-function TableManager:ForceNotify(path: Path)
+function TableManager.ForceNotify(self: TableManager, path: Path)
 	if self._batchDepth > 0 then
 		return -- Suppress during batch; flush will re-emit all changes
 	end
@@ -1128,32 +1136,20 @@ function TableManager:ForceNotify(path: Path)
 	-- Fire signal
 	self.ValueChanged:Fire(parsedPath, currentValue, currentValue)
 
-	-- Fire ancestor callbacks manually (with nil Diff to indicate ancestor notification)
-	for i = #parsedPath - 1, 0, -1 do
-		const ancestorPath = {}
-		for j = 1, i do
-			table.insert(ancestorPath, parsedPath[j])
+	-- Fire ancestor ValueChanged callbacks from parent path up to root.
+	if #parsedPath > 0 then
+		const parentPath = {}
+		for i = 1, #parsedPath - 1 do
+			table.insert(parentPath, parsedPath[i])
 		end
-
-		const ancestorMetadata: ChangeMetadata = {
-			Diff = nil, -- Ancestor notification
-			OriginPath = parsedPath,
-			OriginDiff = metadata.OriginDiff,
-			Snapshot = metadata.Snapshot, -- Reuse snapshot from origin
-		}
-
-		self._listenerRegistry:FireListenersExact("ValueChanged", ancestorPath, {
-			NewValue = nil,
-			OldValue = nil,
-			Metadata = ancestorMetadata,
-		})
+		fireAncestorValueChangedNotifications(self, parentPath, metadata, false)
 	end
 end
 
 --[=[
 	Destroy the TableManager and clean up all resources.
 ]=]
-function TableManager:Destroy()
+function TableManager.Destroy(self: TableManager)
 	self._proxyManager:Destroy()
 	self._listenerRegistry:Destroy()
 

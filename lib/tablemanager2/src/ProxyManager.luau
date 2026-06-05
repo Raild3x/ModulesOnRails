@@ -188,7 +188,7 @@ export type ProxyManager = {
 	_onBatchDirectArraySet: ((path: Path, index: number) -> ())?,
 	_onBatchScalarWritten: ((parentPath: Path) -> ())?,
 	_onValidateWrite: ((path: Path, value: any) -> (boolean, string?))?,
-	_sharedMetatable: { [any]: any },
+	_metatableTemplate: { [any]: any },
 	_GetLivePath: (self: ProxyManager, proxy: Proxy<any>) -> Path,
 }
 
@@ -214,8 +214,8 @@ function ProxyManager.new(): ProxyManager
 	self._onBatchScalarWritten = nil
 	self._onValidateWrite = nil
 
-	-- Create the shared metatable for all proxies
-	self._sharedMetatable = {
+	-- Create the metatable template copied into each proxy metatable.
+	self._metatableTemplate = {
 		__index = function(proxy, key)
 			const meta = self._proxyMeta[proxy]
 			if not meta then
@@ -507,10 +507,10 @@ function ProxyManager:CreateProxy<T>(
 	-- Create new proxy
 	const proxy = newproxy(true) :: Proxy<T>
 	local MT = getmetatable(proxy :: any)
-	for k, v in self._sharedMetatable do
+	for k, v in self._metatableTemplate do
 		MT[k] = v
 	end
-	table.freeze(MT) -- Shared metatable is immutable for safety and performance
+	table.freeze(MT) -- Per-proxy metatable is immutable for safety
 
 	-- Store bidirectional mapping
 	PROXY_TO_ORIGINAL[proxy] = original

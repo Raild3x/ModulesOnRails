@@ -28,28 +28,20 @@ export type Snapshot = {
 
 -- ─── Snapshot ────────────────────────────────────────────────────────────────
 
-local function deepcopy(value: any): any
-	if type(value) ~= "table" then
-		return value
-	end
-	local copy = {}
-	for k, v in pairs(value) do
-		copy[k] = deepcopy(v)
-	end
-	return copy
-end
-
 local function snapshot(value: any): Snapshot
 	if type(value) ~= "table" then
 		return { value = value, ref = nil, children = nil }
 	end
 
 	local children = {}
-	for k, v in pairs(value) do
-		children[k] = snapshot(v)
+	local copy = {}
+	for k, v in value do
+		const childSnap = snapshot(v)
+		children[k] = childSnap
+		copy[k] = childSnap.value
 	end
 
-	return { value = deepcopy(value), ref = value, children = children }
+	return { value = table.freeze(copy), ref = value, children = children }
 end
 
 -- ─── Internal helpers ────────────────────────────────────────────────────────

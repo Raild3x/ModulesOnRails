@@ -235,7 +235,7 @@ export type ChangeDetector = {
 	- `OriginPath` points to where the assignment operation occurred (captured path)
 	- `OriginDiff` contains the root diff of the entire operation
 	- `newValue` parameter contains the TRUE current value at that ancestor level
-	- `oldValue` parameter is nil (we don't track old ancestor values)
+	- `oldValue` parameter is the same as `newValue` (not meaningful for ancestors)
 	- `Snapshot` provides full context (root table + path)
 	- Ancestors are notified ONCE per assignment operation, not per leaf change
 	
@@ -848,7 +848,7 @@ function ChangeDetector:_fireAncestorCallbacks(capturedPath: Path, rootDiff: Dif
 		local parentPath = if i > 1 then { unpack(capturedPath, 1, i - 1) } else {}
 		local key = capturedPath[i]
 
-		-- Navigate to the current value at this ancestor level
+		-- Navigate to the current value at this ancestor level once and reuse it.
 		local currentValue = snapshot.RootTable
 		for _, k in ipairs(currentPath) do
 			currentValue = currentValue[k]
@@ -876,15 +876,7 @@ function ChangeDetector:_fireAncestorCallbacks(capturedPath: Path, rootDiff: Dif
 		OnKeyChanged(parentPath, key, keyValue, nil, metadata)
 
 		-- Fire OnValueChanged for this level with the true current value
-		-- Navigate to the value at currentPath
-		local pathValue = snapshot.RootTable
-		for _, k in ipairs(currentPath) do
-			pathValue = pathValue[k]
-			if pathValue == nil then
-				break
-			end
-		end
-		OnValueChanged(currentPath, pathValue, pathValue, metadata)
+		OnValueChanged(currentPath, currentValue, currentValue, metadata)
 	end
 
 	-- Always fire OnValueChanged for root (unless captured at root)
