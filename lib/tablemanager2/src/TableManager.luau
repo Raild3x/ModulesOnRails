@@ -1243,7 +1243,10 @@ TableManager.SwapRemoveFirstValue = TableManager.ArraySwapRemoveFirstValue
 
 	Nested calls are no-ops: the outermost Batch window covers everything.
 
-	The callback must not yield.
+	:::caution yielding
+	Yielding within a batch window will leave the TableManager in a suspended state, which 
+	can cause unexpected behavior.
+	:::
 ]=]
 function TableManager.Batch(self: TM_Internal, fn: () -> ())
 	if self._batchDepth > 0 then
@@ -1262,9 +1265,8 @@ end
 --[=[
 	Suspends all signal and listener firing.
 
-	`CaptureSnapshot` inside `ChangeDetector` returns a sentinel (O(1)) so no
-	snapshot/diff work is done during the window. Array ops are logged to an
-	`ArrayBatchRecorder` instead of firing immediately.
+	It is recommended to use `:Batch` for better ergonomics and safety, 
+	but `Suspend`/`Resume` can be used for more manual control if needed.
 
 	Pair with `Resume()`. Nested calls are no-ops (the outermost window wins).
 ]=]
@@ -1274,6 +1276,9 @@ function TableManager.Suspend(self: TM_Internal)
 	end
 	-- Capture the pre-batch snapshot BEFORE suspending ChangeDetector so that
 	-- CheckForChanges at flush time can diff old-vs-current correctly.
+	-- `CaptureSnapshot` inside `ChangeDetector` returns a sentinel (O(1)) so no
+	-- snapshot/diff work is done during the window. Array ops are logged to an
+	-- `ArrayBatchRecorder` instead of firing immediately.
 	self._batch = {
 		Recorder = ArrayBatchRecorderModule.new(),
 		StartSnapshot = self._changeDetector:CaptureSnapshot(self._originalData, {}),
@@ -1450,10 +1455,7 @@ function TableManager.CopyTo(self: TM_Internal, currentPath: Path | Proxy<any>, 
 
 	const sourceValue = self:Get(sourcePath)
 	const copiedValue = deepCloneValue(sourceValue)
-
-	self:Batch(function()
-		self:Set(targetPath, copiedValue)
-	end)
+	self:Set(targetPath, copiedValue)
 end
 
 --[=[

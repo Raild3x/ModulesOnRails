@@ -1,22 +1,8 @@
 --!strict
---[=[
-	@class TableManager_new.spec
-	
-	Comprehensive test suite for the clean TableManager_new implementation.
-	
-	Tests cover:
-	- Basic proxy functionality
-	- Unified change detection
-	- Signals fire once behavior
-	- Listeners fire appropriately (ancestors handled by ChangeDetector)
-	- ListenDepth / Once filtering
-	- Array operations with ancestor notifications
-	- Metadata structure validation
-]=]
 
 return function(t: tiniest)
-	local TableManager = require("../TableManager")
-	local T = require("../../T")
+	local TableManager = require("../../TableManager")
+	local T = require("../../../T")
 
 	local test = t.test
 	local describe = t.describe
