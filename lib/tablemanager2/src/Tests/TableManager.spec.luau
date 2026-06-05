@@ -22,6 +22,11 @@ return function(t: tiniest)
 	local describe = t.describe
 	local expect = t.expect
 
+	-- Allow us to access internal methods for testing purposes, while still preserving type safety.
+	local function createManager<T>(t: T & { [any]: any }): TableManager.TM_Internal<T & { [any]: any }>
+		return TableManager.new(t) :: any
+	end
+
 	-- test("notepad", function()
 	-- 	local manager = TableManager.new {
 	-- 		players = { John = { Inventory = { Sword = 1 }, Stats = { Health = 100, Level = 5 } } },

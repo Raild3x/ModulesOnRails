@@ -186,6 +186,9 @@ export type TableManager<T = { [any]: any }> = {
 	ArrayInsert: (self: TableManager<T>, arr: Path | Proxy<any>, newValue: any) -> ()
 		& (self: TableManager<T>, arr: Path | Proxy<any>, index: number, newValue: any) -> (),
 	ArrayRemove: (self: TableManager<T>, arr: Path | Proxy<any>, index: number) -> any,
+	ArrayRemoveFirstValue: (self: TableManager<T>, arr: Path | Proxy<any>, valueToFind: any) -> number?,
+	ArraySwapRemove: (self: TableManager<T>, arr: Path | Proxy<any>, index: number) -> any,
+	ArraySwapRemoveFirstValue: (self: TableManager<T>, arr: Path | Proxy<any>, valueToFind: any) -> number?,
 	MoveTo: (self: TableManager<T>, currentPath: Path | Proxy<any>, newPath: Path | Proxy<any>) -> (),
 	CopyTo: (self: TableManager<T>, currentPath: Path | Proxy<any>, newPath: Path) -> (),
 	Swap: (self: TableManager<T>, a: Path | Proxy<any>, b: Path | Proxy<any>) -> (),
@@ -196,10 +199,10 @@ export type TableManager<T = { [any]: any }> = {
 	--- Resume after `Suspend()`. Flushes all pending changes.
 	Resume: (self: TableManager<T>) -> (),
 	Destroy: (self: TableManager<T>) -> (),
+}
 
-	-- Private
-	_validateWrite: (self: TableManager<T>, path: Path, value: any) -> (boolean, string?),
-	_makeEmit: (self: TableManager<T>, path: Path) -> any,
+export type TM_Internal<T = { [any]: any }> = TableManager<T> & {
+	-- fields
 	_proxyManager: ProxyManager,
 	_listenerRegistry: ListenerRegistry,
 	_changeDetector: ChangeDetector,
@@ -238,7 +241,7 @@ end
 
 -- Serializes a path to a string key for batch tracking.
 -- Must match the serialization used by ArrayBatchRecorder.
-local function serializeBatchPath(path: Path): string
+const function serializeBatchPath(path: Path): string
 	if #path == 0 then
 		return "__root__"
 	end
@@ -251,7 +254,7 @@ end
 
 -- Navigates a ChangeDetector Snapshot's Diff.Snapshot children and returns
 -- the deep-copied value stored at `path` (i.e., the pre-batch state).
-local function getSnapshotValue(snapshot: any, path: Path): any?
+const function getSnapshotValue(snapshot: any, path: Path): any?
 	local snap: any = snapshot.Data
 	for _, key in path do
 		if not snap or not snap.children then
@@ -262,7 +265,7 @@ local function getSnapshotValue(snapshot: any, path: Path): any?
 	return snap and snap.value or nil
 end
 
-local function pathToString(path: Path): string
+const function pathToString(path: Path): string
 	if #path == 0 then
 		return "<root>"
 	end
@@ -273,7 +276,7 @@ local function pathToString(path: Path): string
 	return table.concat(parts, ".")
 end
 
-local function resolvePathFromPathOrProxy(self: TableManager, pathOrProxy: Path | Proxy<any>): Path
+const function resolvePathFromPathOrProxy(self: TM_Internal, pathOrProxy: Path | Proxy<any>): Path
 	if self._proxyManager:IsProxy(pathOrProxy) then
 		const proxy = pathOrProxy :: Proxy<any>
 		const potentialPath = self._proxyManager:GetPath(proxy)
@@ -283,7 +286,7 @@ local function resolvePathFromPathOrProxy(self: TableManager, pathOrProxy: Path 
 	return PathHelpers.ParsePath(pathOrProxy :: Path)
 end
 
-local function resolveArrayPathAndProxy(self: TableManager, pathOrProxy: Path | Proxy<{ any }>): (Path, Proxy<{ any }>)
+const function resolveArrayPathAndProxy(self: TM_Internal, pathOrProxy: Path | Proxy<{ any }>): (Path, Proxy<{ any }>)
 	if self._proxyManager:IsProxy(pathOrProxy) then
 		const proxy = pathOrProxy :: Proxy<{ any }>
 		const parsedPath = resolvePathFromPathOrProxy(self, proxy)
@@ -295,7 +298,7 @@ local function resolveArrayPathAndProxy(self: TableManager, pathOrProxy: Path | 
 	return parsedPath, proxy
 end
 
-local function arePathsEqual(a: Path, b: Path): boolean
+const function arePathsEqual(a: Path, b: Path): boolean
 	if #a ~= #b then
 		return false
 	end
@@ -307,7 +310,7 @@ local function arePathsEqual(a: Path, b: Path): boolean
 	return true
 end
 
-local function isPrefixPath(prefix: Path, fullPath: Path): boolean
+const function isPrefixPath(prefix: Path, fullPath: Path): boolean
 	if #prefix > #fullPath then
 		return false
 	end
@@ -319,14 +322,14 @@ local function isPrefixPath(prefix: Path, fullPath: Path): boolean
 	return true
 end
 
-local function getPathParentAndKey(path: Path): (Path, any)
+const function getPathParentAndKey(path: Path): (Path, any)
 	local parentPath = table.clone(path)
 	local key = table.remove(parentPath)
 	assert(key ~= nil, "Path requires at least one segment")
 	return parentPath, key
 end
 
-local function getParentOriginalAtPath(self: TableManager, parentPath: Path, opName: string): any
+const function getParentOriginalAtPath(self: TM_Internal, parentPath: Path, opName: string): any
 	local parentOriginal: any = if #parentPath == 0 then self._originalData else self:Get(parentPath)
 	if type(parentOriginal) ~= "table" then
 		error(`{opName} destination parent must be a table`)
@@ -334,7 +337,7 @@ local function getParentOriginalAtPath(self: TableManager, parentPath: Path, opN
 	return parentOriginal
 end
 
-local function deepCloneValue(value: any, seen: { [any]: any }?): any
+const function deepCloneValue(value: any, seen: { [any]: any }?): any
 	if type(value) ~= "table" then
 		return value
 	end
@@ -352,8 +355,8 @@ local function deepCloneValue(value: any, seen: { [any]: any }?): any
 	return clone
 end
 
-local function fireAncestorValueChangedNotifications(
-	manager: TableManager,
+const function fireAncestorValueChangedNotifications(
+	manager: TM_Internal,
 	basePath: Path,
 	metadata: ChangeMetadata,
 	includeKeyChanged: boolean?
@@ -391,8 +394,8 @@ local function fireAncestorValueChangedNotifications(
 	end
 end
 
-local function fireArrayOperation(
-	manager: TableManager,
+const function fireArrayOperation(
+	manager: TM_Internal,
 	eventName: "ArrayInserted" | "ArrayRemoved" | "ArraySet",
 	basePath: Path,
 	leafPath: Path,
@@ -409,11 +412,98 @@ local function fireArrayOperation(
 	end
 end
 
+const function validateWrite(self: TM_Internal, path: Path, value: any): (boolean, string?)
+	if not self._schema then
+		return true :: any
+	end
+
+	const ok, err = SchemaNavigatorModule.Validate(self._schema, path, value)
+	if ok then
+		return true :: any
+	end
+
+	const message = err or `Schema validation failed at {pathToString(path)}`
+	if self._onValidationFailed then
+		self._onValidationFailed(path, value, message)
+		return false, nil
+	end
+
+	return false, message
+end
+
 --[=[
+	@private
+	Builds the `Emit` interface for a single array path, wiring the three
+	callbacks to fire `ArrayRemoved` / `ArrayInserted` / `ArraySet` signals,
+	exact-path listeners, and ancestor callbacks in the correct order.
+]=]
+const function makeEmit(self: TM_Internal, path: Path)
+	return {
+		removed = function(index: number, oldValue: any)
+			const removedPath = table.clone(path)
+			table.insert(removedPath, index)
+			const metadata: ChangeMetadata = {
+				Diff = { type = "removed", new = nil, old = oldValue, key = index },
+				OriginPath = removedPath,
+				OriginDiff = { type = "removed", new = nil, old = oldValue, key = index },
+				Snapshot = createSyntheticSnapshot(self._originalData, removedPath, nil),
+			}
+			fireArrayOperation(self, "ArrayRemoved", path, removedPath, {
+				Index = index,
+				OldValue = oldValue,
+				Metadata = metadata,
+			})
+		end,
+		inserted = function(index: number, newValue: any)
+			const insertedPath = table.clone(path)
+			table.insert(insertedPath, index)
+			const metadata: ChangeMetadata = {
+				Diff = { type = "added", new = newValue, old = nil, key = index },
+				OriginPath = insertedPath,
+				OriginDiff = { type = "added", new = newValue, old = nil, key = index },
+				Snapshot = createSyntheticSnapshot(self._originalData, insertedPath, newValue),
+			}
+			fireArrayOperation(self, "ArrayInserted", path, insertedPath, {
+				Index = index,
+				NewValue = newValue,
+				Metadata = metadata,
+			})
+		end,
+		set = function(index: number, newValue: any, oldValue: any)
+			const setPath = table.clone(path)
+			table.insert(setPath, index)
+			const metadata: ChangeMetadata = {
+				Diff = { type = "changed", new = newValue, old = oldValue, key = index },
+				OriginPath = setPath,
+				OriginDiff = { type = "changed", new = newValue, old = oldValue, key = index },
+				Snapshot = createSyntheticSnapshot(self._originalData, setPath, newValue),
+			}
+			fireArrayOperation(self, "ArraySet", path, setPath, {
+				Index = index,
+				NewValue = newValue,
+				OldValue = oldValue,
+				Metadata = metadata,
+			})
+		end,
+	}
+end
+
+-----------------------------------------------------------------------------------
+--// Constructor //--
+-----------------------------------------------------------------------------------
+
+--[=[
+	@within TableManager
+	@function new
+
 	Creates a new TableManager instance.
+	
+	@param initialData table<T> -- The initial table data to manage. Must be a table.
+	@param config TableManagerConfig? -- Optional configuration for the TableManager.
+	@return TableManager<T> -- The newly created TableManager instance.
 ]=]
 function TableManager.new<T>(initialData: T & { [any]: any }, config: TableManagerConfig?): TableManager<T>
-	const self = setmetatable({} :: any, TableManager_MT) :: TableManager<T & { [any]: any }>
+	const self = setmetatable({} :: any, TableManager_MT) :: TM_Internal<T & { [any]: any }>
 	const resolvedConfig = config or {} :: { [string]: any? }
 	const duplicateReferenceMode: DuplicateReferenceMode = resolvedConfig.DuplicateReferenceMode or "error"
 
@@ -458,7 +548,7 @@ function TableManager.new<T>(initialData: T & { [any]: any }, config: TableManag
 
 	-- During batch array flush: suppress numeric-key events on tracked array paths.
 	-- Those arrays will emit their own coalesced events via the array flush.
-	local function shouldSuppressBatchArrayKeyEvent(path: Path, key: any): boolean
+	const function shouldSuppressBatchArrayKeyEvent(path: Path, key: any): boolean
 		const batch = self._batch
 		if batch == nil or not batch.Flushing or type(key) ~= "number" then
 			return false
@@ -541,7 +631,7 @@ function TableManager.new<T>(initialData: T & { [any]: any }, config: TableManag
 	self._proxyManager:SetChangeDetector(self._changeDetector)
 	if self._schema then
 		self._proxyManager:SetValidateCallback(function(path: Path, value: any): (boolean, string?)
-			return self:_validateWrite(path, value)
+			return validateWrite(self, path, value)
 		end)
 	end
 
@@ -680,31 +770,12 @@ function TableManager.new<T>(initialData: T & { [any]: any }, config: TableManag
 
 	return self
 end
-
-function TableManager._validateWrite(self: TableManager, path: Path, value: any): (boolean, string?)
-	if not self._schema then
-		return true :: any
-	end
-
-	const ok, err = SchemaNavigatorModule.Validate(self._schema, path, value)
-	if ok then
-		return true :: any
-	end
-
-	const message = err or `Schema validation failed at {pathToString(path)}`
-	if self._onValidationFailed then
-		self._onValidationFailed(path, value, message)
-		return false, nil
-	end
-
-	return false, message
-end
 --------------------------------------------------------------------------------
 --// Listener Registration //--
 --------------------------------------------------------------------------------
 
 function TableManager.OnValueChange(
-	self: TableManager,
+	self: TM_Internal,
 	path: Path,
 	callback: (newValue: any, oldValue: any?, metadata: ChangeMetadata) -> (),
 	options: ListenerOptions?
@@ -713,7 +784,7 @@ function TableManager.OnValueChange(
 end
 
 function TableManager.OnKeyAdd(
-	self: TableManager,
+	self: TM_Internal,
 	path: Path,
 	callback: (newValue: any, metadata: ChangeMetadata) -> (),
 	options: ListenerOptions?
@@ -722,7 +793,7 @@ function TableManager.OnKeyAdd(
 end
 
 function TableManager.OnKeyRemove(
-	self: TableManager,
+	self: TM_Internal,
 	path: Path,
 	callback: (oldValue: any, metadata: ChangeMetadata) -> (),
 	options: ListenerOptions?
@@ -731,7 +802,7 @@ function TableManager.OnKeyRemove(
 end
 
 function TableManager.OnKeyChange(
-	self: TableManager,
+	self: TM_Internal,
 	path: Path,
 	callback: (key: any, newValue: any, oldValue: any, metadata: ChangeMetadata) -> (),
 	options: ListenerOptions?
@@ -740,7 +811,7 @@ function TableManager.OnKeyChange(
 end
 
 function TableManager.OnArrayInsert(
-	self: TableManager,
+	self: TM_Internal,
 	path: Path,
 	callback: (index: number, newValue: any, metadata: ChangeMetadata) -> (),
 	options: ListenerOptions?
@@ -749,7 +820,7 @@ function TableManager.OnArrayInsert(
 end
 
 function TableManager.OnArrayRemove(
-	self: TableManager,
+	self: TM_Internal,
 	path: Path,
 	callback: (index: number, oldValue: any, metadata: ChangeMetadata) -> (),
 	options: ListenerOptions?
@@ -758,7 +829,7 @@ function TableManager.OnArrayRemove(
 end
 
 function TableManager.OnArraySet(
-	self: TableManager,
+	self: TM_Internal,
 	path: Path,
 	callback: (index: number, newValue: any, oldValue: any, metadata: ChangeMetadata) -> (),
 	options: ListenerOptions?
@@ -773,7 +844,7 @@ end
 --[=[
 	Get the value at a path.
 ]=]
-function TableManager.Get(self: TableManager, path: Path, suppressNilPartialPaths: boolean?): any?
+function TableManager.Get(self: TM_Internal, path: Path, suppressNilPartialPaths: boolean?): any?
 	const parsedPath = PathHelpers.ParsePath(path)
 	local current = self._originalData
 	for _, key in parsedPath do
@@ -793,7 +864,7 @@ end
 	Gets a Proxy for the table at the given path, or the raw value if the path
 	doesn't point to a table.
 ]=]
-function TableManager.GetProxy(self: TableManager, path: Path, suppressNilPartialPaths: boolean?): (Proxy<any> | any)?
+function TableManager.GetProxy(self: TM_Internal, path: Path, suppressNilPartialPaths: boolean?): (Proxy<any> | any)?
 	const parsedPath = PathHelpers.ParsePath(path)
 	local current = self.Proxy
 	for _, key in parsedPath do
@@ -812,7 +883,7 @@ end
 --[=[
 	Set the value at a path.
 ]=]
-function TableManager.Set(self: TableManager, path: Path, value: any, buildTablesDynamically: boolean?)
+function TableManager.Set(self: TM_Internal, path: Path, value: any, buildTablesDynamically: boolean?)
 	const parsedPath = PathHelpers.ParsePath(path)
 	if #parsedPath == 0 then
 		error("Cannot set root path")
@@ -837,7 +908,7 @@ end
 --[=[
 	Insert value(s) into an array at a specific position or at the end.
 ]=]
-function TableManager.ArrayInsert(self: TableManager, pathOrProxy: Path | Proxy<{ any }>, ...: any): ()
+function TableManager.ArrayInsert(self: TM_Internal, pathOrProxy: Path | Proxy<{ any }>, ...: any): ()
 	const proxyManager = self._proxyManager
 	local parsedPath, proxy = resolveArrayPathAndProxy(self, pathOrProxy)
 
@@ -938,7 +1009,7 @@ TableManager.Insert = TableManager.ArrayInsert
 --[=[
 	Remove an element from an array at a specific index.
 ]=]
-function TableManager.ArrayRemove(self: TableManager, pathOrProxy: Path | Proxy<{ any }>, index: number): any
+function TableManager.ArrayRemove(self: TM_Internal, pathOrProxy: Path | Proxy<{ any }>, index: number): any
 	const proxyManager = self._proxyManager
 	local parsedPath, proxy = resolveArrayPathAndProxy(self, pathOrProxy)
 
@@ -1000,6 +1071,146 @@ end
 TableManager.Remove = TableManager.ArrayRemove
 
 --[=[
+	Remove the first matching value from an array.
+	Returns the index it was removed from, or nil if not found.
+]=]
+function TableManager.ArrayRemoveFirstValue(
+	self: TM_Internal,
+	pathOrProxy: Path | Proxy<{ any }>,
+	valueToFind: any
+): number?
+	const proxyManager = self._proxyManager
+	local _parsedPath, proxy = resolveArrayPathAndProxy(self, pathOrProxy)
+
+	const meta: ProxyManagerModule.ProxyMetadata = proxyManager:GetMetadata(proxy)
+	const array = proxyManager:GetOriginal(meta.Original)
+	assert(type(array) == "table", "Target is not a table")
+
+	const index = table.find(array, valueToFind)
+	if index == nil then
+		return nil
+	end
+
+	self:ArrayRemove(pathOrProxy, index)
+	return index
+end
+TableManager.RemoveFirstValue = TableManager.ArrayRemoveFirstValue
+
+--[=[
+	Remove an array element in O(1) by swapping in the last element.
+	Order is not preserved.
+]=]
+function TableManager.ArraySwapRemove(self: TM_Internal, pathOrProxy: Path | Proxy<{ any }>, index: number): any
+	const proxyManager = self._proxyManager
+	local parsedPath, proxy = resolveArrayPathAndProxy(self, pathOrProxy)
+
+	const meta: ProxyManagerModule.ProxyMetadata = proxyManager:GetMetadata(proxy)
+	const array = proxyManager:GetOriginal(meta.Original)
+	assert(type(array) == "table", "Target is not a table")
+
+	const lastIndex = #array
+	if index < 1 or index > lastIndex then
+		return nil
+	end
+
+	const oldValue = array[index]
+	const movedValue = array[lastIndex]
+
+	-- Batch: start tracking and record remove/set intent before mutating.
+	if self._batchDepth > 0 and self._batch then
+		const batch = self._batch
+		const pathKey = serializeBatchPath(parsedPath)
+		if not batch.TrackedPaths[pathKey] then
+			batch.TrackedPaths[pathKey] = table.clone(parsedPath)
+			batch.Recorder:StartTracking(parsedPath, array)
+		end
+		batch.Recorder:RecordRemove(parsedPath, index)
+		if index ~= lastIndex then
+			batch.Recorder:RecordSet(parsedPath, index, movedValue, oldValue)
+		end
+		-- Mark this top-level branch as dirtied
+		const branchKey: any = if #parsedPath > 0 then parsedPath[1] else "__root__"
+		batch.DirtyBranches[branchKey] = true
+	end
+
+	if index ~= lastIndex then
+		array[index] = movedValue
+	end
+	array[lastIndex] = nil
+
+	-- Batch: skip immediate fires
+	if self._batchDepth > 0 then
+		meta.ArrayLength = #array
+		return oldValue
+	end
+
+	const removePath = table.clone(parsedPath)
+	table.insert(removePath, index)
+
+	const removeMetadata: ChangeMetadata = {
+		Diff = { type = "removed", new = nil, old = oldValue, key = index },
+		OriginPath = removePath,
+		OriginDiff = { type = "removed", new = nil, old = oldValue, key = index },
+		Snapshot = createSyntheticSnapshot(self._originalData, removePath, nil),
+	}
+
+	fireArrayOperation(self, "ArrayRemoved", parsedPath, removePath, {
+		Index = index,
+		OldValue = oldValue,
+		Metadata = removeMetadata,
+	})
+
+	if index ~= lastIndex then
+		const setPath = table.clone(parsedPath)
+		table.insert(setPath, index)
+
+		const setMetadata: ChangeMetadata = {
+			Diff = { type = "changed", new = movedValue, old = oldValue, key = index },
+			OriginPath = setPath,
+			OriginDiff = { type = "changed", new = movedValue, old = oldValue, key = index },
+			Snapshot = createSyntheticSnapshot(self._originalData, setPath, movedValue),
+		}
+
+		fireArrayOperation(self, "ArraySet", parsedPath, setPath, {
+			Index = index,
+			NewValue = movedValue,
+			OldValue = oldValue,
+			Metadata = setMetadata,
+		})
+	end
+
+	meta.ArrayLength = #array
+	return oldValue
+end
+TableManager.SwapRemove = TableManager.ArraySwapRemove
+
+--[=[
+	Find and swap-remove the first matching value in an array.
+	Returns the removed index, or nil if not found.
+]=]
+function TableManager.ArraySwapRemoveFirstValue(
+	self: TM_Internal,
+	pathOrProxy: Path | Proxy<{ any }>,
+	valueToFind: any
+): number?
+	const proxyManager = self._proxyManager
+	local _parsedPath, proxy = resolveArrayPathAndProxy(self, pathOrProxy)
+
+	const meta: ProxyManagerModule.ProxyMetadata = proxyManager:GetMetadata(proxy)
+	const array = proxyManager:GetOriginal(meta.Original)
+	assert(type(array) == "table", "Target is not a table")
+
+	const index = table.find(array, valueToFind)
+	if index == nil then
+		return nil
+	end
+
+	self:ArraySwapRemove(pathOrProxy, index)
+	return index
+end
+TableManager.SwapRemoveFirstValue = TableManager.ArraySwapRemoveFirstValue
+
+--[=[
 	Holds off firing signals for the duration of the callback, then fires needed signals at the end.
 	Useful for batch operations where you want to suppress intermediate signals and only fire final results.
 
@@ -1007,7 +1218,7 @@ TableManager.Remove = TableManager.ArrayRemove
 
 	The callback must not yield.
 ]=]
-function TableManager.Batch(self: TableManager, fn: () -> ())
+function TableManager.Batch(self: TM_Internal, fn: () -> ())
 	if self._batchDepth > 0 then
 		-- Already inside a batch window; run the callback in-place
 		fn()
@@ -1030,7 +1241,7 @@ end
 
 	Pair with `Resume()`. Nested calls are no-ops (the outermost window wins).
 ]=]
-function TableManager.Suspend(self: TableManager)
+function TableManager.Suspend(self: TM_Internal)
 	if self._batchDepth > 0 then
 		return -- Already suspended; nested Suspend is a no-op
 	end
@@ -1057,7 +1268,7 @@ end
 	   (LCS `ArrayDiff.emitDiff`) when the op log is poisoned or the array
 	   reference changed, or Branch B (`ArrayBatchRecorder:Coalesce`) otherwise.
 ]=]
-function TableManager.Resume(self: TableManager)
+function TableManager.Resume(self: TM_Internal)
 	if self._batchDepth == 0 then
 		return -- Not suspended
 	end
@@ -1124,7 +1335,7 @@ function TableManager.Resume(self: TableManager)
 			-- Get the old array from the pre-batch snapshot (always authoritative for
 			-- Branch A; Branch B uses log.startCopy built at StartTracking time).
 			const oldArray: { any } = getSnapshotValue(batch.StartSnapshot, path) or {}
-			const emit = self:_makeEmit(path)
+			const emit = makeEmit(self, path)
 
 			if log.poisoned or currentArray ~= log.startRef then
 				-- Branch A: LCS diff — pre-batch snapshot vs current state
@@ -1144,68 +1355,11 @@ function TableManager.Resume(self: TableManager)
 end
 
 --[=[
-	@private
-	Builds the `Emit` interface for a single array path, wiring the three
-	callbacks to fire `ArrayRemoved` / `ArrayInserted` / `ArraySet` signals,
-	exact-path listeners, and ancestor callbacks in the correct order.
-]=]
-function TableManager._makeEmit(self: TableManager, path: Path)
-	return {
-		removed = function(index: number, oldValue: any)
-			const removedPath = table.clone(path)
-			table.insert(removedPath, index)
-			const metadata: ChangeMetadata = {
-				Diff = { type = "removed", new = nil, old = oldValue, key = index },
-				OriginPath = removedPath,
-				OriginDiff = { type = "removed", new = nil, old = oldValue, key = index },
-				Snapshot = createSyntheticSnapshot(self._originalData, removedPath, nil),
-			}
-			fireArrayOperation(self, "ArrayRemoved", path, removedPath, {
-				Index = index,
-				OldValue = oldValue,
-				Metadata = metadata,
-			})
-		end,
-		inserted = function(index: number, newValue: any)
-			const insertedPath = table.clone(path)
-			table.insert(insertedPath, index)
-			const metadata: ChangeMetadata = {
-				Diff = { type = "added", new = newValue, old = nil, key = index },
-				OriginPath = insertedPath,
-				OriginDiff = { type = "added", new = newValue, old = nil, key = index },
-				Snapshot = createSyntheticSnapshot(self._originalData, insertedPath, newValue),
-			}
-			fireArrayOperation(self, "ArrayInserted", path, insertedPath, {
-				Index = index,
-				NewValue = newValue,
-				Metadata = metadata,
-			})
-		end,
-		set = function(index: number, newValue: any, oldValue: any)
-			const setPath = table.clone(path)
-			table.insert(setPath, index)
-			const metadata: ChangeMetadata = {
-				Diff = { type = "changed", new = newValue, old = oldValue, key = index },
-				OriginPath = setPath,
-				OriginDiff = { type = "changed", new = newValue, old = oldValue, key = index },
-				Snapshot = createSyntheticSnapshot(self._originalData, setPath, newValue),
-			}
-			fireArrayOperation(self, "ArraySet", path, setPath, {
-				Index = index,
-				NewValue = newValue,
-				OldValue = oldValue,
-				Metadata = metadata,
-			})
-		end,
-	}
-end
-
---[=[
 	Move an element from one location to another within the same table.
 	This unsets the value at the current path and sets it at the new path, firing appropriate notifications.
 	This is specifically useful for moving tables around without breaking proxy references.
 ]=]
-function TableManager.MoveTo(self: TableManager, currentPath: Path | Proxy<any>, newPath: Path | Proxy<any>)
+function TableManager.MoveTo(self: TM_Internal, currentPath: Path | Proxy<any>, newPath: Path | Proxy<any>)
 	const sourcePath = resolvePathFromPathOrProxy(self, currentPath)
 	const targetPath = resolvePathFromPathOrProxy(self, newPath)
 
@@ -1261,7 +1415,7 @@ end
 	This sets the value at the new path to be the same as the value at the current path, firing appropriate notifications.
 	This is specifically useful for copying tables around without breaking proxy references.
 ]=]
-function TableManager.CopyTo(self: TableManager, currentPath: Path | Proxy<any>, newPath: Path)
+function TableManager.CopyTo(self: TM_Internal, currentPath: Path | Proxy<any>, newPath: Path)
 	const sourcePath = resolvePathFromPathOrProxy(self, currentPath)
 	const targetPath = resolvePathFromPathOrProxy(self, newPath)
 
@@ -1289,7 +1443,7 @@ end
 --[=[
 	Swap values at two paths within the same TM.
 ]=]
-function TableManager.Swap(self: TableManager, a: Path | Proxy<any>, b: Path | Proxy<any>)
+function TableManager.Swap(self: TM_Internal, a: Path | Proxy<any>, b: Path | Proxy<any>)
 	const pathA = resolvePathFromPathOrProxy(self, a)
 	const pathB = resolvePathFromPathOrProxy(self, b)
 
@@ -1376,7 +1530,7 @@ end
 	Note: This creates a synthetic "changed" diff where old == new.
 	Your listeners can detect this by checking if `metadata.Diff.old == metadata.Diff.new`.
 ]=]
-function TableManager.ForceNotify(self: TableManager, path: Path)
+function TableManager.ForceNotify(self: TM_Internal, path: Path)
 	if self._batchDepth > 0 then
 		return -- Suppress during batch; flush will re-emit all changes
 	end
@@ -1424,7 +1578,7 @@ end
 --[=[
 	Destroy the TableManager and clean up all resources.
 ]=]
-function TableManager.Destroy(self: TableManager)
+function TableManager.Destroy(self: TM_Internal)
 	self._proxyManager:Destroy()
 	self._listenerRegistry:Destroy()
 
