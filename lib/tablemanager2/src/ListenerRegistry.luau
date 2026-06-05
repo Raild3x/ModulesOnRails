@@ -1,6 +1,6 @@
 --!strict
 --[=[
-	@class ListenerRegistry_new
+	@class ListenerRegistry
 	
 	Clean implementation with ListenDepth filtering support using a tree structure.
 	
@@ -38,18 +38,18 @@
 	
 	### Example 2: Change at {"Players", "Player1", "Health"}
 	```lua
-	-- Fire: FireListeners("ValueChanged", {"Players", "Player1", "Health"}, eventData)
+	-- Fire: FireListenersExact("ValueChanged", {"Players", "Player1", "Health"}, eventData)
 	
 	-- Listeners that fire (in order):
-	-- 1. callback1 (root, DescendantChanges=true) - Ancestor of change
-	-- 2. callback2 ({"Players"}, DescendantChanges=true) - Ancestor of change
-	-- 3. callback3 ({"Players", "Player1"}, DescendantChanges=true) - Ancestor of change
+	-- 1. callback1 (root, no ListenDepth limit) - Ancestor of change
+	-- 2. callback2 ({"Players"}, no ListenDepth limit) - Ancestor of change
+	-- 3. callback3 ({"Players", "Player1"}, no ListenDepth limit) - Ancestor of change
 	-- 4. callback4 ({"Players", "Player1", "Health"}) - EXACT match (always fires)
 	
 	-- Traversal path:
-	-- [ROOT] (fire callback1 if DescendantChanges)
-	--   → "Players" (fire callback2 if DescendantChanges)
-	--   → "Player1" (fire callback3 if DescendantChanges)
+	-- [ROOT] (fire callback1 if depth filter passes)
+	--   → "Players" (fire callback2 if depth filter passes)
+	--   → "Player1" (fire callback3 if depth filter passes)
 	--   → "Health" (fire callback4 - exact match)
 	```
 	
@@ -86,7 +86,7 @@
 	-- Register:
 	registry:RegisterListener("ValueChanged", {"Players", "Player1", "Health", "MaxHP"}, callback5)
 	
-	-- Fire: FireListeners("ValueChanged", {"Players", "Player1", "Health"}, eventData)
+	-- Fire: FireListenersExact("ValueChanged", {"Players", "Player1", "Health"}, eventData)
 	
 	-- callback5 does NOT fire because:
 	-- - The change is at an ancestor path

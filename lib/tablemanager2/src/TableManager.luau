@@ -1,15 +1,15 @@
 --!strict
 --[=[
-	@class TableManager_new
+	@class TableManager
 	
 	Clean implementation of TableManager following the unified architecture.
 	
 	## Architecture
 	
 	Orchestrates three subsystems:
-	1. **ProxyManager_new**: Manages proxies and delegates to ChangeDetector
+	1. **ProxyManager**: Manages proxies and delegates to ChangeDetector
 	2. **ChangeDetector**: Single source of truth for change detection
-	3. **ListenerRegistry_new**: Path-based listeners with DescendantChanges filtering
+	3. **ListenerRegistry**: Path-based listeners with ListenDepth filtering
 	
 	## Key Features
 	
@@ -17,7 +17,7 @@
 	- **Signals fire once**: Per actual leaf change (only when metadata.Diff exists AND type != "descendantChanged")
 	- **Listeners fire appropriately**: ChangeDetector handles ancestor propagation
 	- **No double propagation**: Uses FireListenersExact to prevent duplicate notifications
-	- **FireOnDescendantChanges filtering**: Optional control over descendant notifications
+	- **Listener filtering**: Optional control over descendant notifications via listener options
 	- **Array operations with ancestors**: Insert/Remove notify parent paths
 	
 	## Callback Classification
@@ -355,6 +355,96 @@ const function deepCloneValue(value: any, seen: { [any]: any }?): any
 	return clone
 end
 
+const function getBatchBranchKey(path: Path): any
+	return if #path > 0 then path[1] else "__root__"
+end
+
+const function markBatchBranchDirty(batch: BatchState?, path: Path)
+	if batch then
+		batch.DirtyBranches[getBatchBranchKey(path)] = true
+	end
+end
+
+const function ensureBatchPathTracking(batch: BatchState, path: Path, startTracking: () -> ())
+	const pathKey = serializeBatchPath(path)
+	if batch.TrackedPaths[pathKey] then
+		return
+	end
+
+	batch.TrackedPaths[pathKey] = table.clone(path)
+	startTracking()
+end
+
+const function createSyntheticDiffNode(
+	kind: "added" | "removed" | "changed",
+	key: any,
+	newValue: any,
+	oldValue: any
+): Diff.DiffNode
+	return {
+		type = kind,
+		new = newValue,
+		old = oldValue,
+		key = key,
+	}
+end
+
+const function createSyntheticMetadata(
+	rootTable: any,
+	leafPath: Path,
+	kind: "added" | "removed" | "changed",
+	key: any,
+	newValue: any,
+	oldValue: any
+): ChangeMetadata
+	return {
+		Diff = createSyntheticDiffNode(kind, key, newValue, oldValue),
+		OriginPath = leafPath,
+		OriginDiff = createSyntheticDiffNode(kind, key, newValue, oldValue),
+		Snapshot = createSyntheticSnapshot(rootTable, leafPath, newValue),
+	}
+end
+
+type ReparentRollback = {
+	Proxy: Proxy<any>,
+	Parent: any?,
+	Key: any?,
+}
+
+const function reparentWithRollback(
+	self: TM_Internal,
+	proxy: Proxy<any>?,
+	newParent: any,
+	newKey: any
+): ReparentRollback?
+	if proxy == nil then
+		return nil
+	end
+
+	local oldParent: any? = nil
+	local oldKey: any? = nil
+	const existingMeta = self._proxyManager:GetMetadata(proxy)
+	if existingMeta ~= nil then
+		oldParent = existingMeta.Parent
+		oldKey = existingMeta.Key
+	end
+
+	self._proxyManager:ReparentProxy(proxy, newParent, newKey)
+
+	return {
+		Proxy = proxy,
+		Parent = oldParent,
+		Key = oldKey,
+	}
+end
+
+const function restoreReparent(self: TM_Internal, rollback: ReparentRollback?)
+	if rollback == nil then
+		return
+	end
+	self._proxyManager:ReparentProxy(rollback.Proxy, rollback.Parent, rollback.Key)
+end
+
 const function fireAncestorValueChangedNotifications(
 	manager: TM_Internal,
 	basePath: Path,
@@ -442,12 +532,7 @@ const function makeEmit(self: TM_Internal, path: Path)
 		removed = function(index: number, oldValue: any)
 			const removedPath = table.clone(path)
 			table.insert(removedPath, index)
-			const metadata: ChangeMetadata = {
-				Diff = { type = "removed", new = nil, old = oldValue, key = index },
-				OriginPath = removedPath,
-				OriginDiff = { type = "removed", new = nil, old = oldValue, key = index },
-				Snapshot = createSyntheticSnapshot(self._originalData, removedPath, nil),
-			}
+			const metadata = createSyntheticMetadata(self._originalData, removedPath, "removed", index, nil, oldValue)
 			fireArrayOperation(self, "ArrayRemoved", path, removedPath, {
 				Index = index,
 				OldValue = oldValue,
@@ -457,12 +542,7 @@ const function makeEmit(self: TM_Internal, path: Path)
 		inserted = function(index: number, newValue: any)
 			const insertedPath = table.clone(path)
 			table.insert(insertedPath, index)
-			const metadata: ChangeMetadata = {
-				Diff = { type = "added", new = newValue, old = nil, key = index },
-				OriginPath = insertedPath,
-				OriginDiff = { type = "added", new = newValue, old = nil, key = index },
-				Snapshot = createSyntheticSnapshot(self._originalData, insertedPath, newValue),
-			}
+			const metadata = createSyntheticMetadata(self._originalData, insertedPath, "added", index, newValue, nil)
 			fireArrayOperation(self, "ArrayInserted", path, insertedPath, {
 				Index = index,
 				NewValue = newValue,
@@ -472,12 +552,7 @@ const function makeEmit(self: TM_Internal, path: Path)
 		set = function(index: number, newValue: any, oldValue: any)
 			const setPath = table.clone(path)
 			table.insert(setPath, index)
-			const metadata: ChangeMetadata = {
-				Diff = { type = "changed", new = newValue, old = oldValue, key = index },
-				OriginPath = setPath,
-				OriginDiff = { type = "changed", new = newValue, old = oldValue, key = index },
-				Snapshot = createSyntheticSnapshot(self._originalData, setPath, newValue),
-			}
+			const metadata = createSyntheticMetadata(self._originalData, setPath, "changed", index, newValue, oldValue)
 			fireArrayOperation(self, "ArraySet", path, setPath, {
 				Index = index,
 				NewValue = newValue,
@@ -497,10 +572,10 @@ end
 	@function new
 
 	Creates a new TableManager instance.
-	
-	@param initialData table<T> -- The initial table data to manage. Must be a table.
+
+	@param initialData table -- The initial table data to manage. Must be a table.
 	@param config TableManagerConfig? -- Optional configuration for the TableManager.
-	@return TableManager<T> -- The newly created TableManager instance.
+	@return TableManager -- The newly created TableManager instance.
 ]=]
 function TableManager.new<T>(initialData: T & { [any]: any }, config: TableManagerConfig?): TableManager<T>
 	const self = setmetatable({} :: any, TableManager_MT) :: TM_Internal<T & { [any]: any }>
@@ -644,9 +719,7 @@ function TableManager.new<T>(initialData: T & { [any]: any }, config: TableManag
 			const batch = self._batch
 			if batch then
 				const recorder = batch.Recorder
-				const pathKey = serializeBatchPath(path)
-				if not batch.TrackedPaths[pathKey] then
-					batch.TrackedPaths[pathKey] = table.clone(path)
+				ensureBatchPathTracking(batch, path, function()
 					-- Build a pre-append shallow copy: original[1..index-1]
 					const original = self:Get(path)
 					const preBatch: { any } = table.create(index - 1)
@@ -654,14 +727,10 @@ function TableManager.new<T>(initialData: T & { [any]: any }, config: TableManag
 						preBatch[i] = original[i]
 					end
 					recorder:StartTracking(path, preBatch)
-				end
+				end)
 				recorder:RecordInsert(path, index, newValue)
 			end
-			-- Mark this top-level branch as dirtied
-			const branchKey: any = if #path > 0 then path[1] else "__root__"
-			if batch then
-				batch.DirtyBranches[branchKey] = true
-			end
+			markBatchBranchDirty(batch, path)
 			return
 		end
 
@@ -669,12 +738,7 @@ function TableManager.new<T>(initialData: T & { [any]: any }, config: TableManag
 		const insertPath = table.clone(path)
 		table.insert(insertPath, index)
 
-		const metadata: ChangeMetadata = {
-			Diff = { type = "added", new = newValue, old = nil, key = index },
-			OriginPath = insertPath,
-			OriginDiff = { type = "added", new = newValue, old = nil, key = index },
-			Snapshot = createSyntheticSnapshot(self._originalData, insertPath, newValue),
-		}
+		const metadata = createSyntheticMetadata(self._originalData, insertPath, "added", index, newValue, nil)
 
 		-- Fire listeners at inserted element's path ONLY (we handle ancestors separately)
 		fireArrayOperation(self, "ArrayInserted", path, insertPath, {
@@ -690,16 +754,14 @@ function TableManager.new<T>(initialData: T & { [any]: any }, config: TableManag
 			const batch = self._batch
 			if batch then
 				const recorder = batch.Recorder
-				const pathKey = serializeBatchPath(path)
-				if not batch.TrackedPaths[pathKey] then
-					batch.TrackedPaths[pathKey] = table.clone(path)
+				ensureBatchPathTracking(batch, path, function()
 					-- StartTracking with the post-mutation array; Branch A will use
 					-- _batchStartSnapshot for the true pre-batch state anyway.
 					const current = self:Get(path)
 					if type(current) == "table" then
 						recorder:StartTracking(path, current)
 					end
-				end
+				end)
 				recorder:MarkPoisoned(path)
 			end
 		end
@@ -710,10 +772,7 @@ function TableManager.new<T>(initialData: T & { [any]: any }, config: TableManag
 	-- The branch key is `parentPath[1]` (or "__root__" for root-level writes).
 	self._proxyManager:SetBatchScalarWrittenCallback(function(parentPath: Path)
 		if self._batchDepth > 0 then
-			const branchKey: any = if #parentPath > 0 then parentPath[1] else "__root__"
-			if self._batch then
-				self._batch.DirtyBranches[branchKey] = true
-			end
+			markBatchBranchDirty(self._batch, parentPath)
 		end
 	end)
 
@@ -953,14 +1012,10 @@ function TableManager.ArrayInsert(self: TM_Internal, pathOrProxy: Path | Proxy<{
 	-- Batch: start tracking before any mutations so startCopy captures pre-batch state.
 	if self._batchDepth > 0 and self._batch then
 		const batch = self._batch
-		const pathKey = serializeBatchPath(parsedPath)
-		if not batch.TrackedPaths[pathKey] then
-			batch.TrackedPaths[pathKey] = table.clone(parsedPath)
+		ensureBatchPathTracking(batch, parsedPath, function()
 			batch.Recorder:StartTracking(parsedPath, array)
-		end
-		-- Mark this top-level branch as dirtied
-		const branchKey: any = if #parsedPath > 0 then parsedPath[1] else "__root__"
-		batch.DirtyBranches[branchKey] = true
+		end)
+		markBatchBranchDirty(batch, parsedPath)
 	end
 
 	-- Insert the value (handles shifting when inserting into the middle).
@@ -981,12 +1036,7 @@ function TableManager.ArrayInsert(self: TM_Internal, pathOrProxy: Path | Proxy<{
 	const insertPath = table.clone(parsedPath)
 	table.insert(insertPath, pos)
 
-	const metadata: ChangeMetadata = {
-		Diff = { type = "added", new = unwrappedValue, old = nil, key = pos },
-		OriginPath = insertPath,
-		OriginDiff = { type = "added", new = unwrappedValue, old = nil, key = pos },
-		Snapshot = createSyntheticSnapshot(self._originalData, insertPath, unwrappedValue),
-	}
+	const metadata = createSyntheticMetadata(self._originalData, insertPath, "added", pos, unwrappedValue, nil)
 
 	-- Fire listeners EXACTLY at insert path (we handle ancestors separately)
 	self._listenerRegistry:FireListenersExact("ArrayInserted", insertPath, {
@@ -1021,15 +1071,11 @@ function TableManager.ArrayRemove(self: TM_Internal, pathOrProxy: Path | Proxy<{
 	-- _computeLiveIds in RecordRemove sees the correct pre-removal id sequence.
 	if self._batchDepth > 0 and self._batch then
 		const batch = self._batch
-		const pathKey = serializeBatchPath(parsedPath)
-		if not batch.TrackedPaths[pathKey] then
-			batch.TrackedPaths[pathKey] = table.clone(parsedPath)
+		ensureBatchPathTracking(batch, parsedPath, function()
 			batch.Recorder:StartTracking(parsedPath, array)
-		end
+		end)
 		batch.Recorder:RecordRemove(parsedPath, index)
-		-- Mark this top-level branch as dirtied
-		const branchKey: any = if #parsedPath > 0 then parsedPath[1] else "__root__"
-		batch.DirtyBranches[branchKey] = true
+		markBatchBranchDirty(batch, parsedPath)
 	end
 
 	-- Remove the element (handles shifting automatically).
@@ -1049,12 +1095,7 @@ function TableManager.ArrayRemove(self: TM_Internal, pathOrProxy: Path | Proxy<{
 	const removePath = table.clone(parsedPath)
 	table.insert(removePath, index)
 
-	local metadata: ChangeMetadata = {
-		Diff = { type = "removed", new = nil, old = oldValue, key = index },
-		OriginPath = removePath,
-		OriginDiff = { type = "removed", new = nil, old = oldValue, key = index },
-		Snapshot = createSyntheticSnapshot(self._originalData, removePath, nil),
-	}
+	local metadata = createSyntheticMetadata(self._originalData, removePath, "removed", index, nil, oldValue)
 
 	-- Fire listeners EXACTLY at remove path (we handle ancestors separately)
 	fireArrayOperation(self, "ArrayRemoved", parsedPath, removePath, {
@@ -1119,18 +1160,14 @@ function TableManager.ArraySwapRemove(self: TM_Internal, pathOrProxy: Path | Pro
 	-- Batch: start tracking and record remove/set intent before mutating.
 	if self._batchDepth > 0 and self._batch then
 		const batch = self._batch
-		const pathKey = serializeBatchPath(parsedPath)
-		if not batch.TrackedPaths[pathKey] then
-			batch.TrackedPaths[pathKey] = table.clone(parsedPath)
+		ensureBatchPathTracking(batch, parsedPath, function()
 			batch.Recorder:StartTracking(parsedPath, array)
-		end
+		end)
 		batch.Recorder:RecordRemove(parsedPath, index)
 		if index ~= lastIndex then
 			batch.Recorder:RecordSet(parsedPath, index, movedValue, oldValue)
 		end
-		-- Mark this top-level branch as dirtied
-		const branchKey: any = if #parsedPath > 0 then parsedPath[1] else "__root__"
-		batch.DirtyBranches[branchKey] = true
+		markBatchBranchDirty(batch, parsedPath)
 	end
 
 	if index ~= lastIndex then
@@ -1147,12 +1184,7 @@ function TableManager.ArraySwapRemove(self: TM_Internal, pathOrProxy: Path | Pro
 	const removePath = table.clone(parsedPath)
 	table.insert(removePath, index)
 
-	const removeMetadata: ChangeMetadata = {
-		Diff = { type = "removed", new = nil, old = oldValue, key = index },
-		OriginPath = removePath,
-		OriginDiff = { type = "removed", new = nil, old = oldValue, key = index },
-		Snapshot = createSyntheticSnapshot(self._originalData, removePath, nil),
-	}
+	const removeMetadata = createSyntheticMetadata(self._originalData, removePath, "removed", index, nil, oldValue)
 
 	fireArrayOperation(self, "ArrayRemoved", parsedPath, removePath, {
 		Index = index,
@@ -1164,12 +1196,7 @@ function TableManager.ArraySwapRemove(self: TM_Internal, pathOrProxy: Path | Pro
 		const setPath = table.clone(parsedPath)
 		table.insert(setPath, index)
 
-		const setMetadata: ChangeMetadata = {
-			Diff = { type = "changed", new = movedValue, old = oldValue, key = index },
-			OriginPath = setPath,
-			OriginDiff = { type = "changed", new = movedValue, old = oldValue, key = index },
-			Snapshot = createSyntheticSnapshot(self._originalData, setPath, movedValue),
-		}
+		const setMetadata = createSyntheticMetadata(self._originalData, setPath, "changed", index, movedValue, oldValue)
 
 		fireArrayOperation(self, "ArraySet", parsedPath, setPath, {
 			Index = index,
@@ -1384,16 +1411,7 @@ function TableManager.MoveTo(self: TM_Internal, currentPath: Path | Proxy<any>, 
 	const targetParentOriginal = getParentOriginalAtPath(self, targetParentPath, "MoveTo")
 
 	const existingProxy = self._proxyManager:GetProxyFromOriginal(sourceValue)
-	local oldParent: any? = nil
-	local oldKey: any? = nil
-	if existingProxy ~= nil then
-		const existingMeta = self._proxyManager:GetMetadata(existingProxy)
-		if existingMeta ~= nil then
-			oldParent = existingMeta.Parent
-			oldKey = existingMeta.Key
-		end
-		self._proxyManager:ReparentProxy(existingProxy, targetParentOriginal, targetKey)
-	end
+	const rollback = reparentWithRollback(self, existingProxy, targetParentOriginal, targetKey)
 
 	const ok, moveErr = pcall(function()
 		self:Batch(function()
@@ -1403,9 +1421,7 @@ function TableManager.MoveTo(self: TM_Internal, currentPath: Path | Proxy<any>, 
 	end)
 
 	if not ok then
-		if existingProxy ~= nil then
-			self._proxyManager:ReparentProxy(existingProxy, oldParent, oldKey)
-		end
+		restoreReparent(self, rollback)
 		error(moveErr, 2)
 	end
 end
@@ -1469,28 +1485,8 @@ function TableManager.Swap(self: TM_Internal, a: Path | Proxy<any>, b: Path | Pr
 
 	const proxyA = if type(valueA) == "table" then self._proxyManager:GetProxyFromOriginal(valueA) else nil
 	const proxyB = if type(valueB) == "table" then self._proxyManager:GetProxyFromOriginal(valueB) else nil
-
-	local oldParentA: any? = nil
-	local oldKeyA: any? = nil
-	if proxyA ~= nil then
-		const metaA = self._proxyManager:GetMetadata(proxyA)
-		if metaA ~= nil then
-			oldParentA = metaA.Parent
-			oldKeyA = metaA.Key
-		end
-		self._proxyManager:ReparentProxy(proxyA, parentOriginalB, keyB)
-	end
-
-	local oldParentB: any? = nil
-	local oldKeyB: any? = nil
-	if proxyB ~= nil then
-		const metaB = self._proxyManager:GetMetadata(proxyB)
-		if metaB ~= nil then
-			oldParentB = metaB.Parent
-			oldKeyB = metaB.Key
-		end
-		self._proxyManager:ReparentProxy(proxyB, parentOriginalA, keyA)
-	end
+	const rollbackA = reparentWithRollback(self, proxyA, parentOriginalB, keyB)
+	const rollbackB = reparentWithRollback(self, proxyB, parentOriginalA, keyA)
 
 	const ok, swapErr = pcall(function()
 		self:Batch(function()
@@ -1500,15 +1496,15 @@ function TableManager.Swap(self: TM_Internal, a: Path | Proxy<any>, b: Path | Pr
 	end)
 
 	if not ok then
-		if proxyA ~= nil then
-			self._proxyManager:ReparentProxy(proxyA, oldParentA, oldKeyA)
-		end
-		if proxyB ~= nil then
-			self._proxyManager:ReparentProxy(proxyB, oldParentB, oldKeyB)
-		end
+		restoreReparent(self, rollbackA)
+		restoreReparent(self, rollbackB)
 		error(swapErr, 2)
 	end
 end
+
+--------------------------------------------------------------------------------
+--// Other Utility Methods //--
+--------------------------------------------------------------------------------
 
 --[=[
 	@private

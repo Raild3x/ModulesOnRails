@@ -1,6 +1,6 @@
 --!strict
 --[=[
-	@class ProxyManager_new
+	@class ProxyManager
 	
 	Clean implementation of ProxyManager following the unified architecture.
 	

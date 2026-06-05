@@ -16,12 +16,12 @@ The `__len` metamethod returns `#meta.Original`, so the length operator works tr
 ```lua
 local tm = TableManager.new { a = 1, b = 2, c = 3 }
 -- ❌ This does NOT work - pairs()and ipairs don't work on userdatas
-for key, value in pairs(tm.Data) do
+for key, value in pairs(tm.Proxy) do
     print(key, value) -- Won't work!
 end
 
 -- ✅ Use generic for iteration instead
-for key, value in tm.Data do
+for key, value in tm.Proxy do
     print(key, value) -- Works! Uses __iter metamethod
 end
 ```
@@ -75,7 +75,7 @@ tm:Insert({"items"}, "value")
 -- ❌ This doesn't work due to Lua/Luau limitation
 local original = { a = 1 }
 local tm = TableManager.new(original)
-if tm.Data == original then -- Won't work! Different metatables
+if tm.Proxy == original then -- Won't work! Different metatables
     -- __eq only works when both operands have same metatable
 end
 ```
@@ -83,7 +83,7 @@ end
 **Solution:** Use the ProxyManager's `Equals` method:
 ```lua
 -- ✅ DO THIS
-if tm._proxyManager:Equals(tm.Data, original) then
+if tm._proxyManager:Equals(tm.Proxy, original) then
     -- This works!
 end
 ```
@@ -91,8 +91,8 @@ end
 ### 3. rawget/rawset on Proxies
 ```lua
 -- ❌ These bypass metamethods and won't work correctly
-rawget(tm.Data, "key")
-rawset(tm.Data, "key", "value")
+rawget(tm.Proxy, "key")
+rawset(tm.Proxy, "key", "value")
 ```
 Since proxies are tracked via weak tables, raw operations may not behave as expected.
 
@@ -104,9 +104,9 @@ local tm = TableManager.new(original)
 local lookup = {}
 
 lookup[original] = "value1"
-lookup[tm.Data] -- Returns nil! Proxy is a different key than original
+lookup[tm.Proxy] -- Returns nil! Proxy is a different key than original
 
-lookup[tm.Data] = "value2"
+lookup[tm.Proxy] = "value2"
 lookup[original] -- Still "value1"! They are separate keys
 ```
 
@@ -115,8 +115,8 @@ lookup[original] -- Still "value1"! They are separate keys
 **Solution:** Be consistent - always use either the proxy OR the original as keys, never mix them:
 ```lua
 -- ✅ Consistent usage - use proxy everywhere
-lookup[tm.Data] = "value"
-print(lookup[tm.Data]) -- Works!
+lookup[tm.Proxy] = "value"
+print(lookup[tm.Proxy]) -- Works!
 
 -- ✅ Consistent usage - use original everywhere  
 lookup[original] = "value"
@@ -124,7 +124,7 @@ print(lookup[original]) -- Works!
 
 -- ❌ Mixed usage - doesn't work
 lookup[original] = "value"
-print(lookup[tm.Data]) -- Returns nil!
+print(lookup[tm.Proxy]) -- Returns nil!
 ```
 
 ## Best Practices
@@ -133,7 +133,7 @@ print(lookup[tm.Data]) -- Returns nil!
 ```lua
 -- ✅ Correct
 tm:Insert({"inventory"}, item)
-tm:Remove({"inventory"})
+tm:Remove({"inventory"}, index)
 
 -- ❌ Incorrect
 table.insert(tm.Proxy.inventory, item) -- Won't work

@@ -55,7 +55,7 @@ local ArrayDiff = {}
 --[=[
 	Builds the LCS (Longest Common Subsequence) DP table for `old` and `new`.
 ]=]
-local function buildLCS(old: { any }, new: { any }): { { number } }
+const function buildLCS(old: { any }, new: { any }): { { number } }
 	const n, m = #old, #new
 	const dp = table.create(n + 1)
 
@@ -85,7 +85,7 @@ end
 --[=[
 	Backtracks through the LCS DP table and returns ops in **forward** order.
 ]=]
-local function backtrack(old: { any }, new: { any }, dp: { { number } }): { Op }
+const function backtrack(old: { any }, new: { any }, dp: { { number } }): { Op }
 	-- Walk backward; collect in reverse, then flip.
 	const reversed: { Op } = {}
 	local i, j = #old, #new

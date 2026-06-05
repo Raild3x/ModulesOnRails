@@ -19,9 +19,9 @@
 	
 	**1. Capture-then-check (Recommended for ongoing monitoring):**
 	```lua
-	detector:CaptureSnapshot(myTable, {"data"})
+	local snapshot = detector:CaptureSnapshot(myTable, {"data"})
 	-- Make changes to myTable...
-	detector:CheckForChanges(myTable) -- Detects changes since snapshot
+	detector:CheckForChanges(snapshot) -- Detects changes since snapshot
 	```
 	
 	**2. Direct comparison (For one-off comparisons):**

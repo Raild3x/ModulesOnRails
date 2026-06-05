@@ -13,9 +13,8 @@ Comprehensive examples for using the TableManager system.
 5. [Parent/Child Relationships](#parentchild-relationships)
 6. [Global Signals](#global-signals)
 7. [Path-Based Access](#path-based-access)
-8. [Fusion Integration](#fusion-integration)
-9. [Common Patterns](#common-patterns)
-10. [Best Practices](#best-practices)
+8. [Common Patterns](#common-patterns)
+9. [Best Practices](#best-practices)
 
 ---
 
@@ -56,13 +55,13 @@ local gameManager: TableManager<GameData> = TableManager.new({
 
 ```lua
 -- Direct access through proxy
-print(manager.Data.Player.Name) -- "Alice"
+print(manager.Proxy.Player.Name) -- "Alice"
 
 -- Modification (triggers listeners)
-manager.Data.Player.Level = 5
+manager.Proxy.Player.Level = 5
 
 -- Iteration (use generic for, NOT pairs!)
-for key, value in manager.Data.Player do
+for key, value in manager.Proxy.Player do
     print(key, "=", value)
 end
 ```
@@ -80,12 +79,14 @@ local manager = TableManager.new({
 
 manager:OnValueChange({"Player", "Health"}, function(newValue, oldValue, metadata)
     print("Health:", oldValue, "→", newValue)
-    print("Source:", metadata.SourceDirection) -- "self", "child", or "parent"
+    print("Changed path:", table.concat(metadata.OriginPath, "."))
+    print("Direct change:", metadata.Diff ~= nil)
 end)
 
-manager.Data.Player.Health = 80
+manager.Proxy.Player.Health = 80
 -- Output: "Health: 100 → 80"
---         "Source: self"
+--         "Changed path: Player.Health"
+--         "Direct change: true"
 ```
 
 ### Observing Nested Changes
@@ -101,14 +102,18 @@ local manager = TableManager.new({
 
 -- Listen to parent path
 manager:OnValueChange({"Game", "World"}, function(newValue, oldValue, metadata)
-    print("Changed at:", table.concat(metadata.SourcePath, "."))
-    print("Direction:", metadata.SourceDirection)
+    print("Origin:", table.concat(metadata.OriginPath, "."))
+    if metadata.Diff then
+        print("Direct replacement at this path")
+    else
+        print("Descendant changed under this path")
+    end
 end)
 
 -- Change deep nested value
-manager.Data.Game.World.Region.Zone = 2
--- Output: "Changed at: Game.World.Region.Zone"
---         "Direction: child"
+manager.Proxy.Game.World.Region.Zone = 2
+-- Output: "Origin: Game.World.Region.Zone"
+--         "Descendant changed under this path"
 ```
 
 ### Root Level Listener
@@ -116,7 +121,7 @@ manager.Data.Game.World.Region.Zone = 2
 ```lua
 -- Listen to ALL changes in the entire structure
 manager:OnValueChange({}, function(newValue, oldValue, metadata)
-    print("Something changed at:", table.concat(metadata.SourcePath, "."))
+    print("Something changed at:", table.concat(metadata.OriginPath, "."))
 end)
 ```
 
@@ -132,8 +137,8 @@ local manager = TableManager.new({
 })
 
 -- Listen for insertions
-manager:OnArrayInsert({"Inventory"}, function(index, value, metadata)
-    print("Inserted", value, "at index", index)
+manager:OnArrayInsert({"Inventory"}, function(index, newValue, metadata)
+    print("Inserted", newValue, "at index", index)
 end)
 
 -- Insert at end
@@ -158,7 +163,7 @@ manager:OnArrayRemove({"Queue"}, function(index, oldValue, metadata)
 end)
 
 -- Remove last element
-local removed = manager:Remove({"Queue"})
+local removed = manager:Remove({"Queue"}, #manager.Proxy.Queue)
 print("Removed:", removed) -- "Task3"
 
 -- Remove specific index
@@ -179,7 +184,7 @@ manager:OnArraySet({"Items"}, function(index, newValue, oldValue, metadata)
 end)
 
 -- Modify existing element (NOT insertion or removal)
-manager.Data.Items[1] = "Steel Sword"
+manager.Proxy.Items[1] = "Steel Sword"
 -- Output: "Item 1 upgraded: Bronze Sword → Steel Sword"
 ```
 
@@ -194,16 +199,17 @@ local manager = TableManager.new({
     Settings = { Volume = 50 }
 })
 
-manager:OnKeyAdd({"Settings"}, function(key, value, metadata)
-    print("New setting:", key, "=", value)
+manager:OnKeyAdd({"Settings"}, function(newValue, metadata)
+    local key = if metadata.Diff then metadata.Diff.key else "<ancestor>"
+    print("New setting:", key, "=", newValue)
 end)
 
 -- Add new key
-manager.Data.Settings.Brightness = 80
+manager.Proxy.Settings.Brightness = 80
 -- Output: "New setting: Brightness = 80"
 
 -- Modifying existing key does NOT trigger OnKeyAdd
-manager.Data.Settings.Volume = 75 -- No output (triggers OnKeyChange instead)
+manager.Proxy.Settings.Volume = 75 -- No output (triggers OnKeyChange instead)
 ```
 
 ### Key Removal
@@ -217,15 +223,16 @@ local manager = TableManager.new({
     }
 })
 
-manager:OnKeyRemove({"Player"}, function(key, oldValue, metadata)
+manager:OnKeyRemove({"Player"}, function(oldValue, metadata)
+    local key = if metadata.Diff then metadata.Diff.key else "<ancestor>"
     print("Removed:", key, "(was", oldValue .. ")")
 end)
 
 -- Remove keys by setting to nil
-manager.Data.Player.TempBoost = nil
+manager.Proxy.Player.TempBoost = nil
 -- Output: "Removed: TempBoost (was 10)"
 
-manager.Data.Player.TempBuff = nil
+manager.Proxy.Player.TempBuff = nil
 -- Output: "Removed: TempBuff (was Speed)"
 ```
 
@@ -241,21 +248,21 @@ manager:OnKeyChange({"Config"}, function(key, newValue, oldValue, metadata)
 end)
 
 -- Modify existing key (triggers OnKeyChange)
-manager.Data.Config.Timeout = 60
+manager.Proxy.Config.Timeout = 60
 -- Output: "Timeout modified: 30 → 60"
 
 -- Add new key (does NOT trigger OnKeyChange, triggers OnKeyAdd)
-manager.Data.Config.MaxConnections = 100 -- No output here
+manager.Proxy.Config.MaxConnections = 100 -- No output here
 
 -- Remove key (does NOT trigger OnKeyChange, triggers OnKeyRemove)
-manager.Data.Config.Retries = nil -- No output here
+manager.Proxy.Config.Retries = nil -- No output here
 ```
 
 ---
 
 ## Parent/Child Relationships
 
-### Understanding Source Direction
+### Understanding Diff and OriginPath
 
 ```lua
 local manager = TableManager.new({
@@ -267,29 +274,25 @@ local manager = TableManager.new({
 })
 
 manager:OnValueChange({"Game", "World"}, function(newValue, oldValue, metadata)
-    local direction = metadata.SourceDirection
-    local path = table.concat(metadata.SourcePath, ".")
-    
-    if direction == "self" then
-        print("World table itself changed at:", path)
-    elseif direction == "child" then
-        print("Child of World changed at:", path)
-    elseif direction == "parent" then
-        print("Parent of World changed at:", path)
+    local path = table.concat(metadata.OriginPath, ".")
+
+    if metadata.Diff then
+        print("Direct change at:", path)
+    else
+        print("Descendant change originated at:", path)
     end
 end)
 
--- Scenario 1: Child change
-manager.Data.Game.World.Region.Zone = 2
--- Output: "Child of World changed at: Game.World.Region.Zone"
+-- Scenario 1: Descendant change under Game.World
+manager.Proxy.Game.World.Region.Zone = 2
+-- Output: "Descendant change originated at: Game.World.Region.Zone"
 
--- Scenario 2: Self change
-manager.Data.Game.World = { Region = { Zone = 3 } }
--- Output: "World table itself changed at: Game.World"
+-- Scenario 2: Direct replacement at Game.World
+manager.Proxy.Game.World = { Region = { Zone = 3 } }
+-- Output: "Direct change at: Game.World"
 
--- Scenario 3: Parent change
-manager.Data.Game = { World = { Region = { Zone = 4 } } }
--- Output: "Parent of World changed at: Game"
+-- Note: listeners registered at {"Game", "World"} only fire for that path and
+-- descendant-origin changes, not unrelated parent-only replacements.
 ```
 
 ### Cascading Listeners
@@ -305,21 +308,21 @@ local manager = TableManager.new({
 
 -- Listener 1: Root level
 manager:OnValueChange({}, function(newValue, oldValue, metadata)
-    print("[ROOT]", table.concat(metadata.SourcePath, "."))
+    print("[ROOT]", table.concat(metadata.OriginPath, "."))
 end)
 
 -- Listener 2: App level
 manager:OnValueChange({"App"}, function(newValue, oldValue, metadata)
-    print("[APP]", table.concat(metadata.SourcePath, "."))
+    print("[APP]", table.concat(metadata.OriginPath, "."))
 end)
 
 -- Listener 3: UI level
 manager:OnValueChange({"App", "UI"}, function(newValue, oldValue, metadata)
-    print("[UI]", table.concat(metadata.SourcePath, "."))
+    print("[UI]", table.concat(metadata.OriginPath, "."))
 end)
 
 -- One change triggers all three listeners!
-manager.Data.App.UI.Menu.Visible = false
+manager.Proxy.App.UI.Menu.Visible = false
 -- Output:
 -- [ROOT] App.UI.Menu.Visible
 -- [APP] App.UI.Menu.Visible
@@ -344,8 +347,8 @@ manager.ValueChanged:Connect(function(path, newValue, oldValue)
     print("Value:", oldValue, "→", newValue)
 end)
 
-manager.Data.Player.Name = "Bob"
-manager.Data.Settings.Volume = 100
+manager.Proxy.Player.Name = "Bob"
+manager.Proxy.Settings.Volume = 100
 -- Both trigger the global listener
 ```
 
@@ -359,7 +362,7 @@ manager.KeyAdded:Connect(function(path, key, value)
     print("Value:", value)
 end)
 
-manager.Data.Player.Level = 1
+manager.Proxy.Player.Level = 1
 -- Output: "New key added: Level"
 --         "At path: Player"
 --         "Value: 1"
@@ -408,8 +411,8 @@ local health = manager:Get({"Player", "Stats", "Health"}) -- 100
 -- Get returns nil for non-existent paths
 local missing = manager:Get({"NonExistent", "Path"}) -- nil
 
--- Get root (returns proxy)
-local root = manager:Get({}) -- Same as manager.Data
+-- Get root (returns managed raw table)
+local root = manager:Get({}) -- Same as manager.Raw
 ```
 
 ### Using Set Method
@@ -420,8 +423,8 @@ manager:Set({"Player", "Name"}, "Bob")
 manager:Set({"Player", "Stats", "Health"}, 80)
 
 -- Equivalent to:
--- manager.Data.Player.Name = "Bob"
--- manager.Data.Player.Stats.Health = 80
+-- manager.Proxy.Player.Name = "Bob"
+-- manager.Proxy.Player.Stats.Health = 80
 
 -- Set triggers all normal events
 manager:OnValueChange({"Player", "Name"}, function(newValue, oldValue)
@@ -448,59 +451,14 @@ watchStat("Health")
 watchStat("Mana")
 
 -- Both are now watched
-manager.Data.Player.Stats.Health = 75
-manager.Data.Player.Stats.Mana = 40
+manager.Proxy.Player.Stats.Health = 75
+manager.Proxy.Player.Stats.Mana = 40
 ```
 
 ---
 
-## Fusion Integration
-
-### Creating Fusion State
-
-```lua
-local Fusion = require(ReplicatedStorage.Packages.Fusion)
-local scope = Fusion.scoped(Fusion)
-
-local manager = TableManager.new({
-    Player = { Health = 100, Mana = 50 }
-})
-
--- Create Fusion Values that auto-sync
-local healthValue = manager:ToFusionState({"Player", "Health"}, scope)
-local manaValue = manager:ToFusionState({"Player", "Mana"}, scope)
-
--- Use in Fusion UI
-local healthBar = scope:New "Frame" {
-    Size = scope:Computed(function(use)
-        local health = use(healthValue)
-        return UDim2.new(health / 100, 0, 1, 0)
-    end)
-}
-
--- When TableManager data changes, Fusion UI updates automatically!
-manager.Data.Player.Health = 80 -- healthBar resizes
-```
-
-### Bidirectional Binding
-
-```lua
-local manager = TableManager.new({
-    Settings = { Volume = 75 }
-})
-
-local volumeValue = manager:ToFusionState({"Settings", "Volume"}, scope)
-
--- Fusion → TableManager
-local slider = scope:New "TextButton" {
-    [scope:Out "Activated"] = function()
-        volumeValue:set(100) -- Updates both Fusion AND TableManager
-    end
-}
-
--- TableManager → Fusion (automatic)
-manager.Data.Settings.Volume = 50 -- volumeValue updates automatically
-```
+> Note: Fusion helper APIs are not part of this package's current public API.
+> Keep integration logic in application code using signals/listeners from this module.
 
 ---
 
@@ -554,11 +512,11 @@ manager:OnValueChange({"Player", "Level"}, function(newValue, oldValue, metadata
     -- Validate level is within bounds
     if newValue < 1 or newValue > 100 then
         warn("Invalid level:", newValue, "- reverting to", oldValue)
-        manager.Data.Player.Level = oldValue
+        manager.Proxy.Player.Level = oldValue
     end
 end)
 
-manager.Data.Player.Level = 150 -- Automatically reverted to previous value
+manager.Proxy.Player.Level = 150 -- Automatically reverted to previous value
 ```
 
 ### Auto-Save System
@@ -620,7 +578,7 @@ updateTotal() -- Initial calculation
 
 ```lua
 -- Use generic for iteration
-for key, value in manager.Data.config do
+for key, value in manager.Proxy.config do
     print(key, value)
 end
 
@@ -644,21 +602,18 @@ local manager: TableManager<MyData> = TableManager.new({...})
 
 ```lua
 -- Don't use pairs() or ipairs() on proxies
-for k, v in pairs(manager.Data) do end -- ❌ Won't work!
+for k, v in pairs(manager.Proxy) do end -- ❌ Won't work!
 
 -- Don't use table.* functions on proxies
-table.insert(manager.Data.items, "value") -- ❌ Won't work!
-table.remove(manager.Data.items) -- ❌ Won't work!
+table.insert(manager.Proxy.items, "value") -- ❌ Won't work!
+table.remove(manager.Proxy.items) -- ❌ Won't work!
 
 -- Don't compare proxy == original directly
-if manager.Data == originalTable then end -- ❌ Won't work!
--- Use: manager._proxyManager:Equals(manager.Data, originalTable)
+if manager.Proxy == originalTable then end -- ❌ Won't work!
+-- Use: manager._proxyManager:Equals(manager.Proxy, originalTable)
 
 -- Don't set root directly
 manager:Set({}, newTable) -- ❌ Errors!
-
--- Don't forget to disconnect listeners
-manager:OnValueChange({}, callback) -- ❌ Memory leak if never disconnected
 ```
 
 ---
@@ -670,11 +625,10 @@ TableManager provides a powerful, type-safe way to observe and manage nested tab
 - 🎯 **Automatic change detection** at any depth
 - 🔄 **Parent/child relationships** for cascading updates
 - 📡 **Global signals** for cross-cutting concerns
-- 🎨 **Fusion integration** for reactive UI
 - ✅ **Type-safe** with full autocomplete support
 - ⚡ **Performance optimized** with proxy caching
 
 For more examples, see:
-- `Demo.luau` - Interactive demonstration
-- `UnitTests.luau` - Comprehensive test cases
+- `Tests/TableManagerDemo.server.luau` - Interactive demonstration
+- `Tests/TableManager.spec.luau` - Comprehensive test cases
 - `PROXY_USERDATA_NOTES.md` - Technical details about proxy behavior
