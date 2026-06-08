@@ -1,5 +1,6 @@
 --!strict
 --[=[
+	@ignore
 	@class ListenerRegistry
 	
 	Clean implementation with ListenDepth filtering support using a tree structure.
@@ -318,7 +319,7 @@ local function cleanupNode(root: ListenerNode, path: Path, index: number): boole
 end
 
 function ListenerRegistry.new(config: ListenerRegistryConfig?): ListenerRegistry
-	local self = setmetatable({} :: any, ListenerRegistry_MT) :: ListenerRegistry
+	local self: ListenerRegistry = setmetatable({}, ListenerRegistry_MT) :: ListenerRegistry
 	local resolvedConfig = config or {} :: ListenerRegistryConfig
 	local debugMode = if resolvedConfig.DebugMode ~= nil then resolvedConfig.DebugMode else false
 	local fireDeferred = if resolvedConfig.FireDeferred == true then true else false
@@ -425,7 +426,12 @@ end
 	@param path The exact path where listeners should be notified
 	@param eventData The event data to pass to callbacks
 ]=]
-function ListenerRegistry:FireListenersExact(eventType: EventType, path: Path, eventData: EventData)
+function ListenerRegistry.FireListenersExact(
+	self: ListenerRegistry,
+	eventType: EventType,
+	path: Path,
+	eventData: EventData
+)
 	local root = self._listenerTrees[eventType]
 
 	-- Navigate to the exact node for this path
@@ -487,7 +493,7 @@ function ListenerRegistry:FireListenersExact(eventType: EventType, path: Path, e
 	end
 end
 
-function ListenerRegistry:Destroy()
+function ListenerRegistry.Destroy(self: ListenerRegistry)
 	-- Recursively disconnect all listeners in the tree
 	local function destroyNode(node: ListenerNode)
 		for _, listener in node.Listeners do

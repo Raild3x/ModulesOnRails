@@ -13,8 +13,12 @@ classes = ["BaseObject"]
 classes = ["Roam"]
 
 [[classOrder]]
-section = "TableManager"
-classes = ["TableManager", "TableState"]
+section = "Parent Section"
+classes = ["TableManager"]
+
+[[classOrder.items]]
+section = "Child section"
+classes = ["ProxyManager", "ChangeDetector"]
 
 [[classOrder]]
 section = "TableReplicator"

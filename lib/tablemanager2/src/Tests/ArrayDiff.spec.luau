@@ -1,10 +1,8 @@
 --!strict
---[=[
-	@class ArrayDiff.spec
-
+--[[
 	Tests for ArrayDiff.emitDiff — verifies that the LCS-based differ emits
 	replay-faithful events for all combinations of insertions, removals, and sets.
-]=]
+]]
 
 return function(t: tiniest)
 	local ArrayDiff = require("../ArrayDiff")

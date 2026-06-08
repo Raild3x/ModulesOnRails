@@ -1,7 +1,5 @@
 --!strict
---[=[
-	@class ListenerRegistry_new.spec
-	
+--[[
 	Unit tests for ListenerRegistry_new to verify:
 	- Listener registration and disconnection
 	- FireListenersExact (exact path matching)
@@ -9,7 +7,7 @@
 	- Once auto-disconnect
 	- Multiple listeners on same path
 	- Event data structure handling
-]=]
+]]
 
 return function(t: tiniest)
 	local ListenerRegistry = require("../ListenerRegistry")

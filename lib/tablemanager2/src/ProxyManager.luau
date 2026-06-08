@@ -37,24 +37,22 @@
 local PathHelpers = require("./PathHelpers")
 type Path = PathHelpers.Path
 
---[=[
+--[[
 	Weak table mapping proxies to their original tables.
 	This allows proxies to be garbage collected when no longer referenced.
-]=]
+]]
 local PROXY_TO_ORIGINAL = setmetatable({}, { __mode = "k" })
 
---[=[
-	Check if a value is a proxy by looking it up in the weak table.
-]=]
+-- Check if a value is a proxy by looking it up in the weak table.
 local function isProxy(t: any): boolean
 	const valueType = type(t)
 	return (valueType == "table" or valueType == "userdata") and PROXY_TO_ORIGINAL[t] ~= nil
 end
 
---[=[
+--[[
 	Get the original (unwrapped) table from a proxy.
 	If the input is not a proxy, returns it unchanged.
-]=]
+]]
 local function getOriginal<T>(t: T | Proxy<T>): T
 	if isProxy(t) then
 		return PROXY_TO_ORIGINAL[t :: Proxy<any>] :: T
@@ -62,10 +60,10 @@ local function getOriginal<T>(t: T | Proxy<T>): T
 	return t
 end
 
---[=[
+--[[
 	Classify table shape in one pass.
 	Returns whether the table is an array plus its array length when true.
-]=]
+]]
 local function classifyTable(t: { [any]: any }): (boolean, number)
 	if type(t) ~= "table" then
 		return false, 0
@@ -117,11 +115,37 @@ end
 --// Types //--
 
 --[=[
+	@within ProxyManager
+	@type Proxy table & { __proxy: true }
+
 	A proxy wraps a table and intercepts read/write operations.
 ]=]
-export type Proxy<T = { [any]: any }> = T & { __proxy: true }
+type function ProxyFn(T: type)
+	if not T:is("table") then
+		return T
+	end
+
+	for k, v in T:properties() do
+		if v.read and v.read:is("table") then
+			T:setproperty(k, ProxyFn(v.read))
+		end
+	end
+
+	T:setproperty(types.singleton("__PROXY__"), types.singleton(true))
+	return T
+end
+export type Proxy<T = { [any]: any }> = ProxyFn<T>
 
 --[=[
+	@within ProxyManager
+	@interface ProxyMetadata
+	Original { [any]: any } -- The unwrapped original table
+	Parent any? -- The original (unwrapped) parent table; nil for the root proxy
+	Key any? -- The key under which this table lives in its parent; nil for the root proxy
+	IsArray boolean -- Whether this table is treated as an array
+	ArrayLength number -- Cached length for arrays
+	RootTable { [any]: any } -- Reference to the root table for snapshot capture
+
 	Metadata stored for each proxy.
 ]=]
 export type ProxyMetadata<T = { [any]: any }> = {
@@ -133,17 +157,11 @@ export type ProxyMetadata<T = { [any]: any }> = {
 	RootTable: { [any]: any }, -- Reference to the root table for snapshot capture
 }
 
---[=[
-	ChangeDetector instance type (minimal interface).
-]=]
 export type ChangeDetector = {
 	CaptureSnapshot: (self: ChangeDetector, value: any, path: Path) -> (),
 	CheckForChanges: (self: ChangeDetector, value: any) -> (),
 }
 
---[=[
-	The ProxyManager instance type.
-]=]
 export type ProxyManager = {
 	IsProxy: (self: ProxyManager, t: any) -> boolean,
 	GetOriginal: <T>(self: ProxyManager, t: Proxy<T> | T) -> T,
@@ -181,7 +199,7 @@ export type ProxyManager = {
 
 	-- Private fields
 	_proxyMeta: { [any]: ProxyMetadata<any> },
-	_originalToProxy: { [any]: Proxy<any> },
+	_originalToProxy: { [any]: Proxy },
 	_proxiesByParent: { [any]: { [any]: true } }, -- parentOriginal → set of child proxies
 	_changeDetector: ChangeDetector?,
 	_onArrayInserted: ((path: Path, index: number, newValue: any) -> ())?,
@@ -204,7 +222,7 @@ const ProxyManager_MT = { __index = ProxyManager }
 	Creates a new ProxyManager instance.
 ]=]
 function ProxyManager.new(): ProxyManager
-	const self = setmetatable({} :: any, ProxyManager_MT) :: ProxyManager
+	const self: ProxyManager = setmetatable({}, ProxyManager_MT) :: any
 
 	self._proxyMeta = {}
 	self._originalToProxy = {}
@@ -356,7 +374,7 @@ function ProxyManager.new(): ProxyManager
 				-- Wrap table values in proxies
 				if type(nextValue) == "table" then
 					if self._originalToProxy[nextValue] then
-						return nextKey, self._originalToProxy[nextValue]
+						return nextKey, self._originalToProxy[nextValue] :: any
 					end
 
 					local nestedProxy = self:CreateProxy(nextValue, nil, meta.RootTable, meta.Original, nextKey)
@@ -451,22 +469,22 @@ function ProxyManager:SetDuplicateTableWriteCallback(
 end
 
 --- Check if a value is a proxy.
-function ProxyManager:IsProxy(t: any): boolean
+function ProxyManager.IsProxy(self: ProxyManager, t: any): boolean
 	return isProxy(t)
 end
 
 --- Get the original (unwrapped) table from a proxy. If the input is not a proxy, returns it unchanged.
-function ProxyManager:GetOriginal<T>(t: Proxy<T> | T): T
+function ProxyManager.GetOriginal<T>(self: ProxyManager, t: Proxy<T> | T): T
 	return getOriginal(t)
 end
 
 --- Get the metadata for a proxy.
-function ProxyManager:GetMetadata<T>(proxy: Proxy<T>): ProxyMetadata<T>
+function ProxyManager.GetMetadata<T>(self: ProxyManager, proxy: Proxy<T>): ProxyMetadata<T>
 	return self._proxyMeta[proxy]
 end
 
 --- Get the live path from root to this proxy by walking the Parent chain.
-function ProxyManager:GetPath<T>(proxy: Proxy<T>): Path?
+function ProxyManager.GetPath<T>(self: ProxyManager, proxy: Proxy<T>): Path?
 	if not self._proxyMeta[proxy] then
 		return nil
 	end
@@ -474,15 +492,15 @@ function ProxyManager:GetPath<T>(proxy: Proxy<T>): Path?
 end
 
 --- Get the proxy for an original table, if it exists.
-function ProxyManager:GetProxyFromOriginal<T>(original: T): Proxy<T>?
-	return self._originalToProxy[original]
+function ProxyManager.GetProxyFromOriginal<T>(self: ProxyManager, original: T): Proxy<T>?
+	return self._originalToProxy[original] :: any
 end
 
 --[=[
 	Walk the Parent chain from `proxy` up to the root and return the assembled path.
 	O(depth). Returns a fresh table each call — safe to mutate.
 ]=]
-function ProxyManager:_GetLivePath(proxy: Proxy<any>): Path
+function ProxyManager._GetLivePath(self: ProxyManager, proxy: Proxy<any>): Path
 	const meta = self._proxyMeta[proxy]
 	if meta == nil or meta.Parent == nil then
 		return {}
@@ -509,12 +527,13 @@ end
 	Create a new proxy for a table at the given path.
 	
 	@param original -- The original table to wrap
-	@param path -- The path from root to this table
+	@param _path -- Optional path for metadata (not used in this implementation but can be helpful for debugging)
 	@param rootTable -- Optional root table reference (defaults to original for root proxy)
 	@param parentOriginal -- The unwrapped parent table (nil for root proxy)
 	@param key -- The key under which `original` lives in its parent (nil for root proxy)
 ]=]
-function ProxyManager:CreateProxy<T>(
+function ProxyManager.CreateProxy<T>(
+	self: ProxyManager,
 	original: T,
 	_path: Path?,
 	rootTable: { [any]: any }?,
@@ -570,7 +589,7 @@ end
 --[=[
 	Reparent an existing proxy to a new parent/key without changing its original table.
 ]=]
-function ProxyManager:ReparentProxy(proxy: Proxy<any>, newParentOriginal: any?, newKey: any?)
+function ProxyManager.ReparentProxy(self: ProxyManager, proxy: Proxy<any>, newParentOriginal: any?, newKey: any?)
 	const meta = self._proxyMeta[proxy]
 	if meta == nil then
 		error("Proxy metadata not found - proxy may have been destroyed")
@@ -606,7 +625,7 @@ end
 	`delta = -1` after `table.remove(array, index)` (passing `index + 1`
 	as `fromIndex` for removes so the removed slot itself is not shifted).
 ]=]
-function ProxyManager:ShiftKeys(arrayOriginal: { [any]: any }, fromIndex: number, delta: number)
+function ProxyManager.ShiftKeys(self: ProxyManager, arrayOriginal: { [any]: any }, fromIndex: number, delta: number)
 	const children = self._proxiesByParent[arrayOriginal]
 	if children == nil then
 		return
@@ -622,7 +641,7 @@ end
 --[=[
 	Clean up all proxies and metadata.
 ]=]
-function ProxyManager:Destroy()
+function ProxyManager.Destroy(self: ProxyManager)
 	-- Clear weak table entries (they'll be GC'd automatically, but we can help)
 	for proxy in self._proxyMeta do
 		PROXY_TO_ORIGINAL[proxy] = nil

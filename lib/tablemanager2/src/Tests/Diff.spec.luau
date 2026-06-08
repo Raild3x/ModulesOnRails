@@ -1,9 +1,7 @@
 --!strict
---[=[
-	@class Diff.spec
-
+--[[
 	Unit tests for Diff module snapshot boundaries and malformed snapshot handling.
-]=]
+]]
 
 return function(t: tiniest)
 	local Diff = require("../Diff")

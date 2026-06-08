@@ -1,7 +1,5 @@
 --!strict
---[=[
-	@class ProxyManager_new.spec
-	
+--[[
 	Unit tests for ProxyManager_new to verify:
 	- Proxy creation for nested structures
 	- Metadata tracking (ArrayLength, Original)
@@ -13,7 +11,7 @@
 	Note: These are UNIT tests for ProxyManager in isolation.
 	Full ChangeDetector integration (auto-triggering, snapshots, etc.) 
 	is tested at the TableManager integration level.
-]=]
+]]
 
 return function(t: tiniest)
 	local ProxyManager = require("../ProxyManager")

@@ -80,8 +80,8 @@
 ]=]
 
 --// Imports //--
-const Signal = require("../Signal")
 const T = require("../T")
+const Signal = require("../Signal")
 const ProxyManagerModule = require("./ProxyManager")
 const ListenerRegistryModule = require("./ListenerRegistry")
 const ChangeDetectorModule = require("./ChangeDetector")
@@ -225,11 +225,11 @@ const TableManager_MT = { __index = TableManager }
 -- Re-export T so schema users do not need to import it separately.
 TableManager.T = T
 
---[=[
+--[[
 	Creates a synthetic snapshot for array operations and ForceNotify.
 	These operations bypass normal ChangeDetector flow, so we create a compatible
 	Snapshot payload using Diff's canonical snapshot builder.
-]=]
+]]
 const function createSyntheticSnapshot(rootTable: any, path: Path, value: any)
 	return {
 		RootTable = rootTable,
@@ -521,12 +521,11 @@ const function validateWrite(self: TM_Internal, path: Path, value: any): (boolea
 	return false, message
 end
 
---[=[
-	@private
+--[[
 	Builds the `Emit` interface for a single array path, wiring the three
 	callbacks to fire `ArrayRemoved` / `ArrayInserted` / `ArraySet` signals,
 	exact-path listeners, and ancestor callbacks in the correct order.
-]=]
+]]
 const function makeEmit(self: TM_Internal, path: Path)
 	return {
 		removed = function(index: number, oldValue: any)
@@ -563,6 +562,15 @@ const function makeEmit(self: TM_Internal, path: Path)
 	}
 end
 
+--[=[
+	@unreleased
+	Utility for peeking at the current value of a proxy without triggering any
+	side effects. Used internally for array operations to get old values.
+]=]
+function TableManager.peek<T>(proxy: Proxy<T> | T): T
+	error("TableManager.peek() is not yet implemented. This is a placeholder.")
+end
+
 -----------------------------------------------------------------------------------
 --// Constructor //--
 -----------------------------------------------------------------------------------
@@ -578,7 +586,7 @@ end
 	@return TableManager -- The newly created TableManager instance.
 ]=]
 function TableManager.new<T>(initialData: T & { [any]: any }, config: TableManagerConfig?): TableManager<T>
-	const self = setmetatable({} :: any, TableManager_MT) :: TM_Internal<T & { [any]: any }>
+	const self = (setmetatable({}, TableManager_MT) :: any) :: TM_Internal<T & { [any]: any }>
 	const resolvedConfig = config or {} :: { [string]: any? }
 	const duplicateReferenceMode: DuplicateReferenceMode = resolvedConfig.DuplicateReferenceMode or "error"
 

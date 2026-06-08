@@ -1,5 +1,6 @@
 --!strict
 --[=[
+	@ignore
 	@class ArrayDiff
 
 	Emits `ArrayRemoved` / `ArrayInserted` / `ArraySet` events from an old array to a new one.
@@ -53,6 +54,9 @@ type Op = {
 local ArrayDiff = {}
 
 --[=[
+	@within ArrayDiff
+	@function buildLCS
+
 	Builds the LCS (Longest Common Subsequence) DP table for `old` and `new`.
 ]=]
 const function buildLCS(old: { any }, new: { any }): { { number } }
@@ -83,6 +87,9 @@ const function buildLCS(old: { any }, new: { any }): { { number } }
 end
 
 --[=[
+	@within ArrayDiff
+	@function backtrack
+
 	Backtracks through the LCS DP table and returns ops in **forward** order.
 ]=]
 const function backtrack(old: { any }, new: { any }, dp: { { number } }): { Op }
@@ -115,12 +122,15 @@ const function backtrack(old: { any }, new: { any }, dp: { { number } }): { Op }
 end
 
 --[=[
+	@within ArrayDiff
+	@function emitDiff
+
 	Diffs `old` against `new` and fires `emit` callbacks with replay-faithful indices.
 
-	@param old -- The array before changes.
-	@param new -- The array after changes.
-	@param emit -- Callback table: `removed`, `inserted`, `set`.
-	@param setMode -- When true, fuses adjacent remove+insert at the same live index
+	@param old {any} -- The array before changes.
+	@param new {any} -- The array after changes.
+	@param emit Emit -- Callback table: `removed`, `inserted`, `set`.
+	@param setMode boolean -- When true, fuses adjacent remove+insert at the same live index
 	               (with differing values) into a single `set` call.
 ]=]
 function ArrayDiff.emitDiff(old: { any }, new: { any }, emit: Emit, setMode: boolean)

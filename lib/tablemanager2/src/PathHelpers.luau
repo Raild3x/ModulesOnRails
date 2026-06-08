@@ -1,5 +1,6 @@
 --!strict
 --[=[
+	@ignore
 	@class PathHelpers
 	
 	Utility functions for working with listener paths in nested table structures.
@@ -12,18 +13,23 @@
 --// Types //--
 
 --[=[
-    Defines a path to a value in the nested table structure.
-    Paths are represented as arrays of keys, where each key can be any Lua type (string, number, boolean, etc.).
-    
-    For example, the path to access `Data.player.level` would be represented as `{"player", "level"}`.
-    
-    Note: Using `any` here is intentional and necessary since Lua tables support any type as a key.
+	@within PathHelpers
+	@type Path { any } | string
+	Defines a path to a value in the nested table structure.
+	Paths are represented as arrays of keys, where each key can be any Lua type (string, number, boolean, etc.).
+
+	For example, the path to access `Data.player.level` would be represented as `{"player", "level"}`.
+
+	Note: Using `any` here is intentional and necessary since Lua tables support any type as a key.
 ]=]
 export type Path = { any }
 
 export type DataChangeSource = "self" | "child" | "parent"
 
 --[=[
+	@within PathHelpers
+	@type ListenerCallback (...any) -> ()
+
 	A listener callback function that receives change notifications.
 	
 	Note: Using `any` for parameters is intentional since callbacks receive different
@@ -31,18 +37,18 @@ export type DataChangeSource = "self" | "child" | "parent"
 ]=]
 export type ListenerCallback = (...any) -> ()
 
---[=[
+--[[
 	Internal structure for storing listeners at a specific path.
 	Contains an array of callbacks under the special `__callbacks` key.
-]=]
+]]
 export type ListenerTable = {
 	__callbacks: { ListenerCallback }?,
 	[any]: ListenerTable?,
 }
 
---[=[
+--[[
 	Root storage structure for all listeners of a specific event type.
-]=]
+]]
 export type ListenerRoot = {
 	[any]: ListenerTable,
 }
@@ -260,7 +266,7 @@ function PathHelpers.ForEachMatchingListener(
 	-- These listeners will receive relation "parent"
 	local function checkChildPaths(currentTable: ListenerRoot | ListenerTable, currentPath: Path)
 		-- Check each key in the current table (except __callbacks)
-		for key, value in pairs(currentTable) do
+		for key, value in currentTable do
 			if key ~= "__callbacks" and type(value) == "table" then
 				local childPath = table.clone(currentPath)
 				table.insert(childPath, key)

@@ -1,5 +1,6 @@
 --!strict
 --[=[
+	@ignore
 	@class ArrayBatchRecorder
 
 	Records in-place array operations during a `TableManager` batch using stable element
@@ -74,6 +75,12 @@ type Emit = ArrayDiff.Emit
 --// Types //--
 
 --[=[
+	@within ArrayBatchRecorder
+	@interface MoveMetadata
+	.moveId string -- Shared id string linking the remove and insert
+	.fromIndex number -- Final position of the Remove in the flush sequence
+	.toIndex number -- Final position of the Insert in the flush sequence
+
 	Optional metadata attached to an insert/remove pair that constitutes a move.
 	Listeners that do not read this field see a normal remove + insert.
 ]=]
@@ -129,9 +136,7 @@ export type ArrayBatchRecorder = {
 --// Helpers //--
 --------------------------------------------------------------------------------
 
---[=[
-	Serializes a path to a stable string key for use as a table key.
-]=]
+-- Serializes a path to a stable string key for use as a table key.
 local function serializePath(path: Path): string
 	if #path == 0 then
 		return "__root__"
@@ -143,9 +148,7 @@ local function serializePath(path: Path): string
 	return table.concat(parts, "\0")
 end
 
---[=[
-	Returns a shallow copy of an array's values (for Branch A startCopy).
-]=]
+-- Returns a shallow copy of an array's values (for Branch A startCopy).
 local function shallowCopyArray(array: { any }): { any }
 	const copy = table.create(#array)
 	for i = 1, #array do

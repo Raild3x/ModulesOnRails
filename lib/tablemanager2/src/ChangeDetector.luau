@@ -157,6 +157,13 @@ local PathHelpers = require("./PathHelpers")
 type Path = PathHelpers.Path
 
 --[=[
+	@within ChangeDetector
+	@interface Snapshot
+	.RootTable { [any]: any } -- Reference to the root table being tracked (for ancestor navigation)
+	.Path Path -- The path where the snapshot was captured (e.g., {"Player", "Stats"})
+	.Data Diff.Snapshot -- The Diff.Snapshot of the value at the captured path
+	.Timestamp number -- Optional timestamp for debugging
+
 	A snapshot object that captures the state of a table at a specific point in time.
 	This object can be passed to CheckForChanges() to detect changes at any point
 	in the table's history.
@@ -218,6 +225,13 @@ export type ChangeDetector = {
 }
 
 --[=[
+	@within ChangeDetector
+	@interface ChangeMetadata
+	Diff Diff.DiffNode -- metadata provided to callbacks for rich context on changes.
+	OriginPath Path -- The path where the assignment operation occurred (captured path)
+	OriginDiff Diff.DiffNode -- The root diff node of the assignment operation (ALWAYS present)
+	Snapshot Snapshot -- The snapshot object used for this comparison (provides full context)
+
 	Metadata about a detected change, providing rich context to callbacks.
 	
 	This structure is designed to clearly distinguish between leaf changes (individual
@@ -348,20 +362,17 @@ function ChangeDetector.new(
 	callbacks.OnKeyChanged = callbacks.OnKeyChanged or function() end
 	callbacks.OnValueChanged = callbacks.OnValueChanged or function() end
 
-	local self = setmetatable(
-		{
-			_callbacks = callbacks,
-			_fireDescendantChangedNodes = callbacks.FireDescendantChangedNodes ~= false,
-			_debugMode = debugMode or false,
-			_suspended = false,
-			-- Sentinel snapshot: a fixed table that CaptureSnapshot returns when
-			-- suspended. CheckForChanges recognises it and returns immediately.
-			_sentinelSnapshot = {} :: any,
-		} :: any,
-		ChangeDetector_MT
-	) :: ChangeDetector
+	local self = setmetatable({
+		_callbacks = callbacks,
+		_fireDescendantChangedNodes = callbacks.FireDescendantChangedNodes ~= false,
+		_debugMode = debugMode or false,
+		_suspended = false,
+		-- Sentinel snapshot: a fixed table that CaptureSnapshot returns when
+		-- suspended. CheckForChanges recognises it and returns immediately.
+		_sentinelSnapshot = {} :: any,
+	}, ChangeDetector_MT) :: any
 
-	return self
+	return self :: ChangeDetector
 end
 
 --------------------------------------------------------------------------------
@@ -727,10 +738,10 @@ end
 --// Private Methods //--
 --------------------------------------------------------------------------------
 
---[=[
+--[[
 	Helper to fire callbacks for a single node in the diff tree.
 	Encapsulates the common callback firing logic to reduce duplication.
-]=]
+]]
 local function fireNodeCallbacks(
 	callbacks: any,
 	basePath: Path,
