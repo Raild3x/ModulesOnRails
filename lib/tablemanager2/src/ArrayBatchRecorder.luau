@@ -68,6 +68,7 @@
 
 local PathHelpers = require(script.Parent.PathHelpers)
 type Path = PathHelpers.Path
+type PathArray = PathHelpers.PathArray
 
 local ArrayDiff = require(script.Parent.ArrayDiff)
 type Emit = ArrayDiff.Emit
@@ -127,6 +128,8 @@ export type ArrayBatchRecorder = {
 	) -> (),
 	Destroy: (self: ArrayBatchRecorder) -> (),
 
+	_getOrCreateLog: (self: ArrayBatchRecorder, path: Path, array: { any }?) -> ArrayLog, -- Private helper
+	_computeLiveIds: (self: ArrayBatchRecorder, log: ArrayLog) -> { number }, -- Private helper
 	-- Private
 	_logs: { [string]: ArrayLog }, -- keyed by serialized path
 	_globalNextId: number, -- global id counter shared across all tracked arrays
@@ -168,20 +171,17 @@ local ArrayBatchRecorder_MT = { __index = ArrayBatchRecorder }
 	Creates a new `ArrayBatchRecorder` instance.
 ]=]
 function ArrayBatchRecorder.new(): ArrayBatchRecorder
-	return setmetatable(
-		{
-			_logs = {},
-			_globalNextId = 1,
-		} :: any,
-		ArrayBatchRecorder_MT
-	) :: ArrayBatchRecorder
+	return setmetatable({
+		_logs = {},
+		_globalNextId = 1,
+	}, ArrayBatchRecorder_MT) :: any
 end
 
 --[=[
 	Gets the log for a path, creating it if it does not exist.
 	Private helper.
 ]=]
-function ArrayBatchRecorder:_getOrCreateLog(path: Path, array: { any }?): ArrayLog
+function ArrayBatchRecorder._getOrCreateLog(self: ArrayBatchRecorder, path: Path, array: { any }?): ArrayLog
 	const key = serializePath(path)
 	local log = self._logs[key]
 	if not log then
@@ -208,7 +208,7 @@ end
 
 	Assigns stable ids to all current elements and captures the start state.
 ]=]
-function ArrayBatchRecorder:StartTracking(path: Path, array: { any })
+function ArrayBatchRecorder.StartTracking(self: ArrayBatchRecorder, path: Path, array: { any })
 	const key = serializePath(path)
 	if self._logs[key] then
 		return -- Already tracking; idempotent
@@ -236,7 +236,7 @@ end
 	Records an insertion at `index` with `value`.
 	The inserted element receives a fresh stable id.
 ]=]
-function ArrayBatchRecorder:RecordInsert(path: Path, index: number, value: any)
+function ArrayBatchRecorder.RecordInsert(self: ArrayBatchRecorder, path: PathArray, index: number, value: any)
 	const log = self:_getOrCreateLog(path)
 
 	-- Assign a fresh id for the new element
@@ -244,7 +244,7 @@ function ArrayBatchRecorder:RecordInsert(path: Path, index: number, value: any)
 	self._globalNextId += 1
 
 	table.insert(log.ops, {
-		type = "insert",
+		type = "insert" :: "insert",
 		elementId = newId,
 		index = index,
 		value = value,
@@ -270,7 +270,7 @@ function ArrayBatchRecorder:RecordRemove(path: Path, index: number)
 	end
 
 	table.insert(log.ops, {
-		type = "remove",
+		type = "remove" :: "remove",
 		elementId = elementId,
 		index = index,
 		value = nil,
@@ -294,7 +294,7 @@ function ArrayBatchRecorder:RecordSet(path: Path, index: number, newValue: any, 
 	end
 
 	table.insert(log.ops, {
-		type = "set",
+		type = "set" :: "set",
 		elementId = elementId,
 		index = index,
 		value = newValue,
@@ -306,7 +306,7 @@ end
 	Marks the array at `path` as poisoned. This forces Branch A (LCS snapshot diff)
 	at flush time. Call this when a direct numeric index assignment is detected.
 ]=]
-function ArrayBatchRecorder:MarkPoisoned(path: Path)
+function ArrayBatchRecorder.MarkPoisoned(self: ArrayBatchRecorder, path: Path)
 	const key = serializePath(path)
 	const log = self._logs[key]
 	if log then
@@ -319,7 +319,7 @@ end
 --[=[
 	Returns the `ArrayLog` for `path`, or `nil` if not tracked.
 ]=]
-function ArrayBatchRecorder:GetLog(path: Path): ArrayLog?
+function ArrayBatchRecorder.GetLog(self: ArrayBatchRecorder, path: Path): ArrayLog?
 	return self._logs[serializePath(path)]
 end
 
@@ -327,7 +327,7 @@ end
 	Returns the full log table, keyed by serialized path string.
 	Iterate with `for key, log in recorder:GetAllLogs() do`.
 ]=]
-function ArrayBatchRecorder:GetAllLogs(): { [string]: ArrayLog }
+function ArrayBatchRecorder.GetAllLogs(self: ArrayBatchRecorder): { [string]: ArrayLog }
 	return self._logs
 end
 
@@ -343,7 +343,13 @@ end
 	`honorIntent`: when `true`, a `RecordSet` op always fires `set` even if net
 	old == net new. When `false`, a no-change set is suppressed.
 ]=]
-function ArrayBatchRecorder:Coalesce(log: ArrayLog, currentArray: { any }, emit: Emit, honorIntent: boolean)
+function ArrayBatchRecorder.Coalesce(
+	self: ArrayBatchRecorder,
+	log: ArrayLog,
+	currentArray: { any },
+	emit: Emit,
+	honorIntent: boolean
+)
 	-- ── Step 1: replay the op log to get the final live id sequence ──────────
 
 	const finalIds = self:_computeLiveIds(log)
@@ -479,7 +485,7 @@ function ArrayBatchRecorder:Coalesce(log: ArrayLog, currentArray: { any }, emit:
 			-- Use startIndex as sort key for removals (they no longer have a final index)
 			table.insert(pending, {
 				finalIndex = removedInfo and removedInfo.startIndex or 0,
-				kind = "remove",
+				kind = "remove" :: "remove",
 				id = id,
 				value = rec.startValue,
 				oldValue = nil,
@@ -493,7 +499,7 @@ function ArrayBatchRecorder:Coalesce(log: ArrayLog, currentArray: { any }, emit:
 			const moveLink = moveLinks[id]
 			table.insert(pending, {
 				finalIndex = finalIndex,
-				kind = "insert",
+				kind = "insert" :: "insert",
 				id = id,
 				value = rec.lastNew,
 				oldValue = nil,
@@ -510,7 +516,7 @@ function ArrayBatchRecorder:Coalesce(log: ArrayLog, currentArray: { any }, emit:
 				const finalIndex = idToFinalIndex[id] or 0
 				table.insert(pending, {
 					finalIndex = finalIndex,
-					kind = "set",
+					kind = "set" :: "set",
 					id = id,
 					value = rec.lastNew,
 					oldValue = rec.firstOld,
@@ -524,7 +530,7 @@ function ArrayBatchRecorder:Coalesce(log: ArrayLog, currentArray: { any }, emit:
 	-- Sort by final index so events are emitted in ascending position order.
 	-- Removals use their start index as sort key (they're interleaved into
 	-- the flush sequence based on where they were).
-	table.sort(pending, function(a, b)
+	table.sort(pending, function(a: any, b: any)
 		return a.finalIndex < b.finalIndex
 	end)
 
@@ -557,7 +563,7 @@ end
 	in the same order as the current array). Used internally to resolve stable
 	ids to their current index positions.
 ]=]
-function ArrayBatchRecorder:_computeLiveIds(log: ArrayLog): { number }
+function ArrayBatchRecorder._computeLiveIds(self: ArrayBatchRecorder, log: ArrayLog): { number }
 	-- Start from the id sequence at batch start
 	const liveIds: { number } = {}
 	for i = 1, #log.startCopy do

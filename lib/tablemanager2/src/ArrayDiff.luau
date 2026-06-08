@@ -43,7 +43,7 @@ export type Emit = {
 
 -- Op kinds collected during LCS backtrack, in forward order.
 type Op = {
-	kind: string, -- "keep" | "remove" | "insert"
+	kind: "keep" | "remove" | "insert",
 	value: any,
 }
 
@@ -61,7 +61,7 @@ local ArrayDiff = {}
 ]=]
 const function buildLCS(old: { any }, new: { any }): { { number } }
 	const n, m = #old, #new
-	const dp = table.create(n + 1)
+	const dp: { { number } } = table.create(n + 1) :: any
 
 	for i = 0, n do
 		dp[i + 1] = table.create(m + 1, 0)
@@ -69,8 +69,8 @@ const function buildLCS(old: { any }, new: { any }): { { number } }
 
 	for i = 1, n do
 		const oldVal = old[i]
-		const rowAbove = dp[i]
-		const rowHere = dp[i + 1]
+		const rowAbove: { any } = dp[i]
+		const rowHere: { any } = dp[i + 1]
 
 		for j = 1, m do
 			if oldVal == new[j] then
@@ -99,21 +99,21 @@ const function backtrack(old: { any }, new: { any }, dp: { { number } }): { Op }
 
 	while i > 0 or j > 0 do
 		if i > 0 and j > 0 and old[i] == new[j] then
-			table.insert(reversed, { kind = "keep", value = old[i] })
+			table.insert(reversed, { kind = "keep" :: "keep", value = old[i] })
 			i -= 1
 			j -= 1
 		elseif j > 0 and (i == 0 or dp[i + 1][j] >= dp[i][j + 1]) then
 			-- new[j] is an insertion
-			table.insert(reversed, { kind = "insert", value = new[j] })
+			table.insert(reversed, { kind = "insert" :: "insert", value = new[j] })
 			j -= 1
 		else
 			-- old[i] is a removal
-			table.insert(reversed, { kind = "remove", value = old[i] })
+			table.insert(reversed, { kind = "remove" :: "remove", value = old[i] })
 			i -= 1
 		end
 	end
 
-	const fwd: { Op } = table.create(#reversed)
+	const fwd: { Op } = table.create(#reversed) :: any
 	for k = #reversed, 1, -1 do
 		fwd[#fwd + 1] = reversed[k]
 	end
