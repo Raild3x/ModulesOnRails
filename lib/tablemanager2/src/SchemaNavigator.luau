@@ -17,18 +17,13 @@ export type CheckMeta =
 	| { kind: "optional", innerCheck: Check }
 	| { kind: "array", valueCheck: Check }
 
-export type SchemaNavigator = {
-	Navigate: (schema: Check, path: Path) -> Check?,
-	Validate: (schema: Check, path: Path, value: any) -> (boolean, string?),
-}
-
 const SchemaNavigator = {}
 
-local function getMeta(check: Check): CheckMeta?
+const function getMeta(check: Check): CheckMeta?
 	return T.GetMeta(check) :: any
 end
 
-local function unwrapOptionalForTraversal(check: Check): Check
+const function unwrapOptionalForTraversal(check: Check): Check
 	local current = check
 	while true do
 		const meta = getMeta(current)
