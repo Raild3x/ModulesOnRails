@@ -16,7 +16,7 @@ return function(t: tiniest)
 	local describe = t.describe
 	local expect = t.expect
 
-	local function fireAndFlush(registry, eventType, path, eventData)
+	local function fireAndFlush(registry: any, eventType, path, eventData)
 		registry:FireListenersExact(eventType, path, eventData)
 		task.wait()
 	end
@@ -381,7 +381,7 @@ return function(t: tiniest)
 			local registry = ListenerRegistry.new { DebugMode = false }
 
 			local fireCount = 0
-			local eventData = {
+			local eventData: any = {
 				NewValue = 50,
 				OldValue = 100,
 				Metadata = {
@@ -444,7 +444,7 @@ return function(t: tiniest)
 			local capturedValue = nil
 			local capturedMetadata = nil
 
-			registry:RegisterListener("KeyAdded", { "player" }, function(value, metadata)
+			registry:RegisterListener("KeyAdded", { "player" }, function(key, value, metadata)
 				capturedValue = value
 				capturedMetadata = metadata
 			end)

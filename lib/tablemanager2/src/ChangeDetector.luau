@@ -320,7 +320,7 @@ export type ChangeMetadata = {
 
 	-- The path where the assignment operation occurred (captured path)
 	-- Always present for all callbacks
-	OriginPath: Path,
+	OriginPath: PathArray,
 
 	-- The root diff node of the assignment operation
 	-- ALWAYS present (not optional) - every callback has an origin diff

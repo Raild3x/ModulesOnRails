@@ -117,7 +117,7 @@
 local PathHelpers = require("./PathHelpers")
 
 --// Types //--
-type Path = PathHelpers.Path
+-- type Path = PathHelpers.Path
 type PathArray = PathHelpers.PathArray
 
 export type EventType =
@@ -132,7 +132,7 @@ export type EventType =
 -- Metadata structure from ChangeDetector
 export type ChangeMetadata = {
 	Diff: any?, -- DiffNode from ChangeDetector (present for direct changes, nil for ancestor)
-	OriginPath: Path,
+	OriginPath: PathArray,
 	OriginDiff: any, -- The actual diff at the origin
 }
 
@@ -189,11 +189,11 @@ export type ListenerRegistry = {
 	RegisterListener: (
 		self: ListenerRegistry,
 		eventType: EventType,
-		path: Path,
+		path: PathArray,
 		callback: (...any) -> (),
 		options: ListenerOptions?
 	) -> Connection,
-	FireListenersExact: (self: ListenerRegistry, eventType: EventType, path: Path, eventData: EventData) -> (),
+	FireListenersExact: (self: ListenerRegistry, eventType: EventType, path: PathArray, eventData: EventData) -> (),
 	Destroy: (self: ListenerRegistry) -> (),
 
 	_listenerTrees: { [EventType]: ListenerNode },
@@ -220,9 +220,9 @@ local function executeListenerCallback(
 	local success, err
 	local metadata = eventData.Metadata
 	if eventType == "KeyAdded" then
-		success, err = pcall(callback, eventData.NewValue, metadata)
+		success, err = pcall(callback, eventData.Key, eventData.NewValue, metadata)
 	elseif eventType == "KeyRemoved" then
-		success, err = pcall(callback, eventData.OldValue, metadata)
+		success, err = pcall(callback, eventData.Key, eventData.OldValue, metadata)
 	elseif eventType == "KeyChanged" then
 		success, err = pcall(callback, eventData.Key, eventData.NewValue, eventData.OldValue, metadata)
 	elseif eventType == "ValueChanged" then

@@ -61,7 +61,7 @@ return function(t: tiniest)
 			}
 
 			local events = {}
-			manager:OnValueChange({ "profile" }, function(_newValue, _oldValue, metadata)
+			manager:OnValueChange("profile", function(_newValue, _oldValue, metadata)
 				table.insert(events, metadata.OriginPath and table.concat(metadata.OriginPath, ".") or "nil")
 			end)
 

@@ -72,7 +72,7 @@ export type DuplicateReferenceMode = "error" | "warn" | "allow" | "move" | "copy
 
 export type TableManagerConfig = {
 	Schema: SchemaCheck?,
-	OnValidationFailed: ((path: Path, value: any, err: string) -> ())?,
+	OnValidationFailed: ((path: PathArray, value: any, err: string) -> ())?,
 	ListenersFireDeferred: boolean?,
 	DuplicateReferenceMode: DuplicateReferenceMode?, -- Experimental
 }
@@ -165,6 +165,7 @@ export type TM_Internal<T = { [any]: any }> = TableManager<T> & {
 	_schema: SchemaCheck?,
 	_onValidationFailed: ((path: Path, value: any, err: string) -> ())?,
 	_duplicateReferenceMode: DuplicateReferenceMode,
+	_Destroyed: boolean?,
 	-- Batch state
 	_batchDepth: number,
 	_batch: BatchState?,
@@ -449,7 +450,10 @@ const function fireArrayOperation(
 	leafPath: PathArray,
 	payload: any
 )
+	-- Fire at the element path (e.g. {"items", 2}) for element-level listeners,
+	-- then at the array path (e.g. {"items"}) for array-level listeners.
 	manager._listenerRegistry:FireListenersExact(eventName, leafPath, payload)
+	manager._listenerRegistry:FireListenersExact(eventName, basePath, payload)
 	fireAncestorValueChangedNotifications(manager, basePath, payload.Metadata)
 	if eventName == "ArrayInserted" then
 		manager.ArrayInserted:Fire(basePath, payload.Index, payload.NewValue)
@@ -894,15 +898,17 @@ end
 function TableManager.GetProxy(self: TM_Internal, path: Path, suppressNilPartialPaths: boolean?): (Proxy<any> | any)?
 	const parsedPath = PathHelpers.ParsePath(path)
 	local current = self.Proxy
+	local previousKey: any = nil
 	for _, key in parsedPath do
 		if not self._proxyManager:IsProxy(current) then
 			if suppressNilPartialPaths then
 				return nil
 			else
-				error(`Path segment {key} is not a table`)
+				error(`Path segment {tostring(previousKey)} is not a table`)
 			end
 		end
 		current = current[key]
+		previousKey = key
 	end
 	return current
 end
@@ -1006,18 +1012,12 @@ function TableManager.ArrayInsert<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 
 	const metadata = createSyntheticMetadata(self._originalData, insertPath, "added", pos, unwrappedValue, nil)
 
-	-- Fire listeners EXACTLY at insert path (we handle ancestors separately)
-	self._listenerRegistry:FireListenersExact("ArrayInserted", insertPath, {
+	-- Fire element-level and array-level listeners, ancestor callbacks, and signal.
+	fireArrayOperation(self, "ArrayInserted", parsedPath, insertPath, {
 		Index = pos,
 		NewValue = unwrappedValue,
 		Metadata = metadata,
 	})
-
-	-- Fire ancestor callbacks manually
-	fireAncestorValueChangedNotifications(self, parsedPath, metadata)
-
-	-- Fire signal ONCE
-	self.ArrayInserted:Fire(parsedPath, pos, unwrappedValue)
 
 	-- Update metadata
 	meta.ArrayLength = #array
@@ -1547,8 +1547,12 @@ end
 	Destroy the TableManager and clean up all resources.
 ]=]
 function TableManager.Destroy(self: TM_Internal)
-	self._proxyManager:Destroy()
+	if not self._Destroyed then
+		return
+	end
+	self._Destroyed = true
 	self._listenerRegistry:Destroy()
+	self._proxyManager:Destroy()
 
 	-- Disconnect all signals
 	self.ValueChanged:Destroy()

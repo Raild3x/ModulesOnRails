@@ -14,17 +14,16 @@ return function(t: tiniest)
 			}
 
 			local fireCount = 0
-			local addedValue = nil
 
-			manager:OnKeyAdd({ "player" }, function(newValue)
+			manager:OnKeyAdd("player", function(key, newValue)
 				fireCount += 1
-				addedValue = newValue
+				expect(newValue).is(50)
+				expect(key).is("mana")
 			end)
 
 			manager.Proxy.player.mana = 50
 
 			expect(fireCount).is(1)
-			expect(addedValue).is(50)
 
 			manager:Destroy()
 		end)
@@ -35,7 +34,7 @@ return function(t: tiniest)
 			}
 
 			local fireCount = 0
-			manager:OnKeyAdd({ "player" }, function()
+			manager:OnKeyAdd("player", function()
 				fireCount += 1
 			end, { ListenDepth = 0 })
 
@@ -49,7 +48,6 @@ return function(t: tiniest)
 			local manager = TableManager.new {
 				player = { health = 100, energy = nil :: number? },
 			}
-			local managerAny: any = manager
 
 			local listenerCount = 0
 			local signalCount = 0
@@ -57,9 +55,10 @@ return function(t: tiniest)
 			local signalKey = nil
 			local signalValue = nil
 
-			managerAny:OnKeyAdd("player", function(newValue)
+			manager:OnKeyAdd("player", function(key, newValue)
 				listenerCount += 1
 				expect(newValue).is(25)
+				expect(key).is("energy")
 			end)
 
 			local conn = manager.KeyAdded:Connect(function(path, key, value)
@@ -89,16 +88,19 @@ return function(t: tiniest)
 			}
 
 			local fireCount = 0
+			local removedKey = nil
 			local removedValue = nil
 
-			manager:OnKeyRemove({ "player" }, function(oldValue)
+			manager:OnKeyRemove("player", function(key, value)
 				fireCount += 1
-				removedValue = oldValue
+				removedKey = key
+				removedValue = value
 			end)
 
 			manager.Proxy.player.mana = nil
 
 			expect(fireCount).is(1)
+			expect(removedKey).is("mana")
 			expect(removedValue).is(20)
 
 			manager:Destroy()
@@ -110,7 +112,7 @@ return function(t: tiniest)
 			}
 
 			local fireCount = 0
-			manager:OnKeyRemove({ "settings" }, function()
+			manager:OnKeyRemove("settings", function()
 				fireCount += 1
 			end)
 
@@ -167,7 +169,7 @@ return function(t: tiniest)
 			local seenIndex = nil
 			local seenValue = nil
 
-			manager:OnArrayInsert({ "items", 2 }, function(index, value)
+			manager:OnArrayInsert("items", function(index, value)
 				fireCount += 1
 				seenIndex = index
 				seenValue = value
@@ -193,7 +195,7 @@ return function(t: tiniest)
 			local signalIndex = nil
 			local signalValue = nil
 
-			manager:OnArrayInsert({ "items", 3 }, function(index, value)
+			manager:OnArrayInsert("items", function(index, value)
 				listenerCount += 1
 				expect(index).is(3)
 				expect(value).is("Potion")
@@ -225,14 +227,15 @@ return function(t: tiniest)
 
 			local mismatched = 0
 			local matched = 0
-			manager:OnArrayInsert({ "items", 3 }, function()
-				mismatched += 1
-			end)
-			manager:OnArrayInsert({ "items", 2 }, function()
-				matched += 1
+			manager:OnArrayInsert("items", function(index, value)
+				if index == 2 then
+					matched += 1
+				else
+					mismatched += 1
+				end
 			end)
 
-			manager:ArrayInsert({ "items" }, "Shield")
+			manager:ArrayInsert("items", "Shield")
 
 			expect(mismatched).is(0)
 			expect(matched).is(1)
@@ -251,7 +254,7 @@ return function(t: tiniest)
 			local seenIndex = nil
 			local seenValue = nil
 
-			manager:OnArrayRemove({ "items", 1 }, function(index, oldValue)
+			manager:OnArrayRemove("items", function(index, oldValue)
 				fireCount += 1
 				seenIndex = index
 				seenValue = oldValue
@@ -309,14 +312,15 @@ return function(t: tiniest)
 
 			local mismatched = 0
 			local matched = 0
-			manager:OnArrayRemove({ "items", 1 }, function()
-				mismatched += 1
-			end)
-			manager:OnArrayRemove({ "items", 2 }, function()
-				matched += 1
+			manager:OnArrayRemove("items", function(index, oldValue)
+				if index == 2 then
+					matched += 1
+				else
+					mismatched += 1
+				end
 			end)
 
-			manager:ArrayRemove({ "items" }, 2)
+			manager:ArrayRemove("items", 2)
 
 			expect(mismatched).is(0)
 			expect(matched).is(1)
@@ -336,7 +340,7 @@ return function(t: tiniest)
 			local seenNew = nil
 			local seenOld = nil
 
-			manager:OnArraySet({ "items", 1 }, function(index, newValue, oldValue)
+			manager:OnArraySet({ "items" }, function(index, newValue, oldValue)
 				fireCount += 1
 				seenIndex = index
 				seenNew = newValue
@@ -365,7 +369,7 @@ return function(t: tiniest)
 			local signalNew = nil
 			local signalOld = nil
 
-			manager:OnArraySet({ "items", 1 }, function(index, newValue, oldValue)
+			manager:OnArraySet("items", function(index, newValue, oldValue)
 				listenerCount += 1
 				expect(index).is(1)
 				expect(newValue).is("C")
@@ -400,14 +404,14 @@ return function(t: tiniest)
 
 			local listenerCount = 0
 			local signalCount = 0
-			manager:OnArraySet({ "items", 2 }, function()
+			manager:OnArraySet("items", function()
 				listenerCount += 1
 			end)
 			local conn = manager.ArraySet:Connect(function()
 				signalCount += 1
 			end)
 
-			manager:ArraySwapRemove({ "items" }, 2)
+			manager:ArraySwapRemove("items", 2)
 
 			expect(listenerCount).is(0)
 			expect(signalCount).is(0)
