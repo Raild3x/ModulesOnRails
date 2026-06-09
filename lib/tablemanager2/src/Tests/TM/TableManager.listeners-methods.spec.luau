@@ -10,7 +10,7 @@ return function(t: tiniest)
 	describe("Method: OnKeyAdd", function()
 		test("fires when a key is added", function()
 			local manager = TableManager.new {
-				player = { health = 100 },
+				player = { health = 100, mana = nil :: number? },
 			}
 
 			local fireCount = 0
@@ -31,7 +31,7 @@ return function(t: tiniest)
 
 		test("respects ListenDepth = 0 for descendant adds", function()
 			local manager = TableManager.new {
-				player = { stats = {} },
+				player = { stats = { level = nil :: number? } },
 			}
 
 			local fireCount = 0
@@ -47,7 +47,7 @@ return function(t: tiniest)
 
 		test("supports string path and matches KeyAdded signal payload", function()
 			local manager = TableManager.new {
-				player = { health = 100 },
+				player = { health = 100, energy = nil :: number? },
 			}
 			local managerAny: any = manager
 
@@ -173,7 +173,7 @@ return function(t: tiniest)
 				seenValue = value
 			end)
 
-			manager:ArrayInsert({ "items" }, "Shield")
+			manager:ArrayInsert("items", "Shield")
 
 			expect(fireCount).is(1)
 			expect(seenIndex).is(2)
@@ -277,7 +277,7 @@ return function(t: tiniest)
 			local signalIndex = nil
 			local signalValue = nil
 
-			manager:OnArrayRemove({ "items", 2 }, function(index, oldValue)
+			manager:OnArrayRemove("items", function(index, oldValue)
 				listenerCount += 1
 				expect(index).is(2)
 				expect(oldValue).is("Shield")

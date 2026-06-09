@@ -118,6 +118,7 @@ local PathHelpers = require("./PathHelpers")
 
 --// Types //--
 type Path = PathHelpers.Path
+type PathArray = PathHelpers.PathArray
 
 export type EventType =
 	"ValueChanged"
@@ -273,7 +274,7 @@ local function createNode(): ListenerNode
 end
 
 -- Helper to get or create a node at a path
-local function getOrCreateNode(root: ListenerNode, path: Path): ListenerNode
+local function getOrCreateNode(root: ListenerNode, path: PathArray): ListenerNode
 	local current = root
 	for _, segment in path do
 		if not current.Children[segment] then
@@ -285,7 +286,7 @@ local function getOrCreateNode(root: ListenerNode, path: Path): ListenerNode
 end
 
 -- Helper to get a node at a path (returns nil if doesn't exist)
-local function getNode(root: ListenerNode, path: Path): ListenerNode?
+local function getNode(root: ListenerNode, path: PathArray): ListenerNode?
 	local current = root
 	for _, segment in path do
 		if not current.Children[segment] then
@@ -297,7 +298,7 @@ local function getNode(root: ListenerNode, path: Path): ListenerNode?
 end
 
 -- Helper to remove empty nodes recursively
-local function cleanupNode(root: ListenerNode, path: Path, index: number): boolean
+local function cleanupNode(root: ListenerNode, path: PathArray, index: number): boolean
 	if index > #path then
 		-- At target node, check if it's empty
 		return #root.Listeners == 0 and next(root.Children) == nil
@@ -341,7 +342,7 @@ end
 
 function ListenerRegistry:RegisterListener(
 	eventType: EventType,
-	path: Path,
+	path: PathArray,
 	callback: (...any) -> (),
 	options: ListenerOptions?
 ): Connection
@@ -429,7 +430,7 @@ end
 function ListenerRegistry.FireListenersExact(
 	self: ListenerRegistry,
 	eventType: EventType,
-	path: Path,
+	path: PathArray,
 	eventData: EventData
 )
 	local root = self._listenerTrees[eventType]

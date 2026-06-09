@@ -22,7 +22,54 @@
 
 	Note: Using `any` here is intentional and necessary since Lua tables support any type as a key.
 ]=]
-export type Path = { any }
+export type Path<S = string> = S | "" | { any }
+export type PathArray<S = string> = { any }
+export type function PathString(S: type)
+	if S:is("table") then
+		return types.intersectionof(types.singleton("[UNKNOWN_PATH]"), types.any)
+	end
+	return S
+end
+
+-- Expects a table type `T` and a path type `S`, and recursively resolves the type at that path.
+export type function ValueAtPath(T: type, S: type)
+	if not T:is("table") then
+		return types.never
+	end
+
+	-- Array/tuple path: {"Hello", "World"}. Luau doesnt support this yet so we have to fall back to 'any'
+	if S:is("table") then
+		return types.any
+	end
+
+	-- String path: "Hello.World" (existing behavior)
+	local str = S:value() :: string?
+	if str == nil then
+		return types.never
+	end
+	if str == "" then -- if the path is empty, return the original type
+		return T
+	end
+
+	local dot = string.find(str, ".", 1, true)
+	if dot == nil then
+		local result = T:readproperty(types.singleton(str))
+		if result == nil then
+			error(`Path segment "{str}" does not exist in the table`)
+			return types.never
+		end
+		return result :: type
+	else
+		local head = string.sub(str, 1, dot - 1)
+		local tail = string.sub(str, dot + 1)
+		local inner = T:readproperty(types.singleton(head))
+		if inner == nil then
+			error(`Path segment "{head}" does not exist in the table`)
+			return types.never
+		end
+		return ValueAtPath(inner, types.singleton(tail))
+	end
+end
 
 export type DataChangeSource = "self" | "child" | "parent"
 
@@ -62,11 +109,11 @@ local PathHelpers = {}
 	@param pathString The path as a string (e.g., "player.level") or an array of keys
 	@return The parsed Path array
 ]=]
-function PathHelpers.ParsePath(pathString: string | Path): Path
+function PathHelpers.ParsePath<S>(pathString: Path<S>): PathArray<S>
 	if typeof(pathString) == "table" then
-		return pathString :: Path
+		return pathString :: PathArray<S>
 	end
-	return table.freeze(string.split(pathString, "."))
+	return table.freeze(string.split(pathString, ".")) :: PathArray<S>
 end
 
 --[=[
@@ -76,7 +123,7 @@ end
 	@param changePath The path where a change occurred
 	@return "self" if paths match exactly, "child" if changePath is deeper, "parent" if changePath is shallower, nil if no match
 ]=]
-function PathHelpers.GetPathRelation(listenerPath: Path, changePath: Path): DataChangeSource?
+function PathHelpers.GetPathRelation(listenerPath: PathArray, changePath: PathArray): DataChangeSource?
 	-- Check if paths match exactly
 	if #listenerPath == #changePath then
 		for i = 1, #listenerPath do
@@ -125,7 +172,7 @@ end
 ]=]
 function PathHelpers.GetListenerTableForPath(
 	listenerRoot: ListenerRoot,
-	path: Path,
+	path: PathArray,
 	createIfMissing: boolean
 ): ListenerTable?
 	local current: ListenerRoot | ListenerTable = listenerRoot
@@ -164,7 +211,7 @@ end
 	@param listenerRoot The root listener table
 	@param path The path where a listener was removed
 ]=]
-function PathHelpers.CleanupEmptyListenerTables(listenerRoot: ListenerRoot, path: Path)
+function PathHelpers.CleanupEmptyListenerTables(listenerRoot: ListenerRoot, path: PathArray)
 	if #path == 0 then
 		return
 	end
@@ -227,9 +274,9 @@ end
 ]=]
 function PathHelpers.ForEachMatchingListener(
 	listenerRoot: ListenerRoot,
-	changePath: Path,
+	changePath: PathArray,
 	callback: (
-		listenerPath: Path,
+		listenerPath: PathArray,
 		callbacks: { ListenerCallback },
 		relation: DataChangeSource
 	) -> ()
@@ -264,7 +311,7 @@ function PathHelpers.ForEachMatchingListener(
 
 	-- Part 2: Recursively check all child paths (extensions of changePath)
 	-- These listeners will receive relation "parent"
-	local function checkChildPaths(currentTable: ListenerRoot | ListenerTable, currentPath: Path)
+	local function checkChildPaths(currentTable: ListenerRoot | ListenerTable, currentPath: PathArray)
 		-- Check each key in the current table (except __callbacks)
 		for key, value in currentTable do
 			if key ~= "__callbacks" and type(value) == "table" then
@@ -291,6 +338,26 @@ function PathHelpers.ForEachMatchingListener(
 	if changeTable then
 		checkChildPaths(changeTable, changePath)
 	end
+end
+
+function PathHelpers.ArePathsEqual(a: Path, b: Path): boolean
+	if a == b then
+		return true
+	end
+
+	local aArray: PathArray = PathHelpers.ParsePath(a)
+	local bArray: PathArray = PathHelpers.ParsePath(b)
+	if #aArray ~= #bArray then
+		return false
+	end
+
+	for i = 1, #aArray do
+		if aArray[i] ~= bArray[i] then
+			return false
+		end
+	end
+
+	return true
 end
 
 return PathHelpers

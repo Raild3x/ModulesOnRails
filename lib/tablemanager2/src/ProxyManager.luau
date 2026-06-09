@@ -35,7 +35,9 @@
 ]=]
 
 local PathHelpers = require("./PathHelpers")
-type Path = PathHelpers.Path
+type Path<S> = PathHelpers.Path<S>
+type PathArray<S> = PathHelpers.PathArray<S>
+type PathString<S> = PathHelpers.PathString<S>
 
 --[[
 	Weak table mapping proxies to their original tables.
@@ -43,8 +45,176 @@ type Path = PathHelpers.Path
 ]]
 local PROXY_TO_ORIGINAL = setmetatable({}, { __mode = "k" })
 
+--// Types //--
+
+--[=[
+	@within ProxyManager
+	@type Proxy table & { __proxy: true }
+
+	A proxy wraps a table and intercepts read/write operations.
+]=]
+-- [Disabled for now because of an internal Luau type inference issue]
+type function ValueAtPath(T: type, S: type)
+	if not T:is("table") then
+		return types.never
+	end
+
+	-- Array/tuple path: {"Hello", "World"}. Luau doesnt support this yet so we have to fall back to 'any'
+	if S:is("table") then
+		return types.any
+	end
+
+	if not S:is("singleton") then
+		return types.any
+	end
+
+	-- String path: "Hello.World" (existing behavior)
+	local str = S:value() :: string?
+	if str == nil then
+		return types.never
+	end
+	if str == "" then -- if the path is empty, return the original type
+		return T
+	end
+
+	local dot = string.find(str, ".", 1, true)
+	if dot == nil then
+		local result = T:readproperty(types.singleton(str))
+		if result == nil then
+			error(`Path segment "{str}" does not exist in the table`)
+			return types.never
+		end
+		return result :: type
+	else
+		local head = string.sub(str, 1, dot - 1)
+		local tail = string.sub(str, dot + 1)
+		local inner = T:readproperty(types.singleton(head))
+		if inner == nil then
+			error(`Path segment "{head}" does not exist in the table`)
+			return types.never
+		end
+		return ValueAtPath(inner, types.singleton(tail))
+	end
+end
+
+type function ProxyWrap(T: type, Path: type): type
+	if not T:is("table") then
+		return T
+	end
+
+	if not Path:is("singleton") then
+		return types.any
+	end
+
+	T = ValueAtPath(T, Path)
+	if not T:is("table") then
+		return T
+	end
+
+	for k, v in T:properties() do
+		if v.read and v.read:is("table") then
+			T:setproperty(k, ProxyWrap(v.read, Path))
+		end
+	end
+
+	T:setproperty(types.singleton("__PROXY__"), types.singleton(true))
+
+	return T
+end
+export type Proxy<T = any, S = ""> = ProxyWrap<T, S>
+
+--[=[
+	@within ProxyManager
+	@interface ProxyMetadata
+	Original { [any]: any } -- The unwrapped original table
+	Parent any? -- The original (unwrapped) parent table; nil for the root proxy
+	Key any? -- The key under which this table lives in its parent; nil for the root proxy
+	IsArray boolean -- Whether this table is treated as an array
+	ArrayLength number -- Cached length for arrays
+	RootTable { [any]: any } -- Reference to the root table for snapshot capture
+
+	Metadata stored for each proxy.
+]=]
+export type ProxyMetadata<T = { [any]: any }, S = ""> = {
+	Original: ValueAtPath<T, S>, -- The unwrapped original table
+	Parent: any?, -- The original (unwrapped) parent table; nil for the root proxy
+	Key: any?, -- The key under which this table lives in its parent; nil for the root proxy
+	IsArray: boolean, -- Whether this table is treated as an array
+	ArrayLength: number, -- Cached length for arrays
+	RootTable: T, -- Reference to the root table for snapshot capture
+}
+
+type ChangeDetector = {
+	CaptureSnapshot: <S>(self: ChangeDetector, value: any, path: PathArray<S>) -> (),
+	CheckForChanges: (self: ChangeDetector, value: any) -> (),
+}
+
+export type ProxyManager<T = { [any]: any }> = {
+	IsProxy: (self: ProxyManager<T>, t: any) -> boolean,
+	GetOriginal: <S>(self: ProxyManager<T>, t: Proxy<T, S>) -> ValueAtPath<T, S>,
+	GetMetadata: <S>(self: ProxyManager<T>, proxy: Proxy<T, S>) -> ProxyMetadata<T, S>,
+	--- Returns the live path from root to this proxy by walking the Parent chain. Returns nil if the proxy is unknown.
+	GetPath: <S>(self: ProxyManager<T>, proxy: Proxy<T, S>) -> PathArray<S>?,
+	--- Returns the existing proxy for an original table, or nil if none exists.
+	GetProxyFromOriginal: (self: ProxyManager<T>, original: any) -> Proxy<T, string>?,
+	CreateProxy: <T, S>(
+		self: ProxyManager<T>,
+		original: T,
+		_path: PathArray<S>?,
+		rootTable: { [any]: any }?,
+		parentOriginal: any?,
+		key: any?
+	) -> Proxy<T>,
+	SetChangeDetector: (self: ProxyManager<T>, changeDetector: ChangeDetector) -> (),
+	SetArrayInsertedCallback: <S>(
+		self: ProxyManager<T>,
+		callback: (path: PathArray<S>, index: number, newValue: any) -> ()
+	) -> (),
+	SetBatchDirectArraySetCallback: <S>(
+		self: ProxyManager<T>,
+		callback: (path: PathArray<S>, index: number) -> ()
+	) -> (),
+	--- Set the callback fired for every non-array, non-append write during a batch.
+	--- Receives the **parent table's path** (not including the written key) so the
+	--- caller can record which top-level branch was dirtied.
+	SetBatchScalarWrittenCallback: <S>(self: ProxyManager<T>, callback: (parentPath: PathArray<S>) -> ()) -> (),
+	SetValidateCallback: <S>(
+		self: ProxyManager<T>,
+		callback: (path: PathArray<S>, value: any) -> (boolean, string?)
+	) -> (),
+	SetDuplicateTableWriteCallback: <S1, S2>(
+		self: ProxyManager<T>,
+		callback: (writePath: PathArray<S1>, existingPath: PathArray<S2>, value: any) -> boolean
+	) -> (),
+	ReparentProxy: (self: ProxyManager<T>, proxy: Proxy<any>, newParentOriginal: any?, newKey: any?) -> (),
+	--- Update the Key metadata for all direct child proxies of `arrayOriginal` whose
+	--- numeric key is >= `fromIndex` by adding `delta`. Called by TableManager after
+	--- every ArrayInsert (+1) or ArrayRemove (-1) so held proxies report the correct path.
+	ShiftKeys: (self: ProxyManager<T>, arrayOriginal: { [any]: any }, fromIndex: number, delta: number) -> (),
+	Destroy: (self: ProxyManager<T>) -> (),
+
+	-- Private fields
+	_proxyMeta: { [any]: ProxyMetadata<any> },
+	_originalToProxy: { [any]: Proxy },
+	_proxiesByParent: { [any]: { [any]: true } }, -- parentOriginal → set of child proxies
+	_changeDetector: ChangeDetector?,
+	_onArrayInserted: (<S>(path: PathArray<S>, index: number, newValue: any) -> ())?,
+	_onBatchDirectArraySet: (<S>(path: PathArray<S>, index: number) -> ())?,
+	_onBatchScalarWritten: (<S>(parentPath: PathArray<S>) -> ())?,
+	_onValidateWrite: (<S>(path: PathArray<S>, value: any) -> (boolean, string?))?,
+	_onDuplicateTableWrite: (<S1, S2>(writePath: PathArray<S1>, existingPath: PathArray<S2>, value: any) -> boolean)?,
+	_metatableTemplate: { [any]: any },
+	_GetLivePath: (self: ProxyManager<T>, proxy: Proxy<any>) -> PathArray<any>,
+}
+
+--------------------------------------------------------------------------------
+--// Util Functions //--
+--------------------------------------------------------------------------------
+
+const arePathsEqual = PathHelpers.ArePathsEqual
+
 -- Check if a value is a proxy by looking it up in the weak table.
-local function isProxy(t: any): boolean
+const function isProxy(t: any): boolean
 	const valueType = type(t)
 	return (valueType == "table" or valueType == "userdata") and PROXY_TO_ORIGINAL[t] ~= nil
 end
@@ -53,7 +223,7 @@ end
 	Get the original (unwrapped) table from a proxy.
 	If the input is not a proxy, returns it unchanged.
 ]]
-local function getOriginal<T>(t: T | Proxy<T>): T
+const function getOriginal<T>(t: T | Proxy<T>): T
 	if isProxy(t) then
 		return PROXY_TO_ORIGINAL[t :: Proxy<any>] :: T
 	end
@@ -64,7 +234,7 @@ end
 	Classify table shape in one pass.
 	Returns whether the table is an array plus its array length when true.
 ]]
-local function classifyTable(t: { [any]: any }): (boolean, number)
+const function classifyTable(t: { [any]: any }): (boolean, number)
 	if type(t) ~= "table" then
 		return false, 0
 	end
@@ -87,21 +257,7 @@ local function classifyTable(t: { [any]: any }): (boolean, number)
 	return false, 0
 end
 
-local function arePathsEqual(a: Path, b: Path): boolean
-	if #a ~= #b then
-		return false
-	end
-
-	for i = 1, #a do
-		if a[i] ~= b[i] then
-			return false
-		end
-	end
-
-	return true
-end
-
-local function getValueAtPath(root: any, path: Path): (any, boolean)
+const function getValueAtPath<T, S>(root: T & { [any]: any }, path: PathArray<S>): (any, boolean)
 	local current = root
 	for _, segment in path do
 		if type(current) ~= "table" then
@@ -111,105 +267,6 @@ local function getValueAtPath(root: any, path: Path): (any, boolean)
 	end
 	return current, true
 end
-
---// Types //--
-
---[=[
-	@within ProxyManager
-	@type Proxy table & { __proxy: true }
-
-	A proxy wraps a table and intercepts read/write operations.
-]=]
-type function ProxyFn(T: type)
-	if not T:is("table") then
-		return T
-	end
-
-	for k, v in T:properties() do
-		if v.read and v.read:is("table") then
-			T:setproperty(k, ProxyFn(v.read))
-		end
-	end
-
-	T:setproperty(types.singleton("__PROXY__"), types.singleton(true))
-	return T
-end
-export type Proxy<T = { [any]: any }> = ProxyFn<T>
-
---[=[
-	@within ProxyManager
-	@interface ProxyMetadata
-	Original { [any]: any } -- The unwrapped original table
-	Parent any? -- The original (unwrapped) parent table; nil for the root proxy
-	Key any? -- The key under which this table lives in its parent; nil for the root proxy
-	IsArray boolean -- Whether this table is treated as an array
-	ArrayLength number -- Cached length for arrays
-	RootTable { [any]: any } -- Reference to the root table for snapshot capture
-
-	Metadata stored for each proxy.
-]=]
-export type ProxyMetadata<T = { [any]: any }> = {
-	Original: T, -- The unwrapped original table
-	Parent: any?, -- The original (unwrapped) parent table; nil for the root proxy
-	Key: any?, -- The key under which this table lives in its parent; nil for the root proxy
-	IsArray: boolean, -- Whether this table is treated as an array
-	ArrayLength: number, -- Cached length for arrays
-	RootTable: { [any]: any }, -- Reference to the root table for snapshot capture
-}
-
-export type ChangeDetector = {
-	CaptureSnapshot: (self: ChangeDetector, value: any, path: Path) -> (),
-	CheckForChanges: (self: ChangeDetector, value: any) -> (),
-}
-
-export type ProxyManager = {
-	IsProxy: (self: ProxyManager, t: any) -> boolean,
-	GetOriginal: <T>(self: ProxyManager, t: Proxy<T> | T) -> T,
-	GetMetadata: <T>(self: ProxyManager, proxy: Proxy<T>) -> ProxyMetadata<T>,
-	--- Returns the live path from root to this proxy by walking the Parent chain. Returns nil if the proxy is unknown.
-	GetPath: <T>(self: ProxyManager, proxy: Proxy<T>) -> Path?,
-	--- Returns the existing proxy for an original table, or nil if none exists.
-	GetProxyFromOriginal: <T>(self: ProxyManager, original: T) -> Proxy<T>?,
-	CreateProxy: <T>(
-		self: ProxyManager,
-		original: T,
-		_path: Path?,
-		rootTable: { [any]: any }?,
-		parentOriginal: any?,
-		key: any?
-	) -> Proxy<T>,
-	SetChangeDetector: (self: ProxyManager, changeDetector: ChangeDetector) -> (),
-	SetArrayInsertedCallback: (self: ProxyManager, callback: (path: Path, index: number, newValue: any) -> ()) -> (),
-	SetBatchDirectArraySetCallback: (self: ProxyManager, callback: (path: Path, index: number) -> ()) -> (),
-	--- Set the callback fired for every non-array, non-append write during a batch.
-	--- Receives the **parent table's path** (not including the written key) so the
-	--- caller can record which top-level branch was dirtied.
-	SetBatchScalarWrittenCallback: (self: ProxyManager, callback: (parentPath: Path) -> ()) -> (),
-	SetValidateCallback: (self: ProxyManager, callback: (path: Path, value: any) -> (boolean, string?)) -> (),
-	SetDuplicateTableWriteCallback: (
-		self: ProxyManager,
-		callback: (writePath: Path, existingPath: Path, value: any) -> boolean
-	) -> (),
-	ReparentProxy: (self: ProxyManager, proxy: Proxy<any>, newParentOriginal: any?, newKey: any?) -> (),
-	--- Update the Key metadata for all direct child proxies of `arrayOriginal` whose
-	--- numeric key is >= `fromIndex` by adding `delta`. Called by TableManager after
-	--- every ArrayInsert (+1) or ArrayRemove (-1) so held proxies report the correct path.
-	ShiftKeys: (self: ProxyManager, arrayOriginal: { [any]: any }, fromIndex: number, delta: number) -> (),
-	Destroy: (self: ProxyManager) -> (),
-
-	-- Private fields
-	_proxyMeta: { [any]: ProxyMetadata<any> },
-	_originalToProxy: { [any]: Proxy },
-	_proxiesByParent: { [any]: { [any]: true } }, -- parentOriginal → set of child proxies
-	_changeDetector: ChangeDetector?,
-	_onArrayInserted: ((path: Path, index: number, newValue: any) -> ())?,
-	_onBatchDirectArraySet: ((path: Path, index: number) -> ())?,
-	_onBatchScalarWritten: ((parentPath: Path) -> ())?,
-	_onValidateWrite: ((path: Path, value: any) -> (boolean, string?))?,
-	_onDuplicateTableWrite: ((writePath: Path, existingPath: Path, value: any) -> boolean)?,
-	_metatableTemplate: { [any]: any },
-	_GetLivePath: (self: ProxyManager, proxy: Proxy<any>) -> Path,
-}
 
 --------------------------------------------------------------------------------
 --// Module //--
@@ -237,10 +294,8 @@ function ProxyManager.new(): ProxyManager
 	-- Create the metatable template copied into each proxy metatable.
 	self._metatableTemplate = {
 		__index = function(proxy, key)
-			const meta = self._proxyMeta[proxy]
-			if not meta then
-				error("Proxy metadata not found - proxy may have been destroyed")
-			end
+			const meta = self._proxyMeta[proxy] :: ProxyMetadata
+			assert(meta, "Proxy metadata not found - proxy may have been destroyed")
 
 			const originalTable = meta.Original
 			const value = originalTable[key]
@@ -260,11 +315,9 @@ function ProxyManager.new(): ProxyManager
 			return value
 		end,
 
-		__newindex = function(proxy, key, value)
-			const meta = self._proxyMeta[proxy]
-			if not meta then
-				error("Proxy metadata not found - proxy may have been destroyed")
-			end
+		__newindex = function(proxy: Proxy, key: any, value: any)
+			const meta = self._proxyMeta[proxy] :: ProxyMetadata
+			assert(meta, "Proxy metadata not found - proxy may have been destroyed")
 
 			const originalTable = meta.Original
 			const parentPath = self:_GetLivePath(proxy)
@@ -358,10 +411,8 @@ function ProxyManager.new(): ProxyManager
 		end,
 
 		__iter = function(proxy)
-			const meta = self._proxyMeta[proxy]
-			if not meta then
-				error("Proxy metadata not found - proxy may have been destroyed")
-			end
+			const meta = self._proxyMeta[proxy] :: ProxyMetadata
+			assert(meta, "Proxy metadata not found - proxy may have been destroyed")
 
 			-- Use next() on the original table, but wrap returned values in proxies
 			const originalTable = meta.Original
@@ -388,15 +439,13 @@ function ProxyManager.new(): ProxyManager
 		end,
 
 		__len = function(proxy)
-			const meta = self._proxyMeta[proxy]
-			if not meta then
-				error("Proxy metadata not found - proxy may have been destroyed")
-			end
+			const meta = self._proxyMeta[proxy] :: ProxyMetadata
+			assert(meta, "Proxy metadata not found - proxy may have been destroyed")
 			return #meta.Original
 		end,
 
 		__tostring = function(proxy)
-			const meta = self._proxyMeta[proxy]
+			const meta = self._proxyMeta[proxy] :: ProxyMetadata
 			if not meta then
 				return "TableManager.Data(?)"
 			end
@@ -423,7 +472,7 @@ end
 --[=[
 	Set the callback for array insertions (appends only).
 ]=]
-function ProxyManager:SetArrayInsertedCallback(callback: (path: Path, index: number, newValue: any) -> ())
+function ProxyManager:SetArrayInsertedCallback(callback: (path: PathArray<any>, index: number, newValue: any) -> ())
 	self._onArrayInserted = callback
 end
 
@@ -434,7 +483,7 @@ end
 	TableManager uses this to mark the array's batch log as poisoned, which forces
 	Branch A (LCS snapshot diff) at flush time instead of the op-log coalescer.
 ]=]
-function ProxyManager:SetBatchDirectArraySetCallback(callback: (path: Path, index: number) -> ())
+function ProxyManager:SetBatchDirectArraySetCallback(callback: (path: PathArray<any>, index: number) -> ())
 	self._onBatchDirectArraySet = callback
 end
 
@@ -446,7 +495,7 @@ end
 	TableManager uses this during a batch to record which top-level branches were
 	dirtied so that the flush can diff only those branches instead of the whole tree.
 ]=]
-function ProxyManager:SetBatchScalarWrittenCallback(callback: (parentPath: Path) -> ())
+function ProxyManager:SetBatchScalarWrittenCallback(callback: (parentPath: PathArray<any>) -> ())
 	self._onBatchScalarWritten = callback
 end
 
@@ -454,7 +503,7 @@ end
 	Set the callback fired for every proxy write before mutation.
 	Returning `false` prevents the write. If an error message is returned it is raised.
 ]=]
-function ProxyManager:SetValidateCallback(callback: (path: Path, value: any) -> (boolean, string?))
+function ProxyManager:SetValidateCallback(callback: (path: PathArray<any>, value: any) -> (boolean, string?))
 	self._onValidateWrite = callback
 end
 
@@ -462,9 +511,11 @@ end
 	Set the callback fired when a write would introduce a duplicate table reference.
 	Return `true` to allow the write, `false` to suppress it.
 ]=]
-function ProxyManager:SetDuplicateTableWriteCallback(
-	callback: (writePath: Path, existingPath: Path, value: any) -> boolean
-)
+function ProxyManager:SetDuplicateTableWriteCallback(callback: (
+	writePath: PathArray<any>,
+	existingPath: PathArray<any>,
+	value: any
+) -> boolean)
 	self._onDuplicateTableWrite = callback
 end
 
@@ -484,7 +535,7 @@ function ProxyManager.GetMetadata<T>(self: ProxyManager, proxy: Proxy<T>): Proxy
 end
 
 --- Get the live path from root to this proxy by walking the Parent chain.
-function ProxyManager.GetPath<T>(self: ProxyManager, proxy: Proxy<T>): Path?
+function ProxyManager.GetPath<T>(self: ProxyManager, proxy: Proxy<T>): PathArray<any>?
 	if not self._proxyMeta[proxy] then
 		return nil
 	end
@@ -500,13 +551,13 @@ end
 	Walk the Parent chain from `proxy` up to the root and return the assembled path.
 	O(depth). Returns a fresh table each call — safe to mutate.
 ]=]
-function ProxyManager._GetLivePath(self: ProxyManager, proxy: Proxy<any>): Path
+function ProxyManager._GetLivePath(self: ProxyManager, proxy: Proxy<any>): PathArray<any>
 	const meta = self._proxyMeta[proxy]
 	if meta == nil or meta.Parent == nil then
 		return {}
 	end
 
-	const keys: Path = {}
+	const keys: PathArray<any> = {}
 	local current = meta
 	while current ~= nil and current.Key ~= nil do
 		table.insert(keys, 1, current.Key)
@@ -534,8 +585,8 @@ end
 ]=]
 function ProxyManager.CreateProxy<T>(
 	self: ProxyManager,
-	original: T,
-	_path: Path?,
+	original: T & { [any]: any },
+	_path: PathArray<any>?,
 	rootTable: { [any]: any }?,
 	parentOriginal: any?,
 	key: any?

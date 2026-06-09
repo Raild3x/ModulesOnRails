@@ -23,9 +23,8 @@ return function(t: tiniest)
 			local manager = TableManager.new {
 				player = { stats = { health = 100 } },
 			}
-			local managerAny: any = manager
 
-			local health = managerAny:Get("player.stats.health")
+			local health = manager:Get("player.stats.health")
 			expect(health).is(100)
 
 			manager:Destroy()
@@ -47,9 +46,19 @@ return function(t: tiniest)
 			local manager = TableManager.new {
 				player = { health = 100 },
 			}
-			local managerAny: any = manager
 
-			local result = managerAny:Get({ "player", "health", "x" }, true)
+			local result = manager:Get({ "player", "health", "x" }, true)
+			expect(result).is(nil)
+
+			manager:Destroy()
+		end)
+
+		test("allows nil values at the end of the path", function()
+			local manager = TableManager.new {
+				player = { health = nil },
+			}
+
+			local result = manager:Get { "player", "health" }
 			expect(result).is(nil)
 
 			manager:Destroy()
@@ -75,9 +84,8 @@ return function(t: tiniest)
 			local manager = TableManager.new {
 				player = { inventory = { slots = 12 } },
 			}
-			local managerAny: any = manager
 
-			local value = managerAny:GetProxy("player.inventory.slots")
+			local value = manager:GetProxy("player.inventory.slots")
 			expect(value).is(12)
 
 			manager:Destroy()
@@ -89,8 +97,8 @@ return function(t: tiniest)
 			}
 
 			expect(function()
-				manager:GetProxy { "player", "health", "x" }
-			end).fails_with("Path segment x is not a table")
+				manager:GetProxy { "player", "mana", "x" }
+			end).fails_with("Path segment mana is not a table")
 
 			manager:Destroy()
 		end)
@@ -99,9 +107,19 @@ return function(t: tiniest)
 			local manager = TableManager.new {
 				player = { health = 100 },
 			}
-			local managerAny: any = manager
 
-			local result = managerAny:GetProxy({ "player", "health", "x" }, true)
+			local result = manager:GetProxy({ "player", "mana", "x" }, true)
+			expect(result).is(nil)
+
+			manager:Destroy()
+		end)
+
+		test("allows nil values at the end of the path", function()
+			local manager = TableManager.new {
+				player = { health = nil },
+			}
+
+			local result = manager:GetProxy { "player", "health" }
 			expect(result).is(nil)
 
 			manager:Destroy()
@@ -124,9 +142,7 @@ return function(t: tiniest)
 			local manager = TableManager.new {
 				player = { stats = { health = 100 } },
 			}
-			local managerAny: any = manager
-
-			managerAny:Set("player.stats.health", 60)
+			manager:Set("player.stats.health", 60)
 			expect(manager.Proxy.player.stats.health).is(60)
 
 			manager:Destroy()

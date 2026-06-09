@@ -152,6 +152,7 @@ return function(t: tiniest)
 			manager.Proxy.player.health = 50
 
 			expect(capturedMetadata).exists()
+			assert(capturedMetadata, "Expected metadata to be provided for direct change")
 			expect(capturedMetadata.Diff).exists()
 			expect(capturedMetadata.OriginPath).is_shallow_equal { "player", "health" }
 			expect(capturedMetadata.OriginDiff).exists()
@@ -175,6 +176,7 @@ return function(t: tiniest)
 			manager.Proxy.player.health = 50
 
 			expect(ancestorMetadata).exists()
+			assert(ancestorMetadata, "Expected metadata to be provided for ancestor notification")
 			expect(ancestorMetadata.Diff).is(nil)
 			expect(ancestorMetadata.OriginPath).is_shallow_equal { "player", "health" }
 			expect(ancestorMetadata.OriginDiff).exists()
@@ -196,6 +198,7 @@ return function(t: tiniest)
 			manager.Proxy.player.health = 50
 
 			expect(capturedMetadata).exists()
+			assert(capturedMetadata, "Expected metadata to be provided for direct change")
 			expect(capturedMetadata.Diff).is(capturedMetadata.OriginDiff)
 
 			conn:Disconnect()
@@ -276,7 +279,7 @@ return function(t: tiniest)
 			local seenNew = nil
 			local seenOld = nil
 
-			manager:OnKeyChange({ "player" }, function(key, newValue, oldValue)
+			manager:OnKeyChange("player", function(key, newValue, oldValue)
 				fireCount += 1
 				seenKey = key
 				seenNew = newValue
@@ -307,7 +310,7 @@ return function(t: tiniest)
 				expect(key).is("players")
 			end)
 
-			manager:ArrayInsert({ "game", "players" }, "Charlie")
+			manager:ArrayInsert("game.players", "Charlie")
 
 			expect(fireCount).is(1)
 			manager:Destroy()

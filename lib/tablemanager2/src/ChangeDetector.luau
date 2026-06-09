@@ -154,7 +154,9 @@ local Diff = require("./Diff")
 local PathHelpers = require("./PathHelpers")
 
 --// Types //--
-type Path = PathHelpers.Path
+type Path<S = string> = PathHelpers.Path<S>
+type PathArray<S = string> = PathHelpers.PathArray<S>
+type PathString<S = string> = PathHelpers.PathString<S>
 
 --[=[
 	@within ChangeDetector
@@ -201,19 +203,19 @@ type Path = PathHelpers.Path
 ]=]
 export type Snapshot = {
 	RootTable: { [any]: any }, -- Reference to root table (for navigation)
-	Path: Path, -- Path where snapshot was captured
+	Path: PathArray, -- Path where snapshot was captured
 	Data: Diff.Snapshot, -- Diff.Snapshot of the value at Path
 	Timestamp: number, -- Timestamp when snapshot was captured
 }
 
 export type ChangeDetector = {
-	CaptureSnapshot: (self: ChangeDetector, rootTable: { [any]: any }, path: Path) -> Snapshot,
+	CaptureSnapshot: (self: ChangeDetector, rootTable: { [any]: any }, path: PathArray) -> Snapshot,
 	CheckForChanges: (self: ChangeDetector, snapshot: Snapshot) -> (),
 	CheckForChangesBetween: (
 		self: ChangeDetector,
 		oldValue: any,
 		newValue: any,
-		basePath: Path,
+		basePath: PathArray,
 		rootTable: { [any]: any }?
 	) -> (),
 	SetDebugMode: (self: ChangeDetector, enabled: boolean) -> (),
@@ -349,10 +351,10 @@ local ChangeDetector_MT = { __index = ChangeDetector }
 ]=]
 function ChangeDetector.new(
 	callbacks: {
-		OnKeyAdded: (path: Path, key: any, newValue: any, metadata: ChangeMetadata) -> ()?,
-		OnKeyRemoved: (path: Path, key: any, oldValue: any, metadata: ChangeMetadata) -> ()?,
-		OnKeyChanged: (path: Path, key: any, newValue: any, oldValue: any, metadata: ChangeMetadata) -> ()?,
-		OnValueChanged: (path: Path, newValue: any, oldValue: any?, metadata: ChangeMetadata) -> ()?,
+		OnKeyAdded: (path: PathArray, key: any, newValue: any, metadata: ChangeMetadata) -> ()?,
+		OnKeyRemoved: (path: PathArray, key: any, oldValue: any, metadata: ChangeMetadata) -> ()?,
+		OnKeyChanged: (path: PathArray, key: any, newValue: any, oldValue: any, metadata: ChangeMetadata) -> ()?,
+		OnValueChanged: (path: PathArray, newValue: any, oldValue: any?, metadata: ChangeMetadata) -> ()?,
 		FireDescendantChangedNodes: boolean?,
 	},
 	debugMode: boolean?
@@ -439,7 +441,7 @@ end
 	detector:CheckForChanges(snapshot2) -- Shows changes from second capture
 	```
 ]=]
-function ChangeDetector:CaptureSnapshot(rootTable: { [any]: any }, path: Path): Snapshot
+function ChangeDetector:CaptureSnapshot(rootTable: { [any]: any }, path: PathArray): Snapshot
 	-- While suspended, skip all snapshot work and return the sentinel.
 	-- CheckForChanges will recognise it and return immediately too.
 	if self._suspended then
@@ -641,7 +643,12 @@ end
 	--   Value: true
 	```
 ]=]
-function ChangeDetector:CheckForChangesBetween(oldValue: any, newValue: any, basePath: Path, rootTable: { [any]: any }?)
+function ChangeDetector:CheckForChangesBetween(
+	oldValue: any,
+	newValue: any,
+	basePath: PathArray,
+	rootTable: { [any]: any }?
+)
 	if self._debugMode then
 		print("CheckForChangesBetween called:")
 		print("  basePath:", table.concat(basePath, "."))
@@ -798,10 +805,10 @@ end
 ]=]
 function ChangeDetector:_processDiffNode(
 	node: Diff.DiffNode,
-	nodePath: Path,
-	parentPath: Path,
+	nodePath: PathArray,
+	parentPath: PathArray,
 	nodeKey: any?,
-	originPath: Path,
+	originPath: PathArray,
 	originDiff: Diff.DiffNode,
 	snapshot: Snapshot
 )
@@ -880,7 +887,7 @@ end
 	@param rootDiff -- The root diff node representing the captured level's changes
 	@param snapshot -- The snapshot object used for this comparison
 ]=]
-function ChangeDetector:_fireAncestorCallbacks(capturedPath: Path, rootDiff: Diff.DiffNode, snapshot: Snapshot)
+function ChangeDetector:_fireAncestorCallbacks(capturedPath: PathArray, rootDiff: Diff.DiffNode, snapshot: Snapshot)
 	-- If captured at root level (empty path), no ancestors to notify
 	if #capturedPath == 0 then
 		return
