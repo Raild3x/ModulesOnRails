@@ -26,7 +26,7 @@ return function(t: tiniest)
 			local manager = ProxyManager.new()
 
 			local data = { health = 100 }
-			local proxy = manager:CreateProxy(data, {})
+			local proxy = manager:CreateProxy(data)
 
 			expect(proxy).exists()
 			expect(proxy.health).is(100)
@@ -40,7 +40,7 @@ return function(t: tiniest)
 			local data = {
 				player = { health = 100, stats = { level = 5 } },
 			}
-			local proxy = manager:CreateProxy(data, {})
+			local proxy = manager:CreateProxy(data)
 
 			-- Access nested table - should return a proxy
 			local playerProxy = proxy.player
@@ -59,7 +59,7 @@ return function(t: tiniest)
 				age = 25,
 				active = true,
 			}
-			local proxy = manager:CreateProxy(data, {})
+			local proxy = manager:CreateProxy(data)
 
 			expect(proxy.name).is("Alice")
 			expect(proxy.age).is(25)
@@ -74,7 +74,7 @@ return function(t: tiniest)
 			local data = {
 				items = { "Sword", "Shield", "Potion" },
 			}
-			local proxy = manager:CreateProxy(data, {})
+			local proxy = manager:CreateProxy(data)
 
 			expect(proxy.items[1]).is("Sword")
 			expect(proxy.items[2]).is("Shield")
@@ -89,7 +89,7 @@ return function(t: tiniest)
 			local manager = ProxyManager.new()
 
 			local data = { health = 100 }
-			local proxy = manager:CreateProxy(data, {})
+			local proxy = manager:CreateProxy(data)
 
 			local meta = manager:GetMetadata(proxy)
 
@@ -104,7 +104,7 @@ return function(t: tiniest)
 			local manager = ProxyManager.new()
 
 			local data = { items = { "Sword", "Shield", "Potion" } }
-			local proxy = manager:CreateProxy(data, {})
+			local proxy = manager:CreateProxy(data)
 
 			local itemsProxy = proxy.items
 			local meta = manager:GetMetadata(itemsProxy)
@@ -121,7 +121,7 @@ return function(t: tiniest)
 			manager:SetChangeDetector(detector)
 
 			local data = { items = { "Sword" } }
-			local proxy = manager:CreateProxy(data, {})
+			local proxy = manager:CreateProxy(data)
 
 			local itemsProxy = proxy.items
 			local meta = manager:GetMetadata(itemsProxy)
@@ -142,7 +142,7 @@ return function(t: tiniest)
 			local manager = ProxyManager.new()
 
 			local data = { health = 100 }
-			local proxy = manager:CreateProxy(data, {})
+			local proxy = manager:CreateProxy(data)
 
 			local original = manager:GetOriginal(proxy)
 
@@ -199,7 +199,7 @@ return function(t: tiniest)
 			manager:SetChangeDetector(detector)
 
 			local data = { health = 100 }
-			local proxy = manager:CreateProxy(data, {})
+			local proxy = manager:CreateProxy(data)
 
 			-- Change value through proxy
 			proxy.health = 50
@@ -221,7 +221,7 @@ return function(t: tiniest)
 			local data = {
 				player = { health = 100, mana = 50 },
 			}
-			local proxy = manager:CreateProxy(data, {})
+			local proxy = manager:CreateProxy(data)
 
 			-- Change nested value through proxy
 			proxy.player.health = 75
@@ -238,7 +238,7 @@ return function(t: tiniest)
 			local manager = ProxyManager.new()
 
 			local data = { items = { "Sword" } }
-			local proxy = manager:CreateProxy(data, {})
+			local proxy = manager:CreateProxy(data)
 
 			-- Directly modify the underlying array
 			-- Note: ProxyManager doesn't intercept table.insert itself
@@ -256,7 +256,7 @@ return function(t: tiniest)
 			local manager = ProxyManager.new()
 
 			local data = { items = { "Sword", "Shield" } }
-			local proxy = manager:CreateProxy(data, {})
+			local proxy = manager:CreateProxy(data)
 
 			local itemsProxy = proxy.items
 			local meta = manager:GetMetadata(itemsProxy)
@@ -271,7 +271,7 @@ return function(t: tiniest)
 			local manager = ProxyManager.new()
 
 			local data = { items = { "Sword", "Shield" } }
-			local proxy = manager:CreateProxy(data, {})
+			local proxy = manager:CreateProxy(data)
 
 			expect(function()
 				table.insert(proxy.items, "Potion")
@@ -288,7 +288,7 @@ return function(t: tiniest)
 			local manager = ProxyManager.new()
 
 			local data = { items = { "Sword", "Shield" } }
-			local proxy = manager:CreateProxy(data, {})
+			local proxy = manager:CreateProxy(data)
 
 			expect(function()
 				table.remove(proxy.items, 1)
@@ -307,7 +307,7 @@ return function(t: tiniest)
 			local manager = ProxyManager.new()
 
 			local data = { health = 100, mana = nil }
-			local proxy = manager:CreateProxy(data, {})
+			local proxy = manager:CreateProxy(data)
 
 			expect(proxy.health).is(100)
 			expect(proxy.mana).is(nil)
@@ -321,7 +321,7 @@ return function(t: tiniest)
 			manager:SetChangeDetector(detector)
 
 			local data = { health = 100, mana = 50 }
-			local proxy = manager:CreateProxy(data, {})
+			local proxy = manager:CreateProxy(data)
 
 			detector:CaptureSnapshot(data, {})
 
@@ -336,7 +336,7 @@ return function(t: tiniest)
 			local manager = ProxyManager.new()
 
 			local data = {}
-			local proxy = manager:CreateProxy(data, {})
+			local proxy = manager:CreateProxy(data)
 
 			expect(proxy).exists()
 
@@ -355,7 +355,7 @@ return function(t: tiniest)
 					},
 				},
 			}
-			local proxy = manager:CreateProxy(data, {})
+			local proxy = manager:CreateProxy(data)
 
 			expect(proxy.level1.level2.level3.level4.value).is(42)
 
@@ -366,7 +366,7 @@ return function(t: tiniest)
 			local manager = ProxyManager.new()
 
 			local data = { name = "Alice" }
-			local proxy = manager:CreateProxy(data, {})
+			local proxy = manager:CreateProxy(data)
 
 			-- Accessing scalar should return the scalar, not a proxy
 			local name = proxy.name
@@ -382,7 +382,7 @@ return function(t: tiniest)
 			local manager = ProxyManager.new()
 
 			local data = { health = 100 }
-			local proxy = manager:CreateProxy(data, {})
+			local proxy = manager:CreateProxy(data)
 
 			manager:Destroy()
 

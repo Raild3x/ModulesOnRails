@@ -156,7 +156,6 @@ local PathHelpers = require("./PathHelpers")
 --// Types //--
 type Path<S = string> = PathHelpers.Path<S>
 type PathArray<S = string> = PathHelpers.PathArray<S>
-type PathString<S = string> = PathHelpers.PathString<S>
 
 --[=[
 	@within ChangeDetector

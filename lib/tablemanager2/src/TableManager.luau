@@ -46,7 +46,6 @@ const Diff = require("./Diff")
 --// Types //--
 type Path<S = string> = PathHelpers.Path<S>
 type PathArray<S = string> = PathHelpers.PathArray<S>
-type PathString<S = string> = PathHelpers.PathString<S>
 type ValueAtPath<T, S> = PathHelpers.ValueAtPath<T, S>
 type ProxyManager = ProxyManagerModule.ProxyManager
 type ListenerRegistry = ListenerRegistryModule.ListenerRegistry
@@ -797,7 +796,7 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	)
 
 	-- Create root proxy (no parent, no key)
-	self.Proxy = self._proxyManager:CreateProxy(self._originalData, nil, nil, nil, nil)
+	self.Proxy = self._proxyManager:CreateProxy(self._originalData, nil, nil, nil)
 
 	return self :: any
 end
@@ -1547,7 +1546,7 @@ end
 	Destroy the TableManager and clean up all resources.
 ]=]
 function TableManager.Destroy(self: TM_Internal)
-	if not self._Destroyed then
+	if self._Destroyed then
 		return
 	end
 	self._Destroyed = true

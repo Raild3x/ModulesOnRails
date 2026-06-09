@@ -157,10 +157,9 @@ export type ProxyManager<T = { [any]: any }> = {
 	GetPath: <S>(self: ProxyManager<T>, proxy: Proxy<T, S>) -> PathArray<S>?,
 	--- Returns the existing proxy for an original table, or nil if none exists.
 	GetProxyFromOriginal: (self: ProxyManager<T>, original: any) -> Proxy<T, string>?,
-	CreateProxy: <T, S>(
+	CreateProxy: <T>(
 		self: ProxyManager<T>,
 		original: T,
-		_path: PathArray<S>?,
 		rootTable: { [any]: any }?,
 		parentOriginal: any?,
 		key: any?
@@ -308,7 +307,7 @@ function ProxyManager.new(): ProxyManager
 				end
 
 				-- Create new proxy for nested table (inherit root table)
-				return self:CreateProxy(value, nil, meta.RootTable, meta.Original, key)
+				return self:CreateProxy(value, meta.RootTable, meta.Original, key)
 			end
 
 			-- Return raw value for scalars
@@ -428,7 +427,7 @@ function ProxyManager.new(): ProxyManager
 						return nextKey, self._originalToProxy[nextValue] :: any
 					end
 
-					local nestedProxy = self:CreateProxy(nextValue, nil, meta.RootTable, meta.Original, nextKey)
+					local nestedProxy = self:CreateProxy(nextValue, meta.RootTable, meta.Original, nextKey)
 					return nextKey, nestedProxy
 				end
 
@@ -578,7 +577,6 @@ end
 	Create a new proxy for a table at the given path.
 	
 	@param original -- The original table to wrap
-	@param _path -- Optional path for metadata (not used in this implementation but can be helpful for debugging)
 	@param rootTable -- Optional root table reference (defaults to original for root proxy)
 	@param parentOriginal -- The unwrapped parent table (nil for root proxy)
 	@param key -- The key under which `original` lives in its parent (nil for root proxy)
@@ -586,7 +584,6 @@ end
 function ProxyManager.CreateProxy<T>(
 	self: ProxyManager,
 	original: T & { [any]: any },
-	_path: PathArray<any>?,
 	rootTable: { [any]: any }?,
 	parentOriginal: any?,
 	key: any?
