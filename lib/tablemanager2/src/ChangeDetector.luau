@@ -1,153 +1,28 @@
 --!strict
 --[=[
 	@class ChangeDetector
-	
-	Detects and reports nested changes for any value transitions using snapshot-based comparison.
-	
-	## Responsibilities
-	- Capture snapshots of values for later comparison
-	- Compare new values against captured snapshots using the Diff module
-	- Traverse diff trees using DFS (Depth-First Search) for efficient processing
-	- Detect added, removed, and changed keys (including root-level changes)
-	- Report granular changes for each nested modification
-	- Coordinate with callback system for event firing
-	
-	## Architecture
-	
-	### Snapshot-Based Workflow
-	ChangeDetector supports two workflows:
-	
-	**1. Capture-then-check (Recommended for ongoing monitoring):**
+
+	Detects and reports nested table/value changes using snapshot-based diffing.
+
+	## Workflows
+	1. Capture then check (stateful):
 	```lua
-	local snapshot = detector:CaptureSnapshot(myTable, {"data"})
-	-- Make changes to myTable...
-	detector:CheckForChanges(snapshot) -- Detects changes since snapshot
+	local snapshot = detector:CaptureSnapshot(root, {"player", "stats"})
+	-- mutate root...
+	detector:CheckForChanges(snapshot)
 	```
-	
-	**2. Direct comparison (For one-off comparisons):**
+	2. Direct compare (one-off):
 	```lua
-	detector:CheckForChangesBetween(oldTable, newTable, {"data"})
+	detector:CheckForChangesBetween(oldValue, newValue, {"player", "stats"})
 	```
-	
-	### Example with All Callbacks
-	```lua
-	local detector = ChangeDetector.new({
-		OnKeyAdded = function(path, key, newValue, metadata)
-			print("[ADD]", key, "at", table.concat(path, "."), "=", newValue)
-			if metadata.Diff then
-				print("  Change type:", metadata.Diff.type)
-			else
-				print("  Ancestor notification - descendant was added")
-			end
-		end,
-		OnKeyRemoved = function(path, key, oldValue, metadata)
-			print("[REMOVE]", key, "from", table.concat(path, "."), "was", oldValue)
-			if metadata.Diff then
-				print("  Change type:", metadata.Diff.type)
-			else
-				print("  Ancestor notification - descendant was removed")
-			end
-		end,
-		OnKeyChanged = function(path, key, newValue, oldValue, metadata)
-			if metadata.Diff then
-				-- Leaf change - values are meaningful
-				print("[CHANGE]", key, "at", table.concat(path, "."), ":", oldValue, "->", newValue)
-				print("  Direct change type:", metadata.Diff.type)
-			else
-				-- Ancestor notification - newValue/oldValue are nil
-				print("[ANCESTOR]", key, "at", table.concat(path, "."), "has descendant changes")
-			end
-		end,
-		OnValueChanged = function(path, newValue, oldValue, metadata)
-			if metadata.Diff then
-				print("[VALUE]", table.concat(path, "."), ":", oldValue, "->", newValue)
-				print("  Change type:", metadata.Diff.type)
-				
-				-- Check for nested changes
-				if metadata.Diff.children then
-					print("  Has descendant changes")
-				end
-			else
-				print("[ANCESTOR VALUE]", table.concat(path, "."), "has descendant changes")
-			end
-		end,
-	})
-	
-	local gameData = {
-		player = { name = "Alice", level = 5 },
-		settings = { volume = 80 }
-	}
-	
-	detector:CaptureSnapshot(gameData, {})
-	
-	-- Make various changes
-	gameData.player.name = "Bob"           -- Change
-	gameData.player.coins = 100            -- Add
-	gameData.settings = nil                -- Remove (table to nil)
-	
-	detector:CheckForChanges(gameData)
-	```
-	
-	### Comprehensive Change Detection
-	ChangeDetector uses the Diff module to handle all value transition types:
-	1. **Table → Table**: Deep comparison with nested change detection
-	2. **Scalar → Scalar**: Simple value changes at any path level
-	3. **Table → Scalar**: All table leaves removed, then scalar added
-	4. **Scalar → Table**: Scalar removed, then all table leaves added
-	5. **nil Transitions**: Proper handling of nil ↔ value changes
-	6. **Root-Level Changes**: Supports changes at the root path (empty path)
-	
-	### Tree-Based Diffing
-	The Diff module generates a tree structure representing changes:
-	- Nodes contain `type`, `old`, `new`, and optional `children`
-	- "descendantChanged" nodes represent containers with changed children
-	- ChangeDetector uses DFS (Depth-First Search) to traverse the tree efficiently
-	- DFS uses less memory than BFS (O(depth) vs O(width)) and has better cache locality
-	- Callbacks are fired in depth-first order: parent containers, then their children recursively
-	- After processing the diff tree, ancestor callbacks are fired up the path hierarchy
-	- Snapshots capture both values and references for accurate change detection
-	
-	### Ancestor Propagation
-	When changes are detected, callbacks fire for:
-	1. **Leaf changes** (direct changes in the diff tree - each individual change)
-	2. **Ancestor propagation** (all parent levels up to root - ONE notification per assignment)
-	
-	**Important:** The `OriginPath` in ancestor callbacks represents WHERE THE ASSIGNMENT OPERATION
-	OCCURRED (the captured path), NOT individual leaf changes. This treats an assignment as a
-	singular operation, even if multiple descendants changed.
-	
-	Example: If you capture at `Player.Stats` with path `{"Player", "Stats"}`,
-	then assign a new stats table with changes to Health, Mana, and Level:
-	
-	**Leaf callbacks** (fired for each individual change):
-	- `OnValueChanged({"Player", "Stats", "Health"}, 50, 100, metadata)` - metadata.Diff present
-	- `OnValueChanged({"Player", "Stats", "Mana"}, 150, 100, metadata)` - metadata.Diff present  
-	- `OnValueChanged({"Player", "Stats", "Level"}, 6, 5, metadata)` - metadata.Diff present
-	
-	**Ancestor callbacks** (fired ONCE for the entire assignment operation):
-	- `OnValueChanged({"Player"}, nil, nil, metadata)` - metadata.Diff = nil, OriginPath = {"Player", "Stats"}
-	- `OnValueChanged({}, nil, nil, metadata)` - metadata.Diff = nil, OriginPath = {"Player", "Stats"}
-	
-	Notice: Ancestors fire ONCE with OriginPath pointing to the assignment location, treating
-	the entire multi-leaf change as a single operation. This prevents ancestors from being
-	notified separately for every descendant change.
-	
-	### Event Callbacks
-	ChangeDetector accepts callbacks for each type of change:
-	- OnKeyAdded: Called when a new key is added (not called for root-level additions)
-	- OnKeyRemoved: Called when a key is removed (not called for root-level removals)
-	- OnKeyChanged: Called when a key's value changes (not called for root-level changes)
-	- OnValueChanged: Called for any value change at any level (including root)
-	
-	**Leaf vs Ancestor Callbacks:**
-	- **Leaf callbacks**: `metadata.Diff` is present, `newValue`/`oldValue` are meaningful
-	- **Ancestor callbacks**: `metadata.Diff` is nil, `newValue`/`oldValue` are nil
-	
-	Ancestor callbacks indicate "a descendant changed" without providing the actual
-	values at that level. This is by design to avoid expensive table traversals.
-	If you need the actual values at ancestor levels, maintain your own state tracking.
-	
-	This allows the detector to remain independent of the event system.
+
+	## Change Types
+	The detector handles table/scalar/nil transitions, including root-level changes.
+
+	## Callback Semantics
+	- Leaf callbacks include `metadata.Diff` with the exact changed node.
+	- Ancestor callbacks use `metadata.Diff = nil` and fire once per assignment operation.
+	- `metadata.OriginPath` always points to the assignment origin (captured path), not each leaf.
 ]=]
 
 local Diff = require("./Diff")
@@ -161,50 +36,17 @@ type PathArray<S = string> = PathHelpers.PathArray<S>
 	@within ChangeDetector
 	@interface Snapshot
 	.RootTable { [any]: any } -- Reference to the root table being tracked (for ancestor navigation)
-	.Path Path -- The path where the snapshot was captured (e.g., {"Player", "Stats"})
+	.Path PathArray -- The path where the snapshot was captured (e.g., {"Player", "Stats"})
 	.Data Diff.Snapshot -- The Diff.Snapshot of the value at the captured path
-	.Timestamp number -- Optional timestamp for debugging
+	.Timestamp number -- Capture timestamp (debugging/ordering)
 
-	A snapshot object that captures the state of a table at a specific point in time.
-	This object can be passed to CheckForChanges() to detect changes at any point
-	in the table's history.
-	
-	**Structure:**
-	- `RootTable`: Reference to the root table being tracked (for ancestor navigation)
-	- `Path`: The path where the snapshot was captured (e.g., {"Player", "Stats"})
-	- `Data`: The Diff.Snapshot of the value at the captured path
-	- `Timestamp`: Optional timestamp for debugging
-	
-	**Benefits:**
-	- Historical diffing: Compare current state against any previous snapshot
-	- Better encapsulation: Snapshot carries all context needed for diffing
-	- Multiple snapshots: Track changes from different points simultaneously
-	- Ancestor value access: Root table + path allows callbacks to navigate to true values
-	
-	```lua
-	local gameState = { player = { stats = { Health = 100 } } }
-	
-	-- Capture snapshot at a nested path
-	local snapshot = detector:CaptureSnapshot(gameState, {"player", "stats"})
-	
-	-- Make changes
-	gameState.player.stats.Health = 50
-	
-	-- Check changes against specific snapshot
-	detector:CheckForChanges(snapshot)
-	
-	-- Can keep multiple snapshots for different comparison points
-	local snapshot2 = detector:CaptureSnapshot(gameState, {"player", "stats"})
-	gameState.player.stats.Health = 25
-	detector:CheckForChanges(snapshot1) -- Shows Health: 100 -> 25
-	detector:CheckForChanges(snapshot2) -- Shows Health: 50 -> 25
-	```
+	State captured at a path and reused by CheckForChanges.
 ]=]
 export type Snapshot = {
-	RootTable: { [any]: any }, -- Reference to root table (for navigation)
-	Path: PathArray, -- Path where snapshot was captured
-	Data: Diff.Snapshot, -- Diff.Snapshot of the value at Path
-	Timestamp: number, -- Timestamp when snapshot was captured
+	RootTable: { [any]: any },
+	Path: PathArray,
+	Data: Diff.Snapshot,
+	Timestamp: number,
 }
 
 export type ChangeDetector = {
@@ -228,105 +70,17 @@ export type ChangeDetector = {
 --[=[
 	@within ChangeDetector
 	@interface ChangeMetadata
-	Diff Diff.DiffNode -- metadata provided to callbacks for rich context on changes.
+	Diff Diff.DiffNode -- Diff node for this callback level; nil for ancestor notifications.
 	OriginPath Path -- The path where the assignment operation occurred (captured path)
-	OriginDiff Diff.DiffNode -- The root diff node of the assignment operation (ALWAYS present)
-	Snapshot Snapshot -- The snapshot object used for this comparison (provides full context)
+	OriginDiff Diff.DiffNode -- Root diff node for the assignment operation.
+	Snapshot Snapshot -- Snapshot used for this comparison.
 
-	Metadata about a detected change, providing rich context to callbacks.
-	
-	This structure is designed to clearly distinguish between leaf changes (individual
-	modifications) and ancestor notifications (parent levels being informed of the operation).
-	
-	**Structure:**
-	- `Diff`: The DiffNode for this callback's level (nil for ancestor callbacks)
-	- `OriginPath`: The path where the ASSIGNMENT OPERATION occurred (captured path)
-	- `OriginDiff`: The root DiffNode of the assignment operation (ALWAYS present)
-	- `Snapshot`: The snapshot object used for this comparison (provides full context)
-	
-	**For leaf callbacks** (individual changes within the operation):
-	- `Diff` is present (details of this specific change)
-	- `path` parameter shows where this specific leaf changed
-	- `newValue`/`oldValue` parameters reflect this leaf's actual changed values
-	- `OriginPath` points to the assignment operation that caused this leaf to change
-	- Use `metadata.Diff.type` to determine change type: "added", "removed", "changed"
-	
-	**For ancestor callbacks** (parent levels being notified of the operation):
-	- `Diff` is nil (no direct change at this level)
-	- `OriginPath` points to where the assignment operation occurred (captured path)
-	- `OriginDiff` contains the root diff of the entire operation
-	- `newValue` parameter contains the TRUE current value at that ancestor level
-	- `oldValue` parameter is the same as `newValue` (not meaningful for ancestors)
-	- `Snapshot` provides full context (root table + path)
-	- Ancestors are notified ONCE per assignment operation, not per leaf change
-	
-	**Ancestor Values:**
-	Unlike the old design, ancestor callbacks now receive the TRUE current value as `newValue`.
-	The detector navigates to each ancestor level using `snapshot.RootTable` and the path,
-	then passes the actual current value to the callback. This is much more convenient than
-	requiring every callback to navigate manually.
-	
-	```lua
-	OnKeyChanged = function(path, key, newValue, oldValue, metadata)
-		if metadata.Diff == nil then  -- Ancestor callback
-			-- newValue is the TRUE current value at this level!
-			print(`Ancestor at {table.concat(path, ".")}.{key}`)
-			print(`Current value: {newValue}`)  -- Already navigated for you
-			print(`Origin: {table.concat(metadata.OriginPath, ".")}`)
-		else
-			-- Leaf callback
-			print(`Leaf change: {oldValue} -> {newValue}`)
-		end
-	end
-	```
-	
-	**Key Concept - Assignment as Operation:**
-	When you assign `player.stats = newStats` (captured at `{"player", "stats"}`),
-	the OriginPath is `{"player", "stats"}` for ALL callbacks (leaf and ancestor),
-	because that's where the assignment operation occurred. This treats the entire
-	change (possibly affecting Health, Mana, Level, etc.) as a single operation.
-	
-	**Why OriginDiff is Always Present:**
-	Every callback is triggered because SOME change was detected. That change is
-	represented by `OriginDiff` (the root diff at the captured path). Whether it's
-	a leaf callback or ancestor callback, there's always an origin diff that caused
-	the notification. There's no case where we'd fire a callback without a change.
-	
-	Example:
-	```lua
-	-- Capture at {"player", "stats"}
-	-- Assign new stats: { health = 50, mana = 150, level = 6 }
-	
-	OnValueChanged = function(path, newValue, oldValue, metadata)
-		if metadata.Diff then
-			-- Leaf callback - one per changed field
-			print("Leaf change at:", table.concat(path, "."))  -- e.g., "player.stats.health"
-			print("Value:", oldValue, "->", newValue)
-			print("Operation at:", table.concat(metadata.OriginPath, "."))  -- "player.stats"
-		else
-			-- Ancestor callback - fired ONCE for entire operation
-			print("Ancestor at:", table.concat(path, "."))  -- e.g., "player"
-			print("Current value:", newValue)  -- TRUE current player table!
-			print("Operation at:", table.concat(metadata.OriginPath, "."))  -- "player.stats"
-		end
-	end
-	```
+	`OriginPath` is the assignment origin for both leaf and ancestor callbacks.
 ]=]
 export type ChangeMetadata = {
-	-- The diff node for the current callback's level
-	-- Present for leaf changes, nil for ancestor notifications
 	Diff: Diff.DiffNode?,
-
-	-- The path where the assignment operation occurred (captured path)
-	-- Always present for all callbacks
 	OriginPath: PathArray,
-
-	-- The root diff node of the assignment operation
-	-- ALWAYS present (not optional) - every callback has an origin diff
 	OriginDiff: Diff.DiffNode,
-
-	-- The snapshot object used for this comparison
-	-- Provides root table reference and path for ancestor value navigation
 	Snapshot: Snapshot,
 }
 
@@ -382,62 +136,17 @@ end
 
 --[=[
 	Captures a snapshot of the table at the specified path and returns a snapshot object.
-	
-	This method navigates to the value at the given path, captures a Diff.Snapshot of it,
-	and returns a snapshot object that can be passed to CheckForChanges() later to detect
-	changes at any point in the table's history.
-	
-	**Returns:** A Snapshot object containing:
-	- RootTable: Reference to the root table (for ancestor navigation)
-	- Path: The path where the snapshot was captured
-	- Data: The Diff.Snapshot of the value at that path
-	- Timestamp: When the snapshot was captured
+	The snapshot can later be passed to CheckForChanges.
 	
 	@param rootTable -- The root table to track changes on
 	@param path -- The path to the value to snapshot (e.g., {"player", "stats"})
-	@return Snapshot object that can be passed to CheckForChanges()
+	@return Snapshot
 	
 	```lua
-	local detector = ChangeDetector.new({
-		OnValueChanged = function(path, newValue, oldValue, metadata)
-			if metadata.Diff then
-				print("Changed at:", table.concat(path, "."))
-				print("  Old:", oldValue, "-> New:", newValue)
-			else
-				-- Ancestor callback - can access true value via snapshot
-				local current = metadata.Snapshot.RootTable
-				for _, k in ipairs(path) do
-					current = current[k]
-				end
-				print("Ancestor at:", table.concat(path, "."))
-				print("  Current value:", current)
-			end
-		end,
-	})
-	
-	local gameState = { 
-		player = { 
-			health = 50, 
-			level = 1 
-		} 
-	}
-	
-	-- Capture the current state and get snapshot object
+	local gameState = { player = { health = 50 } }
 	local snapshot = detector:CaptureSnapshot(gameState, {"player"})
-	
-	-- Make changes to gameState
 	gameState.player.health = 100
-	gameState.player.level = 5
-	
-	-- Detect changes using the snapshot
 	detector:CheckForChanges(snapshot)
-	
-	-- Can capture multiple snapshots for different comparison points
-	local snapshot2 = detector:CaptureSnapshot(gameState, {"player"})
-	gameState.player.health = 25
-	
-	detector:CheckForChanges(snapshot)  -- Shows changes from first capture
-	detector:CheckForChanges(snapshot2) -- Shows changes from second capture
 	```
 ]=]
 function ChangeDetector:CaptureSnapshot(rootTable: { [any]: any }, path: PathArray): Snapshot
@@ -480,11 +189,6 @@ end
 --[=[
 	Checks for changes between a captured snapshot and the current state of the table.
 	
-	This method accepts a snapshot object (returned from CaptureSnapshot) and compares
-	it against the current state of the table, detecting all changes that occurred.
-	The snapshot object contains all the context needed: the root table reference, the
-	path, and the captured data.
-	
 	@param snapshot -- The snapshot object to compare against (from CaptureSnapshot)
 	
 	```lua
@@ -498,13 +202,8 @@ end
 				print("Value at", table.concat(path, "."), "changed")
 				print("  ", oldValue, "->", newValue)
 			else
-				-- Ancestor callback - access true value via snapshot
-				local current = metadata.Snapshot.RootTable
-				for _, k in ipairs(path) do
-					current = current[k]
-				end
-				print("Ancestor at", table.concat(path, "."), "has changes")
-				print("  Current:", current)
+				print("Ancestor at", table.concat(path, "."), "notified")
+				print("  Origin:", table.concat(metadata.OriginPath, "."))
 			end
 		end,
 	})
@@ -598,23 +297,21 @@ end
 --[=[
 	Directly compares two values and detects changes without requiring a snapshot.
 	
-	This is a convenience method for one-off comparisons when you don't need
-	the snapshot-based workflow. Use this when you have both old and new values
-	available at the same time.
-	
 	@param oldValue -- The old value (before change)
 	@param newValue -- The new value (after change)
 	@param basePath -- The path to this value in the table hierarchy
 	
 	```lua
 	local detector = ChangeDetector.new({
-		OnKeyChanged = function(path, key, newValue, oldValue, changeType)
+		OnKeyChanged = function(path, key, newValue, oldValue, metadata)
 			print("Key", key, "changed at", table.concat(path, "."))
 			print("  Old:", oldValue, "-> New:", newValue)
+			print("  Type:", metadata.Diff and metadata.Diff.type)
 		end,
-		OnKeyAdded = function(path, key, newValue, changeType)
+		OnKeyAdded = function(path, key, newValue, metadata)
 			print("Key", key, "added at", table.concat(path, "."))
 			print("  Value:", newValue)
+			print("  Type:", metadata.Diff and metadata.Diff.type)
 		end,
 	})
 	
@@ -783,24 +480,8 @@ local function fireNodeCallbacks(
 end
 
 --[=[
-	Processes a single diff node and recursively processes its children using DFS.
-	
-	This method processes nodes in depth-first order:
-	1. Recursively process all children (depth-first)
-	2. Fire callbacks for leaf nodes (actual changes)
-	
-	**Important:** `descendantChanged` nodes are NOT leaf changes - they're containers.
-	We only fire callbacks for actual changes (added, removed, changed), not for containers.
-	
-	The `OriginPath` in metadata represents the captured path (where the assignment occurred),
-	NOT the individual leaf path. The `OriginDiff` represents the root diff of the entire
-	operation. The `Snapshot` provides context for ancestor callbacks to access true values.
-	
-	@param node -- The diff node to process
-	@param nodePath -- The full path to this node in the hierarchy
-	@param originPath -- The path where the assignment operation occurred (captured path)
-	@param originDiff -- The root diff node of the assignment operation
-	@param snapshot -- The snapshot object used for this comparison
+	DFS traversal for diff nodes.
+	Fires callbacks for each node with origin metadata from the root assignment.
 ]=]
 function ChangeDetector:_processDiffNode(
 	node: Diff.DiffNode,
@@ -860,31 +541,8 @@ function ChangeDetector:_processDiffNode(
 end
 
 --[=[
-	Fires OnKeyChanged and OnValueChanged callbacks for all ancestor levels above the captured base path.
-	
-	This propagates changes up through the hierarchy for levels that are parents of the captured
-	snapshot point. The origin represents WHERE THE ASSIGNMENT OPERATION OCCURRED, not individual
-	leaf changes. This method navigates to the true current values at each ancestor level and
-	passes them to the callbacks.
-	
-	For example, if you capture at `Player.Stats` with path `{"Player", "Stats"}`,
-	and change multiple descendants (Health, Mana), this fires ancestor callbacks with 
-	`OriginPath = {"Player", "Stats"}` because that's where the assignment happened:
-	- Player level: OnKeyChanged({}, "Player", <current player table>, nil, metadata)
-	- Player value: OnValueChanged({"Player"}, <current player table>, nil, metadata)
-	- Root level: OnValueChanged({}, <current root table>, nil, metadata)
-	
-	All ancestors receive the SAME origin - the captured path - because the entire change
-	is a single operation at that level, even if it contains multiple leaf changes.
-	
-	**Note:** We pass the true current value as `newValue` but `oldValue` is nil because
-	we don't have the old ancestor values captured. This is by design - ancestor callbacks
-	are about notification that descendants changed, not about tracking the ancestor's
-	own value changes.
-	
-	@param capturedPath -- The path where the snapshot was captured (where the assignment happened)
-	@param rootDiff -- The root diff node representing the captured level's changes
-	@param snapshot -- The snapshot object used for this comparison
+	Notifies parent levels above the captured path once per assignment operation.
+	Ancestor callbacks receive Diff=nil and share OriginPath/OriginDiff metadata.
 ]=]
 function ChangeDetector:_fireAncestorCallbacks(capturedPath: PathArray, rootDiff: Diff.DiffNode, snapshot: Snapshot)
 	-- If captured at root level (empty path), no ancestors to notify
