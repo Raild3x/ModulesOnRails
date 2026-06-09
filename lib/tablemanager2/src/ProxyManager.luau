@@ -131,7 +131,6 @@ export type Proxy<T = any, S = ""> = ProxyWrap<T, S>
 	Key any? -- The key under which this table lives in its parent; nil for the root proxy
 	IsArray boolean -- Whether this table is treated as an array
 	ArrayLength number -- Cached length for arrays
-	RootTable { [any]: any } -- Reference to the root table for snapshot capture
 
 	Metadata stored for each proxy.
 ]=]
@@ -141,7 +140,6 @@ export type ProxyMetadata<T = { [any]: any }, S = ""> = {
 	Key: any?, -- The key under which this table lives in its parent; nil for the root proxy
 	IsArray: boolean, -- Whether this table is treated as an array
 	ArrayLength: number, -- Cached length for arrays
-	RootTable: T, -- Reference to the root table for snapshot capture
 }
 
 type ChangeDetector = {
@@ -157,13 +155,7 @@ export type ProxyManager<T = { [any]: any }> = {
 	GetPath: <S>(self: ProxyManager<T>, proxy: Proxy<T, S>) -> PathArray<S>?,
 	--- Returns the existing proxy for an original table, or nil if none exists.
 	GetProxyFromOriginal: (self: ProxyManager<T>, original: any) -> Proxy<T, string>?,
-	CreateProxy: <T>(
-		self: ProxyManager<T>,
-		original: T,
-		rootTable: { [any]: any }?,
-		parentOriginal: any?,
-		key: any?
-	) -> Proxy<T>,
+	CreateProxy: <T>(self: ProxyManager<T>, original: T, parentOriginal: any?, key: any?) -> Proxy<T>,
 	SetChangeDetector: (self: ProxyManager<T>, changeDetector: ChangeDetector) -> (),
 	SetArrayInsertedCallback: <S>(
 		self: ProxyManager<T>,
@@ -196,6 +188,7 @@ export type ProxyManager<T = { [any]: any }> = {
 	_proxyMeta: { [any]: ProxyMetadata<any> },
 	_originalToProxy: { [any]: Proxy },
 	_proxiesByParent: { [any]: { [any]: true } }, -- parentOriginal → set of child proxies
+	_rootTable: T,
 	_changeDetector: ChangeDetector?,
 	_onArrayInserted: (<S>(path: PathArray<S>, index: number, newValue: any) -> ())?,
 	_onBatchDirectArraySet: (<S>(path: PathArray<S>, index: number) -> ())?,
@@ -277,12 +270,17 @@ const ProxyManager_MT = { __index = ProxyManager }
 --[=[
 	Creates a new ProxyManager instance.
 ]=]
-function ProxyManager.new(): ProxyManager
-	const self: ProxyManager = setmetatable({}, ProxyManager_MT) :: any
+function ProxyManager.new<T>(rootTable: T): ProxyManager<T>
+	if type(rootTable) ~= "table" then
+		error("ProxyManager.new expects rootTable to be a plain table")
+	end
+
+	const self: ProxyManager<T> = setmetatable({}, ProxyManager_MT) :: any
 
 	self._proxyMeta = {}
 	self._originalToProxy = {}
 	self._proxiesByParent = {}
+	self._rootTable = rootTable
 	self._changeDetector = nil
 	self._onArrayInserted = nil
 	self._onBatchDirectArraySet = nil
@@ -306,8 +304,8 @@ function ProxyManager.new(): ProxyManager
 					return self._originalToProxy[value]
 				end
 
-				-- Create new proxy for nested table (inherit root table)
-				return self:CreateProxy(value, meta.RootTable, meta.Original, key)
+				-- Create new proxy for nested table
+				return self:CreateProxy(value, meta.Original, key)
 			end
 
 			-- Return raw value for scalars
@@ -334,7 +332,7 @@ function ProxyManager.new(): ProxyManager
 						const existingMeta = self._proxyMeta[existingProxy]
 						local isOrphan = true
 						if existingMeta ~= nil then
-							const liveValue, hasPath = getValueAtPath(existingMeta.RootTable, existingPath)
+							const liveValue, hasPath = getValueAtPath(self._rootTable, existingPath)
 							isOrphan = not hasPath or liveValue ~= existingMeta.Original
 						end
 
@@ -387,7 +385,7 @@ function ProxyManager.new(): ProxyManager
 			-- 1. Capture snapshot BEFORE the change (returns snapshot object)
 			local snapshot = nil
 			if self._changeDetector then
-				snapshot = self._changeDetector:CaptureSnapshot(meta.RootTable, currentPath)
+				snapshot = self._changeDetector:CaptureSnapshot(self._rootTable, currentPath)
 			end
 
 			-- 2. Apply the change
@@ -427,7 +425,7 @@ function ProxyManager.new(): ProxyManager
 						return nextKey, self._originalToProxy[nextValue] :: any
 					end
 
-					local nestedProxy = self:CreateProxy(nextValue, meta.RootTable, meta.Original, nextKey)
+					local nestedProxy = self:CreateProxy(nextValue, meta.Original, nextKey)
 					return nextKey, nestedProxy
 				end
 
@@ -577,14 +575,12 @@ end
 	Create a new proxy for a table at the given path.
 	
 	@param original -- The original table to wrap
-	@param rootTable -- Optional root table reference (defaults to original for root proxy)
 	@param parentOriginal -- The unwrapped parent table (nil for root proxy)
 	@param key -- The key under which `original` lives in its parent (nil for root proxy)
 ]=]
 function ProxyManager.CreateProxy<T>(
 	self: ProxyManager,
 	original: T & { [any]: any },
-	rootTable: { [any]: any }?,
 	parentOriginal: any?,
 	key: any?
 ): Proxy<T>
@@ -596,9 +592,6 @@ function ProxyManager.CreateProxy<T>(
 	if self._originalToProxy[original] then
 		return self._originalToProxy[original] :: any
 	end
-
-	-- For root proxy, original IS the root table
-	const root = rootTable or (original :: any)
 
 	-- Create new proxy
 	const proxy = newproxy(true) :: Proxy<T>
@@ -620,7 +613,6 @@ function ProxyManager.CreateProxy<T>(
 		Key = key,
 		IsArray = isArr,
 		ArrayLength = arrayLength,
-		RootTable = root,
 	}
 
 	-- Register in parent lookup so ShiftKeys can find child proxies

@@ -23,9 +23,8 @@ return function(t: tiniest)
 
 	describe("Proxy Creation", function()
 		test("should create a proxy for a table", function()
-			local manager = ProxyManager.new()
-
 			local data = { health = 100 }
+			local manager = ProxyManager.new(data)
 			local proxy = manager:CreateProxy(data)
 
 			expect(proxy).exists()
@@ -35,11 +34,10 @@ return function(t: tiniest)
 		end)
 
 		test("should create nested proxies automatically", function()
-			local manager = ProxyManager.new()
-
 			local data = {
 				player = { health = 100, stats = { level = 5 } },
 			}
+			local manager = ProxyManager.new(data)
 			local proxy = manager:CreateProxy(data)
 
 			-- Access nested table - should return a proxy
@@ -52,13 +50,12 @@ return function(t: tiniest)
 		end)
 
 		test("should handle scalar values in tables", function()
-			local manager = ProxyManager.new()
-
 			local data = {
 				name = "Alice",
 				age = 25,
 				active = true,
 			}
+			local manager = ProxyManager.new(data)
 			local proxy = manager:CreateProxy(data)
 
 			expect(proxy.name).is("Alice")
@@ -69,11 +66,10 @@ return function(t: tiniest)
 		end)
 
 		test("should handle arrays", function()
-			local manager = ProxyManager.new()
-
 			local data = {
 				items = { "Sword", "Shield", "Potion" },
 			}
+			local manager = ProxyManager.new(data)
 			local proxy = manager:CreateProxy(data)
 
 			expect(proxy.items[1]).is("Sword")
@@ -86,9 +82,8 @@ return function(t: tiniest)
 
 	describe("Metadata Tracking", function()
 		test("should track metadata for proxies", function()
-			local manager = ProxyManager.new()
-
 			local data = { health = 100 }
+			local manager = ProxyManager.new(data)
 			local proxy = manager:CreateProxy(data)
 
 			local meta = manager:GetMetadata(proxy)
@@ -101,9 +96,8 @@ return function(t: tiniest)
 		end)
 
 		test("should track ArrayLength for arrays", function()
-			local manager = ProxyManager.new()
-
 			local data = { items = { "Sword", "Shield", "Potion" } }
+			local manager = ProxyManager.new(data)
 			local proxy = manager:CreateProxy(data)
 
 			local itemsProxy = proxy.items
@@ -116,11 +110,10 @@ return function(t: tiniest)
 		end)
 
 		test("should update ArrayLength when items change", function()
-			local manager = ProxyManager.new()
+			local data = { items = { "Sword" } }
+			local manager = ProxyManager.new(data)
 			local detector = ChangeDetector.new {}
 			manager:SetChangeDetector(detector)
-
-			local data = { items = { "Sword" } }
 			local proxy = manager:CreateProxy(data)
 
 			local itemsProxy = proxy.items
@@ -139,9 +132,8 @@ return function(t: tiniest)
 
 	describe("GetOriginal Helper", function()
 		test("should return original table for proxy", function()
-			local manager = ProxyManager.new()
-
 			local data = { health = 100 }
+			local manager = ProxyManager.new(data)
 			local proxy = manager:CreateProxy(data)
 
 			local original = manager:GetOriginal(proxy)
@@ -152,7 +144,7 @@ return function(t: tiniest)
 		end)
 
 		test("should return scalar values unchanged", function()
-			local manager = ProxyManager.new()
+			local manager = ProxyManager.new {}
 
 			expect(manager:GetOriginal(42)).is(42)
 			expect(manager:GetOriginal("hello")).is("hello")
@@ -163,7 +155,7 @@ return function(t: tiniest)
 		end)
 
 		test("should return non-proxy tables unchanged", function()
-			local manager = ProxyManager.new()
+			local manager = ProxyManager.new {}
 
 			local regularTable = { x = 1, y = 2 }
 			local result = manager:GetOriginal(regularTable)
@@ -176,7 +168,7 @@ return function(t: tiniest)
 
 	describe("ChangeDetector Integration", function()
 		test("should allow setting a ChangeDetector", function()
-			local manager = ProxyManager.new()
+			local manager = ProxyManager.new {}
 
 			local detector = ChangeDetector.new {
 				OnValueChanged = function() end,
@@ -191,14 +183,13 @@ return function(t: tiniest)
 		end)
 
 		test("should modify original data when proxy changes", function()
-			local manager = ProxyManager.new()
+			local data = { health = 100 }
+			local manager = ProxyManager.new(data)
 
 			local detector = ChangeDetector.new {
 				OnValueChanged = function() end,
 			}
 			manager:SetChangeDetector(detector)
-
-			local data = { health = 100 }
 			local proxy = manager:CreateProxy(data)
 
 			-- Change value through proxy
@@ -211,16 +202,15 @@ return function(t: tiniest)
 		end)
 
 		test("should modify nested original data when proxy changes", function()
-			local manager = ProxyManager.new()
+			local data = {
+				player = { health = 100, mana = 50 },
+			}
+			local manager = ProxyManager.new(data)
 
 			local detector = ChangeDetector.new {
 				OnValueChanged = function() end,
 			}
 			manager:SetChangeDetector(detector)
-
-			local data = {
-				player = { health = 100, mana = 50 },
-			}
 			local proxy = manager:CreateProxy(data)
 
 			-- Change nested value through proxy
@@ -235,9 +225,8 @@ return function(t: tiniest)
 
 	describe("Array Operations", function()
 		test("should handle direct array modifications", function()
-			local manager = ProxyManager.new()
-
 			local data = { items = { "Sword" } }
+			local manager = ProxyManager.new(data)
 			local proxy = manager:CreateProxy(data)
 
 			-- Directly modify the underlying array
@@ -253,9 +242,8 @@ return function(t: tiniest)
 		end)
 
 		test("should track ArrayLength metadata", function()
-			local manager = ProxyManager.new()
-
 			local data = { items = { "Sword", "Shield" } }
+			local manager = ProxyManager.new(data)
 			local proxy = manager:CreateProxy(data)
 
 			local itemsProxy = proxy.items
@@ -268,9 +256,8 @@ return function(t: tiniest)
 		end)
 
 		test("table.insert on proxy arrays is rejected natively", function()
-			local manager = ProxyManager.new()
-
 			local data = { items = { "Sword", "Shield" } }
+			local manager = ProxyManager.new(data)
 			local proxy = manager:CreateProxy(data)
 
 			expect(function()
@@ -285,9 +272,8 @@ return function(t: tiniest)
 		end)
 
 		test("table.remove on proxy arrays is rejected natively", function()
-			local manager = ProxyManager.new()
-
 			local data = { items = { "Sword", "Shield" } }
+			local manager = ProxyManager.new(data)
 			local proxy = manager:CreateProxy(data)
 
 			expect(function()
@@ -304,9 +290,8 @@ return function(t: tiniest)
 
 	describe("Edge Cases", function()
 		test("should handle nil values", function()
-			local manager = ProxyManager.new()
-
 			local data = { health = 100, mana = nil }
+			local manager = ProxyManager.new(data)
 			local proxy = manager:CreateProxy(data)
 
 			expect(proxy.health).is(100)
@@ -316,11 +301,10 @@ return function(t: tiniest)
 		end)
 
 		test("should handle setting values to nil", function()
-			local manager = ProxyManager.new()
+			local data: { [any]: any } = { health = 100, mana = 50 }
+			local manager = ProxyManager.new(data)
 			local detector = ChangeDetector.new {}
 			manager:SetChangeDetector(detector)
-
-			local data = { health = 100, mana = 50 }
 			local proxy = manager:CreateProxy(data)
 
 			detector:CaptureSnapshot(data, {})
@@ -333,9 +317,8 @@ return function(t: tiniest)
 		end)
 
 		test("should handle empty tables", function()
-			local manager = ProxyManager.new()
-
 			local data = {}
+			local manager = ProxyManager.new(data)
 			local proxy = manager:CreateProxy(data)
 
 			expect(proxy).exists()
@@ -344,8 +327,6 @@ return function(t: tiniest)
 		end)
 
 		test("should handle deeply nested structures", function()
-			local manager = ProxyManager.new()
-
 			local data = {
 				level1 = {
 					level2 = {
@@ -355,6 +336,7 @@ return function(t: tiniest)
 					},
 				},
 			}
+			local manager = ProxyManager.new(data)
 			local proxy = manager:CreateProxy(data)
 
 			expect(proxy.level1.level2.level3.level4.value).is(42)
@@ -363,9 +345,8 @@ return function(t: tiniest)
 		end)
 
 		test("should not create proxy for scalar values", function()
-			local manager = ProxyManager.new()
-
 			local data = { name = "Alice" }
+			local manager = ProxyManager.new(data)
 			local proxy = manager:CreateProxy(data)
 
 			-- Accessing scalar should return the scalar, not a proxy
@@ -379,9 +360,8 @@ return function(t: tiniest)
 
 	describe("Cleanup", function()
 		test("should clean up on Destroy", function()
-			local manager = ProxyManager.new()
-
 			local data = { health = 100 }
+			local manager = ProxyManager.new(data)
 			local proxy = manager:CreateProxy(data)
 
 			manager:Destroy()

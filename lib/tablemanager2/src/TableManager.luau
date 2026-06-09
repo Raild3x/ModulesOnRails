@@ -575,7 +575,7 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	self._batch = nil
 
 	-- Initialize subsystems
-	self._proxyManager = ProxyManagerModule.new()
+	self._proxyManager = ProxyManagerModule.new(self._originalData)
 	self._listenerRegistry = ListenerRegistryModule.new {
 		DebugMode = false,
 		FireDeferred = resolvedConfig.ListenersFireDeferred == true,
@@ -796,7 +796,7 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	)
 
 	-- Create root proxy (no parent, no key)
-	self.Proxy = self._proxyManager:CreateProxy(self._originalData, nil, nil, nil)
+	self.Proxy = self._proxyManager:CreateProxy(self._originalData, nil, nil)
 
 	return self :: any
 end
