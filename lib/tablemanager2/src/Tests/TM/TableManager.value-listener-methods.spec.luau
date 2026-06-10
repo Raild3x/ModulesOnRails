@@ -268,6 +268,253 @@ return function(t: tiniest)
 		end)
 	end)
 
+	describe("Method: OnValueChanged", function()
+		test("fires for direct reassignment of the exact path", function()
+			local manager = TableManager.new {
+				player = { health = 100 },
+			}
+
+			local fireCount = 0
+			local conn = manager:OnValueChanged({ "player", "health" }, function()
+				fireCount += 1
+			end)
+
+			manager.Proxy.player.health = 50
+
+			expect(fireCount).is(1)
+
+			conn:Disconnect()
+			manager:Destroy()
+		end)
+
+		test("does NOT fire when only a descendant changes", function()
+			local manager = TableManager.new {
+				player = { health = 100 },
+			}
+
+			local fireCount = 0
+			local conn = manager:OnValueChanged({ "player" }, function()
+				fireCount += 1
+			end)
+
+			manager.Proxy.player.health = 50
+
+			expect(fireCount).is(0)
+
+			conn:Disconnect()
+			manager:Destroy()
+		end)
+
+		test("fires when the whole subtree is directly reassigned", function()
+			local manager = TableManager.new {
+				player = { health = 100 },
+			}
+
+			local fireCount = 0
+			local conn = manager:OnValueChanged({ "player" }, function()
+				fireCount += 1
+			end)
+
+			manager.Proxy.player = { health = 50 }
+
+			expect(fireCount).is(1)
+
+			conn:Disconnect()
+			manager:Destroy()
+		end)
+	end)
+
+	describe("Method: OnChanged", function()
+		test("fires for direct reassignment of the exact path", function()
+			local manager = TableManager.new {
+				player = { health = 100 },
+			}
+
+			local fireCount = 0
+			local conn = manager:OnChanged({ "player", "health" }, function()
+				fireCount += 1
+			end)
+
+			manager.Proxy.player.health = 50
+
+			expect(fireCount).is(1)
+
+			conn:Disconnect()
+			manager:Destroy()
+		end)
+
+		test("fires when a descendant changes", function()
+			local manager = TableManager.new {
+				player = { health = 100 },
+			}
+
+			local fireCount = 0
+			local conn = manager:OnChanged({ "player" }, function()
+				fireCount += 1
+			end)
+
+			manager.Proxy.player.health = 50
+
+			expect(fireCount).is(1)
+
+			conn:Disconnect()
+			manager:Destroy()
+		end)
+	end)
+
+	describe("Method: Observe", function()
+		test("immediately fires with the current value and nil metadata", function()
+			local manager = TableManager.new {
+				player = { health = 100 },
+			}
+
+			local capturedValue = nil
+			local capturedOld: any = "unset"
+			local capturedMetadata: any = "unset"
+
+			local conn = manager:Observe({ "player", "health" }, function(newValue, oldValue, metadata)
+				capturedValue = newValue
+				capturedOld = oldValue
+				capturedMetadata = metadata
+			end)
+
+			expect(capturedValue).is(100)
+			expect(capturedOld).is(nil)
+			expect(capturedMetadata).is(nil)
+
+			conn:Disconnect()
+			manager:Destroy()
+		end)
+
+		test("fires again with real metadata on subsequent changes", function()
+			local manager = TableManager.new {
+				player = { health = 100 },
+			}
+
+			local fireCount = 0
+			local lastValue = nil
+			local lastMetadata: any = nil
+
+			local conn = manager:Observe({ "player", "health" }, function(newValue, _oldValue, metadata)
+				fireCount += 1
+				lastValue = newValue
+				lastMetadata = metadata
+			end)
+
+			manager.Proxy.player.health = 50
+
+			expect(fireCount).is(2) -- initial + change
+			expect(lastValue).is(50)
+			expect(lastMetadata).exists()
+
+			conn:Disconnect()
+			manager:Destroy()
+		end)
+
+		test("immediately fires with nil for a path that does not exist yet", function()
+			local manager = TableManager.new {
+				player = { health = 100 },
+			}
+
+			local capturedValue: any = "unset"
+			local conn = manager:Observe({ "player", "mana" }, function(newValue)
+				capturedValue = newValue
+			end)
+
+			expect(capturedValue).is(nil)
+
+			conn:Disconnect()
+			manager:Destroy()
+		end)
+
+		test("disconnect prevents later listener invocation", function()
+			local manager = TableManager.new {
+				player = { health = 100 },
+			}
+
+			local fireCount = 0
+			local conn = manager:Observe({ "player", "health" }, function()
+				fireCount += 1
+			end)
+
+			conn:Disconnect()
+			manager.Proxy.player.health = 50
+
+			expect(fireCount).is(1) -- only the initial fire
+			manager:Destroy()
+		end)
+	end)
+
+	describe("Wildcard listeners", function()
+		test("OnValueChange with a wildcard path fires for any matching key", function()
+			local manager = TableManager.new {
+				Players = {
+					p123 = { Health = 100 },
+					p456 = { Health = 80 },
+				},
+			}
+
+			local fired: { [string]: number } = {}
+			local conn = manager:OnValueChanged({ "Players", "*", "Health" }, function(newValue, _oldValue, metadata)
+				local playerId = metadata.WildcardMatches[1]
+				fired[playerId] = newValue
+			end)
+
+			manager.Proxy.Players.p123.Health = 90
+			manager.Proxy.Players.p456.Health = 70
+
+			expect(fired.p123).is(90)
+			expect(fired.p456).is(70)
+
+			conn:Disconnect()
+			manager:Destroy()
+		end)
+
+		test("a new key added under a wildcard-watched parent fires the wildcard ancestor listener", function()
+			local manager = TableManager.new {
+				Players = {
+					p123 = { Health = 100 },
+				},
+			}
+
+			local matchedIds: { string } = {}
+			local conn = manager:OnValueChange({ "Players", "*" }, function(_newValue, _oldValue, metadata)
+				if metadata.WildcardMatches then
+					table.insert(matchedIds, metadata.WildcardMatches[1])
+				end
+			end)
+
+			manager.Proxy.Players.p456 = { Health = 80 }
+
+			expect(#matchedIds).is(1)
+			expect(matchedIds[1]).is("p456")
+
+			conn:Disconnect()
+			manager:Destroy()
+		end)
+
+		test("supports dot-string wildcard path input", function()
+			local manager = TableManager.new {
+				Players = {
+					p123 = { Health = 100 },
+				},
+			}
+			local managerAny: any = manager
+
+			local fireCount = 0
+			local conn = managerAny:OnValueChange("Players.*.Health", function()
+				fireCount += 1
+			end)
+
+			manager.Proxy.Players.p123.Health = 50
+
+			expect(fireCount).is(1)
+
+			(conn :: any):Disconnect()
+			manager:Destroy()
+		end)
+	end)
+
 	describe("Method: OnKeyChange", function()
 		test("fires when a scalar key changes", function()
 			local manager = TableManager.new {

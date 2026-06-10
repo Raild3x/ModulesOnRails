@@ -10,12 +10,17 @@
 
 --// Imports //--
 const Diff = require("./Diff")
+const ArrayBatchRecorder = require("./ArrayBatchRecorder")
+const ChangeDetector = require("./ChangeDetector")
 
 --// Types //--
+type PathArray = { any }
+type ArrayBatchRecorder = ArrayBatchRecorder.ArrayBatchRecorder
+
 export type BatchState = {
-	Recorder: any, -- ArrayBatchRecorder
-	StartSnapshot: any,
-	TrackedPaths: { [string]: { any } },
+	Recorder: ArrayBatchRecorder,
+	StartSnapshot: ChangeDetector.Snapshot,
+	TrackedPaths: { [string]: PathArray },
 	DirtyBranches: { [any]: boolean },
 	Flushing: boolean,
 }
@@ -25,7 +30,7 @@ const BatchUtils = {}
 -- Creates a synthetic snapshot for array operations and ForceNotify.
 -- These operations bypass normal ChangeDetector flow, so we create a compatible
 -- Snapshot payload using Diff's canonical snapshot builder.
-function BatchUtils.CreateSyntheticSnapshot<T>(rootTable: T, path: { any }, value: any)
+function BatchUtils.CreateSyntheticSnapshot<T>(rootTable: T, path: { any }, value: any): ChangeDetector.Snapshot
 	return {
 		RootTable = rootTable,
 		Path = path,
@@ -49,7 +54,7 @@ end
 
 -- Navigates a ChangeDetector Snapshot's Diff.Snapshot children and returns
 -- the deep-copied value stored at `path` (i.e., the pre-batch state).
-function BatchUtils.GetSnapshotValue(snapshot: any, path: { any }): any?
+function BatchUtils.GetSnapshotValue(snapshot: ChangeDetector.Snapshot, path: { any }): any?
 	local snap: any = snapshot.Data
 	for _, key in path do
 		if not snap or not snap.children then

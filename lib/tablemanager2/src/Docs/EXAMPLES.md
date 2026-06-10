@@ -125,6 +125,101 @@ manager:OnValueChange({}, function(newValue, oldValue, metadata)
 end)
 ```
 
+### OnValueChanged vs OnChanged
+
+`OnValueChanged` and `OnChanged` are convenience wrappers around `OnValueChange`
+for the two most common cases:
+
+- **`OnValueChanged`** fires ONLY when this exact path is directly reassigned.
+- **`OnChanged`** fires when this path is directly reassigned OR any descendant
+  of it changes (this is `OnValueChange`'s default behavior).
+
+```lua
+local manager = TableManager.new({
+    Player = { Health = 100, Mana = 50 }
+})
+
+manager:OnValueChanged({"Player"}, function(newValue, oldValue, metadata)
+    print("Player table was directly replaced")
+end)
+
+manager:OnChanged({"Player"}, function(newValue, oldValue, metadata)
+    print("Player table or one of its fields changed")
+end)
+
+manager.Proxy.Player.Health = 80
+-- Output: "Player table or one of its fields changed"
+-- (OnValueChanged does NOT fire - only Health changed, not Player itself)
+
+manager.Proxy.Player = { Health = 100, Mana = 50 }
+-- Output: "Player table was directly replaced"
+--         "Player table or one of its fields changed"
+```
+
+### Observe
+
+`Observe` immediately invokes the callback with the current value (with
+`oldValue` and `metadata` both `nil`), then behaves like `OnValueChange` for
+subsequent changes. Useful for binding UI to data without separately calling
+`Get` first.
+
+```lua
+local manager = TableManager.new({
+    Player = { Health = 100 }
+})
+
+manager:Observe({"Player", "Health"}, function(newValue, oldValue, metadata)
+    if metadata == nil then
+        print("Initial value:", newValue)
+    else
+        print("Health changed:", oldValue, "→", newValue)
+    end
+end)
+-- Output immediately: "Initial value: 100"
+
+manager.Proxy.Player.Health = 80
+-- Output: "Health changed: 100 → 80"
+```
+
+### Wildcard Listeners
+
+A `"*"` path segment matches any literal key at that position, which is
+useful for dynamic collections (e.g. per-player data) without needing to
+register a listener for each existing key or re-register on `KeyAdded`.
+The matched keys are available via `metadata.WildcardMatches`, in
+left-to-right order.
+
+```lua
+local manager = TableManager.new({
+    Players = {
+        p123 = { Health = 100 },
+        p456 = { Health = 80 },
+    }
+})
+
+manager:OnValueChanged({"Players", "*", "Health"}, function(newValue, oldValue, metadata)
+    local playerId = metadata.WildcardMatches[1]
+    print(playerId, "health:", oldValue, "→", newValue)
+end)
+
+manager.Proxy.Players.p123.Health = 90  -- "p123 health: 100 → 90"
+manager.Proxy.Players.p456.Health = 70  -- "p456 health: 80 → 70"
+
+-- A new player added later is also covered by a wildcard ancestor listener:
+manager:OnValueChange({"Players", "*"}, function(_, _, metadata)
+    if metadata.WildcardMatches then
+        print("Player data changed for:", metadata.WildcardMatches[1])
+    end
+end)
+
+manager.Proxy.Players.p789 = { Health = 100 }
+-- Output: "Player data changed for: p789"
+```
+
+> Note: a listener registered with `Once = true` on a wildcard path fires once
+> **total** across all matching keys, not once per key, since it lives on a
+> single tree node.
+
 ---
 
 ## Array Operations

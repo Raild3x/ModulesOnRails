@@ -35,6 +35,7 @@
 const T = require("../T")
 const Signal = require("../Signal")
 const PathHelpers = require("./PathHelpers")
+const BatchUtilsModule = require("./BatchUtils")
 const ProxyManagerModule = require("./ProxyManager")
 const ListenerRegistryModule = require("./ListenerRegistry")
 const ChangeDetectorModule = require("./ChangeDetector")
@@ -42,13 +43,11 @@ const SchemaNavigatorModule = require("./SchemaNavigator")
 const ArrayBatchRecorderModule = require("./ArrayBatchRecorder")
 const ArrayDiffModule = require("./ArrayDiff")
 const Diff = require("./Diff")
-const BatchUtilsModule = require("./BatchUtils")
 
 --// Localize batch utils to avoid function call overhead //--
 const createSyntheticSnapshot = BatchUtilsModule.CreateSyntheticSnapshot
 const serializeBatchPath = BatchUtilsModule.SerializeBatchPath
 const getSnapshotValue = BatchUtilsModule.GetSnapshotValue
-const getBatchBranchKey = BatchUtilsModule.GetBatchBranchKey
 const markBatchBranchDirty = BatchUtilsModule.MarkBatchBranchDirty
 const ensureBatchPathTracking = BatchUtilsModule.EnsureBatchPathTracking
 
@@ -65,14 +64,7 @@ type Connection = ListenerRegistryModule.Connection
 type Signal<Fn, Args...> = Signal.Signal<Fn, Args...>
 type ArrayBatchRecorder = ArrayBatchRecorderModule.ArrayBatchRecorder
 type SchemaCheck = SchemaNavigatorModule.Check
-
-type BatchState = {
-	Recorder: ArrayBatchRecorder,
-	StartSnapshot: any,
-	TrackedPaths: { [string]: PathArray },
-	DirtyBranches: { [any]: boolean },
-	Flushing: boolean,
-}
+type BatchState = BatchUtilsModule.BatchState
 
 export type Proxy<T = any, S = ""> = ProxyManagerModule.Proxy<T, S>
 
@@ -98,30 +90,26 @@ export type TableManager<T = { [any]: any }> = {
 	ArrayRemoved: Signal<(path: PathArray, index: number, oldValue: any) -> (), PathArray, number, any>,
 	ArraySet: Signal<(path: PathArray, index: number, newValue: any, oldValue: any) -> (), PathArray, number, any, any>,
 
-	-- Listener registration (fire for ancestors/descendants)
+	-- Listener registration (fire for ancestors/descendants) --
+
+	--- Fires when this path is directly reassigned OR any descendant of it
+	OnChange: <S>(
+		self: TableManager<T>,
+		path: Path<S>,
+		callback: (newValue: ValueAtPath<T, S>, oldValue: ValueAtPath<T, S>?, metadata: ChangeMetadata) -> (),
+		options: ListenerOptions?
+	) -> Connection,
+
+	--- Fires ONLY when this exact path is directly reassigned (not when a
+	--- descendant changes). Shorthand for `OnValueChange` with
+	--- `ListenDepth = 0, ListenDepthStyle = "=="`.
 	OnValueChange: <S>(
 		self: TableManager<T>,
 		path: Path<S>,
 		callback: (newValue: ValueAtPath<T, S>, oldValue: ValueAtPath<T, S>?, metadata: ChangeMetadata) -> (),
 		options: ListenerOptions?
 	) -> Connection,
-	--- Fires ONLY when this exact path is directly reassigned (not when a
-	--- descendant changes). Shorthand for `OnValueChange` with
-	--- `ListenDepth = 0, ListenDepthStyle = "=="`.
-	OnValueChanged: <S>(
-		self: TableManager<T>,
-		path: Path<S>,
-		callback: (newValue: ValueAtPath<T, S>, oldValue: ValueAtPath<T, S>?, metadata: ChangeMetadata) -> (),
-		options: ListenerOptions?
-	) -> Connection,
-	--- Fires when this path is directly reassigned OR any descendant of it
-	--- changes. Alias for `OnValueChange`.
-	OnChanged: <S>(
-		self: TableManager<T>,
-		path: Path<S>,
-		callback: (newValue: ValueAtPath<T, S>, oldValue: ValueAtPath<T, S>?, metadata: ChangeMetadata) -> (),
-		options: ListenerOptions?
-	) -> Connection,
+
 	--- Immediately invokes `callback` with the current value at `path`
 	--- (`oldValue` and `metadata` both `nil`), then behaves like
 	--- `OnValueChange` for subsequent changes.
@@ -131,6 +119,7 @@ export type TableManager<T = { [any]: any }> = {
 		callback: (newValue: ValueAtPath<T, S>, oldValue: ValueAtPath<T, S>?, metadata: ChangeMetadata?) -> (),
 		options: ListenerOptions?
 	) -> Connection,
+
 	OnKeyAdd: (
 		self: TableManager<T>,
 		path: Path,
@@ -174,9 +163,9 @@ export type TableManager<T = { [any]: any }> = {
 	Set: <S>(self: TableManager<T>, path: Path<S>, value: ValueAtPath<T, S>) -> (),
 	ArrayInsert: (self: TableManager<T>, arrPath: Path | Proxy, newValue: any) -> ()
 		& (self: TableManager<T>, arrPath: Path | Proxy, index: number, newValue: any) -> (),
-	ArrayRemove: <S>(self: TableManager<T>, arrPath: Path | Proxy, index: number) -> any,
+	ArrayRemove: <S>(self: TableManager<T>, arrPath: Path | Proxy, index: number) -> any?,
 	ArrayRemoveFirstValue: (self: TableManager<T>, arrPath: Path | Proxy, valueToFind: any) -> number?,
-	ArraySwapRemove: (self: TableManager<T>, arrPath: Path | Proxy, index: number) -> any,
+	ArraySwapRemove: (self: TableManager<T>, arrPath: Path | Proxy, index: number) -> any?,
 	ArraySwapRemoveFirstValue: (self: TableManager<T>, arrPath: Path | Proxy, valueToFind: any) -> number?,
 	MoveTo: <S1, S2>(self: TableManager<T>, currentPath: Path<S1>, newPath: Path<S2>) -> (),
 	CopyTo: <S1, S2>(self: TableManager<T>, currentPath: Path<S1>, newPath: Path<S2>) -> (),
@@ -525,7 +514,7 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 
 	-- During batch array flush: suppress numeric-key events on tracked array paths.
 	-- Those arrays will emit their own coalesced events via the array flush.
-	const function shouldSuppressBatchArrayKeyEvent(path: Path, key: any): boolean
+	const function shouldSuppressBatchArrayKeyEvent(path: PathArray, key: any): boolean
 		const batch = self._batch
 		if batch == nil or not batch.Flushing or type(key) ~= "number" then
 			return false
@@ -737,13 +726,61 @@ end
 --// Listener Registration //--
 --------------------------------------------------------------------------------
 
+--[=[
+	Fires ONLY when this exact path is directly reassigned (not when a
+	descendant of it changes). Shorthand for `OnChange` with
+	`ListenDepth = 0, ListenDepthStyle = "=="`.
+]=]
 function TableManager.OnValueChange(
 	self: TM_Internal,
 	path: Path,
 	callback: (newValue: any, oldValue: any?, metadata: ChangeMetadata) -> (),
 	options: ListenerOptions?
 ): Connection
+	const mergedOptions: ListenerOptions = if options then table.clone(options :: any) else {}
+	mergedOptions.ListenDepth = 0
+	mergedOptions.ListenDepthStyle = "=="
+	return self._listenerRegistry:RegisterListener("ValueChanged", PathHelpers.ParsePath(path), callback, mergedOptions)
+end
+
+--[=[
+	Fires when this path is directly reassigned OR any descendant of it
+	changes.
+]=]
+function TableManager.OnChange(
+	self: TM_Internal,
+	path: Path,
+	callback: (newValue: any, oldValue: any?, metadata: ChangeMetadata) -> (),
+	options: ListenerOptions?
+): Connection
 	return self._listenerRegistry:RegisterListener("ValueChanged", PathHelpers.ParsePath(path), callback, options)
+end
+
+--[=[
+	Immediately invokes `callback` with the current value at `path`
+	(`oldValue` and `metadata` both `nil`), then behaves like
+	`OnValueChange` for subsequent changes.
+]=]
+function TableManager.Observe(
+	self: TM_Internal,
+	path: Path,
+	callback: (newValue: any, oldValue: any?, metadata: ChangeMetadata?) -> (),
+	options: ListenerOptions?
+): Connection
+	const parsedPath = PathHelpers.ParsePath(path)
+	const currentValue = self:Get(parsedPath, true)
+
+	const function fireInitial()
+		callback(currentValue, nil, nil)
+	end
+
+	if self._listenerRegistry._fireDeferred then
+		task.defer(fireInitial)
+	else
+		task.spawn(fireInitial)
+	end
+
+	return self._listenerRegistry:RegisterListener("ValueChanged", parsedPath, callback, options)
 end
 
 function TableManager.OnKeyAdd(

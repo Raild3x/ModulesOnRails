@@ -112,6 +112,31 @@
 	
 	-- Speed improvement: 70x faster!
 	```
+
+	### Example 7: Wildcard Listeners
+	```lua
+	-- Register a wildcard listener that matches any key at that segment:
+	registry:RegisterListener("ValueChanged", {"Players", "*", "Health"}, function(newValue, oldValue, metadata)
+		print(metadata.WildcardMatches[1], "health changed to", newValue)
+	end)
+
+	-- Fire: FireListenersExact("ValueChanged", {"Players", "p123", "Health"}, eventData)
+	-- The "*" branch matches "p123", so the listener fires with
+	-- metadata.WildcardMatches == {"p123"}.
+
+	-- A literal listener registered at {"Players", "p123", "Health"} and the
+	-- wildcard listener above are different tree nodes and BOTH fire for the
+	-- same change.
+
+	-- Multiple "*" segments accumulate matches left-to-right, e.g. a listener
+	-- at {"Players", "*", "Inventory", "*"} fired at
+	-- {"Players", "p123", "Inventory", "item7"} gets
+	-- metadata.WildcardMatches == {"p123", "item7"}.
+
+	-- Note: a listener registered with `Once = true` at a wildcard path fires
+	-- once TOTAL across all matching keys, not once per key, since it lives on
+	-- a single tree node.
+	```
 ]=]
 
 local PathHelpers = require("./PathHelpers")
@@ -134,6 +159,9 @@ export type ChangeMetadata = {
 	Diff: any?, -- DiffNode from ChangeDetector (present for direct changes, nil for ancestor)
 	OriginPath: PathArray,
 	OriginDiff: any, -- The actual diff at the origin
+	-- The literal keys matched by each "*" segment of the listener's registered
+	-- path, in left-to-right order. nil if the listener path had no wildcards.
+	WildcardMatches: { any }?,
 }
 
 export type EventData = {
@@ -285,16 +313,58 @@ local function getOrCreateNode(root: ListenerNode, path: PathArray): ListenerNod
 	return current
 end
 
--- Helper to get a node at a path (returns nil if doesn't exist)
-local function getNode(root: ListenerNode, path: PathArray): ListenerNode?
-	local current = root
-	for _, segment in path do
-		if not current.Children[segment] then
-			return nil
-		end
-		current = current.Children[segment]
+-- Reserved path segment used to register a listener that matches any literal
+-- key at that position (e.g. {"Players", "*", "Health"}).
+local WILDCARD = "*"
+
+type MatchedNode = {
+	node: ListenerNode,
+	-- Literal keys matched by each "*" segment, in left-to-right order. nil if
+	-- no wildcard segments were traversed to reach this node.
+	matches: { any }?,
+	-- The registered path used to reach this node (with "*" where a wildcard
+	-- branch was taken). Used for Once-listener cleanup.
+	nodePath: PathArray,
+}
+
+-- Recursively walks `path`, following both literal-segment children and "*"
+-- (wildcard) children, collecting every listener node that matches.
+local function collectMatchingNodes(
+	node: ListenerNode,
+	path: PathArray,
+	index: number,
+	matches: { any },
+	nodePath: PathArray,
+	results: { MatchedNode }
+)
+	if index > #path then
+		table.insert(results, {
+			node = node,
+			matches = if #matches > 0 then matches else nil,
+			nodePath = nodePath,
+		})
+		return
 	end
-	return current
+
+	local segment = path[index]
+
+	local literalChild = node.Children[segment]
+	if literalChild then
+		local childPath = table.clone(nodePath)
+		table.insert(childPath, segment)
+		collectMatchingNodes(literalChild, path, index + 1, matches, childPath, results)
+	end
+
+	if segment ~= WILDCARD then
+		local wildcardChild = node.Children[WILDCARD]
+		if wildcardChild then
+			local newMatches = table.clone(matches)
+			table.insert(newMatches, segment)
+			local childPath = table.clone(nodePath)
+			table.insert(childPath, WILDCARD)
+			collectMatchingNodes(wildcardChild, path, index + 1, newMatches, childPath, results)
+		end
+	end
 end
 
 -- Helper to remove empty nodes recursively
@@ -435,9 +505,10 @@ function ListenerRegistry.FireListenersExact(
 )
 	local root = self._listenerTrees[eventType]
 
-	-- Navigate to the exact node for this path
-	local node = getNode(root, path)
-	if not node then
+	-- Navigate to every node that matches this path, including wildcard ("*") branches
+	local results: { MatchedNode } = {}
+	collectMatchingNodes(root, path, 1, {}, {}, results)
+	if #results == 0 then
 		return -- No listeners at this path
 	end
 
@@ -452,45 +523,60 @@ function ListenerRegistry.FireListenersExact(
 		end
 	end
 
-	local listeners = node.Listeners
-	local hasOnceFired = false
 	local debugMode = self._debugMode
 	local fireDeferred = self._fireDeferred
 
-	for _, listener in listeners do
-		if not listener.Connection.Connected then
-			continue
+	for _, result in results do
+		local node = result.node
+		local listeners = node.Listeners
+		local hasOnceFired = false
+
+		-- Listeners reached via a wildcard branch get the matched keys attached
+		-- to a per-result copy of the metadata; literal-only matches reuse eventData as-is.
+		local fireEventData = eventData
+		if result.matches then
+			local metadata = eventData.Metadata
+			local newMetadata = if metadata then table.clone(metadata) else {} :: ChangeMetadata
+			newMetadata.WildcardMatches = result.matches
+			fireEventData = table.clone(eventData)
+			fireEventData.Metadata = newMetadata
 		end
 
-		if not shouldFireListener(listener, baseRelativeDepth) then
-			continue
-		end
-
-		-- Mark Once listeners as consumed before firing to guard against re-entrant calls.
-		if listener.Once then
-			listener.Connection.Connected = false
-			hasOnceFired = true
-		end
-
-		if fireDeferred then
-			task.defer(executeListenerCallback, listener.Callback, eventType, eventData, debugMode)
-		else
-			if not freeRunnerThread then
-				freeRunnerThread = coroutine.create(runListenerCallbackInFreeThread)
+		for _, listener in listeners do
+			if not listener.Connection.Connected then
+				continue
 			end
-			task.spawn(freeRunnerThread :: thread, listener.Callback, eventType, eventData, debugMode)
-		end
-	end
 
-	-- Backward sweep: physically remove all consumed Once listeners from the node.
-	-- Done after the fire loop to avoid mid-iteration mutation.
-	if hasOnceFired then
-		for i = #listeners, 1, -1 do
-			if listeners[i].Once and not listeners[i].Connection.Connected then
-				table.remove(listeners, i)
+			if not shouldFireListener(listener, baseRelativeDepth) then
+				continue
+			end
+
+			-- Mark Once listeners as consumed before firing to guard against re-entrant calls.
+			if listener.Once then
+				listener.Connection.Connected = false
+				hasOnceFired = true
+			end
+
+			if fireDeferred then
+				task.defer(executeListenerCallback, listener.Callback, eventType, fireEventData, debugMode)
+			else
+				if not freeRunnerThread then
+					freeRunnerThread = coroutine.create(runListenerCallbackInFreeThread)
+				end
+				task.spawn(freeRunnerThread :: thread, listener.Callback, eventType, fireEventData, debugMode)
 			end
 		end
-		cleanupNode(root, path, 1)
+
+		-- Backward sweep: physically remove all consumed Once listeners from the node.
+		-- Done after the fire loop to avoid mid-iteration mutation.
+		if hasOnceFired then
+			for i = #listeners, 1, -1 do
+				if listeners[i].Once and not listeners[i].Connection.Connected then
+					table.remove(listeners, i)
+				end
+			end
+			cleanupNode(root, result.nodePath, 1)
+		end
 	end
 end
 

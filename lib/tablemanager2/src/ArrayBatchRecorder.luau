@@ -66,11 +66,11 @@
 	suppress the event). Branch A always uses net-effect semantics.
 ]=]
 
-local PathHelpers = require(script.Parent.PathHelpers)
+local PathHelpers = require("./PathHelpers")
 type Path = PathHelpers.Path
 type PathArray = PathHelpers.PathArray
 
-local ArrayDiff = require(script.Parent.ArrayDiff)
+local ArrayDiff = require("./ArrayDiff")
 type Emit = ArrayDiff.Emit
 
 --// Types //--
@@ -78,7 +78,7 @@ type Emit = ArrayDiff.Emit
 --[=[
 	@within ArrayBatchRecorder
 	@interface MoveMetadata
-	.moveId string -- Shared id string linking the remove and insert
+	.moveId string -- Shared id string linking the remove and the insert
 	.fromIndex number -- Final position of the Remove in the flush sequence
 	.toIndex number -- Final position of the Insert in the flush sequence
 
@@ -86,7 +86,7 @@ type Emit = ArrayDiff.Emit
 	Listeners that do not read this field see a normal remove + insert.
 ]=]
 export type MoveMetadata = {
-	moveId: string, -- Shared id string linking the remove and insert
+	moveId: string, -- Shared id string linking the remove and the insert
 	fromIndex: number, -- Final position of the Remove in the flush sequence
 	toIndex: number, -- Final position of the Insert in the flush sequence
 }

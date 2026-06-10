@@ -83,6 +83,10 @@ export type ChangeMetadata = {
 	OriginPath: PathArray,
 	OriginDiff: Diff.DiffNode,
 	Snapshot: Snapshot,
+	-- The literal keys matched by each "*" segment of the listener's registered
+	-- path, in left-to-right order. Set by ListenerRegistry; nil if the
+	-- listener path had no wildcards.
+	WildcardMatches: { any }?,
 }
 
 --------------------------------------------------------------------------------

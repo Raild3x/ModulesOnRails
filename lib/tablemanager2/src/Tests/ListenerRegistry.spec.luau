@@ -550,6 +550,166 @@ return function(t: tiniest)
 		end)
 	end)
 
+	describe("Wildcard Listeners", function()
+		test("should fire a wildcard listener for a matching literal segment", function()
+			local registry = ListenerRegistry.new { DebugMode = false }
+
+			local matches: { any }? = nil
+			registry:RegisterListener("ValueChanged", { "Players", "*", "Health" }, function(_, _, metadata)
+				matches = metadata.WildcardMatches
+			end)
+
+			fireAndFlush(registry, "ValueChanged", { "Players", "p123", "Health" }, {
+				NewValue = 90,
+				OldValue = 100,
+				Metadata = {
+					Diff = { type = "changed" },
+					OriginPath = { "Players", "p123", "Health" },
+					OriginDiff = { type = "changed" },
+				},
+			})
+
+			expect(matches).exists()
+			expect((matches :: { any })[1]).is("p123")
+
+			registry:Destroy()
+		end)
+
+		test("should fire both a literal listener and a wildcard listener for the same change", function()
+			local registry = ListenerRegistry.new { DebugMode = false }
+
+			local literalFired, wildcardFired = false, false
+			registry:RegisterListener("ValueChanged", { "Players", "p123", "Health" }, function()
+				literalFired = true
+			end)
+			registry:RegisterListener("ValueChanged", { "Players", "*", "Health" }, function()
+				wildcardFired = true
+			end)
+
+			fireAndFlush(registry, "ValueChanged", { "Players", "p123", "Health" }, {
+				NewValue = 90,
+				OldValue = 100,
+				Metadata = {
+					Diff = { type = "changed" },
+					OriginPath = { "Players", "p123", "Health" },
+					OriginDiff = { type = "changed" },
+				},
+			})
+
+			expect(literalFired).is_true()
+			expect(wildcardFired).is_true()
+
+			registry:Destroy()
+		end)
+
+		test("should not fire a wildcard listener for a non-matching path", function()
+			local registry = ListenerRegistry.new { DebugMode = false }
+
+			local fired = false
+			registry:RegisterListener("ValueChanged", { "Players", "*", "Health" }, function()
+				fired = true
+			end)
+
+			fireAndFlush(registry, "ValueChanged", { "Players", "p123", "Mana" }, {
+				NewValue = 10,
+				OldValue = 20,
+				Metadata = {
+					Diff = { type = "changed" },
+					OriginPath = { "Players", "p123", "Mana" },
+					OriginDiff = { type = "changed" },
+				},
+			})
+
+			expect(fired).never_is_true()
+
+			registry:Destroy()
+		end)
+
+		test("should accumulate matches left-to-right for multiple wildcard segments", function()
+			local registry = ListenerRegistry.new { DebugMode = false }
+
+			local matches: { any }? = nil
+			registry:RegisterListener("ValueChanged", { "Players", "*", "Inventory", "*" }, function(_, _, metadata)
+				matches = metadata.WildcardMatches
+			end)
+
+			fireAndFlush(registry, "ValueChanged", { "Players", "p123", "Inventory", "item7" }, {
+				NewValue = "Sword",
+				OldValue = nil,
+				Metadata = {
+					Diff = { type = "changed" },
+					OriginPath = { "Players", "p123", "Inventory", "item7" },
+					OriginDiff = { type = "changed" },
+				},
+			})
+
+			expect(matches).exists()
+			local m = matches :: { any }
+			expect(m[1]).is("p123")
+			expect(m[2]).is("item7")
+
+			registry:Destroy()
+		end)
+
+		test("should fire a wildcard ancestor listener when a descendant changes", function()
+			local registry = ListenerRegistry.new { DebugMode = false }
+
+			local matches: { any }? = nil
+			registry:RegisterListener("ValueChanged", { "Players", "*" }, function(_, _, metadata)
+				matches = metadata.WildcardMatches
+			end)
+
+			-- Ancestor notification: Diff == nil, OriginPath deeper than the listener path
+			fireAndFlush(registry, "ValueChanged", { "Players", "p456" }, {
+				NewValue = nil,
+				OldValue = nil,
+				Metadata = {
+					Diff = nil,
+					OriginPath = { "Players", "p456", "Health" },
+					OriginDiff = { type = "changed" },
+				},
+			})
+
+			expect(matches).exists()
+			expect((matches :: { any })[1]).is("p456")
+
+			registry:Destroy()
+		end)
+
+		test("Once on a wildcard listener fires once total, not once per matching key", function()
+			local registry = ListenerRegistry.new { DebugMode = false }
+
+			local fireCount = 0
+			registry:RegisterListener("ValueChanged", { "Players", "*", "Health" }, function()
+				fireCount += 1
+			end, { Once = true })
+
+			fireAndFlush(registry, "ValueChanged", { "Players", "p123", "Health" }, {
+				NewValue = 90,
+				OldValue = 100,
+				Metadata = {
+					Diff = { type = "changed" },
+					OriginPath = { "Players", "p123", "Health" },
+					OriginDiff = { type = "changed" },
+				},
+			})
+
+			fireAndFlush(registry, "ValueChanged", { "Players", "p456", "Health" }, {
+				NewValue = 70,
+				OldValue = 80,
+				Metadata = {
+					Diff = { type = "changed" },
+					OriginPath = { "Players", "p456", "Health" },
+					OriginDiff = { type = "changed" },
+				},
+			})
+
+			expect(fireCount).is(1)
+
+			registry:Destroy()
+		end)
+	end)
+
 	describe("Dispatch Config", function()
 		test("defaults to immediate dispatch when no config is provided", function()
 			local registry = ListenerRegistry.new()
