@@ -1,0 +1,18 @@
+[package]
+name = "raild3x/proxygraph"
+description = "A luau reactive data-graph library"
+authors = ["Logan Hunt (Raildex)"]
+version = "0.1.0"
+license = "MIT"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+
+[custom]
+# The properly capitalized and spaced name of the library
+formattedName = "ProxyGraph"
+# The intro page for the documentation
+docsLink = "ProxyGraph"
+
+[dependencies]
+Signal = "howmanysmall/better-signal@2.1.0"
+T = "raild3x/t@^1"
