@@ -214,6 +214,12 @@ function ArrayBatchRecorder.StartTracking(self: ArrayBatchRecorder, path: Path, 
 		return -- Already tracking; idempotent
 	end
 
+	if table.isfrozen(array) then
+		error(
+			`ArrayBatchRecorder: cannot track frozen array at path {table.concat(path :: { string }, ".")}. Frozen arrays are immutable and cannot have mutations recorded against them.`
+		)
+	end
+
 	-- Assign stable ids to existing elements
 	const startIds: { [number]: number } = {}
 	for i = 1, #array do
@@ -239,6 +245,12 @@ end
 function ArrayBatchRecorder.RecordInsert(self: ArrayBatchRecorder, path: PathArray, index: number, value: any)
 	const log = self:_getOrCreateLog(path)
 
+	if table.isfrozen(log.startRef) then
+		error(
+			`ArrayBatchRecorder: cannot RecordInsert on frozen array at path {table.concat(path :: { string }, ".")}. Frozen arrays are immutable.`
+		)
+	end
+
 	-- Assign a fresh id for the new element
 	const newId = self._globalNextId
 	self._globalNextId += 1
@@ -258,6 +270,12 @@ end
 ]=]
 function ArrayBatchRecorder:RecordRemove(path: Path, index: number)
 	const log = self:_getOrCreateLog(path)
+
+	if table.isfrozen(log.startRef) then
+		error(
+			`ArrayBatchRecorder: cannot RecordRemove on frozen array at path {table.concat(path :: { string }, ".")}. Frozen arrays are immutable.`
+		)
+	end
 
 	-- Replay prior ops to find the current live id at `index`
 	const liveIds: { number } = self:_computeLiveIds(log)
@@ -283,6 +301,12 @@ end
 ]=]
 function ArrayBatchRecorder:RecordSet(path: Path, index: number, newValue: any, oldValue: any)
 	const log = self:_getOrCreateLog(path)
+
+	if table.isfrozen(log.startRef) then
+		error(
+			`ArrayBatchRecorder: cannot RecordSet on frozen array at path {table.concat(path :: { string }, ".")}. Frozen arrays are immutable.`
+		)
+	end
 
 	-- Resolve to stable id
 	const liveIds: { number } = self:_computeLiveIds(log)
