@@ -1,6 +1,7 @@
 --!strict
 --[=[
 	@class ChangeDetector
+	@ignore
 
 	Detects and reports nested table/value changes using snapshot-based diffing.
 

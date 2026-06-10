@@ -360,4 +360,55 @@ function PathHelpers.ArePathsEqual(a: Path, b: Path): boolean
 	return true
 end
 
+--[=[
+	Converts a path array to a dot-separated string representation.
+	Useful for debugging and error messages.
+
+	@param path The path array to convert
+	@return A string representation (e.g., "player.stats.health" or "<root>" for empty path)
+]=]
+function PathHelpers.PathToString(path: PathArray): string
+	if #path == 0 then
+		return "<root>"
+	end
+	local parts = table.create(#path)
+	for i, segment in path do
+		parts[i] = tostring(segment)
+	end
+	return table.concat(parts, ".")
+end
+
+--[=[
+	Checks if one path is a prefix of another.
+
+	@param prefix The potential prefix path
+	@param fullPath The full path to check against
+	@return true if prefix matches the start of fullPath
+]=]
+function PathHelpers.IsPrefixPath(prefix: PathArray, fullPath: PathArray): boolean
+	if #prefix > #fullPath then
+		return false
+	end
+	for i = 1, #prefix do
+		if prefix[i] ~= fullPath[i] then
+			return false
+		end
+	end
+	return true
+end
+
+--[=[
+	Extracts the parent path and the last key from a path.
+
+	@param path The path array
+	@return The parent path array and the last key
+	@throws If path is empty (has no last key)
+]=]
+function PathHelpers.GetPathParentAndKey(path: PathArray): (PathArray, any)
+	local parentPath = table.clone(path)
+	local key = table.remove(parentPath)
+	assert(key ~= nil, "Path requires at least one segment")
+	return parentPath, key
+end
+
 return PathHelpers

@@ -42,6 +42,15 @@ const SchemaNavigatorModule = require("./SchemaNavigator")
 const ArrayBatchRecorderModule = require("./ArrayBatchRecorder")
 const ArrayDiffModule = require("./ArrayDiff")
 const Diff = require("./Diff")
+const BatchUtilsModule = require("./BatchUtils")
+
+--// Localize batch utils to avoid function call overhead //--
+const createSyntheticSnapshot = BatchUtilsModule.CreateSyntheticSnapshot
+const serializeBatchPath = BatchUtilsModule.SerializeBatchPath
+const getSnapshotValue = BatchUtilsModule.GetSnapshotValue
+const getBatchBranchKey = BatchUtilsModule.GetBatchBranchKey
+const markBatchBranchDirty = BatchUtilsModule.MarkBatchBranchDirty
+const ensureBatchPathTracking = BatchUtilsModule.EnsureBatchPathTracking
 
 --// Types //--
 type Path<S = string> = PathHelpers.Path<S>
@@ -94,6 +103,32 @@ export type TableManager<T = { [any]: any }> = {
 		self: TableManager<T>,
 		path: Path<S>,
 		callback: (newValue: ValueAtPath<T, S>, oldValue: ValueAtPath<T, S>?, metadata: ChangeMetadata) -> (),
+		options: ListenerOptions?
+	) -> Connection,
+	--- Fires ONLY when this exact path is directly reassigned (not when a
+	--- descendant changes). Shorthand for `OnValueChange` with
+	--- `ListenDepth = 0, ListenDepthStyle = "=="`.
+	OnValueChanged: <S>(
+		self: TableManager<T>,
+		path: Path<S>,
+		callback: (newValue: ValueAtPath<T, S>, oldValue: ValueAtPath<T, S>?, metadata: ChangeMetadata) -> (),
+		options: ListenerOptions?
+	) -> Connection,
+	--- Fires when this path is directly reassigned OR any descendant of it
+	--- changes. Alias for `OnValueChange`.
+	OnChanged: <S>(
+		self: TableManager<T>,
+		path: Path<S>,
+		callback: (newValue: ValueAtPath<T, S>, oldValue: ValueAtPath<T, S>?, metadata: ChangeMetadata) -> (),
+		options: ListenerOptions?
+	) -> Connection,
+	--- Immediately invokes `callback` with the current value at `path`
+	--- (`oldValue` and `metadata` both `nil`), then behaves like
+	--- `OnValueChange` for subsequent changes.
+	Observe: <S>(
+		self: TableManager<T>,
+		path: Path<S>,
+		callback: (newValue: ValueAtPath<T, S>, oldValue: ValueAtPath<T, S>?, metadata: ChangeMetadata?) -> (),
 		options: ListenerOptions?
 	) -> Connection,
 	OnKeyAdd: (
@@ -180,57 +215,6 @@ const TableManager_MT = { __index = TableManager }
 -- Re-export T so schema users do not need to import it separately.
 TableManager.T = T
 
---[[
-	Creates a synthetic snapshot for array operations and ForceNotify.
-	These operations bypass normal ChangeDetector flow, so we create a compatible
-	Snapshot payload using Diff's canonical snapshot builder.
-]]
-const function createSyntheticSnapshot(rootTable: any, path: PathArray, value: any)
-	return {
-		RootTable = rootTable,
-		Path = path,
-		Data = Diff.snapshot(value),
-		Timestamp = os.clock(),
-	}
-end
-
--- Serializes a path to a string key for batch tracking.
--- Must match the serialization used by ArrayBatchRecorder.
-const function serializeBatchPath(path: Path): string
-	if #path == 0 then
-		return "__root__"
-	end
-	const parts = table.create(#path)
-	for i, seg in path do
-		parts[i] = tostring(seg)
-	end
-	return table.concat(parts, "\0")
-end
-
--- Navigates a ChangeDetector Snapshot's Diff.Snapshot children and returns
--- the deep-copied value stored at `path` (i.e., the pre-batch state).
-const function getSnapshotValue(snapshot: any, path: Path): any?
-	local snap: any = snapshot.Data
-	for _, key in path do
-		if not snap or not snap.children then
-			return nil
-		end
-		snap = (snap.children :: any)[key]
-	end
-	return snap and snap.value or nil
-end
-
-const function pathToString(path: Path): string
-	if #path == 0 then
-		return "<root>"
-	end
-	const parts = table.create(#path)
-	for i, segment in path do
-		parts[i] = tostring(segment)
-	end
-	return table.concat(parts, ".")
-end
-
 const function resolvePathFromPathOrProxy<T, S>(self: TM_Internal<T>, pathOrProxy: Path<S> | Proxy<T, S>): PathArray<S>
 	if self._proxyManager:IsProxy(pathOrProxy) then
 		const proxy = pathOrProxy :: Proxy<T, S>
@@ -254,37 +238,6 @@ const function resolveArrayPathAndProxy<T, S>(
 	const parsedPath = PathHelpers.ParsePath(pathOrProxy :: Path)
 	const proxy = self:GetProxy(parsedPath)
 	return parsedPath, proxy
-end
-
-const function arePathsEqual(a: PathArray, b: PathArray): boolean
-	if #a ~= #b then
-		return false
-	end
-	for i = 1, #a do
-		if a[i] ~= b[i] then
-			return false
-		end
-	end
-	return true
-end
-
-const function isPrefixPath(prefix: PathArray, fullPath: PathArray): boolean
-	if #prefix > #fullPath then
-		return false
-	end
-	for i = 1, #prefix do
-		if prefix[i] ~= fullPath[i] then
-			return false
-		end
-	end
-	return true
-end
-
-const function getPathParentAndKey<S>(path: PathArray<S>): (PathArray<any>, any)
-	local parentPath = table.clone(path :: any)
-	local key = table.remove(parentPath)
-	assert(key ~= nil, "Path requires at least one segment")
-	return parentPath, key
 end
 
 const function getParentOriginalAtPath(self: TM_Internal<any>, parentPath: PathArray, opName: string): any
@@ -311,26 +264,6 @@ const function deepCloneValue(value: any, seen: { [any]: any }?): any
 		clone[deepCloneValue(k, memo)] = deepCloneValue(v, memo)
 	end
 	return clone
-end
-
-const function getBatchBranchKey(path: PathArray): any
-	return if #path > 0 then path[1] else "__root__"
-end
-
-const function markBatchBranchDirty(batch: BatchState?, path: PathArray)
-	if batch then
-		batch.DirtyBranches[getBatchBranchKey(path)] = true
-	end
-end
-
-const function ensureBatchPathTracking(batch: BatchState, path: PathArray, startTracking: () -> ())
-	const pathKey = serializeBatchPath(path)
-	if batch.TrackedPaths[pathKey] then
-		return
-	end
-
-	batch.TrackedPaths[pathKey] = table.clone(path :: any)
-	startTracking()
 end
 
 const function createSyntheticDiffNode(
@@ -473,7 +406,7 @@ const function validateWrite(self: TM_Internal<any>, path: PathArray, value: any
 		return true :: any
 	end
 
-	const message = err or `Schema validation failed at {pathToString(path)}`
+	const message = err or `Schema validation failed at {PathHelpers.PathToString(path)}`
 	if self._onValidationFailed then
 		self._onValidationFailed(path, value, message)
 		return false, nil
@@ -752,8 +685,8 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 				return true
 			end
 
-			const writePathStr = pathToString(writePath)
-			const existingPathStr = pathToString(existingPath)
+			const writePathStr = PathHelpers.PathToString(writePath)
+			const existingPathStr = PathHelpers.PathToString(existingPath)
 			const duplicateMessage =
 				`Duplicate table reference detected: existing at {existingPathStr}, attempted write to {writePathStr}`
 
@@ -971,7 +904,7 @@ function TableManager.ArrayInsert<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 			if arrayMeta and arrayMeta.kind == "array" then
 				const ok, err = arrayMeta.valueCheck(unwrappedValue)
 				if not ok then
-					const message = err or `Schema validation failed at {pathToString(parsedPath)}`
+					const message = err or `Schema validation failed at {PathHelpers.PathToString(parsedPath)}`
 					if self._onValidationFailed then
 						self._onValidationFailed(parsedPath, unwrappedValue, message)
 						return
@@ -1368,11 +1301,11 @@ function TableManager.MoveTo<T, S1, S2>(
 		error("MoveTo cannot move the root table")
 	end
 
-	if arePathsEqual(sourcePath, targetPath) then
+	if PathHelpers.ArePathsEqual(sourcePath, targetPath) then
 		return
 	end
 
-	if isPrefixPath(sourcePath, targetPath) then
+	if PathHelpers.IsPrefixPath(sourcePath, targetPath) then
 		error("MoveTo cannot move a table into one of its descendants")
 	end
 
@@ -1381,7 +1314,7 @@ function TableManager.MoveTo<T, S1, S2>(
 		error("MoveTo source must be a table")
 	end
 
-	const targetParentPath, targetKey = getPathParentAndKey(targetPath)
+	const targetParentPath, targetKey = PathHelpers.GetPathParentAndKey(targetPath)
 	const targetParentOriginal = getParentOriginalAtPath(self, targetParentPath, "MoveTo")
 
 	const existingProxy: Proxy<T, S1> = self._proxyManager:GetProxyFromOriginal(sourceValue)
@@ -1413,7 +1346,7 @@ function TableManager.CopyTo<T, S1, S2>(self: TM_Internal<T>, currentPath: Path<
 		error("CopyTo cannot set the root table")
 	end
 
-	if arePathsEqual(sourcePath, targetPath) then
+	if PathHelpers.ArePathsEqual(sourcePath, targetPath) then
 		return
 	end
 
@@ -1438,16 +1371,16 @@ function TableManager.Swap<T>(self: TM_Internal<T>, a: Path | Proxy<T>, b: Path<
 		error("Swap cannot target the root table")
 	end
 
-	if arePathsEqual(pathA, pathB) then
+	if PathHelpers.ArePathsEqual(pathA, pathB) then
 		return
 	end
 
-	if isPrefixPath(pathA, pathB) or isPrefixPath(pathB, pathA) then
+	if PathHelpers.IsPrefixPath(pathA, pathB) or PathHelpers.IsPrefixPath(pathB, pathA) then
 		error("Swap cannot swap ancestor/descendant paths")
 	end
 
-	const parentPathA, keyA = getPathParentAndKey(pathA)
-	const parentPathB, keyB = getPathParentAndKey(pathB)
+	const parentPathA, keyA = PathHelpers.GetPathParentAndKey(pathA)
+	const parentPathB, keyB = PathHelpers.GetPathParentAndKey(pathB)
 	const parentOriginalA = getParentOriginalAtPath(self, parentPathA, "Swap")
 	const parentOriginalB = getParentOriginalAtPath(self, parentPathB, "Swap")
 
