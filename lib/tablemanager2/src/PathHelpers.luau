@@ -32,19 +32,25 @@ export type function PathString(S: type)
 end
 
 -- Expects a table type `T` and a path type `S`, and recursively resolves the type at that path.
-export type function ValueAtPath(T: type, S: type)
+export type function ValueAtPathFn(T: type, S: type): type
 	if not T:is("table") then
 		return types.never
 	end
 
 	-- Array/tuple path: {"Hello", "World"}. Luau doesnt support this yet so we have to fall back to 'any'
-	if S:is("table") then
+	if S:is("table") or S:is("string") then
 		return types.any
 	end
 
+	if not S:is("singleton") then
+		error("Path type must be a singleton string or a table of any keys. Defaulting to 'never'.")
+		return types.never
+	end
+
 	-- String path: "Hello.World" (existing behavior)
-	local str = S:value() :: string?
-	if str == nil then
+	local str = S:value()
+	if typeof(str) ~= "string" then
+		error("Path type must be a singleton string or a table of any keys. Defaulting to 'never'.")
 		return types.never
 	end
 	if str == "" then -- if the path is empty, return the original type
@@ -58,7 +64,7 @@ export type function ValueAtPath(T: type, S: type)
 			error(`Path segment "{str}" does not exist in the table`)
 			return types.never
 		end
-		return result :: type
+		return result
 	else
 		local head = string.sub(str, 1, dot - 1)
 		local tail = string.sub(str, dot + 1)
@@ -67,9 +73,10 @@ export type function ValueAtPath(T: type, S: type)
 			error(`Path segment "{head}" does not exist in the table`)
 			return types.never
 		end
-		return ValueAtPath(inner, types.singleton(tail))
+		return ValueAtPathFn(inner, types.singleton(tail))
 	end
 end
+export type ValueAtPath<T, S> = any --ValueAtPathFn(T, S)
 
 export type DataChangeSource = "self" | "child" | "parent"
 

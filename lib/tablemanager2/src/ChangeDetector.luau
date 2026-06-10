@@ -28,10 +28,12 @@
 
 local Diff = require("./Diff")
 local PathHelpers = require("./PathHelpers")
+local ArrayDiffModule = require("./ArrayDiff")
 
 --// Types //--
 type Path<S = string> = PathHelpers.Path<S>
 type PathArray<S = string> = PathHelpers.PathArray<S>
+type MoveMetadata = ArrayDiffModule.MoveMetadata
 
 --[=[
 	@within ChangeDetector
@@ -43,22 +45,22 @@ type PathArray<S = string> = PathHelpers.PathArray<S>
 
 	State captured at a path and reused by CheckForChanges.
 ]=]
-export type Snapshot = {
-	RootTable: { [any]: any },
-	Path: PathArray,
+export type Snapshot<T = { [any]: any }, S = string> = {
+	RootTable: T,
+	Path: PathArray<S>,
 	Data: Diff.Snapshot,
 	Timestamp: number,
 }
 
 export type ChangeDetector = {
-	CaptureSnapshot: (self: ChangeDetector, rootTable: { [any]: any }, path: PathArray) -> Snapshot,
-	CheckForChanges: (self: ChangeDetector, snapshot: Snapshot) -> (),
-	CheckForChangesBetween: (
+	CaptureSnapshot: <T, S>(self: ChangeDetector, rootTable: T, path: PathArray<S>) -> Snapshot<T, S>,
+	CheckForChanges: <T, S>(self: ChangeDetector, snapshot: Snapshot<T, S>) -> (),
+	CheckForChangesBetween: <T, S>(
 		self: ChangeDetector,
 		oldValue: any,
 		newValue: any,
-		basePath: PathArray,
-		rootTable: { [any]: any }?
+		basePath: PathArray<S>,
+		rootTable: T?
 	) -> (),
 	SetDebugMode: (self: ChangeDetector, enabled: boolean) -> (),
 	--- Suspends change detection. While suspended, `CaptureSnapshot` and
@@ -87,6 +89,9 @@ export type ChangeMetadata = {
 	-- path, in left-to-right order. Set by ListenerRegistry; nil if the
 	-- listener path had no wildcards.
 	WildcardMatches: { any }?,
+	-- Set on ArrayRemoved/ArrayInserted/ArrayMoved when the operation is part of
+	-- a detected move (Branch B coalescing only). nil otherwise.
+	Move: MoveMetadata?,
 }
 
 --------------------------------------------------------------------------------
@@ -109,10 +114,10 @@ local ChangeDetector_MT = { __index = ChangeDetector }
 ]=]
 function ChangeDetector.new(
 	callbacks: {
-		OnKeyAdded: (path: PathArray, key: any, newValue: any, metadata: ChangeMetadata) -> ()?,
-		OnKeyRemoved: (path: PathArray, key: any, oldValue: any, metadata: ChangeMetadata) -> ()?,
-		OnKeyChanged: (path: PathArray, key: any, newValue: any, oldValue: any, metadata: ChangeMetadata) -> ()?,
-		OnValueChanged: (path: PathArray, newValue: any, oldValue: any?, metadata: ChangeMetadata) -> ()?,
+		OnKeyAdded: <S>(path: PathArray<S>, key: any, newValue: any, metadata: ChangeMetadata) -> ()?,
+		OnKeyRemoved: <S>(path: PathArray<S>, key: any, oldValue: any, metadata: ChangeMetadata) -> ()?,
+		OnKeyChanged: <S>(path: PathArray<S>, key: any, newValue: any, oldValue: any, metadata: ChangeMetadata) -> ()?,
+		OnValueChanged: <S>(path: PathArray<S>, newValue: any, oldValue: any?, metadata: ChangeMetadata) -> ()?,
 		FireDescendantChangedNodes: boolean?,
 	},
 	debugMode: boolean?

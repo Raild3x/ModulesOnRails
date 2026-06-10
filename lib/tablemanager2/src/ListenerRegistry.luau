@@ -140,10 +140,12 @@
 ]=]
 
 local PathHelpers = require("./PathHelpers")
+local ArrayDiffModule = require("./ArrayDiff")
 
 --// Types //--
 -- type Path = PathHelpers.Path
 type PathArray = PathHelpers.PathArray
+type MoveMetadata = ArrayDiffModule.MoveMetadata
 
 export type EventType =
 	"ValueChanged"
@@ -153,6 +155,7 @@ export type EventType =
 	| "ArrayInserted"
 	| "ArrayRemoved"
 	| "ArraySet"
+	| "ArrayMoved"
 
 -- Metadata structure from ChangeDetector
 export type ChangeMetadata = {
@@ -162,6 +165,9 @@ export type ChangeMetadata = {
 	-- The literal keys matched by each "*" segment of the listener's registered
 	-- path, in left-to-right order. nil if the listener path had no wildcards.
 	WildcardMatches: { any }?,
+	-- Set on ArrayRemoved/ArrayInserted/ArrayMoved when the operation is part of
+	-- a detected move (Branch B coalescing only). nil otherwise.
+	Move: MoveMetadata?,
 }
 
 export type EventData = {
@@ -169,7 +175,9 @@ export type EventData = {
 	OldValue: any?,
 	Key: any?,
 	Index: number?,
-	Metadata: ChangeMetadata?, -- Will be required after full refactor
+	FromIndex: number?,
+	ToIndex: number?,
+	Metadata: ChangeMetadata?,
 }
 
 export type ListenerOptions = {
@@ -261,6 +269,8 @@ local function executeListenerCallback(
 		success, err = pcall(callback, eventData.Index, eventData.OldValue, metadata)
 	elseif eventType == "ArraySet" then
 		success, err = pcall(callback, eventData.Index, eventData.NewValue, eventData.OldValue, metadata)
+	elseif eventType == "ArrayMoved" then
+		success, err = pcall(callback, eventData.FromIndex, eventData.ToIndex, eventData.NewValue, metadata)
 	end
 
 	if not success and debugMode then
@@ -403,6 +413,7 @@ function ListenerRegistry.new(config: ListenerRegistryConfig?): ListenerRegistry
 		ArrayInserted = createNode(),
 		ArrayRemoved = createNode(),
 		ArraySet = createNode(),
+		ArrayMoved = createNode(),
 	}
 	self._debugMode = debugMode
 	self._fireDeferred = fireDeferred

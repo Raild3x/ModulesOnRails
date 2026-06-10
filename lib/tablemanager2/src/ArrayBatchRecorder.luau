@@ -75,21 +75,8 @@ type Emit = ArrayDiff.Emit
 
 --// Types //--
 
---[=[
-	@within ArrayBatchRecorder
-	@interface MoveMetadata
-	.moveId string -- Shared id string linking the remove and the insert
-	.fromIndex number -- Final position of the Remove in the flush sequence
-	.toIndex number -- Final position of the Insert in the flush sequence
-
-	Optional metadata attached to an insert/remove pair that constitutes a move.
-	Listeners that do not read this field see a normal remove + insert.
-]=]
-export type MoveMetadata = {
-	moveId: string, -- Shared id string linking the remove and the insert
-	fromIndex: number, -- Final position of the Remove in the flush sequence
-	toIndex: number, -- Final position of the Insert in the flush sequence
-}
+-- Re-exported for convenience; see ArrayDiff.MoveMetadata for the canonical definition.
+export type MoveMetadata = ArrayDiff.MoveMetadata
 
 -- A single recorded operation, keyed by stable element id.
 type Op = {
@@ -560,11 +547,47 @@ function ArrayBatchRecorder.Coalesce(
 
 	-- ── Step 5: emit ─────────────────────────────────────────────────────────
 
+	-- Resolve full from/to index pairs for moves: each moveId appears on exactly
+	-- one "remove" event (with fromIndex set) and one "insert" event (with
+	-- toIndex set). Merge them into a single pair per moveId.
+	const moveIndexById: { [string]: { fromIndex: number?, toIndex: number? } } = {}
+	for _, event in pending do
+		if event.moveId then
+			local rec2 = moveIndexById[event.moveId]
+			if not rec2 then
+				rec2 = {} :: { fromIndex: number?, toIndex: number? }
+				moveIndexById[event.moveId] = rec2
+			end
+			if event.fromIndex then
+				rec2.fromIndex = event.fromIndex
+			end
+			if event.toIndex then
+				rec2.toIndex = event.toIndex
+			end
+		end
+	end
+
+	const movedFired: { [string]: boolean } = {}
+
 	for _, event in pending do
 		if event.kind == "remove" then
-			emit.removed(event.finalIndex, event.value)
+			local move: MoveMetadata? = nil
+			if event.moveId then
+				const idx = moveIndexById[event.moveId]
+				move = { moveId = event.moveId, fromIndex = idx.fromIndex :: number, toIndex = idx.toIndex :: number }
+			end
+			emit.removed(event.finalIndex, event.value, move)
 		elseif event.kind == "insert" then
-			emit.inserted(event.finalIndex, event.value)
+			local move: MoveMetadata? = nil
+			if event.moveId then
+				const idx = moveIndexById[event.moveId]
+				move = { moveId = event.moveId, fromIndex = idx.fromIndex :: number, toIndex = idx.toIndex :: number }
+				if emit.moved and not movedFired[event.moveId] then
+					movedFired[event.moveId] = true
+					emit.moved(idx.fromIndex :: number, idx.toIndex :: number, event.value)
+				end
+			end
+			emit.inserted(event.finalIndex, event.value, move)
 		elseif event.kind == "set" then
 			emit.set(event.finalIndex, event.value, event.oldValue :: any)
 		end

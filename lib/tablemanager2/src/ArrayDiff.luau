@@ -35,10 +35,30 @@
 
 --// Types //--
 
+--[=[
+	@within ArrayDiff
+	@interface MoveMetadata
+	.moveId string -- Shared id string linking the remove and the insert
+	.fromIndex number -- Final position of the Remove in the flush sequence
+	.toIndex number -- Final position of the Insert in the flush sequence
+
+	Optional metadata attached to a remove/insert pair (or `moved` event)
+	that constitutes a move. Listeners that do not read this field see a
+	normal remove + insert.
+]=]
+export type MoveMetadata = {
+	moveId: string,
+	fromIndex: number,
+	toIndex: number,
+}
+
 export type Emit = {
-	removed: (index: number, oldValue: any) -> (),
-	inserted: (index: number, newValue: any) -> (),
+	removed: (index: number, oldValue: any, move: MoveMetadata?) -> (),
+	inserted: (index: number, newValue: any, move: MoveMetadata?) -> (),
 	set: (index: number, newValue: any, oldValue: any) -> (),
+	-- Fired once per detected move (Branch B / `ArrayBatchRecorder.Coalesce` only).
+	-- `emitDiff` (Branch A) never calls this.
+	moved: ((fromIndex: number, toIndex: number, value: any) -> ())?,
 }
 
 -- Op kinds collected during LCS backtrack, in forward order.
