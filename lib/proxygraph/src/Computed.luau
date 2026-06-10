@@ -29,13 +29,12 @@
 local SignalLib = require("../Signal")
 local ProxyNode = require("./ProxyNode")
 local DepTracker = require("./DepTracker")
-local ScopeModule = require("./Scope")
 local Root = require("./Root")
 local Types = require("./Types")
 type Scope = Types.Scope<{}>
 type Connection = Types.Connection
 type AnySignal = Types.AnySignal
-type ComputedState<T> = Types.ComputedState<T>
+type ComputedState<T> = Types.InternalComputedState<T>
 
 -- Erased alias used by all internal implementation functions.
 type AnyComputed = ComputedState<any>
@@ -118,22 +117,15 @@ impl.evaluate = function(computed: AnyComputed)
 
 	computed._state = "recomputing"
 
-	if computed._innerScope ~= nil then
-		computed._innerScope:Destroy()
-	end
-	local innerScope = ScopeModule.new()
-	computed._innerScope = innerScope
-
-	Root.pushOwner(innerScope)
 	local depCtx = DepTracker.push()
 
 	local newValue: any
-	local ok, err = pcall(function()
+	local innerScope, ok, err = Root.renewInnerScope(computed._innerScope, function()
 		newValue = computed._fn(use)
 	end)
+	computed._innerScope = innerScope
 
 	DepTracker.pop()
-	Root.popOwner()
 
 	if not ok then
 		computed._state = "stale"
@@ -200,10 +192,11 @@ local Computed = {}
 	hp:Get()  -- number
 	```
 
-	If called inside a `root()` or `withScope()` context, the computed
+	If `scope` is given, the computed registers its cleanup with that scope.
+	Otherwise, if called inside a `root()` or `withScope()` context, it
 	automatically registers its cleanup with the current owner scope.
 ]=]
-function Computed.new<T>(fn: (use: Types.Use) -> T): ComputedState<T>
+function Computed.new<T>(fn: (use: Types.Use) -> T, scope: Scope?): Types.Computed<T>
 	local computed: AnyComputed = setmetatable({
 		_isState = DepTracker.COMPUTED_SENTINEL,
 		_fn = fn :: (use: any) -> any,
@@ -215,15 +208,12 @@ function Computed.new<T>(fn: (use: Types.Use) -> T): ComputedState<T>
 		_destroyed = false,
 	}, ComputedMeta) :: any
 
-	local owner = Root.currentOwner()
-	if owner ~= nil then
-		owner:addTask(function()
-			computed:Destroy()
-		end)
-	end
+	Root.registerWithOwner(scope, function()
+		computed:Destroy()
+	end)
 
 	impl.evaluate(computed)
-	return computed :: ComputedState<T>
+	return computed :: Types.Computed<T>
 end
 
 return Computed

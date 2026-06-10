@@ -25,17 +25,16 @@
 	disappears automatically.
 ]=]
 
-local SignalLib = require("../Signal")
-local Propagation = require("./Propagation")
-local Batch = require("./Batch")
-local Diff = require("./Diff")
-local Types = require("./Types")
+const Propagation = require("./Propagation")
+const Batch = require("./Batch")
+const Diff = require("./Diff")
+const Signals = require("./Signals")
+const Types = require("./Types")
 
 -- Internal raw userdata type; keeps all module-level tables keyed by identity.
 -- External consumers use Types.Proxy<T> (the generic public type) instead.
-type Proxy = typeof(newproxy(true))
+type Proxy<T = any> = Types.Proxy<T>
 type NodeMode = Types.NodeMode
-type AnySignal = Types.AnySignal
 type Connection = Types.Connection
 type SetOptions = Types.SetOptions
 
@@ -45,16 +44,8 @@ local _nodeValue: { [Proxy]: any } = {}
 local _nodeMode: { [Proxy]: NodeMode } = {}
 local _children: { [Proxy]: { [any]: Proxy } } = {}
 local _weakParents: { [Proxy]: { [Proxy]: any } } = {} -- child → weak{parent: key}
-local _isOpaque: { [Proxy]: { [any]: boolean } } = {}  -- (Phase 9)
-
--- Signals (created lazily when first observed)
-local _onValueChangeSignal: { [Proxy]: AnySignal } = {}
-local _onChangeSignal: { [Proxy]: AnySignal } = {}
-local _onKeyAddedSignal: { [Proxy]: AnySignal } = {}
-local _onKeyRemovedSignal: { [Proxy]: AnySignal } = {}
-local _onArrayInsertedSignal: { [Proxy]: AnySignal } = {}
-local _onArrayRemovedSignal: { [Proxy]: AnySignal } = {}
-local _onArrayShiftedSignal: { [Proxy]: AnySignal } = {}
+local _isOpaque: { [Proxy]: { [any]: boolean } } = {} -- (Phase 9)
+local _destroyed: { [Proxy]: boolean } = {}
 
 -- Shared with Propagation so the same table is used for generation stamps.
 local _nodeGeneration: { [any]: number } = Propagation._nodeGeneration
@@ -76,6 +67,8 @@ local RESERVED: { [string]: boolean } = {
 	Remove = true,
 	Insert = true,
 	Find = true,
+	Destroy = true,
+	DestroyChain = true,
 }
 
 local function isProxy(v: any): boolean
@@ -102,7 +95,7 @@ end
 
 -- Deep copy of raw value for :Get() return. Follows proxy references to
 -- produce a plain-Lua snapshot.
-local function deepCopy(value: any): any
+local function deepCopy<T>(value: T): T
 	if isProxy(value) then
 		return deepCopy(_nodeValue[value :: Proxy])
 	elseif type(value) ~= "table" then
@@ -112,22 +105,7 @@ local function deepCopy(value: any): any
 	for k, v in value :: { [any]: any } do
 		copy[k] = deepCopy(v)
 	end
-	return copy
-end
-
-local function tryFire(sig: AnySignal?, ...: any)
-	if sig ~= nil and sig:IsConnectedTo() then
-		sig:Fire(...)
-	end
-end
-
-local function getOrCreate(tbl: { [Proxy]: AnySignal }, node: Proxy): AnySignal
-	local s = tbl[node]
-	if s == nil then
-		s = SignalLib.new()
-		tbl[node] = s
-	end
-	return s
+	return copy :: any
 end
 
 -- ─── Impl table (set / reconcileChildren mutual recursion) ───────────────────
@@ -137,12 +115,7 @@ end
 
 type ImplType = {
 	set: (node: Proxy, newValue: any, genOverride: number?) -> (),
-	reconcileChildren: (
-		proxy: Proxy,
-		diffNode: Diff.DiffNode,
-		newData: { [any]: any },
-		gen: number
-	) -> (),
+	reconcileChildren: (proxy: Proxy, diffNode: Diff.DiffNode, newData: { [any]: any }, gen: number) -> (),
 }
 
 local impl = {} :: ImplType
@@ -163,7 +136,7 @@ local function walkParents(node: Proxy, generation: number, newValue: any, oldVa
 			continue
 		end
 		_nodeGeneration[parent] = generation
-		tryFire(_onChangeSignal[parent], newValue, oldValue)
+		Signals.tryFire(Signals.peek("onChange", parent), newValue, oldValue)
 		walkParents(parent, generation, newValue, oldValue)
 	end
 end
@@ -172,19 +145,14 @@ end
 
 local function fireNodeChange(node: Proxy, newValue: any, oldValue: any, generation: number)
 	_nodeGeneration[node] = generation
-	tryFire(_onValueChangeSignal[node], newValue, oldValue)
-	tryFire(_onChangeSignal[node], newValue, oldValue)
+	Signals.tryFire(Signals.peek("onValueChange", node), newValue, oldValue)
+	Signals.tryFire(Signals.peek("onChange", node), newValue, oldValue)
 	walkParents(node, generation, newValue, oldValue)
 end
 
 -- ─── Structural reconciliation ────────────────────────────────────────────────
 
-impl.reconcileChildren = function(
-	proxy: Proxy,
-	diffNode: Diff.DiffNode,
-	newData: { [any]: any },
-	gen: number
-)
+impl.reconcileChildren = function(proxy: Proxy, diffNode: Diff.DiffNode, newData: { [any]: any }, gen: number)
 	local children = diffNode.children
 	if children == nil then
 		return
@@ -201,30 +169,27 @@ impl.reconcileChildren = function(
 			if childProxy ~= nil and _weakParents[childProxy] ~= nil then
 				_weakParents[childProxy][proxy] = nil
 			end
-			tryFire(_onKeyRemovedSignal[proxy], key, childProxy)
-
+			Signals.tryFire(Signals.peek("onKeyRemoved", proxy), key, childProxy)
 		elseif childDiff.type == "added" then
 			local addedValue = newData[key]
 			rawTable[key] = addedValue
 			if myChildren[key] ~= nil then
 				impl.set(myChildren[key], addedValue, gen)
 			end
-			tryFire(_onKeyAddedSignal[proxy], key, myChildren[key])
-
+			Signals.tryFire(Signals.peek("onKeyAdded", proxy), key, myChildren[key])
 		elseif childDiff.type == "changed" then
 			rawTable[key] = childDiff.new
 			local childProxy = myChildren[key]
 			if childProxy ~= nil then
 				impl.set(childProxy, childDiff.new, gen)
 			end
-
 		elseif childDiff.type == "descendantChanged" then
 			local childProxy = myChildren[key]
 			if childProxy ~= nil then
 				_nodeGeneration[childProxy] = gen
 				impl.reconcileChildren(childProxy, childDiff, newData[key], gen)
 				if not Batch.isBatching() then
-					tryFire(_onChangeSignal[childProxy], rawTable[key], childDiff.old)
+					Signals.tryFire(Signals.peek("onChange", childProxy), rawTable[key], childDiff.old)
 				else
 					Batch.record(childProxy, childDiff.old, rawTable[key])
 				end
@@ -266,7 +231,6 @@ impl.set = function(node: Proxy, newValue: any, genOverride: number?)
 				end
 			end
 		end
-
 	elseif mode == "table" or mode == "array" then
 		if type(newValue) == "table" then
 			local newMode = determineMode(newValue)
@@ -306,8 +270,8 @@ impl.set = function(node: Proxy, newValue: any, genOverride: number?)
 	if Batch.isBatching() then
 		Batch.record(node, oldValue, currentRawValue)
 	else
-		tryFire(_onValueChangeSignal[node], currentRawValue, oldValue)
-		tryFire(_onChangeSignal[node], currentRawValue, oldValue)
+		Signals.tryFire(Signals.peek("onValueChange", node), currentRawValue, oldValue)
+		Signals.tryFire(Signals.peek("onChange", node), currentRawValue, oldValue)
 		walkParents(node, gen, currentRawValue, oldValue)
 	end
 
@@ -327,7 +291,7 @@ end)
 
 -- ─── Method closures returned by __index for reserved keys ───────────────────
 
-local function method_Get(self: Proxy): any
+local function method_Get<T>(self: Proxy<T>): T
 	return deepCopy(_nodeValue[self])
 end
 
@@ -354,16 +318,69 @@ local function method_Remove(self: Proxy, key: any)
 	if childProxy ~= nil and _weakParents[childProxy] ~= nil then
 		_weakParents[childProxy][self] = nil
 	end
-	tryFire(_onKeyRemovedSignal[self], key, childProxy)
+	Signals.tryFire(Signals.peek("onKeyRemoved", self), key, childProxy)
 
 	if Batch.isBatching() then
 		Batch.record(self, rawTable, rawTable)
 	else
-		tryFire(_onChangeSignal[self], rawTable, rawTable)
+		Signals.tryFire(Signals.peek("onChange", self), rawTable, rawTable)
 		walkParents(self, gen, rawTable, rawTable)
 	end
 
 	Propagation.endWrite()
+end
+
+-- ─── Destroy / DestroyChain ───────────────────────────────────────────────────
+
+-- Destroys `proxy`: destroys (and disconnects all listeners from) its
+-- signals, unlinks it from any parents, and clears its module-level state.
+-- Idempotent — safe to call more than once. Does NOT touch this proxy's
+-- children; see destroyChain for recursive teardown.
+local function destroyNode(proxy: Proxy)
+	if _destroyed[proxy] then
+		return
+	end
+	_destroyed[proxy] = true
+
+	Signals.destroy(proxy)
+
+	local parents = _weakParents[proxy]
+	if parents ~= nil then
+		for parent, key in parents do
+			if _children[parent] ~= nil and _children[parent][key] == proxy then
+				_children[parent][key] = nil
+			end
+		end
+	end
+
+	_weakParents[proxy] = nil :: any
+	_children[proxy] = nil :: any
+	_nodeValue[proxy] = nil
+	_nodeMode[proxy] = nil :: any
+	_isOpaque[proxy] = nil :: any
+	_nodeGeneration[proxy] = nil :: any
+end
+
+-- Recursively destroys `proxy` and all of its descendant ProxyNodes
+-- (leaf-first), then `proxy` itself. A child is destroyed even if it is
+-- also referenced as a child elsewhere in the graph.
+local function destroyChain(proxy: Proxy)
+	local children = _children[proxy]
+	if children ~= nil then
+		local snapshot = table.clone(children)
+		for _, child in snapshot do
+			destroyChain(child)
+		end
+	end
+	destroyNode(proxy)
+end
+
+local function method_Destroy(self: Proxy)
+	destroyNode(self)
+end
+
+local function method_DestroyChain(self: Proxy)
+	destroyChain(self)
 end
 
 -- ─── Proxy metatable ─────────────────────────────────────────────────────────
@@ -372,13 +389,15 @@ end
 -- defined immediately after ProxyNode.new — both are only called from user
 -- code (after the module finishes loading), so there is no ordering issue.
 
-local ProxyMeta: { [string]: any } = {}
+local ProxyMeta = {}
 ProxyMeta.__metatable = "The metatable is locked."
 
 ProxyMeta.__iter = function(proxy: Proxy): any
 	local rawTable: { [any]: any } = _nodeValue[proxy]
 	if type(rawTable) ~= "table" then
-		return function() return nil :: any, nil :: any end, {} :: { [any]: any }, nil
+		return function()
+			return nil :: any, nil :: any
+		end, {} :: { [any]: any }, nil
 	end
 	return next, rawTable, nil
 end
@@ -410,8 +429,8 @@ end
 
 function ProxyNode.new<T>(value: T): Types.Proxy<T>
 	local proxy = newproxy(true) :: Proxy
-	local mt = getmetatable(proxy) :: { [string]: any }
-	for k, v in ProxyMeta do
+	local mt: any = getmetatable(proxy)
+	for k, v in ProxyMeta :: any do
 		mt[k] = v
 	end
 
@@ -452,6 +471,10 @@ ProxyMeta.__index = function(proxy: Proxy, key: any): any
 		return method_Set
 	elseif key == "Remove" then
 		return method_Remove
+	elseif key == "Destroy" then
+		return method_Destroy
+	elseif key == "DestroyChain" then
+		return method_DestroyChain
 	end
 
 	local mode = _nodeMode[proxy]
@@ -517,7 +540,7 @@ ProxyMeta.__newindex = function(proxy: Proxy, key: any, value: any)
 		if Batch.isBatching() then
 			Batch.record(proxy, rawTable, rawTable)
 		else
-			tryFire(_onChangeSignal[proxy], rawTable, rawTable)
+			Signals.tryFire(Signals.peek("onChange", proxy), rawTable, rawTable)
 			walkParents(proxy, gen, rawTable, rawTable)
 		end
 		Propagation.endWrite()
@@ -537,14 +560,14 @@ ProxyMeta.__newindex = function(proxy: Proxy, key: any, value: any)
 		createChild(proxy, key, value)
 
 		if isNew then
-			tryFire(_onKeyAddedSignal[proxy], key, myChildren[key])
+			Signals.tryFire(Signals.peek("onKeyAdded", proxy), key, myChildren[key])
 		end
 
 		if Batch.isBatching() then
 			Batch.record(proxy, rawTable, rawTable)
 		else
-			tryFire(_onValueChangeSignal[proxy], rawTable, rawTable)
-			tryFire(_onChangeSignal[proxy], rawTable, rawTable)
+			Signals.tryFire(Signals.peek("onValueChange", proxy), rawTable, rawTable)
+			Signals.tryFire(Signals.peek("onChange", proxy), rawTable, rawTable)
 			walkParents(proxy, gen, rawTable, rawTable)
 		end
 
@@ -554,32 +577,15 @@ end
 
 -- ─── Public API ──────────────────────────────────────────────────────────────
 
-function ProxyNode.getSignals(proxy: any): {
-	onValueChange: AnySignal,
-	onChange: AnySignal,
-	onKeyAdded: AnySignal,
-	onKeyRemoved: AnySignal,
-	onArrayInserted: AnySignal,
-	onArrayRemoved: AnySignal,
-	onArrayShifted: AnySignal,
-}
-	local p = proxy :: Proxy
-	return {
-		onValueChange = getOrCreate(_onValueChangeSignal, p),
-		onChange = getOrCreate(_onChangeSignal, p),
-		onKeyAdded = getOrCreate(_onKeyAddedSignal, p),
-		onKeyRemoved = getOrCreate(_onKeyRemovedSignal, p),
-		onArrayInserted = getOrCreate(_onArrayInsertedSignal, p),
-		onArrayRemoved = getOrCreate(_onArrayRemovedSignal, p),
-		onArrayShifted = getOrCreate(_onArrayShiftedSignal, p),
-	}
+function ProxyNode.getSignals(proxy: any): Types.SignalsTable
+	return Signals.getSignals(proxy :: Proxy)
 end
 
 function ProxyNode.isProxy(v: any): boolean
 	return isProxy(v)
 end
 
-function ProxyNode.makeOpaqueWrapper(value: any): { _opaqueValue: any }
+function ProxyNode.makeOpaqueWrapper<T>(value: T): { _opaqueValue: T }
 	return setmetatable({ _opaqueValue = value }, OpaqueWrapperMeta) :: any
 end
 
@@ -601,8 +607,8 @@ end
 	call. Used by Computed/Effect to subscribe without allocating the full
 	signals wrapper table.
 ]=]
-function ProxyNode.getOnValueChangeSignal(proxy: any): AnySignal
-	return getOrCreate(_onValueChangeSignal, proxy :: Proxy)
+function ProxyNode.getOnValueChangeSignal(proxy: any): Types.AnySignal
+	return Signals.getOnValueChangeSignal(proxy :: Proxy)
 end
 
 return ProxyNode

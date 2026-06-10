@@ -119,4 +119,35 @@ function Root.withScope(scope: Scope, fn: () -> ())
 	end
 end
 
+--[=[
+	Registers `destroy` to run when `explicitScope` (if given) or the current
+	implicit owner (Root.currentOwner()) is destroyed. No-op if neither is
+	available. Shared by Computed.new and Effect.new for consistent
+	owner-registration behavior.
+]=]
+function Root.registerWithOwner(explicitScope: Scope?, destroy: () -> ())
+	local owner = explicitScope or Root.currentOwner()
+	if owner ~= nil then
+		owner:addTask(destroy)
+	end
+end
+
+--[=[
+	Destroys `previous` (if any), creates a fresh Scope, pushes it as the
+	current owner, runs `fn` inside it, pops it, and returns
+	(newScope, ok, err) — `ok`/`err` are pcall's results for `fn`. Used by
+	Computed/Effect to implement their per-evaluation `_innerScope`
+	(Types.InternalScopedRunner).
+]=]
+function Root.renewInnerScope(previous: Scope?, fn: () -> ()): (Scope, boolean, any)
+	if previous ~= nil then
+		previous:Destroy()
+	end
+	local scope = ScopeModule.new()
+	Root.pushOwner(scope)
+	local ok, err = pcall(fn)
+	Root.popOwner()
+	return scope, ok, err
+end
+
 return Root

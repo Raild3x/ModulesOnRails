@@ -26,20 +26,20 @@ local Types = require("./Types")
 type AnySignal = Types.AnySignal
 
 export type Observer<T> = {
-	OnChange: AnySignal,
-	OnValueChange: AnySignal,
-	OnKeyAdded: AnySignal?,
-	OnKeyRemoved: AnySignal?,
-	OnArrayInserted: AnySignal?,
-	OnArrayRemoved: AnySignal?,
-	OnArrayShifted: AnySignal?,
+	OnChange: Types.Signal<(newValue: T, oldValue: T) -> ()>,
+	OnValueChange: Types.Signal<(newValue: T, oldValue: T) -> ()>,
+	OnKeyAdded: Types.Signal<(key: any, value: any) -> ()>?,
+	OnKeyRemoved: Types.Signal<(key: any, value: any) -> ()>?,
+	OnArrayInserted: Types.Signal<(index: number, value: any) -> ()>?,
+	OnArrayRemoved: Types.Signal<(index: number, value: any) -> ()>?,
+	OnArrayShifted: Types.Signal<(index: number, value: any) -> ()>?,
 }
 
 local Observer = {}
 
 --[=[
 	Creates an Observer object for `state`. Accepts a `Proxy<T>` or a
-	`ComputedState<T>`; passing anything else is a runtime error.
+	`Computed<T>`; passing anything else is a runtime error.
 
 	The generic parameter `T` flows through to `Observer<T>` for future
 	signal typing (Phase 10). For Computed states only `OnChange` and
@@ -58,7 +58,7 @@ function Observer.new<T>(state: Types.State<T>): Observer<T>
 			OnArrayShifted = signals.onArrayShifted,
 		}
 	elseif DepTracker.isState(state) then
-		local cs = state :: Types.ComputedState<T>
+		local cs = state :: Types.InternalComputedState<T>
 		return {
 			OnChange = cs._onValueChange,
 			OnValueChange = cs._onValueChange,

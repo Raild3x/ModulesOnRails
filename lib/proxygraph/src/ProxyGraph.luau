@@ -38,12 +38,13 @@ local Types = require("./Types")
 
 export type Observer<T> = ObserverModule.Observer<T>
 export type Connection = Types.Connection
+export type Readable<T> = Types.Readable<T>
 export type Proxy<T> = Types.Proxy<T>
+export type Computed<T> = Types.Computed<T>
 export type State<T> = Types.State<T>
 export type UsedAs<T> = Types.UsedAs<T>
 export type Use = Types.Use
-export type Scope<T> = Types.Scope<T>
-export type ComputedState<T> = Types.ComputedState<T>
+export type Scope<Provider = {}> = Types.Scope<Provider>
 
 type NewOptions = Types.NewOptions
 export type NewOptions_ = NewOptions  -- public alias
@@ -75,7 +76,7 @@ end
 	- `OnKeyAdded` / `OnKeyRemoved`
 	- `OnArrayInserted` / `OnArrayRemoved` / `OnArrayShifted` (Phase 10)
 
-	Accepts any `State<T>` (`Proxy<T>` or `ComputedState<T>`). For computed
+	Accepts any `State<T>` (`Proxy<T>` or `Computed<T>`). For computed
 	states only `OnChange` / `OnValueChange` are populated.
 
 	```lua
@@ -228,9 +229,13 @@ end
 	end)
 	combined:Get()  -- number
 	```
+
+	If `scope` is given, the computed registers its cleanup with that scope.
+	Otherwise, if called inside a `root()` or `withScope()` context, it
+	automatically registers its cleanup with the current owner scope.
 ]=]
-function ProxyGraph.Computed<T>(fn: (use: Use) -> T): ComputedState<T>
-	return ComputedModule.new(fn)
+function ProxyGraph.Computed<T>(fn: (use: Use) -> T, scope: Scope?): Computed<T>
+	return ComputedModule.new(fn, scope)
 end
 
 -- ─── Phase 7: Effect ──────────────────────────────────────────────────────────
@@ -247,9 +252,13 @@ end
 	end)
 	stop()
 	```
+
+	If `scope` is given, the stop handle is registered with that scope.
+	Otherwise, if called inside a `root()` or `withScope()` context the stop
+	handle is registered with the current owner scope automatically.
 ]=]
-function ProxyGraph.Effect(fn: (use: Use) -> ()): () -> ()
-	return EffectModule.new(fn)
+function ProxyGraph.Effect(fn: (use: Use) -> (), scope: Scope?): () -> ()
+	return EffectModule.new(fn, scope)
 end
 
 --[=[
@@ -268,7 +277,7 @@ function ProxyGraph.use<T>(value: UsedAs<T>): T
 		return ProxyNode.peek(value) :: T
 	elseif DepTracker.isState(value) then
 		DepTracker.trackAccess(value)
-		return ((value :: any) :: ComputedState<T>):Get()
+		return ((value :: any) :: Computed<T>):Get()
 	end
 	return (value :: any) :: T
 end

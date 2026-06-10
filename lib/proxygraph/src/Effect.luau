@@ -25,13 +25,12 @@
 
 local ProxyNode = require("./ProxyNode")
 local DepTracker = require("./DepTracker")
-local ScopeModule = require("./Scope")
 local Root = require("./Root")
 local Types = require("./Types")
 type Scope = Types.Scope<{}>
 type Connection = Types.Connection
 type AnySignal = Types.AnySignal
-type EffectState = Types.EffectState
+type EffectState = Types.InternalEffectState
 
 -- ─── Impl table (breaks mutual recursion without forward declarations) ────────
 
@@ -51,7 +50,7 @@ local function use<T>(value: Types.UsedAs<T>): T
 		return ProxyNode.peek(value) :: T
 	elseif DepTracker.isState(value) then
 		DepTracker.trackAccess(value)
-		return ((value :: any) :: Types.ComputedState<T>):Get()
+		return ((value :: any) :: Types.Computed<T>):Get()
 	end
 	return (value :: any) :: T
 end
@@ -62,7 +61,7 @@ local function getStateSignal(state: any): AnySignal?
 	if ProxyNode.isProxy(state) then
 		return ProxyNode.getOnValueChangeSignal(state)
 	elseif DepTracker.isState(state) then
-		return (state :: Types.ComputedState<any>)._onValueChange
+		return (state :: Types.InternalComputedState<any>)._onValueChange
 	end
 	return nil
 end
@@ -104,21 +103,14 @@ impl.run = function(effect: EffectState)
 	end
 	effect._running = true
 
-	if effect._runScope ~= nil then
-		effect._runScope:Destroy()
-	end
-	local runScope = ScopeModule.new()
-	effect._runScope = runScope
-
-	Root.pushOwner(runScope)
 	local depCtx = DepTracker.push()
 
-	local ok, err = pcall(function()
+	local innerScope, ok, err = Root.renewInnerScope(effect._innerScope, function()
 		effect._fn(use)
 	end)
+	effect._innerScope = innerScope
 
 	DepTracker.pop()
-	Root.popOwner()
 
 	effect._running = false
 
@@ -140,9 +132,9 @@ local function destroyEffect(effect: EffectState)
 		conn:Disconnect()
 	end
 	table.clear(effect._deps)
-	if effect._runScope ~= nil then
-		effect._runScope:Destroy()
-		effect._runScope = nil
+	if effect._innerScope ~= nil then
+		effect._innerScope:Destroy()
+		effect._innerScope = nil
 	end
 end
 
@@ -160,24 +152,22 @@ local Effect = {}
 	Returns a stop handle: calling it disconnects all deps and destroys the
 	current run scope.
 
-	If called inside a `root()` or `withScope()` context the stop handle is
-	also registered with the owner scope automatically.
+	If `scope` is given, the stop handle is registered with that scope.
+	Otherwise, if called inside a `root()` or `withScope()` context the stop
+	handle is registered with the current owner scope automatically.
 ]=]
-function Effect.new(fn: (use: Types.Use) -> ()): () -> ()
+function Effect.new(fn: (use: Types.Use) -> (), scope: Scope?): () -> ()
 	local effect: EffectState = {
 		_fn = fn :: (use: any) -> (),
 		_deps = {} :: { [any]: Connection },
-		_runScope = nil :: Scope?,
+		_innerScope = nil :: Scope?,
 		_running = false,
 		_destroyed = false,
 	}
 
-	local owner = Root.currentOwner()
-	if owner ~= nil then
-		owner:addTask(function()
-			destroyEffect(effect)
-		end)
-	end
+	Root.registerWithOwner(scope, function()
+		destroyEffect(effect)
+	end)
 
 	impl.run(effect)
 
