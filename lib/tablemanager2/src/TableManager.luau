@@ -8,14 +8,18 @@
 	events and snapshots for any changes made to the managed table or its descendants — all 
 	without needing to manually fire events or manage listener connections.
 
+	## What is TableManager good for?
+	- Tracking changes to nested tables and arrays.
+	- Emitting detailed change events for any modifications.
+	- Providing snapshots of the current state for debugging or synchronization.
+	- Integrating with ProfileStore for easy management of player data.
+
 	### What TableManager is Not
 	- TableManager is not a state management library, and does not include any opinionated
 	features for structuring your data, managing side effects, or integrating with
 	other systems. It is purely a change tracking and notification system for tables.
-
 	- TableManager is not intended to be used with tables that are mutated by external code 
 	without going through TableManager's API.
-
 	- TableManager is not meant for data with a high frequency of updates. It focuses on providing
 	detailed and accurate change information, which can be expensive to generate for large or 
 	rapidly changing data.
@@ -247,7 +251,7 @@ const TableManager = {}
 const TableManager_MT = { __index = TableManager }
 
 -- Re-export T so schema users do not need to import it separately.
--- TableManager.T = T
+TableManager.T = T
 
 const function resolvePathFromPathOrProxy<T, S>(self: TM_Internal<T>, pathOrProxy: Path<S> | Proxy<T, S>): PathArray<S>
 	if self._proxyManager:IsProxy(pathOrProxy) then
@@ -666,6 +670,23 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 		end,
 
 		OnValueChanged = function(path: PathArray, newValue: any, oldValue: any?, metadata: ChangeMetadata)
+			-- During batch array flush, suppress numeric-index element events on
+			-- tracked array paths; those arrays emit their own coalesced Array*
+			-- events in the array flush phase, so firing ValueChanged here too would
+			-- double-apply the change for consumers (e.g. replication).
+			if #path > 0 then
+				const lastKey = path[#path]
+				if type(lastKey) == "number" then
+					const parentPath = table.create(#path - 1)
+					for i = 1, #path - 1 do
+						parentPath[i] = path[i]
+					end
+					if shouldSuppressBatchArrayKeyEvent(parentPath, lastKey) then
+						return
+					end
+				end
+			end
+
 			self._listenerRegistry:FireListenersExact("ValueChanged", path, {
 				NewValue = newValue,
 				OldValue = oldValue,
@@ -1043,17 +1064,31 @@ function TableManager.Set<T, S>(
 		error("Cannot set root path")
 	end
 
+	-- Only build intermediate tables when setting non-nil values; removing (nil) doesn't need them
+	const shouldBuild = buildTablesDynamically and value ~= nil
+
 	local parent = self.Proxy
 	for i = 1, #parsedPath - 1 do
-		parent = parent[parsedPath[i]]
-		if not self._proxyManager:IsProxy(parent) then
-			if buildTablesDynamically then
-				parent[parsedPath[i]] = {} -- TODO: Change this to use ProxyManager to create a proxy for the new table
-				parent = parent[parsedPath[i]]
+		local nextValue = parent[parsedPath[i]]
+		if nextValue == nil then
+			if shouldBuild then
+				nextValue = {}
+				parent[parsedPath[i]] = nextValue
+			elseif value == nil then
+				-- Removing from a non-existent path; silently succeed (nothing to remove)
+				return
+			else
+				error(`Path segment {parsedPath[i]} is not a table`)
+			end
+		elseif not self._proxyManager:IsProxy(nextValue) then
+			if shouldBuild then
+				nextValue = {}
+				parent[parsedPath[i]] = nextValue
 			else
 				error(`Path segment {parsedPath[i]} is not a table`)
 			end
 		end
+		parent = nextValue
 	end
 
 	parent[parsedPath[#parsedPath]] = value
@@ -1266,23 +1301,17 @@ function TableManager.ArraySwapRemove<T, S>(self: TM_Internal<T>, pathOrProxy: P
 		return oldValue
 	end
 
-	const removePath: { any } = table.clone(parsedPath :: any)
-	table.insert(removePath, index)
+	const moveInfo = if index ~= lastIndex
+		then { moveId = `swapremove_{index}_{lastIndex}`, fromIndex = lastIndex, toIndex = index }
+		else nil
 
-	const removeMetadata = createSyntheticMetadata(self._originalData, removePath, "removed", index, nil, oldValue)
-
-	fireArrayOperation(self, "ArrayRemoved", parsedPath, removePath, {
-		Index = index,
-		OldValue = oldValue,
-		Metadata = removeMetadata,
-	})
-
+	-- 1. Emit ArraySet for the backfill: array[index] = movedValue (no-op if index == lastIndex)
 	if index ~= lastIndex then
 		const setPath: { any } = table.clone(parsedPath :: any)
 		table.insert(setPath, index)
 
 		const setMetadata = createSyntheticMetadata(self._originalData, setPath, "changed", index, movedValue, oldValue)
-
+		setMetadata.Move = moveInfo
 		fireArrayOperation(self, "ArraySet", parsedPath, setPath, {
 			Index = index,
 			NewValue = movedValue,
@@ -1290,6 +1319,19 @@ function TableManager.ArraySwapRemove<T, S>(self: TM_Internal<T>, pathOrProxy: P
 			Metadata = setMetadata,
 		})
 	end
+
+	-- 2. Emit ArrayRemoved for the shrink: array[lastIndex] = nil (the actual removal)
+	const removePath: { any } = table.clone(parsedPath :: any)
+	table.insert(removePath, lastIndex)
+
+	const removeMetadata =
+		createSyntheticMetadata(self._originalData, removePath, "removed", lastIndex, nil, movedValue)
+	removeMetadata.Move = moveInfo
+	fireArrayOperation(self, "ArrayRemoved", parsedPath, removePath, {
+		Index = lastIndex,
+		OldValue = movedValue,
+		Metadata = removeMetadata,
+	})
 
 	meta.ArrayLength = #array
 	return oldValue

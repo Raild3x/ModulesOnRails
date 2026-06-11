@@ -152,6 +152,13 @@ local function diff(v1: any, v2: any, snap1: Snapshot?, snap2: Snapshot?): DiffN
 		end
 		return nil -- No changes
 	elseif is_v1_table and not is_v2_table then
+		if v2 == nil then
+			-- The whole table was removed (table -> nil). Emit a "removed" root so
+			-- consumers receive a removal event at THIS path, not only at the leaf
+			-- descendants. Otherwise a consumer that applies leaf removals would be
+			-- left with an empty table here instead of removing it entirely.
+			return make_removal_tree(v1)
+		end
 		local tree: DiffTree = {}
 		local removal = make_removal_tree(v1)
 		if removal.children then
@@ -159,9 +166,7 @@ local function diff(v1: any, v2: any, snap1: Snapshot?, snap2: Snapshot?): DiffN
 				tree[k] = v
 			end
 		end
-		if v2 ~= nil then
-			tree[""] = { type = "added", old = nil, new = v2, children = nil }
-		end
+		tree[""] = { type = "added", old = nil, new = v2, children = nil }
 		return make_descendant_node(v1, v2, tree)
 	elseif not is_v1_table and is_v2_table then
 		local tree: DiffTree = {}
