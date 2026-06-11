@@ -32,7 +32,7 @@ return function(t: tiniest)
 			local signalIndex = nil
 			local signalValue = nil
 
-			manager:OnArrayRemove({ "items", 2 }, function(index, oldValue)
+			manager:OnArrayRemove({ "items" }, function(index, oldValue)
 				listenerCount += 1
 				expect(index).is(2)
 				expect(oldValue).is("B")
@@ -110,7 +110,7 @@ return function(t: tiniest)
 			local removedConn = manager.ArrayRemoved:Connect(function(_path, index, oldValue)
 				removedCount += 1
 				removedIndex = index
-				expect(oldValue).is("B")
+				expect(oldValue).is("C")
 			end)
 			local setConn = manager.ArraySet:Connect(function(_path, index, newValue, oldValue)
 				setCount += 1
@@ -124,7 +124,7 @@ return function(t: tiniest)
 
 			expect(removedCount).is(1)
 			expect(setCount).is(1)
-			expect(removedIndex).is(2)
+			expect(removedIndex).is(3)
 			expect(setIndex).is(2)
 
 			removedConn:Disconnect()
@@ -169,13 +169,13 @@ return function(t: tiniest)
 			local removeListenerCount = 0
 			local setListenerCount = 0
 
-			manager:OnArrayRemove({ "items", 2 }, function(index, oldValue)
+			manager:OnArrayRemove({ "items" }, function(index, oldValue)
 				removeListenerCount += 1
-				expect(index).is(2)
-				expect(oldValue).is("B")
+				expect(index).is(3)
+				expect(oldValue).is("C")
 			end)
 
-			manager:OnArraySet({ "items", 2 }, function(index, newValue, oldValue)
+			manager:OnArraySet({ "items" }, function(index, newValue, oldValue)
 				setListenerCount += 1
 				expect(index).is(2)
 				expect(newValue).is("C")

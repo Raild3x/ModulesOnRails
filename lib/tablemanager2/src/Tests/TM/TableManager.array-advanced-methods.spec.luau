@@ -59,7 +59,7 @@ return function(t: tiniest)
 			local gameKeyChanged = 0
 			local originPath = nil
 
-			manager:OnValueChange({ "game" }, function(_newValue, _oldValue, metadata)
+			manager:OnChange({ "game" }, function(_newValue, _oldValue, metadata)
 				gameNotified += 1
 				originPath = metadata.OriginPath
 			end)
@@ -213,7 +213,7 @@ return function(t: tiniest)
 			}
 
 			local notifiedCount = 0
-			manager:OnValueChange({ "game" }, function()
+			manager:OnChange({ "game" }, function()
 				notifiedCount += 1
 			end)
 

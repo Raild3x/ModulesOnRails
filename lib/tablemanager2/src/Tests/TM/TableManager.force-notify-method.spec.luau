@@ -26,7 +26,7 @@ return function(t: tiniest)
 				end
 			)
 
-			local johnConn = manager:OnValueChange({ "players", "John" }, function()
+			local johnConn = manager:OnChange({ "players", "John" }, function()
 				johnListenerCount += 1
 			end)
 
@@ -85,19 +85,19 @@ return function(t: tiniest)
 			local johnCount = 0
 			local healthCount = 0
 
-			manager:OnValueChange({ "game" }, function()
+			manager:OnChange({ "game" }, function()
 				gameCount += 1
 			end)
-			manager:OnValueChange({ "game", "world" }, function()
+			manager:OnChange({ "game", "world" }, function()
 				worldCount += 1
 			end)
-			manager:OnValueChange({ "game", "world", "players" }, function()
+			manager:OnChange({ "game", "world", "players" }, function()
 				playersCount += 1
 			end)
-			manager:OnValueChange({ "game", "world", "players", "John" }, function()
+			manager:OnChange({ "game", "world", "players", "John" }, function()
 				johnCount += 1
 			end)
-			manager:OnValueChange({ "game", "world", "players", "John", "health" }, function()
+			manager:OnChange({ "game", "world", "players", "John", "health" }, function()
 				healthCount += 1
 			end)
 
@@ -120,10 +120,10 @@ return function(t: tiniest)
 			local unlimited = 0
 			local directOnly = 0
 
-			manager:OnValueChange({ "player" }, function()
+			manager:OnChange({ "player" }, function()
 				unlimited += 1
 			end)
-			manager:OnValueChange({ "player" }, function()
+			manager:OnChange({ "player" }, function()
 				directOnly += 1
 			end, { ListenDepth = 0 })
 

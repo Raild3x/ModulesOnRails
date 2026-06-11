@@ -7,7 +7,7 @@ return function(t: tiniest)
 	local describe = t.describe
 	local expect = t.expect
 
-	describe("Method: OnValueChange", function()
+	describe("Method: OnChange", function()
 		test("fires for direct leaf change with Diff metadata", function()
 			local manager = TableManager.new {
 				player = { health = 100 },
@@ -17,7 +17,7 @@ return function(t: tiniest)
 			local hasDiff = false
 			local originPath = nil
 
-			local conn = manager:OnValueChange({ "player", "health" }, function(_newValue, _oldValue, metadata)
+			local conn = manager:OnChange({ "player", "health" }, function(_newValue, _oldValue, metadata)
 				fireCount += 1
 				hasDiff = metadata.Diff ~= nil
 				originPath = metadata.OriginPath
@@ -41,7 +41,7 @@ return function(t: tiniest)
 			local fireCount = 0
 			local diffWasNil = false
 
-			manager:OnValueChange({ "player" }, function(_newValue, _oldValue, metadata)
+			manager:OnChange({ "player" }, function(_newValue, _oldValue, metadata)
 				fireCount += 1
 				diffWasNil = (metadata.Diff == nil)
 			end)
@@ -61,7 +61,7 @@ return function(t: tiniest)
 			local managerAny: any = manager
 
 			local fireCount = 0
-			managerAny:OnValueChange("player.stats.health", function(newValue, oldValue, metadata)
+			managerAny:OnChange("player.stats.health", function(newValue, oldValue, metadata)
 				fireCount += 1
 				expect(newValue).is(75)
 				expect(oldValue).is(100)
@@ -74,19 +74,19 @@ return function(t: tiniest)
 			manager:Destroy()
 		end)
 
-		test("respects ListenDepth=0 for descendant changes", function()
+		test("fires when a descendant changes", function()
 			local manager = TableManager.new {
 				player = { health = 100 },
 			}
 
 			local fireCount = 0
-			manager:OnValueChange({ "player" }, function()
+			manager:OnChange({ "player" }, function()
 				fireCount += 1
-			end, { ListenDepth = 0 })
+			end)
 
 			manager.Proxy.player.health = 50
 
-			expect(fireCount).is(0)
+			expect(fireCount).is(1)
 			manager:Destroy()
 		end)
 
@@ -96,7 +96,7 @@ return function(t: tiniest)
 			}
 
 			local fireCount = 0
-			local conn = manager:OnValueChange({ "player", "health" }, function()
+			local conn = manager:OnChange({ "player", "health" }, function()
 				fireCount += 1
 			end, { Once = true })
 
@@ -118,7 +118,7 @@ return function(t: tiniest)
 			local signalCount = 0
 			local signalPath = nil
 
-			manager:OnValueChange({ "player", "health" }, function()
+			manager:OnChange({ "player", "health" }, function()
 				listenerCount += 1
 			end)
 
@@ -145,7 +145,7 @@ return function(t: tiniest)
 			}
 
 			local capturedMetadata = nil
-			local conn = manager:OnValueChange({ "player", "health" }, function(_newValue, _oldValue, metadata)
+			local conn = manager:OnChange({ "player", "health" }, function(_newValue, _oldValue, metadata)
 				capturedMetadata = metadata
 			end)
 
@@ -167,7 +167,7 @@ return function(t: tiniest)
 			}
 
 			local ancestorMetadata = nil
-			local conn = manager:OnValueChange({ "player" }, function(_newValue, _oldValue, metadata)
+			local conn = manager:OnChange({ "player" }, function(_newValue, _oldValue, metadata)
 				if metadata.Diff == nil then
 					ancestorMetadata = metadata
 				end
@@ -191,7 +191,7 @@ return function(t: tiniest)
 			}
 
 			local capturedMetadata = nil
-			local conn = manager:OnValueChange({ "player", "health" }, function(_newValue, _oldValue, metadata)
+			local conn = manager:OnChange({ "player", "health" }, function(_newValue, _oldValue, metadata)
 				capturedMetadata = metadata
 			end)
 
@@ -212,7 +212,7 @@ return function(t: tiniest)
 			}
 
 			local fireCount = 0
-			local conn = manager:OnValueChange({}, function(_newValue, _oldValue, metadata)
+			local conn = manager:OnChange({}, function(_newValue, _oldValue, metadata)
 				fireCount += 1
 				expect(metadata.OriginPath).is_shallow_equal { "settings" }
 			end)
@@ -233,10 +233,10 @@ return function(t: tiniest)
 			local count1 = 0
 			local count2 = 0
 
-			local conn1 = manager:OnValueChange({ "player", "health" }, function()
+			local conn1 = manager:OnChange({ "player", "health" }, function()
 				count1 += 1
 			end)
-			local conn2 = manager:OnValueChange({ "player", "health" }, function()
+			local conn2 = manager:OnChange({ "player", "health" }, function()
 				count2 += 1
 			end)
 
@@ -256,7 +256,7 @@ return function(t: tiniest)
 			}
 
 			local fired = false
-			local conn = manager:OnValueChange({ "player", "health" }, function()
+			local conn = manager:OnChange({ "player", "health" }, function()
 				fired = true
 			end)
 
@@ -268,14 +268,14 @@ return function(t: tiniest)
 		end)
 	end)
 
-	describe("Method: OnValueChanged", function()
-		test("fires for direct reassignment of the exact path", function()
+	describe("Method: OnValueChange", function()
+		test("fires only for direct reassignment of the exact path", function()
 			local manager = TableManager.new {
 				player = { health = 100 },
 			}
 
 			local fireCount = 0
-			local conn = manager:OnValueChanged({ "player", "health" }, function()
+			local conn = manager:OnValueChange({ "player", "health" }, function()
 				fireCount += 1
 			end)
 
@@ -293,7 +293,7 @@ return function(t: tiniest)
 			}
 
 			local fireCount = 0
-			local conn = manager:OnValueChanged({ "player" }, function()
+			local conn = manager:OnValueChange({ "player" }, function()
 				fireCount += 1
 			end)
 
@@ -311,49 +311,11 @@ return function(t: tiniest)
 			}
 
 			local fireCount = 0
-			local conn = manager:OnValueChanged({ "player" }, function()
+			local conn = manager:OnValueChange({ "player" }, function()
 				fireCount += 1
 			end)
 
 			manager.Proxy.player = { health = 50 }
-
-			expect(fireCount).is(1)
-
-			conn:Disconnect()
-			manager:Destroy()
-		end)
-	end)
-
-	describe("Method: OnChanged", function()
-		test("fires for direct reassignment of the exact path", function()
-			local manager = TableManager.new {
-				player = { health = 100 },
-			}
-
-			local fireCount = 0
-			local conn = manager:OnChanged({ "player", "health" }, function()
-				fireCount += 1
-			end)
-
-			manager.Proxy.player.health = 50
-
-			expect(fireCount).is(1)
-
-			conn:Disconnect()
-			manager:Destroy()
-		end)
-
-		test("fires when a descendant changes", function()
-			local manager = TableManager.new {
-				player = { health = 100 },
-			}
-
-			local fireCount = 0
-			local conn = manager:OnChanged({ "player" }, function()
-				fireCount += 1
-			end)
-
-			manager.Proxy.player.health = 50
 
 			expect(fireCount).is(1)
 
@@ -455,8 +417,8 @@ return function(t: tiniest)
 			}
 
 			local fired: { [string]: number } = {}
-			local conn = manager:OnValueChanged({ "Players", "*", "Health" }, function(newValue, _oldValue, metadata)
-				local playerId = metadata.WildcardMatches[1]
+			local conn = manager:OnValueChange({ "Players", "*", "Health" }, function(newValue, _oldValue, metadata)
+				local playerId = metadata.WildcardMatches and metadata.WildcardMatches[1]
 				fired[playerId] = newValue
 			end)
 
@@ -478,7 +440,7 @@ return function(t: tiniest)
 			}
 
 			local matchedIds: { string } = {}
-			local conn = manager:OnValueChange({ "Players", "*" }, function(_newValue, _oldValue, metadata)
+			local conn = manager:OnChange({ "Players", "*" }, function(_newValue, _oldValue, metadata)
 				if metadata.WildcardMatches then
 					table.insert(matchedIds, metadata.WildcardMatches[1])
 				end
@@ -510,7 +472,7 @@ return function(t: tiniest)
 
 			expect(fireCount).is(1)
 
-			(conn :: any):Disconnect()
+			conn:Disconnect()
 			manager:Destroy()
 		end)
 	end)
