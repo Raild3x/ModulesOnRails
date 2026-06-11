@@ -125,31 +125,30 @@ manager:OnValueChange({}, function(newValue, oldValue, metadata)
 end)
 ```
 
-### OnValueChanged vs OnChanged
+### OnValueChange vs OnChange
 
-`OnValueChanged` and `OnChanged` are convenience wrappers around `OnValueChange`
-for the two most common cases:
+`OnValueChange` and `OnChange` are for the two most common listening patterns:
 
-- **`OnValueChanged`** fires ONLY when this exact path is directly reassigned.
-- **`OnChanged`** fires when this path is directly reassigned OR any descendant
-  of it changes (this is `OnValueChange`'s default behavior).
+- **`OnValueChange`** fires ONLY when this exact path is directly reassigned.
+- **`OnChange`** fires when this path is directly reassigned OR any descendant
+  of it changes.
 
 ```lua
 local manager = TableManager.new({
     Player = { Health = 100, Mana = 50 }
 })
 
-manager:OnValueChanged({"Player"}, function(newValue, oldValue, metadata)
+manager:OnValueChange({"Player"}, function(newValue, oldValue, metadata)
     print("Player table was directly replaced")
 end)
 
-manager:OnChanged({"Player"}, function(newValue, oldValue, metadata)
+manager:OnChange({"Player"}, function(newValue, oldValue, metadata)
     print("Player table or one of its fields changed")
 end)
 
 manager.Proxy.Player.Health = 80
 -- Output: "Player table or one of its fields changed"
--- (OnValueChanged does NOT fire - only Health changed, not Player itself)
+-- (OnValueChange does NOT fire - only Health changed, not Player itself)
 
 manager.Proxy.Player = { Health = 100, Mana = 50 }
 -- Output: "Player table was directly replaced"
@@ -197,7 +196,7 @@ local manager = TableManager.new({
     }
 })
 
-manager:OnValueChanged({"Players", "*", "Health"}, function(newValue, oldValue, metadata)
+manager:OnValueChange({"Players", "*", "Health"}, function(newValue, oldValue, metadata)
     local playerId = metadata.WildcardMatches[1]
     print(playerId, "health:", oldValue, "→", newValue)
 end)
@@ -206,7 +205,7 @@ manager.Proxy.Players.p123.Health = 90  -- "p123 health: 100 → 90"
 manager.Proxy.Players.p456.Health = 70  -- "p456 health: 80 → 70"
 
 -- A new player added later is also covered by a wildcard ancestor listener:
-manager:OnValueChange({"Players", "*"}, function(_, _, metadata)
+manager:OnChange({"Players", "*"}, function(_, _, metadata)
     if metadata.WildcardMatches then
         print("Player data changed for:", metadata.WildcardMatches[1])
     end

@@ -22,6 +22,11 @@ export type BatchState = {
 	StartSnapshot: ChangeDetector.Snapshot,
 	TrackedPaths: { [string]: PathArray },
 	DirtyBranches: { [any]: boolean },
+	-- Parent paths of every non-array scalar/table write during the batch. Used at
+	-- flush time to detect in-place mutations of array ELEMENTS (a write whose
+	-- parent is strictly under a tracked array path), which Branch B coalescing
+	-- cannot represent and which therefore force Branch A.
+	ScalarWritePaths: { PathArray },
 	Flushing: boolean,
 }
 
@@ -63,6 +68,20 @@ function BatchUtils.GetSnapshotValue(snapshot: ChangeDetector.Snapshot, path: { 
 		snap = (snap.children :: any)[key]
 	end
 	return snap and snap.value or nil
+end
+
+-- Like GetSnapshotValue but returns the ORIGINAL table reference captured at
+-- `path` pre-batch (Diff.Snapshot.ref), not the frozen copy. Used to detect
+-- whether a tracked array was reference-replaced during the batch.
+function BatchUtils.GetSnapshotRef(snapshot: ChangeDetector.Snapshot, path: { any }): any?
+	local snap: any = snapshot.Data
+	for _, key in path do
+		if not snap or not snap.children then
+			return nil
+		end
+		snap = (snap.children :: any)[key]
+	end
+	return snap and snap.ref or nil
 end
 
 -- Gets the top-level key (first segment) for a path, used for batch branch tracking.

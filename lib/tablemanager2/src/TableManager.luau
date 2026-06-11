@@ -79,6 +79,7 @@ const Diff = require("./Diff")
 const createSyntheticSnapshot = BatchUtilsModule.CreateSyntheticSnapshot
 const serializeBatchPath = BatchUtilsModule.SerializeBatchPath
 const getSnapshotValue = BatchUtilsModule.GetSnapshotValue
+const getSnapshotRef = BatchUtilsModule.GetSnapshotRef
 const markBatchBranchDirty = BatchUtilsModule.MarkBatchBranchDirty
 const ensureBatchPathTracking = BatchUtilsModule.EnsureBatchPathTracking
 
@@ -602,14 +603,47 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	self.ArraySet = Signal.new() :: any
 	self.ArrayMoved = Signal.new() :: any
 
-	-- During batch array flush: suppress numeric-key events on tracked array paths.
-	-- Those arrays will emit their own coalesced events via the array flush.
-	const function shouldSuppressBatchArrayKeyEvent(path: PathArray, key: any): boolean
+	-- During batch array flush: suppress any change event whose location is at or
+	-- under a tracked array path. Those arrays emit their own coalesced Array*
+	-- events in the array flush phase, so the non-array flush firing here too would
+	-- double-apply the change for consumers (e.g. replication). This covers the
+	-- array container, its numeric element slots, AND string-keyed fields of array
+	-- elements (e.g. {"items", 1, "hp"}), which a numeric-only check would miss.
+	-- Arrays created during the batch are pruned from TrackedPaths before the flush
+	-- (see Resume) so their creation flows through the non-array flush instead.
+	const function shouldSuppressBatchArrayEvent(location: PathArray): boolean
 		const batch = self._batch
-		if batch == nil or not batch.Flushing or type(key) ~= "number" then
+		if batch == nil or not batch.Flushing then
 			return false
 		end
-		return batch.TrackedPaths[serializeBatchPath(path)] ~= nil
+		const tracked = batch.TrackedPaths
+		for i = 1, #location do
+			const prefix = table.create(i)
+			for j = 1, i do
+				prefix[j] = location[j]
+			end
+			if tracked[serializeBatchPath(prefix)] ~= nil then
+				-- Only suppress when the tracked array STILL EXISTS, because only
+				-- then does the array flush re-emit its contents. If the array was
+				-- removed wholesale during the batch, the array flush skips it, so its
+				-- removal must be allowed through this (non-array) flush instead.
+				if type((self :: any):Get(prefix, true)) == "table" then
+					return true
+				end
+			end
+		end
+		return false
+	end
+
+	-- Builds the full path of a keyed event (`path` is the owning table, `key` the
+	-- written key) for the suppression check above.
+	const function keyEventLocation(path: PathArray, key: any): PathArray
+		const location = table.create(#path + 1)
+		for i = 1, #path do
+			location[i] = path[i]
+		end
+		location[#path + 1] = key
+		return location
 	end
 
 	-- Initialize ChangeDetector with callbacks
@@ -617,8 +651,16 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	-- ChangeDetector already handles ancestor notifications, so we only fire at exact paths
 	self._changeDetector = ChangeDetectorModule.new {
 		OnKeyAdded = function(path: PathArray, key: any, newValue: any, metadata: ChangeMetadata)
-			if shouldSuppressBatchArrayKeyEvent(path, key) then
+			if shouldSuppressBatchArrayEvent(keyEventLocation(path, key)) then
 				return
+			end
+
+			-- Fire the signal BEFORE the registry listeners. If a listener performs a
+			-- re-entrant write, its nested signal then fires after this one, so the
+			-- public signal stream stays in write-initiation order (deterministic for
+			-- consumers like replication). Signal fires for leaf changes only.
+			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
+				self.KeyAdded:Fire(path, key, newValue)
 			end
 
 			-- Fire listeners ONLY at exact path (ChangeDetector handles ancestors)
@@ -627,16 +669,15 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 				Key = key,
 				Metadata = metadata,
 			})
-
-			-- Fire signal ONLY for leaf changes (not descendantChanged)
-			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
-				self.KeyAdded:Fire(path, key, newValue)
-			end
 		end,
 
 		OnKeyRemoved = function(path: PathArray, key: any, oldValue: any, metadata: ChangeMetadata)
-			if shouldSuppressBatchArrayKeyEvent(path, key) then
+			if shouldSuppressBatchArrayEvent(keyEventLocation(path, key)) then
 				return
+			end
+
+			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
+				self.KeyRemoved:Fire(path, key, oldValue)
 			end
 
 			self._listenerRegistry:FireListenersExact("KeyRemoved", path, {
@@ -644,16 +685,15 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 				Key = key,
 				Metadata = metadata,
 			})
-
-			-- Fire signal ONLY for leaf changes (not descendantChanged)
-			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
-				self.KeyRemoved:Fire(path, key, oldValue)
-			end
 		end,
 
 		OnKeyChanged = function(path: PathArray, key: any, newValue: any, oldValue: any, metadata: ChangeMetadata)
-			if shouldSuppressBatchArrayKeyEvent(path, key) then
+			if shouldSuppressBatchArrayEvent(keyEventLocation(path, key)) then
 				return
+			end
+
+			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
+				self.KeyChanged:Fire(path, key, newValue, oldValue)
 			end
 
 			self._listenerRegistry:FireListenersExact("KeyChanged", path, {
@@ -662,29 +702,19 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 				Key = key,
 				Metadata = metadata,
 			})
-
-			-- Fire signal ONLY for leaf changes (not descendantChanged)
-			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
-				self.KeyChanged:Fire(path, key, newValue, oldValue)
-			end
 		end,
 
 		OnValueChanged = function(path: PathArray, newValue: any, oldValue: any?, metadata: ChangeMetadata)
-			-- During batch array flush, suppress numeric-index element events on
-			-- tracked array paths; those arrays emit their own coalesced Array*
-			-- events in the array flush phase, so firing ValueChanged here too would
-			-- double-apply the change for consumers (e.g. replication).
-			if #path > 0 then
-				const lastKey = path[#path]
-				if type(lastKey) == "number" then
-					const parentPath = table.create(#path - 1)
-					for i = 1, #path - 1 do
-						parentPath[i] = path[i]
-					end
-					if shouldSuppressBatchArrayKeyEvent(parentPath, lastKey) then
-						return
-					end
-				end
+			-- During batch array flush, suppress events at or under a tracked array
+			-- path; those arrays emit their own coalesced Array* events in the array
+			-- flush phase, so firing ValueChanged here too would double-apply.
+			if shouldSuppressBatchArrayEvent(path) then
+				return
+			end
+
+			-- Signal before listeners (see OnKeyAdded for the rationale).
+			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
+				self.ValueChanged:Fire(path, newValue, oldValue)
 			end
 
 			self._listenerRegistry:FireListenersExact("ValueChanged", path, {
@@ -692,11 +722,6 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 				OldValue = oldValue,
 				Metadata = metadata,
 			})
-
-			-- Fire signal ONLY for leaf changes (not descendantChanged)
-			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
-				self.ValueChanged:Fire(path, newValue, oldValue)
-			end
 		end,
 	}
 
@@ -770,7 +795,13 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	-- The branch key is `parentPath[1]` (or "__root__" for root-level writes).
 	self._proxyManager:SetBatchScalarWrittenCallback(function(parentPath: PathArray)
 		if self._batchDepth > 0 then
-			markBatchBranchDirty(self._batch, parentPath)
+			const batch = self._batch
+			markBatchBranchDirty(batch, parentPath)
+			-- Record the write location so the flush can tell whether an array
+			-- element's interior was mutated (forces Branch A; see Resume).
+			if batch then
+				table.insert(batch.ScalarWritePaths, table.clone(parentPath))
+			end
 		end
 	end)
 
@@ -1411,6 +1442,7 @@ function TableManager.Suspend(self: TM_Internal)
 		StartSnapshot = self._changeDetector:CaptureSnapshot(self._originalData, {}),
 		TrackedPaths = {},
 		DirtyBranches = {},
+		ScalarWritePaths = {},
 		Flushing = false,
 	}
 	self._batchDepth = 1
@@ -1440,6 +1472,19 @@ function TableManager.Resume(self: TM_Internal)
 		return
 	end
 	batch.Flushing = true
+
+	-- Prune arrays that were CREATED during the batch (did not exist pre-batch)
+	-- from the tracked set. A newly-created array's container does not yet exist on
+	-- a downstream consumer, so coalesced Array* events (which assume the container
+	-- exists) cannot be applied. Instead we let the non-array flush emit its
+	-- creation as ordinary key/value adds (the same path a non-batched creation
+	-- takes), which build the container and its elements. Removing them here also
+	-- stops `shouldSuppressBatchArrayEvent` from suppressing those adds.
+	for pathKey, path in batch.TrackedPaths do
+		if getSnapshotRef(batch.StartSnapshot, path) == nil then
+			batch.TrackedPaths[pathKey] = nil
+		end
+	end
 
 	-- Non-array flush: diff only the branches that were actually mutated during
 	-- the batch. This avoids traversing the whole table when only a small subset
@@ -1498,7 +1543,37 @@ function TableManager.Resume(self: TM_Internal)
 			const oldArray: { any } = getSnapshotValue(batch.StartSnapshot, path) or {}
 			const emit = makeEmit(self, path)
 
-			if log.poisoned or currentArray ~= log.startRef then
+			-- If the array's reference was replaced during the batch (e.g.
+			-- `Proxy.items = {...}` followed by array ops), the op log's startCopy
+			-- reflects only the post-replacement array and would miss the
+			-- replacement. Detect this by comparing the pre-batch reference to the
+			-- log's start reference and force Branch A (full pre-batch-vs-current LCS).
+			const preBatchRef = getSnapshotRef(batch.StartSnapshot, path)
+			const wasReplaced = preBatchRef ~= nil and preBatchRef ~= log.startRef
+
+			-- If an ELEMENT of this array was mutated in place (a scalar/table write
+			-- whose parent is strictly under the array path, e.g. `items[1].hp = 9`),
+			-- Branch B coalescing cannot represent the interior change — it only sees
+			-- element identities. Force Branch A so the changed element is emitted as
+			-- a whole-value ArraySet.
+			local elementMutated = false
+			for _, writePath in batch.ScalarWritePaths do
+				if #writePath > #path then
+					local underPath = true
+					for i = 1, #path do
+						if writePath[i] ~= path[i] then
+							underPath = false
+							break
+						end
+					end
+					if underPath then
+						elementMutated = true
+						break
+					end
+				end
+			end
+
+			if log.poisoned or currentArray ~= log.startRef or wasReplaced or elementMutated then
 				-- Branch A: LCS diff — pre-batch snapshot vs current state
 				ArrayDiffModule.emitDiff(oldArray, currentArray, emit, true)
 			else

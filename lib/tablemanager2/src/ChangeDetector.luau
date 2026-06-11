@@ -512,7 +512,7 @@ function ChangeDetector:_processDiffNode(
 	-- Recurse into children if present
 	if node.children then
 		for key, childNode in node.children do
-			local childKey = if key ~= "" then key else nil
+			local childKey = if key ~= Diff.ScalarSentinel then key else nil
 			local childPath = table.clone(nodePath)
 			local childParentPath = parentPath
 			local childNodeKey = childKey

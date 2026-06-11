@@ -11,7 +11,14 @@ export type DiffEntry = {
 	new: any,
 }
 
-export type DiffTree = { [string | number | boolean]: DiffNode }
+export type DiffTree = { [any]: DiffNode }
+
+-- Sentinel key used inside a DiffTree to carry the scalar side of a
+-- table<->scalar transition (e.g. the old scalar when a key becomes a table).
+-- A unique userdata is used rather than "" so a genuine empty-string user key
+-- cannot collide with it. `flatten`/`ChangeDetector` skip this key when building
+-- paths. Exported so ChangeDetector can recognise it.
+local SCALAR_SENTINEL = newproxy(false)
 
 export type DiffNode = {
 	type: DiffType,
@@ -114,18 +121,27 @@ local function diff_tables(t1: { [any]: any }, t2: { [any]: any }, snap1: Snapsh
 					children[ck] = cv
 				end
 			end
-			children[""] = { type = "added", old = nil, new = v2, children = nil }
+			children[SCALAR_SENTINEL] = { type = "added", old = nil, new = v2, children = nil }
 			tree[k] = make_descendant_node(v1, v2, children)
 		elseif not is_v1_table and is_v2_table then
+			-- scalar/nil -> table. Carry the whole new table on the node (`new`) so
+			-- the value is authoritative regardless of child traversal order, and
+			-- attach the new table's keys as children for granular listeners. No
+			-- scalar sentinel is needed here (the node itself records old/new).
 			local children: DiffTree = {}
-			children[""] = { type = "removed", old = v1, new = nil, children = nil }
 			local addition = make_addition_tree(v2)
 			if addition.children then
 				for ck, cv in pairs(addition.children) do
 					children[ck] = cv
 				end
 			end
-			tree[k] = make_descendant_node(v1, v2, children)
+			local has_children = next(children) ~= nil
+			tree[k] = {
+				type = if v1 == nil then "added" else "changed",
+				old = v1,
+				new = v2,
+				children = if has_children then children else nil,
+			}
 		elseif v1 ~= v2 then
 			tree[k] = { type = "changed", old = v1, new = v2, children = nil }
 		end
@@ -166,20 +182,35 @@ local function diff(v1: any, v2: any, snap1: Snapshot?, snap2: Snapshot?): DiffN
 				tree[k] = v
 			end
 		end
-		tree[""] = { type = "added", old = nil, new = v2, children = nil }
+		tree[SCALAR_SENTINEL] = { type = "added", old = nil, new = v2, children = nil }
 		return make_descendant_node(v1, v2, tree)
 	elseif not is_v1_table and is_v2_table then
-		local tree: DiffTree = {}
-		if v1 ~= nil then
-			tree[""] = { type = "removed", old = v1, new = nil, children = nil }
-		end
+		local children: DiffTree = {}
 		local addition = make_addition_tree(v2)
 		if addition.children then
 			for k, v in pairs(addition.children) do
-				tree[k] = v
+				children[k] = v
 			end
 		end
-		return make_descendant_node(v1, v2, tree)
+		local has_children = next(children) ~= nil
+
+		if v1 == nil then
+			-- nil -> table: a pure addition. Keep the existing descendantChanged
+			-- shape for non-empty tables (their leaf adds drive consumers). But an
+			-- EMPTY table has no leaves, and a childless descendantChanged node fires
+			-- no signal, so the key would never reach a consumer — emit an "added"
+			-- leaf node instead (defect: empty-table assignment was silent).
+			if has_children then
+				return make_descendant_node(v1, v2, children)
+			end
+			return { type = "added", old = nil, new = v2, children = nil }
+		end
+
+		-- scalar -> table: a direct change. Carry the whole new table on the node
+		-- (`new`) so the value is order-independent, with the table's keys as
+		-- children for granular listeners. No "" sentinel is used, so a genuine ""
+		-- key is not folded into the parent path.
+		return { type = "changed", old = v1, new = v2, children = if has_children then children else nil }
 	else
 		-- Scalar to scalar comparison
 		if v1 == nil and v2 ~= nil then
@@ -211,7 +242,7 @@ local function flatten_node(node: DiffNode, path: Path, result: { DiffEntry })
 	if node.children then
 		for k, child in pairs(node.children) do
 			local child_path: Path = table.clone(path)
-			if k ~= "" then
+			if k ~= SCALAR_SENTINEL then
 				table.insert(child_path, k)
 			end
 			flatten_node(child, child_path, result)
@@ -287,5 +318,7 @@ Module.diff = diff
 Module.flatten = flatten
 Module.snapshot = snapshot
 Module.diffFromSnapshot = diff_from_snapshot
+-- The sentinel DiffTree key for the scalar side of a table<->scalar transition.
+Module.ScalarSentinel = SCALAR_SENTINEL
 
 return Module
