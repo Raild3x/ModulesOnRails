@@ -21,14 +21,11 @@ If a package is pure Luau and has multiple modules, do not use `init.luau` as th
 
 Publishing will generate an `init.luau` re-export automatically. Non-pure-Luau packages may use `init.luau` directly.
 
-## Setup For Development
-Use `npm run setup <package-name>` when deeper local package context is needed. This installs dependencies and arranges them similarly to live usage, improving autocomplete, linting, and diagnostics in VS Code.
-
 ## Luau Style Rules
 - Use PascalCase for class names, table fields, and method names.
 - Use camelCase for variable names.
 - Use SCREAMING_SNAKE_CASE for constants.
-- Prefix private fields and methods with `_`.
+- Prefix private fields and methods of class objects with `_`.
 - Add explicit types for non-inferred parameters and function signatures.
 - For Luau classes, define both a public type and an internal type.
 - Internal type should extend public type with private fields and methods.
@@ -45,6 +42,8 @@ Use `npm run setup <package-name>` when deeper local package context is needed. 
 - Public multi-line docs: `--[=[]=]`
 - Private single-line comments: `--`
 - Private multi-line comments: `--[[]]`
+
+Documentation is in moonwave format.
 
 ## Constant Policy
 Use `const` whenever a variable binding is never reassigned.
@@ -71,11 +70,13 @@ Declaration matrix:
 | any | Inner | Assigned programmatically | local with camelCase |
 
 ## Testing Rules
-- Use tiniest for tests. Analyze the examples under `/test/tiniest` for reference.
-- TestEZ is deprecated in this codebase. NEVER use TestEZ or its syntax. They do not exist.
+- `tiniest` is the testing framework we use for running tests. If needed, analyze the examples under `/test/tiniest` for reference.
+- Utilize `tiniest`'s `describe`, `test`, `expect`, and `context` functions for structuring tests and assertions. Context is useful for debugging test cases by providing custom additional info. Attach context to failing tests to surface that info in the test output.
 - Create tests in `.spec.luau` files.
-- For pure Luau packages, run tests through `tests.luau` in VS Code.
+- Do not attempt to run tests through command line or anything else yourself unless you are explicitly instructed to.
+- For pure Luau packages, you can run tests through `tests.luau` in VS Code.
 - For non-pure-Luau packages, rely on developer-run manual testing and provided output.
+- TestEZ is deprecated in this codebase. NEVER use TestEZ or its syntax. They do not exist.
 
 ## Debugging Rules
 - Never assume root cause without validating with test output.
