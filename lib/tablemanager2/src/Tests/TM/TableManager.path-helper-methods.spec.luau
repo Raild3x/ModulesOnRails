@@ -205,5 +205,45 @@ return function(t: tiniest)
 
 			manager:Destroy()
 		end)
+
+		test("nil write through a non-table segment silently succeeds", function()
+			-- A nil write is a removal, and a scalar segment means the target
+			-- path holds nothing - there is nothing to remove, so this must be
+			-- a silent no-op (replication consumers can receive a redundant
+			-- child removal after the parent was replaced by a scalar).
+			local manager = TableManager.new {
+				player = { health = 100 },
+			}
+
+			local fired = 0
+			manager.ValueChanged:Connect(function()
+				fired += 1
+			end)
+
+			manager:Set({ "player", "health", "buff" }, nil)
+
+			expect(fired).is(0)
+			expect(manager:Get { "player", "health" }).is(100)
+
+			manager:Destroy()
+		end)
+
+		test("nil write through a missing segment silently succeeds", function()
+			local manager = TableManager.new {
+				player = { health = 100 },
+			}
+
+			local fired = 0
+			manager.ValueChanged:Connect(function()
+				fired += 1
+			end)
+
+			manager:Set({ "player", "gear", "slot" }, nil)
+
+			expect(fired).is(0)
+			expect(manager:Get({ "player", "gear" }, true)).is(nil)
+
+			manager:Destroy()
+		end)
 	end)
 end

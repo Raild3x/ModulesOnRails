@@ -13,16 +13,16 @@ information to reconstruct an independent replica that
 
 ## Headline conclusion
 
-**Use the SIGNALS feed, not the OriginDiff (diff) feed**, for the rebuilt
-TableReplicator. The diff feed double-represents batched array mutations and is
-not shift-faithful, so it cannot be consumed by naive flatten-and-apply (see
-"Diff-feed channel limitation"). The signals feed converges on batches the diff
-feed cannot.
+**Both feeds are now replication-faithful.** The signals feed remains the
+simplest channel (explicit shift semantics per event). The diff feed's former
+"channel limitation" has been RESOLVED in production code (see "Third pass");
+a diff consumer must follow the consumer contract below (apply
+`metadata.ArrayOp` deliveries as array ops; flatten everything else into
+non-shifting Sets with ancestor entries shadowing descendants).
 
-The five defects below were all genuine. **Fixes for all five have now been
-applied** (see "Fixes applied"); the signals feed is expected to converge on
-every defect case after the fixes. The diff feed remains channel-limited for
-batches and re-entrancy by design.
+The five defects below were all genuine and have been fixed, along with three
+residual defects found on re-run ("Follow-up fixes") and the diff-feed channel
+rework ("Third pass").
 
 ## Fixes applied (2026-06-11)
 
@@ -58,14 +58,110 @@ was weakened.
    `BatchUtils.GetSnapshotRef`) differs from the op-log's start reference, so a
    `Proxy.items = {...}` replacement inside a batch is no longer lost.
 
+## Follow-up fixes (2026-06-11, second pass)
+
+The first re-run showed three residual defects the fixes above missed:
+
+6. **`Set` with `buildTablesDynamically` bypassed change detection** — after
+   creating the first missing intermediate through the proxy, `Set` re-pointed
+   its cursor at the RAW `{}` table it had just built, so every deeper write
+   (including the final leaf) went around the proxy and emitted nothing. The
+   replica only ever heard "empty table at the first segment". `Set` now builds
+   the remaining path as ONE plain subtree (value at the leaf) and assigns it
+   through the proxy in a single write, producing one ordinary nil→table /
+   scalar→table diff. Fixes `structural methods › Set with
+   buildTablesDynamically` on BOTH feeds.
+7. **In-batch `ArraySwapRemove` recorded ops that corrupted stable-id
+   resolution** — it recorded `Remove@index` then `Set@index`, but the recorder
+   replays its op log to map indices to ids, so the Remove killed the id at
+   `index` and the Set then targeted whichever id "shifted" into that slot
+   (an element that never actually moved). Coalesce emitted
+   `remove(1,a) + set(1,d,b)` for a swap-remove of `{a,b,c,d}` → consumer state
+   `{d,c,d}` vs source `{d,b,c}`. The recording now mirrors the actual mutation
+   (backfill `Set@index` first, then `Remove@lastIndex`), matching the
+   non-batched emission order. Fixes `batch › ArraySwapRemove inside a batch`
+   on the signals feed.
+8. **Stale ChangeDetector spec** — `should handle scalar to table transition`
+   still pinned the pre-fix contract (synthesized `KeyRemoved` for the old
+   scalar). Updated to assert the new contract from fix #2: one `KeyChanged`
+   at the key (old scalar → whole new table) plus the table's keys as adds.
+
+## Third pass (2026-06-11): diff feed made replication-faithful
+
+The diff feed's batch/Swap/re-entrancy/hole failures were NOT left as a channel
+limitation; four production-code changes resolved them:
+
+1. **Array ops now carry explicit shift semantics** — `fireArrayOperation` tags
+   every synthetic array delivery (and its ancestor notifications) with
+   `metadata.ArrayOp = { Kind = "ArrayInserted"|"ArrayRemoved"|"ArraySet",
+   Index }`. A flattened "removed" entry at a numeric leaf is otherwise
+   indistinguishable from an in-place nil write — this is what broke the
+   array-hole case and forced the old harness to guess via an array-like
+   heuristic.
+2. **Batch flush no longer double-delivers arrays** — the non-array branch diff
+   now MASKS every still-existing tracked-array subtree (substituting its
+   pre-batch snapshot value via `maskTrackedArraysForBranchDiff`), so array
+   content changes reach consumers exactly once: through the array flush's
+   ArrayOp-tagged per-op deliveries. Wholesale array removals still flow
+   through the branch diff (the array flush skips non-table paths).
+3. **Root-level batch writes now reach root listeners** — a `__root__` dirty
+   marker is expanded into per-key `CheckForChangesBetween({key})` flushes
+   (union of pre-batch and current root keys). The old full-root
+   `CheckForChanges` was captured at path `{}`, which fires NO ancestor
+   delivery, so a root `OnChange` listener never saw batched root-level writes
+   (and its diff re-included tracked-array changes).
+4. **Re-entrant writes are queued** — `ChangeDetector:_dispatch` queues any
+   check triggered from inside a callback and runs it after the current
+   dispatch completes, so the OUTER write's events always deliver first. This
+   fixes the inverted delivery order (inner clamp before outer write) on BOTH
+   feeds at the source.
+
+### Diff-feed consumer contract (bakes into the TableReplicator rebuild)
+
+- A delivery with `metadata.ArrayOp` MUST be applied as an array op:
+  `ArrayInserted`/`ArrayRemoved` shift later elements, `ArraySet` does not.
+  The element path is `metadata.OriginPath`; the value is `OriginDiff.new`.
+- Any other delivery: `Diff.flatten(metadata.OriginDiff, metadata.OriginPath)`
+  and apply every entry as a plain non-shifting Set (`removed` → nil), SKIPPING
+  entries whose path extends another entry's path in the same delivery (the
+  ancestor entry's `new` carries the whole subtree and is authoritative — e.g.
+  scalar↔table transitions).
+- Surviving entries have no ancestor/descendant relation, so apply order does
+  not matter (the old "apply numeric removals highest-index-first" rule is
+  obsolete — removals are no longer applied as shifting ArrayRemoves).
+
+`ReplicationHarness._connectDiffFeed` implements exactly this contract.
+
+### Ordering guarantee for table<->scalar transitions
+
+For a table -> scalar transition, the subtree teardown events (removals under
+the key) are always delivered BEFORE the scalar event at the key:
+`ChangeDetector._processDiffNode` processes the scalar-sentinel child LAST.
+This used to follow `pairs()` order, so a consumer could receive the scalar
+first and then error applying the (redundant) child removals through a
+non-table value — an error that was invisible to state-only tests because the
+replica already held the correct value. Two guards now exist:
+
+- `Set(path, nil, ...)` through a missing OR non-table segment is a silent
+  no-op (nothing to remove), so consumers tolerate redundant removals in any
+  order.
+- The harness records every replica apply error (`ApplyErrors()`), and
+  `IsConverged()` returns false when any apply errored — every state-level
+  test in the suite now doubles as an apply-cleanliness check. Feed handlers
+  run in signal threads where uncaught errors are printed but do NOT fail
+  tests; without this, "applied with an error but happened to converge" passed
+  silently.
+
 ### Expected re-run outcome
-- SIGNALS-feed tests: all defect cases above should now converge (incl. the
-  `per-step convergence`, `echo order`, and `deferred` checks for signals).
-- DIFF-feed tests: empty-table, empty-string-key, and scalar→table now converge;
-  batch and re-entrancy cases remain expected-divergent (channel limitation).
-- Regression watch: the `batch-lifecycle`, `array-advanced-methods`, and
-  `integration-scenarios` suites exercise the batch flush and the
-  signal/listener ordering that changed here — confirm they stay green.
+- SIGNALS-feed tests: all cases converge (incl. `per-step convergence`,
+  `echo order`, and `deferred`).
+- DIFF-feed tests: all cases converge, including every batch, Swap,
+  re-entrancy, and array-hole case. `per-step convergence` (which runs both
+  feeds) converges.
+- Regression watch: the `batch-lifecycle`, `array-advanced-methods`,
+  `listeners-methods`, and `integration-scenarios` suites exercise the batch
+  flush, ancestor notifications, and the dispatch ordering that changed here —
+  confirm they stay green.
 
 ## Original defect analysis (pre-fix)
 
@@ -151,31 +247,19 @@ the replica stays on the old base (`{a,y,b}` vs source `{x,y}`).
 - Cause: when the tracked array's reference changes mid-batch, Branch A's
   old-vs-current LCS appears to diff against the wrong baseline.
 
-## Diff-feed channel limitation (NOT a per-test bug)
+## Diff-feed channel limitation (HISTORICAL — resolved in the third pass)
 
-The diff feed fails **every** batch test and all `Swap`s (which run an internal
-batch), *including cases the signals feed replicates correctly* (e.g. "multiple
-mixed operations in one Batch"). Root cause: during a batch flush the root
-`OnChange({})` listener fires **multiple** deliveries, and array changes are
-delivered **twice** — once as the branch-level `descendantChanged` subtree (whose
-numeric children read as in-place `changed`) and once as the array-flush
-`added`/`removed` element deliveries. Flattening and applying every delivery
-double-counts, and the positional `added`/`removed` entries are not shift-faithful
-when coalesced.
+The diff feed originally failed **every** batch test and all `Swap`s (which run
+an internal batch): during a batch flush the root `OnChange({})` listener fired
+multiple deliveries, and array changes were delivered **twice** — once as the
+branch-level `descendantChanged` subtree (whose numeric children read as
+in-place `changed`) and once as the array-flush `added`/`removed` element
+deliveries. Flattening and applying every delivery double-counted, and the
+positional entries were not shift-faithful.
 
-There is no clean way to consume the OriginDiff tree for batched array mutations
-by flatten-and-apply. **Recommendation: the TableReplicator should consume the
-signals feed.** If a diff-style wire format is desired, it should be derived from
-the signal stream (which carries explicit shift semantics), not from
-`metadata.OriginDiff`.
-
-## Consumer contract verified (now handled in the harness)
-
-- **Numeric removals from a single diff delivery must be applied
-  highest-index-first**, because `ArrayRemove` shifts later elements down. The
-  `wholesale shrink by >1` test exposed this; the harness diff feed now sorts
-  removals descending. This is a real contract for any diff consumer, documented
-  here so the rebuild bakes it in.
+Resolved by masking tracked arrays out of the branch diff and tagging array
+deliveries with `metadata.ArrayOp` — see "Third pass" above for the mechanism
+and the resulting consumer contract.
 
 ## Pinned / passing (guard rails, expected green)
 
@@ -190,7 +274,7 @@ the signal stream (which carries explicit shift semantics), not from
 - `echo order (signals feed) › …` — replica re-emits an equivalent ordered stream
   for the non-buggy cases.
 
-## Triage summary of the 28 failures
+## Triage summary of the 28 original failures (HISTORICAL — all since fixed)
 
 | Failure(s) | Category |
 | --- | --- |

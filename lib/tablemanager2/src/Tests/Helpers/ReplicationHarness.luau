@@ -10,8 +10,10 @@
 	  connected for diagnostics only (logged, never applied) since they are
 	  redundant with the above for replication purposes.
 	- "diff": the metadata.OriginDiff tree delivered once per operation to a
-	  root `OnChange({}, ...)` listener, walked via Diff.flatten and applied
-	  with a small array-vs-dict heuristic.
+	  root `OnChange({}, ...)` listener. Array operations arrive tagged with
+	  metadata.ArrayOp (explicit shift semantics); everything else is walked
+	  via Diff.flatten and applied as plain Sets with ancestor entries
+	  shadowing their descendants. See _connectDiffFeed for the full contract.
 
 	Every value crossing from Source to Replica is passed through `wireCopy`,
 	a deep copy with cycle detection that simulates a network boundary -
@@ -74,6 +76,16 @@ local function deepEqual(a: any, b: any): boolean
 	return true
 end
 
+-- Human-readable path label for diagnostics. tostrings every segment so
+-- non-string keys (numbers, booleans) are safe to join.
+local function describePath(path: { any }): string
+	local parts = table.create(#path)
+	for i, segment in path do
+		parts[i] = tostring(segment)
+	end
+	return table.concat(parts, ".")
+end
+
 local function isArrayLike(value: any): boolean
 	if type(value) ~= "table" then
 		return false
@@ -98,6 +110,7 @@ export type ReplicationHarness = typeof(setmetatable(
 		_connections: { any },
 		_opLog: { OpLogEntry },
 		_replicaOpLog: { OpLogEntry },
+		_applyErrors: { { Op: string, Error: string } },
 	},
 	ReplicationHarness
 ))
@@ -113,8 +126,32 @@ function ReplicationHarness.new(sourceInitialData: any, feedMode: FeedMode?, sou
 	self._connections = {}
 	self._opLog = {}
 	self._replicaOpLog = {}
+	self._applyErrors = {}
 
 	return self
+end
+
+--[[
+	Runs one replica apply, recording (instead of swallowing) any error.
+
+	Feed handlers run in signal-handler threads, where an uncaught error kills
+	only that one invocation and is merely printed - it does NOT fail the test.
+	That hid a real defect class: a redundant or late event that errors on
+	apply, while the replica happens to already hold the right state (e.g. a
+	child-removal event delivered after its parent was replaced by a scalar).
+	Every apply goes through here, and IsConverged() reports false if ANY apply
+	errored, so state-level tests also act as apply-error detectors.
+]]
+function ReplicationHarness._apply(self: ReplicationHarness, opDescription: string, applyFn: () -> ())
+	local ok, err = pcall(applyFn)
+	if not ok then
+		table.insert(self._applyErrors, { Op = opDescription, Error = tostring(err) })
+	end
+end
+
+--- Returns the errors recorded while applying feed events to the replica.
+function ReplicationHarness.ApplyErrors(self: ReplicationHarness): { { Op: string, Error: string } }
+	return self._applyErrors
 end
 
 --// Replica echo recorder //--
@@ -187,11 +224,13 @@ function ReplicationHarness._connectSignalFeed(self: ReplicationHarness)
 				return
 			end
 
-			if newValue == nil then
-				replica:Set(wirePath, nil, true)
-			else
-				replica:Set(wirePath, wireCopy(newValue), true)
-			end
+			self:_apply(`ValueChanged {describePath(wirePath)}`, function()
+				if newValue == nil then
+					replica:Set(wirePath, nil, true)
+				else
+					replica:Set(wirePath, wireCopy(newValue), true)
+				end
+			end)
 		end)
 	)
 
@@ -200,7 +239,9 @@ function ReplicationHarness._connectSignalFeed(self: ReplicationHarness)
 		source.ArrayInserted:Connect(function(path, index, newValue)
 			local wirePath = wireCopy(path)
 			table.insert(opLog, { Signal = "ArrayInserted", Path = wirePath, Index = index, New = newValue })
-			replica:ArrayInsert(wirePath, index, wireCopy(newValue))
+			self:_apply(`ArrayInserted {describePath(wirePath)}@{index}`, function()
+				replica:ArrayInsert(wirePath, index, wireCopy(newValue))
+			end)
 		end)
 	)
 
@@ -209,7 +250,9 @@ function ReplicationHarness._connectSignalFeed(self: ReplicationHarness)
 		source.ArrayRemoved:Connect(function(path, index, oldValue)
 			local wirePath = wireCopy(path)
 			table.insert(opLog, { Signal = "ArrayRemoved", Path = wirePath, Index = index, Old = oldValue })
-			replica:ArrayRemove(wirePath, index)
+			self:_apply(`ArrayRemoved {describePath(wirePath)}@{index}`, function()
+				replica:ArrayRemove(wirePath, index)
+			end)
 		end)
 	)
 
@@ -219,9 +262,11 @@ function ReplicationHarness._connectSignalFeed(self: ReplicationHarness)
 			local wirePath = wireCopy(path)
 			table.insert(opLog, { Signal = "ArraySet", Path = wirePath, Index = index, New = newValue, Old = oldValue })
 
-			local elementPath = table.clone(wirePath)
-			table.insert(elementPath, index)
-			replica:Set(elementPath, wireCopy(newValue), true)
+			self:_apply(`ArraySet {describePath(wirePath)}@{index}`, function()
+				local elementPath = table.clone(wirePath)
+				table.insert(elementPath, index)
+				replica:Set(elementPath, wireCopy(newValue), true)
+			end)
 		end)
 	)
 
@@ -255,52 +300,32 @@ end
 
 --// Feed: diff //--
 
---[[
-	Applies a single flattened Diff.DiffEntry to the replica.
-
-	`type=="changed"` is always a Set (dict key change OR array element
-	overwrite - neither shifts). `type=="added"`/`"removed"` at a numeric
-	leaf key whose parent is currently array-like in the replica are treated
-	as ArrayInsert/ArrayRemove (which shift); everything else is a Set to the
-	new value (or nil for removal).
-
-	NOTE: this heuristic cannot distinguish "insert into an array, shifting
-	later elements" from "add a new sparse/boundary numeric dict key" purely
-	from the diff - see the replication-fidelity spec's "ambiguity" section.
-]]
-local function applyDiffEntry(replica: any, entry: Diff.DiffEntry)
-	local path = wireCopy(entry.path)
-	if #path == 0 then
-		return
+-- Builds a type-qualified string key for a path so prefix lookups can't be
+-- spoofed by tostring collisions (e.g. 1 vs "1").
+local function diffEntryPathKey(path: { any }): string
+	local parts = table.create(#path)
+	for i, segment in path do
+		parts[i] = `{typeof(segment)}:{tostring(segment)}`
 	end
-
-	local parentPath = table.clone(path)
-	local lastKey = table.remove(parentPath)
-
-	if entry.type == "removed" then
-		if type(lastKey) == "number" then
-			local parent = replica:Get(parentPath, true)
-			if isArrayLike(parent) and lastKey >= 1 and lastKey <= #parent then
-				replica:ArrayRemove(parentPath, lastKey)
-				return
-			end
-		end
-		replica:Set(path, nil, true)
-		return
-	end
-
-	-- "added" or "changed"
-	if entry.type == "added" and type(lastKey) == "number" then
-		local parent = replica:Get(parentPath, true)
-		if isArrayLike(parent) and lastKey >= 1 and lastKey <= #parent + 1 then
-			replica:ArrayInsert(parentPath, lastKey, wireCopy(entry.new))
-			return
-		end
-	end
-
-	replica:Set(path, wireCopy(entry.new), true)
+	return table.concat(parts, "\0")
 end
 
+--[[
+	Diff-feed consumer contract (mirrors what a TableReplicator rebuild must do):
+
+	1. Array operations arrive tagged with `metadata.ArrayOp` and MUST be
+	   applied as array ops: ArrayInserted/ArrayRemoved SHIFT later elements,
+	   ArraySet does not. A flattened "removed" entry at a numeric leaf is
+	   otherwise indistinguishable from an in-place nil write (a hole).
+	2. Everything else is flattened and applied as plain (non-shifting) Sets:
+	   `added`/`changed` set `entry.new`, `removed` sets nil.
+	3. Within one delivery, an entry whose path extends another entry's path is
+	   SHADOWED and skipped: the ancestor entry's `new` carries the whole
+	   subtree (e.g. a scalar<->table transition), so it is authoritative and
+	   applying descendants too could target paths that no longer hold tables.
+	   Surviving entries have no ancestor/descendant relation, so apply order
+	   does not matter.
+]]
 function ReplicationHarness._connectDiffFeed(self: ReplicationHarness)
 	local source = self.Source
 	local replica = self.Replica
@@ -314,28 +339,57 @@ function ReplicationHarness._connectDiffFeed(self: ReplicationHarness)
 		end
 
 		local originPath = wireCopy(metadata.OriginPath)
-		table.insert(opLog, { Signal = "Diff", OriginPath = originPath, OriginDiff = metadata.OriginDiff })
+		table.insert(opLog, {
+			Signal = "Diff",
+			OriginPath = originPath,
+			OriginDiff = metadata.OriginDiff,
+			ArrayOp = metadata.ArrayOp,
+		} :: OpLogEntry)
 
-		-- Consumer contract (verified by the "wholesale shrink" test): numeric
-		-- removals from a single diff delivery MUST be applied highest-index-first,
-		-- because ArrayRemove shifts later elements down. Flatten yields children
-		-- in pairs() order, so we apply non-removals first (in order), then
-		-- removals sorted by descending numeric leaf key.
-		local entries = Diff.flatten(metadata.OriginDiff, originPath)
-		local numericRemovals: { Diff.DiffEntry } = {}
-		for _, entry in entries do
-			local lastKey = entry.path[#entry.path]
-			if entry.type == "removed" and type(lastKey) == "number" then
-				table.insert(numericRemovals, entry)
-			else
-				applyDiffEntry(replica, entry)
-			end
+		local arrayOp = metadata.ArrayOp
+		if arrayOp then
+			self:_apply(`{arrayOp.Kind} {describePath(originPath)}`, function()
+				local arrayPath = table.clone(originPath)
+				table.remove(arrayPath)
+				if arrayOp.Kind == "ArrayInserted" then
+					replica:ArrayInsert(arrayPath, arrayOp.Index, wireCopy(metadata.OriginDiff.new))
+				elseif arrayOp.Kind == "ArrayRemoved" then
+					replica:ArrayRemove(arrayPath, arrayOp.Index)
+				else -- ArraySet: in-place element overwrite, no shift
+					replica:Set(originPath, wireCopy(metadata.OriginDiff.new), true)
+				end
+			end)
+			return
 		end
-		table.sort(numericRemovals, function(a, b)
-			return (a.path[#a.path] :: number) > (b.path[#b.path] :: number)
-		end)
-		for _, entry in numericRemovals do
-			applyDiffEntry(replica, entry)
+
+		local entries = Diff.flatten(metadata.OriginDiff, originPath)
+
+		local entryPathKeys: { [string]: boolean } = {}
+		for _, entry in entries do
+			entryPathKeys[diffEntryPathKey(entry.path)] = true
+		end
+		local function isShadowed(path: { any }): boolean
+			for i = 1, #path - 1 do
+				local prefix = table.create(i)
+				table.move(path, 1, i, 1, prefix)
+				if entryPathKeys[diffEntryPathKey(prefix)] then
+					return true
+				end
+			end
+			return false
+		end
+
+		for _, entry in entries do
+			if #entry.path == 0 or isShadowed(entry.path) then
+				continue
+			end
+			self:_apply(`Diff:{entry.type} {describePath(entry.path)}`, function()
+				if entry.type == "removed" then
+					replica:Set(wireCopy(entry.path), nil, true)
+				else
+					replica:Set(wireCopy(entry.path), wireCopy(entry.new), true)
+				end
+			end)
 		end
 	end)
 
@@ -494,7 +548,9 @@ end
 ReplicationHarness.DEBUG = true
 
 function ReplicationHarness.IsConverged(self: ReplicationHarness): boolean
-	local converged = deepEqual(self.Source.Raw, self.Replica.Raw)
+	-- Apply errors fail convergence even when the final state happens to match:
+	-- an event a real consumer would crash on is not a healthy feed.
+	local converged = #self._applyErrors == 0 and deepEqual(self.Source.Raw, self.Replica.Raw)
 	if not converged and ReplicationHarness.DEBUG then
 		print(self:Diagnose())
 	end
@@ -512,6 +568,10 @@ function ReplicationHarness.Diagnose(self: ReplicationHarness): string
 	table.insert(lines, `--- Replica echo log ({#self._replicaOpLog} entries) ---`)
 	for i, entry in self._replicaOpLog do
 		table.insert(lines, `  {i}. {serializeOp(entry)}`)
+	end
+	table.insert(lines, `--- Apply errors ({#self._applyErrors}) ---`)
+	for i, applyError in self._applyErrors do
+		table.insert(lines, `  {i}. [{applyError.Op}] {applyError.Error}`)
 	end
 	table.insert(lines, `--- Source.Raw ---`)
 	table.insert(lines, serialize(self.Source.Raw))

@@ -394,6 +394,8 @@ const function fireAncestorValueChangedNotifications<T, S>(
 			OriginPath = metadata.OriginPath,
 			OriginDiff = metadata.OriginDiff,
 			Snapshot = metadata.Snapshot,
+			-- Preserve array-op shift semantics for root/ancestor diff consumers.
+			ArrayOp = metadata.ArrayOp,
 		}
 
 		manager._listenerRegistry:FireListenersExact("ValueChanged", ancestorPath, {
@@ -421,6 +423,12 @@ const function fireArrayOperation<T, S1, S2>(
 	leafPath: PathArray<S2>,
 	payload: any
 )
+	-- Tag the metadata with explicit shift semantics for diff-tree consumers
+	-- (metadata.OriginDiff via root OnChange listeners): a flattened "removed"
+	-- entry at a numeric leaf cannot otherwise be distinguished from an
+	-- in-place nil write (a hole), nor "added" from a non-shifting index write.
+	payload.Metadata.ArrayOp = { Kind = eventName, Index = payload.Index }
+
 	-- Fire at the element path (e.g. {"items", 2}) for element-level listeners,
 	-- then at the array path (e.g. {"items"}) for array-level listeners.
 	manager._listenerRegistry:FireListenersExact(eventName, leafPath, payload)
@@ -1100,24 +1108,33 @@ function TableManager.Set<T, S>(
 
 	local parent = self.Proxy
 	for i = 1, #parsedPath - 1 do
-		local nextValue = parent[parsedPath[i]]
-		if nextValue == nil then
-			if shouldBuild then
-				nextValue = {}
-				parent[parsedPath[i]] = nextValue
-			elseif value == nil then
-				-- Removing from a non-existent path; silently succeed (nothing to remove)
-				return
-			else
+		const nextValue = parent[parsedPath[i]]
+		if nextValue == nil or not self._proxyManager:IsProxy(nextValue) then
+			if not shouldBuild then
+				if value == nil then
+					-- Removing from a path that doesn't exist (a segment is missing
+					-- or holds a non-table); silently succeed (nothing to remove).
+					-- Keeps replication consumers safe when a redundant child
+					-- removal arrives after its parent was replaced by a scalar.
+					return
+				end
 				error(`Path segment {parsedPath[i]} is not a table`)
 			end
-		elseif not self._proxyManager:IsProxy(nextValue) then
-			if shouldBuild then
-				nextValue = {}
-				parent[parsedPath[i]] = nextValue
-			else
-				error(`Path segment {parsedPath[i]} is not a table`)
+			-- Build the remaining segments as ONE plain subtree with the value at
+			-- the leaf, then assign it through the proxy in a single write so the
+			-- whole creation is captured by one change-detection pass. Assigning
+			-- level-by-level would re-point `parent` at a raw (unproxied) table,
+			-- so the deeper writes would bypass change detection and never emit.
+			const subtree: { [any]: any } = {}
+			local cursor = subtree
+			for j = i + 1, #parsedPath - 1 do
+				const nested: { [any]: any } = {}
+				cursor[parsedPath[j]] = nested
+				cursor = nested
 			end
+			cursor[parsedPath[#parsedPath]] = value
+			parent[parsedPath[i]] = subtree
+			return
 		end
 		parent = nextValue
 	end
@@ -1308,16 +1325,21 @@ function TableManager.ArraySwapRemove<T, S>(self: TM_Internal<T>, pathOrProxy: P
 	const oldValue = array[index]
 	const movedValue = array[lastIndex]
 
-	-- Batch: start tracking and record remove/set intent before mutating.
+	-- Batch: start tracking and record intent before mutating. The ops must
+	-- mirror the actual mutation below — backfill Set at `index` FIRST, then
+	-- Remove the vacated LAST slot. Recording Remove@index first would corrupt
+	-- the recorder's stable-id resolution: it replays its op log to map indices
+	-- to ids, so Remove@index kills the id living at `index` and a subsequent
+	-- Set@index targets whichever id shifted into that slot instead.
 	if self._batchDepth > 0 and self._batch then
 		const batch = self._batch
 		ensureBatchPathTracking(batch, parsedPath, function()
 			batch.Recorder:StartTracking(parsedPath, array)
 		end)
-		batch.Recorder:RecordRemove(parsedPath, index)
 		if index ~= lastIndex then
 			batch.Recorder:RecordSet(parsedPath, index, movedValue, oldValue)
 		end
+		batch.Recorder:RecordRemove(parsedPath, lastIndex)
 		markBatchBranchDirty(batch, parsedPath)
 	end
 
@@ -1420,6 +1442,93 @@ function TableManager.Batch(self: TM_Internal, fn: () -> ())
 	end
 end
 
+--[[
+	Returns `branchValue` with every still-existing tracked-array subtree under
+	`branchKey` replaced by its pre-batch snapshot value, cloning only the
+	tables along each spine (live data is never mutated; returns `branchValue`
+	itself when nothing is masked).
+
+	The array flush is the sole owner of tracked-array content changes: it
+	emits coalesced, shift-faithful Array* events. Leaving those changes in the
+	non-array branch diff too would deliver them a second time — as in-place
+	positional entries that are NOT shift-faithful — to any consumer of the
+	root-listener OriginDiff delivery.
+
+	Arrays that were removed wholesale during the batch are NOT masked (the
+	array flush skips non-table paths, so their removal must flow through this
+	branch diff), and arrays created during the batch are already pruned from
+	TrackedPaths before this runs.
+]]
+const function maskTrackedArraysForBranchDiff(
+	self: TM_Internal,
+	batch: BatchUtilsModule.BatchState,
+	branchKey: any,
+	branchValue: any
+): any
+	if type(branchValue) ~= "table" then
+		return branchValue
+	end
+
+	-- Deepest-first so a shallower mask planted later wholesale-replaces (and
+	-- never walks through) a frozen subtree planted by a deeper mask.
+	const pathsToMask: { { any } } = {}
+	for _, trackedPath in batch.TrackedPaths do
+		if trackedPath[1] == branchKey then
+			table.insert(pathsToMask, trackedPath)
+		end
+	end
+	table.sort(pathsToMask, function(a, b)
+		return #a > #b
+	end)
+
+	local masked = branchValue
+	for _, trackedPath in pathsToMask do
+		-- Only mask while the array still exists as a table.
+		local liveValue: any = self._originalData
+		for _, key in trackedPath do
+			if type(liveValue) ~= "table" then
+				break
+			end
+			liveValue = liveValue[key]
+		end
+		if type(liveValue) ~= "table" then
+			continue
+		end
+
+		const preBatchValue = getSnapshotValue(batch.StartSnapshot, trackedPath)
+		if preBatchValue == nil then
+			continue
+		end
+
+		if #trackedPath == 1 then
+			-- The branch itself is the tracked array.
+			masked = preBatchValue
+			continue
+		end
+
+		-- Clone the spine from the branch root down to the array's parent and
+		-- plant the pre-batch value, so the diff sees this subtree as unchanged.
+		if masked == branchValue then
+			masked = table.clone(branchValue)
+		end
+		local cursor: any = masked
+		for i = 2, #trackedPath - 1 do
+			const key = trackedPath[i]
+			if type(cursor[key]) ~= "table" then
+				cursor = nil
+				break
+			end
+			cursor[key] = table.clone(cursor[key])
+			cursor = cursor[key]
+		end
+		if cursor ~= nil then
+			cursor[trackedPath[#trackedPath]] = preBatchValue
+		end
+	end
+
+	return masked
+end
+
 --[=[
 	Suspends all signal and listener firing.
 
@@ -1453,11 +1562,13 @@ end
 	Resumes after `Suspend()` and flushes all pending changes.
 
 	Flush is two-phase:
-	1. **Non-array flush** — `ChangeDetector:CheckForChanges` replays the full
-	   pre-batch snapshot diff, firing all non-array change events.
+	1. **Non-array flush** — per dirty branch, `CheckForChangesBetween` diffs the
+	   pre-batch value against the current value (with tracked-array subtrees
+	   masked out — the array flush owns those), firing all non-array events.
 	2. **Array flush** — For each tracked array path, routes through Branch A
-	   (LCS `ArrayDiff.emitDiff`) when the op log is poisoned or the array
-	   reference changed, or Branch B (`ArrayBatchRecorder:Coalesce`) otherwise.
+	   (LCS `ArrayDiff.emitDiff`) when the op log is poisoned, the array
+	   reference changed, or an element interior was mutated, or Branch B
+	   (`ArrayBatchRecorder:Coalesce`) otherwise.
 ]=]
 function TableManager.Resume(self: TM_Internal)
 	if self._batchDepth == 0 then
@@ -1492,19 +1603,36 @@ function TableManager.Resume(self: TM_Internal)
 	-- from the root snapshot's Diff.Snapshot children and compare it against the
 	-- current live value, letting ChangeDetector fire all leaf + ancestor events.
 	--
-	-- The OnKey* callbacks suppress numeric-key events for tracked array paths so
-	-- those are not double-fired by both the non-array and array flush phases.
+	-- Tracked-array subtrees are MASKED out of each branch diff (see
+	-- maskTrackedArraysForBranchDiff): the array flush below is the sole owner
+	-- of their content changes, so the branch diff must not also carry them.
 	if batch.StartSnapshot then
 		const rootSnapshot = batch.StartSnapshot
 		const rootSnapshotData: any = rootSnapshot.Data -- Diff.Snapshot
 
-		for branchKey in batch.DirtyBranches do
-			if branchKey == "__root__" then
-				-- Root-level scalar assignment: just diff the whole root (rare).
-				self._changeDetector:CheckForChanges(rootSnapshot)
-				continue
+		-- A "__root__" dirty marker means a root-level key was written directly.
+		-- Expand it to EVERY root key (pre-batch and current) so each key flushes
+		-- through the same masked per-branch diff. A full-root CheckForChanges
+		-- cannot be used here: captured at path {}, it fires no ancestor
+		-- delivery (root OnChange listeners would never see the operation) and
+		-- its diff would re-include tracked-array changes.
+		local branchKeys: { [any]: boolean } = {}
+		if batch.DirtyBranches["__root__"] then
+			if rootSnapshotData and rootSnapshotData.children then
+				for key in rootSnapshotData.children :: any do
+					branchKeys[key] = true
+				end
 			end
+			for key in self._originalData :: any do
+				branchKeys[key] = true
+			end
+		else
+			for branchKey in batch.DirtyBranches do
+				branchKeys[branchKey] = true
+			end
+		end
 
+		for branchKey in branchKeys do
 			-- Extract old branch value from the pre-batch snapshot's children map.
 			const oldBranchValue: any = if rootSnapshotData and rootSnapshotData.children
 				then (rootSnapshotData.children :: any)[branchKey]
@@ -1512,8 +1640,10 @@ function TableManager.Resume(self: TM_Internal)
 					or nil
 				else nil
 
-			-- Current live value for this branch.
-			const newBranchValue: any = self._originalData[branchKey]
+			-- Current live value for this branch, with still-existing tracked
+			-- arrays substituted by their pre-batch values (no change to report).
+			const newBranchValue: any =
+				maskTrackedArraysForBranchDiff(self, batch, branchKey, self._originalData[branchKey])
 
 			self._changeDetector:CheckForChangesBetween(
 				oldBranchValue,

@@ -1136,6 +1136,7 @@ return function(t: tiniest)
 		test("should handle scalar to table transition", function()
 			local removals = {}
 			local additions = {}
+			local changes = {}
 			local detector = ChangeDetector.new {
 				OnKeyRemoved = function(_path, key, _oldValue, metadata)
 					if metadata.Diff then
@@ -1147,6 +1148,11 @@ return function(t: tiniest)
 						table.insert(additions, { key = key })
 					end
 				end,
+				OnKeyChanged = function(_path, key, newValue, oldValue, metadata)
+					if metadata.Diff then
+						table.insert(changes, { key = key, old = oldValue, new = newValue })
+					end
+				end,
 			}
 
 			local myTable = { config = "disabled" }
@@ -1156,9 +1162,50 @@ return function(t: tiniest)
 
 			detector:CheckForChanges(snapshot)
 
-			-- Should detect removal of scalar 'config' and addition of new table leaves
-			expect(#removals).is(1)
+			-- scalar -> table is a single "changed" at the key (NOT a removal),
+			-- carrying the whole new table, plus the new table's keys reported
+			-- as additions for granular listeners.
+			expect(#removals).is(0)
+			expect(#changes).is(1)
+			expect(changes[1].key).is("config")
+			expect(changes[1].old).is("disabled")
+			expect(type(changes[1].new)).is("table")
 			expect(#additions >= 1).is_true()
+		end)
+
+		test("table to scalar transition fires subtree teardown before the scalar event", function()
+			-- Regression guard: the scalar-sentinel child used to be processed in
+			-- pairs() order among the real children, so a consumer could receive
+			-- the parent's scalar value FIRST and then fail to apply the
+			-- (now-redundant) child removals through a non-table value. The
+			-- sentinel must always fire LAST.
+			local events = {}
+			local detector = ChangeDetector.new {
+				OnValueChanged = function(path, newValue, _oldValue, metadata)
+					if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
+						table.insert(events, { path = table.clone(path), new = newValue })
+					end
+				end,
+			}
+
+			local myTable = { config = { host = "localhost", ports = { 80, 443 } } }
+			local snapshot = detector:CaptureSnapshot(myTable, {})
+
+			myTable.config = "disabled"
+
+			detector:CheckForChanges(snapshot)
+
+			-- Teardown events for the old subtree (paths deeper than {config})
+			-- must all precede the single scalar event at {config}, which is last.
+			expect(#events >= 2).is_true()
+			local lastEvent = events[#events]
+			expect(#lastEvent.path).is(1)
+			expect(lastEvent.path[1]).is("config")
+			expect(lastEvent.new).is("disabled")
+			for i = 1, #events - 1 do
+				expect(events[i].path[1]).is("config")
+				expect(#events[i].path > 1).with_context(`event #{i} should be a descendant teardown`).is_true()
+			end
 		end)
 
 		test("should handle mixed changes in single operation", function()

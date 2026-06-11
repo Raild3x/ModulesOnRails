@@ -13,12 +13,12 @@
 	  so NaN is not a replicable value and is intentionally untested.
 	- ForceNotify beyond the existing scalar-leaf smoke test.
 
-	Tests marked `FIXME(replication) CONFIRMED` pin real defects observed in a
-	test run (see Docs/REPLICATION-FIDELITY-FINDINGS.md): the assertions state
-	the CORRECT expected behavior, so they are expected to FAIL until TableManager
-	is fixed. The diff feed additionally fails all batch/Swap cases due to a
-	channel limitation (overlapping OriginDiff deliveries) documented in the
-	findings doc — the SIGNALS feed is the recommended replication channel.
+	History: tests marked `FIXME(replication) CONFIRMED` pinned real defects
+	(see Docs/REPLICATION-FIDELITY-FINDINGS.md). All confirmed defects have
+	since been fixed, including the diff feed's former batch/Swap "channel
+	limitation" (resolved by masking tracked arrays out of the batch branch
+	diff and tagging array operations with metadata.ArrayOp). Both feeds are
+	now expected to converge on the full matrix.
 ]]
 
 return function(t: tiniest)
@@ -167,10 +167,8 @@ return function(t: tiniest)
 				end)
 
 				test("setting an empty table value yields a table on the replica, not nil", function()
-					-- FIXME(replication) CONFIRMED defect #1: assigning an empty table
-					-- emits nothing (signals: 0 ops; diff: OriginDiff flattens to 0
-					-- entries), so the key never reaches the replica. See
-					-- Docs/REPLICATION-FIDELITY-FINDINGS.md.
+					-- nil -> {} emits an "added" leaf node (formerly defect #1: a
+					-- childless descendantChanged node fired nothing).
 					local harness = ReplicationHarness.new({ player = { health = 100 } }, feedMode)
 					harness:Connect()
 
@@ -219,10 +217,8 @@ return function(t: tiniest)
 				end)
 
 				test("empty-string key does not collide with the diff sentinel", function()
-					-- FIXME(replication) CONFIRMED defect #2 (both feeds): a genuine ""
-					-- key collides with Diff's "" sentinel for table<->scalar
-					-- transitions, so the change is delivered at the PARENT path ({x}=7)
-					-- instead of {x,""}=7. Replica ends with x=7. See findings doc.
+					-- Diff's table<->scalar sentinel is a unique userdata (formerly
+					-- defect #2: it was "", colliding with genuine "" keys).
 					local harness = ReplicationHarness.new({ x = 5 }, feedMode)
 					harness:Connect()
 
@@ -258,6 +254,141 @@ return function(t: tiniest)
 					expect(harness.Replica:Get({ "a", "b", "c", "drop" }, true)).is(nil)
 					harness:Destroy()
 				end)
+			end)
+
+			describe("table<->scalar transitions", function()
+				-- Regression guards: the teardown events for an old subtree and
+				-- the parent's scalar event used to arrive in nondeterministic
+				-- (pairs) order; a consumer that received the scalar first then
+				-- errored applying the child removals through a non-table value.
+				-- IsConverged() now fails on ANY recorded apply error, so these
+				-- assert apply-cleanliness as well as state.
+				test("deep table overwritten with a scalar applies cleanly", function()
+					local harness = ReplicationHarness.new({
+						config = {
+							host = "localhost",
+							ports = { 80, 443 },
+							nested = { deep = { x = 1 } },
+						},
+					}, feedMode)
+					harness:Connect()
+
+					harness.Source.Proxy.config = "disabled"
+
+					expect(#harness:ApplyErrors()).is(0)
+					expect(harness:IsConverged()).is_true()
+					expect(harness.Replica:Get { "config" }).is("disabled")
+					harness:Destroy()
+				end)
+
+				test("scalar overwritten with a deep table applies cleanly", function()
+					local harness = ReplicationHarness.new({ config = "disabled" }, feedMode)
+					harness:Connect()
+
+					harness.Source.Proxy.config = { host = "localhost", nested = { deep = { x = 1 } } }
+
+					expect(#harness:ApplyErrors()).is(0)
+					expect(harness:IsConverged()).is_true()
+					expect(harness.Replica:Get { "config", "nested", "deep", "x" }).is(1)
+					harness:Destroy()
+				end)
+
+				test("table to scalar inside a batch applies cleanly", function()
+					-- The batch flush runs the same transition diff through
+					-- CheckForChangesBetween; sentinel-last ordering must hold
+					-- there too.
+					local harness = ReplicationHarness.new({
+						player = { stats = { str = 5, buffs = { "haste" } }, name = "x" },
+					}, feedMode)
+					harness:Connect()
+
+					harness.Source:Batch(function()
+						harness.Source.Proxy.player.stats = 0
+						harness.Source.Proxy.player.name = "y"
+					end)
+
+					expect(#harness:ApplyErrors()).is(0)
+					expect(harness:IsConverged()).is_true()
+					expect(harness.Replica:Get { "player", "stats" }).is(0)
+					harness:Destroy()
+				end)
+
+				test("scalar to table inside a batch applies cleanly", function()
+					local harness = ReplicationHarness.new({ player = { stats = 0 } }, feedMode)
+					harness:Connect()
+
+					harness.Source:Batch(function()
+						harness.Source.Proxy.player.stats = { str = 5, dex = { base = 2 } }
+					end)
+
+					expect(#harness:ApplyErrors()).is(0)
+					expect(harness:IsConverged()).is_true()
+					expect(harness.Replica:Get { "player", "stats", "dex", "base" }).is(2)
+					harness:Destroy()
+				end)
+
+				test("Swap of two deep tables applies cleanly", function()
+					local harness = ReplicationHarness.new({
+						a = { inner = { v = 1, list = { "x" } } },
+						b = { other = 2 },
+					}, feedMode)
+					harness:Connect()
+
+					harness.Source:Swap({ "a" }, { "b" })
+
+					expect(#harness:ApplyErrors()).is(0)
+					expect(harness:IsConverged()).is_true()
+					expect(harness.Replica:Get { "a", "other" }).is(2)
+					expect(harness.Replica:Get { "b", "inner", "v" }).is(1)
+					harness:Destroy()
+				end)
+
+				test("repeated scalar/table flips at the same key apply cleanly", function()
+					local harness = ReplicationHarness.new({ slot = { item = "sword" } }, feedMode)
+					harness:Connect()
+
+					harness.Source.Proxy.slot = 0
+					harness.Source.Proxy.slot = { item = "shield", mods = { 1, 2 } }
+					harness.Source.Proxy.slot = false
+
+					expect(#harness:ApplyErrors()).is(0)
+					expect(harness:IsConverged()).is_true()
+					expect(harness.Replica:Get { "slot" }).is(false)
+					harness:Destroy()
+				end)
+
+				if feedMode == "signals" then
+					test("teardown events reach the wire before the scalar event", function()
+						-- Order assertion at the op-log level: a consumer applying
+						-- in receipt order must see every removal UNDER the key
+						-- before the scalar write AT the key, or it would apply
+						-- them through a non-table value.
+						local harness = ReplicationHarness.new({
+							config = { host = "localhost", ports = { 80, 443 } },
+						}, "signals")
+						harness:Connect()
+
+						harness.Source.Proxy.config = "off"
+
+						local sawScalarEvent = false
+						for i, entry in (harness :: any)._opLog do
+							if entry.Signal ~= "ValueChanged" or entry.Path[1] ~= "config" then
+								continue
+							end
+							if #entry.Path == 1 then
+								sawScalarEvent = true
+							else
+								expect(sawScalarEvent)
+									.with_context(`teardown op #{i} arrived after the scalar event`)
+									.never_is_true()
+							end
+						end
+						expect(sawScalarEvent).is_true()
+
+						expect(harness:IsConverged()).is_true()
+						harness:Destroy()
+					end)
+				end
 			end)
 
 			describe("arrays of scalars", function()
@@ -332,9 +463,9 @@ return function(t: tiniest)
 				end)
 
 				test("nil write in the middle of an array (hole) replicates the hole", function()
-					-- Mixed/sparse arrays are documented-unsupported. CONFIRMED: passes
-					-- on signals, diverges on the diff feed (the hole interacts badly
-					-- with the array-like heuristic). Pins sparse-array as unsupported.
+					-- A plain nil write is NOT an array op: it arrives without
+					-- metadata.ArrayOp and must be applied as a non-shifting Set,
+					-- which preserves the hole on both feeds.
 					local harness = ReplicationHarness.new({ items = { "a", "b", "c" } }, feedMode)
 					harness:Connect()
 
@@ -345,10 +476,10 @@ return function(t: tiniest)
 				end)
 
 				test("wholesale replacement that shrinks the array by more than one", function()
-					-- CONFIRMED consumer contract, now handled in the harness: numeric
-					-- removals from one diff delivery must be applied highest-index-first
-					-- (ArrayRemove shifts). The diff feed sorts removals descending, so
-					-- this now PASSES. Pins the contract for the TableReplicator rebuild.
+					-- A wholesale replacement arrives as one diff delivery whose
+					-- numeric removals are applied as non-shifting nil Sets (no
+					-- metadata.ArrayOp), so apply order doesn't matter and the
+					-- trailing nils truncate the replica's array.
 					local harness = ReplicationHarness.new({ items = { "a", "b", "c", "d" } }, feedMode)
 					harness:Connect()
 
@@ -447,10 +578,8 @@ return function(t: tiniest)
 			end)
 
 			describe("structural methods", function()
-				-- NOTE: MoveTo/CopyTo converge on both feeds. The Swap tests converge
-				-- on signals but FAIL on the diff feed: Swap runs an internal Batch, so
-				-- it hits the diff-feed channel limitation (overlapping OriginDiff
-				-- deliveries). See findings doc.
+				-- Swap/MoveTo run an internal Batch; their flush deliveries are
+				-- masked + ArrayOp-tagged like any other batch (see findings doc).
 				test("MoveTo relocates a table between branches", function()
 					local harness = ReplicationHarness.new({
 						player = { stats = { str = 5, dex = 3 } },
@@ -527,10 +656,9 @@ return function(t: tiniest)
 				end)
 
 				test("Set with buildTablesDynamically creates intermediate tables", function()
-					-- FIXME(replication) CONFIRMED, downstream of defect #1: building a
-					-- deep missing path creates intermediate EMPTY tables, which emit
-					-- nothing, so only the leaf event (if any) reaches the replica and
-					-- it has no parent to attach to. See findings doc.
+					-- The missing path is built as ONE subtree assigned through the
+					-- proxy in a single write (formerly: level-by-level raw writes
+					-- that bypassed change detection entirely).
 					local harness = ReplicationHarness.new({ existing = 1 }, feedMode)
 					harness:Connect()
 
@@ -543,13 +671,10 @@ return function(t: tiniest)
 			end)
 
 			describe("batch", function()
-				-- NOTE: every test in this block CONVERGES on the signals feed but
-				-- FAILS on the diff feed (channel limitation, findings doc): batch
-				-- flush delivers array changes twice through metadata.OriginDiff (the
-				-- branch-level descendantChanged subtree AND the array-flush element
-				-- deliveries), which a flatten-and-apply consumer double-counts.
-				-- The signals-feed failures below are genuine TM double-emission
-				-- defects (#4/#5).
+				-- Batch flush contract: the non-array flush masks tracked-array
+				-- subtrees out of each branch diff, so array changes reach
+				-- consumers exactly once — via the array flush's ArrayOp-tagged
+				-- per-op deliveries. Both feeds converge on every case below.
 				test("multiple mixed operations in one Batch converge", function()
 					local harness = ReplicationHarness.new({
 						player = { health = 100, mana = 5 },
@@ -570,10 +695,9 @@ return function(t: tiniest)
 				end)
 
 				test("array created inside the batch then inserted into", function()
-					-- FIXME(replication) CONFIRMED defect #4 (signals): the non-array
-					-- flush fires ValueChanged({newItems}, {a,b}) carrying the FULL
-					-- array, then the array flush emits ArrayInserted a@1, b@2 →
-					-- replica gets {a,b,a,b}. See findings doc.
+					-- Arrays created during a batch are pruned from TrackedPaths at
+					-- flush, so their creation flows ONLY through the non-array
+					-- flush as ordinary adds (formerly defect #4: both phases fired).
 					local harness = ReplicationHarness.new({ existing = 1 }, feedMode)
 					harness:Connect()
 
@@ -588,11 +712,9 @@ return function(t: tiniest)
 				end)
 
 				test("ArrayInsert of a table element inside a Batch", function()
-					-- FIXME(replication) CONFIRMED defect #4 (signals): string-keyed
-					-- leaf events under the tracked array path (e.g. {items,1,"hp"})
-					-- escape shouldSuppressBatchArrayKeyEvent (which only suppresses
-					-- NUMERIC keys), so the non-array flush mutates the old element AND
-					-- the array flush re-inserts the new one → duplicate. Findings doc.
+					-- The tracked array (including its elements' string-keyed
+					-- fields) is masked out of the non-array flush; only the array
+					-- flush's ArrayInserted reaches consumers.
 					local harness = ReplicationHarness.new({ items = { { hp = 1 } } }, feedMode)
 					harness:Connect()
 
@@ -619,9 +741,9 @@ return function(t: tiniest)
 				end)
 
 				test("whole array replaced inside a batch then mutated", function()
-					-- FIXME(replication) CONFIRMED defect #5 (signals): the {a,b}->{x}
-					-- reference replacement is never emitted; only the trailing insert
-					-- is, so the replica keeps the stale base. See findings doc.
+					-- A mid-batch reference replacement forces Branch A (pre-batch
+					-- vs current LCS), so the {a,b}->{x,y} transition is emitted in
+					-- full (formerly defect #5: only the trailing insert emitted).
 					local harness = ReplicationHarness.new({ items = { "a", "b" } }, feedMode)
 					harness:Connect()
 
@@ -675,8 +797,8 @@ return function(t: tiniest)
 				end)
 
 				test("ArraySwapRemove inside a batch", function()
-					-- FIXME(replication) CONFIRMED defect #4 (signals): coalesced
-					-- set/remove plus overlapping leaf events double-represent the op.
+					-- Recorded as Set@index then Remove@lastIndex, mirroring the
+					-- actual mutation and the non-batched emission order.
 					local harness = ReplicationHarness.new({ items = { "a", "b", "c", "d" } }, feedMode)
 					harness:Connect()
 
@@ -721,10 +843,9 @@ return function(t: tiniest)
 				end)
 
 				test("element field mutation plus a shift of the same array in one batch", function()
-					-- FIXME(replication) CONFIRMED defect #4 (signals): string-keyed
-					-- leaf events for the element escape the numeric-only batch-array
-					-- suppression and run before the array flush's shift, so they apply
-					-- to the wrong (pre-shift) element. See findings doc.
+					-- An in-place element interior write forces Branch A, which
+					-- re-emits the changed element as a whole-value op at its
+					-- post-shift index; the non-array flush is masked out.
 					local harness = ReplicationHarness.new({ items = { { hp = 1 } } }, feedMode)
 					harness:Connect()
 
@@ -753,13 +874,11 @@ return function(t: tiniest)
 
 			describe("ambiguity", function()
 				--[[
-					The diff feed cannot distinguish "ArrayInsert (shifting)" from
-					"a new numeric dictionary key" purely from an added-at-numeric-leaf
-					entry; ReplicationHarness.applyDiffEntry guesses via isArrayLike.
-					State still converges in these cases (a boundary insert and a
-					boundary key-add produce the same table), but a diff consumer may
-					re-emit ArrayInserted where the source performed a plain key add.
-					These tests pin the state-level guarantee.
+					Shifting array ops are distinguished from plain numeric key
+					writes by metadata.ArrayOp, so the diff feed no longer guesses:
+					an added-at-numeric-leaf entry WITHOUT ArrayOp is always a
+					non-shifting Set. These tests pin that boundary/sparse numeric
+					dictionary writes converge under that rule.
 				]]
 				test("sparse numeric dictionary keys converge", function()
 					local harness = ReplicationHarness.new({ lookup = { [1] = "a", [3] = "c" } }, feedMode)
@@ -827,10 +946,9 @@ return function(t: tiniest)
 
 			describe("re-entrant mutation", function()
 				test("a source listener that clamps during notification", function()
-					-- FIXME(replication) CONFIRMED defect #3 (both feeds): the clamp's
-					-- inner write emits BEFORE the outer write that triggered it
-					-- (ValueChanged(-50→0) then ValueChanged(100→-50)), so a consumer
-					-- applying in receipt order ends on -50 while the source holds 0.
+					-- Re-entrant writes are queued by ChangeDetector and dispatched
+					-- AFTER the outer write's events, so consumers applying in
+					-- receipt order see -50 then the clamp to 0 on both feeds.
 					local harness = ReplicationHarness.new({ player = { health = 100 } }, feedMode)
 					harness:Connect()
 

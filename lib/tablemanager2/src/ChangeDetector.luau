@@ -92,6 +92,13 @@ export type ChangeMetadata = {
 	-- Set on ArrayRemoved/ArrayInserted/ArrayMoved when the operation is part of
 	-- a detected move (Branch B coalescing only). nil otherwise.
 	Move: MoveMetadata?,
+	-- Set on synthetic array-operation events (ArrayInserted/ArrayRemoved/
+	-- ArraySet), including their ancestor notifications. Carries explicit shift
+	-- semantics for consumers that apply the OriginDiff tree: a flattened
+	-- "removed" entry at a numeric leaf cannot otherwise be distinguished from
+	-- an in-place nil write (a hole), nor "added" from a non-shifting index
+	-- write. ArrayInserted/ArrayRemoved shift later elements; ArraySet does not.
+	ArrayOp: { Kind: "ArrayInserted" | "ArrayRemoved" | "ArraySet", Index: number }?,
 }
 
 --------------------------------------------------------------------------------
@@ -135,6 +142,10 @@ function ChangeDetector.new(
 		-- Sentinel snapshot: a fixed table that CaptureSnapshot returns when
 		-- suspended. CheckForChanges recognises it and returns immediately.
 		_sentinelSnapshot = {} :: any,
+		-- Re-entrancy guard: while a check is dispatching callbacks, checks
+		-- triggered from inside those callbacks are queued and run afterwards.
+		_dispatching = false,
+		_dispatchQueue = {} :: { () -> () },
 	}, ChangeDetector_MT) :: any
 
 	return self :: ChangeDetector
@@ -263,45 +274,47 @@ function ChangeDetector:CheckForChanges(snapshot: Snapshot)
 		print("  timestamp:", snapshot.Timestamp)
 	end
 
-	-- Navigate to current state using stored path and root table reference
-	local currentValue = snapshot.RootTable
-	for _, key in ipairs(snapshot.Path) do
-		currentValue = currentValue[key]
-		if currentValue == nil then
-			-- Path no longer exists - entire subtree was removed
-			break
-		end
-	end
-
-	-- Use diffFromSnapshot to compare against the captured Diff.Snapshot
-	local rootDiffNode = Diff.diffFromSnapshot(snapshot.Data, currentValue)
-
-	-- Process the root node if there are changes
-	if rootDiffNode then
-		local rootParentPath: Path = {}
-		local rootKey: any? = nil
-		if #snapshot.Path > 0 then
-			rootParentPath = table.create(#snapshot.Path - 1)
-			table.move(snapshot.Path, 1, #snapshot.Path - 1, 1, rootParentPath)
-			rootKey = snapshot.Path[#snapshot.Path]
+	self:_dispatch(function()
+		-- Navigate to current state using stored path and root table reference
+		local currentValue = snapshot.RootTable
+		for _, key in ipairs(snapshot.Path) do
+			currentValue = currentValue[key]
+			if currentValue == nil then
+				-- Path no longer exists - entire subtree was removed
+				break
+			end
 		end
 
-		-- Process all leaf changes via DFS
-		-- Pass the snapshot to all callbacks for context
-		self:_processDiffNode(
-			rootDiffNode,
-			snapshot.Path,
-			rootParentPath,
-			rootKey,
-			snapshot.Path,
-			rootDiffNode,
-			snapshot
-		)
+		-- Use diffFromSnapshot to compare against the captured Diff.Snapshot
+		local rootDiffNode = Diff.diffFromSnapshot(snapshot.Data, currentValue)
 
-		-- Fire ancestor callbacks for the captured level
-		-- The origin is the captured path (where the assignment happened)
-		self:_fireAncestorCallbacks(snapshot.Path, rootDiffNode, snapshot)
-	end
+		-- Process the root node if there are changes
+		if rootDiffNode then
+			local rootParentPath: Path = {}
+			local rootKey: any? = nil
+			if #snapshot.Path > 0 then
+				rootParentPath = table.create(#snapshot.Path - 1)
+				table.move(snapshot.Path, 1, #snapshot.Path - 1, 1, rootParentPath)
+				rootKey = snapshot.Path[#snapshot.Path]
+			end
+
+			-- Process all leaf changes via DFS
+			-- Pass the snapshot to all callbacks for context
+			self:_processDiffNode(
+				rootDiffNode,
+				snapshot.Path,
+				rootParentPath,
+				rootKey,
+				snapshot.Path,
+				rootDiffNode,
+				snapshot
+			)
+
+			-- Fire ancestor callbacks for the captured level
+			-- The origin is the captured path (where the assignment happened)
+			self:_fireAncestorCallbacks(snapshot.Path, rootDiffNode, snapshot)
+		end
+	end)
 end
 
 --[=[
@@ -392,28 +405,30 @@ function ChangeDetector:CheckForChangesBetween(
 		Timestamp = os.clock(),
 	}
 
-	-- Use Diff module to generate tree
-	local rootDiffNode = Diff.diff(oldValue, newValue)
+	self:_dispatch(function()
+		-- Use Diff module to generate tree
+		local rootDiffNode = Diff.diff(oldValue, newValue)
 
-	-- Process the root node if there are changes
-	if rootDiffNode then
-		local rootParentPath: Path = {}
-		local rootKey: any? = nil
-		if #basePath > 0 then
-			rootParentPath = table.create(#basePath - 1)
-			table.move(basePath, 1, #basePath - 1, 1, rootParentPath)
-			rootKey = basePath[#basePath]
+		-- Process the root node if there are changes
+		if rootDiffNode then
+			local rootParentPath: Path = {}
+			local rootKey: any? = nil
+			if #basePath > 0 then
+				rootParentPath = table.create(#basePath - 1)
+				table.move(basePath, 1, #basePath - 1, 1, rootParentPath)
+				rootKey = basePath[#basePath]
+			end
+
+			-- Process all leaf changes via DFS
+			-- Pass the basePath as both the current path and origin
+			-- Include the temporary snapshot for context
+			self:_processDiffNode(rootDiffNode, basePath, rootParentPath, rootKey, basePath, rootDiffNode, tempSnapshot)
+
+			-- Fire ancestor callbacks for the base level
+			-- The origin is the basePath (where the assignment happened)
+			self:_fireAncestorCallbacks(basePath, rootDiffNode, tempSnapshot)
 		end
-
-		-- Process all leaf changes via DFS
-		-- Pass the basePath as both the current path and origin
-		-- Include the temporary snapshot for context
-		self:_processDiffNode(rootDiffNode, basePath, rootParentPath, rootKey, basePath, rootDiffNode, tempSnapshot)
-
-		-- Fire ancestor callbacks for the base level
-		-- The origin is the basePath (where the assignment happened)
-		self:_fireAncestorCallbacks(basePath, rootDiffNode, tempSnapshot)
-	end
+	end)
 end
 
 --[=[
@@ -450,6 +465,40 @@ end
 --------------------------------------------------------------------------------
 --// Private Methods //--
 --------------------------------------------------------------------------------
+
+--[[
+	Runs `job` now, or queues it when a check is already dispatching callbacks
+	(a re-entrant check triggered by a write from inside a listener). Queued
+	jobs run after the current dispatch fully completes, so the event stream
+	for the OUTER write is always delivered before the events of any write it
+	triggered. Without this, a listener writing back during notification (e.g.
+	a clamp) emits its nested events FIRST, and a consumer applying events in
+	receipt order ends on the pre-clamp value.
+
+	Note: a queued check diffs against the state at DRAIN time, so chained
+	re-entrant writes may collapse into fewer events; the net result is
+	unchanged.
+]]
+function ChangeDetector:_dispatch(job: () -> ())
+	if self._dispatching then
+		table.insert(self._dispatchQueue, job)
+		return
+	end
+
+	self._dispatching = true
+	local ok, err = pcall(function()
+		job()
+		while #self._dispatchQueue > 0 do
+			local queued = table.remove(self._dispatchQueue, 1) :: () -> ()
+			queued()
+		end
+	end)
+	self._dispatching = false
+	if not ok then
+		table.clear(self._dispatchQueue)
+		error(err, 3)
+	end
+end
 
 --[[
 	Helper to fire callbacks for a single node in the diff tree.
@@ -509,25 +558,39 @@ function ChangeDetector:_processDiffNode(
 		print(`Processing diff node at path: {table.concat(nodePath, ".")}, type: {node.type}`)
 	end
 
-	-- Recurse into children if present
+	-- Recurse into children if present. The scalar-sentinel child (the scalar
+	-- side of a table<->scalar transition) is processed LAST: it represents
+	-- this node's own replacement value, so consumers must receive the
+	-- subtree's teardown events (e.g. removed {b,v}) BEFORE the event that
+	-- collapses the node to a scalar ({b}=5). pairs() order would otherwise
+	-- make this nondeterministic, and a consumer that applied the scalar first
+	-- would then try to apply child events through a non-table value.
 	if node.children then
+		local sentinelChild: Diff.DiffNode? = nil
 		for key, childNode in node.children do
-			local childKey = if key ~= Diff.ScalarSentinel then key else nil
-			local childPath = table.clone(nodePath)
-			local childParentPath = parentPath
-			local childNodeKey = childKey
-
-			if childKey then
-				table.insert(childPath, childKey)
-				childParentPath = nodePath
-			else
-				-- Sentinel child ("") represents a scalar replacement at this exact node.
-				-- It keeps the same nodePath and key as its parent node.
-				childNodeKey = nodeKey
+			if key == Diff.ScalarSentinel then
+				sentinelChild = childNode
+				continue
 			end
+			local childPath = table.clone(nodePath)
+			table.insert(childPath, key)
 
 			-- Pass the same origin path, origin diff, and snapshot down through recursion
-			self:_processDiffNode(childNode, childPath, childParentPath, childNodeKey, originPath, originDiff, snapshot)
+			self:_processDiffNode(childNode, childPath, nodePath, key, originPath, originDiff, snapshot)
+		end
+
+		if sentinelChild then
+			-- The sentinel child represents a scalar replacement at this exact
+			-- node, so it keeps the same nodePath and key as its parent node.
+			self:_processDiffNode(
+				sentinelChild,
+				table.clone(nodePath),
+				parentPath,
+				nodeKey,
+				originPath,
+				originDiff,
+				snapshot
+			)
 		end
 	end
 
