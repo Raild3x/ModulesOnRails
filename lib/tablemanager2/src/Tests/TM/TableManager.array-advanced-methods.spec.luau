@@ -234,6 +234,10 @@ return function(t: tiniest)
 			manager:ArrayRemove({ "items" }, 1)
 			expect(manager:Get { "items", 1, "value" }).is(20)
 
+			-- A proxy is bound to the table object it represents, not the path it
+			-- once resolved to. deadProxy's original table (value=10) was removed
+			-- from the array entirely, so writing through it only mutates that
+			-- detached table and does not affect the survivor now living at items[1].
 			deadProxy.value = 999
 			expect(survivorProxy.value).is(20)
 			expect(manager:Get { "items", 1, "value" }).is(20)

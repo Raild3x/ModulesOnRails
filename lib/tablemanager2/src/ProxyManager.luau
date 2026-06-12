@@ -169,6 +169,21 @@ const function getOriginal<T>(t: T | Proxy<T>): T
 end
 
 --[[
+	Walk `root` along `path`, returning the value found or nil if any
+	intermediate segment is not a table.
+]]
+const function resolveAtPath(root: any, path: PathArray<any>): any
+	local current: any = root
+	for _, key in path do
+		if type(current) ~= "table" then
+			return nil
+		end
+		current = current[key]
+	end
+	return current
+end
+
+--[[
 	Classify table shape in one pass.
 	Returns whether the table is an array plus its array length when true.
 ]]
@@ -248,12 +263,20 @@ function ProxyManager.new<T>(rootTable: T): ProxyManager<T>
 
 			const unwrappedValue = getOriginal(value)
 
-			if self._writeHandler then
-				const path = self:_GetLivePath(proxy)
+			-- A proxy is bound to the table object it represents (`meta.Original`),
+			-- not to the path it currently resolves to. If that object has been
+			-- removed/replaced at its computed live path (e.g. a sibling shifted
+			-- into its old slot after an ArrayRemove), the proxy is orphaned:
+			-- write directly to the detached object so it does not bleed into
+			-- whatever now lives at that path.
+			const path = self:_GetLivePath(proxy)
+			const isLive = resolveAtPath(self._rootTable, path) == meta.Original
+
+			if self._writeHandler and isLive then
 				table.insert(path, key)
 				self._writeHandler(path, unwrappedValue)
 			else
-				-- Standalone mode (no write handler registered): apply directly.
+				-- Standalone mode (no write handler) or an orphaned proxy: apply directly.
 				meta.Original[key] = unwrappedValue
 			end
 		end,

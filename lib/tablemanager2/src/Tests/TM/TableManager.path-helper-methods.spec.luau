@@ -138,6 +138,25 @@ return function(t: tiniest)
 			manager:Destroy()
 		end)
 
+		test("proxy held before a subtree replacement stays bound to the old table", function()
+			local manager = TableManager.new {
+				player = { health = 100 },
+			}
+
+			local heldPlayer = manager.Proxy.player
+
+			manager:Set({ "player" }, { health = 50 })
+			expect(manager.Proxy.player.health).is(50)
+
+			-- heldPlayer is bound to the replaced (now detached) table, not the
+			-- "player" path - writing through it must not affect the live tree.
+			heldPlayer.health = 999
+			expect(manager.Proxy.player.health).is(50)
+			expect(manager:Get { "player", "health" }).is(50)
+
+			manager:Destroy()
+		end)
+
 		test("supports dot-string path input", function()
 			local manager = TableManager.new {
 				player = { stats = { health = 100 } },

@@ -76,7 +76,7 @@ return function(t: tiniest)
 
 			expect(function()
 				manager:ArrayRemoveFirstValue({ "notArray" }, 5)
-			end).fails_with("attempt to index nil with 'Original'")
+			end).fails_with("Target is not a table")
 
 			manager:Destroy()
 		end)

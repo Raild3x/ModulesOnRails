@@ -1523,7 +1523,7 @@ const function maskTrackedArraysForBranchDiff(
 			table.insert(pathsToMask, trackedPath)
 		end
 	end
-	table.sort(pathsToMask, function(a, b)
+	table.sort(pathsToMask, function(a: { any }, b: { any })
 		return #a > #b
 	end)
 
@@ -1604,6 +1604,164 @@ function TableManager.Suspend(self: TM_Internal)
 	self._changeDetector:Suspend()
 end
 
+--[[
+	Removes TrackedPaths entries for arrays that did not exist in the pre-batch
+	snapshot (created during the batch). A newly-created array's container does
+	not yet exist on a downstream consumer, so coalesced Array* events (which
+	assume the container exists) cannot be applied. Instead the non-array flush
+	emits its creation as ordinary key/value adds (the same path a non-batched
+	creation takes), which build the container and its elements. Removing them
+	here also stops `shouldSuppressBatchArrayEvent` from suppressing those adds.
+]]
+const function pruneArraysCreatedDuringBatch(batch: BatchState)
+	for pathKey, path in batch.TrackedPaths do
+		if getSnapshotRef(batch.StartSnapshot, path) == nil then
+			batch.TrackedPaths[pathKey] = nil
+		end
+	end
+end
+
+--[[
+	Non-array flush: diff only the branches that were actually mutated during
+	the batch. This avoids traversing the whole table when only a small subset
+	of keys changed. For each dirty branch key we extract the pre-batch value
+	from the root snapshot's Diff.Snapshot children and compare it against the
+	current live value, letting ChangeDetector fire all leaf + ancestor events.
+
+	Tracked-array subtrees are MASKED out of each branch diff (see
+	maskTrackedArraysForBranchDiff): flushTrackedArrays is the sole owner of
+	their content changes, so the branch diff must not also carry them.
+]]
+const function flushNonArrayBranches(self: TM_Internal, batch: BatchState)
+	if not batch.StartSnapshot then
+		return
+	end
+
+	const rootSnapshot = batch.StartSnapshot
+	const rootSnapshotData: any = rootSnapshot.Data -- Diff.Snapshot
+
+	-- A "__root__" dirty marker means a root-level key was written directly.
+	-- Expand it to EVERY root key (pre-batch and current) so each key flushes
+	-- through the same masked per-branch diff. A full-root CheckForChanges
+	-- cannot be used here: captured at path {}, it fires no ancestor
+	-- delivery (root OnChange listeners would never see the operation) and
+	-- its diff would re-include tracked-array changes.
+	local branchKeys: { [any]: boolean } = {}
+	if batch.DirtyBranches["__root__"] then
+		if rootSnapshotData and rootSnapshotData.children then
+			for key in rootSnapshotData.children :: any do
+				branchKeys[key] = true
+			end
+		end
+		for key in self._originalData :: any do
+			branchKeys[key] = true
+		end
+	else
+		for branchKey in batch.DirtyBranches do
+			branchKeys[branchKey] = true
+		end
+	end
+
+	for branchKey in branchKeys do
+		-- Extract old branch value from the pre-batch snapshot's children map.
+		const oldBranchValue: any = if rootSnapshotData and rootSnapshotData.children
+			then (rootSnapshotData.children :: any)[branchKey] and (rootSnapshotData.children :: any)[branchKey].value or nil
+			else nil
+
+		-- Current live value for this branch, with still-existing tracked
+		-- arrays substituted by their pre-batch values (no change to report).
+		const newBranchValue: any =
+			maskTrackedArraysForBranchDiff(self, batch, branchKey, self._originalData[branchKey])
+
+		self._changeDetector:CheckForChangesBetween(oldBranchValue, newBranchValue, { branchKey }, self._originalData)
+	end
+end
+
+--[[
+	Branch A/B decision for one tracked array's flush: true forces a full
+	pre-batch-vs-current LCS diff (Branch A); false uses the op-log coalescer
+	(Branch B).
+]]
+const function shouldForceFullArrayDiff(
+	batch: BatchState,
+	path: PathArray,
+	log: ArrayBatchRecorderModule.ArrayLog,
+	currentArray: { any }
+): boolean
+	if log.poisoned or currentArray ~= log.startRef then
+		return true
+	end
+
+	-- If the array's reference was replaced during the batch (e.g.
+	-- `Proxy.items = {...}` followed by array ops), the op log's startCopy
+	-- reflects only the post-replacement array and would miss the
+	-- replacement. Detect this by comparing the pre-batch reference to the
+	-- log's start reference and force Branch A (full pre-batch-vs-current LCS).
+	const preBatchRef = getSnapshotRef(batch.StartSnapshot, path)
+	if preBatchRef ~= nil and preBatchRef ~= log.startRef then
+		return true
+	end
+
+	-- If an ELEMENT of this array was mutated in place (a scalar/table write
+	-- whose parent is strictly under the array path, e.g. `items[1].hp = 9`),
+	-- Branch B coalescing cannot represent the interior change — it only sees
+	-- element identities. Force Branch A so the changed element is emitted as
+	-- a whole-value ArraySet.
+	for _, writePath in batch.ScalarWritePaths do
+		if #writePath > #path then
+			local underPath = true
+			for i = 1, #path do
+				if writePath[i] ~= path[i] then
+					underPath = false
+					break
+				end
+			end
+			if underPath then
+				return true
+			end
+		end
+	end
+
+	return false
+end
+
+--[[
+	Array flush: emit coalesced events for each tracked array path, routing
+	through Branch A (LCS `ArrayDiff.emitDiff`) or Branch B
+	(`ArrayBatchRecorder:Coalesce`) per `shouldForceFullArrayDiff`.
+]]
+const function flushTrackedArrays<T>(self: TM_Internal<T>, batch: BatchState)
+	const recorder = batch.Recorder
+	if not recorder then
+		return
+	end
+
+	for _, path in batch.TrackedPaths do
+		const log = recorder:GetLog(path)
+		if not log then
+			continue
+		end
+
+		const currentArray = self:Get(path)
+		if type(currentArray) ~= "table" then
+			continue
+		end
+
+		-- Get the old array from the pre-batch snapshot (always authoritative for
+		-- Branch A; Branch B uses log.startCopy built at StartTracking time).
+		const oldArray: { any } = getSnapshotValue(batch.StartSnapshot, path) or {}
+		const emit = makeEmit(self, path)
+
+		if shouldForceFullArrayDiff(batch, path, log, currentArray) then
+			-- Branch A: LCS diff — pre-batch snapshot vs current state
+			ArrayDiffModule.emitDiff(oldArray, currentArray, emit, true)
+		else
+			-- Branch B: op-log coalescer — net-change semantics with intent honoured
+			recorder:Coalesce(log, currentArray, emit, true)
+		end
+	end
+end
+
 --[=[
 	Resumes after `Suspend()` and flushes all pending changes.
 
@@ -1630,134 +1788,9 @@ function TableManager.Resume(self: TM_Internal)
 	end
 	batch.Flushing = true
 
-	-- Prune arrays that were CREATED during the batch (did not exist pre-batch)
-	-- from the tracked set. A newly-created array's container does not yet exist on
-	-- a downstream consumer, so coalesced Array* events (which assume the container
-	-- exists) cannot be applied. Instead we let the non-array flush emit its
-	-- creation as ordinary key/value adds (the same path a non-batched creation
-	-- takes), which build the container and its elements. Removing them here also
-	-- stops `shouldSuppressBatchArrayEvent` from suppressing those adds.
-	for pathKey, path in batch.TrackedPaths do
-		if getSnapshotRef(batch.StartSnapshot, path) == nil then
-			batch.TrackedPaths[pathKey] = nil
-		end
-	end
-
-	-- Non-array flush: diff only the branches that were actually mutated during
-	-- the batch. This avoids traversing the whole table when only a small subset
-	-- of keys changed. For each dirty branch key we extract the pre-batch value
-	-- from the root snapshot's Diff.Snapshot children and compare it against the
-	-- current live value, letting ChangeDetector fire all leaf + ancestor events.
-	--
-	-- Tracked-array subtrees are MASKED out of each branch diff (see
-	-- maskTrackedArraysForBranchDiff): the array flush below is the sole owner
-	-- of their content changes, so the branch diff must not also carry them.
-	if batch.StartSnapshot then
-		const rootSnapshot = batch.StartSnapshot
-		const rootSnapshotData: any = rootSnapshot.Data -- Diff.Snapshot
-
-		-- A "__root__" dirty marker means a root-level key was written directly.
-		-- Expand it to EVERY root key (pre-batch and current) so each key flushes
-		-- through the same masked per-branch diff. A full-root CheckForChanges
-		-- cannot be used here: captured at path {}, it fires no ancestor
-		-- delivery (root OnChange listeners would never see the operation) and
-		-- its diff would re-include tracked-array changes.
-		local branchKeys: { [any]: boolean } = {}
-		if batch.DirtyBranches["__root__"] then
-			if rootSnapshotData and rootSnapshotData.children then
-				for key in rootSnapshotData.children :: any do
-					branchKeys[key] = true
-				end
-			end
-			for key in self._originalData :: any do
-				branchKeys[key] = true
-			end
-		else
-			for branchKey in batch.DirtyBranches do
-				branchKeys[branchKey] = true
-			end
-		end
-
-		for branchKey in branchKeys do
-			-- Extract old branch value from the pre-batch snapshot's children map.
-			const oldBranchValue: any = if rootSnapshotData and rootSnapshotData.children
-				then (rootSnapshotData.children :: any)[branchKey]
-						and (rootSnapshotData.children :: any)[branchKey].value
-					or nil
-				else nil
-
-			-- Current live value for this branch, with still-existing tracked
-			-- arrays substituted by their pre-batch values (no change to report).
-			const newBranchValue: any =
-				maskTrackedArraysForBranchDiff(self, batch, branchKey, self._originalData[branchKey])
-
-			self._changeDetector:CheckForChangesBetween(
-				oldBranchValue,
-				newBranchValue,
-				{ branchKey },
-				self._originalData
-			)
-		end
-	end
-
-	-- Array flush: emit coalesced events for each tracked array path.
-	const recorder = batch.Recorder
-	if recorder then
-		for _, path in batch.TrackedPaths do
-			const log = recorder:GetLog(path)
-			if not log then
-				continue
-			end
-
-			const currentArray = self:Get(path)
-			if type(currentArray) ~= "table" then
-				continue
-			end
-
-			-- Get the old array from the pre-batch snapshot (always authoritative for
-			-- Branch A; Branch B uses log.startCopy built at StartTracking time).
-			const oldArray: { any } = getSnapshotValue(batch.StartSnapshot, path) or {}
-			const emit = makeEmit(self, path)
-
-			-- If the array's reference was replaced during the batch (e.g.
-			-- `Proxy.items = {...}` followed by array ops), the op log's startCopy
-			-- reflects only the post-replacement array and would miss the
-			-- replacement. Detect this by comparing the pre-batch reference to the
-			-- log's start reference and force Branch A (full pre-batch-vs-current LCS).
-			const preBatchRef = getSnapshotRef(batch.StartSnapshot, path)
-			const wasReplaced = preBatchRef ~= nil and preBatchRef ~= log.startRef
-
-			-- If an ELEMENT of this array was mutated in place (a scalar/table write
-			-- whose parent is strictly under the array path, e.g. `items[1].hp = 9`),
-			-- Branch B coalescing cannot represent the interior change — it only sees
-			-- element identities. Force Branch A so the changed element is emitted as
-			-- a whole-value ArraySet.
-			local elementMutated = false
-			for _, writePath in batch.ScalarWritePaths do
-				if #writePath > #path then
-					local underPath = true
-					for i = 1, #path do
-						if writePath[i] ~= path[i] then
-							underPath = false
-							break
-						end
-					end
-					if underPath then
-						elementMutated = true
-						break
-					end
-				end
-			end
-
-			if log.poisoned or currentArray ~= log.startRef or wasReplaced or elementMutated then
-				-- Branch A: LCS diff — pre-batch snapshot vs current state
-				ArrayDiffModule.emitDiff(oldArray, currentArray, emit, true)
-			else
-				-- Branch B: op-log coalescer — net-change semantics with intent honoured
-				recorder:Coalesce(log, currentArray, emit, true)
-			end
-		end
-	end
+	pruneArraysCreatedDuringBatch(batch)
+	flushNonArrayBranches(self, batch)
+	flushTrackedArrays(self, batch)
 
 	-- Clear batch state
 	batch.Flushing = false
