@@ -27,6 +27,10 @@ export type BatchState = {
 	-- parent is strictly under a tracked array path), which Branch B coalescing
 	-- cannot represent and which therefore force Branch A.
 	ScalarWritePaths: { PathArray },
+	-- Table values detached during the batch (overwritten/removed). Proxy-graph
+	-- pruning is deferred to the end of Resume so values re-homed later in the
+	-- same batch (e.g. by Swap) are spared by PruneOriginal's liveness guard.
+	PendingPrunes: { any },
 	Flushing: boolean,
 }
 

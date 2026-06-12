@@ -622,6 +622,30 @@ const function checkDuplicateTableWrite<T, S>(self: TM_Internal<T>, writePath: P
 end
 
 --[[
+	Evicts proxy-graph bookkeeping for a table value that was just detached by a
+	write (overwritten or removed), so the detached subtree can be garbage
+	collected. During a batch the prune is deferred to the end of Resume: a value
+	detached early in the batch may be re-homed later in the same window (e.g.
+	Swap's second Set), and PruneOriginal's liveness guard then spares it.
+]]
+const function pruneDetachedValue<T>(self: TM_Internal<T>, oldValue: any, newValue: any)
+	if type(oldValue) ~= "table" or oldValue == newValue then
+		return
+	end
+	const proxyManager = self._proxyManager
+	if proxyManager == nil then
+		return
+	end
+
+	const batch = self._batch
+	if self._batchDepth > 0 and batch then
+		table.insert(batch.PendingPrunes, oldValue)
+	else
+		proxyManager:PruneOriginal(oldValue)
+	end
+end
+
+--[[
 	The single proxy-free write core. `parsedPath` is the full path of the write
 	(including the final key); `value` must already be unwrapped
 	(`ProxyManagerModule.Unwrap`). Mirrors the order of the old proxy
@@ -701,8 +725,10 @@ const function applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>, 
 
 	-- Standard change detection workflow: capture a snapshot before the write,
 	-- apply it, then let ChangeDetector diff against the captured snapshot.
+	const oldValue = parentTable[key]
 	const snapshot = self._changeDetector:CaptureSnapshot(self._originalData, parsedPath)
 	parentTable[key] = value
+	pruneDetachedValue(self, oldValue, value)
 	self._changeDetector:CheckForChanges(snapshot)
 end
 
@@ -1351,6 +1377,7 @@ function TableManager.ArrayRemove<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 	if self._proxyManager then
 		self._proxyManager:ShiftKeys(array, index + 1, -1)
 	end
+	pruneDetachedValue(self, oldValue, nil)
 
 	-- Batch: skip fires
 	if self._batchDepth > 0 then
@@ -1418,6 +1445,7 @@ function TableManager.ArraySwapRemove<T, S>(self: TM_Internal<T>, pathOrProxy: P
 		array[index] = movedValue
 	end
 	array[lastIndex] = nil
+	pruneDetachedValue(self, oldValue, nil)
 
 	-- Batch: skip immediate fires
 	if self._batchDepth > 0 then
@@ -1598,6 +1626,7 @@ function TableManager.Suspend(self: TM_Internal)
 		TrackedPaths = {},
 		DirtyBranches = {},
 		ScalarWritePaths = {},
+		PendingPrunes = {},
 		Flushing = false,
 	}
 	self._batchDepth = 1
@@ -1797,6 +1826,17 @@ function TableManager.Resume(self: TM_Internal)
 	self._batchDepth = 0
 	batch.Recorder:Destroy()
 	self._batch = nil
+
+	-- Prune proxy bookkeeping for values detached during the batch. Done after
+	-- the flush (and after _batch is cleared, so a re-entrant write from a flush
+	-- listener that detached a table prunes immediately rather than queueing
+	-- into a dead batch). Values re-homed during the batch are spared by
+	-- PruneOriginal's liveness guard.
+	if self._proxyManager then
+		for _, removedValue in batch.PendingPrunes do
+			self._proxyManager:PruneOriginal(removedValue)
+		end
+	end
 end
 
 --[=[
@@ -1999,6 +2039,17 @@ function TableManager.Destroy<T>(self: TM_Internal<T>)
 		return
 	end
 	self._Destroyed = true
+
+	-- If destroyed mid-batch (Suspend without Resume), release the batch state:
+	-- StartSnapshot is a full deep snapshot of the entire tree and the recorder
+	-- holds per-array op logs and start copies.
+	const batch = self._batch
+	if batch then
+		batch.Recorder:Destroy()
+		self._batch = nil
+		self._batchDepth = 0
+	end
+
 	self._listenerRegistry:Destroy()
 	if self._proxyManager then
 		self._proxyManager:Destroy()

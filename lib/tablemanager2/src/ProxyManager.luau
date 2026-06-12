@@ -135,6 +135,10 @@ export type ProxyManager<T = { [any]: any }> = {
 	--- numeric key is >= `fromIndex` by adding `delta`. Called by TableManager after
 	--- every ArrayInsert (+1) or ArrayRemove (-1) so held proxies report the correct path.
 	ShiftKeys: (self: ProxyManager<T>, arrayOriginal: { [any]: any }, fromIndex: number, delta: number) -> (),
+	--- Evicts proxy-graph bookkeeping for a table value (and every table nested
+	--- inside it) that has been detached from the tree. Called by TableManager
+	--- after removals/replacements so detached subtrees can be garbage collected.
+	PruneOriginal: (self: ProxyManager<T>, removedValue: any) -> (),
 	Destroy: (self: ProxyManager<T>) -> (),
 
 	-- Private fields
@@ -227,7 +231,12 @@ function ProxyManager.new<T>(rootTable: T): ProxyManager<T>
 
 	const self: ProxyManager<T> = setmetatable({}, ProxyManager_MT) :: any
 
-	self._proxyMeta = {}
+	-- Weak keys: an unheld proxy collects together with its metadata once it is
+	-- evicted from the strong maps (PruneOriginal / Destroy). While a table is in
+	-- the tree, its proxy stays strongly rooted via _originalToProxy, so metadata
+	-- persistence is unchanged for live data. Metadata values never reference
+	-- their proxy key, so no ephemeron semantics are needed.
+	self._proxyMeta = setmetatable({}, { __mode = "k" }) :: any
 	self._originalToProxy = {}
 	self._proxiesByParent = {}
 	self._rootTable = rootTable
@@ -445,10 +454,11 @@ function ProxyManager.CreateProxy<T, S>(
 		ArrayLength = arrayLength,
 	}
 
-	-- Register in parent lookup so ShiftKeys can find child proxies
+	-- Register in parent lookup so ShiftKeys can find child proxies.
+	-- Weak-keyed set: evicted/unheld proxies drop out instead of accumulating.
 	if parentOriginal ~= nil then
 		if not self._proxiesByParent[parentOriginal] then
-			self._proxiesByParent[parentOriginal] = {}
+			self._proxiesByParent[parentOriginal] = setmetatable({}, { __mode = "k" }) :: any
 		end
 		self._proxiesByParent[parentOriginal][proxy] = true
 	end
@@ -481,7 +491,7 @@ function ProxyManager.ReparentProxy<T, S>(self: ProxyManager<T>, proxy: Proxy<T,
 
 	if newParentOriginal ~= nil then
 		if not self._proxiesByParent[newParentOriginal] then
-			self._proxiesByParent[newParentOriginal] = {}
+			self._proxiesByParent[newParentOriginal] = setmetatable({}, { __mode = "k" }) :: any
 		end
 		self._proxiesByParent[newParentOriginal][proxy] = true
 	end
@@ -509,6 +519,67 @@ function ProxyManager.ShiftKeys(self: ProxyManager, arrayOriginal: { [any]: any 
 end
 
 --[=[
+	Evicts proxy-graph bookkeeping for `removedValue` and every table nested
+	inside it, after the value has been detached from the tree.
+
+	Tables whose proxy still resolves to a live location are left tracked: this
+	covers `MoveTo`/`Swap` (which reparent the proxy before the old slot is
+	cleared) and second references under `DuplicateReferenceMode = "allow"`.
+
+	`_proxyMeta` entries are intentionally NOT removed here: the map is
+	weak-keyed, so an unheld proxy collects together with its metadata, while an
+	externally-held proxy keeps its metadata and continues to function as an
+	orphan (reads and direct writes against the detached table still work).
+
+	Note: traversing a HELD orphan proxy after pruning re-registers its nested
+	tables in the strong maps (they are only evicted again on Destroy). Avoid
+	retaining and walking orphan proxies long-term.
+]=]
+function ProxyManager.PruneOriginal(self: ProxyManager, removedValue: any)
+	if type(removedValue) ~= "table" then
+		return
+	end
+
+	const memo: { [any]: true } = {}
+
+	const function visit(t: { [any]: any })
+		if memo[t] then
+			return
+		end
+		memo[t] = true
+
+		const proxy = self._originalToProxy[t]
+		if proxy ~= nil then
+			-- Liveness guard: skip tables that still resolve at their proxy's
+			-- live path (re-homed by MoveTo/Swap, or duplicate references).
+			const stillLive = resolveAtPath(self._rootTable, self:_GetLivePath(proxy)) == t
+			if not stillLive then
+				self._originalToProxy[t] = nil
+				const meta = self._proxyMeta[proxy]
+				if meta ~= nil and meta.Parent ~= nil then
+					const siblings = self._proxiesByParent[meta.Parent]
+					if siblings ~= nil then
+						siblings[proxy] = nil
+						if next(siblings) == nil then
+							self._proxiesByParent[meta.Parent] = nil
+						end
+					end
+				end
+				self._proxiesByParent[t] = nil
+			end
+		end
+
+		for _, child in t do
+			if type(child) == "table" then
+				visit(child)
+			end
+		end
+	end
+
+	visit(removedValue)
+end
+
+--[=[
 	Clean up all proxies and metadata.
 ]=]
 function ProxyManager.Destroy(self: ProxyManager)
@@ -522,6 +593,10 @@ function ProxyManager.Destroy(self: ProxyManager)
 	table.clear(self._originalToProxy)
 	table.clear(self._proxiesByParent)
 
+	-- Per-proxy metatable closures capture `self`, so any externally-held proxy
+	-- pins this manager after Destroy; drop the root reference so it cannot pin
+	-- the entire data tree along with it.
+	self._rootTable = nil :: any
 	self._writeHandler = nil
 end
 

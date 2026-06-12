@@ -235,6 +235,7 @@ export type ListenerRegistry = {
 	_listenerTrees: { [EventType]: ListenerNode },
 	_debugMode: boolean,
 	_fireDeferred: boolean,
+	_destroyed: boolean,
 }
 
 --------------------------------------------------------------------------------
@@ -291,13 +292,12 @@ local function acquireRunnerThreadAndCall(
 	freeRunnerThread = acquiredRunnerThread
 end
 
-local function runListenerCallbackInFreeThread(
-	callback: (...any) -> (),
-	eventType: EventType,
-	eventData: EventData,
-	debugMode: boolean
-)
-	acquireRunnerThreadAndCall(callback, eventType, eventData, debugMode)
+-- Argless on purpose: the runner thread is primed with an empty resume so it
+-- parks at coroutine.yield() before receiving any payload. Taking the first
+-- payload as function parameters instead would pin that payload (callback +
+-- eventData, including its deep Metadata.Snapshot) on the thread's stack for
+-- the thread's entire lifetime.
+local function runListenerCallbackInFreeThread()
 	while true do
 		acquireRunnerThreadAndCall(coroutine.yield())
 	end
@@ -417,6 +417,7 @@ function ListenerRegistry.new(config: ListenerRegistryConfig?): ListenerRegistry
 	}
 	self._debugMode = debugMode
 	self._fireDeferred = fireDeferred
+	self._destroyed = false
 
 	return self
 end
@@ -427,6 +428,15 @@ function ListenerRegistry:RegisterListener(
 	callback: (...any) -> (),
 	options: ListenerOptions?
 ): Connection
+	-- A destroyed registry must stay empty: registrations would repopulate trees
+	-- that will never be cleaned again. Hand back an inert, dead connection.
+	if self._destroyed then
+		return {
+			Connected = false,
+			Disconnect = function() end,
+		} :: Connection
+	end
+
 	local depth: number? = if options then options.ListenDepth else nil
 	local depthStyle: "<=" | "==" = if options and options.ListenDepthStyle then options.ListenDepthStyle else "<="
 	local once: boolean = if options and options.Once == true then true else false
@@ -573,6 +583,9 @@ function ListenerRegistry.FireListenersExact(
 			else
 				if not freeRunnerThread then
 					freeRunnerThread = coroutine.create(runListenerCallbackInFreeThread)
+					-- Prime the thread so it parks at coroutine.yield() with an
+					-- empty stack; payloads only ever arrive via task.spawn below.
+					coroutine.resume(freeRunnerThread :: thread)
 				end
 				task.spawn(freeRunnerThread :: thread, listener.Callback, eventType, fireEventData, debugMode)
 			end
@@ -592,12 +605,18 @@ function ListenerRegistry.FireListenersExact(
 end
 
 function ListenerRegistry.Destroy(self: ListenerRegistry)
-	-- Recursively disconnect all listeners in the tree
+	if self._destroyed then
+		return
+	end
+	self._destroyed = true
+
+	-- Recursively disconnect all listeners in the tree. Mark connections dead
+	-- directly instead of calling Disconnect(): Disconnect table.remove's from
+	-- the array being iterated (skipping every other listener) and runs
+	-- redundant cleanupNode passes on a tree that is being cleared wholesale.
 	local function destroyNode(node: ListenerNode)
 		for _, listener in node.Listeners do
-			if listener.Connection.Connected then
-				listener.Connection:Disconnect()
-			end
+			listener.Connection.Connected = false
 		end
 		table.clear(node.Listeners)
 
