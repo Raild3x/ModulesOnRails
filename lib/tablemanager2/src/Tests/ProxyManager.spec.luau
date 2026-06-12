@@ -3,19 +3,18 @@
 	Unit tests for ProxyManager_new to verify:
 	- Proxy creation for nested structures
 	- Metadata tracking (ArrayLength, Original)
-	- ChangeDetector wiring (can be set, proxies modify original data)
+	- Write handling (SetWriteHandler delegation; default passthrough writes)
 	- GetOriginal/GetMetadata helpers
 	- Array metadata tracking
 	- Edge cases (nil values, deep nesting, scalars, cleanup)
-	
+
 	Note: These are UNIT tests for ProxyManager in isolation.
-	Full ChangeDetector integration (auto-triggering, snapshots, etc.) 
+	Full TableManager integration (change detection, batching, etc.)
 	is tested at the TableManager integration level.
 ]]
 
 return function(t: tiniest)
 	local ProxyManager = require("../ProxyManager")
-	local ChangeDetector = require("../ChangeDetector")
 
 	local test = t.test
 	local describe = t.describe
@@ -109,11 +108,9 @@ return function(t: tiniest)
 			manager:Destroy()
 		end)
 
-		test("should update ArrayLength when items change", function()
+		test("should record ArrayLength at proxy-creation time", function()
 			local data = { items = { "Sword" } }
 			local manager = ProxyManager.new(data)
-			local detector = ChangeDetector.new {}
-			manager:SetChangeDetector(detector)
 			local proxy = manager:CreateProxy(data)
 
 			local itemsProxy = proxy.items
@@ -123,8 +120,8 @@ return function(t: tiniest)
 
 			-- Add item (this will update the original table)
 			data.items[2] = "Shield"
-			-- Note: ArrayLength only updates when accessed through proxy operations
-			-- or when explicitly recalculated
+			-- Note: ArrayLength is only recorded at proxy-creation time; ProxyManager
+			-- no longer maintains it on subsequent writes.
 
 			manager:Destroy()
 		end)
@@ -166,30 +163,10 @@ return function(t: tiniest)
 		end)
 	end)
 
-	describe("ChangeDetector Integration", function()
-		test("should allow setting a ChangeDetector", function()
-			local manager = ProxyManager.new {}
-
-			local detector = ChangeDetector.new {
-				OnValueChanged = function() end,
-			}
-
-			-- Should not error when setting detector
-			manager:SetChangeDetector(detector)
-
-			expect(true).is_true() -- If we get here, it worked
-
-			manager:Destroy()
-		end)
-
-		test("should modify original data when proxy changes", function()
+	describe("Write Handling", function()
+		test("should modify original data when proxy changes (no write handler)", function()
 			local data = { health = 100 }
 			local manager = ProxyManager.new(data)
-
-			local detector = ChangeDetector.new {
-				OnValueChanged = function() end,
-			}
-			manager:SetChangeDetector(detector)
 			local proxy = manager:CreateProxy(data)
 
 			-- Change value through proxy
@@ -201,16 +178,11 @@ return function(t: tiniest)
 			manager:Destroy()
 		end)
 
-		test("should modify nested original data when proxy changes", function()
+		test("should modify nested original data when proxy changes (no write handler)", function()
 			local data = {
 				player = { health = 100, mana = 50 },
 			}
 			local manager = ProxyManager.new(data)
-
-			local detector = ChangeDetector.new {
-				OnValueChanged = function() end,
-			}
-			manager:SetChangeDetector(detector)
 			local proxy = manager:CreateProxy(data)
 
 			-- Change nested value through proxy
@@ -218,6 +190,31 @@ return function(t: tiniest)
 
 			-- Verify the original nested data was modified
 			expect(data.player.health).is(75)
+
+			manager:Destroy()
+		end)
+
+		test("should delegate writes to SetWriteHandler with the resolved path and unwrapped value", function()
+			local data = {
+				player = { health = 100 },
+			}
+			local manager = ProxyManager.new(data)
+
+			local calls: { { path: { any }, value: any } } = {}
+			manager:SetWriteHandler(function(path, value)
+				table.insert(calls, { path = path, value = value })
+			end)
+
+			local proxy = manager:CreateProxy(data)
+			proxy.player.health = 75
+
+			expect(#calls).is(1)
+			expect(calls[1].path).is_shallow_equal { "player", "health" }
+			expect(calls[1].value).is(75)
+
+			-- The write handler is responsible for applying the mutation; since it
+			-- only records the call here, the original data is left untouched.
+			expect(data.player.health).is(100)
 
 			manager:Destroy()
 		end)
@@ -303,11 +300,7 @@ return function(t: tiniest)
 		test("should handle setting values to nil", function()
 			local data: { [any]: any } = { health = 100, mana = 50 }
 			local manager = ProxyManager.new(data)
-			local detector = ChangeDetector.new {}
-			manager:SetChangeDetector(detector)
 			local proxy = manager:CreateProxy(data)
-
-			detector:CaptureSnapshot(data, {})
 
 			proxy.mana = nil
 

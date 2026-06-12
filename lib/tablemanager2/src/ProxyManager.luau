@@ -3,31 +3,35 @@
 	@ignore
 	@class ProxyManager
 	
-	Clean implementation of ProxyManager following the unified architecture.
-	
+	Thin proxy front-end over a raw table. ProxyManager only maintains the
+	proxy graph (creation, parent/key tracking, reparenting) and read-side
+	metamethods. It performs NO change detection, validation, batching, or
+	duplicate-reference checks itself.
+
 	## Architecture
-	
-	### Unified Change Detection
-	ProxyManager delegates ALL change detection to ChangeDetector:
-	1. **Capture**: __newindex captures snapshot BEFORE write using CaptureSnapshot (returns snapshot object)
-	2. **Apply**: Write unwrapped value to original table
-	3. **Detect**: ChangeDetector.CheckForChanges(snapshot) compares new state against snapshot object
-	4. **Result**: Single source of truth for all change detection
-	
-	**Special Case**: Array appends (key == length + 1) fire directly
-	since they don't require complex diff logic.
-	
+
+	### Single Write Integration Point
+	Every proxy write (`proxy[key] = value`) resolves the live path of the
+	write (via `_GetLivePath` + the written key) and unwraps any proxy value,
+	then calls the handler registered via `SetWriteHandler`. The handler
+	(TableManager's `applyWrite`) owns validation, duplicate-reference checks,
+	array-append detection, batching, snapshotting, and change detection.
+
+	If no handler is registered, writes apply directly to the underlying
+	original table — this keeps ProxyManager usable standalone (see
+	`Tests/ProxyManager.spec.luau`).
+
 	### Proxy Implementation
 	Uses a weak table (PROXY_TO_ORIGINAL) to track proxies without polluting
 	their key space or interfering with metamethods.
-	
+
 	### Shared Metatable
 	All proxies share one metatable per TableManager instance for memory efficiency.
 	Metadata is stored in `_proxyMeta` and looked up dynamically.
-	
+
 	### Metamethods
 	- __index: Returns nested proxies for tables, raw values for scalars
-	- __newindex: Captures snapshot → applies change → delegates to ChangeDetector
+	- __newindex: Resolves the live write path and delegates to the write handler
 	- __eq: Allows proxy == proxy comparisons
 	- __iter: Enables `for k, v in proxy do` iteration
 	- __len: Returns array length
@@ -106,11 +110,6 @@ export type ProxyMetadata<T = { [any]: any }, S = string> = {
 	ArrayLength: number, -- Cached length for arrays
 }
 
-type ChangeDetector = {
-	CaptureSnapshot: <S>(self: ChangeDetector, value: any, path: PathArray<S>) -> (),
-	CheckForChanges: (self: ChangeDetector, value: any) -> (),
-}
-
 export type ProxyManager<T = { [any]: any }> = {
 	IsProxy: (self: ProxyManager<T>, t: any) -> boolean,
 	GetOriginal: <S>(self: ProxyManager<T>, t: Proxy<T, S>) -> ValueAtPath<T, S>,
@@ -125,27 +124,12 @@ export type ProxyManager<T = { [any]: any }> = {
 		parentOriginal: any?,
 		key: any?
 	) -> Proxy<T, S>,
-	SetChangeDetector: (self: ProxyManager<T>, changeDetector: ChangeDetector) -> (),
-	SetArrayInsertedCallback: <S>(
-		self: ProxyManager<T>,
-		callback: (path: PathArray<S>, index: number, newValue: any) -> ()
-	) -> (),
-	SetBatchDirectArraySetCallback: <S>(
-		self: ProxyManager<T>,
-		callback: (path: PathArray<S>, index: number) -> ()
-	) -> (),
-	--- Set the callback fired for every non-array, non-append write during a batch.
-	--- Receives the **parent table's path** (not including the written key) so the
-	--- caller can record which top-level branch was dirtied.
-	SetBatchScalarWrittenCallback: <S>(self: ProxyManager<T>, callback: (parentPath: PathArray<S>) -> ()) -> (),
-	SetValidateCallback: <S>(
-		self: ProxyManager<T>,
-		callback: (path: PathArray<S>, value: any) -> (boolean, string?)
-	) -> (),
-	SetDuplicateTableWriteCallback: <S1, S2>(
-		self: ProxyManager<T>,
-		callback: (writePath: PathArray<S1>, existingPath: PathArray<S2>, value: any) -> boolean
-	) -> (),
+	--- Sets the single write-interception handler. Every proxy write
+	--- (`proxy[key] = value`) resolves the live path of the write (including
+	--- `key`) and calls `handler(path, unwrappedValue)`. If no handler is set,
+	--- writes apply directly to the underlying original table (used by
+	--- standalone ProxyManager tests).
+	SetWriteHandler: <S>(self: ProxyManager<T>, handler: (path: PathArray<S>, value: any) -> ()) -> (),
 	ReparentProxy: <S>(self: ProxyManager<T>, proxy: Proxy<T, S>, newParentOriginal: any?, newKey: any?) -> (),
 	--- Update the Key metadata for all direct child proxies of `arrayOriginal` whose
 	--- numeric key is >= `fromIndex` by adding `delta`. Called by TableManager after
@@ -158,12 +142,7 @@ export type ProxyManager<T = { [any]: any }> = {
 	_originalToProxy: { [any]: Proxy<T, string> },
 	_proxiesByParent: { [any]: { [any]: true } }, -- parentOriginal → set of child proxies
 	_rootTable: T,
-	_changeDetector: ChangeDetector?,
-	_onArrayInserted: (<S>(path: PathArray<S>, index: number, newValue: any) -> ())?,
-	_onBatchDirectArraySet: (<S>(path: PathArray<S>, index: number) -> ())?,
-	_onBatchScalarWritten: (<S>(parentPath: PathArray<S>) -> ())?,
-	_onValidateWrite: (<S>(path: PathArray<S>, value: any) -> (boolean, string?))?,
-	_onDuplicateTableWrite: (<S1, S2>(writePath: PathArray<S1>, existingPath: PathArray<S2>, value: any) -> boolean)?,
+	_writeHandler: (<S>(path: PathArray<S>, value: any) -> ())?,
 	_metatableTemplate: { [any]: any },
 	_GetLivePath: <S>(self: ProxyManager<T>, proxy: Proxy<T, S>) -> PathArray<S>,
 }
@@ -171,8 +150,6 @@ export type ProxyManager<T = { [any]: any }> = {
 --------------------------------------------------------------------------------
 --// Util Functions //--
 --------------------------------------------------------------------------------
-
-const arePathsEqual = PathHelpers.ArePathsEqual
 
 -- Check if a value is a proxy by looking it up in the weak table.
 const function isProxy(t: any): boolean
@@ -218,17 +195,6 @@ const function classifyTable(t: { [any]: any }): (boolean, number)
 	return false, 0
 end
 
-const function getValueAtPath<T, S>(root: T & { [any]: any }, path: PathArray<S>): (any, boolean)
-	local current = root
-	for _, segment in path do
-		if type(current) ~= "table" then
-			return nil, false
-		end
-		current = current[segment]
-	end
-	return current, true
-end
-
 --------------------------------------------------------------------------------
 --// Module //--
 --------------------------------------------------------------------------------
@@ -250,12 +216,7 @@ function ProxyManager.new<T>(rootTable: T): ProxyManager<T>
 	self._originalToProxy = {}
 	self._proxiesByParent = {}
 	self._rootTable = rootTable
-	self._changeDetector = nil
-	self._onArrayInserted = nil
-	self._onBatchDirectArraySet = nil
-	self._onBatchScalarWritten = nil
-	self._onValidateWrite = nil
-	self._onDuplicateTableWrite = nil
+	self._writeHandler = nil
 
 	-- Create the metatable template copied into each proxy metatable.
 	self._metatableTemplate = {
@@ -285,89 +246,15 @@ function ProxyManager.new<T>(rootTable: T): ProxyManager<T>
 			const meta = self._proxyMeta[proxy]
 			assert(meta, "Proxy metadata not found - proxy may have been destroyed")
 
-			const originalTable = meta.Original
-			const parentPath = self:_GetLivePath(proxy)
-			const currentPath = table.clone(parentPath)
-			table.insert(currentPath, key)
 			const unwrappedValue = getOriginal(value)
 
-			-- Table duplicate checks happen before validation/mutation.
-			-- Orphaned proxies are intentionally treated as regular table assignments.
-			if type(unwrappedValue) == "table" and self._onDuplicateTableWrite then
-				const existingProxy = self._originalToProxy[unwrappedValue]
-				if existingProxy ~= nil then
-					const existingPath = self:_GetLivePath(existingProxy)
-					if not arePathsEqual(existingPath, currentPath) then
-						const existingMeta = self._proxyMeta[existingProxy]
-						local isOrphan = true
-						if existingMeta ~= nil then
-							const liveValue, hasPath = getValueAtPath(self._rootTable, existingPath)
-							isOrphan = not hasPath or liveValue ~= existingMeta.Original
-						end
-
-						if not isOrphan then
-							const shouldAllow = self._onDuplicateTableWrite(currentPath, existingPath, unwrappedValue)
-							if not shouldAllow then
-								return
-							end
-						end
-					end
-				end
-			end
-
-			-- Validate writes before any side effects (batch tracking, snapshots, or mutation).
-			if self._onValidateWrite then
-				const ok, err = self._onValidateWrite(currentPath, unwrappedValue)
-				if not ok then
-					if err then
-						error(err, 2)
-					end
-					return
-				end
-			end
-
-			-- Special case: Array append (key == length + 1)
-			if meta.IsArray and type(key) == "number" and key == meta.ArrayLength + 1 then
-				-- Apply
-				originalTable[key] = unwrappedValue
-				meta.ArrayLength = key
-
-				-- Fire array inserted callback directly
-				if self._onArrayInserted then
-					self._onArrayInserted(parentPath, key, unwrappedValue)
-				end
-				return
-			end
-
-			-- Non-append numeric assignment on an array: notify the batch recorder
-			-- so it can mark this array path as poisoned (forces Branch A at flush).
-			if meta.IsArray and type(key) == "number" and self._onBatchDirectArraySet then
-				self._onBatchDirectArraySet(parentPath, key)
-			end
-
-			-- Notify the batch system which parent branch was dirtied by this scalar write.
-			if self._onBatchScalarWritten then
-				self._onBatchScalarWritten(parentPath)
-			end
-
-			-- Standard change detection workflow:
-			-- 1. Capture snapshot BEFORE the change (returns snapshot object)
-			local snapshot = nil
-			if self._changeDetector then
-				snapshot = self._changeDetector:CaptureSnapshot(self._rootTable, currentPath)
-			end
-
-			-- 2. Apply the change
-			originalTable[key] = unwrappedValue
-
-			-- 3. Detect changes (ChangeDetector compares new state against snapshot)
-			if self._changeDetector and snapshot then
-				self._changeDetector:CheckForChanges(snapshot)
-			end
-
-			-- 4. Update metadata
-			if meta.IsArray then
-				meta.ArrayLength = #originalTable
+			if self._writeHandler then
+				const path = self:_GetLivePath(proxy)
+				table.insert(path, key)
+				self._writeHandler(path, unwrappedValue)
+			else
+				-- Standalone mode (no write handler registered): apply directly.
+				meta.Original[key] = unwrappedValue
 			end
 		end,
 
@@ -429,60 +316,11 @@ function ProxyManager.new<T>(rootTable: T): ProxyManager<T>
 end
 
 --[=[
-	Set the ChangeDetector instance to delegate change detection to.
+	Sets the single write-interception handler. See the `SetWriteHandler` type
+	declaration for the contract.
 ]=]
-function ProxyManager:SetChangeDetector(changeDetector: ChangeDetector)
-	self._changeDetector = changeDetector
-end
-
---[=[
-	Set the callback for array insertions (appends only).
-]=]
-function ProxyManager:SetArrayInsertedCallback(callback: (path: PathArray<any>, index: number, newValue: any) -> ())
-	self._onArrayInserted = callback
-end
-
---[=[
-	Set the callback fired when a non-append numeric index is directly assigned on an
-	array proxy (e.g. `proxy[2] = value` when the array already has that slot).
-
-	TableManager uses this to mark the array's batch log as poisoned, which forces
-	Branch A (LCS snapshot diff) at flush time instead of the op-log coalescer.
-]=]
-function ProxyManager:SetBatchDirectArraySetCallback(callback: (path: PathArray<any>, index: number) -> ())
-	self._onBatchDirectArraySet = callback
-end
-
---[=[
-	Set the callback fired for every non-array, non-append write through a proxy.
-	Receives the **parent table's path** (the path of the proxy that owns the key
-	that was written, i.e. NOT including the written key itself).
-
-	TableManager uses this during a batch to record which top-level branches were
-	dirtied so that the flush can diff only those branches instead of the whole tree.
-]=]
-function ProxyManager:SetBatchScalarWrittenCallback(callback: (parentPath: PathArray<any>) -> ())
-	self._onBatchScalarWritten = callback
-end
-
---[=[
-	Set the callback fired for every proxy write before mutation.
-	Returning `false` prevents the write. If an error message is returned it is raised.
-]=]
-function ProxyManager:SetValidateCallback(callback: (path: PathArray<any>, value: any) -> (boolean, string?))
-	self._onValidateWrite = callback
-end
-
---[=[
-	Set the callback fired when a write would introduce a duplicate table reference.
-	Return `true` to allow the write, `false` to suppress it.
-]=]
-function ProxyManager:SetDuplicateTableWriteCallback(callback: (
-	writePath: PathArray<any>,
-	existingPath: PathArray<any>,
-	value: any
-) -> boolean)
-	self._onDuplicateTableWrite = callback
+function ProxyManager:SetWriteHandler<S>(handler: (path: PathArray<S>, value: any) -> ())
+	self._writeHandler = handler :: any
 end
 
 --- Check if a value is a proxy.
@@ -661,10 +499,31 @@ function ProxyManager.Destroy(self: ProxyManager)
 	table.clear(self._originalToProxy)
 	table.clear(self._proxiesByParent)
 
-	self._changeDetector = nil
-	self._onArrayInserted = nil
-	self._onValidateWrite = nil
-	self._onDuplicateTableWrite = nil
+	self._writeHandler = nil
+end
+
+--------------------------------------------------------------------------------
+--// Instance-Free Statics //--
+--------------------------------------------------------------------------------
+
+--- Returns true if `t` is a proxy created by any ProxyManager.
+function ProxyManager.IsProxyValue(t: any): boolean
+	return isProxy(t)
+end
+
+--- Returns the original (unwrapped) table behind a proxy, or `t` unchanged if it isn't a proxy.
+function ProxyManager.Unwrap<T>(t: T | Proxy<T>): T
+	return getOriginal(t)
+end
+
+--[[
+	Classify table shape in one pass.
+	Returns whether the table is an array plus its array length when true.
+	A table is considered an array when every key is a positive integer and
+	the set of keys is exactly `{1, .., maxIndex}` (so `{}` is a length-0 array).
+]]
+function ProxyManager.ClassifyTable(t: { [any]: any }): (boolean, number)
+	return classifyTable(t)
 end
 
 return ProxyManager

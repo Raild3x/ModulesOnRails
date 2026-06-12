@@ -238,6 +238,7 @@ export type TM_Internal<T = { [any]: any }> = TableManager<T> & {
 	_schema: SchemaCheck?,
 	_onValidationFailed: (<S>(path: Path<S>, value: any, err: string) -> ())?,
 	_duplicateReferenceMode: DuplicateReferenceMode,
+	_isDuplicateMoveInProgress: boolean?,
 	_Destroyed: boolean?,
 	-- Batch state
 	_batchDepth: number,
@@ -490,6 +491,217 @@ const function validateWrite<T, S>(self: TM_Internal<T>, path: PathArray<S>, val
 end
 
 --[[
+	Fires `ArrayInserted` for an append (key == length + 1) write that was just
+	applied to the raw array at `path`. During a batch, logs the insert into the
+	recorder (capturing the pre-append slice for StartTracking) and marks the
+	branch dirty instead of firing immediately.
+]]
+const function onArrayAppended<T, S>(self: TM_Internal<T>, path: PathArray<S>, index: number, newValue: any)
+	if self._batchDepth > 0 then
+		const batch = self._batch
+		if batch then
+			const recorder = batch.Recorder
+			ensureBatchPathTracking(batch, path, function()
+				-- Build a pre-append shallow copy: original[1..index-1]
+				const original: { any } = self:Get(path)
+				const preBatch: { any } = table.create(index - 1)
+				for i = 1, index - 1 do
+					preBatch[i] = original[i]
+				end
+				recorder:StartTracking(path, preBatch)
+			end)
+			recorder:RecordInsert(path, index, newValue)
+		end
+		markBatchBranchDirty(batch, path)
+		return
+	end
+
+	const insertPath: { any } = table.clone(path :: any)
+	table.insert(insertPath, index)
+
+	const metadata = createSyntheticMetadata(self._originalData, insertPath, "added", index, newValue, nil)
+
+	-- Fire listeners at inserted element's path ONLY (we handle ancestors separately)
+	fireArrayOperation(self, "ArrayInserted", path, insertPath, {
+		Index = index,
+		NewValue = newValue,
+		Metadata = metadata,
+	})
+end
+
+--[[
+	Resolves the duplicate-table-reference policy (error/warn/allow/move/copy) for
+	a write of `value` (already known to exist elsewhere at `existingPath`) to
+	`writePath`. Returns true if the write should proceed.
+]]
+const function resolveDuplicateReferencePolicy<T, S1, S2>(
+	self: TM_Internal<T>,
+	writePath: PathArray<S1>,
+	existingPath: PathArray<S2>,
+	value: any
+): boolean
+	if self._duplicateReferenceMode == "allow" then
+		return true
+	end
+
+	const writePathStr = PathHelpers.PathToString(writePath)
+	const existingPathStr = PathHelpers.PathToString(existingPath)
+	const duplicateMessage =
+		`Duplicate table reference detected: existing at {existingPathStr}, attempted write to {writePathStr}`
+
+	if self._duplicateReferenceMode == "warn" then
+		warn(duplicateMessage)
+		return true
+	end
+
+	if self._duplicateReferenceMode == "move" then
+		if self._isDuplicateMoveInProgress then
+			return true
+		end
+
+		self._isDuplicateMoveInProgress = true
+		local ok, moveErr = pcall(function()
+			self:MoveTo(existingPath, writePath)
+		end)
+		self._isDuplicateMoveInProgress = false
+
+		if not ok then
+			error(`Failed to move duplicate table reference: {tostring(moveErr)}`, 2)
+		end
+
+		if self:Get(writePath) ~= value then
+			error(
+				`DuplicateReferenceMode 'move' is not fully implemented yet. Expected MoveTo to place the value at {writePathStr}`,
+				2
+			)
+		end
+
+		return false
+	end
+
+	if self._duplicateReferenceMode == "copy" then
+		error("DuplicateReferenceMode 'copy' is not implemented yet", 2)
+	end
+
+	error(duplicateMessage, 2)
+end
+
+--[[
+	Checks whether `value` (a table) already lives elsewhere in the tree (tracked
+	via the proxy graph). Returns true if the write should proceed. Orphaned
+	proxies (whose live path no longer resolves back to the same original table)
+	are treated as regular table assignments.
+]]
+const function checkDuplicateTableWrite<T, S>(self: TM_Internal<T>, writePath: PathArray<S>, value: any): boolean
+	const proxyManager = self._proxyManager
+	if proxyManager == nil then
+		return true
+	end
+
+	const existingProxy = proxyManager:GetProxyFromOriginal(value)
+	if existingProxy == nil then
+		return true
+	end
+
+	const existingPath = proxyManager:GetPath(existingProxy)
+	if existingPath == nil or PathHelpers.ArePathsEqual(existingPath, writePath) then
+		return true
+	end
+
+	const isOrphan = self:Get(existingPath, true) ~= value
+	if isOrphan then
+		return true
+	end
+
+	return resolveDuplicateReferencePolicy(self, writePath, existingPath, value)
+end
+
+--[[
+	The single proxy-free write core. `parsedPath` is the full path of the write
+	(including the final key); `value` must already be unwrapped
+	(`ProxyManagerModule.Unwrap`). Mirrors the order of the old proxy
+	`__newindex`: duplicate check -> validation -> array-append fast path ->
+	batch dirty-marking -> snapshot/write/diff.
+]]
+const function applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>, value: any)
+	const parentPath, key = PathHelpers.GetPathParentAndKey(parsedPath :: any)
+
+	-- Navigate to the raw parent table, mirroring Get()'s error convention: the
+	-- error names the segment whose lookup produced a non-table value.
+	local current: any = self._originalData
+	for _, segment in parentPath do
+		if type(current) ~= "table" then
+			error(`Path segment {segment} is not a table`)
+		end
+		current = current[segment]
+	end
+	if type(current) ~= "table" then
+		error(`Path segment {key} is not a table`)
+	end
+	const parentTable: { [any]: any } = current
+
+	-- Duplicate-reference checks happen before validation/mutation. Orphaned
+	-- proxies are intentionally treated as regular table assignments.
+	if type(value) == "table" and self._proxyManager ~= nil then
+		const shouldProceed = checkDuplicateTableWrite(self, parsedPath, value)
+		if not shouldProceed then
+			return
+		end
+	end
+
+	-- Validate writes before any side effects (batch tracking, snapshots, or mutation).
+	const ok, err = validateWrite(self, parsedPath, value)
+	if not ok then
+		if err then
+			error(err, 2)
+		end
+		return
+	end
+
+	-- Array-append fast path (key == length + 1): apply immediately and report
+	-- the insertion. Skips batch dirty-marking and snapshot/diff entirely.
+	const isArray, arrayLength = ProxyManagerModule.ClassifyTable(parentTable)
+	if isArray and type(key) == "number" and key == arrayLength + 1 then
+		parentTable[key] = value
+		onArrayAppended(self, parentPath, key, value)
+		return
+	end
+
+	if self._batchDepth > 0 then
+		const batch = self._batch
+
+		-- Non-append numeric assignment on an array: mark the array path as
+		-- poisoned (forces Branch A LCS diff at flush) instead of the op-log coalescer.
+		if isArray and type(key) == "number" and batch then
+			const recorder = batch.Recorder
+			ensureBatchPathTracking(batch, parentPath, function()
+				-- StartTracking with the post-mutation array; Branch A will use
+				-- _batchStartSnapshot for the true pre-batch state anyway.
+				const arrayCurrent: any = self:Get(parentPath)
+				if type(arrayCurrent) == "table" then
+					recorder:StartTracking(parentPath, arrayCurrent)
+				end
+			end)
+			recorder:MarkPoisoned(parentPath)
+		end
+
+		-- Track which top-level branch was dirtied by this scalar write, and
+		-- record the write location so the flush can tell whether an array
+		-- element's interior was mutated (forces Branch A; see Resume).
+		markBatchBranchDirty(batch, parentPath)
+		if batch then
+			table.insert(batch.ScalarWritePaths, table.clone(parentPath :: any))
+		end
+	end
+
+	-- Standard change detection workflow: capture a snapshot before the write,
+	-- apply it, then let ChangeDetector diff against the captured snapshot.
+	const snapshot = self._changeDetector:CaptureSnapshot(self._originalData, parsedPath)
+	parentTable[key] = value
+	self._changeDetector:CheckForChanges(snapshot)
+end
+
+--[[
 	Builds the `Emit` interface for a single array path, wiring the three
 	callbacks to fire `ArrayRemoved` / `ArrayInserted` / `ArraySet` signals,
 	exact-path listeners, and ancestor callbacks in the correct order.
@@ -733,135 +945,11 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 		end,
 	}
 
-	-- Wire up ProxyManager to ChangeDetector
-	self._proxyManager:SetChangeDetector(self._changeDetector)
-	if self._schema then
-		self._proxyManager:SetValidateCallback(function(path: PathArray, value: any): (boolean, string?)
-			return validateWrite(self :: any, path, value)
-		end)
-	end
-
-	-- Wire up array append callback
-	self._proxyManager:SetArrayInsertedCallback(function(path: PathArray, index: number, newValue: any)
-		-- During batch: log the insert and skip fires.
-		-- The element is already appended to the original table at this point, so we
-		-- reconstruct the pre-append array (original[1..index-1]) for StartTracking.
-		if self._batchDepth > 0 then
-			const batch = self._batch
-			if batch then
-				const recorder = batch.Recorder
-				ensureBatchPathTracking(batch, path, function()
-					-- Build a pre-append shallow copy: original[1..index-1]
-					const original: { any } = self:Get(path)
-					const preBatch: { any } = table.create(index - 1)
-					for i = 1, index - 1 do
-						preBatch[i] = original[i]
-					end
-					recorder:StartTracking(path, preBatch)
-				end)
-				recorder:RecordInsert(path, index, newValue)
-			end
-			markBatchBranchDirty(batch, path)
-			return
-		end
-
-		-- Create synthetic metadata for array append
-		const insertPath: { any } = table.clone(path :: any)
-		table.insert(insertPath, index)
-
-		const metadata = createSyntheticMetadata(self._originalData, insertPath, "added", index, newValue, nil)
-
-		-- Fire listeners at inserted element's path ONLY (we handle ancestors separately)
-		fireArrayOperation(self, "ArrayInserted", path, insertPath, {
-			Index = index,
-			NewValue = newValue,
-			Metadata = metadata,
-		})
+	-- Single write-integration point: every proxy write resolves its live path
+	-- and unwrapped value, then flows through the proxy-free write core.
+	self._proxyManager:SetWriteHandler(function(path: PathArray, value: any)
+		applyWrite(self, path, value)
 	end)
-
-	-- Wire up direct numeric-index write callback (for batch poisoning)
-	self._proxyManager:SetBatchDirectArraySetCallback(function(path: PathArray, _index: number)
-		if self._batchDepth > 0 then
-			const batch = self._batch
-			if batch then
-				const recorder = batch.Recorder
-				ensureBatchPathTracking(batch, path, function()
-					-- StartTracking with the post-mutation array; Branch A will use
-					-- _batchStartSnapshot for the true pre-batch state anyway.
-					const current: any = self:Get(path)
-					if type(current) == "table" then
-						recorder:StartTracking(path, current)
-					end
-				end)
-				recorder:MarkPoisoned(path)
-			end
-		end
-	end)
-
-	-- Track which top-level branches are dirtied by non-array scalar writes.
-	-- `parentPath` is the path of the proxy table that owns the written key.
-	-- The branch key is `parentPath[1]` (or "__root__" for root-level writes).
-	self._proxyManager:SetBatchScalarWrittenCallback(function(parentPath: PathArray)
-		if self._batchDepth > 0 then
-			const batch = self._batch
-			markBatchBranchDirty(batch, parentPath)
-			-- Record the write location so the flush can tell whether an array
-			-- element's interior was mutated (forces Branch A; see Resume).
-			if batch then
-				table.insert(batch.ScalarWritePaths, table.clone(parentPath))
-			end
-		end
-	end)
-
-	local isMoveInProgress = false
-	self._proxyManager:SetDuplicateTableWriteCallback(
-		function(writePath: PathArray, existingPath: PathArray, value: any): boolean
-			if self._duplicateReferenceMode == "allow" then
-				return true
-			end
-
-			const writePathStr = PathHelpers.PathToString(writePath)
-			const existingPathStr = PathHelpers.PathToString(existingPath)
-			const duplicateMessage =
-				`Duplicate table reference detected: existing at {existingPathStr}, attempted write to {writePathStr}`
-
-			if self._duplicateReferenceMode == "warn" then
-				warn(duplicateMessage)
-				return true
-			end
-
-			if self._duplicateReferenceMode == "move" then
-				if isMoveInProgress then
-					return true
-				end
-
-				isMoveInProgress = true
-				local ok, moveErr = pcall(function()
-					self:MoveTo(existingPath, writePath)
-				end)
-				isMoveInProgress = false
-
-				if not ok then
-					error(`Failed to move duplicate table reference: {tostring(moveErr)}`, 2)
-				end
-
-				if self:Get(writePath) ~= value then
-					error(
-						`DuplicateReferenceMode 'move' is not fully implemented yet. Expected MoveTo to place the value at {writePathStr}`,
-						2
-					)
-				end
-
-				return false
-			end
-
-			if self._duplicateReferenceMode == "copy" then
-				error("DuplicateReferenceMode 'copy' is not implemented yet", 2)
-			end
-
-			error(duplicateMessage, 2)
-		end
-	)
 
 	-- Create root proxy (no parent, no key)
 	self.Proxy = self._proxyManager:CreateProxy(self._originalData, nil, nil)
@@ -1149,7 +1237,6 @@ function TableManager.ArrayInsert<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 	const proxyManager = self._proxyManager
 	local parsedPath, proxy = resolveArrayPathAndProxy(self, pathOrProxy)
 
-	const meta = proxyManager:GetMetadata(proxy)
 	const array: { any }? = proxyManager:GetOriginal(proxy)
 	assert(type(array) == "table", "Target is not a table")
 
@@ -1161,7 +1248,7 @@ function TableManager.ArrayInsert<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 		pos, secondArg = ...
 		newValue = secondArg
 	else
-		pos = meta.ArrayLength + 1
+		pos = #array + 1
 		newValue = ...
 	end
 
@@ -1206,7 +1293,6 @@ function TableManager.ArrayInsert<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 		if self._batch then
 			self._batch.Recorder:RecordInsert(parsedPath, pos, unwrappedValue)
 		end
-		meta.ArrayLength = #array
 		return
 	end
 
@@ -1222,9 +1308,6 @@ function TableManager.ArrayInsert<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 		NewValue = unwrappedValue,
 		Metadata = metadata,
 	})
-
-	-- Update metadata
-	meta.ArrayLength = #array
 end
 TableManager.Insert = TableManager.ArrayInsert
 
@@ -1259,7 +1342,6 @@ function TableManager.ArrayRemove<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 
 	-- Batch: skip fires
 	if self._batchDepth > 0 then
-		meta.ArrayLength = #array
 		return oldValue
 	end
 
@@ -1275,9 +1357,6 @@ function TableManager.ArrayRemove<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 		OldValue = oldValue,
 		Metadata = metadata,
 	})
-
-	-- Update metadata
-	meta.ArrayLength = #array
 
 	return oldValue
 end
@@ -1350,7 +1429,6 @@ function TableManager.ArraySwapRemove<T, S>(self: TM_Internal<T>, pathOrProxy: P
 
 	-- Batch: skip immediate fires
 	if self._batchDepth > 0 then
-		meta.ArrayLength = #array
 		return oldValue
 	end
 
@@ -1386,7 +1464,6 @@ function TableManager.ArraySwapRemove<T, S>(self: TM_Internal<T>, pathOrProxy: P
 		Metadata = removeMetadata,
 	})
 
-	meta.ArrayLength = #array
 	return oldValue
 end
 TableManager.SwapRemove = TableManager.ArraySwapRemove
