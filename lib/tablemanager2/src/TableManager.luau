@@ -108,10 +108,11 @@ export type TableManagerConfig = {
 	OnValidationFailed: ((path: PathArray, value: any, err: string) -> ())?,
 	ListenersFireDeferred: boolean?,
 	DuplicateReferenceMode: DuplicateReferenceMode?, -- Experimental
+	EnableProxies: boolean?, -- Defaults to true. When false, `Proxy`/`GetProxy` are unavailable.
 }
 
 export type TableManager<T = { [any]: any }> = {
-	Proxy: Proxy<T, "">,
+	Proxy: Proxy<T, "">?,
 	Raw: T,
 
 	-- Signals (fire once per change)
@@ -231,7 +232,7 @@ export type TableManager<T = { [any]: any }> = {
 
 export type TM_Internal<T = { [any]: any }> = TableManager<T> & {
 	-- fields
-	_proxyManager: ProxyManagerModule.ProxyManager<T>,
+	_proxyManager: ProxyManagerModule.ProxyManager<T>?,
 	_listenerRegistry: ListenerRegistry,
 	_changeDetector: ChangeDetector,
 	_originalData: T,
@@ -256,28 +257,32 @@ const TableManager_MT = { __index = TableManager }
 TableManager.T = T
 
 const function resolvePathFromPathOrProxy<T, S>(self: TM_Internal<T>, pathOrProxy: Path<S> | Proxy<T, S>): PathArray<S>
-	if self._proxyManager:IsProxy(pathOrProxy) then
+	const proxyManager = self._proxyManager
+	if proxyManager == nil then
+		if ProxyManagerModule.IsProxyValue(pathOrProxy) then
+			error("GetProxy requires proxies (Config.EnableProxies = false for this TableManager)")
+		end
+		return PathHelpers.ParsePath(pathOrProxy :: Path<S>)
+	end
+	if proxyManager:IsProxy(pathOrProxy) then
 		const proxy = pathOrProxy :: Proxy<T, S>
-		const potentialPath = self._proxyManager:GetPath(proxy)
+		const potentialPath = proxyManager:GetPath(proxy)
 		assert(potentialPath, "Proxy does not have a path")
 		return potentialPath
 	end
 	return PathHelpers.ParsePath(pathOrProxy :: Path<S>)
 end
 
-const function resolveArrayPathAndProxy<T, S>(
-	self: TM_Internal<T>,
-	pathOrProxy: Path<S> | Proxy<T, S>
-): (PathArray<S>, Proxy<T, S>)
-	if self._proxyManager:IsProxy(pathOrProxy) then
-		const proxy = pathOrProxy :: Proxy<T, S>
-		const parsedPath = resolvePathFromPathOrProxy(self, proxy)
-		return parsedPath, proxy
-	end
-
-	const parsedPath = PathHelpers.ParsePath(pathOrProxy)
-	const proxy = self:GetProxy(parsedPath)
-	return parsedPath, proxy
+--[[
+	Resolves `pathOrProxy` to a parsed path and the raw array at that path
+	(proxy-free). Proxy arguments are still accepted (resolved to their live
+	path via the proxy graph).
+]]
+const function resolveArrayForWrite<T, S>(self: TM_Internal<T>, pathOrProxy: Path<S> | Proxy<T, S>): (PathArray<S>, { any })
+	const parsedPath = resolvePathFromPathOrProxy(self, pathOrProxy)
+	const array = self:Get(parsedPath)
+	assert(type(array) == "table", "Target is not a table")
+	return parsedPath, array :: { any }
 end
 
 const function getParentOriginalAtPath<T, S>(self: TM_Internal<T>, parentPath: PathArray<S>, opName: string): {}
@@ -730,10 +735,11 @@ const function makeEmit<T, S>(self: TM_Internal<T>, path: PathArray<S>)
 				Metadata = metadata,
 			})
 		end,
-		set = function(index: number, newValue: any, oldValue: any)
+		set = function(index: number, newValue: any, oldValue: any, move: MoveMetadata?)
 			const setPath = table.clone(path)
 			table.insert(setPath, index)
 			const metadata = createSyntheticMetadata(self._originalData, setPath, "changed", index, newValue, oldValue)
+			metadata.Move = move
 			fireArrayOperation(self, "ArraySet", path, setPath, {
 				Index = index,
 				NewValue = newValue,
@@ -806,8 +812,18 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	self._batchDepth = 0
 	self._batch = nil
 
+	const enableProxies = resolvedConfig.EnableProxies ~= false
+	if not enableProxies and resolvedConfig.DuplicateReferenceMode ~= nil then
+		warn("DuplicateReferenceMode has no effect when Config.EnableProxies = false")
+	end
+
 	-- Initialize subsystems
-	self._proxyManager = ProxyManagerModule.new(self._originalData)
+	if enableProxies then
+		self._proxyManager = ProxyManagerModule.new(self._originalData)
+	else
+		self._proxyManager = nil
+		self.Proxy = nil :: any
+	end
 	self._listenerRegistry = ListenerRegistryModule.new {
 		DebugMode = false,
 		FireDeferred = resolvedConfig.ListenersFireDeferred == true,
@@ -945,14 +961,16 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 		end,
 	}
 
-	-- Single write-integration point: every proxy write resolves its live path
-	-- and unwrapped value, then flows through the proxy-free write core.
-	self._proxyManager:SetWriteHandler(function(path: PathArray, value: any)
-		applyWrite(self, path, value)
-	end)
+	if self._proxyManager then
+		-- Single write-integration point: every proxy write resolves its live path
+		-- and unwrapped value, then flows through the proxy-free write core.
+		self._proxyManager:SetWriteHandler(function(path: PathArray, value: any)
+			applyWrite(self, path, value)
+		end)
 
-	-- Create root proxy (no parent, no key)
-	self.Proxy = self._proxyManager:CreateProxy(self._originalData, nil, nil)
+		-- Create root proxy (no parent, no key)
+		self.Proxy = self._proxyManager:CreateProxy(self._originalData, nil, nil)
+	end
 
 	return self :: any
 end
@@ -1160,11 +1178,15 @@ function TableManager.GetProxy<T, S>(
 	path: Path<S>,
 	suppressNilPartialPaths: boolean?
 ): (Proxy<T, S> | ValueAtPath<T, S>)?
+	const proxyManager = self._proxyManager
+	if proxyManager == nil then
+		error("GetProxy requires proxies (Config.EnableProxies = false for this TableManager)")
+	end
 	const parsedPath = PathHelpers.ParsePath(path)
 	local current = self.Proxy
 	local previousKey: any = nil
 	for _, key in parsedPath do
-		if not self._proxyManager:IsProxy(current) then
+		if not proxyManager:IsProxy(current) then
 			if suppressNilPartialPaths then
 				return nil
 			else
@@ -1240,11 +1262,7 @@ end
 	Insert value(s) into an array at a specific position or at the end.
 ]=]
 function TableManager.ArrayInsert<T, S>(self: TM_Internal<T>, pathOrProxy: Path<S> | Proxy<T, S>, ...: any): ()
-	const proxyManager = self._proxyManager
-	local parsedPath, proxy = resolveArrayPathAndProxy(self, pathOrProxy)
-
-	const array: { any }? = proxyManager:GetOriginal(proxy)
-	assert(type(array) == "table", "Target is not a table")
+	local parsedPath, array = resolveArrayForWrite(self, pathOrProxy)
 
 	-- Determine if a position was provided or default to appending.
 	local pos: number
@@ -1258,8 +1276,7 @@ function TableManager.ArrayInsert<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 		newValue = ...
 	end
 
-	-- Get original table
-	const unwrappedValue = proxyManager:GetOriginal(newValue)
+	const unwrappedValue = ProxyManagerModule.Unwrap(newValue)
 
 	-- Validate against the schema's element check for this array, if configured.
 	if self._schema then
@@ -1292,7 +1309,9 @@ function TableManager.ArrayInsert<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 	-- Insert the value (handles shifting when inserting into the middle).
 	table.insert(array, pos, unwrappedValue)
 	-- Update Key metadata for all proxies that were shifted right by this insert.
-	proxyManager:ShiftKeys(array, pos, 1)
+	if self._proxyManager then
+		self._proxyManager:ShiftKeys(array, pos, 1)
+	end
 
 	-- Batch: log the insert and skip fires
 	if self._batchDepth > 0 then
@@ -1302,18 +1321,8 @@ function TableManager.ArrayInsert<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 		return
 	end
 
-	-- Create synthetic metadata
-	const insertPath: { any } = table.clone(parsedPath :: any)
-	table.insert(insertPath, pos)
-
-	const metadata = createSyntheticMetadata(self._originalData, insertPath, "added", pos, unwrappedValue, nil)
-
 	-- Fire element-level and array-level listeners, ancestor callbacks, and signal.
-	fireArrayOperation(self, "ArrayInserted", parsedPath, insertPath, {
-		Index = pos,
-		NewValue = unwrappedValue,
-		Metadata = metadata,
-	})
+	makeEmit(self, parsedPath).inserted(pos, unwrappedValue)
 end
 TableManager.Insert = TableManager.ArrayInsert
 
@@ -1321,12 +1330,7 @@ TableManager.Insert = TableManager.ArrayInsert
 	Remove an element from an array at a specific index.
 ]=]
 function TableManager.ArrayRemove<T, S>(self: TM_Internal<T>, pathOrProxy: Path<S> | Proxy<T, S>, index: number): any
-	const proxyManager = self._proxyManager
-	local parsedPath, proxy = resolveArrayPathAndProxy(self, pathOrProxy)
-
-	const meta = proxyManager:GetMetadata(proxy)
-	const array: { any }? = proxyManager:GetOriginal(meta.Original)
-	assert(type(array) == "table", "Target is not a table")
+	local parsedPath, array = resolveArrayForWrite(self, pathOrProxy)
 
 	-- Batch: start tracking and log the removal BEFORE mutating, so that
 	-- _computeLiveIds in RecordRemove sees the correct pre-removal id sequence.
@@ -1344,25 +1348,17 @@ function TableManager.ArrayRemove<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 	-- Shift proxies after the removed slot left by 1. Pass index+1 as fromIndex
 	-- so the removed item's own proxy (if held) keeps its original key rather than
 	-- being shifted to key=0.
-	proxyManager:ShiftKeys(array, index + 1, -1)
+	if self._proxyManager then
+		self._proxyManager:ShiftKeys(array, index + 1, -1)
+	end
 
 	-- Batch: skip fires
 	if self._batchDepth > 0 then
 		return oldValue
 	end
 
-	-- Create synthetic metadata
-	const removePath: { any } = table.clone(parsedPath :: any)
-	table.insert(removePath, index)
-
-	local metadata = createSyntheticMetadata(self._originalData, removePath, "removed", index, nil, oldValue)
-
 	-- Fire listeners EXACTLY at remove path (we handle ancestors separately)
-	fireArrayOperation(self, "ArrayRemoved", parsedPath, removePath, {
-		Index = index,
-		OldValue = oldValue,
-		Metadata = metadata,
-	})
+	makeEmit(self, parsedPath).removed(index, oldValue)
 
 	return oldValue
 end
@@ -1373,19 +1369,14 @@ TableManager.Remove = TableManager.ArrayRemove
 	Returns the index it was removed from, or nil if not found.
 ]=]
 function TableManager.ArrayRemoveFirstValue<T, S>(self: TM_Internal<T>, pathOrProxy: Path<S>, valueToFind: any): number?
-	const proxyManager = self._proxyManager
-	local _parsedPath, proxy = resolveArrayPathAndProxy(self, pathOrProxy)
-
-	const meta = proxyManager:GetMetadata(proxy)
-	const array: { any }? = proxyManager:GetOriginal(meta.Original)
-	assert(type(array) == "table", "Target is not a table")
+	local parsedPath, array = resolveArrayForWrite(self, pathOrProxy)
 
 	const index = table.find(array, valueToFind)
 	if index == nil then
 		return nil
 	end
 
-	self:ArrayRemove(pathOrProxy, index)
+	self:ArrayRemove(parsedPath, index)
 	return index
 end
 TableManager.RemoveFirstValue = TableManager.ArrayRemoveFirstValue
@@ -1395,12 +1386,7 @@ TableManager.RemoveFirstValue = TableManager.ArrayRemoveFirstValue
 	Order is not preserved.
 ]=]
 function TableManager.ArraySwapRemove<T, S>(self: TM_Internal<T>, pathOrProxy: Path<S> | Proxy<T, S>, index: number): any
-	const proxyManager = self._proxyManager
-	local parsedPath, proxy = resolveArrayPathAndProxy(self, pathOrProxy)
-
-	const meta: ProxyManagerModule.ProxyMetadata = proxyManager:GetMetadata(proxy)
-	const array = proxyManager:GetOriginal(meta.Original)
-	assert(type(array) == "table", "Target is not a table")
+	local parsedPath, array = resolveArrayForWrite(self, pathOrProxy)
 
 	const lastIndex = #array
 	if index < 1 or index > lastIndex then
@@ -1442,33 +1428,15 @@ function TableManager.ArraySwapRemove<T, S>(self: TM_Internal<T>, pathOrProxy: P
 		then { moveId = `swapremove_{index}_{lastIndex}`, fromIndex = lastIndex, toIndex = index }
 		else nil
 
+	const emit = makeEmit(self, parsedPath)
+
 	-- 1. Emit ArraySet for the backfill: array[index] = movedValue (no-op if index == lastIndex)
 	if index ~= lastIndex then
-		const setPath: { any } = table.clone(parsedPath :: any)
-		table.insert(setPath, index)
-
-		const setMetadata = createSyntheticMetadata(self._originalData, setPath, "changed", index, movedValue, oldValue)
-		setMetadata.Move = moveInfo
-		fireArrayOperation(self, "ArraySet", parsedPath, setPath, {
-			Index = index,
-			NewValue = movedValue,
-			OldValue = oldValue,
-			Metadata = setMetadata,
-		})
+		emit.set(index, movedValue, oldValue, moveInfo)
 	end
 
 	-- 2. Emit ArrayRemoved for the shrink: array[lastIndex] = nil (the actual removal)
-	const removePath: { any } = table.clone(parsedPath :: any)
-	table.insert(removePath, lastIndex)
-
-	const removeMetadata =
-		createSyntheticMetadata(self._originalData, removePath, "removed", lastIndex, nil, movedValue)
-	removeMetadata.Move = moveInfo
-	fireArrayOperation(self, "ArrayRemoved", parsedPath, removePath, {
-		Index = lastIndex,
-		OldValue = movedValue,
-		Metadata = removeMetadata,
-	})
+	emit.removed(lastIndex, movedValue, moveInfo)
 
 	return oldValue
 end
@@ -1483,19 +1451,14 @@ function TableManager.ArraySwapRemoveFirstValue<T, S>(
 	pathOrProxy: Path<S> | Proxy<T, S>,
 	valueToFind: any
 ): number?
-	const proxyManager = self._proxyManager
-	local _parsedPath, proxy = resolveArrayPathAndProxy(self, pathOrProxy)
-
-	const meta = proxyManager:GetMetadata(proxy)
-	const array: { any }? = proxyManager:GetOriginal(meta.Original)
-	assert(type(array) == "table", "Target is not a table")
+	local parsedPath, array = resolveArrayForWrite(self, pathOrProxy)
 
 	const index = table.find(array, valueToFind)
 	if index == nil then
 		return nil
 	end
 
-	self:ArraySwapRemove(pathOrProxy, index)
+	self:ArraySwapRemove(parsedPath, index)
 	return index
 end
 TableManager.SwapRemoveFirstValue = TableManager.ArraySwapRemoveFirstValue
@@ -1836,7 +1799,7 @@ function TableManager.MoveTo<T, S1, S2>(
 	const targetParentPath, targetKey = PathHelpers.GetPathParentAndKey(targetPath)
 	const targetParentOriginal = getParentOriginalAtPath(self, targetParentPath, "MoveTo")
 
-	const existingProxy = self._proxyManager:GetProxyFromOriginal(sourceValue)
+	const existingProxy = if self._proxyManager then self._proxyManager:GetProxyFromOriginal(sourceValue) else nil
 	const rollback = reparentWithRollback(self, existingProxy, targetParentOriginal, targetKey)
 
 	const ok, moveErr = pcall(function()
@@ -1906,8 +1869,9 @@ function TableManager.Swap<T, S1, S2>(self: TM_Internal<T>, a: Path<S1> | Proxy<
 	const valueA = self:Get(pathA)
 	const valueB = self:Get(pathB)
 
-	const proxyA = if type(valueA) == "table" then self._proxyManager:GetProxyFromOriginal(valueA) else nil
-	const proxyB = if type(valueB) == "table" then self._proxyManager:GetProxyFromOriginal(valueB) else nil
+	const proxyManager = self._proxyManager
+	const proxyA = if proxyManager and type(valueA) == "table" then proxyManager:GetProxyFromOriginal(valueA) else nil
+	const proxyB = if proxyManager and type(valueB) == "table" then proxyManager:GetProxyFromOriginal(valueB) else nil
 	const rollbackA = reparentWithRollback(self, proxyA, parentOriginalB, keyB)
 	const rollbackB = reparentWithRollback(self, proxyB, parentOriginalA, keyA)
 
@@ -2003,7 +1967,9 @@ function TableManager.Destroy<T>(self: TM_Internal<T>)
 	end
 	self._Destroyed = true
 	self._listenerRegistry:Destroy()
-	self._proxyManager:Destroy()
+	if self._proxyManager then
+		self._proxyManager:Destroy()
+	end
 
 	-- Disconnect all signals
 	self.ValueChanged:Destroy()
