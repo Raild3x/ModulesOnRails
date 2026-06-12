@@ -1,7 +1,7 @@
 # ModulesOnRails Copilot Instructions
 
 ## Goal
-This repository contains multiple Roblox Wally modules. Favor consistency inside the package you are editing over consistency with the rest of the repository.
+This repository contains multiple Roblox Wally modules. Favor consistency inside the package you are editing over consistency with the rest of the repository. We use Luau, not Lua.
 
 ## Priority Order
 1. Follow the local style of the current package first.
@@ -33,8 +33,8 @@ Publishing will generate an `init.luau` re-export automatically. Non-pure-Luau p
 - Call those methods with colon syntax.
 - Keep existing comments and debug logic unless removal is explicitly requested or the content is now outdated.
 - Methods/functions that yield or could potentially yield should be either suffixed with `Async` or return as a Promise to prevent unexpected behavior.
-- Avoid magic numbers. That is, numbers with no obvious underlying meaning. You can attribute meaning to a number by assigning it to a variable or constant with a descriptive name, or by writing a comment explaining what the number's purpose is.
-- Packages should always have relative paths for their requires. Never require another module with an absolute path.
+- Avoid magic numbers. That is, numbers or valueswith no obvious underlying meaning. You can attribute meaning to a number by assigning it to a variable or constant with a descriptive name, or by writing a comment explaining what the number's purpose is.
+- Packages should always have relative paths for their requires. Never require another module with an absolute path. Prefer string requires.
 - Avoid forward declaration whenever possible.
 
 ## Documentation Style
