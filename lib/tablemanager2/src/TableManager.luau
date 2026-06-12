@@ -1191,15 +1191,17 @@ function TableManager.Set<T, S>(
 		error("Cannot set root path")
 	end
 
-	-- Only build intermediate tables when setting non-nil values; removing (nil) doesn't need them
-	const shouldBuild = buildTablesDynamically and value ~= nil
+	const unwrappedValue = ProxyManagerModule.Unwrap(value)
 
-	local parent = self.Proxy
+	-- Only build intermediate tables when setting non-nil values; removing (nil) doesn't need them
+	const shouldBuild = buildTablesDynamically and unwrappedValue ~= nil
+
+	local parent: any = self._originalData
 	for i = 1, #parsedPath - 1 do
 		const nextValue = parent[parsedPath[i]]
-		if nextValue == nil or not self._proxyManager:IsProxy(nextValue) then
+		if type(nextValue) ~= "table" then
 			if not shouldBuild then
-				if value == nil then
+				if unwrappedValue == nil then
 					-- Removing from a path that doesn't exist (a segment is missing
 					-- or holds a non-table); silently succeed (nothing to remove).
 					-- Keeps replication consumers safe when a redundant child
@@ -1209,10 +1211,9 @@ function TableManager.Set<T, S>(
 				error(`Path segment {parsedPath[i]} is not a table`)
 			end
 			-- Build the remaining segments as ONE plain subtree with the value at
-			-- the leaf, then assign it through the proxy in a single write so the
-			-- whole creation is captured by one change-detection pass. Assigning
-			-- level-by-level would re-point `parent` at a raw (unproxied) table,
-			-- so the deeper writes would bypass change detection and never emit.
+			-- the leaf, then apply it as a single write so the whole creation is
+			-- captured by one change-detection pass. Writing level-by-level would
+			-- otherwise produce one diff per intermediate table.
 			const subtree: { [any]: any } = {}
 			local cursor = subtree
 			for j = i + 1, #parsedPath - 1 do
@@ -1220,14 +1221,19 @@ function TableManager.Set<T, S>(
 				cursor[parsedPath[j]] = nested
 				cursor = nested
 			end
-			cursor[parsedPath[#parsedPath]] = value
-			parent[parsedPath[i]] = subtree
+			cursor[parsedPath[#parsedPath]] = unwrappedValue
+
+			const subtreePath: PathArray = table.create(i)
+			for j = 1, i do
+				subtreePath[j] = parsedPath[j]
+			end
+			applyWrite(self, subtreePath, subtree)
 			return
 		end
 		parent = nextValue
 	end
 
-	parent[parsedPath[#parsedPath]] = value
+	applyWrite(self, parsedPath, unwrappedValue)
 end
 
 --[=[
