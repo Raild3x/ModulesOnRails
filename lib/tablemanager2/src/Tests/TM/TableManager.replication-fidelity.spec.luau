@@ -726,7 +726,7 @@ return function(t: tiniest)
 					harness:Destroy()
 				end)
 
-				test("poisoned batch (direct index write) routes through LCS and converges", function()
+				test("direct index write in a batch routes through LCS and converges", function()
 					local harness = ReplicationHarness.new({ items = { "a", "b", "c" } }, feedMode)
 					harness:Connect()
 
@@ -741,9 +741,9 @@ return function(t: tiniest)
 				end)
 
 				test("whole array replaced inside a batch then mutated", function()
-					-- A mid-batch reference replacement forces Branch A (pre-batch
-					-- vs current LCS), so the {a,b}->{x,y} transition is emitted in
-					-- full (formerly defect #5: only the trailing insert emitted).
+					-- A mid-batch reference replacement is captured by the pre-batch
+					-- snapshot, so the {a,b}->{x,y} transition is emitted in full via
+					-- LCS (formerly defect #5: only the trailing insert emitted).
 					local harness = ReplicationHarness.new({ items = { "a", "b" } }, feedMode)
 					harness:Connect()
 
@@ -780,25 +780,12 @@ return function(t: tiniest)
 					end)
 
 					expect(harness:IsConverged()).is_true()
-					if feedMode == "signals" then
-						-- ArrayMoved alone is not sufficient for replication; the
-						-- harness ignores it. Convergence above proves the paired
-						-- ArrayRemoved/ArrayInserted carried the state. Sanity-check
-						-- the diagnostic fired exactly once for the coalesced move.
-						local movedCount = 0
-						for _, entry in (harness :: any)._opLog do
-							if entry.Signal == "ArrayMoved" then
-								movedCount += 1
-							end
-						end
-						expect(movedCount).is(1)
-					end
 					harness:Destroy()
 				end)
 
 				test("ArraySwapRemove inside a batch", function()
-					-- Recorded as Set@index then Remove@lastIndex, mirroring the
-					-- actual mutation and the non-batched emission order.
+					-- LCS sees Set@index then Remove@lastIndex, mirroring the actual
+					-- mutation and the non-batched emission order.
 					local harness = ReplicationHarness.new({ items = { "a", "b", "c", "d" } }, feedMode)
 					harness:Connect()
 
@@ -843,9 +830,9 @@ return function(t: tiniest)
 				end)
 
 				test("element field mutation plus a shift of the same array in one batch", function()
-					-- An in-place element interior write forces Branch A, which
-					-- re-emits the changed element as a whole-value op at its
-					-- post-shift index; the non-array flush is masked out.
+					-- An in-place element interior write is captured by the pre-batch
+					-- snapshot, so LCS re-emits the changed element as a whole-value
+					-- op at its post-shift index; the non-array flush is masked out.
 					local harness = ReplicationHarness.new({ items = { { hp = 1 } } }, feedMode)
 					harness:Connect()
 

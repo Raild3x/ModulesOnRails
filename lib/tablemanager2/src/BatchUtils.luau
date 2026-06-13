@@ -10,23 +10,15 @@
 
 --// Imports //--
 const Diff = require("./Diff")
-const ArrayBatchRecorder = require("./ArrayBatchRecorder")
 const ChangeDetector = require("./ChangeDetector")
 
 --// Types //--
 type PathArray = { any }
-type ArrayBatchRecorder = ArrayBatchRecorder.ArrayBatchRecorder
 
 export type BatchState = {
-	Recorder: ArrayBatchRecorder,
 	StartSnapshot: ChangeDetector.Snapshot,
 	TrackedPaths: { [string]: PathArray },
 	DirtyBranches: { [any]: boolean },
-	-- Parent paths of every non-array scalar/table write during the batch. Used at
-	-- flush time to detect in-place mutations of array ELEMENTS (a write whose
-	-- parent is strictly under a tracked array path), which Branch B coalescing
-	-- cannot represent and which therefore force Branch A.
-	ScalarWritePaths: { PathArray },
 	-- Table values detached during the batch (overwritten/removed). Proxy-graph
 	-- pruning is deferred to the end of Resume so values re-homed later in the
 	-- same batch (e.g. by Swap) are spared by PruneOriginal's liveness guard.
@@ -49,7 +41,6 @@ function BatchUtils.CreateSyntheticSnapshot<T>(rootTable: T, path: { any }, valu
 end
 
 -- Serializes a path to a string key for batch tracking.
--- Must match the serialization used by ArrayBatchRecorder.
 function BatchUtils.SerializeBatchPath(path: { any }): string
 	if #path == 0 then
 		return "__root__"
@@ -75,8 +66,9 @@ function BatchUtils.GetSnapshotValue(snapshot: ChangeDetector.Snapshot, path: { 
 end
 
 -- Like GetSnapshotValue but returns the ORIGINAL table reference captured at
--- `path` pre-batch (Diff.Snapshot.ref), not the frozen copy. Used to detect
--- whether a tracked array was reference-replaced during the batch.
+-- `path` pre-batch (Diff.Snapshot.ref), not the frozen copy. Used by
+-- pruneArraysCreatedDuringBatch to detect arrays created during the batch
+-- (no pre-batch ref).
 function BatchUtils.GetSnapshotRef(snapshot: ChangeDetector.Snapshot, path: { any }): any?
 	local snap: any = snapshot.Data
 	for _, key in path do
@@ -100,15 +92,14 @@ function BatchUtils.MarkBatchBranchDirty(batch: BatchState?, path: { any })
 	end
 end
 
--- Ensures a path is being tracked in the batch, calling startTracking callback if needed.
-function BatchUtils.EnsureBatchPathTracking(batch: BatchState, path: { any }, startTracking: () -> ())
+-- Ensures a path is being tracked in the batch for the flush's array diff.
+function BatchUtils.EnsureBatchPathTracking(batch: BatchState, path: { any })
 	local pathKey = BatchUtils.SerializeBatchPath(path)
 	if batch.TrackedPaths[pathKey] then
 		return
 	end
 
 	batch.TrackedPaths[pathKey] = table.clone(path)
-	startTracking()
 end
 
 return BatchUtils

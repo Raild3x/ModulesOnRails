@@ -71,7 +71,6 @@ const ProxyManagerModule = require("./ProxyManager")
 const ListenerRegistryModule = require("./ListenerRegistry")
 const ChangeDetectorModule = require("./ChangeDetector")
 const SchemaNavigatorModule = require("./SchemaNavigator")
-const ArrayBatchRecorderModule = require("./ArrayBatchRecorder")
 const ArrayDiffModule = require("./ArrayDiff")
 const Diff = require("./Diff")
 
@@ -93,7 +92,6 @@ type ChangeMetadata = ChangeDetectorModule.ChangeMetadata
 type ListenerOptions = ListenerRegistryModule.ListenerOptions
 type Connection = ListenerRegistryModule.Connection
 type Signal<Fn, Args...> = Signal.Signal<Fn, Args...>
-type ArrayBatchRecorder = ArrayBatchRecorderModule.ArrayBatchRecorder
 type MoveMetadata = ArrayDiffModule.MoveMetadata
 type SchemaCheck = SchemaNavigatorModule.Check
 type BatchState = BatchUtilsModule.BatchState
@@ -123,15 +121,6 @@ export type TableManager<T = { [any]: any }> = {
 	ArrayInserted: Signal<(path: PathArray, index: number, newValue: any) -> (), PathArray, number, any>,
 	ArrayRemoved: Signal<(path: PathArray, index: number, oldValue: any) -> (), PathArray, number, any>,
 	ArraySet: Signal<(path: PathArray, index: number, newValue: any, oldValue: any) -> (), PathArray, number, any, any>,
-	-- Fires once per detected move (Branch B array coalescing only) with the
-	-- move's final from/to indices and the moved value.
-	ArrayMoved: Signal<
-		(path: PathArray, fromIndex: number, toIndex: number, value: any) -> (),
-		PathArray,
-		number,
-		number,
-		any
-	>,
 
 	-- Listener registration (fire for ancestors/descendants) --
 
@@ -199,16 +188,6 @@ export type TableManager<T = { [any]: any }> = {
 		callback: (index: number, newValue: any, oldValue: any, metadata: ChangeMetadata) -> (),
 		options: ListenerOptions?
 	) -> Connection,
-	--- Fires once per detected move (Branch B array coalescing only). Does not
-	--- fire for moves resolved via Branch A (LCS snapshot diff, e.g. after a
-	--- direct index assignment poisons the batch's op log).
-	OnArrayMove: <S>(
-		self: TableManager<T>,
-		path: Path<S>,
-		callback: (fromIndex: number, toIndex: number, value: any, metadata: ChangeMetadata) -> (),
-		options: ListenerOptions?
-	) -> Connection,
-
 	-- Helper methods
 	Get: <S>(self: TableManager<T>, path: Path<S>, suppressNilPartialPaths: boolean?) -> ValueAtPath<T, S>,
 	GetProxy: <S>(self: TableManager<T>, path: Path<S>, suppressNilPartialPaths: boolean?) -> Proxy<T, S>,
@@ -387,39 +366,39 @@ const function fireAncestorValueChangedNotifications<T, S>(
 	metadata: ChangeMetadata,
 	includeKeyChanged: boolean?
 )
-	const shouldIncludeKeyChanged = if includeKeyChanged == nil then true else includeKeyChanged
+	const ancestorMetadata: ChangeMetadata = {
+		Diff = nil,
+		OriginPath = metadata.OriginPath,
+		OriginDiff = metadata.OriginDiff,
+		Snapshot = metadata.Snapshot,
+		-- Preserve array-op shift semantics for root/ancestor diff consumers.
+		ArrayOp = metadata.ArrayOp,
+	}
 
-	for i = #basePath, 0, -1 do
-		const ancestorPath = {}
-		for j = 1, i do
-			table.insert(ancestorPath, basePath[j])
-		end
+	const keyChangedMode = if includeKeyChanged == false then "none" else "child"
 
-		const ancestorMetadata: ChangeMetadata = {
-			Diff = nil,
-			OriginPath = metadata.OriginPath,
-			OriginDiff = metadata.OriginDiff,
-			Snapshot = metadata.Snapshot,
-			-- Preserve array-op shift semantics for root/ancestor diff consumers.
-			ArrayOp = metadata.ArrayOp,
-		}
-
-		manager._listenerRegistry:FireListenersExact("ValueChanged", ancestorPath, {
-			NewValue = nil,
-			OldValue = nil,
-			Metadata = ancestorMetadata,
-		})
-
-		if shouldIncludeKeyChanged and i < #basePath then
-			const changedKey = basePath[i + 1]
-			manager._listenerRegistry:FireListenersExact("KeyChanged", ancestorPath, {
-				Key = changedKey,
-				NewValue = nil,
-				OldValue = nil,
-				Metadata = ancestorMetadata,
+	ChangeDetectorModule.EmitAncestorNotifications(
+		basePath :: { any },
+		#basePath,
+		ancestorMetadata,
+		nil,
+		keyChangedMode,
+		function(path, key, newValue, oldValue, m)
+			manager._listenerRegistry:FireListenersExact("KeyChanged", path, {
+				Key = key,
+				NewValue = newValue,
+				OldValue = oldValue,
+				Metadata = m,
+			})
+		end,
+		function(path, newValue, oldValue, m)
+			manager._listenerRegistry:FireListenersExact("ValueChanged", path, {
+				NewValue = newValue,
+				OldValue = oldValue,
+				Metadata = m,
 			})
 		end
-	end
+	)
 end
 
 const function fireArrayOperation<T, S1, S2>(
@@ -449,33 +428,6 @@ const function fireArrayOperation<T, S1, S2>(
 	end
 end
 
---[=[
-	Fires `ArrayMoved` for a detected move (Branch B coalescing only). Unlike
-	`fireArrayOperation`, this does NOT fire ancestor `ValueChanged`
-	notifications — the corresponding `ArrayRemoved`/`ArrayInserted` for the
-	same op already do that.
-]=]
-const function fireArrayMoved<T, S>(
-	manager: TM_Internal<T>,
-	basePath: PathArray<S>,
-	fromIndex: number,
-	toIndex: number,
-	value: any,
-	metadata: ChangeMetadata
-)
-	const fromPath: { any } = table.clone(basePath :: any)
-	table.insert(fromPath, fromIndex)
-	const payload: ListenerRegistryModule.EventData = {
-		FromIndex = fromIndex,
-		ToIndex = toIndex,
-		NewValue = value,
-		Metadata = metadata,
-	}
-	manager._listenerRegistry:FireListenersExact("ArrayMoved", fromPath, payload)
-	manager._listenerRegistry:FireListenersExact("ArrayMoved", basePath, payload)
-	manager.ArrayMoved:Fire(basePath, fromIndex, toIndex, value)
-end
-
 const function validateWrite<T, S>(self: TM_Internal<T>, path: PathArray<S>, value: ValueAtPath<T, S>): (boolean, string?)
 	if not self._schema then
 		return true :: any
@@ -497,25 +449,15 @@ end
 
 --[[
 	Fires `ArrayInserted` for an append (key == length + 1) write that was just
-	applied to the raw array at `path`. During a batch, logs the insert into the
-	recorder (capturing the pre-append slice for StartTracking) and marks the
-	branch dirty instead of firing immediately.
+	applied to the raw array at `path`. During a batch, marks the array path as
+	tracked and the branch dirty instead of firing immediately; the flush diffs
+	the pre-batch snapshot against the current array via LCS.
 ]]
 const function onArrayAppended<T, S>(self: TM_Internal<T>, path: PathArray<S>, index: number, newValue: any)
 	if self._batchDepth > 0 then
 		const batch = self._batch
 		if batch then
-			const recorder = batch.Recorder
-			ensureBatchPathTracking(batch, path, function()
-				-- Build a pre-append shallow copy: original[1..index-1]
-				const original: { any } = self:Get(path)
-				const preBatch: { any } = table.create(index - 1)
-				for i = 1, index - 1 do
-					preBatch[i] = original[i]
-				end
-				recorder:StartTracking(path, preBatch)
-			end)
-			recorder:RecordInsert(path, index, newValue)
+			ensureBatchPathTracking(batch, path)
 		end
 		markBatchBranchDirty(batch, path)
 		return
@@ -699,28 +641,13 @@ const function applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>, 
 	if self._batchDepth > 0 then
 		const batch = self._batch
 
-		-- Non-append numeric assignment on an array: mark the array path as
-		-- poisoned (forces Branch A LCS diff at flush) instead of the op-log coalescer.
+		-- Non-append numeric assignment on an array: track the array path so the
+		-- flush diffs the pre-batch snapshot against the current array via LCS.
 		if isArray and type(key) == "number" and batch then
-			const recorder = batch.Recorder
-			ensureBatchPathTracking(batch, parentPath, function()
-				-- StartTracking with the post-mutation array; Branch A will use
-				-- _batchStartSnapshot for the true pre-batch state anyway.
-				const arrayCurrent: any = self:Get(parentPath)
-				if type(arrayCurrent) == "table" then
-					recorder:StartTracking(parentPath, arrayCurrent)
-				end
-			end)
-			recorder:MarkPoisoned(parentPath)
+			ensureBatchPathTracking(batch, parentPath)
 		end
 
-		-- Track which top-level branch was dirtied by this scalar write, and
-		-- record the write location so the flush can tell whether an array
-		-- element's interior was mutated (forces Branch A; see Resume).
 		markBatchBranchDirty(batch, parentPath)
-		if batch then
-			table.insert(batch.ScalarWritePaths, table.clone(parentPath :: any))
-		end
 	end
 
 	-- Standard change detection workflow: capture a snapshot before the write,
@@ -773,16 +700,6 @@ const function makeEmit<T, S>(self: TM_Internal<T>, path: PathArray<S>)
 				Metadata = metadata,
 			})
 		end,
-		moved = (
-				function(fromIndex: number, toIndex: number, value: any)
-					const originPath = table.clone(path)
-					table.insert(originPath, toIndex)
-					const metadata =
-						createSyntheticMetadata(self._originalData, originPath, "changed", toIndex, value, value)
-					metadata.Move = { moveId = `move_{fromIndex}_{toIndex}`, fromIndex = fromIndex, toIndex = toIndex }
-					fireArrayMoved(self, path, fromIndex, toIndex, value, metadata)
-				end
-			) :: ((fromIndex: number, toIndex: number, value: any) -> ())?,
 	}
 end
 
@@ -863,7 +780,6 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	self.ArrayInserted = Signal.new() :: any
 	self.ArrayRemoved = Signal.new() :: any
 	self.ArraySet = Signal.new() :: any
-	self.ArrayMoved = Signal.new() :: any
 
 	-- During batch array flush: suppress any change event whose location is at or
 	-- under a tracked array path. Those arrays emit their own coalesced Array*
@@ -1158,20 +1074,6 @@ function TableManager.OnArraySet<T, S>(
 	return self._listenerRegistry:RegisterListener("ArraySet", PathHelpers.ParsePath(path), callback, options)
 end
 
-function TableManager.OnArrayMove<T, S>(
-	self: TM_Internal<T>,
-	path: Path<S>,
-	callback: (
-		fromIndex: number,
-		toIndex: number,
-		value: any,
-		metadata: ChangeMetadata
-	) -> (),
-	options: ListenerOptions?
-): Connection
-	return self._listenerRegistry:RegisterListener("ArrayMoved", PathHelpers.ParsePath(path), callback, options)
-end
-
 --------------------------------------------------------------------------------
 --// Helper Methods //--
 --------------------------------------------------------------------------------
@@ -1323,12 +1225,10 @@ function TableManager.ArrayInsert<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 		end
 	end
 
-	-- Batch: start tracking before any mutations so startCopy captures pre-batch state.
+	-- Batch: track this array path so the flush can diff against the pre-batch snapshot.
 	if self._batchDepth > 0 and self._batch then
 		const batch = self._batch
-		ensureBatchPathTracking(batch, parsedPath, function()
-			batch.Recorder:StartTracking(parsedPath, array)
-		end)
+		ensureBatchPathTracking(batch, parsedPath)
 		markBatchBranchDirty(batch, parsedPath)
 	end
 
@@ -1339,11 +1239,8 @@ function TableManager.ArrayInsert<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 		self._proxyManager:ShiftKeys(array, pos, 1)
 	end
 
-	-- Batch: log the insert and skip fires
+	-- Batch: skip fires
 	if self._batchDepth > 0 then
-		if self._batch then
-			self._batch.Recorder:RecordInsert(parsedPath, pos, unwrappedValue)
-		end
 		return
 	end
 
@@ -1358,14 +1255,10 @@ TableManager.Insert = TableManager.ArrayInsert
 function TableManager.ArrayRemove<T, S>(self: TM_Internal<T>, pathOrProxy: Path<S> | Proxy<T, S>, index: number): any
 	local parsedPath, array = resolveArrayForWrite(self, pathOrProxy)
 
-	-- Batch: start tracking and log the removal BEFORE mutating, so that
-	-- _computeLiveIds in RecordRemove sees the correct pre-removal id sequence.
+	-- Batch: track this array path so the flush can diff against the pre-batch snapshot.
 	if self._batchDepth > 0 and self._batch then
 		const batch = self._batch
-		ensureBatchPathTracking(batch, parsedPath, function()
-			batch.Recorder:StartTracking(parsedPath, array)
-		end)
-		batch.Recorder:RecordRemove(parsedPath, index)
+		ensureBatchPathTracking(batch, parsedPath)
 		markBatchBranchDirty(batch, parsedPath)
 	end
 
@@ -1423,21 +1316,10 @@ function TableManager.ArraySwapRemove<T, S>(self: TM_Internal<T>, pathOrProxy: P
 	const oldValue = array[index]
 	const movedValue = array[lastIndex]
 
-	-- Batch: start tracking and record intent before mutating. The ops must
-	-- mirror the actual mutation below — backfill Set at `index` FIRST, then
-	-- Remove the vacated LAST slot. Recording Remove@index first would corrupt
-	-- the recorder's stable-id resolution: it replays its op log to map indices
-	-- to ids, so Remove@index kills the id living at `index` and a subsequent
-	-- Set@index targets whichever id shifted into that slot instead.
+	-- Batch: track this array path so the flush can diff against the pre-batch snapshot.
 	if self._batchDepth > 0 and self._batch then
 		const batch = self._batch
-		ensureBatchPathTracking(batch, parsedPath, function()
-			batch.Recorder:StartTracking(parsedPath, array)
-		end)
-		if index ~= lastIndex then
-			batch.Recorder:RecordSet(parsedPath, index, movedValue, oldValue)
-		end
-		batch.Recorder:RecordRemove(parsedPath, lastIndex)
+		ensureBatchPathTracking(batch, parsedPath)
 		markBatchBranchDirty(batch, parsedPath)
 	end
 
@@ -1618,14 +1500,12 @@ function TableManager.Suspend(self: TM_Internal)
 	-- Capture the pre-batch snapshot BEFORE suspending ChangeDetector so that
 	-- CheckForChanges at flush time can diff old-vs-current correctly.
 	-- `CaptureSnapshot` inside `ChangeDetector` returns a sentinel (O(1)) so no
-	-- snapshot/diff work is done during the window. Array ops are logged to an
-	-- `ArrayBatchRecorder` instead of firing immediately.
+	-- snapshot/diff work is done during the window. Tracked array paths are
+	-- diffed against this snapshot via LCS at flush time.
 	self._batch = {
-		Recorder = ArrayBatchRecorderModule.new(),
 		StartSnapshot = self._changeDetector:CaptureSnapshot(self._originalData, {}),
 		TrackedPaths = {},
 		DirtyBranches = {},
-		ScalarWritePaths = {},
 		PendingPrunes = {},
 		Flushing = false,
 	}
@@ -1707,87 +1587,20 @@ const function flushNonArrayBranches(self: TM_Internal, batch: BatchState)
 end
 
 --[[
-	Branch A/B decision for one tracked array's flush: true forces a full
-	pre-batch-vs-current LCS diff (Branch A); false uses the op-log coalescer
-	(Branch B).
-]]
-const function shouldForceFullArrayDiff(
-	batch: BatchState,
-	path: PathArray,
-	log: ArrayBatchRecorderModule.ArrayLog,
-	currentArray: { any }
-): boolean
-	if log.poisoned or currentArray ~= log.startRef then
-		return true
-	end
-
-	-- If the array's reference was replaced during the batch (e.g.
-	-- `Proxy.items = {...}` followed by array ops), the op log's startCopy
-	-- reflects only the post-replacement array and would miss the
-	-- replacement. Detect this by comparing the pre-batch reference to the
-	-- log's start reference and force Branch A (full pre-batch-vs-current LCS).
-	const preBatchRef = getSnapshotRef(batch.StartSnapshot, path)
-	if preBatchRef ~= nil and preBatchRef ~= log.startRef then
-		return true
-	end
-
-	-- If an ELEMENT of this array was mutated in place (a scalar/table write
-	-- whose parent is strictly under the array path, e.g. `items[1].hp = 9`),
-	-- Branch B coalescing cannot represent the interior change — it only sees
-	-- element identities. Force Branch A so the changed element is emitted as
-	-- a whole-value ArraySet.
-	for _, writePath in batch.ScalarWritePaths do
-		if #writePath > #path then
-			local underPath = true
-			for i = 1, #path do
-				if writePath[i] ~= path[i] then
-					underPath = false
-					break
-				end
-			end
-			if underPath then
-				return true
-			end
-		end
-	end
-
-	return false
-end
-
---[[
-	Array flush: emit coalesced events for each tracked array path, routing
-	through Branch A (LCS `ArrayDiff.emitDiff`) or Branch B
-	(`ArrayBatchRecorder:Coalesce`) per `shouldForceFullArrayDiff`.
+	Array flush: for each tracked array path, diff the pre-batch snapshot value
+	against the current value via LCS (`ArrayDiff.emitDiff`), emitting coalesced
+	Array* events. Arrays removed wholesale during the batch are skipped here —
+	their removal flows through the non-array branch diff instead.
 ]]
 const function flushTrackedArrays<T>(self: TM_Internal<T>, batch: BatchState)
-	const recorder = batch.Recorder
-	if not recorder then
-		return
-	end
-
 	for _, path in batch.TrackedPaths do
-		const log = recorder:GetLog(path)
-		if not log then
-			continue
-		end
-
 		const currentArray = self:Get(path)
 		if type(currentArray) ~= "table" then
 			continue
 		end
 
-		-- Get the old array from the pre-batch snapshot (always authoritative for
-		-- Branch A; Branch B uses log.startCopy built at StartTracking time).
 		const oldArray: { any } = getSnapshotValue(batch.StartSnapshot, path) or {}
-		const emit = makeEmit(self, path)
-
-		if shouldForceFullArrayDiff(batch, path, log, currentArray) then
-			-- Branch A: LCS diff — pre-batch snapshot vs current state
-			ArrayDiffModule.emitDiff(oldArray, currentArray, emit, true)
-		else
-			-- Branch B: op-log coalescer — net-change semantics with intent honoured
-			recorder:Coalesce(log, currentArray, emit, true)
-		end
+		ArrayDiffModule.emitDiff(oldArray, currentArray, makeEmit(self, path), true)
 	end
 end
 
@@ -1798,10 +1611,8 @@ end
 	1. **Non-array flush** — per dirty branch, `CheckForChangesBetween` diffs the
 	   pre-batch value against the current value (with tracked-array subtrees
 	   masked out — the array flush owns those), firing all non-array events.
-	2. **Array flush** — For each tracked array path, routes through Branch A
-	   (LCS `ArrayDiff.emitDiff`) when the op log is poisoned, the array
-	   reference changed, or an element interior was mutated, or Branch B
-	   (`ArrayBatchRecorder:Coalesce`) otherwise.
+	2. **Array flush** — For each tracked array path, diffs the pre-batch
+	   snapshot against the current value via LCS (`ArrayDiff.emitDiff`).
 ]=]
 function TableManager.Resume(self: TM_Internal)
 	if self._batchDepth == 0 then
@@ -1824,7 +1635,6 @@ function TableManager.Resume(self: TM_Internal)
 	-- Clear batch state
 	batch.Flushing = false
 	self._batchDepth = 0
-	batch.Recorder:Destroy()
 	self._batch = nil
 
 	-- Prune proxy bookkeeping for values detached during the batch. Done after
@@ -2040,12 +1850,9 @@ function TableManager.Destroy<T>(self: TM_Internal<T>)
 	end
 	self._Destroyed = true
 
-	-- If destroyed mid-batch (Suspend without Resume), release the batch state:
-	-- StartSnapshot is a full deep snapshot of the entire tree and the recorder
-	-- holds per-array op logs and start copies.
+	-- If destroyed mid-batch (Suspend without Resume), release the batch state.
 	const batch = self._batch
 	if batch then
-		batch.Recorder:Destroy()
 		self._batch = nil
 		self._batchDepth = 0
 	end
@@ -2063,7 +1870,6 @@ function TableManager.Destroy<T>(self: TM_Internal<T>)
 	self.ArrayInserted:Destroy()
 	self.ArrayRemoved:Destroy()
 	self.ArraySet:Destroy()
-	self.ArrayMoved:Destroy()
 end
 
 return TableManager

@@ -6,9 +6,9 @@
 	only one of two candidate "replication feeds":
 
 	- "signals": the leaf-only public Signals (ValueChanged, ArrayInserted,
-	  ArrayRemoved, ArraySet). KeyAdded/KeyRemoved/KeyChanged/ArrayMoved are
-	  connected for diagnostics only (logged, never applied) since they are
-	  redundant with the above for replication purposes.
+	  ArrayRemoved, ArraySet). KeyAdded/KeyRemoved/KeyChanged are connected
+	  for diagnostics only (logged, never applied) since they are redundant
+	  with the above for replication purposes.
 	- "diff": the metadata.OriginDiff tree delivered once per operation to a
 	  root `OnChange({}, ...)` listener. Array operations arrive tagged with
 	  metadata.ArrayOp (explicit shift semantics); everything else is walked
@@ -160,7 +160,7 @@ end
 	Records the events the REPLICA emits while the feed is applied to it, so
 	tests can assert the replica re-emits an equivalent event stream ("echo").
 	Only the four state-bearing signals are recorded; KeyAdded/KeyRemoved/
-	KeyChanged/ArrayMoved are derivable diagnostics on both sides.
+	KeyChanged are derivable diagnostics on both sides.
 ]]
 function ReplicationHarness._connectReplicaRecorders(self: ReplicationHarness)
 	local replica = self.Replica
@@ -280,22 +280,6 @@ function ReplicationHarness._connectSignalFeed(self: ReplicationHarness)
 			end)
 		)
 	end
-
-	-- Diagnostics only - NOT applied. ArrayMoved fires alongside the
-	-- ArrayRemoved/ArrayInserted pair for the same logical move; applying it
-	-- too would triple-apply.
-	table.insert(
-		connections,
-		source.ArrayMoved:Connect(function(path, fromIndex, toIndex, value)
-			table.insert(opLog, {
-				Signal = "ArrayMoved",
-				Path = wireCopy(path),
-				FromIndex = fromIndex,
-				ToIndex = toIndex,
-				New = value,
-			})
-		end)
-	)
 end
 
 --// Feed: diff //--
@@ -459,7 +443,7 @@ end
 	- ArraySet(path, i, new)         -> set(path..i, new)  (a replica applies
 	  ArraySet via :Set, which re-emits ValueChanged at the element path)
 	- ArrayInserted / ArrayRemoved   -> kept as-is
-	- diagnostics (Key*, ArrayMoved) -> dropped (derivable on both sides)
+	- diagnostics (Key*) -> dropped (derivable on both sides)
 ]]
 local function normalizeForEcho(opLog: { OpLogEntry }): { any }
 	local normalized: { any } = {}

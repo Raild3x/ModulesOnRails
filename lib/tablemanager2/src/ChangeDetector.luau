@@ -89,8 +89,8 @@ export type ChangeMetadata = {
 	-- path, in left-to-right order. Set by ListenerRegistry; nil if the
 	-- listener path had no wildcards.
 	WildcardMatches: { any }?,
-	-- Set on ArrayRemoved/ArrayInserted/ArrayMoved when the operation is part of
-	-- a detected move (Branch B coalescing only). nil otherwise.
+	-- Set on the ArrayRemoved/ArrayInserted pair from a non-batched
+	-- ArraySwapRemove that constitutes a move. nil otherwise.
 	Move: MoveMetadata?,
 	-- Set on synthetic array-operation events (ArrayInserted/ArrayRemoved/
 	-- ArraySet), including their ancestor notifications. Carries explicit shift
@@ -608,6 +608,70 @@ function ChangeDetector:_processDiffNode(
 end
 
 --[=[
+	Walks ancestor levels of `basePath` from `fromDepth` down to 0 (inclusive),
+	firing `emitKeyChanged`/`emitValueChanged` for each level. Shared by
+	ChangeDetector's own ancestor notifications and TableManager's synthetic
+	(array-operation / ForceNotify) ancestor notifications, which differ in:
+
+	- Walk start: ChangeDetector skips the captured level itself
+	  (`fromDepth = #basePath - 1`, already processed by DFS); TableManager
+	  includes its base level (`fromDepth = #basePath`).
+	- Value source: `rootTable` is navigated to produce live current values
+	  (ChangeDetector); `nil` to always pass nil values (TableManager's
+	  synthetic notifications carry no Diff/value payload).
+	- `keyChangedMode`:
+	  - "parent": at level i >= 1, fires KeyChanged(parentPath, basePath[i],
+	    keyValue, nil, metadata) BEFORE ValueChanged(currentPath, ...).
+	    (ChangeDetector.)
+	  - "child": at level i < #basePath, fires ValueChanged(currentPath, ...)
+	    THEN KeyChanged(currentPath, basePath[i + 1], nil, nil, metadata).
+	    (TableManager.)
+	  - "none": only ValueChanged fires at each level (TableManager's
+	    ForceNotify with includeKeyChanged = false).
+]=]
+function ChangeDetector.EmitAncestorNotifications(
+	basePath: PathArray,
+	fromDepth: number,
+	metadata: ChangeMetadata,
+	rootTable: any?,
+	keyChangedMode: "parent" | "child" | "none",
+	emitKeyChanged: (path: PathArray, key: any, newValue: any, oldValue: any, metadata: ChangeMetadata) -> (),
+	emitValueChanged: (path: PathArray, newValue: any, oldValue: any, metadata: ChangeMetadata) -> ()
+)
+	for i = fromDepth, 0, -1 do
+		local currentPath: PathArray = { unpack(basePath, 1, i) }
+
+		local currentValue: any = nil
+		if rootTable ~= nil then
+			currentValue = rootTable
+			for _, k in ipairs(currentPath) do
+				if currentValue == nil then
+					break
+				end
+				currentValue = (currentValue :: any)[k]
+			end
+		end
+
+		if keyChangedMode == "parent" and i >= 1 then
+			local parentPath: PathArray = { unpack(basePath, 1, i - 1) }
+			local key = basePath[i]
+			local keyValue = nil
+			if currentValue ~= nil and type(currentValue) == "table" then
+				keyValue = (currentValue :: any)[key]
+			end
+			emitKeyChanged(parentPath, key, keyValue, nil, metadata)
+		end
+
+		emitValueChanged(currentPath, currentValue, currentValue, metadata)
+
+		if keyChangedMode == "child" and i < #basePath then
+			local changedKey = basePath[i + 1]
+			emitKeyChanged(currentPath, changedKey, nil, nil, metadata)
+		end
+	end
+end
+
+--[=[
 	Notifies parent levels above the captured path once per assignment operation.
 	Ancestor callbacks receive Diff=nil and share OriginPath/OriginDiff metadata.
 ]=]
@@ -617,13 +681,7 @@ function ChangeDetector:_fireAncestorCallbacks(capturedPath: PathArray, rootDiff
 		return
 	end
 
-	if self._debugMode then
-		print(`Firing ancestor callbacks above captured path: {table.concat(capturedPath, ".")}`)
-	end
-
 	local callbacks = self._callbacks
-	local OnKeyChanged = callbacks.OnKeyChanged
-	local OnValueChanged = callbacks.OnValueChanged
 
 	-- Create metadata for ancestor notifications
 	-- Diff is nil to indicate these are ancestor notifications
@@ -636,49 +694,15 @@ function ChangeDetector:_fireAncestorCallbacks(capturedPath: PathArray, rootDiff
 		Snapshot = snapshot,
 	}
 
-	-- Walk up from the PARENT of the captured level to root
-	-- Start at i = #capturedPath - 1 to skip the captured level (already processed by DFS)
-	for i = #capturedPath - 1, 1, -1 do
-		local currentPath = { unpack(capturedPath, 1, i) }
-		local parentPath = if i > 1 then { unpack(capturedPath, 1, i - 1) } else {}
-		local key = capturedPath[i]
-
-		-- Navigate to the current value at this ancestor level once and reuse it.
-		local currentValue = snapshot.RootTable
-		for _, k in ipairs(currentPath) do
-			currentValue = currentValue[k]
-			if currentValue == nil then
-				break
-			end
-		end
-
-		-- Get the value at the key for OnKeyChanged
-		local keyValue = nil
-		if currentValue ~= nil and type(currentValue) == "table" then
-			keyValue = currentValue[key]
-		end
-
-		if self._debugMode then
-			print(
-				`  Ancestor: parentPath=[{table.concat(parentPath, ", ")}], key={key}, currentPath=[{table.concat(
-					currentPath,
-					", "
-				)}], value type={type(keyValue)}`
-			)
-		end
-
-		-- Fire OnKeyChanged for this level with the true current value
-		OnKeyChanged(parentPath, key, keyValue, nil, metadata)
-
-		-- Fire OnValueChanged for this level with the true current value
-		OnValueChanged(currentPath, currentValue, currentValue, metadata)
-	end
-
-	-- Always fire OnValueChanged for root (unless captured at root)
-	if #capturedPath > 0 then
-		-- Root is just the RootTable itself
-		OnValueChanged({}, snapshot.RootTable, snapshot.RootTable, metadata)
-	end
+	ChangeDetector.EmitAncestorNotifications(
+		capturedPath,
+		#capturedPath - 1,
+		metadata,
+		snapshot.RootTable,
+		"parent",
+		callbacks.OnKeyChanged,
+		callbacks.OnValueChanged
+	)
 end
 
 return ChangeDetector

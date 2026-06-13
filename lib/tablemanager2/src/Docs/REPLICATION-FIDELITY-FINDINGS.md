@@ -53,6 +53,8 @@ was weakened.
      key/value adds (the array flush can't create a not-yet-existing container).
    - In-place mutation of an array element (`items[1].hp = 9`) now forces Branch A
      (full LCS), since Branch B coalescing can't represent interior field changes.
+     (Superseded: Branch B was later removed entirely — all batched array flushes
+     now go through LCS unconditionally.)
 5. **Array-reference replacement in a batch (#5)** — Resume forces Branch A when
    the pre-batch array reference (`Diff.Snapshot.ref`, via the new
    `BatchUtils.GetSnapshotRef`) differs from the op-log's start reference, so a
@@ -246,6 +248,9 @@ the replica stays on the old base (`{a,y,b}` vs source `{x,y}`).
 - Test: `batch › whole array replaced inside a batch then mutated` (signals).
 - Cause: when the tracked array's reference changes mid-batch, Branch A's
   old-vs-current LCS appears to diff against the wrong baseline.
+- (Superseded: the flush now always diffs the pre-batch snapshot value against
+  the current array via LCS, so a mid-batch reference replacement is captured
+  directly — no separate reference-change detection is needed.)
 
 ## Diff-feed channel limitation (HISTORICAL — resolved in the third pass)
 
