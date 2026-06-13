@@ -141,30 +141,7 @@ return function(t: tiniest)
 		expect(sawRootAncestor).is_true()
 	end)
 
-	test("FireDescendantChangedNodes=false suppresses descendantChanged node callbacks", function()
-		local callbackCount = 0
-		local leafCount = 0
-		local detector = ChangeDetector.new {
-			FireDescendantChangedNodes = false,
-			OnValueChanged = function(_path, _newValue, _oldValue, metadata)
-				callbackCount += 1
-				if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
-					leafCount += 1
-				end
-			end,
-		}
-
-		local myTable = { a = { b = 1 } }
-		local snapshot = detector:CaptureSnapshot(myTable, {})
-		myTable.a.b = 2
-
-		detector:CheckForChanges(snapshot)
-
-		expect(callbackCount).is(leafCount)
-		expect(leafCount).is(1)
-	end)
-
-	test("FireDescendantChangedNodes defaults to true", function()
+	test("descendantChanged nodes fire for ancestors of a changed leaf", function()
 		local sawDescendantChanged = false
 		local detector = ChangeDetector.new {
 			OnValueChanged = function(_path, _newValue, _oldValue, metadata)

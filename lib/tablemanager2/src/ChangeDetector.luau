@@ -125,7 +125,6 @@ function ChangeDetector.new(
 		OnKeyRemoved: <S>(path: PathArray<S>, key: any, oldValue: any, metadata: ChangeMetadata) -> ()?,
 		OnKeyChanged: <S>(path: PathArray<S>, key: any, newValue: any, oldValue: any, metadata: ChangeMetadata) -> ()?,
 		OnValueChanged: <S>(path: PathArray<S>, newValue: any, oldValue: any?, metadata: ChangeMetadata) -> ()?,
-		FireDescendantChangedNodes: boolean?,
 	},
 	debugMode: boolean?
 ): ChangeDetector
@@ -136,7 +135,6 @@ function ChangeDetector.new(
 
 	local self = setmetatable({
 		_callbacks = callbacks,
-		_fireDescendantChangedNodes = callbacks.FireDescendantChangedNodes ~= false,
 		_debugMode = debugMode or false,
 		_suspended = false,
 		-- Sentinel snapshot: a fixed table that CaptureSnapshot returns when
@@ -592,10 +590,6 @@ function ChangeDetector:_processDiffNode(
 				snapshot
 			)
 		end
-	end
-
-	if node.type == "descendantChanged" and not self._fireDescendantChangedNodes then
-		return
 	end
 
 	-- Create metadata for this node

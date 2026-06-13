@@ -300,20 +300,12 @@ local function diff_from_snapshot(before: Snapshot, after_value: any, safe_mode:
 	return diff(before.value, after.value, before, after)
 end
 
-local function capture(value: any): (any, boolean?) -> DiffNode?
-	local before = snapshot(value)
-	return function(after_value: any, safe_mode: boolean?): DiffNode?
-		return diff_from_snapshot(before, after_value, safe_mode)
-	end
-end
-
 --------------------------------------------------------------------------------
 --// Final Return //--
 --------------------------------------------------------------------------------
 
 local Module = {}
 
-Module.capture = capture
 Module.diff = diff
 Module.flatten = flatten
 Module.snapshot = snapshot
