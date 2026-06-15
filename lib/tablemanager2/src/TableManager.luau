@@ -73,6 +73,7 @@ const ChangeDetectorModule = require("./ChangeDetector")
 const SchemaNavigatorModule = require("./SchemaNavigator")
 const ArrayDiffModule = require("./ArrayDiff")
 const Diff = require("./Diff")
+const LinkGroupModule = require("./LinkGroup")
 
 --// Localize batch utils to avoid function call overhead //--
 const createSyntheticSnapshot = BatchUtilsModule.CreateSyntheticSnapshot
@@ -98,6 +99,10 @@ type BatchState = BatchUtilsModule.BatchState
 type table = { [any]: any }
 
 export type Proxy<T, S> = ProxyManagerModule.Proxy<T, S>
+
+export type LinkGroup = LinkGroupModule.LinkGroup
+export type LinkAnchor = LinkGroupModule.LinkAnchor
+export type AppliedOp = LinkGroupModule.AppliedOp
 
 export type DuplicateReferenceMode = "error" | "warn" | "allow" | "move" | "copy"
 
@@ -206,6 +211,11 @@ export type TableManager<T = { [any]: any }> = {
 	Suspend: (self: TableManager<T>) -> (),
 	Resume: (self: TableManager<T>) -> (),
 
+	-- Remove this manager from `group`, or from ALL its link groups if `group` is nil.
+	Unlink: (self: TableManager<T>, group: LinkGroup?) -> (),
+	-- The link groups this manager currently participates in (possibly empty).
+	GetLinkGroups: (self: TableManager<T>) -> { LinkGroup },
+
 	Destroy: (self: TableManager<T>) -> (),
 }
 
@@ -223,6 +233,14 @@ export type TM_Internal<T = { [any]: any }> = TableManager<T> & {
 	-- Batch state
 	_batchDepth: number,
 	_batch: BatchState?,
+	-- Link state
+	_linkGroups: { LinkGroup }?,
+	_suppressLinkFanOut: boolean?,
+
+	-- Re-fires listeners/signals for an op that has ALREADY been applied to the
+	-- shared raw, WITHOUT mutating or snapshot-diffing. Used only by LinkGroup
+	-- fan-out; `op.Path` is in this manager's own coordinates.
+	_NotifyApplied: (self: TM_Internal<T>, op: AppliedOp) -> (),
 }
 
 --------------------------------------------------------------------------------
@@ -425,6 +443,10 @@ const function fireArrayOperation<T, S1, S2>(
 		manager.ArrayRemoved:Fire(basePath, payload.Index, payload.OldValue)
 	elseif eventName == "ArraySet" then
 		manager.ArraySet:Fire(basePath, payload.Index, payload.NewValue, payload.OldValue)
+	end
+
+	if not manager._suppressLinkFanOut then
+		LinkGroupModule.FanOutArrayOp(manager, eventName, basePath, payload)
 	end
 end
 
@@ -655,6 +677,9 @@ const function applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>, 
 	const oldValue = parentTable[key]
 	const snapshot = self._changeDetector:CaptureSnapshot(self._originalData, parsedPath)
 	parentTable[key] = value
+	if not self._suppressLinkFanOut then
+		LinkGroupModule.CheckDivergence(self, parsedPath)
+	end
 	pruneDetachedValue(self, oldValue, value)
 	self._changeDetector:CheckForChanges(snapshot)
 end
@@ -900,6 +925,12 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 				OldValue = oldValue,
 				Metadata = metadata,
 			})
+
+			-- Link fan-out: only for leaf changes (mirrors the signal-fire gate
+			-- above), and never while replaying another member's fan-out.
+			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" and not self._suppressLinkFanOut then
+				LinkGroupModule.FanOutSet(self, path, newValue, oldValue)
+			end
 		end,
 	}
 
@@ -918,42 +949,96 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 end
 
 --------------------------------------------------------------------------------
---// Extending TableManagers //--
+--// Linking //--
 --------------------------------------------------------------------------------
-do
-	-- -- TODO: Implement Link and Extend methods for sharing sub-tables between TableManagers.
-	-- -- --[=[
 
-	-- -- ]=]
-	-- -- function TableManager.Link<T, S>(self: TM_Internal<T>, path: Path<S>, other: TableManager<ValueAtPath<T, S>>): ()
-	-- -- 	local currentValue = self:Get(path)
-	-- -- 	if currentValue ~= nil then
-	-- -- 		error(`Cannot link to path {PathHelpers.PathToString(PathHelpers.ParsePath(path))} because it is not nil`)
-	-- -- 	end
+--[=[
+	@within TableManager
+	@function Link
 
-	-- -- 	local otherValue = other:Get({})
-	-- -- 	if otherValue == nil then
-	-- -- 		error("Cannot link to other TableManager because its root value is nil")
-	-- -- 	end
+	Joins TableManagers (or interior nodes within them) that share one
+	underlying table by identity into a notify-only `LinkGroup`. A write
+	applied through any member fans out to every other current member,
+	translated into that member's own path coordinates. See `LinkGroup`.
 
-	-- -- 	self:Set(path, otherValue)
-	-- -- end
+	Two call forms:
+	- `TableManager.Link({ {managerA, pathA?}, {managerB, pathB?}, ... })`
+	- `TableManager.Link(managerA, pathA, managerB, pathB)`
+]=]
+TableManager.Link = LinkGroupModule.Link :: any
 
-	-- -- --[=[
+--[=[
+	Removes this manager from `group`, or from ALL its link groups if `group`
+	is nil.
+]=]
+function TableManager.Unlink<T>(self: TM_Internal<T>, group: LinkGroup?)
+	if group then
+		group:Remove(self)
+		return
+	end
 
-	-- -- ]=]
-	-- -- function TableManager.Extend<T, S>(self: TM_Internal<T>, path: Path<S>, newTMOptions: TableManagerOptions?):  TableManager<ValueAtPath<T, S>>
-	-- -- 	const dataAtPath = self:Get(path)
-	-- -- 	if type(dataAtPath) ~= "table" then
-	-- -- 		error(`Cannot extend non-table value at path {PathHelpers.PathToString(PathHelpers.ParsePath(path))}`)
-	-- -- 	end
-
-	-- -- 	const extendedTM = TableManager.new(dataAtPath, newTMOptions)
-
-	-- -- 	return extendedTM
-
-	-- -- end
+	const groups = self._linkGroups
+	if groups == nil then
+		return
+	end
+	for _, g in table.clone(groups) do
+		g:Remove(self)
+	end
 end
+
+--[=[
+	Returns the link groups this manager currently participates in (possibly empty).
+]=]
+function TableManager.GetLinkGroups<T>(self: TM_Internal<T>): { LinkGroup }
+	return if self._linkGroups then table.clone(self._linkGroups) else {}
+end
+
+--[=[
+	Re-fires listeners/signals for an op that has ALREADY been applied to the
+	shared raw (by another linked manager), without mutating or
+	snapshot-diffing. `op.Path` is in this manager's own coordinates. Used only
+	by `LinkGroup` fan-out.
+]=]
+function TableManager._NotifyApplied<T>(self: TM_Internal<T>, op: AppliedOp)
+	if self._Destroyed then
+		return
+	end
+
+	self._suppressLinkFanOut = true
+	const ok, err = pcall(function()
+		if op.Kind == "Set" then
+			pruneDetachedValue(self, op.OldValue, op.NewValue)
+			self._changeDetector:CheckForChangesBetween(op.OldValue, op.NewValue, op.Path, self._originalData)
+		elseif op.Kind == "ArrayInsert" then
+			const index = op.Index :: number
+			if self._proxyManager then
+				const array = self:Get(op.Path, true)
+				if type(array) == "table" then
+					self._proxyManager:ShiftKeys(array, index, 1)
+				end
+			end
+			makeEmit(self, op.Path).inserted(index, op.NewValue)
+		elseif op.Kind == "ArrayRemove" then
+			const index = op.Index :: number
+			if self._proxyManager then
+				const array = self:Get(op.Path, true)
+				if type(array) == "table" then
+					self._proxyManager:ShiftKeys(array, index + 1, -1)
+				end
+			end
+			pruneDetachedValue(self, op.OldValue, nil)
+			makeEmit(self, op.Path).removed(index, op.OldValue)
+		elseif op.Kind == "ArraySet" then
+			makeEmit(self, op.Path).set(op.Index :: number, op.NewValue, op.OldValue)
+		end
+	end)
+	self._suppressLinkFanOut = false
+
+	if not ok then
+		error(err, 0)
+	end
+end
+
 --------------------------------------------------------------------------------
 --// Listener Registration //--
 --------------------------------------------------------------------------------
@@ -1849,6 +1934,8 @@ function TableManager.Destroy<T>(self: TM_Internal<T>)
 		return
 	end
 	self._Destroyed = true
+
+	self:Unlink()
 
 	-- If destroyed mid-batch (Suspend without Resume), release the batch state.
 	const batch = self._batch
