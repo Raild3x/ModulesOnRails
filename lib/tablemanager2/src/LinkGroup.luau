@@ -721,4 +721,5 @@ return {
 	UnregisterAutoLink = unregisterAutoLink,
 	FindChildLinks = findChildLinks,
 	CheckAutoLink = checkAutoLink,
+	FindPathOf = findPathOf,
 }

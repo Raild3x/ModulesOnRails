@@ -221,10 +221,22 @@ export type TableManager<T = { [any]: any }> = {
 	-- / IsLinkedWith / GetGroups.
 	Linker: Linker,
 
+	-- Returns a PLAIN TableManager rooted at the shared table found at `target`
+	-- (a proxy, a path, or a raw value already in this manager's tree), linked
+	-- to this manager via `Link` so writes on either side fan out to the other.
+	Extend: <S>(self: TableManager<T>, target: Proxy<T, S> | Path<S>, config: ExtendConfig?) -> TableManager<ValueAtPath<T, S>>,
+
 	Destroy: (self: TableManager<T>) -> (),
 }
 
 export type Linker = LinkerModule.Linker
+
+export type ExtendConfig = {
+	-- Called when the extended manager's anchor diverges (the shared object is
+	-- removed/replaced in this manager's tree) and it leaves the link group.
+	-- Equivalent to listening on the group's `MemberRemoved` for the extended manager.
+	OnDetached: (() -> ())?,
+}
 
 export type TM_Internal<T = { [any]: any }> = TableManager<T> & {
 	-- fields
@@ -1038,6 +1050,82 @@ function TableManager._NotifyApplied<T>(self: TM_Internal<T>, op: AppliedOp)
 	if not ok then
 		error(err, 0)
 	end
+end
+
+--[=[
+	@within TableManager
+
+	Returns a plain `TableManager` rooted at the shared table found at `target`,
+	linked (via `Link`) to this manager so writes on either side fan out to the
+	other. `target` may be:
+	- a proxy obtained from this manager (preferred);
+	- a raw table value that is already part of this manager's tree; or
+	- a path (string or array) into this manager's tree.
+
+	Requires proxies (`Config.EnableProxies` must not be `false`).
+]=]
+function TableManager.Extend<T, S>(
+	self: TM_Internal<T>,
+	target: Proxy<T, S> | Path<S>,
+	config: ExtendConfig?
+): TableManager<ValueAtPath<T, S>>
+	const proxyManager = self._proxyManager
+	if proxyManager == nil then
+		error("Extend requires proxies (Config.EnableProxies = false for this TableManager)")
+	end
+
+	local anchorPath: PathArray<any>
+	if proxyManager:IsProxy(target) then
+		-- Preferred form: a proxy already names its live path.
+		const path = proxyManager:GetPath(target :: any)
+		if path == nil then
+			error("Extend target proxy is not part of this manager's tree")
+		end
+		anchorPath = path
+	else
+		-- Raw value already in the tree: locate it by identity (it may not have
+		-- a proxy yet if it was never accessed via Get/GetProxy). Falls back to
+		-- treating `target` as a path (string or array) if not found.
+		const foundPath = if type(target) == "table" then LinkGroupModule.FindPathOf(self._originalData, target) else nil
+		if foundPath ~= nil then
+			anchorPath = foundPath
+		else
+			anchorPath = PathHelpers.ParsePath(target :: any)
+		end
+	end
+
+	const object = self:Get(anchorPath, true)
+	if type(object) ~= "table" then
+		error("Extend target must resolve to a table")
+	end
+
+	const extended = TableManager.new(object :: any)
+
+	const group = LinkGroupModule.Link({ { self :: any, anchorPath }, { extended :: any } })
+
+	if config and config.OnDetached then
+		const onDetached = config.OnDetached
+		-- Fires when EITHER `extended` itself leaves the group, or the group
+		-- dissolves (the common 2-member case, where the other side diverging
+		-- also orphans `extended`). Guarded so a single divergence that
+		-- triggers both signals only runs the callback once.
+		local fired = false
+		const fireOnce = function()
+			if fired then
+				return
+			end
+			fired = true
+			onDetached()
+		end
+		group.MemberRemoved:Connect(function(manager)
+			if manager == (extended :: any) then
+				fireOnce()
+			end
+		end)
+		group.Dissolved:Connect(fireOnce)
+	end
+
+	return extended :: any
 end
 
 --------------------------------------------------------------------------------
