@@ -74,6 +74,7 @@ const SchemaNavigatorModule = require("./SchemaNavigator")
 const ArrayDiffModule = require("./ArrayDiff")
 const Diff = require("./Diff")
 const LinkGroupModule = require("./LinkGroup")
+const LinkerModule = require("./Linker")
 
 --// Localize batch utils to avoid function call overhead //--
 const createSyntheticSnapshot = BatchUtilsModule.CreateSyntheticSnapshot
@@ -112,6 +113,11 @@ export type TableManagerConfig = {
 	ListenersFireDeferred: boolean?,
 	DuplicateReferenceMode: DuplicateReferenceMode?, -- Experimental
 	EnableProxies: boolean?, -- Defaults to true. When false, `Proxy`/`GetProxy` are unavailable.
+	-- When true, this manager auto-links (via `tm.Linker`) with any OTHER AutoLink
+	-- manager whose root table is a node inside this one's tree, or vice-versa.
+	-- Directly-assigned managed tables link automatically; nested/bulk placements
+	-- are hooked up with `tm.Linker:Ensure(path)`.
+	AutoLink: boolean?,
 }
 
 export type TableManager<T = { [any]: any }> = {
@@ -211,13 +217,14 @@ export type TableManager<T = { [any]: any }> = {
 	Suspend: (self: TableManager<T>) -> (),
 	Resume: (self: TableManager<T>) -> (),
 
-	-- Remove this manager from `group`, or from ALL its link groups if `group` is nil.
-	Unlink: (self: TableManager<T>, group: LinkGroup?) -> (),
-	-- The link groups this manager currently participates in (possibly empty).
-	GetLinkGroups: (self: TableManager<T>) -> { LinkGroup },
+	-- All linking lives here (see `Linker`): With / Ensure / Unlink / GetManagers
+	-- / IsLinkedWith / GetGroups.
+	Linker: Linker,
 
 	Destroy: (self: TableManager<T>) -> (),
 }
+
+export type Linker = LinkerModule.Linker
 
 export type TM_Internal<T = { [any]: any }> = TableManager<T> & {
 	-- fields
@@ -236,6 +243,8 @@ export type TM_Internal<T = { [any]: any }> = TableManager<T> & {
 	-- Link state
 	_linkGroups: { LinkGroup }?,
 	_suppressLinkFanOut: boolean?,
+	-- Set from `Config.AutoLink`; gates the direct write-path auto-link hook.
+	_autoLink: boolean?,
 
 	-- Re-fires listeners/signals for an op that has ALREADY been applied to the
 	-- shared raw, WITHOUT mutating or snapshot-diffing. Used only by LinkGroup
@@ -657,6 +666,10 @@ const function applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>, 
 	if isArray and type(key) == "number" and key == arrayLength + 1 then
 		parentTable[key] = value
 		onArrayAppended(self, parentPath, key, value)
+		-- Direct auto-link for an appended managed table (parsedPath is the element path).
+		if self._autoLink and not self._suppressLinkFanOut then
+			LinkGroupModule.CheckAutoLink(self, parsedPath, value)
+		end
 		return
 	end
 
@@ -679,6 +692,10 @@ const function applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>, 
 	parentTable[key] = value
 	if not self._suppressLinkFanOut then
 		LinkGroupModule.CheckDivergence(self, parsedPath)
+		-- Direct auto-link: a managed table assigned straight to this path links O(1).
+		if self._autoLink then
+			LinkGroupModule.CheckAutoLink(self, parsedPath, value)
+		end
 	end
 	pruneDetachedValue(self, oldValue, value)
 	self._changeDetector:CheckForChanges(snapshot)
@@ -945,6 +962,16 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 		self.Proxy = self._proxyManager:CreateProxy(self._originalData, nil, nil)
 	end
 
+	-- Public linking facade (lightweight; heavy link state stays lazy).
+	self.Linker = LinkerModule.new(self)
+
+	-- Opt-in auto-link: form any links implied by the current tree topology
+	-- (this manager nested inside another, or others nested inside it).
+	if resolvedConfig.AutoLink then
+		self._autoLink = true
+		LinkGroupModule.RegisterAutoLink(self)
+	end
+
 	return self :: any
 end
 
@@ -966,32 +993,6 @@ end
 	- `TableManager.Link(managerA, pathA, managerB, pathB)`
 ]=]
 TableManager.Link = LinkGroupModule.Link :: any
-
---[=[
-	Removes this manager from `group`, or from ALL its link groups if `group`
-	is nil.
-]=]
-function TableManager.Unlink<T>(self: TM_Internal<T>, group: LinkGroup?)
-	if group then
-		group:Remove(self)
-		return
-	end
-
-	const groups = self._linkGroups
-	if groups == nil then
-		return
-	end
-	for _, g in table.clone(groups) do
-		g:Remove(self)
-	end
-end
-
---[=[
-	Returns the link groups this manager currently participates in (possibly empty).
-]=]
-function TableManager.GetLinkGroups<T>(self: TM_Internal<T>): { LinkGroup }
-	return if self._linkGroups then table.clone(self._linkGroups) else {}
-end
 
 --[=[
 	Re-fires listeners/signals for an op that has ALREADY been applied to the
@@ -1323,6 +1324,12 @@ function TableManager.ArrayInsert<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 	if self._proxyManager then
 		self._proxyManager:ShiftKeys(array, pos, 1)
 	end
+	-- Direct auto-link for an inserted managed table.
+	if self._autoLink and not self._suppressLinkFanOut then
+		const elementPath = table.clone(parsedPath)
+		table.insert(elementPath, pos)
+		LinkGroupModule.CheckAutoLink(self :: any, elementPath, unwrappedValue)
+	end
 
 	-- Batch: skip fires
 	if self._batchDepth > 0 then
@@ -1356,6 +1363,9 @@ function TableManager.ArrayRemove<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 		self._proxyManager:ShiftKeys(array, index + 1, -1)
 	end
 	pruneDetachedValue(self, oldValue, nil)
+	if not self._suppressLinkFanOut then
+		LinkGroupModule.CheckDivergence(self, parsedPath)
+	end
 
 	-- Batch: skip fires
 	if self._batchDepth > 0 then
@@ -1413,6 +1423,9 @@ function TableManager.ArraySwapRemove<T, S>(self: TM_Internal<T>, pathOrProxy: P
 	end
 	array[lastIndex] = nil
 	pruneDetachedValue(self, oldValue, nil)
+	if not self._suppressLinkFanOut then
+		LinkGroupModule.CheckDivergence(self, parsedPath)
+	end
 
 	-- Batch: skip immediate fires
 	if self._batchDepth > 0 then
@@ -1935,7 +1948,8 @@ function TableManager.Destroy<T>(self: TM_Internal<T>)
 	end
 	self._Destroyed = true
 
-	self:Unlink()
+	self.Linker:Unlink()
+	LinkGroupModule.UnregisterAutoLink(self)
 
 	-- If destroyed mid-batch (Suspend without Resume), release the batch state.
 	const batch = self._batch

@@ -27,6 +27,7 @@ type Signal<Fn, Args...> = Signal.Signal<Fn, Args...>
 type ProxyManagerLike = {
 	IsProxy: (self: ProxyManagerLike, value: any) -> boolean,
 	GetPath: (self: ProxyManagerLike, proxy: any) -> PathArray?,
+	GetProxyFromOriginal: (self: ProxyManagerLike, original: any) -> any?,
 }
 
 -- Minimal structural view of a TableManager (TM_Internal) that LinkGroup
@@ -39,10 +40,15 @@ type TableManagerLike = {
 	_proxyManager: ProxyManagerLike?,
 	_linkGroups: { LinkGroup }?,
 	_Destroyed: boolean?,
+	-- Set when the manager was constructed with `Config.AutoLink = true`. Gates
+	-- the direct write-path auto-link hook so non-AutoLink managers pay nothing.
+	_autoLink: boolean?,
 }
 
+type opKind = "Set" | "ArrayInsert" | "ArrayRemove" | "ArraySet"
+
 export type AppliedOp = {
-	Kind: "Set" | "ArrayInsert" | "ArrayRemove" | "ArraySet",
+	Kind: opKind,
 	Path: PathArray,
 	NewValue: any?,
 	OldValue: any?,
@@ -52,7 +58,7 @@ export type AppliedOp = {
 -- A relative op (relative to the shared object) computed by the fan-out hooks,
 -- before being translated into each member's own coordinates.
 type RelativeOp = {
-	Kind: "Set" | "ArrayInsert" | "ArrayRemove" | "ArraySet",
+	Kind: opKind,
 	RelativePath: PathArray,
 	NewValue: any?,
 	OldValue: any?,
@@ -484,7 +490,7 @@ local function fanOutArrayOp(
 	end
 
 	-- Translate the event name into the AppliedOp vocabulary shared with fanOutSet.
-	local kind: "Set" | "ArrayInsert" | "ArrayRemove" | "ArraySet" = if eventName == "ArrayInserted"
+	local kind: opKind = if eventName == "ArrayInserted"
 		then "ArrayInsert"
 		elseif eventName == "ArrayRemoved" then "ArrayRemove"
 		else "ArraySet"
@@ -525,10 +531,194 @@ local function fanOutArrayOp(
 	end
 end
 
+--------------------------------------------------------------------------------
+--// Auto-Link //--
+--
+-- Opt-in (`Config.AutoLink = true`) automatic linking for the "nested window"
+-- pattern, where one TableManager's root table is a node inside another
+-- TableManager's tree. Every auto-link anchor is a whole manager's *root*, so
+-- the registry below is keyed by root identity only (one entry per manager),
+-- not by every nested table.
+--------------------------------------------------------------------------------
+
+-- Weak-VALUED registry: root table -> the AutoLink manager that owns it. When a
+-- manager is collected its entry vanishes (and the root key with it), so the
+-- registry never pins a manager or its data alive. `UnregisterAutoLink` clears
+-- entries promptly on Destroy.
+local ROOT_TO_AUTOLINK_TM: { [any]: TableManagerLike } = setmetatable({}, { __mode = "v" }) :: any
+
+-- Returns the live AutoLink manager registered for `object`, or nil if none /
+-- the registrant has been destroyed.
+local function autoLinkManagerFor(object: any): TableManagerLike?
+	local tm = ROOT_TO_AUTOLINK_TM[object]
+	if tm == nil or tm._Destroyed then
+		return nil
+	end
+	return tm
+end
+
+-- Depth-first search of every table reachable from `root`, invoking
+-- `visit(node, path)` for each table node (including `root` itself, at path {}).
+-- `path` is fresh per call (safe to keep). Cycle-guarded via a seen-set.
+local function dfsTables(root: any, visit: (node: { [any]: any }, path: PathArray) -> ())
+	if type(root) ~= "table" then
+		return
+	end
+	local seen: { [any]: true } = {}
+	local function recurse(node: any, path: PathArray)
+		if type(node) ~= "table" or seen[node] then
+			return
+		end
+		seen[node] = true
+		visit(node, path)
+		for key, child in node do
+			if type(child) == "table" then
+				local childPath = table.clone(path)
+				table.insert(childPath, key)
+				recurse(child, childPath)
+			end
+		end
+	end
+	recurse(root, {})
+end
+
+-- Returns the path from `root` to the first node whose identity is `target`,
+-- or nil if `target` is not reachable. `{}` when `root == target`.
+local function findPathOf(root: any, target: any): PathArray?
+	if type(root) ~= "table" then
+		return nil
+	end
+	local seen: { [any]: true } = {}
+	local function recurse(node: any, path: PathArray): PathArray?
+		if type(node) ~= "table" or seen[node] then
+			return nil
+		end
+		seen[node] = true
+		if node == target then
+			return path
+		end
+		for key, child in node do
+			if type(child) == "table" then
+				local childPath = table.clone(path)
+				table.insert(childPath, key)
+				local found = recurse(child, childPath)
+				if found ~= nil then
+					return found
+				end
+			end
+		end
+		return nil
+	end
+	return recurse(root, {})
+end
+
+--[=[
+	Downward pass: scans `tm`'s subtree at `path` (default root) for table nodes
+	that are the root of *another* AutoLink manager, and links each at its found
+	location. Recurses fully, so roots nested inside an already-found child are
+	also linked (overlapping groups are fine — a manager can belong to many).
+	Backs `Linker:Ensure`; also run at construction over the root.
+]=]
+local function findChildLinks(tm: TableManagerLike, path: Path<any>?)
+	local basePath = resolveAnchorPath(path)
+	local subtree = tm:Get(basePath, true)
+	if type(subtree) ~= "table" then
+		return
+	end
+
+	dfsTables(subtree, function(node, relPath)
+		local child = autoLinkManagerFor(node)
+		if child == nil or child == tm then
+			return
+		end
+		local anchorPath = table.clone(basePath)
+		for _, segment in relPath do
+			table.insert(anchorPath, segment)
+		end
+		link({ { tm, anchorPath }, { child } })
+	end)
+end
+
+--[=[
+	Upward pass for the child-created-after-parent case: if `tm`'s own root sits
+	inside an already-registered AutoLink manager `Y`, link them at that location.
+	Uses Y's proxy graph for the path when available, else a bounded DFS of Y.
+]=]
+local function findParentLinks(tm: TableManagerLike)
+	local root = tm:Get({}, true)
+	if type(root) ~= "table" then
+		return
+	end
+
+	for _, parent in ROOT_TO_AUTOLINK_TM do
+		if parent == tm or parent._Destroyed then
+			continue
+		end
+
+		-- Cheap path first: ask the parent's proxy graph if it already knows
+		-- `root`; fall back to a bounded DFS of the parent's raw tree.
+		local anchorPath: PathArray? = nil
+		local proxyManager = parent._proxyManager
+		if proxyManager then
+			local existing = proxyManager:GetProxyFromOriginal(root)
+			if existing ~= nil then
+				anchorPath = proxyManager:GetPath(existing)
+			end
+		end
+		if anchorPath == nil then
+			anchorPath = findPathOf(parent:Get({}, true), root)
+		end
+
+		if anchorPath ~= nil then
+			link({ { parent, anchorPath }, { tm } })
+		end
+	end
+end
+
+--[=[
+	Registers `tm` as an AutoLink manager and forms any links implied by current
+	tree topology — both directions: `tm` nested inside an existing manager
+	(`findParentLinks`) and existing managers nested inside `tm` (`findChildLinks`).
+	Registration happens last so the walks never match `tm` against itself.
+]=]
+local function registerAutoLink(tm: TableManagerLike)
+	findParentLinks(tm)
+	findChildLinks(tm, nil)
+	ROOT_TO_AUTOLINK_TM[tm:Get({}, true)] = tm
+end
+
+-- Drops `tm`'s registry entry. Called from TableManager.Destroy.
+local function unregisterAutoLink(tm: TableManagerLike)
+	local root = tm:Get({}, true)
+	if type(root) == "table" then
+		ROOT_TO_AUTOLINK_TM[root] = nil
+	end
+end
+
+--[=[
+	O(1) direct write-path hook: if a *directly assigned* table value is the root
+	of another AutoLink manager, link it at the write location. Only the assigned
+	value itself is checked (no subtree scan) — roots buried inside a composite
+	are the `Linker:Ensure` case. Called from `applyWrite` for AutoLink managers.
+]=]
+local function checkAutoLink(tm: TableManagerLike, writePath: PathArray, value: any)
+	if type(value) ~= "table" then
+		return
+	end
+	local other = autoLinkManagerFor(value)
+	if other ~= nil and other ~= tm then
+		link({ { tm, writePath }, { other } })
+	end
+end
+
 return {
 	Link = link,
 	GetOrCreateGroup = getOrCreateGroup,
 	CheckDivergence = checkDivergence,
 	FanOutSet = fanOutSet,
 	FanOutArrayOp = fanOutArrayOp,
+	RegisterAutoLink = registerAutoLink,
+	UnregisterAutoLink = unregisterAutoLink,
+	FindChildLinks = findChildLinks,
+	CheckAutoLink = checkAutoLink,
 }

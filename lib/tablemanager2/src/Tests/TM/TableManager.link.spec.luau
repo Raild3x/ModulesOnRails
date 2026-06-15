@@ -274,11 +274,11 @@ return function(t: tiniest)
 
 			local group = TableManager.Link({ { a }, { b } })
 
-			expect(#a:GetLinkGroups()).is(1)
+			expect(#a.Linker:GetGroups()).is(1)
 
-			a:Unlink(group)
+			a.Linker:Unlink(group)
 
-			expect(#a:GetLinkGroups()).is(0)
+			expect(#a.Linker:GetGroups()).is(0)
 			expect(group:HasMember(a)).never_is_true()
 
 			a:Destroy()
@@ -298,6 +298,223 @@ return function(t: tiniest)
 			expect(group:HasMember(b)).never_is_true() -- group dissolved below 2 members
 
 			b:Destroy()
+		end)
+	end)
+
+	describe("Linker facade", function()
+		test("Linker:With links whole roots; fan-out both directions", function()
+			local shared = { value = 1 }
+			local a = TableManager.new(shared)
+			local b = TableManager.new(shared)
+
+			a.Linker:With(b)
+
+			local seen
+			b:OnValueChange("value", function(newValue)
+				seen = newValue
+			end)
+			a:Set("value", 2)
+			expect(seen).is(2)
+
+			local aSeen
+			a:OnValueChange("value", function(newValue)
+				aSeen = newValue
+			end)
+			b:Set("value", 3)
+			expect(aSeen).is(3)
+
+			a:Destroy()
+			b:Destroy()
+		end)
+
+		test("Linker:With links interior nodes via paths", function()
+			local sharedNode = { x = 1 }
+			local a = TableManager.new({ B = sharedNode })
+			local b = TableManager.new({ other = { nested = sharedNode } })
+
+			a.Linker:With(b, "B", "other.nested")
+
+			local seen
+			b:OnValueChange("other.nested.x", function(newValue)
+				seen = newValue
+			end)
+			a:Set("B.x", 42)
+			expect(b.Raw.other.nested.x).is(42)
+			expect(seen).is(42)
+
+			a:Destroy()
+			b:Destroy()
+		end)
+
+		test("IsLinkedWith and GetManagers report linked managers", function()
+			local shared = { value = 1 }
+			local a = TableManager.new(shared)
+			local b = TableManager.new(shared)
+			local c = TableManager.new(shared)
+
+			TableManager.Link({ { a }, { b }, { c } })
+
+			expect(a.Linker:IsLinkedWith(b)).is_true()
+			expect(a.Linker:IsLinkedWith(c)).is_true()
+
+			local managers = a.Linker:GetManagers()
+			expect(#managers).is(2)
+			-- excludes self
+			local containsSelf = false
+			for _, m in managers do
+				if m == a then
+					containsSelf = true
+				end
+			end
+			expect(containsSelf).never_is_true()
+
+			a:Destroy()
+			b:Destroy()
+			c:Destroy()
+		end)
+
+		test("Linker:Unlink(manager) severs the link to that manager", function()
+			local shared = { value = 1 }
+			local a = TableManager.new(shared)
+			local b = TableManager.new(shared)
+
+			a.Linker:With(b)
+			expect(a.Linker:IsLinkedWith(b)).is_true()
+
+			a.Linker:Unlink(b)
+			expect(a.Linker:IsLinkedWith(b)).never_is_true()
+
+			a:Destroy()
+			b:Destroy()
+		end)
+
+		test("tm.Linker is the same object across accesses", function()
+			local a = TableManager.new({ value = 1 })
+			expect(a.Linker).is(a.Linker)
+			a:Destroy()
+		end)
+	end)
+
+	describe("AutoLink", function()
+		test("nested managers auto-link to a parent (parent created first)", function()
+			local Data = { Inventory = { { Name = "Sword" } }, Stats = { Health = 100 } }
+			local PlayerTM = TableManager.new(Data, { AutoLink = true })
+			local StatsTM = TableManager.new(Data.Stats, { AutoLink = true })
+			local SwordTM = TableManager.new(Data.Inventory[1], { AutoLink = true })
+
+			local statsSeen
+			PlayerTM:OnValueChange("Stats.Health", function(newValue)
+				statsSeen = newValue
+			end)
+			StatsTM:Set("Health", 50)
+			expect(Data.Stats.Health).is(50)
+			expect(statsSeen).is(50)
+
+			-- reverse direction
+			local healthOnStats
+			StatsTM:OnValueChange("Health", function(newValue)
+				healthOnStats = newValue
+			end)
+			PlayerTM:Set("Stats.Health", 75)
+			expect(healthOnStats).is(75)
+
+			local swordSeen
+			PlayerTM:OnValueChange({ "Inventory", 1, "Name" }, function(newValue)
+				swordSeen = newValue
+			end)
+			SwordTM:Set("Name", "Axe")
+			expect(swordSeen).is("Axe")
+
+			PlayerTM:Destroy()
+			StatsTM:Destroy()
+			SwordTM:Destroy()
+		end)
+
+		test("nested manager auto-links when child created before parent", function()
+			local statsTable = { Health = 100 }
+			local StatsTM = TableManager.new(statsTable, { AutoLink = true })
+			local PlayerTM = TableManager.new({ Stats = statsTable }, { AutoLink = true })
+
+			local seen
+			PlayerTM:OnValueChange("Stats.Health", function(newValue)
+				seen = newValue
+			end)
+			StatsTM:Set("Health", 25)
+			expect(seen).is(25)
+
+			PlayerTM:Destroy()
+			StatsTM:Destroy()
+		end)
+
+		test("direct insert of a managed table auto-links (no Ensure needed)", function()
+			local PlayerTM = TableManager.new({ Inventory = {} }, { AutoLink = true })
+			local sword = { Name = "Sword" }
+			local SwordTM = TableManager.new(sword, { AutoLink = true })
+
+			PlayerTM:ArrayInsert("Inventory", sword)
+
+			local seen
+			PlayerTM:OnValueChange({ "Inventory", 1, "Name" }, function(newValue)
+				seen = newValue
+			end)
+			SwordTM:Set("Name", "Mace")
+			expect(seen).is("Mace")
+
+			PlayerTM:Destroy()
+			SwordTM:Destroy()
+		end)
+
+		test("nested/bulk insert does not link until Linker:Ensure", function()
+			local PlayerTM = TableManager.new({}, { AutoLink = true })
+			local sword = { Name = "Sword" }
+			local SwordTM = TableManager.new(sword, { AutoLink = true })
+
+			-- sword is nested one level inside the assigned composite value.
+			PlayerTM:Set("bag", { sword })
+			expect(PlayerTM.Linker:IsLinkedWith(SwordTM)).never_is_true()
+
+			PlayerTM.Linker:Ensure("bag")
+			expect(PlayerTM.Linker:IsLinkedWith(SwordTM)).is_true()
+
+			local seen
+			PlayerTM:OnValueChange({ "bag", 1, "Name" }, function(newValue)
+				seen = newValue
+			end)
+			SwordTM:Set("Name", "Dagger")
+			expect(seen).is("Dagger")
+
+			-- Ensure is idempotent
+			PlayerTM.Linker:Ensure("bag")
+			expect(#SwordTM.Linker:GetGroups()).is(1)
+
+			PlayerTM:Destroy()
+			SwordTM:Destroy()
+		end)
+
+		test("removing a nested managed table auto-severs the link", function()
+			local Data = { Inventory = { { Name = "Sword" } } }
+			local PlayerTM = TableManager.new(Data, { AutoLink = true })
+			local SwordTM = TableManager.new(Data.Inventory[1], { AutoLink = true })
+
+			expect(PlayerTM.Linker:IsLinkedWith(SwordTM)).is_true()
+
+			PlayerTM:ArrayRemove("Inventory", 1)
+			expect(PlayerTM.Linker:IsLinkedWith(SwordTM)).never_is_true()
+
+			PlayerTM:Destroy()
+			SwordTM:Destroy()
+		end)
+
+		test("without AutoLink, overlapping managers are not linked", function()
+			local Data = { Stats = { Health = 100 } }
+			local PlayerTM = TableManager.new(Data)
+			local StatsTM = TableManager.new(Data.Stats)
+
+			expect(PlayerTM.Linker:IsLinkedWith(StatsTM)).never_is_true()
+			expect(#PlayerTM.Linker:GetGroups()).is(0)
+
+			PlayerTM:Destroy()
+			StatsTM:Destroy()
 		end)
 	end)
 end
