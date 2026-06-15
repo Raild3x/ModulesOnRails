@@ -206,5 +206,106 @@ return function(t: tiniest)
 
 			harness:Destroy()
 		end)
+
+		-- These exercise `TableManager._NotifyApplied` (the LinkGroup fan-out replay
+		-- path) when `_proxyManager == nil`. The proxy-key-shift step must no-op
+		-- cleanly on a proxyless receiver while the op still converges and re-fires
+		-- the receiver's listeners/signals.
+		test("linked proxyless managers fan out a scalar Set", function()
+			local shared = { player = { health = 100 } }
+			local a = TableManager.new(shared, { EnableProxies = false })
+			local b = TableManager.new(shared, { EnableProxies = false })
+
+			TableManager.Link({ { a }, { b } })
+
+			local bNew, bOld
+			b:OnValueChange({ "player", "health" }, function(newValue, oldValue)
+				bNew, bOld = newValue, oldValue
+			end)
+
+			a:Set({ "player", "health" }, 50)
+
+			expect(b.Raw.player.health).is(50)
+			expect(bNew).is(50)
+			expect(bOld).is(100)
+
+			a:Destroy()
+			b:Destroy()
+		end)
+
+		test("linked proxyless managers fan out array insert/remove/set", function()
+			local shared = { items = { "A", "B", "C" } }
+			local a = TableManager.new(shared, { EnableProxies = false })
+			local b = TableManager.new(shared, { EnableProxies = false })
+
+			TableManager.Link({ { a }, { b } })
+
+			local inserted = {}
+			local removed = {}
+			local setOps = {}
+			b:OnArrayInsert({ "items" }, function(index, newValue)
+				table.insert(inserted, { index, newValue })
+			end)
+			b:OnArrayRemove({ "items" }, function(index, oldValue)
+				table.insert(removed, { index, oldValue })
+			end)
+			b:OnArraySet({ "items" }, function(index, newValue, oldValue)
+				table.insert(setOps, { index, newValue, oldValue })
+			end)
+
+			-- ArrayInsert fan-out hits the "ArrayInsert" branch of _NotifyApplied.
+			a:ArrayInsert({ "items" }, 1, "X")
+			expect(b:Get { "items" }).is_shallow_equal { "X", "A", "B", "C" }
+			expect(#inserted).is(1)
+			expect(inserted[1][1]).is(1)
+			expect(inserted[1][2]).is("X")
+
+			-- ArrayRemove fan-out hits the "ArrayRemove" branch.
+			a:ArrayRemove({ "items" }, 2)
+			expect(b:Get { "items" }).is_shallow_equal { "X", "B", "C" }
+			expect(#removed).is(1)
+			expect(removed[1][1]).is(2)
+
+			-- ArraySwapRemove emits an ArraySet (backfill) + ArrayRemoved, exercising
+			-- the "ArraySet" branch on the proxyless receiver.
+			a:ArraySwapRemove({ "items" }, 1)
+			expect(b:Get { "items" }).is_shallow_equal { "C", "B" }
+			expect(#setOps).is(1)
+			expect(setOps[1][1]).is(1)
+			expect(setOps[1][2]).is("C")
+
+			a:Destroy()
+			b:Destroy()
+		end)
+
+		test("mixed proxied + proxyless link fans out array ops both directions", function()
+			local shared = { items = { "A", "B" } }
+			local proxied = TableManager.new(shared)
+			local proxyless = TableManager.new(shared, { EnableProxies = false })
+
+			TableManager.Link({ { proxied }, { proxyless } })
+
+			-- The proxied side holds a proxy that must stay coherent after an op that
+			-- originates on the proxyless side fans out and runs ShiftKeys on the
+			-- proxied receiver.
+			local heldProxy = proxied:GetProxy { "items", 2 } -- "B"
+
+			proxyless:ArrayInsert({ "items" }, 1, "X")
+			expect(proxied:Get { "items" }).is_shallow_equal { "X", "A", "B" }
+			expect((proxied:GetProxy { "items", 3 })).is(heldProxy)
+
+			-- Reverse: an op on the proxied side fans out to the proxyless receiver,
+			-- whose key-shift is a clean no-op.
+			local proxylessInserted
+			proxyless:OnArrayInsert({ "items" }, function(_index, newValue)
+				proxylessInserted = newValue
+			end)
+			proxied:ArrayInsert({ "items" }, "Y")
+			expect(proxyless:Get { "items" }).is_shallow_equal { "X", "A", "B", "Y" }
+			expect(proxylessInserted).is("Y")
+
+			proxied:Destroy()
+			proxyless:Destroy()
+		end)
 	end)
 end

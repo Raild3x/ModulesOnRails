@@ -15,7 +15,7 @@
 const PathHelpers = require("./PathHelpers")
 const BatchUtilsModule = require("./BatchUtils")
 const ArrayDiffModule = require("./ArrayDiff")
-const ChangeDetectorModule = require("./ChangeDetector")
+const TMTypes = require("./TMTypes")
 
 --// Localize batch utils to avoid function call overhead //--
 const serializeBatchPath = BatchUtilsModule.SerializeBatchPath
@@ -26,25 +26,12 @@ const getSnapshotRef = BatchUtilsModule.GetSnapshotRef
 type PathArray = PathHelpers.PathArray
 type BatchState = BatchUtilsModule.BatchState
 
--- Minimal structural view of a TableManager's ProxyManager that BatchFlush
--- touches (avoids a circular require of ProxyManager/TableManager).
-type ProxyManagerLike = {
-	PruneOriginal: (self: ProxyManagerLike, value: any) -> (),
-}
-
--- Minimal structural view of a TableManager (TM_Internal) that BatchFlush
--- needs. Kept local to avoid a circular require with TableManager.luau
--- (which requires this module). `_MakeEmit` is set in `TableManager.new` to
--- give BatchFlush access to the write/fire core's `makeEmit` without a cycle.
-export type TableManagerLike = {
-	Get: (self: TableManagerLike, path: PathArray, raw: boolean?) -> any,
-	_originalData: any,
-	_proxyManager: ProxyManagerLike?,
-	_changeDetector: ChangeDetectorModule.ChangeDetector,
-	_batch: BatchState?,
-	_batchDepth: number,
-	_MakeEmit: (path: PathArray) -> ArrayDiffModule.Emit,
-}
+-- `TableManagerLike` (= `TM_Internal<any>`) is defined in `TMTypes` (a leaf
+-- module), so this module can reference the real TableManager type without a
+-- circular require with TableManager.luau (which requires this module).
+-- `_MakeEmit` is set in `TableManager.new` to give BatchFlush access to the
+-- write/fire core's `makeEmit` without a cycle.
+type TableManagerLike = TMTypes.TableManagerLike
 
 const BatchFlush = {}
 

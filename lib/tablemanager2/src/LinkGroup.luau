@@ -15,6 +15,7 @@
 
 local PathHelpers = require("./PathHelpers")
 local Signal = require("../Signal")
+local TMTypes = require("./TMTypes")
 
 type PathArray<S = string> = PathHelpers.PathArray<S>
 type Path<S> = PathHelpers.Path<S>
@@ -22,58 +23,15 @@ type Signal<Fn, Args...> = Signal.Signal<Fn, Args...>
 
 --// Types //--
 
--- Minimal structural view of a TableManager's ProxyManager that LinkGroup
--- itself touches (avoids a circular require of ProxyManager/TableManager).
-type ProxyManagerLike = {
-	IsProxy: (self: ProxyManagerLike, value: any) -> boolean,
-	GetPath: (self: ProxyManagerLike, proxy: any) -> PathArray?,
-	GetProxyFromOriginal: (self: ProxyManagerLike, original: any) -> any?,
-}
-
--- Minimal structural view of a TableManager (TM_Internal) that LinkGroup
--- and the fan-out hooks need. Kept local to avoid a circular require with
--- TableManager.luau (which requires this module).
-type TableManagerLike = {
-	Get: (self: TableManagerLike, path: Path<any>?, raw: boolean?) -> any,
-	GetProxy: (self: TableManagerLike, path: Path<any>?, raw: boolean?) -> any,
-	_NotifyApplied: (self: TableManagerLike, op: AppliedOp) -> (),
-	_proxyManager: ProxyManagerLike?,
-	_linkGroups: { LinkGroup }?,
-	_Destroyed: boolean?,
-	-- Set when the manager was constructed with `Config.AutoLink = true`. Gates
-	-- the direct write-path auto-link hook so non-AutoLink managers pay nothing.
-	_autoLink: boolean?,
-}
-
-type opKind = "Set" | "ArrayInsert" | "ArrayRemove" | "ArraySet"
-
-export type AppliedOp = {
-	Kind: opKind,
-	Path: PathArray,
-	NewValue: any?,
-	OldValue: any?,
-	Index: number?,
-}
-
--- A relative op (relative to the shared object) computed by the fan-out hooks,
--- before being translated into each member's own coordinates.
-type RelativeOp = {
-	Kind: opKind,
-	RelativePath: PathArray,
-	NewValue: any?,
-	OldValue: any?,
-	Index: number?,
-}
-
--- Payload shape passed from `fireArrayOperation` for array-op fan-out.
-export type ArrayOpPayload = {
-	NewValue: any?,
-	OldValue: any?,
-	Index: number?,
-}
-
--- A positional 2-tuple { manager, path } naming a shared node inside a TM.
-export type LinkAnchor = { TableManagerLike | Path<any> }
+-- `TableManagerLike` (= `TM_Internal<any>`), `AppliedOp`, `RelativeOp`,
+-- `ArrayOpPayload`, `LinkAnchor`, and `LinkGroup` are defined in `TMTypes`
+-- (a leaf module), so TableManager.luau can reference the real types here
+-- without a circular require.
+type TableManagerLike = TMTypes.TableManagerLike
+export type AppliedOp = TMTypes.AppliedOp
+type RelativeOp = TMTypes.RelativeOp
+export type ArrayOpPayload = TMTypes.ArrayOpPayload
+export type LinkAnchor = TMTypes.LinkAnchor
 
 type Member = {
 	Manager: TableManagerLike, -- TM_Internal<any>
@@ -81,20 +39,9 @@ type Member = {
 	AnchorProxy: any?,
 }
 
-export type LinkGroup = {
-	_object: any,
-	_members: { Member },
-	_destroyed: boolean,
-	MemberRemoved: Signal<(manager: TableManagerLike) -> (), TableManagerLike>,
-	Dissolved: Signal<() -> ()>,
-	Add: (self: LinkGroup, manager: TableManagerLike, path: Path<any>?) -> (),
-	Remove: (self: LinkGroup, manager: TableManagerLike) -> (),
-	Members: (self: LinkGroup) -> { TableManagerLike },
-	HasMember: (self: LinkGroup, manager: TableManagerLike) -> boolean,
-	GetAnchorPath: (self: LinkGroup, manager: TableManagerLike) -> PathArray?,
-	NotifyChange: (self: LinkGroup, originManager: TableManagerLike, op: RelativeOp) -> (),
-	Destroy: (self: LinkGroup) -> (),
-}
+type opKind = "Set" | "ArrayInsert" | "ArrayRemove" | "ArraySet"
+
+export type LinkGroup = TMTypes.LinkGroup
 
 --------------------------------------------------------------------------------
 --// Module //--

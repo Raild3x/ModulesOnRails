@@ -76,6 +76,7 @@ const ArrayDiffModule = require("./ArrayDiff")
 const Diff = require("./Diff")
 const LinkGroupModule = require("./LinkGroup")
 const LinkerModule = require("./Linker")
+const TMTypes = require("./TMTypes")
 
 --// Localize batch utils to avoid function call overhead //--
 const createSyntheticSnapshot = BatchUtilsModule.CreateSyntheticSnapshot
@@ -83,6 +84,10 @@ const markBatchBranchDirty = BatchUtilsModule.MarkBatchBranchDirty
 const ensureBatchPathTracking = BatchUtilsModule.EnsureBatchPathTracking
 
 --// Types //--
+-- The public/internal type definitions (`TableManager`, `TM_Internal`,
+-- `TableManagerConfig`, link type shapes, etc.) live in `TMTypes` (a leaf
+-- module) and are re-exported below, so BatchFlush/LinkGroup/Linker/etc. can
+-- reference `TM_Internal` directly without a circular require back here.
 type Path<S> = PathHelpers.Path<S>
 type PathArray<S = string> = PathHelpers.PathArray<S>
 type ValueAtPath<T, S> = PathHelpers.ValueAtPath<T, S>
@@ -97,172 +102,24 @@ type SchemaCheck = SchemaNavigatorModule.Check
 type BatchState = BatchUtilsModule.BatchState
 type table = { [any]: any }
 
-export type Proxy<T, S> = ProxyManagerModule.Proxy<T, S>
+export type Proxy<T, S> = TMTypes.Proxy<T, S>
 
-export type LinkGroup = LinkGroupModule.LinkGroup
-export type LinkAnchor = LinkGroupModule.LinkAnchor
-export type AppliedOp = LinkGroupModule.AppliedOp
+export type LinkGroup = TMTypes.LinkGroup
+export type LinkAnchor = TMTypes.LinkAnchor
+export type AppliedOp = TMTypes.AppliedOp
 
-export type DuplicateReferenceMode = "error" | "warn" | "allow" | "move" | "copy"
+export type DuplicateReferenceMode = TMTypes.DuplicateReferenceMode
 
-export type TableManagerConfig = {
-	Schema: SchemaCheck?,
-	OnValidationFailed: ((path: PathArray, value: any, err: string) -> ())?,
-	ListenersFireDeferred: boolean?,
-	DuplicateReferenceMode: DuplicateReferenceMode?, -- Experimental
-	EnableProxies: boolean?, -- Defaults to true. When false, `Proxy`/`GetProxy` are unavailable.
-	-- When true, this manager auto-links (via `tm.Linker`) with any OTHER AutoLink
-	-- manager whose root table is a node inside this one's tree, or vice-versa.
-	-- Directly-assigned managed tables link automatically; nested/bulk placements
-	-- are hooked up with `tm.Linker:Ensure(path)`.
-	AutoLink: boolean?,
-}
+export type TableManagerConfig = TMTypes.TableManagerConfig
 
-export type TableManager<T = { [any]: any }> = {
-	Proxy: Proxy<T, "">?,
-	Raw: T,
+export type TableManager<T = { [any]: any }> = TMTypes.TableManager<T>
 
-	-- Signals (fire once per change)
-	ValueChanged: Signal<(path: PathArray, newValue: any, oldValue: any) -> (), PathArray, any, any>,
-	KeyAdded: Signal<(path: PathArray, key: any, newValue: any) -> (), PathArray, any, any>,
-	KeyRemoved: Signal<(path: PathArray, key: any, oldValue: any) -> (), PathArray, any, any>,
-	KeyChanged: Signal<(path: PathArray, key: any, newValue: any, oldValue: any) -> (), PathArray, any, any, any>,
-	ArrayInserted: Signal<(path: PathArray, index: number, newValue: any) -> (), PathArray, number, any>,
-	ArrayRemoved: Signal<(path: PathArray, index: number, oldValue: any) -> (), PathArray, number, any>,
-	ArraySet: Signal<(path: PathArray, index: number, newValue: any, oldValue: any) -> (), PathArray, number, any, any>,
+export type Linker = TMTypes.Linker
 
-	-- Listener registration (fire for ancestors/descendants) --
+export type ExtendConfig = TMTypes.ExtendConfig
 
-	-- Fires when this path is directly reassigned OR any descendant of it
-	OnChange: <S>(
-		self: TableManager<T>,
-		path: Path<S>,
-		callback: (newValue: ValueAtPath<T, S>, oldValue: ValueAtPath<T, S>?, metadata: ChangeMetadata) -> (),
-		options: ListenerOptions?
-	) -> Connection,
-
-	--- Fires ONLY when this exact path is directly reassigned (not when a
-	--- descendant changes). Shorthand for `OnValueChange` with
-	--- `ListenDepth = 0, ListenDepthStyle = "=="`.
-	OnValueChange: <S>(
-		self: TableManager<T>,
-		path: Path<S>,
-		callback: (newValue: ValueAtPath<T, S>, oldValue: ValueAtPath<T, S>?, metadata: ChangeMetadata) -> (),
-		options: ListenerOptions?
-	) -> Connection,
-
-	--- Immediately invokes `callback` with the current value at `path`
-	--- (`oldValue` and `metadata` both `nil`), then behaves like
-	--- `OnValueChange` for subsequent changes.
-	Observe: <S>(
-		self: TableManager<T>,
-		path: Path<S>,
-		callback: (newValue: ValueAtPath<T, S>, oldValue: ValueAtPath<T, S>?, metadata: ChangeMetadata?) -> (),
-		options: ListenerOptions?
-	) -> Connection,
-
-	OnKeyAdd: <S>(
-		self: TableManager<T>,
-		path: Path<S>,
-		callback: (key: any, newValue: any, metadata: ChangeMetadata) -> (),
-		options: ListenerOptions?
-	) -> Connection,
-	OnKeyRemove: <S>(
-		self: TableManager<T>,
-		path: Path<S>,
-		callback: (key: any, oldValue: any, metadata: ChangeMetadata) -> (),
-		options: ListenerOptions?
-	) -> Connection,
-	OnKeyChange: <S>(
-		self: TableManager<T>,
-		path: Path<S>,
-		callback: (key: any, newValue: ValueAtPath<T, S>, oldValue: ValueAtPath<T, S>, metadata: ChangeMetadata) -> (),
-		options: ListenerOptions?
-	) -> Connection,
-	OnArrayInsert: <S>(
-		self: TableManager<T>,
-		path: Path<S>,
-		callback: (index: number, newValue: any, metadata: ChangeMetadata) -> (),
-		options: ListenerOptions?
-	) -> Connection,
-	OnArrayRemove: <S>(
-		self: TableManager<T>,
-		path: Path<S>,
-		callback: (index: number, oldValue: any, metadata: ChangeMetadata) -> (),
-		options: ListenerOptions?
-	) -> Connection,
-	OnArraySet: <S>(
-		self: TableManager<T>,
-		path: Path<S>,
-		callback: (index: number, newValue: any, oldValue: any, metadata: ChangeMetadata) -> (),
-		options: ListenerOptions?
-	) -> Connection,
-	-- Helper methods
-	Get: <S>(self: TableManager<T>, path: Path<S>, suppressNilPartialPaths: boolean?) -> ValueAtPath<T, S>,
-	GetProxy: <S>(self: TableManager<T>, path: Path<S>, suppressNilPartialPaths: boolean?) -> Proxy<T, S>,
-	Set: <S>(self: TableManager<T>, path: Path<S>, value: ValueAtPath<T, S>) -> (),
-	ArrayInsert: <S>(self: TableManager<T>, arrPath: Path<S> | Proxy<T, S>, newValue: any) -> ()
-		& <S>(self: TableManager<T>, arrPath: Path<S> | Proxy<T, S>, index: number, newValue: any) -> (),
-	ArrayRemove: <S>(self: TableManager<T>, arrPath: Path<S> | Proxy<T, S>, index: number) -> any?,
-	ArrayRemoveFirstValue: <S>(self: TableManager<T>, arrPath: Path<S> | Proxy<T, S>, valueToFind: any) -> number?,
-	ArraySwapRemove: <S>(self: TableManager<T>, arrPath: Path<S> | Proxy<T, S>, index: number) -> any?,
-	ArraySwapRemoveFirstValue: <S>(self: TableManager<T>, arrPath: Path<S> | Proxy<T, S>, valueToFind: any) -> number?,
-	MoveTo: <S1, S2>(self: TableManager<T>, currentPath: Path<S1>, newPath: Path<S2>) -> (),
-	CopyTo: <S1, S2>(self: TableManager<T>, currentPath: Path<S1>, newPath: Path<S2>) -> (),
-	Swap: <S1, S2>(self: TableManager<T>, a: Path<S1>, b: Path<S2>) -> (),
-	-- ForceNotify: <S>(self: TableManager<T>, path: Path<S> | Proxy<T, S>) -> (),
-	Batch: (self: TableManager<T>, fn: () -> ()) -> (),
-	Suspend: (self: TableManager<T>) -> (),
-	Resume: (self: TableManager<T>) -> (),
-
-	-- All linking lives here (see `Linker`): With / Ensure / Unlink / GetManagers
-	-- / IsLinkedWith / GetGroups.
-	Linker: Linker,
-
-	-- Returns a PLAIN TableManager rooted at the shared table found at `target`
-	-- (a proxy, a path, or a raw value already in this manager's tree), linked
-	-- to this manager via `Link` so writes on either side fan out to the other.
-	Extend: <S>(self: TableManager<T>, target: Proxy<T, S> | Path<S>, config: ExtendConfig?) -> TableManager<ValueAtPath<T, S>>,
-
-	Destroy: (self: TableManager<T>) -> (),
-}
-
-export type Linker = LinkerModule.Linker
-
-export type ExtendConfig = {
-	-- Called when the extended manager's anchor diverges (the shared object is
-	-- removed/replaced in this manager's tree) and it leaves the link group.
-	-- Equivalent to listening on the group's `MemberRemoved` for the extended manager.
-	OnDetached: (() -> ())?,
-}
-
-export type TM_Internal<T = { [any]: any }> = TableManager<T> & {
-	-- fields
-	_proxyManager: ProxyManagerModule.ProxyManager<T>?,
-	_listenerRegistry: ListenerRegistry,
-	_changeDetector: ChangeDetector,
-	_originalData: T,
-	_schema: SchemaCheck?,
-	_onValidationFailed: (<S>(path: Path<S>, value: any, err: string) -> ())?,
-	_duplicateReferenceMode: DuplicateReferenceMode,
-	_isDuplicateMoveInProgress: boolean?,
-	_Destroyed: boolean?,
-	-- Batch state
-	_batchDepth: number,
-	_batch: BatchState?,
-	-- Exposes the write/fire core's `makeEmit` to BatchFlush without a circular require.
-	_MakeEmit: (path: PathArray) -> ArrayDiffModule.Emit,
-	-- Link state
-	_linkGroups: { LinkGroup }?,
-	_suppressLinkFanOut: boolean?,
-	-- Set from `Config.AutoLink`; gates the direct write-path auto-link hook.
-	_autoLink: boolean?,
-
-	-- Re-fires listeners/signals for an op that has ALREADY been applied to the
-	-- shared raw, WITHOUT mutating or snapshot-diffing. Used only by LinkGroup
-	-- fan-out; `op.Path` is in this manager's own coordinates.
-	_NotifyApplied: (self: TM_Internal<T>, op: AppliedOp) -> (),
-}
+export type TM_Internal<T = { [any]: any }> = TMTypes.TM_Internal<T>
+type ProxyManager<T> = ProxyManagerModule.ProxyManager<T>
 
 --------------------------------------------------------------------------------
 --// Module //--
@@ -365,25 +222,36 @@ type ReparentRollback<T = { [any]: any }, S = string> = {
 	Key: any?,
 }
 
-const function reparentWithRollback<T, S>(
-	self: TM_Internal<T>,
-	proxy: Proxy<T, S>?,
+--[[
+	Reparents the proxy backing the raw `value` (if any) to `newParent`/`newKey`,
+	returning a rollback handle. No-op (returns nil) when proxies are disabled,
+	`value` is not a table, or `value` has no live proxy — so callers pass the raw
+	value and need no proxy-manager guards of their own.
+]]
+const function reparentWithRollback<T>(
+	proxyManager: ProxyManager<T>?,
+	value: any,
 	newParent: any,
 	newKey: any
-): ReparentRollback<T, S>?
+): ReparentRollback<T>?
+	if proxyManager == nil or type(value) ~= "table" then
+		return nil
+	end
+
+	const proxy = proxyManager:GetProxyFromOriginal(value)
 	if proxy == nil then
 		return nil
 	end
 
 	local oldParent: any? = nil
 	local oldKey: any? = nil
-	const existingMeta = self._proxyManager:GetMetadata(proxy)
+	const existingMeta = proxyManager:GetMetadata(proxy)
 	if existingMeta ~= nil then
 		oldParent = existingMeta.Parent
 		oldKey = existingMeta.Key
 	end
 
-	self._proxyManager:ReparentProxy(proxy, newParent, newKey)
+	proxyManager:ReparentProxy(proxy, newParent, newKey)
 
 	return {
 		Proxy = proxy,
@@ -392,11 +260,23 @@ const function reparentWithRollback<T, S>(
 	}
 end
 
-const function restoreReparent<T, S>(self: TM_Internal<T>, rollback: ReparentRollback<T, S>?)
-	if rollback == nil then
+const function restoreReparent<T>(proxyManager: ProxyManager<T>?, rollback: ReparentRollback<T>?)
+	if proxyManager == nil or rollback == nil then
 		return
 	end
-	self._proxyManager:ReparentProxy(rollback.Proxy, rollback.Parent, rollback.Key)
+	proxyManager:ReparentProxy(rollback.Proxy, rollback.Parent, rollback.Key)
+end
+
+--[[
+	Shifts the Key metadata of proxies in `array` so held proxy references stay
+	correct after an insert/remove. No-op when proxies are disabled or `array` is
+	not a table, so callers pass the raw value and need no proxy-manager guard.
+]]
+const function shiftArrayKeys<T>(proxyManager: ProxyManager<T>?, array: any, fromIndex: number, delta: number)
+	if proxyManager == nil or type(array) ~= "table" then
+		return
+	end
+	proxyManager:ShiftKeys(array, fromIndex, delta)
 end
 
 const function fireAncestorValueChangedNotifications<T, S>(
@@ -918,15 +798,16 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 		end,
 	}
 
-	if self._proxyManager then
+	const proxyManager = self._proxyManager
+	if proxyManager then
 		-- Single write-integration point: every proxy write resolves its live path
 		-- and unwrapped value, then flows through the proxy-free write core.
-		self._proxyManager:SetWriteHandler(function(path: PathArray, value: any)
+		proxyManager:SetWriteHandler(function(path: PathArray, value: any)
 			applyWrite(self, path, value)
 		end)
 
 		-- Create root proxy (no parent, no key)
-		self.Proxy = self._proxyManager:CreateProxy(self._originalData, nil, nil)
+		self.Proxy = proxyManager:CreateProxy(self._originalData, nil, nil)
 	end
 
 	-- Public linking facade (lightweight; heavy link state stays lazy).
@@ -979,21 +860,11 @@ function TableManager._NotifyApplied<T>(self: TM_Internal<T>, op: AppliedOp)
 			self._changeDetector:CheckForChangesBetween(op.OldValue, op.NewValue, op.Path, self._originalData)
 		elseif op.Kind == "ArrayInsert" then
 			const index = op.Index :: number
-			if self._proxyManager then
-				const array = self:Get(op.Path, true)
-				if type(array) == "table" then
-					self._proxyManager:ShiftKeys(array, index, 1)
-				end
-			end
+			shiftArrayKeys(self._proxyManager, self:Get(op.Path, true), index, 1)
 			makeEmit(self, op.Path).inserted(index, op.NewValue)
 		elseif op.Kind == "ArrayRemove" then
 			const index = op.Index :: number
-			if self._proxyManager then
-				const array = self:Get(op.Path, true)
-				if type(array) == "table" then
-					self._proxyManager:ShiftKeys(array, index + 1, -1)
-				end
-			end
+			shiftArrayKeys(self._proxyManager, self:Get(op.Path, true), index + 1, -1)
 			pruneDetachedValue(self, op.OldValue, nil)
 			makeEmit(self, op.Path).removed(index, op.OldValue)
 		elseif op.Kind == "ArraySet" then
@@ -1364,9 +1235,7 @@ function TableManager.ArrayInsert<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 	-- Insert the value (handles shifting when inserting into the middle).
 	table.insert(array, pos, unwrappedValue)
 	-- Update Key metadata for all proxies that were shifted right by this insert.
-	if self._proxyManager then
-		self._proxyManager:ShiftKeys(array, pos, 1)
-	end
+	shiftArrayKeys(self._proxyManager, array, pos, 1)
 	-- Direct auto-link for an inserted managed table.
 	if self._autoLink and not self._suppressLinkFanOut then
 		const elementPath = PathHelpers.Append(parsedPath, pos)
@@ -1401,9 +1270,7 @@ function TableManager.ArrayRemove<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 	-- Shift proxies after the removed slot left by 1. Pass index+1 as fromIndex
 	-- so the removed item's own proxy (if held) keeps its original key rather than
 	-- being shifted to key=0.
-	if self._proxyManager then
-		self._proxyManager:ShiftKeys(array, index + 1, -1)
-	end
+	shiftArrayKeys(self._proxyManager, array, index + 1, -1)
 	pruneDetachedValue(self, oldValue, nil)
 	if not self._suppressLinkFanOut then
 		LinkGroupModule.CheckDivergence(self, parsedPath)
@@ -1597,8 +1464,7 @@ function TableManager.MoveTo<T, S1, S2>(
 	const targetParentPath, targetKey = PathHelpers.GetPathParentAndKey(targetPath)
 	const targetParentOriginal = getParentOriginalAtPath(self, targetParentPath, "MoveTo")
 
-	const existingProxy = if self._proxyManager then self._proxyManager:GetProxyFromOriginal(sourceValue) else nil
-	const rollback = reparentWithRollback(self, existingProxy, targetParentOriginal, targetKey)
+	const rollback = reparentWithRollback(self._proxyManager, sourceValue, targetParentOriginal, targetKey)
 
 	const ok, moveErr = pcall(function()
 		self:Batch(function()
@@ -1608,7 +1474,7 @@ function TableManager.MoveTo<T, S1, S2>(
 	end)
 
 	if not ok then
-		restoreReparent(self, rollback)
+		restoreReparent(self._proxyManager, rollback)
 		error(moveErr, 2)
 	end
 end
@@ -1667,11 +1533,8 @@ function TableManager.Swap<T, S1, S2>(self: TM_Internal<T>, a: Path<S1> | Proxy<
 	const valueA = self:Get(pathA)
 	const valueB = self:Get(pathB)
 
-	const proxyManager = self._proxyManager
-	const proxyA = if proxyManager and type(valueA) == "table" then proxyManager:GetProxyFromOriginal(valueA) else nil
-	const proxyB = if proxyManager and type(valueB) == "table" then proxyManager:GetProxyFromOriginal(valueB) else nil
-	const rollbackA = reparentWithRollback(self, proxyA, parentOriginalB, keyB)
-	const rollbackB = reparentWithRollback(self, proxyB, parentOriginalA, keyA)
+	const rollbackA = reparentWithRollback(self._proxyManager, valueA, parentOriginalB, keyB)
+	const rollbackB = reparentWithRollback(self._proxyManager, valueB, parentOriginalA, keyA)
 
 	const ok, swapErr = pcall(function()
 		self:Batch(function()
@@ -1681,8 +1544,8 @@ function TableManager.Swap<T, S1, S2>(self: TM_Internal<T>, a: Path<S1> | Proxy<
 	end)
 
 	if not ok then
-		restoreReparent(self, rollbackA)
-		restoreReparent(self, rollbackB)
+		restoreReparent(self._proxyManager, rollbackA)
+		restoreReparent(self._proxyManager, rollbackB)
 		error(swapErr, 2)
 	end
 end
@@ -1773,8 +1636,9 @@ function TableManager.Destroy<T>(self: TM_Internal<T>)
 	end
 
 	self._listenerRegistry:Destroy()
-	if self._proxyManager then
-		self._proxyManager:Destroy()
+	const proxyManager = self._proxyManager
+	if proxyManager then
+		proxyManager:Destroy()
 	end
 
 	-- Disconnect all signals

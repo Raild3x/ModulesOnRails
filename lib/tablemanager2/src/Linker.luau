@@ -11,34 +11,21 @@
 
 const LinkGroupModule = require("./LinkGroup")
 const PathHelpers = require("./PathHelpers")
+const TMTypes = require("./TMTypes")
 
 type Path<S> = PathHelpers.Path<S>
 type LinkGroup = LinkGroupModule.LinkGroup
 
---[=[
-	@within Linker
-	@private
-
-	Minimal structural view of the TableManager this Linker is attached to.
-	Kept local (and minimal) to avoid a circular require with TableManager.luau,
-	which requires this module to build `self.Linker`.
-]=]
-export type LinkerHost = {
-	_linkGroups: { LinkGroup }?,
-}
-
-export type Linker = {
-	With: (self: Linker, other: any, selfPath: Path<any>?, otherPath: Path<any>?) -> (),
-	Ensure: (self: Linker, path: Path<any>?) -> (),
-	Unlink: (self: Linker, target: any?) -> (),
-	GetManagers: (self: Linker) -> { any },
-	IsLinkedWith: (self: Linker, other: any) -> boolean,
-	GetGroups: (self: Linker) -> { LinkGroup },
-}
+-- `Linker` and `TableManagerLike` (= `TM_Internal<any>`) are defined in
+-- `TMTypes` (a leaf module), so this module can reference the real
+-- TableManager type without a circular require with TableManager.luau, which
+-- requires this module to build `self.Linker`.
+type TableManagerLike = TMTypes.TableManagerLike
+export type Linker = TMTypes.Linker
 
 -- Implementation-side view of `Linker`, including the back-reference to the
 -- host TableManager. `Linker` itself never exposes `_tm`.
-type LinkerImpl = Linker & { _tm: LinkerHost }
+type LinkerImpl = Linker & { _tm: TableManagerLike }
 
 --------------------------------------------------------------------------------
 --// Module //--
@@ -54,7 +41,7 @@ const Linker_MT = { __index = Linker }
 	Constructs the lazy `Linker` facade for `tm`. Allocated once at
 	construction; negligible next to the other per-instance state.
 ]=]
-const function new(tm: LinkerHost): Linker
+const function new(tm: TableManagerLike): Linker
 	return setmetatable({ _tm = tm }, Linker_MT) :: any
 end
 
