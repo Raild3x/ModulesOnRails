@@ -1,3 +1,5 @@
+local PathHelpers = require("./PathHelpers")
+
 -- ─── Types ───────────────────────────────────────────────────────────────────
 
 export type Path = { string | number | boolean }
@@ -241,10 +243,7 @@ local function flatten_node(node: DiffNode, path: Path, result: { DiffEntry })
 	-- Recurse into children
 	if node.children then
 		for k, child in pairs(node.children) do
-			local child_path: Path = table.clone(path)
-			if k ~= SCALAR_SENTINEL then
-				table.insert(child_path, k)
-			end
+			local child_path: Path = if k ~= SCALAR_SENTINEL then PathHelpers.Append(path, k) else table.clone(path)
 			flatten_node(child, child_path, result)
 		end
 	end
@@ -261,41 +260,9 @@ local function flatten(root: DiffNode?, path: Path?): { DiffEntry }
 	return result
 end
 
-local function validate_snapshot_node(node: any, breadcrumb: string)
-	if type(node) ~= "table" then
-		error(`Invalid snapshot object for Diff.diffFromSnapshot: expected table at {breadcrumb}.`)
-	end
-
-	if node.children ~= nil and type(node.children) ~= "table" then
-		error(`Invalid snapshot object for Diff.diffFromSnapshot: children must be a table at {breadcrumb}.`)
-	end
-
-	local is_table_value = type(node.value) == "table"
-	if is_table_value and type(node.ref) ~= "table" then
-		error(`Invalid snapshot object for Diff.diffFromSnapshot: table values require table refs at {breadcrumb}.`)
-	end
-
-	if is_table_value and node.children == nil then
-		error(`Invalid snapshot object for Diff.diffFromSnapshot: table values require children at {breadcrumb}.`)
-	end
-
-	if not is_table_value and node.children ~= nil then
-		error(`Invalid snapshot object for Diff.diffFromSnapshot: scalar values cannot have children at {breadcrumb}.`)
-	end
-
-	if node.children then
-		for key, child in pairs(node.children) do
-			validate_snapshot_node(child, `{breadcrumb}.{tostring(key)}`)
-		end
-	end
-end
-
 -- ─── Public API ──────────────────────────────────────────────────────────────
 
-local function diff_from_snapshot(before: Snapshot, after_value: any, safe_mode: boolean?): DiffNode?
-	if safe_mode then
-		validate_snapshot_node(before, "<root>")
-	end
+local function diff_from_snapshot(before: Snapshot, after_value: any): DiffNode?
 	local after = snapshot(after_value)
 	return diff(before.value, after.value, before, after)
 end

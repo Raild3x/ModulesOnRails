@@ -165,4 +165,18 @@ function PathHelpers.GetPathParentAndKey(path: PathArray): (PathArray, any)
 	return parentPath, key
 end
 
+--[=[
+	Returns a fresh path equal to `path` with `key` appended. The input path is
+	not mutated; the returned table is safe to mutate further.
+
+	@param path The base path array
+	@param key The segment to append
+	@return A new path array `{...path, key}`
+]=]
+function PathHelpers.Append(path: PathArray, key: any): PathArray
+	local result = table.clone(path)
+	table.insert(result, key)
+	return result
+end
+
 return PathHelpers

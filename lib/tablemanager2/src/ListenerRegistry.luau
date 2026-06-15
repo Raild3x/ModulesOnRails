@@ -355,18 +355,15 @@ local function collectMatchingNodes(
 
 	local literalChild = node.Children[segment]
 	if literalChild then
-		local childPath = table.clone(nodePath)
-		table.insert(childPath, segment)
+		local childPath = PathHelpers.Append(nodePath, segment)
 		collectMatchingNodes(literalChild, path, index + 1, matches, childPath, results)
 	end
 
 	if segment ~= WILDCARD then
 		local wildcardChild = node.Children[WILDCARD]
 		if wildcardChild then
-			local newMatches = table.clone(matches)
-			table.insert(newMatches, segment)
-			local childPath = table.clone(nodePath)
-			table.insert(childPath, WILDCARD)
+			local newMatches = PathHelpers.Append(matches, segment)
+			local childPath = PathHelpers.Append(nodePath, WILDCARD)
 			collectMatchingNodes(wildcardChild, path, index + 1, newMatches, childPath, results)
 		end
 	end

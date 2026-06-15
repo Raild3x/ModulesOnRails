@@ -62,7 +62,6 @@ export type ChangeDetector = {
 		basePath: PathArray<S>,
 		rootTable: T?
 	) -> (),
-	SetDebugMode: (self: ChangeDetector, enabled: boolean) -> (),
 	--- Suspends change detection. While suspended, `CaptureSnapshot` and
 	--- `CheckForChanges` are no-ops (O(1)). Used by `TableManager:Batch()`.
 	Suspend: (self: ChangeDetector) -> (),
@@ -430,15 +429,6 @@ function ChangeDetector:CheckForChangesBetween(
 end
 
 --[=[
-	Sets debug mode on or off.
-	
-	@param enabled -- Whether to enable debug logging
-]=]
-function ChangeDetector:SetDebugMode(enabled: boolean)
-	self._debugMode = enabled
-end
-
---[=[
 	Suspends change detection.
 
 	While suspended, `CaptureSnapshot` returns a cheap sentinel value and
@@ -570,8 +560,7 @@ function ChangeDetector:_processDiffNode(
 				sentinelChild = childNode
 				continue
 			end
-			local childPath = table.clone(nodePath)
-			table.insert(childPath, key)
+			local childPath = PathHelpers.Append(nodePath, key)
 
 			-- Pass the same origin path, origin diff, and snapshot down through recursion
 			self:_processDiffNode(childNode, childPath, nodePath, key, originPath, originDiff, snapshot)

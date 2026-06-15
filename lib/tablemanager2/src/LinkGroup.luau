@@ -573,9 +573,7 @@ local function dfsTables(root: any, visit: (node: { [any]: any }, path: PathArra
 		visit(node, path)
 		for key, child in node do
 			if type(child) == "table" then
-				local childPath = table.clone(path)
-				table.insert(childPath, key)
-				recurse(child, childPath)
+				recurse(child, PathHelpers.Append(path, key))
 			end
 		end
 	end
@@ -599,9 +597,7 @@ local function findPathOf(root: any, target: any): PathArray?
 		end
 		for key, child in node do
 			if type(child) == "table" then
-				local childPath = table.clone(path)
-				table.insert(childPath, key)
-				local found = recurse(child, childPath)
+				local found = recurse(child, PathHelpers.Append(path, key))
 				if found ~= nil then
 					return found
 				end
