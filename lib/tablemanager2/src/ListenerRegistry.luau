@@ -233,6 +233,7 @@ export type ListenerRegistry = {
 	_debugMode: boolean,
 	_fireDeferred: boolean,
 	_destroyed: boolean,
+	_hasWildcards: boolean,
 }
 
 --------------------------------------------------------------------------------
@@ -391,6 +392,78 @@ local function cleanupNode(root: ListenerNode, path: PathArray, index: number): 
 	return #root.Listeners == 0 and next(root.Children) == nil
 end
 
+-- Non-creating node lookup: returns the node at `path` or nil if any segment is absent.
+local function getNode(root: ListenerNode, path: PathArray): ListenerNode?
+	local current = root
+	for _, segment in path do
+		current = current.Children[segment]
+		if not current then
+			return nil
+		end
+	end
+	return current
+end
+
+-- Returns true if the listener should fire given how many path segments below the
+-- listener's registered path the change originated.
+-- relativeDepth = 0: change is AT the listener's exact path.
+-- relativeDepth > 0: change originated that many levels deeper (ancestor notification).
+local function shouldFireListener(listener: Listener, relativeDepth: number): boolean
+	if listener.Depth == nil then
+		return true
+	end
+	if listener.DepthStyle == "==" then
+		return relativeDepth == listener.Depth
+	else -- "<="
+		return relativeDepth <= listener.Depth
+	end
+end
+
+-- Fires all listeners on a single already-located node and handles Once cleanup.
+-- Extracted so both the no-wildcard fast path and the wildcard path share one
+-- implementation of the inner fire loop.
+local function fireListenersOnNode(
+	listeners: { Listener },
+	root: ListenerNode,
+	nodePath: PathArray,
+	fireEventData: EventData,
+	baseRelativeDepth: number,
+	fireDeferred: boolean,
+	debugMode: boolean,
+	eventType: EventType
+)
+	local hasOnceFired = false
+	for _, listener in listeners do
+		if not listener.Connection.Connected then
+			continue
+		end
+		if not shouldFireListener(listener, baseRelativeDepth) then
+			continue
+		end
+		if listener.Once then
+			listener.Connection.Connected = false
+			hasOnceFired = true
+		end
+		if fireDeferred then
+			task.defer(executeListenerCallback, listener.Callback, eventType, fireEventData, debugMode)
+		else
+			if not freeRunnerThread then
+				freeRunnerThread = coroutine.create(runListenerCallbackInFreeThread)
+				coroutine.resume(freeRunnerThread :: thread)
+			end
+			task.spawn(freeRunnerThread :: thread, listener.Callback, eventType, fireEventData, debugMode)
+		end
+	end
+	if hasOnceFired then
+		for i = #listeners, 1, -1 do
+			if listeners[i].Once and not listeners[i].Connection.Connected then
+				table.remove(listeners, i)
+			end
+		end
+		cleanupNode(root, nodePath, 1)
+	end
+end
+
 function ListenerRegistry.new(config: ListenerRegistryConfig?): ListenerRegistry
 	local self: ListenerRegistry = setmetatable({}, ListenerRegistry_MT) :: ListenerRegistry
 	local resolvedConfig = config or {} :: ListenerRegistryConfig
@@ -409,6 +482,7 @@ function ListenerRegistry.new(config: ListenerRegistryConfig?): ListenerRegistry
 	self._debugMode = debugMode
 	self._fireDeferred = fireDeferred
 	self._destroyed = false
+	self._hasWildcards = false
 
 	return self
 end
@@ -434,6 +508,17 @@ function ListenerRegistry:RegisterListener(
 
 	-- Get the tree for this event type
 	local root = self._listenerTrees[eventType]
+
+	-- One-way latch: once any wildcard listener is registered the fast path in
+	-- FireListenersExact is permanently bypassed for this registry.
+	if not self._hasWildcards then
+		for _, segment in path do
+			if segment == WILDCARD then
+				self._hasWildcards = true
+				break
+			end
+		end
+	end
 
 	-- Navigate to the node for this path, creating nodes as needed
 	local node = getOrCreateNode(root, path)
@@ -477,21 +562,6 @@ function ListenerRegistry:RegisterListener(
 	return connection
 end
 
--- Returns true if the listener should fire given how many path segments below the
--- listener's registered path the change originated.
--- relativeDepth = 0: change is AT the listener's exact path.
--- relativeDepth > 0: change originated that many levels deeper (ancestor notification).
-local function shouldFireListener(listener: Listener, relativeDepth: number): boolean
-	if listener.Depth == nil then
-		return true
-	end
-	if listener.DepthStyle == "==" then
-		return relativeDepth == listener.Depth
-	else -- "<="
-		return relativeDepth <= listener.Depth
-	end
-end
-
 --[=[
 	Fires listeners ONLY at the exact path provided, without any ancestor/descendant matching.
 
@@ -516,13 +586,8 @@ function ListenerRegistry.FireListenersExact(
 	eventData: EventData
 )
 	local root = self._listenerTrees[eventType]
-
-	-- Navigate to every node that matches this path, including wildcard ("*") branches
-	local results: { MatchedNode } = {}
-	collectMatchingNodes(root, path, 1, {}, {}, results)
-	if #results == 0 then
-		return -- No listeners at this path
-	end
+	local debugMode = self._debugMode
+	local fireDeferred = self._fireDeferred
 
 	-- For ancestor notifications (Diff == nil), compute relative depth from OriginPath.
 	-- Direct change notifications always have relativeDepth = 0 (change is at the listener's path).
@@ -535,14 +600,34 @@ function ListenerRegistry.FireListenersExact(
 		end
 	end
 
-	local debugMode = self._debugMode
-	local fireDeferred = self._fireDeferred
+	if not self._hasWildcards then
+		-- Fast path: no wildcard listeners have ever been registered; walk directly to
+		-- the exact node without the O(depth²) collectMatchingNodes traversal.
+		local node = getNode(root, path)
+		if node == nil or #node.Listeners == 0 then
+			return
+		end
+		fireListenersOnNode(
+			node.Listeners,
+			root,
+			path,
+			eventData,
+			baseRelativeDepth,
+			fireDeferred,
+			debugMode,
+			eventType
+		)
+		return
+	end
+
+	-- Wildcard path: collect all matching nodes (literal + wildcard branches).
+	local results: { MatchedNode } = {}
+	collectMatchingNodes(root, path, 1, {}, {}, results)
+	if #results == 0 then
+		return
+	end
 
 	for _, result in results do
-		local node = result.node
-		local listeners = node.Listeners
-		local hasOnceFired = false
-
 		-- Listeners reached via a wildcard branch get the matched keys attached
 		-- to a per-result copy of the metadata; literal-only matches reuse eventData as-is.
 		local fireEventData = eventData
@@ -553,45 +638,16 @@ function ListenerRegistry.FireListenersExact(
 			fireEventData = table.clone(eventData)
 			fireEventData.Metadata = newMetadata
 		end
-
-		for _, listener in listeners do
-			if not listener.Connection.Connected then
-				continue
-			end
-
-			if not shouldFireListener(listener, baseRelativeDepth) then
-				continue
-			end
-
-			-- Mark Once listeners as consumed before firing to guard against re-entrant calls.
-			if listener.Once then
-				listener.Connection.Connected = false
-				hasOnceFired = true
-			end
-
-			if fireDeferred then
-				task.defer(executeListenerCallback, listener.Callback, eventType, fireEventData, debugMode)
-			else
-				if not freeRunnerThread then
-					freeRunnerThread = coroutine.create(runListenerCallbackInFreeThread)
-					-- Prime the thread so it parks at coroutine.yield() with an
-					-- empty stack; payloads only ever arrive via task.spawn below.
-					coroutine.resume(freeRunnerThread :: thread)
-				end
-				task.spawn(freeRunnerThread :: thread, listener.Callback, eventType, fireEventData, debugMode)
-			end
-		end
-
-		-- Backward sweep: physically remove all consumed Once listeners from the node.
-		-- Done after the fire loop to avoid mid-iteration mutation.
-		if hasOnceFired then
-			for i = #listeners, 1, -1 do
-				if listeners[i].Once and not listeners[i].Connection.Connected then
-					table.remove(listeners, i)
-				end
-			end
-			cleanupNode(root, result.nodePath, 1)
-		end
+		fireListenersOnNode(
+			result.node.Listeners,
+			root,
+			result.nodePath,
+			fireEventData,
+			baseRelativeDepth,
+			fireDeferred,
+			debugMode,
+			eventType
+		)
 	end
 end
 
