@@ -76,7 +76,7 @@ export type function ValueAtPathFn(T: type, S: type): type
 		return ValueAtPathFn(inner, types.singleton(tail))
 	end
 end
-export type ValueAtPath<T, S> = any --ValueAtPathFn(T, S)
+export type ValueAtPath<T, S> = any --ValueAtPathFn<T, S> -- This is temporarily commented out bc luau has an internal bug preventing proper parsing
 
 local PathHelpers = {}
 

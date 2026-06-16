@@ -184,6 +184,26 @@ return function(t: tiniest)
 			b:Destroy()
 		end)
 
+		test("divergence: replacing a member's root via Set({}, ...) severs it", function()
+			local shared = { health = 100 }
+			local a = TableManager.new(shared)
+			local b = TableManager.new(shared)
+
+			local group = TableManager.Link({ { a }, { b } })
+
+			-- Re-root `a` onto a brand-new table; its root anchor no longer points
+			-- at the shared object, so it leaves the group.
+			a:Set({}, { health = 5 })
+
+			expect(group:HasMember(a)).never_is_true()
+			-- b keeps the original shared object, untouched by a's re-root.
+			expect(b.Raw.health).is(100)
+			expect(a.Raw.health).is(5)
+
+			a:Destroy()
+			b:Destroy()
+		end)
+
 		test("topology robustness: destroying the middle member of a 3-way group keeps the others linked", function()
 			local shared = { value = 1 }
 			local a = TableManager.new(shared)

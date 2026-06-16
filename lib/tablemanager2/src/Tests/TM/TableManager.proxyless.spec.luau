@@ -37,6 +37,26 @@ return function(t: tiniest)
 			manager:Destroy()
 		end)
 
+		test("Set({}, newTable) replaces the root without proxies", function()
+			local manager = TableManager.new({ a = 1, b = 2 }, { EnableProxies = false })
+
+			local rootChanges = 0
+			local conn = manager:OnChange({}, function()
+				rootChanges += 1
+			end)
+
+			manager:Set({}, { a = 10, c = 3 })
+
+			expect(manager:Get("a")).is(10)
+			expect(manager:Get("b")).is(nil)
+			expect(manager:Get("c")).is(3)
+			expect(manager.Raw).is(manager:Get({}))
+			expect(rootChanges > 0).is(true)
+
+			conn:Disconnect()
+			manager:Destroy()
+		end)
+
 		test("Set with buildTablesDynamically constructs missing subtrees", function()
 			local manager = TableManager.new({}, { EnableProxies = false })
 

@@ -72,22 +72,16 @@ const ProxyManagerModule = require("./ProxyManager")
 const ListenerRegistryModule = require("./ListenerRegistry")
 const ChangeDetectorModule = require("./ChangeDetector")
 const SchemaNavigatorModule = require("./SchemaNavigator")
-const ArrayDiffModule = require("./ArrayDiff")
-const Diff = require("./Diff")
 const LinkGroupModule = require("./LinkGroup")
 const LinkerModule = require("./Linker")
-const TMTypes = require("./TMTypes")
+const Types = require("./TMTypes")
+const EmitterModule = require("./Emitter")
+const MutatorModule = require("./Mutator")
 
 --// Localize batch utils to avoid function call overhead //--
 const createSyntheticSnapshot = BatchUtilsModule.CreateSyntheticSnapshot
-const markBatchBranchDirty = BatchUtilsModule.MarkBatchBranchDirty
-const ensureBatchPathTracking = BatchUtilsModule.EnsureBatchPathTracking
 
 --// Types //--
--- The public/internal type definitions (`TableManager`, `TM_Internal`,
--- `TableManagerConfig`, link type shapes, etc.) live in `TMTypes` (a leaf
--- module) and are re-exported below, so BatchFlush/LinkGroup/Linker/etc. can
--- reference `TM_Internal` directly without a circular require back here.
 type Path<S> = PathHelpers.Path<S>
 type PathArray<S = string> = PathHelpers.PathArray<S>
 type ValueAtPath<T, S> = PathHelpers.ValueAtPath<T, S>
@@ -97,28 +91,24 @@ type ChangeMetadata = ChangeDetectorModule.ChangeMetadata
 type ListenerOptions = ListenerRegistryModule.ListenerOptions
 type Connection = ListenerRegistryModule.Connection
 type Signal<Fn, Args...> = Signal.Signal<Fn, Args...>
-type MoveMetadata = ArrayDiffModule.MoveMetadata
 type SchemaCheck = SchemaNavigatorModule.Check
 type BatchState = BatchUtilsModule.BatchState
 type table = { [any]: any }
 
-export type Proxy<T, S> = TMTypes.Proxy<T, S>
+export type Proxy<T, S> = Types.Proxy<T, S>
 
-export type LinkGroup = TMTypes.LinkGroup
-export type LinkAnchor = TMTypes.LinkAnchor
-export type AppliedOp = TMTypes.AppliedOp
+export type LinkGroup = Types.LinkGroup
+export type LinkAnchor = Types.LinkAnchor
+export type AppliedOp = Types.AppliedOp
 
-export type DuplicateReferenceMode = TMTypes.DuplicateReferenceMode
+export type DuplicateReferenceMode = Types.DuplicateReferenceMode
+export type TableManagerConfig = Types.TableManagerConfig
+export type TableManager<T = { [any]: any }> = Types.TableManager<T>
+export type Linker = Types.Linker
 
-export type TableManagerConfig = TMTypes.TableManagerConfig
+export type ExtendConfig = Types.ExtendConfig
 
-export type TableManager<T = { [any]: any }> = TMTypes.TableManager<T>
-
-export type Linker = TMTypes.Linker
-
-export type ExtendConfig = TMTypes.ExtendConfig
-
-export type TM_Internal<T = { [any]: any }> = TMTypes.TM_Internal<T>
+export type TM_Internal<T = { [any]: any }> = Types.TM_Internal<T>
 type ProxyManager<T> = ProxyManagerModule.ProxyManager<T>
 
 --------------------------------------------------------------------------------
@@ -131,507 +121,23 @@ const TableManager_MT = { __index = TableManager }
 -- Re-export T so schema users do not need to import it separately.
 TableManager.T = T
 
-const function resolvePathFromPathOrProxy<T, S>(self: TM_Internal<T>, pathOrProxy: Path<S> | Proxy<T, S>): PathArray<S>
-	const proxyManager = self._proxyManager
-	if proxyManager == nil then
-		if ProxyManagerModule.IsProxyValue(pathOrProxy) then
-			error("GetProxy requires proxies (Config.EnableProxies = false for this TableManager)")
-		end
-		return PathHelpers.ParsePath(pathOrProxy :: Path<S>)
-	end
-	if proxyManager:IsProxy(pathOrProxy) then
-		const proxy = pathOrProxy :: Proxy<T, S>
-		const potentialPath = proxyManager:GetPath(proxy)
-		assert(potentialPath, "Proxy does not have a path")
-		return potentialPath
-	end
-	return PathHelpers.ParsePath(pathOrProxy :: Path<S>)
-end
+-- Write-core helpers live in Mutator.luau; local aliases keep call sites unchanged.
+const resolvePathFromPathOrProxy = MutatorModule.resolvePathFromPathOrProxy
+const resolveArrayForWrite = MutatorModule.resolveArrayForWrite
+const getParentOriginalAtPath = MutatorModule.getParentOriginalAtPath
+const applyWrite = MutatorModule.applyWrite
+const applyRootSet = MutatorModule.applyRootSet
+const pruneDetachedValue = MutatorModule.pruneDetachedValue
+const shiftArrayKeys = MutatorModule.shiftArrayKeys
+const reparentWithRollback = MutatorModule.reparentWithRollback
+const restoreReparent = MutatorModule.restoreReparent
+const deepCloneValue = MutatorModule.deepCloneValue
+const trackArrayMutation = MutatorModule.trackArrayMutation
 
---[[
-	Resolves `pathOrProxy` to a parsed path and the raw array at that path
-	(proxy-free). Proxy arguments are still accepted (resolved to their live
-	path via the proxy graph).
-]]
-const function resolveArrayForWrite<T, S>(self: TM_Internal<T>, pathOrProxy: Path<S> | Proxy<T, S>): (PathArray<S>, { any })
-	const parsedPath = resolvePathFromPathOrProxy(self, pathOrProxy)
-	const array = self:Get(parsedPath)
-	assert(type(array) == "table", "Target is not a table")
-	return parsedPath, array :: { any }
-end
+-- Emit/notify core lives in Emitter.luau; local aliases keep call sites unchanged.
+const fireAncestorValueChangedNotifications = EmitterModule.fireAncestorValueChangedNotifications
+const makeEmit = EmitterModule.makeEmit
 
-const function getParentOriginalAtPath<T, S>(self: TM_Internal<T>, parentPath: PathArray<S>, opName: string): {}
-	local parentOriginal = if #parentPath == 0 then self._originalData else self:Get(parentPath)
-	if type(parentOriginal) ~= "table" then
-		error(`{opName} destination parent must be a table`)
-	end
-	return parentOriginal
-end
-
-const function deepCloneValue(value: any, seen: { [any]: any }?): any
-	if type(value) ~= "table" then
-		return value
-	end
-
-	const memo = seen or {}
-	if memo[value] ~= nil then
-		return memo[value]
-	end
-
-	const clone = {}
-	memo[value] = clone
-	for k, v in value do
-		clone[deepCloneValue(k, memo)] = deepCloneValue(v, memo)
-	end
-	return clone
-end
-
-const function createSyntheticDiffNode(
-	kind: "added" | "removed" | "changed",
-	key: any,
-	newValue: any,
-	oldValue: any
-): Diff.DiffNode
-	return {
-		type = kind,
-		new = newValue,
-		old = oldValue,
-		key = key,
-	}
-end
-
-const function createSyntheticMetadata<T, S>(
-	rootTable: T & table,
-	leafPath: PathArray<S>,
-	kind: "added" | "removed" | "changed",
-	key: any,
-	newValue: any,
-	oldValue: any
-): ChangeMetadata
-	return {
-		Diff = createSyntheticDiffNode(kind, key, newValue, oldValue),
-		OriginPath = leafPath,
-		OriginDiff = createSyntheticDiffNode(kind, key, newValue, oldValue),
-		Snapshot = createSyntheticSnapshot(rootTable, leafPath, newValue),
-	}
-end
-
-type ReparentRollback<T = { [any]: any }, S = string> = {
-	Proxy: Proxy<T, S>,
-	Parent: any?,
-	Key: any?,
-}
-
---[[
-	Reparents the proxy backing the raw `value` (if any) to `newParent`/`newKey`,
-	returning a rollback handle. No-op (returns nil) when proxies are disabled,
-	`value` is not a table, or `value` has no live proxy — so callers pass the raw
-	value and need no proxy-manager guards of their own.
-]]
-const function reparentWithRollback<T>(
-	proxyManager: ProxyManager<T>?,
-	value: any,
-	newParent: any,
-	newKey: any
-): ReparentRollback<T>?
-	if proxyManager == nil or type(value) ~= "table" then
-		return nil
-	end
-
-	const proxy = proxyManager:GetProxyFromOriginal(value)
-	if proxy == nil then
-		return nil
-	end
-
-	local oldParent: any? = nil
-	local oldKey: any? = nil
-	const existingMeta = proxyManager:GetMetadata(proxy)
-	if existingMeta ~= nil then
-		oldParent = existingMeta.Parent
-		oldKey = existingMeta.Key
-	end
-
-	proxyManager:ReparentProxy(proxy, newParent, newKey)
-
-	return {
-		Proxy = proxy,
-		Parent = oldParent,
-		Key = oldKey,
-	}
-end
-
-const function restoreReparent<T>(proxyManager: ProxyManager<T>?, rollback: ReparentRollback<T>?)
-	if proxyManager == nil or rollback == nil then
-		return
-	end
-	proxyManager:ReparentProxy(rollback.Proxy, rollback.Parent, rollback.Key)
-end
-
---[[
-	Shifts the Key metadata of proxies in `array` so held proxy references stay
-	correct after an insert/remove. No-op when proxies are disabled or `array` is
-	not a table, so callers pass the raw value and need no proxy-manager guard.
-]]
-const function shiftArrayKeys<T>(proxyManager: ProxyManager<T>?, array: any, fromIndex: number, delta: number)
-	if proxyManager == nil or type(array) ~= "table" then
-		return
-	end
-	proxyManager:ShiftKeys(array, fromIndex, delta)
-end
-
-const function fireAncestorValueChangedNotifications<T, S>(
-	manager: any, --TM_Internal<T>, -- typing this causes it to freak out for some reason
-	basePath: PathArray<S>,
-	metadata: ChangeMetadata,
-	includeKeyChanged: boolean?
-)
-	const ancestorMetadata: ChangeMetadata = {
-		Diff = nil,
-		OriginPath = metadata.OriginPath,
-		OriginDiff = metadata.OriginDiff,
-		Snapshot = metadata.Snapshot,
-		-- Preserve array-op shift semantics for root/ancestor diff consumers.
-		ArrayOp = metadata.ArrayOp,
-	}
-
-	const keyChangedMode = if includeKeyChanged == false then "none" else "child"
-
-	ChangeDetectorModule.EmitAncestorNotifications(
-		basePath :: { any },
-		#basePath,
-		ancestorMetadata,
-		nil,
-		keyChangedMode,
-		function(path, key, newValue, oldValue, m)
-			manager._listenerRegistry:FireListenersExact("KeyChanged", path, {
-				Key = key,
-				NewValue = newValue,
-				OldValue = oldValue,
-				Metadata = m,
-			})
-		end,
-		function(path, newValue, oldValue, m)
-			manager._listenerRegistry:FireListenersExact("ValueChanged", path, {
-				NewValue = newValue,
-				OldValue = oldValue,
-				Metadata = m,
-			})
-		end
-	)
-end
-
-const function fireArrayOperation<T, S1, S2>(
-	manager: TM_Internal<T>,
-	eventName: "ArrayInserted" | "ArrayRemoved" | "ArraySet",
-	basePath: PathArray<S1>,
-	leafPath: PathArray<S2>,
-	payload: any
-)
-	-- Tag the metadata with explicit shift semantics for diff-tree consumers
-	-- (metadata.OriginDiff via root OnChange listeners): a flattened "removed"
-	-- entry at a numeric leaf cannot otherwise be distinguished from an
-	-- in-place nil write (a hole), nor "added" from a non-shifting index write.
-	payload.Metadata.ArrayOp = { Kind = eventName, Index = payload.Index }
-
-	-- Fire at the element path (e.g. {"items", 2}) for element-level listeners,
-	-- then at the array path (e.g. {"items"}) for array-level listeners.
-	manager._listenerRegistry:FireListenersExact(eventName, leafPath, payload)
-	manager._listenerRegistry:FireListenersExact(eventName, basePath, payload)
-	fireAncestorValueChangedNotifications(manager, basePath, payload.Metadata)
-	if eventName == "ArrayInserted" then
-		manager.ArrayInserted:Fire(basePath, payload.Index, payload.NewValue)
-	elseif eventName == "ArrayRemoved" then
-		manager.ArrayRemoved:Fire(basePath, payload.Index, payload.OldValue)
-	elseif eventName == "ArraySet" then
-		manager.ArraySet:Fire(basePath, payload.Index, payload.NewValue, payload.OldValue)
-	end
-
-	if not manager._suppressLinkFanOut then
-		LinkGroupModule.FanOutArrayOp(manager, eventName, basePath, payload)
-	end
-end
-
-const function validateWrite<T, S>(self: TM_Internal<T>, path: PathArray<S>, value: ValueAtPath<T, S>): (boolean, string?)
-	if not self._schema then
-		return true :: any
-	end
-
-	const ok, err = SchemaNavigatorModule.Validate(self._schema, path, value)
-	if ok then
-		return true :: any
-	end
-
-	const message = err or `Schema validation failed at {PathHelpers.PathToString(path)}`
-	if self._onValidationFailed then
-		self._onValidationFailed(path, value, message)
-		return false, nil
-	end
-
-	return false, message
-end
-
---[[
-	Fires `ArrayInserted` for an append (key == length + 1) write that was just
-	applied to the raw array at `path`. During a batch, marks the array path as
-	tracked and the branch dirty instead of firing immediately; the flush diffs
-	the pre-batch snapshot against the current array via LCS.
-]]
-const function onArrayAppended<T, S>(self: TM_Internal<T>, path: PathArray<S>, index: number, newValue: any)
-	if self._batchDepth > 0 then
-		const batch = self._batch
-		if batch then
-			ensureBatchPathTracking(batch, path)
-		end
-		markBatchBranchDirty(batch, path)
-		return
-	end
-
-	const insertPath: { any } = PathHelpers.Append(path :: any, index)
-
-	const metadata = createSyntheticMetadata(self._originalData, insertPath, "added", index, newValue, nil)
-
-	-- Fire listeners at inserted element's path ONLY (we handle ancestors separately)
-	fireArrayOperation(self, "ArrayInserted", path, insertPath, {
-		Index = index,
-		NewValue = newValue,
-		Metadata = metadata,
-	})
-end
-
---[[
-	Resolves the duplicate-table-reference policy (error/warn/allow/move/copy) for
-	a write of `value` (already known to exist elsewhere at `existingPath`) to
-	`writePath`. Returns true if the write should proceed.
-]]
-const function resolveDuplicateReferencePolicy<T, S1, S2>(
-	self: TM_Internal<T>,
-	writePath: PathArray<S1>,
-	existingPath: PathArray<S2>,
-	value: any
-): boolean
-	if self._duplicateReferenceMode == "allow" then
-		return true
-	end
-
-	const writePathStr = PathHelpers.PathToString(writePath)
-	const existingPathStr = PathHelpers.PathToString(existingPath)
-	const duplicateMessage =
-		`Duplicate table reference detected: existing at {existingPathStr}, attempted write to {writePathStr}`
-
-	if self._duplicateReferenceMode == "warn" then
-		warn(duplicateMessage)
-		return true
-	end
-
-	if self._duplicateReferenceMode == "move" then
-		if self._isDuplicateMoveInProgress then
-			return true
-		end
-
-		self._isDuplicateMoveInProgress = true
-		local ok, moveErr = pcall(function()
-			self:MoveTo(existingPath, writePath)
-		end)
-		self._isDuplicateMoveInProgress = false
-
-		if not ok then
-			error(`Failed to move duplicate table reference: {tostring(moveErr)}`, 2)
-		end
-
-		if self:Get(writePath) ~= value then
-			error(
-				`DuplicateReferenceMode 'move' is not fully implemented yet. Expected MoveTo to place the value at {writePathStr}`,
-				2
-			)
-		end
-
-		return false
-	end
-
-	if self._duplicateReferenceMode == "copy" then
-		error("DuplicateReferenceMode 'copy' is not implemented yet", 2)
-	end
-
-	error(duplicateMessage, 2)
-end
-
---[[
-	Checks whether `value` (a table) already lives elsewhere in the tree (tracked
-	via the proxy graph). Returns true if the write should proceed. Orphaned
-	proxies (whose live path no longer resolves back to the same original table)
-	are treated as regular table assignments.
-]]
-const function checkDuplicateTableWrite<T, S>(self: TM_Internal<T>, writePath: PathArray<S>, value: any): boolean
-	const proxyManager = self._proxyManager
-	if proxyManager == nil then
-		return true
-	end
-
-	const existingProxy = proxyManager:GetProxyFromOriginal(value)
-	if existingProxy == nil then
-		return true
-	end
-
-	const existingPath = proxyManager:GetPath(existingProxy)
-	if existingPath == nil or PathHelpers.ArePathsEqual(existingPath, writePath) then
-		return true
-	end
-
-	const isOrphan = self:Get(existingPath, true) ~= value
-	if isOrphan then
-		return true
-	end
-
-	return resolveDuplicateReferencePolicy(self, writePath, existingPath, value)
-end
-
---[[
-	Evicts proxy-graph bookkeeping for a table value that was just detached by a
-	write (overwritten or removed), so the detached subtree can be garbage
-	collected. During a batch the prune is deferred to the end of Resume: a value
-	detached early in the batch may be re-homed later in the same window (e.g.
-	Swap's second Set), and PruneOriginal's liveness guard then spares it.
-]]
-const function pruneDetachedValue<T>(self: TM_Internal<T>, oldValue: any, newValue: any)
-	if type(oldValue) ~= "table" or oldValue == newValue then
-		return
-	end
-	const proxyManager = self._proxyManager
-	if proxyManager == nil then
-		return
-	end
-
-	const batch = self._batch
-	if self._batchDepth > 0 and batch then
-		table.insert(batch.PendingPrunes, oldValue)
-	else
-		proxyManager:PruneOriginal(oldValue)
-	end
-end
-
---[[
-	The single proxy-free write core. `parsedPath` is the full path of the write
-	(including the final key); `value` must already be unwrapped
-	(`ProxyManagerModule.Unwrap`). Mirrors the order of the old proxy
-	`__newindex`: duplicate check -> validation -> array-append fast path ->
-	batch dirty-marking -> snapshot/write/diff.
-]]
-const function applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>, value: any)
-	const parentPath, key = PathHelpers.GetPathParentAndKey(parsedPath :: any)
-
-	-- Navigate to the raw parent table, mirroring Get()'s error convention: the
-	-- error names the segment whose lookup produced a non-table value.
-	local current: any = self._originalData
-	for _, segment in parentPath do
-		if type(current) ~= "table" then
-			error(`Path segment {segment} is not a table`)
-		end
-		current = current[segment]
-	end
-	if type(current) ~= "table" then
-		error(`Path segment {key} is not a table`)
-	end
-	const parentTable: { [any]: any } = current
-
-	-- Duplicate-reference checks happen before validation/mutation. Orphaned
-	-- proxies are intentionally treated as regular table assignments.
-	if type(value) == "table" and self._proxyManager ~= nil then
-		const shouldProceed = checkDuplicateTableWrite(self, parsedPath, value)
-		if not shouldProceed then
-			return
-		end
-	end
-
-	-- Validate writes before any side effects (batch tracking, snapshots, or mutation).
-	const ok, err = validateWrite(self, parsedPath, value)
-	if not ok then
-		if err then
-			error(err, 2)
-		end
-		return
-	end
-
-	-- Array-append fast path (key == length + 1): apply immediately and report
-	-- the insertion. Skips batch dirty-marking and snapshot/diff entirely.
-	const isArray, arrayLength = ProxyManagerModule.ClassifyTable(parentTable)
-	if isArray and type(key) == "number" and key == arrayLength + 1 then
-		parentTable[key] = value
-		onArrayAppended(self, parentPath, key, value)
-		-- Direct auto-link for an appended managed table (parsedPath is the element path).
-		if self._autoLink and not self._suppressLinkFanOut then
-			LinkGroupModule.CheckAutoLink(self, parsedPath, value)
-		end
-		return
-	end
-
-	if self._batchDepth > 0 then
-		const batch = self._batch
-
-		-- Non-append numeric assignment on an array: track the array path so the
-		-- flush diffs the pre-batch snapshot against the current array via LCS.
-		if isArray and type(key) == "number" and batch then
-			ensureBatchPathTracking(batch, parentPath)
-		end
-
-		markBatchBranchDirty(batch, parentPath)
-	end
-
-	-- Standard change detection workflow: capture a snapshot before the write,
-	-- apply it, then let ChangeDetector diff against the captured snapshot.
-	const oldValue = parentTable[key]
-	const snapshot = self._changeDetector:CaptureSnapshot(self._originalData, parsedPath)
-	parentTable[key] = value
-	if not self._suppressLinkFanOut then
-		LinkGroupModule.CheckDivergence(self, parsedPath)
-		-- Direct auto-link: a managed table assigned straight to this path links O(1).
-		if self._autoLink then
-			LinkGroupModule.CheckAutoLink(self, parsedPath, value)
-		end
-	end
-	pruneDetachedValue(self, oldValue, value)
-	self._changeDetector:CheckForChanges(snapshot)
-end
-
---[[
-	Builds the `Emit` interface for a single array path, wiring the three
-	callbacks to fire `ArrayRemoved` / `ArrayInserted` / `ArraySet` signals,
-	exact-path listeners, and ancestor callbacks in the correct order.
-]]
-const function makeEmit<T, S>(self: TM_Internal<T>, path: PathArray<S>)
-	return {
-		removed = function(index: number, oldValue: any, move: MoveMetadata?)
-			const removedPath: PathArray = PathHelpers.Append(path, index)
-			const metadata = createSyntheticMetadata(self._originalData, removedPath, "removed", index, nil, oldValue)
-			metadata.Move = move
-			fireArrayOperation(self, "ArrayRemoved", path, removedPath, {
-				Index = index,
-				OldValue = oldValue,
-				Metadata = metadata,
-			})
-		end,
-		inserted = function(index: number, newValue: any, move: MoveMetadata?)
-			const insertedPath = PathHelpers.Append(path, index)
-			const metadata = createSyntheticMetadata(self._originalData, insertedPath, "added", index, newValue, nil)
-			metadata.Move = move
-			fireArrayOperation(self, "ArrayInserted", path, insertedPath, {
-				Index = index,
-				NewValue = newValue,
-				Metadata = metadata,
-			})
-		end,
-		set = function(index: number, newValue: any, oldValue: any, move: MoveMetadata?)
-			const setPath = PathHelpers.Append(path, index)
-			const metadata = createSyntheticMetadata(self._originalData, setPath, "changed", index, newValue, oldValue)
-			metadata.Move = move
-			fireArrayOperation(self, "ArraySet", path, setPath, {
-				Index = index,
-				NewValue = newValue,
-				OldValue = oldValue,
-				Metadata = metadata,
-			})
-		end,
-	}
-end
 
 -----------------------------------------------------------------------------------
 --// Constructor //--
@@ -677,7 +183,7 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	self._batch = nil
 
 	-- Exposes `makeEmit` (write/fire core) to BatchFlush without a circular require.
-	self._MakeEmit = function(path: PathArray): ArrayDiffModule.Emit
+	self._MakeEmit = function(path: PathArray)
 		return makeEmit(self, path)
 	end
 
@@ -707,96 +213,10 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	self.ArrayRemoved = Signal.new() :: any
 	self.ArraySet = Signal.new() :: any
 
-	-- Suppresses non-array change events whose location is at or under a
-	-- tracked array path during batch array flush (see BatchFlush.ShouldSuppress).
-	const function shouldSuppressBatchArrayEvent(location: PathArray): boolean
-		return BatchFlushModule.ShouldSuppress(self :: any, location)
-	end
-
-	-- Initialize ChangeDetector with callbacks
-	-- NOTE: Use FireListenersExact() to prevent double ancestor propagation
-	-- ChangeDetector already handles ancestor notifications, so we only fire at exact paths
-	self._changeDetector = ChangeDetectorModule.new {
-		OnKeyAdded = function(path: PathArray, key: any, newValue: any, metadata: ChangeMetadata)
-			if shouldSuppressBatchArrayEvent(PathHelpers.Append(path, key)) then
-				return
-			end
-
-			-- Fire the signal BEFORE the registry listeners. If a listener performs a
-			-- re-entrant write, its nested signal then fires after this one, so the
-			-- public signal stream stays in write-initiation order (deterministic for
-			-- consumers like replication). Signal fires for leaf changes only.
-			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
-				self.KeyAdded:Fire(path, key, newValue)
-			end
-
-			-- Fire listeners ONLY at exact path (ChangeDetector handles ancestors)
-			self._listenerRegistry:FireListenersExact("KeyAdded", path, {
-				NewValue = newValue,
-				Key = key,
-				Metadata = metadata,
-			})
-		end,
-
-		OnKeyRemoved = function(path: PathArray, key: any, oldValue: any, metadata: ChangeMetadata)
-			if shouldSuppressBatchArrayEvent(PathHelpers.Append(path, key)) then
-				return
-			end
-
-			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
-				self.KeyRemoved:Fire(path, key, oldValue)
-			end
-
-			self._listenerRegistry:FireListenersExact("KeyRemoved", path, {
-				OldValue = oldValue,
-				Key = key,
-				Metadata = metadata,
-			})
-		end,
-
-		OnKeyChanged = function(path: PathArray, key: any, newValue: any, oldValue: any, metadata: ChangeMetadata)
-			if shouldSuppressBatchArrayEvent(PathHelpers.Append(path, key)) then
-				return
-			end
-
-			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
-				self.KeyChanged:Fire(path, key, newValue, oldValue)
-			end
-
-			self._listenerRegistry:FireListenersExact("KeyChanged", path, {
-				NewValue = newValue,
-				OldValue = oldValue,
-				Key = key,
-				Metadata = metadata,
-			})
-		end,
-
-		OnValueChanged = function(path: PathArray, newValue: any, oldValue: any?, metadata: ChangeMetadata)
-			-- During batch array flush, suppress events at or under a tracked array
-			-- path; those arrays emit their own coalesced Array* events in the array
-			-- flush phase, so firing ValueChanged here too would double-apply.
-			if shouldSuppressBatchArrayEvent(path) then
-				return
-			end
-
-			-- Signal before listeners (see OnKeyAdded for the rationale).
-			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
-				self.ValueChanged:Fire(path, newValue, oldValue)
-			end
-
-			self._listenerRegistry:FireListenersExact("ValueChanged", path, {
-				NewValue = newValue,
-				OldValue = oldValue,
-				Metadata = metadata,
-			})
-
-			-- Link fan-out: only for leaf changes (mirrors the signal-fire gate
-			-- above), and never while replaying another member's fan-out.
-			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" and not self._suppressLinkFanOut then
-				LinkGroupModule.FanOutSet(self, path, newValue, oldValue)
-			end
-		end,
-	}
+	-- Initialize ChangeDetector with callbacks (signal+listener dual-fire in Emitter).
+	-- `:: any` bypasses the generic-vs-non-generic callback signature mismatch
+	-- (same pattern the original inline closures used to avoid).
+	self._changeDetector = ChangeDetectorModule.new(EmitterModule.makeChangeDetectorCallbacks(self :: any) :: any)
 
 	const proxyManager = self._proxyManager
 	if proxyManager then
@@ -840,7 +260,7 @@ end
 	- `TableManager.Link({ {managerA, pathA?}, {managerB, pathB?}, ... })`
 	- `TableManager.Link(managerA, pathA, managerB, pathB)`
 ]=]
-TableManager.Link = LinkGroupModule.Link :: any
+TableManager.Link = LinkGroupModule.Link
 
 --[=[
 	Re-fires listeners/signals for an op that has ALREADY been applied to the
@@ -888,22 +308,16 @@ end
 	- a raw table value that is already part of this manager's tree; or
 	- a path (string or array) into this manager's tree.
 
-	Requires proxies (`Config.EnableProxies` must not be `false`).
+	The new TM is bound to the targeted table, not its path in the extending TM.
 ]=]
 function TableManager.Extend<T, S>(
 	self: TM_Internal<T>,
-	target: Proxy<T, S> | Path<S>,
-	config: ExtendConfig?
+	target: Proxy<T, S> | Path<S>
 ): TableManager<ValueAtPath<T, S>>
-	const proxyManager = self._proxyManager
-	if proxyManager == nil then
-		error("Extend requires proxies (Config.EnableProxies = false for this TableManager)")
-	end
-
-	local anchorPath: PathArray<any>
-	if proxyManager:IsProxy(target) then
+	local anchorPath: PathArray<S>
+	if self._proxyManager and self._proxyManager:IsProxy(target) then
 		-- Preferred form: a proxy already names its live path.
-		const path = proxyManager:GetPath(target :: any)
+		const path = self._proxyManager:GetPath(target)
 		if path == nil then
 			error("Extend target proxy is not part of this manager's tree")
 		end
@@ -916,42 +330,19 @@ function TableManager.Extend<T, S>(
 		if foundPath ~= nil then
 			anchorPath = foundPath
 		else
-			anchorPath = PathHelpers.ParsePath(target :: any)
+			anchorPath = PathHelpers.ParsePath(target)
 		end
 	end
 
-	const object = self:Get(anchorPath, true)
+	const object = self:Get(anchorPath)
 	if type(object) ~= "table" then
 		error("Extend target must resolve to a table")
 	end
 
-	const extended = TableManager.new(object :: any)
+	const extended = TableManager.new(object)
+	LinkGroupModule.Link({ { self , anchorPath }, { extended } })
 
-	const group = LinkGroupModule.Link({ { self :: any, anchorPath }, { extended :: any } })
-
-	if config and config.OnDetached then
-		const onDetached = config.OnDetached
-		-- Fires when EITHER `extended` itself leaves the group, or the group
-		-- dissolves (the common 2-member case, where the other side diverging
-		-- also orphans `extended`). Guarded so a single divergence that
-		-- triggers both signals only runs the callback once.
-		local fired = false
-		const fireOnce = function()
-			if fired then
-				return
-			end
-			fired = true
-			onDetached()
-		end
-		group.MemberRemoved:Connect(function(manager)
-			if manager == (extended :: any) then
-				fireOnce()
-			end
-		end)
-		group.Dissolved:Connect(fireOnce)
-	end
-
-	return extended :: any
+	return extended
 end
 
 --------------------------------------------------------------------------------
@@ -1129,6 +520,12 @@ end
 
 --[=[
 	Set the value at a path.
+
+	An empty path (`Set({}, newTable)` / `Set("", newTable)`) replaces the entire
+	root table: its identity is swapped to `newTable`, stale proxies of the old
+	tree are pruned, and root/child change listeners fire for the diff. The new
+	root must be a table (the root cannot become a scalar or `nil`), and the root
+	cannot be replaced while a batch is open.
 ]=]
 function TableManager.Set<T, S>(
 	self: TM_Internal<T>,
@@ -1137,11 +534,13 @@ function TableManager.Set<T, S>(
 	buildTablesDynamically: boolean?
 )
 	const parsedPath = PathHelpers.ParsePath(path)
-	if #parsedPath == 0 then
-		error("Cannot set root path")
-	end
-
 	const unwrappedValue = ProxyManagerModule.Unwrap(value)
+
+	-- Empty path replaces the entire root table (identity swap + full diff).
+	if #parsedPath == 0 then
+		applyRootSet(self, unwrappedValue)
+		return
+	end
 
 	-- Only build intermediate tables when setting non-nil values; removing (nil) doesn't need them
 	const shouldBuild = buildTablesDynamically and unwrappedValue ~= nil
@@ -1152,11 +551,7 @@ function TableManager.Set<T, S>(
 		if type(nextValue) ~= "table" then
 			if not shouldBuild then
 				if unwrappedValue == nil then
-					-- Removing from a path that doesn't exist (a segment is missing
-					-- or holds a non-table); silently succeed (nothing to remove).
-					-- Keeps replication consumers safe when a redundant child
-					-- removal arrives after its parent was replaced by a scalar.
-					return
+					return -- Silently return if we are setting a non existent path to nil since it is already nil.
 				end
 				error(`Path segment {parsedPath[i]} is not a table`)
 			end
@@ -1206,31 +601,9 @@ function TableManager.ArrayInsert<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 
 	const unwrappedValue = ProxyManagerModule.Unwrap(newValue)
 
-	-- Validate against the schema's element check for this array, if configured.
-	if self._schema then
-		const arrayCheck = SchemaNavigatorModule.Navigate(self._schema, parsedPath)
-		if arrayCheck then
-			const arrayMeta = T.GetMeta(arrayCheck)
-			if arrayMeta and arrayMeta.kind == "array" then
-				const ok, err = arrayMeta.valueCheck(unwrappedValue)
-				if not ok then
-					const message = err or `Schema validation failed at {PathHelpers.PathToString(parsedPath)}`
-					if self._onValidationFailed then
-						self._onValidationFailed(parsedPath, unwrappedValue, message)
-						return
-					end
-					error(message, 2)
-				end
-			end
-		end
-	end
+	if not MutatorModule.validateArrayInsert(self, parsedPath, unwrappedValue) then return end
 
-	-- Batch: track this array path so the flush can diff against the pre-batch snapshot.
-	if self._batchDepth > 0 and self._batch then
-		const batch = self._batch
-		ensureBatchPathTracking(batch, parsedPath)
-		markBatchBranchDirty(batch, parsedPath)
-	end
+	const inBatch = trackArrayMutation(self, parsedPath)
 
 	-- Insert the value (handles shifting when inserting into the middle).
 	table.insert(array, pos, unwrappedValue)
@@ -1242,10 +615,7 @@ function TableManager.ArrayInsert<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 		LinkGroupModule.CheckAutoLink(self :: any, elementPath, unwrappedValue)
 	end
 
-	-- Batch: skip fires
-	if self._batchDepth > 0 then
-		return
-	end
+	if inBatch then return end
 
 	-- Fire element-level and array-level listeners, ancestor callbacks, and signal.
 	makeEmit(self, parsedPath).inserted(pos, unwrappedValue)
@@ -1258,12 +628,7 @@ TableManager.Insert = TableManager.ArrayInsert
 function TableManager.ArrayRemove<T, S>(self: TM_Internal<T>, pathOrProxy: Path<S> | Proxy<T, S>, index: number): any
 	local parsedPath, array = resolveArrayForWrite(self, pathOrProxy)
 
-	-- Batch: track this array path so the flush can diff against the pre-batch snapshot.
-	if self._batchDepth > 0 and self._batch then
-		const batch = self._batch
-		ensureBatchPathTracking(batch, parsedPath)
-		markBatchBranchDirty(batch, parsedPath)
-	end
+	const inBatch = trackArrayMutation(self, parsedPath)
 
 	-- Remove the element (handles shifting automatically).
 	const oldValue = table.remove(array, index)
@@ -1276,10 +641,7 @@ function TableManager.ArrayRemove<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 		LinkGroupModule.CheckDivergence(self, parsedPath)
 	end
 
-	-- Batch: skip fires
-	if self._batchDepth > 0 then
-		return oldValue
-	end
+	if inBatch then return oldValue end
 
 	-- Fire listeners EXACTLY at remove path (we handle ancestors separately)
 	makeEmit(self, parsedPath).removed(index, oldValue)
@@ -1320,12 +682,7 @@ function TableManager.ArraySwapRemove<T, S>(self: TM_Internal<T>, pathOrProxy: P
 	const oldValue = array[index]
 	const movedValue = array[lastIndex]
 
-	-- Batch: track this array path so the flush can diff against the pre-batch snapshot.
-	if self._batchDepth > 0 and self._batch then
-		const batch = self._batch
-		ensureBatchPathTracking(batch, parsedPath)
-		markBatchBranchDirty(batch, parsedPath)
-	end
+	const inBatch = trackArrayMutation(self, parsedPath)
 
 	if index ~= lastIndex then
 		array[index] = movedValue
@@ -1336,10 +693,7 @@ function TableManager.ArraySwapRemove<T, S>(self: TM_Internal<T>, pathOrProxy: P
 		LinkGroupModule.CheckDivergence(self, parsedPath)
 	end
 
-	-- Batch: skip immediate fires
-	if self._batchDepth > 0 then
-		return oldValue
-	end
+	if inBatch then return oldValue end
 
 	const moveInfo = if index ~= lastIndex
 		then { moveId = `swapremove_{index}_{lastIndex}`, fromIndex = lastIndex, toIndex = index }
@@ -1413,9 +767,7 @@ end
 
 	Pair with `Resume()`. Nested calls are no-ops (the outermost window wins).
 ]=]
-function TableManager.Suspend(self: TM_Internal)
-	BatchFlushModule.Suspend(self :: any)
-end
+TableManager.Suspend = BatchFlushModule.Suspend
 
 --[=[
 	Resumes after `Suspend()` and flushes all pending changes.
@@ -1427,9 +779,7 @@ end
 	2. **Array flush** — For each tracked array path, diffs the pre-batch
 	   snapshot against the current value via LCS (`ArrayDiff.emitDiff`).
 ]=]
-function TableManager.Resume(self: TM_Internal)
-	BatchFlushModule.Resume(self :: any)
-end
+TableManager.Resume = BatchFlushModule.Resume
 
 --[=[
 	Move an element from one location to another within the same table.

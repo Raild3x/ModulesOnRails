@@ -289,9 +289,7 @@ local function newGroup(object: any): LinkGroup
 	return self
 end
 
---[=[
-	Returns the canonical group for `object`'s identity, creating it if needed.
-]=]
+-- Returns the canonical group for `object`'s identity, creating it if needed.
 local function getOrCreateGroup(object: any): LinkGroup
 	local group = OBJECT_TO_GROUP[object]
 	if group == nil then
@@ -377,6 +375,33 @@ local function checkDivergence(self: TableManagerLike, writePath: PathArray)
 			end
 		end
 	end
+end
+
+--[=[
+	Called when `self`'s root table identity has been replaced
+	(`Set({}, newRoot)`). The manager's cached anchor proxies pointed into the
+	now-pruned old tree, so clear them (GetAnchorPath then falls back to the
+	static AnchorPath), then run the standard divergence check at the root: any
+	anchor that no longer resolves to its group's shared object is severed. This
+	is the `{}` generalisation of the ancestor-replacement handling in
+	`checkDivergence`.
+]=]
+local function onRootReplaced(self: TableManagerLike)
+	local groups = self._linkGroups
+	if groups == nil then
+		return
+	end
+
+	for _, group in table.clone(groups) do
+		for _, member in group._members do
+			if member.Manager == self then
+				member.AnchorProxy = nil
+				break
+			end
+		end
+	end
+
+	checkDivergence(self, {})
 end
 
 --[=[
@@ -492,7 +517,7 @@ end
 -- manager is collected its entry vanishes (and the root key with it), so the
 -- registry never pins a manager or its data alive. `UnregisterAutoLink` clears
 -- entries promptly on Destroy.
-local ROOT_TO_AUTOLINK_TM: { [any]: TableManagerLike } = setmetatable({}, { __mode = "v" }) :: any
+local ROOT_TO_AUTOLINK_TM: { [{ [any]: any }]: TableManagerLike? } = setmetatable({}, { __mode = "kv" }) :: any
 
 -- Returns the live AutoLink manager registered for `object`, or nil if none /
 -- the registrant has been destroyed.
@@ -578,7 +603,7 @@ local function findChildLinks(tm: TableManagerLike, path: Path<any>?)
 		for _, segment in relPath do
 			table.insert(anchorPath, segment)
 		end
-		link({ { tm, anchorPath }, { child } })
+		link { { tm, anchorPath }, { child } }
 	end)
 end
 
@@ -613,7 +638,7 @@ local function findParentLinks(tm: TableManagerLike)
 		end
 
 		if anchorPath ~= nil then
-			link({ { parent, anchorPath }, { tm } })
+			link { { parent, anchorPath }, { tm } }
 		end
 	end
 end
@@ -650,7 +675,7 @@ local function checkAutoLink(tm: TableManagerLike, writePath: PathArray, value: 
 	end
 	local other = autoLinkManagerFor(value)
 	if other ~= nil and other ~= tm then
-		link({ { tm, writePath }, { other } })
+		link { { tm, writePath }, { other } }
 	end
 end
 
@@ -658,6 +683,7 @@ return {
 	Link = link,
 	GetOrCreateGroup = getOrCreateGroup,
 	CheckDivergence = checkDivergence,
+	OnRootReplaced = onRootReplaced,
 	FanOutSet = fanOutSet,
 	FanOutArrayOp = fanOutArrayOp,
 	RegisterAutoLink = registerAutoLink,

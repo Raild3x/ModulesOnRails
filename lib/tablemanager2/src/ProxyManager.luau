@@ -498,6 +498,47 @@ function ProxyManager.ReparentProxy<T, S>(self: ProxyManager<T>, proxy: Proxy<T,
 end
 
 --[=[
+	Retarget the root proxy from `oldRoot` to `newRoot`, preserving the root
+	proxy's identity (callers may hold `manager.Proxy`). Updates `_rootTable`,
+	the root proxy's metadata, and the bidirectional mappings, then prunes the
+	stale proxy bookkeeping of the old subtree.
+
+	`oldRoot` must be the current root proxy's original. Nested proxies for
+	`newRoot` are recreated lazily on first access via `__index`.
+]=]
+function ProxyManager.RetargetRoot<T>(self: ProxyManager<T>, oldRoot: any, newRoot: any)
+	if type(newRoot) ~= "table" then
+		error("RetargetRoot expects newRoot to be a table")
+	end
+	const rootProxy = self._originalToProxy[oldRoot]
+	if rootProxy == nil then
+		error("RetargetRoot: oldRoot is not the current root proxy's original")
+	end
+
+	-- Point the manager's root reference at the new table (used by liveness checks).
+	self._rootTable = newRoot
+
+	-- Retarget the root proxy's metadata to the new original.
+	const meta = self._proxyMeta[rootProxy]
+	if meta ~= nil then
+		const isArr, arrayLength = classifyTable(newRoot)
+		meta.Original = newRoot
+		meta.IsArray = isArr
+		meta.ArrayLength = arrayLength
+	end
+
+	-- Move the bidirectional mappings onto the new original.
+	self._originalToProxy[oldRoot] = nil
+	self._originalToProxy[newRoot] = rootProxy
+	PROXY_TO_ORIGINAL[rootProxy] = newRoot
+
+	-- Evict stale proxy bookkeeping for the old subtree. The old root's mapping
+	-- is already cleared above, so `visit(oldRoot)` only prunes its former
+	-- descendants; the (now newRoot-backed) root proxy is never touched.
+	self:PruneOriginal(oldRoot)
+end
+
+--[=[
 	Update the `Key` metadata for all direct child proxies of `arrayOriginal`
 	whose numeric key is >= `fromIndex` by adding `delta`.
 

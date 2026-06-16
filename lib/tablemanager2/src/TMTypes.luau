@@ -1,20 +1,4 @@
 --!strict
---[=[
-	@ignore
-	@class TMTypes
-
-	Leaf type hub for TableManager2. Requires only leaf modules (PathHelpers,
-	ProxyManager, ListenerRegistry, ChangeDetector, SchemaNavigator, ArrayDiff,
-	BatchUtils, Signal) — none of which require TableManager, LinkGroup, Linker,
-	or BatchFlush. This lets every core module `require("./TMTypes")` for the
-	real `TM_Internal`/`TableManager` types one-directionally, without a
-	circular require back to `TableManager.luau`.
-
-	Link-related type *shapes* (`LinkGroup`, `Linker`, `AppliedOp`, etc.) live
-	here too, even though they're implemented in `LinkGroup.luau`/`Linker.luau`,
-	because `TM_Internal` must reference them and those modules require this one
-	for `TableManagerLike`.
-]=]
 
 --// Imports //--
 const PathHelpers = require("./PathHelpers")
@@ -112,23 +96,38 @@ export type Linker = {
 --// TableManager //--
 --------------------------------------------------------------------------------
 
+--[=[
+	@within TableManager
+	@interface TableManagerConfig
+	.Schema SchemaCheck?
+	.OnValidationFailed (path: PathArray, value: any, err: string) -> ()?
+	.ListenersFireDeferred boolean?
+	.DuplicateReferenceMode DuplicateReferenceMode? -- Experimental
+	.EnableProxies boolean? -- Defaults to true. When false, `Proxy`/`GetProxy` are unavailable.
+	.AutoLink boolean? -- When true, this manager auto-links (via `tm.Linker`) with any OTHER AutoLink manager with shared tables
+
+	:::caution Auto Linking
+	AutoLinking is an experimental feature.
+	AutoLinking only supports linking with other managers that have AutoLink enabled. If you attempt 
+	to link with a manager that does not have AutoLink enabled, the link will not be established. AutoLinking
+	also only works when you are setting/inserting a managed table directly. It will not automatically link 
+	nested tables that are placed in bulk. You can use `tm.Linker:Ensure(path)` to link nested tables.
+	:::
+]=]
 export type TableManagerConfig = {
 	Schema: SchemaCheck?,
 	OnValidationFailed: ((path: PathArray, value: any, err: string) -> ())?,
 	ListenersFireDeferred: boolean?,
-	DuplicateReferenceMode: DuplicateReferenceMode?, -- Experimental
-	EnableProxies: boolean?, -- Defaults to true. When false, `Proxy`/`GetProxy` are unavailable.
-	-- When true, this manager auto-links (via `tm.Linker`) with any OTHER AutoLink
-	-- manager whose root table is a node inside this one's tree, or vice-versa.
-	-- Directly-assigned managed tables link automatically; nested/bulk placements
-	-- are hooked up with `tm.Linker:Ensure(path)`.
+	DuplicateReferenceMode: DuplicateReferenceMode?,
+	EnableProxies: boolean?,
 	AutoLink: boolean?,
 }
 
 export type TableManager<T = { [any]: any }> = {
-	Proxy: Proxy<T, "">?,
 	Raw: T,
-
+	Proxy: Proxy<T, "">?,
+	Linker: Linker,
+	
 	-- Signals (fire once per change)
 	ValueChanged: Signal<(path: PathArray, newValue: any, oldValue: any) -> (), PathArray, any, any>,
 	KeyAdded: Signal<(path: PathArray, key: any, newValue: any) -> (), PathArray, any, any>,
@@ -204,6 +203,7 @@ export type TableManager<T = { [any]: any }> = {
 		callback: (index: number, newValue: any, oldValue: any, metadata: ChangeMetadata) -> (),
 		options: ListenerOptions?
 	) -> Connection,
+
 	-- Helper methods
 	Get: <S>(self: TableManager<T>, path: Path<S>, suppressNilPartialPaths: boolean?) -> ValueAtPath<T, S>,
 	GetProxy: <S>(self: TableManager<T>, path: Path<S>, suppressNilPartialPaths: boolean?) -> Proxy<T, S>,
@@ -222,13 +222,10 @@ export type TableManager<T = { [any]: any }> = {
 	Suspend: (self: TableManager<T>) -> (),
 	Resume: (self: TableManager<T>) -> (),
 
-	-- All linking lives here (see `Linker`): With / Ensure / Unlink / GetManagers
-	-- / IsLinkedWith / GetGroups.
-	Linker: Linker,
 
-	-- Returns a PLAIN TableManager rooted at the shared table found at `target`
-	-- (a proxy, a path, or a raw value already in this manager's tree), linked
-	-- to this manager via `Link` so writes on either side fan out to the other.
+	--- Returns a PLAIN TableManager rooted at the shared table found at `target`
+	--- (a proxy, a path, or a raw value already in this manager's tree), linked
+	--- to this manager via `Link` so writes on either side fan out to the other.
 	Extend: <S>(self: TableManager<T>, target: Proxy<T, S> | Path<S>, config: ExtendConfig?) -> TableManager<ValueAtPath<T, S>>,
 
 	Destroy: (self: TableManager<T>) -> (),
@@ -269,10 +266,6 @@ export type TM_Internal<T = { [any]: any }> = TableManager<T> & {
 	_NotifyApplied: (self: TM_Internal<T>, op: AppliedOp) -> (),
 }
 
--- Unified structural alias for util modules (BatchFlush, LinkGroup, Linker)
--- that need to talk about "a TableManager instance" without a circular
--- require on TableManager.luau. `any` makes this bidirectionally compatible
--- with every concrete `TM_Internal<T>`.
-export type TableManagerLike = TM_Internal<any>
+export type TableManagerLike = TM_Internal<{[any]:any}>
 
 return {}

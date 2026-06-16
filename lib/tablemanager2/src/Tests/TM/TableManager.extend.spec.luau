@@ -94,20 +94,14 @@ return function(t: tiniest)
 			swordTM:Destroy()
 		end)
 
-		test("Detachment: replacing the extended object dissolves the group and fires OnDetached", function()
+		test("Detachment: replacing the extended object dissolves the group", function()
 			local data = { Stats = { Health = 100 } }
 			local playerTM = TableManager.new(data)
 
-			local detached = false
-			local statsTM = playerTM:Extend("Stats", {
-				OnDetached = function()
-					detached = true
-				end,
-			})
+			local statsTM = playerTM:Extend("Stats")
 
 			playerTM:Set("Stats", { Health = 999 })
 
-			expect(detached).is_true()
 			expect(playerTM.Linker:IsLinkedWith(statsTM)).never_is_true()
 
 			-- statsTM keeps operating on the orphaned object, independent of
@@ -126,23 +120,21 @@ return function(t: tiniest)
 		end)
 
 		test("Extend requires a table target", function()
-			local playerTM = TableManager.new({ Stats = { Health = 100 }, Name = "Bob" })
+			local playerTM = TableManager.new { Stats = { Health = 100 }, Name = "Bob" }
 
-			local ok = pcall(function()
+			expect(function()
 				playerTM:Extend("Name")
-			end)
-			expect(ok).never_is_true()
+			end).fails()
 
 			playerTM:Destroy()
 		end)
 
-		test("Extend requires proxies", function()
+		test("Extend does not require proxies", function()
 			local playerTM = TableManager.new({ Stats = { Health = 100 } }, { EnableProxies = false })
 
-			local ok = pcall(function()
+			expect(function()
 				playerTM:Extend("Stats")
-			end)
-			expect(ok).never_is_true()
+			end).never_fails()
 
 			playerTM:Destroy()
 		end)

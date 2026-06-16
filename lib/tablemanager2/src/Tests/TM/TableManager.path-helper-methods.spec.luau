@@ -201,14 +201,14 @@ return function(t: tiniest)
 			manager:Destroy()
 		end)
 
-		test("errors when attempting to set root path", function()
+		test("errors when setting the root to a non-table value", function()
 			local manager = TableManager.new {
 				a = 1,
 			}
 
 			expect(function()
 				manager:Set({}, 2)
-			end).fails_with("Cannot set root path")
+			end).fails_with("root must remain a table")
 
 			manager:Destroy()
 		end)
