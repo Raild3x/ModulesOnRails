@@ -154,6 +154,7 @@ const makeEmit = EmitterModule.makeEmit
 	@return TableManager -- The newly created TableManager instance.
 ]=]
 function TableManager.new<T>(initialData: T, config: TableManagerConfig?): TableManager<T>
+	debug.profilebegin("TM.new")
 	const self: TM_Internal<T> = (setmetatable({}, TableManager_MT) :: any) :: TM_Internal<T>
 	const resolvedConfig = config or {} :: { [string]: any? }
 	const duplicateReferenceMode: DuplicateReferenceMode = resolvedConfig.DuplicateReferenceMode or "error"
@@ -240,6 +241,7 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 		LinkGroupModule.RegisterAutoLink(self)
 	end
 
+	debug.profileend()
 	return self :: any
 end
 
@@ -473,6 +475,7 @@ end
 	Get the value at a path.
 ]=]
 function TableManager.Get<T, S>(self: TM_Internal<T>, path: Path<S>, suppressNilPartialPaths: boolean?): ValueAtPath<T, S>?
+	debug.profilebegin("TM.Get")
 	const parsedPath = PathHelpers.ParsePath(path)
 	local current = self._originalData :: T & table
 	for _, key in parsedPath do
@@ -485,6 +488,7 @@ function TableManager.Get<T, S>(self: TM_Internal<T>, path: Path<S>, suppressNil
 		end
 		current = current[key]
 	end
+	debug.profileend()
 	return current
 end
 
@@ -497,6 +501,7 @@ function TableManager.GetProxy<T, S>(
 	path: Path<S>,
 	suppressNilPartialPaths: boolean?
 ): (Proxy<T, S> | ValueAtPath<T, S>)?
+	debug.profilebegin("TableManager.GetProxy")
 	const proxyManager = self._proxyManager
 	if proxyManager == nil then
 		error("GetProxy requires proxies (Config.EnableProxies = false for this TableManager)")
@@ -515,6 +520,7 @@ function TableManager.GetProxy<T, S>(
 		current = current[key]
 		previousKey = key
 	end
+	debug.profileend()
 	return current
 end
 
@@ -533,6 +539,7 @@ function TableManager.Set<T, S>(
 	value: ValueAtPath<T, S>,
 	buildTablesDynamically: boolean?
 )
+	debug.profilebegin("TM.Set")
 	const parsedPath = PathHelpers.ParsePath(path)
 	const unwrappedValue = ProxyManagerModule.Unwrap(value)
 
@@ -579,12 +586,14 @@ function TableManager.Set<T, S>(
 	end
 
 	applyWrite(self, parsedPath, unwrappedValue)
+	debug.profileend()
 end
 
 --[=[
 	Insert value(s) into an array at a specific position or at the end.
 ]=]
 function TableManager.ArrayInsert<T, S>(self: TM_Internal<T>, pathOrProxy: Path<S> | Proxy<T, S>, ...: any): ()
+	debug.profilebegin("TM.ArrayInsert")
 	local parsedPath, array = resolveArrayForWrite(self, pathOrProxy)
 
 	-- Determine if a position was provided or default to appending.
@@ -615,10 +624,11 @@ function TableManager.ArrayInsert<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 		LinkGroupModule.CheckAutoLink(self :: any, elementPath, unwrappedValue)
 	end
 
-	if inBatch then return end
-
-	-- Fire element-level and array-level listeners, ancestor callbacks, and signal.
-	makeEmit(self, parsedPath).inserted(pos, unwrappedValue)
+	if not inBatch then 
+		-- Fire element-level and array-level listeners, ancestor callbacks, and signal.
+		makeEmit(self, parsedPath).inserted(pos, unwrappedValue)
+	end
+	debug.profileend()
 end
 TableManager.Insert = TableManager.ArrayInsert
 
@@ -626,6 +636,7 @@ TableManager.Insert = TableManager.ArrayInsert
 	Remove an element from an array at a specific index.
 ]=]
 function TableManager.ArrayRemove<T, S>(self: TM_Internal<T>, pathOrProxy: Path<S> | Proxy<T, S>, index: number): any
+	debug.profilebegin("TM.ArrayRemove")
 	local parsedPath, array = resolveArrayForWrite(self, pathOrProxy)
 
 	const inBatch = trackArrayMutation(self, parsedPath)
@@ -791,6 +802,7 @@ function TableManager.MoveTo<T, S1, S2>(
 	currentPath: Path<S1> | Proxy<T, S1>,
 	newPath: Path<S2> | Proxy<T, S2>
 )
+	debug.profilebegin("TM.MoveTo")
 	const sourcePath: PathArray<S1> = resolvePathFromPathOrProxy(self, currentPath)
 	const targetPath: PathArray<S2> = resolvePathFromPathOrProxy(self, newPath)
 
@@ -799,6 +811,7 @@ function TableManager.MoveTo<T, S1, S2>(
 	end
 
 	if PathHelpers.ArePathsEqual(sourcePath, targetPath) then
+		debug.profileend()
 		return
 	end
 
@@ -827,6 +840,7 @@ function TableManager.MoveTo<T, S1, S2>(
 		restoreReparent(self._proxyManager, rollback)
 		error(moveErr, 2)
 	end
+	debug.profileend()
 end
 
 --[=[
@@ -835,6 +849,7 @@ end
 	This is specifically useful for copying tables around without breaking proxy references.
 ]=]
 function TableManager.CopyTo<T, S1, S2>(self: TM_Internal<T>, currentPath: Path<S1> | Proxy<T, S1>, newPath: Path<S2>)
+	debug.profilebegin("TM.CopyTo")
 	const sourcePath = resolvePathFromPathOrProxy(self, currentPath)
 	const targetPath = resolvePathFromPathOrProxy(self, newPath)
 
@@ -854,6 +869,7 @@ function TableManager.CopyTo<T, S1, S2>(self: TM_Internal<T>, currentPath: Path<
 	const sourceValue = self:Get(sourcePath)
 	const copiedValue = deepCloneValue(sourceValue)
 	self:Set(targetPath, copiedValue)
+	debug.profileend()
 end
 
 --[=[

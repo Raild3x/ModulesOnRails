@@ -316,6 +316,7 @@ end
 	array-append fast path → batch dirty-marking → snapshot/write/diff.
 ]]
 function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>, value: any)
+	debug.profilebegin("applyWrite")
 	const parentPath, key = PathHelpers.GetPathParentAndKey(parsedPath :: any)
 
 	local current: any = self._originalData
@@ -333,6 +334,7 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 	if type(value) == "table" and self._proxyManager ~= nil then
 		const shouldProceed = checkDuplicateTableWrite(self, parsedPath, value)
 		if not shouldProceed then
+			debug.profileend()
 			return
 		end
 	end
@@ -342,6 +344,7 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 		if err then
 			error(err, 2)
 		end
+		debug.profileend()
 		return
 	end
 
@@ -358,6 +361,7 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 		if self._autoLink and not self._suppressLinkFanOut then
 			LinkGroupModule.CheckAutoLink(self, parsedPath, value)
 		end
+		debug.profileend()
 		return
 	end
 
@@ -380,6 +384,7 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 	end
 	Mutator.pruneDetachedValue(self, oldValue, value)
 	self._changeDetector:CheckForChanges(snapshot)
+	debug.profileend()
 end
 
 --[[
