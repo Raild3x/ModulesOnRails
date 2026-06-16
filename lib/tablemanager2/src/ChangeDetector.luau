@@ -627,35 +627,56 @@ function ChangeDetector.EmitAncestorNotifications(
 	emitKeyChanged: (path: PathArray, key: any, newValue: any, oldValue: any, metadata: ChangeMetadata) -> (),
 	emitValueChanged: (path: PathArray, newValue: any, oldValue: any, metadata: ChangeMetadata) -> ()
 )
-	for i = fromDepth, 0, -1 do
-		local currentPath: PathArray = { unpack(basePath, 1, i) }
-
-		local currentValue: any = nil
-		if rootTable ~= nil then
-			currentValue = rootTable
-			for _, k in ipairs(currentPath) do
-				if currentValue == nil then
-					break
-				end
-				currentValue = (currentValue :: any)[k]
+	-- Pre-navigate rootTable once, caching the value at each depth 0..fromDepth.
+	-- The original code re-navigated from the root at every ancestor level
+	-- (O(0+1+…+depth) = O(depth²) hash lookups); this reduces it to one O(depth) pass.
+	local cachedValues: { any }?
+	if rootTable ~= nil then
+		cachedValues = table.create(fromDepth + 1)
+		local v: any = rootTable
+		cachedValues[1] = v -- depth 0 → index 1
+		for d = 1, fromDepth do
+			if type(v) == "table" then
+				v = (v :: any)[basePath[d]]
+			else
+				v = nil
 			end
+			cachedValues[d + 1] = v -- depth d → index d+1
 		end
+	end
+
+	for i = fromDepth, 0, -1 do
+		local currentValue: any = if cachedValues then cachedValues[i + 1] else nil
 
 		if keyChangedMode == "parent" and i >= 1 then
-			local parentPath: PathArray = { unpack(basePath, 1, i - 1) }
+			-- Build parentPath (i-1 elements) with a manual loop, then derive
+			-- currentPath via table.clone + one append — avoids copying basePath twice.
+			-- Each path is a fresh unique table because Signal:Fire leaks the reference.
+			local parentPath: PathArray = table.create(i - 1)
+			for j = 1, i - 1 do
+				parentPath[j] = basePath[j]
+			end
+			local currentPath: PathArray = table.clone(parentPath)
+			currentPath[i] = basePath[i]
+
 			local key = basePath[i]
 			local keyValue = nil
 			if currentValue ~= nil and type(currentValue) == "table" then
 				keyValue = (currentValue :: any)[key]
 			end
 			emitKeyChanged(parentPath, key, keyValue, nil, metadata)
-		end
+			emitValueChanged(currentPath, currentValue, currentValue, metadata)
+		else
+			local currentPath: PathArray = table.create(i)
+			for j = 1, i do
+				currentPath[j] = basePath[j]
+			end
+			emitValueChanged(currentPath, currentValue, currentValue, metadata)
 
-		emitValueChanged(currentPath, currentValue, currentValue, metadata)
-
-		if keyChangedMode == "child" and i < #basePath then
-			local changedKey = basePath[i + 1]
-			emitKeyChanged(currentPath, changedKey, nil, nil, metadata)
+			if keyChangedMode == "child" and i < #basePath then
+				local changedKey = basePath[i + 1]
+				emitKeyChanged(currentPath, changedKey, nil, nil, metadata)
+			end
 		end
 	end
 end
