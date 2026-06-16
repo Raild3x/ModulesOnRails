@@ -346,8 +346,13 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 	end
 
 	-- Array-append fast path (key == length + 1): apply immediately and report.
-	const isArray, arrayLength = ProxyManagerModule.ClassifyTable(parentTable)
-	if isArray and type(key) == "number" and key == arrayLength + 1 then
+	-- Only classify the parent table when the key is numeric; classification is O(n)
+	-- and its result is never used for string/non-numeric keys.
+	local isArray, arrayLength = false, 0
+	if type(key) == "number" then
+		isArray, arrayLength = ProxyManagerModule.ClassifyTable(parentTable)
+	end
+	if isArray and key == arrayLength + 1 then
 		parentTable[key] = value
 		onArrayAppended(self, parentPath, key, value)
 		if self._autoLink and not self._suppressLinkFanOut then
@@ -358,7 +363,7 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 
 	if self._batchDepth > 0 then
 		const batch = self._batch
-		if isArray and type(key) == "number" and batch then
+		if isArray and batch then
 			ensureBatchPathTracking(batch, parentPath)
 		end
 		markBatchBranchDirty(batch, parentPath)

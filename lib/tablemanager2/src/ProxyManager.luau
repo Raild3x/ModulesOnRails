@@ -396,7 +396,7 @@ function ProxyManager._GetLivePath(self: ProxyManager, proxy: Proxy<any>): PathA
 	const keys: PathArray<any> = {}
 	local current = meta
 	while current ~= nil and current.Key ~= nil do
-		table.insert(keys, 1, current.Key)
+		keys[#keys + 1] = current.Key  -- collect leaf→root; reverse below
 		if current.Parent == nil then
 			break
 		end
@@ -405,6 +405,14 @@ function ProxyManager._GetLivePath(self: ProxyManager, proxy: Proxy<any>): PathA
 			break
 		end
 		current = self._proxyMeta[parentProxy]
+	end
+
+	-- Reverse in place: collected in leaf→root order, callers expect root→leaf.
+	local lo, hi = 1, #keys
+	while lo < hi do
+		keys[lo], keys[hi] = keys[hi], keys[lo]
+		lo += 1
+		hi -= 1
 	end
 
 	return keys
