@@ -77,6 +77,7 @@ export type Options = {
 }
 
 export type CollectOptions = {
+	ignore: (Instance) -> (boolean?, boolean?)?, -- ignoreSelf, ignoreDescendants
 	file_name_pattern: string?,
 }
 
@@ -151,6 +152,9 @@ function tiniest_for_roblox.configure(options: Options)
 		
 		## CollectOptions
 		- `file_name_pattern: string?` -- Lua pattern to match test files (defaults to "%.spec$")
+		- `ignore: ((Instance) -> (boolean?, boolean?))?` -- Called for every Instance visited during
+		  discovery. Return `ignoreSelf` to skip describing/collecting the Instance itself, and
+		  `ignoreDescendants` to skip recursing into its children.
 		
 		## Example
 		```lua
@@ -180,7 +184,32 @@ function tiniest_for_roblox.configure(options: Options)
 	function self.collect_tests_from_hierarchy(ancestor: Instance, declared_collect_options: CollectOptions?)
 		local collect_options: CollectOptions = declared_collect_options or {}
 		local file_name_pattern = collect_options.file_name_pattern or "%.spec$"
-		local function discover(ancestor: Instance): ()
+		local ignore = collect_options.ignore
+		local discover: (ancestor: Instance) -> ()
+		local function discoverChildren(ancestor: Instance): ()
+			local children = ancestor:GetChildren()
+			if #children > 0 then
+				table.sort(children, function(a: Instance, b: Instance)
+					return a.Name < b.Name
+				end)
+				for _, child in children do
+					discover(child)
+				end
+			end
+		end
+		function discover(ancestor: Instance): ()
+			local ignoreSelf: boolean?, ignoreDescendants: boolean?
+			if ignore then
+				ignoreSelf, ignoreDescendants = ignore(ancestor)
+			end
+
+			if ignoreSelf then
+				if not ignoreDescendants then
+					discoverChildren(ancestor)
+				end
+				return
+			end
+
 			self.describe(ancestor.Name, function()
 				if ancestor:IsA("ModuleScript") and ancestor.Name:match(file_name_pattern) then
 					local requireOk, module = pcall(require, ancestor)
@@ -194,14 +223,8 @@ function tiniest_for_roblox.configure(options: Options)
 						error(err, 0)
 					end
 				end
-				local children = ancestor:GetChildren()
-				if #children > 0 then
-					table.sort(children, function(a: Instance, b: Instance)
-						return a.Name < b.Name
-					end)
-					for _, child in children do
-						discover(child)
-					end
+				if not ignoreDescendants then
+					discoverChildren(ancestor)
 				end
 			end)
 		end
