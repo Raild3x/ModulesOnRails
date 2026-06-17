@@ -9,11 +9,15 @@ const SchemaNavigatorModule = require("./SchemaNavigator")
 const ArrayDiffModule = require("./ArrayDiff")
 const BatchUtilsModule = require("./BatchUtils")
 const Signal = require("../Signal")
+const JanitorModule = require("../Janitor")
 
 --// Types //--
 type Path<S> = PathHelpers.Path<S>
 type PathArray<S = string> = PathHelpers.PathArray<S>
 type ValueAtPath<T, S> = PathHelpers.ValueAtPath<T, S>
+type KeyAtPath<T, S> = PathHelpers.KeyAtPath<T, S>
+type ElementAtPath<T, S> = PathHelpers.ElementAtPath<T, S>
+type Janitor = JanitorModule.Janitor
 type ListenerRegistry = ListenerRegistryModule.ListenerRegistry
 type ChangeDetector = ChangeDetectorModule.ChangeDetector
 type ChangeMetadata = ChangeDetectorModule.ChangeMetadata
@@ -123,6 +127,17 @@ export type TableManagerConfig = {
 	AutoLink: boolean?,
 }
 
+--[=[
+	@within TableManager
+	@interface ForOptions
+	.FireForExisting boolean? -- Defaults to true: run the handler/transform for items already present at subscribe time.
+	.Defer boolean? -- Defer the initial fire (honors the registry's deferred-fire mode either way).
+]=]
+export type ForOptions = {
+	FireForExisting: boolean?,
+	Defer: boolean?,
+}
+
 export type TableManager<T = { [any]: any }> = {
 	Raw: T,
 	Proxy: Proxy<T, "">?,
@@ -204,6 +219,74 @@ export type TableManager<T = { [any]: any }> = {
 		options: ListenerOptions?
 	) -> Connection,
 
+	-- For / Map: reconcile the items found at `path` (a dictionary OR an array)
+	-- by identity, running a handler/transform per item with automatic teardown
+	-- (via a per-item Janitor) when that item leaves or is replaced. See
+	-- TableManager.luau for full semantics and the identity rules per method.
+
+	--- Identity = key. Re-runs only when a key is added/removed; a value change
+	--- at an existing key does NOT re-run the handler.
+	ForKeys: <S>(
+		self: TableManager<T>,
+		path: Path<S>,
+		handler: (itemJanitor: Janitor, key: KeyAtPath<T, S>, metadata: ChangeMetadata?) -> (),
+		options: ForOptions?
+	) -> Connection,
+
+	--- Identity = value (multiset; duplicate values are tracked independently).
+	--- A value moving between keys/indices does NOT re-run the handler.
+	ForValues: <S>(
+		self: TableManager<T>,
+		path: Path<S>,
+		handler: (itemJanitor: Janitor, value: ElementAtPath<T, S>, metadata: ChangeMetadata?) -> (),
+		options: ForOptions?
+	) -> Connection,
+
+	--- Identity = (key, value). Either changing tears down the old item and
+	--- runs the handler again for the new one.
+	ForPairs: <S>(
+		self: TableManager<T>,
+		path: Path<S>,
+		handler: (
+			itemJanitor: Janitor,
+			key: KeyAtPath<T, S>,
+			value: ElementAtPath<T, S>,
+			metadata: ChangeMetadata?
+		) -> (),
+		options: ForOptions?
+	) -> Connection,
+
+	--- Returns a live `TableManager` keyed by `transform`'s return value, with
+	--- values passed through unchanged. Re-runs `transform` only when the
+	--- source key changes; a value change at an existing key refreshes the
+	--- output value WITHOUT re-running `transform`. Destroying the returned
+	--- manager disconnects the source subscription; destroying the SOURCE does
+	--- NOT cascade-destroy the returned manager.
+	MapKeys: <S>(
+		self: TableManager<T>,
+		path: Path<S>,
+		transform: (entryJanitor: Janitor, key: KeyAtPath<T, S>, value: ElementAtPath<T, S>) -> any
+	) -> TableManager<any>,
+
+	--- Returns a live `TableManager` keyed by the source key, with each entry
+	--- recomputed via `transform` whenever its value changes. Same lifecycle
+	--- rules as `MapKeys`.
+	MapValues: <S>(
+		self: TableManager<T>,
+		path: Path<S>,
+		transform: (entryJanitor: Janitor, value: ElementAtPath<T, S>, key: KeyAtPath<T, S>) -> any
+	) -> TableManager<any>,
+
+	--- Returns a live `TableManager` keyed by `transform`'s returned key, with
+	--- the entry recomputed whenever the source key or value changes. On an
+	--- output-key collision, the last write wins. Same lifecycle rules as
+	--- `MapKeys`.
+	MapPairs: <S>(
+		self: TableManager<T>,
+		path: Path<S>,
+		transform: (entryJanitor: Janitor, key: KeyAtPath<T, S>, value: ElementAtPath<T, S>) -> (any, any)
+	) -> TableManager<any>,
+
 	-- Helper methods
 	Get: <S>(self: TableManager<T>, path: Path<S>, suppressNilPartialPaths: boolean?) -> ValueAtPath<T, S>,
 	GetProxy: <S>(self: TableManager<T>, path: Path<S>, suppressNilPartialPaths: boolean?) -> Proxy<T, S>,
@@ -259,6 +342,10 @@ export type TM_Internal<T = { [any]: any }> = TableManager<T> & {
 	_suppressLinkFanOut: boolean?,
 	-- Set from `Config.AutoLink`; gates the direct write-path auto-link hook.
 	_autoLink: boolean?,
+	-- Lazily-created Janitor holding resources this manager owns but that live
+	-- outside it (e.g. a `Map*` derived manager's subscription to its source).
+	-- Flushed in `Destroy`. Reusable extension point for future derived helpers.
+	_ownedCleanup: Janitor?,
 
 	-- Re-fires listeners/signals for an op that has ALREADY been applied to the
 	-- shared raw, WITHOUT mutating or snapshot-diffing. Used only by LinkGroup

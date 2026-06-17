@@ -16,3 +16,4 @@ docsLink = "TableManager"
 [dependencies]
 Signal = "howmanysmall/better-signal@2.1.0"
 T = "raild3x/t@^1"
+Janitor = "howmanysmall/janitor@^1.16.0"

@@ -65,6 +65,7 @@
 --// Imports //--
 const T = require("../T")
 const Signal = require("../Signal")
+const Janitor = require("../Janitor")
 const PathHelpers = require("./PathHelpers")
 const BatchUtilsModule = require("./BatchUtils")
 const BatchFlushModule = require("./BatchFlush")
@@ -85,12 +86,15 @@ const createSyntheticSnapshot = BatchUtilsModule.CreateSyntheticSnapshot
 type Path<S> = PathHelpers.Path<S>
 type PathArray<S = string> = PathHelpers.PathArray<S>
 type ValueAtPath<T, S> = PathHelpers.ValueAtPath<T, S>
+type KeyAtPath<T, S> = PathHelpers.KeyAtPath<T, S>
+type ElementAtPath<T, S> = PathHelpers.ElementAtPath<T, S>
 type ListenerRegistry = ListenerRegistryModule.ListenerRegistry
 type ChangeDetector = ChangeDetectorModule.ChangeDetector
 type ChangeMetadata = ChangeDetectorModule.ChangeMetadata
 type ListenerOptions = ListenerRegistryModule.ListenerOptions
 type Connection = ListenerRegistryModule.Connection
 type Signal<Fn, Args...> = Signal.Signal<Fn, Args...>
+type Janitor = Janitor.Janitor
 type SchemaCheck = SchemaNavigatorModule.Check
 type BatchState = BatchUtilsModule.BatchState
 type table = { [any]: any }
@@ -103,6 +107,7 @@ export type AppliedOp = Types.AppliedOp
 
 export type DuplicateReferenceMode = Types.DuplicateReferenceMode
 export type TableManagerConfig = Types.TableManagerConfig
+export type ForOptions = Types.ForOptions
 export type TableManager<T = { [any]: any }> = Types.TableManager<T>
 export type Linker = Types.Linker
 
@@ -182,6 +187,9 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	-- Batch state (reset at start of each Suspend/Resume cycle)
 	self._batchDepth = 0
 	self._batch = nil
+
+	-- Lazily created on first use by a `Map*` helper (see `attachOwnedCleanup`).
+	self._ownedCleanup = nil
 
 	-- Exposes `makeEmit` (write/fire core) to BatchFlush without a circular require.
 	self._MakeEmit = function(path: PathArray)
@@ -468,6 +476,404 @@ function TableManager.OnArraySet<T, S>(
 end
 
 --------------------------------------------------------------------------------
+--// For / Map //--
+--------------------------------------------------------------------------------
+-- Shared identity-based reconcile driver behind `ForKeys`/`ForValues`/`ForPairs`
+-- and `MapKeys`/`MapValues`/`MapPairs`. See TMTypes.luau for the public
+-- semantics table; this section is the implementation only.
+
+type ForItem = {
+	Value: any,
+	Janitor: Janitor,
+}
+
+type ValueItem = {
+	Janitor: Janitor,
+}
+
+-- Wires the `OnChange` listener that drives `reconcile` and the initial fire
+-- (deferred per `options.Defer`/the registry's fire-deferred mode, mirroring
+-- `Observe`). Unlike `Observe`, the listener is registered BEFORE the initial
+-- fire is scheduled: if the initial reconcile yields (a handler awaits
+-- something), a change arriving mid-reconcile must still be observed instead
+-- of silently lost. `reconcile` is idempotent against the live table, so a
+-- redundant extra pass triggered by this ordering is harmless.
+local function wireReconcileConnection(
+	self: TM_Internal<any>,
+	parsedPath: PathArray,
+	reconcile: (metadata: ChangeMetadata?) -> (),
+	teardownAll: () -> (),
+	options: ForOptions?,
+	wrapInitialFire: ((fire: () -> ()) -> ())?
+): Connection
+	const listenerConnection = self:OnChange(parsedPath, function(_newValue, _oldValue, metadata)
+		reconcile(metadata)
+	end, { ListenDepth = 1 })
+
+	if options == nil or options.FireForExisting ~= false then
+		const function fireInitial()
+			if wrapInitialFire then
+				wrapInitialFire(function()
+					reconcile(nil)
+				end)
+			else
+				reconcile(nil)
+			end
+		end
+
+		if (options and options.Defer) or self._listenerRegistry._fireDeferred then
+			task.defer(fireInitial)
+		else
+			task.spawn(fireInitial)
+		end
+	end
+
+	const connection = {} :: Connection
+	connection.Connected = true
+	connection.Disconnect = function(conn: Connection)
+		if not conn.Connected then
+			return
+		end
+		conn.Connected = false
+		listenerConnection:Disconnect()
+		teardownAll()
+	end
+
+	return connection
+end
+
+--[=[
+	Shared driver for `ForKeys`/`ForPairs`/`MapKeys`/`MapValues`/`MapPairs`:
+	items are tracked BY KEY. When `recreateOnValueChange` is true
+	(`ForPairs`/`MapValues`/`MapPairs`), a value change at an existing key
+	tears down the old item and runs `onAdd` again for the new one. When false
+	(`ForKeys`/`MapKeys`), a value change at an existing key calls `onRefresh`
+	instead and the item (and its Janitor) stays alive.
+]=]
+local function makeKeyedReconciler(
+	self: TM_Internal<any>,
+	parsedPath: PathArray,
+	recreateOnValueChange: boolean,
+	onAdd: (itemJanitor: Janitor, key: any, value: any, metadata: ChangeMetadata?) -> (),
+	onRemove: ((item: ForItem, key: any) -> ())?,
+	onRefresh: ((item: ForItem, key: any, newValue: any, metadata: ChangeMetadata?) -> ())?,
+	options: ForOptions?,
+	wrapInitialFire: ((fire: () -> ()) -> ())?
+): Connection
+	const items: { [any]: ForItem } = {}
+
+	const function destroyItem(key: any, item: ForItem)
+		items[key] = nil
+		if onRemove then
+			onRemove(item, key)
+		end
+		item.Janitor:Destroy()
+	end
+
+	const function reconcile(metadata: ChangeMetadata?)
+		const current = self:Get(parsedPath, true)
+
+		-- Removal pass first (safe to nil existing table keys mid `pairs`/`for...in`).
+		for key, item in items do
+			if type(current) ~= "table" or (current :: any)[key] == nil then
+				destroyItem(key, item)
+			end
+		end
+
+		if type(current) ~= "table" then
+			return
+		end
+
+		for key, value in current :: any do
+			const item = items[key]
+			if item == nil then
+				const itemJanitor = Janitor.new()
+				items[key] = { Value = value, Janitor = itemJanitor }
+				onAdd(itemJanitor, key, value, metadata)
+			elseif item.Value ~= value then
+				if recreateOnValueChange then
+					destroyItem(key, item)
+					const itemJanitor = Janitor.new()
+					items[key] = { Value = value, Janitor = itemJanitor }
+					onAdd(itemJanitor, key, value, metadata)
+				else
+					item.Value = value
+					if onRefresh then
+						onRefresh(item, key, value, metadata)
+					end
+				end
+			end
+		end
+	end
+
+	const function teardownAll()
+		for key, item in items do
+			destroyItem(key, item)
+		end
+	end
+
+	return wireReconcileConnection(self, parsedPath, reconcile, teardownAll, options, wrapInitialFire)
+end
+
+--[=[
+	Shared driver for `ForValues`: items are tracked BY VALUE as a multiset, so
+	duplicate values are tracked as independent items and a value moving
+	between keys/indices does not re-run `onAdd`.
+]=]
+local function makeValueReconciler(
+	self: TM_Internal<any>,
+	parsedPath: PathArray,
+	onAdd: (itemJanitor: Janitor, value: any, metadata: ChangeMetadata?) -> (),
+	options: ForOptions?
+): Connection
+	const items: { [any]: { ValueItem } } = {}
+
+	const function reconcile(metadata: ChangeMetadata?)
+		const current = self:Get(parsedPath, true)
+		const counts: { [any]: number } = {}
+
+		if type(current) == "table" then
+			for _, value in current :: any do
+				counts[value] = (counts[value] or 0) + 1
+			end
+		end
+
+		for value, count in counts do
+			local list = items[value]
+			if list == nil then
+				list = {}
+				items[value] = list
+			end
+			while #list < count do
+				const itemJanitor = Janitor.new()
+				table.insert(list, { Janitor = itemJanitor })
+				onAdd(itemJanitor, value, metadata)
+			end
+			while #list > count do
+				const item = table.remove(list) :: ValueItem
+				item.Janitor:Destroy()
+			end
+		end
+
+		for value, list in items do
+			if counts[value] == nil then
+				for _, item in list do
+					item.Janitor:Destroy()
+				end
+				items[value] = nil
+			end
+		end
+	end
+
+	const function teardownAll()
+		for _, list in items do
+			for _, item in list do
+				item.Janitor:Destroy()
+			end
+		end
+		table.clear(items)
+	end
+
+	return wireReconcileConnection(self, parsedPath, reconcile, teardownAll, options, nil)
+end
+
+-- Registers `item` (cleaned up via `methodName`) in `manager`'s lazily-created
+-- owned-cleanup Janitor, so it is torn down when `manager` is destroyed. Used
+-- by `Map*` to tie the derived manager's lifetime to its source subscription.
+local function attachOwnedCleanup(manager: TM_Internal<any>, item: any, methodName: string)
+	local ownedCleanup = manager._ownedCleanup
+	if ownedCleanup == nil then
+		ownedCleanup = Janitor.new()
+		manager._ownedCleanup = ownedCleanup
+	end
+	ownedCleanup:Add(item, methodName)
+end
+
+--[=[
+	Reconciles the items found at `path` by KEY: `handler` runs once per key
+	(passed a per-item Janitor, the key, and change metadata — `nil` on the
+	initial fire), and is NOT re-run when the value at an existing key
+	changes. The Janitor is destroyed when that key is removed or the
+	connection disconnects.
+]=]
+function TableManager.ForKeys<T, S>(
+	self: TM_Internal<T>,
+	path: Path<S>,
+	handler: (itemJanitor: Janitor, key: KeyAtPath<T, S>, metadata: ChangeMetadata?) -> (),
+	options: ForOptions?
+): Connection
+	const parsedPath = PathHelpers.ParsePath(path)
+	return makeKeyedReconciler(self, parsedPath, false, function(itemJanitor, key, _value, metadata)
+		handler(itemJanitor, key, metadata)
+	end, nil, nil, options, nil)
+end
+
+--[=[
+	Reconciles the items found at `path` by VALUE (as a multiset — duplicate
+	values are tracked as independent items): `handler` runs once per value
+	occurrence and is NOT re-run when that value moves between keys/indices
+	(e.g. an `ArraySwapRemove`). The Janitor is destroyed when that value
+	occurrence is no longer present or the connection disconnects.
+]=]
+function TableManager.ForValues<T, S>(
+	self: TM_Internal<T>,
+	path: Path<S>,
+	handler: (itemJanitor: Janitor, value: ElementAtPath<T, S>, metadata: ChangeMetadata?) -> (),
+	options: ForOptions?
+): Connection
+	const parsedPath = PathHelpers.ParsePath(path)
+	return makeValueReconciler(self, parsedPath, handler, options)
+end
+
+--[=[
+	Reconciles the items found at `path` by KEY AND VALUE: `handler` re-runs
+	(tearing down the previous item's Janitor first) whenever EITHER the key
+	or the value changes — a value change at an existing key is treated as
+	that item leaving and a new one appearing.
+]=]
+function TableManager.ForPairs<T, S>(
+	self: TM_Internal<T>,
+	path: Path<S>,
+	handler: (
+		itemJanitor: Janitor,
+		key: KeyAtPath<T, S>,
+		value: ElementAtPath<T, S>,
+		metadata: ChangeMetadata?
+	) -> (),
+	options: ForOptions?
+): Connection
+	const parsedPath = PathHelpers.ParsePath(path)
+	return makeKeyedReconciler(self, parsedPath, true, handler, nil, nil, options, nil)
+end
+
+--[=[
+	Returns a live `TableManager` keyed by `transform(entryJanitor, key, value)`,
+	with values passed through unchanged. `transform` re-runs only when the
+	source key is added/removed; a value change at an existing key refreshes
+	the output value WITHOUT re-running `transform`. The output manager owns
+	the source subscription: destroying it disconnects from the source and
+	tears down every entry's Janitor. Destroying the SOURCE does not
+	cascade-destroy the returned manager (independent lifecycles).
+]=]
+function TableManager.MapKeys<T, S>(
+	self: TM_Internal<T>,
+	path: Path<S>,
+	transform: (entryJanitor: Janitor, key: KeyAtPath<T, S>, value: ElementAtPath<T, S>) -> any
+): TableManager<any>
+	const parsedPath = PathHelpers.ParsePath(path)
+	const derived: TM_Internal<any> = TableManager.new({}) :: any
+	const outKeys: { [any]: any } = {}
+
+	const connection = makeKeyedReconciler(
+		self,
+		parsedPath,
+		false,
+		function(itemJanitor, key, value)
+			const outKey = transform(itemJanitor, key, value)
+			outKeys[key] = outKey
+			derived:Set(outKey, value)
+		end,
+		function(_item, key)
+			const outKey = outKeys[key]
+			outKeys[key] = nil
+			if outKey ~= nil then
+				derived:Set(outKey, nil)
+			end
+		end,
+		function(_item, key, newValue)
+			const outKey = outKeys[key]
+			if outKey ~= nil then
+				derived:Set(outKey, newValue)
+			end
+		end,
+		nil,
+		function(fire)
+			derived:Batch(fire)
+		end
+	)
+	attachOwnedCleanup(derived, connection, "Disconnect")
+
+	return derived :: any
+end
+
+--[=[
+	Returns a live `TableManager` keyed by the SOURCE key, with each entry
+	recomputed via `transform(entryJanitor, value, key)` whenever its value
+	changes. Same ownership/lifecycle rules as `MapKeys`.
+]=]
+function TableManager.MapValues<T, S>(
+	self: TM_Internal<T>,
+	path: Path<S>,
+	transform: (entryJanitor: Janitor, value: ElementAtPath<T, S>, key: KeyAtPath<T, S>) -> any
+): TableManager<any>
+	const parsedPath = PathHelpers.ParsePath(path)
+	const derived: TM_Internal<any> = TableManager.new({}) :: any
+
+	const connection = makeKeyedReconciler(
+		self,
+		parsedPath,
+		true,
+		function(itemJanitor, key, value)
+			derived:Set(key, transform(itemJanitor, value, key))
+		end,
+		function(_item, key)
+			derived:Set(key, nil)
+		end,
+		nil,
+		nil,
+		function(fire)
+			derived:Batch(fire)
+		end
+	)
+	attachOwnedCleanup(derived, connection, "Disconnect")
+
+	return derived :: any
+end
+
+--[=[
+	Returns a live `TableManager` keyed by `transform(entryJanitor, key, value)`'s
+	first return value (the second is the output value); the entry is
+	recomputed whenever the source key or value changes. On an output-key
+	collision between two source entries, the last write wins. Same
+	ownership/lifecycle rules as `MapKeys`.
+]=]
+function TableManager.MapPairs<T, S>(
+	self: TM_Internal<T>,
+	path: Path<S>,
+	transform: (entryJanitor: Janitor, key: KeyAtPath<T, S>, value: ElementAtPath<T, S>) -> (any, any)
+): TableManager<any>
+	const parsedPath = PathHelpers.ParsePath(path)
+	const derived: TM_Internal<any> = TableManager.new({}) :: any
+	const outKeys: { [any]: any } = {}
+
+	const connection = makeKeyedReconciler(
+		self,
+		parsedPath,
+		true,
+		function(itemJanitor, key, value)
+			const outKey, outValue = transform(itemJanitor, key, value)
+			outKeys[key] = outKey
+			derived:Set(outKey, outValue)
+		end,
+		function(_item, key)
+			const outKey = outKeys[key]
+			outKeys[key] = nil
+			if outKey ~= nil then
+				derived:Set(outKey, nil)
+			end
+		end,
+		nil,
+		nil,
+		function(fire)
+			derived:Batch(fire)
+		end
+	)
+	attachOwnedCleanup(derived, connection, "Disconnect")
+
+	return derived :: any
+end
+
+--------------------------------------------------------------------------------
 --// Helper Methods //--
 --------------------------------------------------------------------------------
 
@@ -540,12 +946,13 @@ function TableManager.Set<T, S>(
 	buildTablesDynamically: boolean?
 )
 	debug.profilebegin("TM.Set")
-	const parsedPath = PathHelpers.ParsePath(path)
-	const unwrappedValue = ProxyManagerModule.Unwrap(value)
+	local parsedPath = PathHelpers.ParsePath(path)
+	local unwrappedValue = ProxyManagerModule.Unwrap(value)
 
 	-- Empty path replaces the entire root table (identity swap + full diff).
 	if #parsedPath == 0 then
 		applyRootSet(self, unwrappedValue)
+		debug.profileend()
 		return
 	end
 
@@ -579,8 +986,9 @@ function TableManager.Set<T, S>(
 			for j = 1, i do
 				subtreePath[j] = parsedPath[j]
 			end
-			applyWrite(self, subtreePath, subtree)
-			return
+			parsedPath = subtreePath
+			unwrappedValue = subtree
+			break
 		end
 		parent = nextValue
 	end
@@ -990,6 +1398,13 @@ function TableManager.Destroy<T>(self: TM_Internal<T>)
 		return
 	end
 	self._Destroyed = true
+
+	-- Tear down anything this manager owns (e.g. a `Map*` derived manager's
+	-- subscription to its source) BEFORE dismantling our own subsystems below,
+	-- since that teardown writes through `self:Set` to clear output entries.
+	if self._ownedCleanup then
+		self._ownedCleanup:Destroy()
+	end
 
 	self.Linker:Unlink()
 	LinkGroupModule.UnregisterAutoLink(self)

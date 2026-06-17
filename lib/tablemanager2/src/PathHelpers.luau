@@ -78,6 +78,42 @@ export type function ValueAtPathFn(T: type, S: type): type
 end
 export type ValueAtPath<T, S> = any --ValueAtPathFn<T, S> -- This is temporarily commented out bc luau has an internal bug preventing proper parsing
 
+-- Resolves to the *key* type of the indexer of the container found at path `S` in
+-- `T` (e.g. `string` for `{ [string]: Item }`, `number` for `{ Item }`). `never` if
+-- the container has no indexer (e.g. a record with only named fields).
+export type function KeyAtPathFn(T: type, S: type): type
+	local container = ValueAtPathFn(T, S)
+	if not container:is("table") then
+		return types.never
+	end
+	local indexer = container:indexer()
+	if indexer == nil then
+		return types.never
+	end
+	return indexer.index
+end
+export type KeyAtPath<T, S> = any --KeyAtPathFn<T, S>
+
+-- Resolves to the *element* type of the indexer of the container found at path `S`
+-- in `T` (e.g. `Item` for `{ [string]: Item }` or `{ Item }`). `never` if the
+-- container has no indexer.
+export type function ElementAtPathFn(T: type, S: type): type
+	local container = ValueAtPathFn(T, S)
+	if not container:is("table") then
+		return types.never
+	end
+	local indexer = container:indexer()
+	if indexer == nil then
+		return types.never
+	end
+	return indexer.value
+end
+export type ElementAtPath<T, S> = any --ElementAtPathFn<T, S>
+
+--------------------------------------------------------------------------------
+--// Class //--
+--------------------------------------------------------------------------------
+
 local PathHelpers = {}
 
 --[=[

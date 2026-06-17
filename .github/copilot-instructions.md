@@ -87,3 +87,6 @@ Declaration matrix:
 ## Planning
 - Plans should be broken up into phases that can be executed independently without breaking a system. Each phase should have a clear goal and a defined set of tasks.
 - Phases should note touched files and the expected impact on those files. This helps with code review and ensures that changes are intentional and well-understood.
+
+## Reference Links
+- If creating a type function, view the following: https://luau.org/types-library/

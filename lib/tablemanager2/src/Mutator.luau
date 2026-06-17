@@ -315,10 +315,11 @@ end
 	(`ProxyManagerModule.Unwrap`). Order: duplicate-check → validation →
 	array-append fast path → batch dirty-marking → snapshot/write/diff.
 ]]
-function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>, value: any)
+function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>, newValue: any)
 	debug.profilebegin("applyWrite")
-	const parentPath, key = PathHelpers.GetPathParentAndKey(parsedPath :: any)
+	const parentPath, key = PathHelpers.GetPathParentAndKey(parsedPath)
 
+	-- Navigate to the parent table of the write.
 	local current: any = self._originalData
 	for _, segment in parentPath do
 		if type(current) ~= "table" then
@@ -331,15 +332,17 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 	end
 	const parentTable: { [any]: any } = current
 
-	if type(value) == "table" and self._proxyManager ~= nil then
-		const shouldProceed = checkDuplicateTableWrite(self, parsedPath, value)
+	-- Check if the value is a table and if it is already managed by this TableManager.
+	if type(newValue) == "table" and self._proxyManager ~= nil then
+		const shouldProceed = checkDuplicateTableWrite(self, parsedPath, newValue)
 		if not shouldProceed then
 			debug.profileend()
 			return
 		end
 	end
 
-	const ok, err = validateWrite(self, parsedPath, value)
+	-- Verify the write against the schema, if one is configured.
+	const ok, err = validateWrite(self, parsedPath, newValue)
 	if not ok then
 		if err then
 			error(err, 2)
@@ -356,10 +359,10 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 		isArray, arrayLength = ProxyManagerModule.ClassifyTable(parentTable)
 	end
 	if isArray and key == arrayLength + 1 then
-		parentTable[key] = value
-		onArrayAppended(self, parentPath, key, value)
+		parentTable[key] = newValue
+		onArrayAppended(self, parentPath, key, newValue)
 		if self._autoLink and not self._suppressLinkFanOut then
-			LinkGroupModule.CheckAutoLink(self, parsedPath, value)
+			LinkGroupModule.CheckAutoLink(self, parsedPath, newValue)
 		end
 		debug.profileend()
 		return
@@ -375,14 +378,14 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 
 	const oldValue = parentTable[key]
 	const snapshot = self._changeDetector:CaptureSnapshot(self._originalData, parsedPath)
-	parentTable[key] = value
+	parentTable[key] = newValue
 	if not self._suppressLinkFanOut then
 		LinkGroupModule.CheckDivergence(self, parsedPath)
 		if self._autoLink then
-			LinkGroupModule.CheckAutoLink(self, parsedPath, value)
+			LinkGroupModule.CheckAutoLink(self, parsedPath, newValue)
 		end
 	end
-	Mutator.pruneDetachedValue(self, oldValue, value)
+	Mutator.pruneDetachedValue(self, oldValue, newValue)
 	self._changeDetector:CheckForChanges(snapshot)
 	debug.profileend()
 end
