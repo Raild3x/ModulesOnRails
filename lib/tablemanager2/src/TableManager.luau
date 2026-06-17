@@ -78,6 +78,8 @@ const LinkerModule = require("./Linker")
 const Types = require("./TMTypes")
 const EmitterModule = require("./Emitter")
 const MutatorModule = require("./Mutator")
+const OpaqueRegistryModule = require("./OpaqueRegistry")
+const IgnoreTrieModule = require("./IgnoreTrie")
 
 --// Localize batch utils to avoid function call overhead //--
 const createSyntheticSnapshot = BatchUtilsModule.CreateSyntheticSnapshot
@@ -112,6 +114,7 @@ export type TableManager<T = { [any]: any }> = Types.TableManager<T>
 export type Linker = Types.Linker
 
 export type ExtendConfig = Types.ExtendConfig
+export type OpaqueWrapper = Types.OpaqueWrapper
 
 export type TM_Internal<T = { [any]: any }> = Types.TM_Internal<T>
 type ProxyManager<T> = ProxyManagerModule.ProxyManager<T>
@@ -191,6 +194,18 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	-- Lazily created on first use by a `Map*` helper (see `attachOwnedCleanup`).
 	self._ownedCleanup = nil
 
+	-- Opacity registries (per-manager `Opaque`/`OpaqueChildren`; `GlobalOpaque`/
+	-- `GlobalOpaqueChildren` live in OpaqueRegistry's own module-globals) and the
+	-- ignored-path prefix trie, seeded from config. Both are handed to
+	-- ChangeDetector below so it can build/consult the diff oracle.
+	self._opaqueRegistries = OpaqueRegistryModule.NewRegistries()
+	self._ignoreTrie = IgnoreTrieModule.New()
+	if resolvedConfig.IgnoredPaths then
+		for _, ignoredPath in resolvedConfig.IgnoredPaths :: { PathHelpers.Path<any> } do
+			IgnoreTrieModule.SetPathIgnored(self._ignoreTrie, ignoredPath, true)
+		end
+	end
+
 	-- Exposes `makeEmit` (write/fire core) to BatchFlush without a circular require.
 	self._MakeEmit = function(path: PathArray)
 		return makeEmit(self, path)
@@ -225,7 +240,12 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	-- Initialize ChangeDetector with callbacks (signal+listener dual-fire in Emitter).
 	-- `:: any` bypasses the generic-vs-non-generic callback signature mismatch
 	-- (same pattern the original inline closures used to avoid).
-	self._changeDetector = ChangeDetectorModule.new(EmitterModule.makeChangeDetectorCallbacks(self :: any) :: any)
+	self._changeDetector = ChangeDetectorModule.new(
+		EmitterModule.makeChangeDetectorCallbacks(self :: any) :: any,
+		nil,
+		self._opaqueRegistries,
+		self._ignoreTrie
+	)
 
 	const proxyManager = self._proxyManager
 	if proxyManager then
@@ -942,12 +962,13 @@ end
 function TableManager.Set<T, S>(
 	self: TM_Internal<T>,
 	path: Path<S>,
-	value: ValueAtPath<T, S>,
+	value: ValueAtPath<T, S> | Types.OpaqueWrapper,
 	buildTablesDynamically: boolean?
 )
 	debug.profilebegin("TM.Set")
 	local parsedPath = PathHelpers.ParsePath(path)
 	local unwrappedValue = ProxyManagerModule.Unwrap(value)
+	unwrappedValue = OpaqueRegistryModule.UnwrapAndRegister(self._opaqueRegistries, unwrappedValue)
 
 	-- Empty path replaces the entire root table (identity swap + full diff).
 	if #parsedPath == 0 then
@@ -1016,7 +1037,8 @@ function TableManager.ArrayInsert<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 		newValue = ...
 	end
 
-	const unwrappedValue = ProxyManagerModule.Unwrap(newValue)
+	local unwrappedValue = ProxyManagerModule.Unwrap(newValue)
+	unwrappedValue = OpaqueRegistryModule.UnwrapAndRegister(self._opaqueRegistries, unwrappedValue)
 
 	if not MutatorModule.validateArrayInsert(self, parsedPath, unwrappedValue) then return end
 
@@ -1199,6 +1221,17 @@ TableManager.Suspend = BatchFlushModule.Suspend
 	   snapshot against the current value via LCS (`ArrayDiff.emitDiff`).
 ]=]
 TableManager.Resume = BatchFlushModule.Resume
+
+--[=[
+	Marks `path` (and every descendant of it) as ignored or not. An ignored
+	write still happens — `Get`/`Raw` reflect it immediately — but skips all
+	diff/snapshot/event work, so it never fires listeners/signals and is never
+	cloned for change detection. See `TableManagerConfig.IgnoredPaths` for the
+	config-time equivalent (seeded once at construction).
+]=]
+function TableManager.SetPathIgnored<T, S>(self: TM_Internal<T>, path: Path<S>, ignored: boolean)
+	IgnoreTrieModule.SetPathIgnored(self._ignoreTrie, path, ignored)
+end
 
 --[=[
 	Move an element from one location to another within the same table.
@@ -1431,5 +1464,14 @@ function TableManager.Destroy<T>(self: TM_Internal<T>)
 	self.ArrayRemoved:Destroy()
 	self.ArraySet:Destroy()
 end
+
+-- Opacity wrapper constructors (see OpaqueRegistry): mark a value (or a
+-- container's direct children) opaque to the diff engine — no clone/freeze/
+-- walk of its internals, only identity compares. `Global*` variants register
+-- in a registry shared by every TableManager rather than just this one.
+TableManager.Opaque = OpaqueRegistryModule.Opaque
+TableManager.GlobalOpaque = OpaqueRegistryModule.GlobalOpaque
+TableManager.OpaqueChildren = OpaqueRegistryModule.OpaqueChildren
+TableManager.GlobalOpaqueChildren = OpaqueRegistryModule.GlobalOpaqueChildren
 
 return TableManager

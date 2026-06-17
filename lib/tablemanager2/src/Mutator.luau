@@ -16,6 +16,7 @@ const ProxyManagerModule = require("./ProxyManager")
 const SchemaNavigatorModule = require("./SchemaNavigator")
 const LinkGroupModule = require("./LinkGroup")
 const EmitterModule = require("./Emitter")
+const IgnoreTrieModule = require("./IgnoreTrie")
 const T = require("../T")
 const TMTypes = require("./TMTypes")
 
@@ -230,7 +231,15 @@ local function onArrayAppended<T, S>(self: TM_Internal<T>, path: PathArray<S>, i
 		return
 	end
 	const insertPath: { any } = PathHelpers.Append(path :: any, index)
-	const metadata = EmitterModule.makeSyntheticMetadata(self._originalData, insertPath, "added", index, newValue, nil)
+	const metadata = EmitterModule.makeSyntheticMetadata(
+		self._originalData,
+		insertPath,
+		"added",
+		index,
+		newValue,
+		nil,
+		self._changeDetector:GetOpaqueCtx()
+	)
 	EmitterModule.fireArrayOperation(self, "ArrayInserted", path, insertPath, {
 		Index = index,
 		NewValue = newValue,
@@ -351,6 +360,11 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 		return
 	end
 
+	-- Ignored paths skip the diff/snapshot/event machinery entirely (the
+	-- expensive part) — the value below is still written normally, so
+	-- Get/Raw reflect it immediately; only change detection is short-circuited.
+	const ignored = IgnoreTrieModule.IsPathIgnored(self._ignoreTrie, parsedPath)
+
 	-- Array-append fast path (key == length + 1): apply immediately and report.
 	-- Only classify the parent table when the key is numeric; classification is O(n)
 	-- and its result is never used for string/non-numeric keys.
@@ -360,7 +374,9 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 	end
 	if isArray and key == arrayLength + 1 then
 		parentTable[key] = newValue
-		onArrayAppended(self, parentPath, key, newValue)
+		if not ignored then
+			onArrayAppended(self, parentPath, key, newValue)
+		end
 		if self._autoLink and not self._suppressLinkFanOut then
 			LinkGroupModule.CheckAutoLink(self, parsedPath, newValue)
 		end
@@ -377,7 +393,7 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 	end
 
 	const oldValue = parentTable[key]
-	const snapshot = self._changeDetector:CaptureSnapshot(self._originalData, parsedPath)
+	const snapshot = if not ignored then self._changeDetector:CaptureSnapshot(self._originalData, parsedPath) else nil
 	parentTable[key] = newValue
 	if not self._suppressLinkFanOut then
 		LinkGroupModule.CheckDivergence(self, parsedPath)
@@ -386,7 +402,9 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 		end
 	end
 	Mutator.pruneDetachedValue(self, oldValue, newValue)
-	self._changeDetector:CheckForChanges(snapshot)
+	if not ignored then
+		self._changeDetector:CheckForChanges(snapshot :: any)
+	end
 	debug.profileend()
 end
 

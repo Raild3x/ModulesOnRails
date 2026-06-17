@@ -8,6 +8,8 @@ const ChangeDetectorModule = require("./ChangeDetector")
 const SchemaNavigatorModule = require("./SchemaNavigator")
 const ArrayDiffModule = require("./ArrayDiff")
 const BatchUtilsModule = require("./BatchUtils")
+const OpaqueRegistryModule = require("./OpaqueRegistry")
+const IgnoreTrieModule = require("./IgnoreTrie")
 const Signal = require("../Signal")
 const JanitorModule = require("../Janitor")
 
@@ -27,8 +29,15 @@ type Signal<Fn, Args...> = Signal.Signal<Fn, Args...>
 type MoveMetadata = ArrayDiffModule.MoveMetadata
 type SchemaCheck = SchemaNavigatorModule.Check
 type BatchState = BatchUtilsModule.BatchState
+type OpaqueRegistries = OpaqueRegistryModule.Registries
+type IgnoreTrieNode = IgnoreTrieModule.Node
 
 export type Proxy<T, S> = ProxyManagerModule.Proxy<T, S>
+
+-- The value returned by `Opaque`/`GlobalOpaque`/`OpaqueChildren`/
+-- `GlobalOpaqueChildren` (see `OpaqueRegistry`). `Set`/`ArrayInsert` unwrap it
+-- at write time; the literal value stored at the path is always the bare inner.
+export type OpaqueWrapper = OpaqueRegistryModule.Wrapper
 
 export type DuplicateReferenceMode = "error" | "warn" | "allow" | "move" | "copy"
 
@@ -109,12 +118,13 @@ export type Linker = {
 	.DuplicateReferenceMode DuplicateReferenceMode? -- Experimental
 	.EnableProxies boolean? -- Defaults to true. When false, `Proxy`/`GetProxy` are unavailable.
 	.AutoLink boolean? -- When true, this manager auto-links (via `tm.Linker`) with any OTHER AutoLink manager with shared tables
+	.IgnoredPaths { Path }? -- Paths (and their descendants) that skip diff/snapshot/event work entirely; see `SetPathIgnored`.
 
 	:::caution Auto Linking
 	AutoLinking is an experimental feature.
-	AutoLinking only supports linking with other managers that have AutoLink enabled. If you attempt 
+	AutoLinking only supports linking with other managers that have AutoLink enabled. If you attempt
 	to link with a manager that does not have AutoLink enabled, the link will not be established. AutoLinking
-	also only works when you are setting/inserting a managed table directly. It will not automatically link 
+	also only works when you are setting/inserting a managed table directly. It will not automatically link
 	nested tables that are placed in bulk. You can use `tm.Linker:Ensure(path)` to link nested tables.
 	:::
 ]=]
@@ -125,6 +135,7 @@ export type TableManagerConfig = {
 	DuplicateReferenceMode: DuplicateReferenceMode?,
 	EnableProxies: boolean?,
 	AutoLink: boolean?,
+	IgnoredPaths: { Path<any> }?,
 }
 
 --[=[
@@ -290,7 +301,7 @@ export type TableManager<T = { [any]: any }> = {
 	-- Helper methods
 	Get: <S>(self: TableManager<T>, path: Path<S>, suppressNilPartialPaths: boolean?) -> ValueAtPath<T, S>,
 	GetProxy: <S>(self: TableManager<T>, path: Path<S>, suppressNilPartialPaths: boolean?) -> Proxy<T, S>,
-	Set: <S>(self: TableManager<T>, path: Path<S>, value: ValueAtPath<T, S>) -> (),
+	Set: <S>(self: TableManager<T>, path: Path<S>, value: ValueAtPath<T, S> | OpaqueWrapper) -> (),
 	ArrayInsert: <S>(self: TableManager<T>, arrPath: Path<S> | Proxy<T, S>, newValue: any) -> ()
 		& <S>(self: TableManager<T>, arrPath: Path<S> | Proxy<T, S>, index: number, newValue: any) -> (),
 	ArrayRemove: <S>(self: TableManager<T>, arrPath: Path<S> | Proxy<T, S>, index: number) -> any?,
@@ -304,6 +315,11 @@ export type TableManager<T = { [any]: any }> = {
 	Batch: (self: TableManager<T>, fn: () -> ()) -> (),
 	Suspend: (self: TableManager<T>) -> (),
 	Resume: (self: TableManager<T>) -> (),
+
+	--- Marks `path` (and every descendant of it) as ignored or not: an ignored
+	--- write still happens, but skips all diff/snapshot/event work. See
+	--- `TableManagerConfig.IgnoredPaths` for the config-time equivalent.
+	SetPathIgnored: <S>(self: TableManager<T>, path: Path<S>, ignored: boolean) -> (),
 
 
 	--- Returns a PLAIN TableManager rooted at the shared table found at `target`
@@ -346,6 +362,16 @@ export type TM_Internal<T = { [any]: any }> = TableManager<T> & {
 	-- outside it (e.g. a `Map*` derived manager's subscription to its source).
 	-- Flushed in `Destroy`. Reusable extension point for future derived helpers.
 	_ownedCleanup: Janitor?,
+
+	-- Per-manager opacity registries backing `Opaque`/`OpaqueChildren` (see
+	-- `OpaqueRegistry`); handed to `_changeDetector` at construction so it can
+	-- build the diff oracle. `GlobalOpaque`/`GlobalOpaqueChildren` live in
+	-- OpaqueRegistry's own module-global registries instead.
+	_opaqueRegistries: OpaqueRegistries,
+	-- Per-manager ignored-path prefix trie (see `IgnoreTrie`); handed to
+	-- `_changeDetector` at construction (mutable, shared by reference) so
+	-- `SetPathIgnored` calls take effect without re-wiring anything.
+	_ignoreTrie: IgnoreTrieNode,
 
 	-- Re-fires listeners/signals for an op that has ALREADY been applied to the
 	-- shared raw, WITHOUT mutating or snapshot-diffing. Used only by LinkGroup

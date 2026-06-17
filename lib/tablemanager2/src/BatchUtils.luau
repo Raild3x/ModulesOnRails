@@ -31,11 +31,16 @@ const BatchUtils = {}
 -- Creates a synthetic snapshot for array operations and ForceNotify.
 -- These operations bypass normal ChangeDetector flow, so we create a compatible
 -- Snapshot payload using Diff's canonical snapshot builder.
-function BatchUtils.CreateSyntheticSnapshot<T>(rootTable: T, path: { any }, value: any): ChangeDetector.Snapshot
+function BatchUtils.CreateSyntheticSnapshot<T>(
+	rootTable: T,
+	path: { any },
+	value: any,
+	ctx: Diff.Ctx?
+): ChangeDetector.Snapshot
 	return {
 		RootTable = rootTable,
 		Path = path,
-		Data = Diff.snapshot(value),
+		Data = Diff.snapshot(value, ctx),
 		Timestamp = os.clock(),
 	}
 end

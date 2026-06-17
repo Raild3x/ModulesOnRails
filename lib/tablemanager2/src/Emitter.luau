@@ -54,13 +54,14 @@ local function createSyntheticMetadata(
 	kind: "added" | "removed" | "changed",
 	key: any,
 	newValue: any,
-	oldValue: any
+	oldValue: any,
+	ctx: Diff.Ctx?
 ): ChangeMetadata
 	return {
 		Diff = createSyntheticDiffNode(kind, key, newValue, oldValue),
 		OriginPath = leafPath,
 		OriginDiff = createSyntheticDiffNode(kind, key, newValue, oldValue),
-		Snapshot = createSyntheticSnapshot(rootTable, leafPath, newValue),
+		Snapshot = createSyntheticSnapshot(rootTable, leafPath, newValue, ctx),
 	}
 end
 
@@ -163,8 +164,15 @@ function Emitter.makeEmit(manager: TableManagerLike, path: PathArray)
 	return {
 		removed = function(index: number, oldValue: any, move: MoveMetadata?)
 			const removedPath: PathArray = PathHelpers.Append(path, index)
-			const metadata =
-				createSyntheticMetadata(manager._originalData, removedPath, "removed", index, nil, oldValue)
+			const metadata = createSyntheticMetadata(
+				manager._originalData,
+				removedPath,
+				"removed",
+				index,
+				nil,
+				oldValue,
+				manager._changeDetector:GetOpaqueCtx()
+			)
 			metadata.Move = move
 			Emitter.fireArrayOperation(manager, "ArrayRemoved", path, removedPath, {
 				Index = index,
@@ -174,7 +182,15 @@ function Emitter.makeEmit(manager: TableManagerLike, path: PathArray)
 		end,
 		inserted = function(index: number, newValue: any, move: MoveMetadata?)
 			const insertedPath = PathHelpers.Append(path, index)
-			const metadata = createSyntheticMetadata(manager._originalData, insertedPath, "added", index, newValue, nil)
+			const metadata = createSyntheticMetadata(
+				manager._originalData,
+				insertedPath,
+				"added",
+				index,
+				newValue,
+				nil,
+				manager._changeDetector:GetOpaqueCtx()
+			)
 			metadata.Move = move
 			Emitter.fireArrayOperation(manager, "ArrayInserted", path, insertedPath, {
 				Index = index,
@@ -184,8 +200,15 @@ function Emitter.makeEmit(manager: TableManagerLike, path: PathArray)
 		end,
 		set = function(index: number, newValue: any, oldValue: any, move: MoveMetadata?)
 			const setPath = PathHelpers.Append(path, index)
-			const metadata =
-				createSyntheticMetadata(manager._originalData, setPath, "changed", index, newValue, oldValue)
+			const metadata = createSyntheticMetadata(
+				manager._originalData,
+				setPath,
+				"changed",
+				index,
+				newValue,
+				oldValue,
+				manager._changeDetector:GetOpaqueCtx()
+			)
 			metadata.Move = move
 			Emitter.fireArrayOperation(manager, "ArraySet", path, setPath, {
 				Index = index,
@@ -207,9 +230,10 @@ function Emitter.makeSyntheticMetadata(
 	kind: "added" | "removed" | "changed",
 	key: any,
 	newValue: any,
-	oldValue: any
+	oldValue: any,
+	ctx: Diff.Ctx?
 ): ChangeMetadata
-	return createSyntheticMetadata(rootTable, leafPath, kind, key, newValue, oldValue)
+	return createSyntheticMetadata(rootTable, leafPath, kind, key, newValue, oldValue, ctx)
 end
 
 -- ---------------------------------------------------------------------------

@@ -29,6 +29,8 @@
 local Diff = require("./Diff")
 local PathHelpers = require("./PathHelpers")
 local ArrayDiffModule = require("./ArrayDiff")
+local OpaqueRegistry = require("./OpaqueRegistry")
+local IgnoreTrieModule = require("./IgnoreTrie")
 
 --// Types //--
 type Path<S = string> = PathHelpers.Path<S>
@@ -67,6 +69,11 @@ export type ChangeDetector = {
 	Suspend: (self: ChangeDetector) -> (),
 	--- Resumes change detection after a `Suspend` call.
 	Resume: (self: ChangeDetector) -> (),
+	--- Returns the opacity oracle to pass to `Diff`, or `nil` when nothing is
+	--- marked opaque (per-manager or global) — lets other modules building
+	--- their own `Diff.snapshot` calls (e.g. synthetic array-op metadata)
+	--- avoid cloning opaque values too.
+	GetOpaqueCtx: (self: ChangeDetector) -> Diff.Ctx?,
 }
 
 --[=[
@@ -116,6 +123,7 @@ local ChangeDetector_MT = { __index = ChangeDetector }
 	
 	@param callbacks -- Callbacks for different change events
 	@param debugMode -- Optional flag to enable debug logging
+	@param registries -- Optional per-manager opacity registries (see `OpaqueRegistry`)
 	@return ChangeDetector
 ]=]
 function ChangeDetector.new(
@@ -125,7 +133,9 @@ function ChangeDetector.new(
 		OnKeyChanged: <S>(path: PathArray<S>, key: any, newValue: any, oldValue: any, metadata: ChangeMetadata) -> ()?,
 		OnValueChanged: <S>(path: PathArray<S>, newValue: any, oldValue: any?, metadata: ChangeMetadata) -> ()?,
 	},
-	debugMode: boolean?
+	debugMode: boolean?,
+	registries: OpaqueRegistry.Registries?,
+	ignoreTrie: IgnoreTrieModule.Node?
 ): ChangeDetector
 	callbacks.OnKeyAdded = callbacks.OnKeyAdded or function() end
 	callbacks.OnKeyRemoved = callbacks.OnKeyRemoved or function() end
@@ -143,9 +153,43 @@ function ChangeDetector.new(
 		-- triggered from inside those callbacks are queued and run afterwards.
 		_dispatching = false,
 		_dispatchQueue = {} :: { () -> () },
+		-- Opacity: registries is nil for managers built before this existed in
+		-- tests that construct ChangeDetector directly; `_oracle` treats that
+		-- the same as "nothing marked" (ctx == nil, zero-cost original path).
+		_registries = registries,
+		-- Lazily-built once activated (see `_oracle`); never rebuilt afterwards
+		-- since the closures close over the (mutable) registry tables.
+		_opaqueCtx = nil :: Diff.Ctx?,
+		-- Ignored-path pruning: the root trie node (a mutable table), so later
+		-- `SetPathIgnored` calls are visible without re-handing it in. nil is
+		-- the same as an empty trie (nothing pruned).
+		_ignoreTrie = ignoreTrie,
 	}, ChangeDetector_MT) :: any
 
 	return self :: ChangeDetector
+end
+
+--[[
+	Returns the opacity oracle when anything is marked opaque (per-manager or
+	global), or `nil` otherwise. `nil` means callers should pass `ctx = nil`
+	through to `Diff`, hitting the exact original (no per-node probe) path.
+]]
+function ChangeDetector:_oracle(): Diff.Ctx?
+	local registries = self._registries
+	if registries == nil then
+		return nil
+	end
+	if registries.Count == 0 and OpaqueRegistry.GlobalCount() == 0 then
+		return nil
+	end
+	if self._opaqueCtx == nil then
+		self._opaqueCtx = OpaqueRegistry.MakeCtx(registries)
+	end
+	return self._opaqueCtx
+end
+
+function ChangeDetector:GetOpaqueCtx(): Diff.Ctx?
+	return self:_oracle()
 end
 
 --------------------------------------------------------------------------------
@@ -197,7 +241,7 @@ function ChangeDetector:CaptureSnapshot(rootTable: { [any]: any }, path: PathArr
 	local snapshot: Snapshot = {
 		RootTable = rootTable, -- Keep reference to root (not copied)
 		Path = table.clone(path), -- Clone the path array
-		Data = Diff.snapshot(valueAtPath), -- Diff.Snapshot with ref tracking
+		Data = Diff.snapshot(valueAtPath, self:_oracle()), -- Diff.Snapshot with ref tracking
 		Timestamp = os.clock(),
 	}
 
@@ -283,7 +327,7 @@ function ChangeDetector:CheckForChanges(snapshot: Snapshot)
 		end
 
 		-- Use diffFromSnapshot to compare against the captured Diff.Snapshot
-		local rootDiffNode = Diff.diffFromSnapshot(snapshot.Data, currentValue)
+		local rootDiffNode = Diff.diffFromSnapshot(snapshot.Data, currentValue, self:_oracle())
 
 		-- Process the root node if there are changes
 		if rootDiffNode then
@@ -395,16 +439,17 @@ function ChangeDetector:CheckForChangesBetween(
 			cursor[basePath[#basePath]] = newValue
 		end
 	end
+	local ctx = self:_oracle()
 	local tempSnapshot: Snapshot = {
 		RootTable = tempRootTable,
 		Path = basePath,
-		Data = Diff.snapshot(oldValue), -- Snapshot the old value
+		Data = Diff.snapshot(oldValue, ctx), -- Snapshot the old value
 		Timestamp = os.clock(),
 	}
 
 	self:_dispatch(function()
 		-- Use Diff module to generate tree
-		local rootDiffNode = Diff.diff(oldValue, newValue)
+		local rootDiffNode = Diff.diff(oldValue, newValue, nil, nil, ctx)
 
 		-- Process the root node if there are changes
 		if rootDiffNode then
@@ -539,6 +584,16 @@ function ChangeDetector:_processDiffNode(
 	originDiff: Diff.DiffNode,
 	snapshot: Snapshot
 )
+	-- Ignored-path pruning: skip this node AND its descendants entirely (no
+	-- recursion, no callbacks). `nodePath` is already the absolute path, so
+	-- this is the one place a path-ignore mark can intercept changes that
+	-- arrive nested inside a larger write (e.g. a root replacement) — the
+	-- write's own exact path is instead pre-pruned in `Mutator.applyWrite`,
+	-- before any snapshot/diff work happens.
+	if IgnoreTrieModule.IsPathIgnored(self._ignoreTrie, nodePath) then
+		return
+	end
+
 	local callbacks = self._callbacks
 	local debugMode = self._debugMode
 
