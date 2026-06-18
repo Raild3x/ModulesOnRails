@@ -218,6 +218,36 @@ local function validateWrite<T, S>(self: TM_Internal<T>, path: PathArray<S>, val
 end
 
 -- ---------------------------------------------------------------------------
+-- Observation gate (module-internal, used only by applyWrite/onArrayAppended)
+-- ---------------------------------------------------------------------------
+
+-- Conservative check: true if a write at `path` could be observed by
+-- anything at all — a registry listener covering `path`
+-- (ListenerRegistry:CoversChangesAt), a connection on one of the 7 global
+-- Signals (each fires for ANY path, so any connection forces full tracking),
+-- or an active link group (cross-manager fan-out rides inside the same
+-- diff-dispatch this gate would otherwise skip, see LinkGroup.FanOutSet/
+-- FanOutArrayOp). False means the upcoming snapshot/diff is provably
+-- unobservable and can be skipped.
+local function shouldTrackChangesAt<T, S>(self: TM_Internal<T>, path: PathArray<S>): boolean
+	if self._linkGroups ~= nil and self._linkGroups[1] ~= nil then
+		return true
+	end
+	if
+		self.ValueChanged:IsConnectedTo()
+		or self.KeyAdded:IsConnectedTo()
+		or self.KeyRemoved:IsConnectedTo()
+		or self.KeyChanged:IsConnectedTo()
+		or self.ArrayInserted:IsConnectedTo()
+		or self.ArrayRemoved:IsConnectedTo()
+		or self.ArraySet:IsConnectedTo()
+	then
+		return true
+	end
+	return self._listenerRegistry:CoversChangesAt(path)
+end
+
+-- ---------------------------------------------------------------------------
 -- Array-append notification (module-internal, used only by applyWrite)
 -- ---------------------------------------------------------------------------
 
@@ -228,6 +258,9 @@ local function onArrayAppended<T, S>(self: TM_Internal<T>, path: PathArray<S>, i
 			ensureBatchPathTracking(batch, path)
 		end
 		markBatchBranchDirty(batch, path)
+		return
+	end
+	if not shouldTrackChangesAt(self, path) then
 		return
 	end
 	const insertPath: { any } = PathHelpers.Append(path :: any, index)
@@ -393,7 +426,8 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 	end
 
 	const oldValue = parentTable[key]
-	const snapshot = if not ignored then self._changeDetector:CaptureSnapshot(self._originalData, parsedPath) else nil
+	const tracked = not ignored and shouldTrackChangesAt(self, parsedPath)
+	const snapshot = if tracked then self._changeDetector:CaptureSnapshot(self._originalData, parsedPath) else nil
 	parentTable[key] = newValue
 	if not self._suppressLinkFanOut then
 		LinkGroupModule.CheckDivergence(self, parsedPath)
@@ -402,7 +436,7 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 		end
 	end
 	Mutator.pruneDetachedValue(self, oldValue, newValue)
-	if not ignored then
+	if tracked then
 		self._changeDetector:CheckForChanges(snapshot :: any)
 	end
 	debug.profileend()

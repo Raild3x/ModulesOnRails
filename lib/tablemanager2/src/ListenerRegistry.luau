@@ -210,12 +210,26 @@ type Listener = {
 	Connection: Connection,
 }
 
--- Tree node structure for efficient path-based lookups
+-- Tree node structure for efficient path-based lookups. A single tree serves
+-- every event type: each node stores its listeners bucketed by EventType
+-- alongside Count (listeners AT this exact node, all event types) and Subtree
+-- (listeners at or below this node), so one walk both fires listeners and
+-- answers "is anyone watching here?" (CoversChangesAt) with no parallel
+-- structure to keep in sync.
 type ListenerNode = {
-	-- Listeners registered at this exact path
-	Listeners: { Listener },
-	-- Child nodes keyed by path segment
+	-- Listeners registered at this exact path, bucketed by event type. A
+	-- bucket is deleted (set to nil) as soon as it goes empty.
+	Listeners: { [EventType]: { Listener } },
+	-- Total listeners (all event types) registered at this exact node.
+	Count: number,
+	-- Total listeners at or below this node (Count + every descendant's Subtree).
+	Subtree: number,
+	-- Child nodes keyed by path segment.
 	Children: { [any]: ListenerNode },
+	-- Back-pointer and this node's key within Parent.Children, used to prune
+	-- now-empty nodes back toward the root on disconnect. nil for the root.
+	Parent: ListenerNode?,
+	Key: any?,
 }
 
 export type ListenerRegistry = {
@@ -227,9 +241,15 @@ export type ListenerRegistry = {
 		options: ListenerOptions?
 	) -> Connection,
 	FireListenersExact: (self: ListenerRegistry, eventType: EventType, path: PathArray, eventData: EventData) -> (),
+	-- Conservative O(depth) check: true if a change at `path` could reach some
+	-- registered listener — one AT path, an ANCESTOR of it (ancestor
+	-- ValueChanged/KeyChanged delivery), or a DESCENDANT of it (a deep write
+	-- restructures the subtree a descendant listener watches). Never under-
+	-- reports, so callers can safely skip diff work whenever this is false.
+	CoversChangesAt: (self: ListenerRegistry, path: PathArray) -> boolean,
 	Destroy: (self: ListenerRegistry) -> (),
 
-	_listenerTrees: { [EventType]: ListenerNode },
+	_root: ListenerNode,
 	_debugMode: boolean,
 	_fireDeferred: boolean,
 	_destroyed: boolean,
@@ -300,21 +320,31 @@ local function runListenerCallbackInFreeThread()
 end
 
 -- Helper to create a new tree node
-local function createNode(): ListenerNode
+local function createNode(parent: ListenerNode?, key: any?): ListenerNode
 	return {
 		Listeners = {},
+		Count = 0,
+		Subtree = 0,
 		Children = {},
+		Parent = parent,
+		Key = key,
 	}
 end
 
--- Helper to get or create a node at a path
+-- Helper to get or create a node at a path. Bumps Subtree by 1 at every node
+-- visited (root included) since the caller is about to register exactly one
+-- listener at the returned node.
 local function getOrCreateNode(root: ListenerNode, path: PathArray): ListenerNode
 	local current = root
+	current.Subtree += 1
 	for _, segment in path do
-		if not current.Children[segment] then
-			current.Children[segment] = createNode()
+		local child = current.Children[segment]
+		if not child then
+			child = createNode(current, segment)
+			current.Children[segment] = child
 		end
-		current = current.Children[segment]
+		child.Subtree += 1
+		current = child
 	end
 	return current
 end
@@ -370,26 +400,21 @@ local function collectMatchingNodes(
 	end
 end
 
--- Helper to remove empty nodes recursively
-local function cleanupNode(root: ListenerNode, path: PathArray, index: number): boolean
-	if index > #path then
-		-- At target node, check if it's empty
-		return #root.Listeners == 0 and next(root.Children) == nil
+-- Decrements `node`'s Subtree (and every ancestor's, up to and including the
+-- root) by `amount`, pruning any non-root node that becomes fully empty
+-- (Count == 0 and Subtree == 0) along the way. `node.Count` must already
+-- reflect the removal before this runs. Pruning is mandatory (not optional)
+-- so a registry with churny listeners never accumulates dead spine nodes.
+local function decrementAndPrune(node: ListenerNode, amount: number)
+	local current: ListenerNode? = node
+	while current ~= nil do
+		current.Subtree -= amount
+		local parent = current.Parent
+		if parent ~= nil and current.Count == 0 and current.Subtree == 0 then
+			parent.Children[current.Key] = nil
+		end
+		current = parent
 	end
-
-	local segment = path[index]
-	local child = root.Children[segment]
-	if not child then
-		return false
-	end
-
-	-- Recursively clean up child
-	if cleanupNode(child, path, index + 1) then
-		root.Children[segment] = nil
-	end
-
-	-- Return true if this node is now empty
-	return #root.Listeners == 0 and next(root.Children) == nil
 end
 
 -- Non-creating node lookup: returns the node at `path` or nil if any segment is absent.
@@ -419,19 +444,21 @@ local function shouldFireListener(listener: Listener, relativeDepth: number): bo
 	end
 end
 
--- Fires all listeners on a single already-located node and handles Once cleanup.
--- Extracted so both the no-wildcard fast path and the wildcard path share one
--- implementation of the inner fire loop.
+-- Fires all listeners of `eventType` on a single already-located node and
+-- handles Once cleanup. Extracted so both the no-wildcard fast path and the
+-- wildcard path share one implementation of the inner fire loop.
 local function fireListenersOnNode(
-	listeners: { Listener },
-	root: ListenerNode,
-	nodePath: PathArray,
+	node: ListenerNode,
+	eventType: EventType,
 	fireEventData: EventData,
 	baseRelativeDepth: number,
 	fireDeferred: boolean,
-	debugMode: boolean,
-	eventType: EventType
+	debugMode: boolean
 )
+	local listeners = node.Listeners[eventType]
+	if listeners == nil then
+		return
+	end
 	local hasOnceFired = false
 	for _, listener in listeners do
 		if not listener.Connection.Connected then
@@ -455,12 +482,18 @@ local function fireListenersOnNode(
 		end
 	end
 	if hasOnceFired then
+		local removed = 0
 		for i = #listeners, 1, -1 do
 			if listeners[i].Once and not listeners[i].Connection.Connected then
 				table.remove(listeners, i)
+				removed += 1
 			end
 		end
-		cleanupNode(root, nodePath, 1)
+		if next(listeners) == nil then
+			node.Listeners[eventType] = nil
+		end
+		node.Count -= removed
+		decrementAndPrune(node, removed)
 	end
 end
 
@@ -470,15 +503,7 @@ function ListenerRegistry.new(config: ListenerRegistryConfig?): ListenerRegistry
 	local debugMode = if resolvedConfig.DebugMode ~= nil then resolvedConfig.DebugMode else false
 	local fireDeferred = if resolvedConfig.FireDeferred == true then true else false
 
-	self._listenerTrees = {
-		ValueChanged = createNode(),
-		KeyAdded = createNode(),
-		KeyRemoved = createNode(),
-		KeyChanged = createNode(),
-		ArrayInserted = createNode(),
-		ArrayRemoved = createNode(),
-		ArraySet = createNode(),
-	}
+	self._root = createNode(nil, nil)
 	self._debugMode = debugMode
 	self._fireDeferred = fireDeferred
 	self._destroyed = false
@@ -506,9 +531,6 @@ function ListenerRegistry:RegisterListener(
 	local depthStyle: "<=" | "==" = if options and options.ListenDepthStyle then options.ListenDepthStyle else "<="
 	local once: boolean = if options and options.Once == true then true else false
 
-	-- Get the tree for this event type
-	local root = self._listenerTrees[eventType]
-
 	-- One-way latch: once any wildcard listener is registered the fast path in
 	-- FireListenersExact is permanently bypassed for this registry.
 	if not self._hasWildcards then
@@ -520,8 +542,9 @@ function ListenerRegistry:RegisterListener(
 		end
 	end
 
-	-- Navigate to the node for this path, creating nodes as needed
-	local node = getOrCreateNode(root, path)
+	-- Navigate to the node for this path, creating nodes as needed (bumps
+	-- Subtree along the way for the listener being added below).
+	local node = getOrCreateNode(self._root, path)
 
 	-- Create listener first
 	local listener: Listener = {
@@ -541,23 +564,36 @@ function ListenerRegistry:RegisterListener(
 				return
 			end
 			conn.Connected = false
-			-- Remove listener from node
-			for i, l in node.Listeners do
-				if l.Connection == conn then
-					table.remove(node.Listeners, i)
-					break
+			-- Remove listener from its event-type bucket on the node
+			local bucket = node.Listeners[eventType]
+			if bucket then
+				for i, l in bucket do
+					if l.Connection == conn then
+						table.remove(bucket, i)
+						break
+					end
+				end
+				if next(bucket) == nil then
+					node.Listeners[eventType] = nil
 				end
 			end
-			-- Clean up empty nodes
-			cleanupNode(root, path, 1)
+			-- Decrement coverage counts and prune now-empty nodes
+			node.Count -= 1
+			decrementAndPrune(node, 1)
 		end,
 	} :: Connection
 
 	-- Set connection in listener
 	listener.Connection = connection
 
-	-- Store listener in the tree node
-	table.insert(node.Listeners, listener)
+	-- Store listener in the node's event-type bucket
+	local bucket = node.Listeners[eventType]
+	if bucket == nil then
+		bucket = {}
+		node.Listeners[eventType] = bucket
+	end
+	table.insert(bucket, listener)
+	node.Count += 1
 
 	return connection
 end
@@ -585,7 +621,7 @@ function ListenerRegistry.FireListenersExact(
 	path: PathArray,
 	eventData: EventData
 )
-	local root = self._listenerTrees[eventType]
+	local root = self._root
 	local debugMode = self._debugMode
 	local fireDeferred = self._fireDeferred
 
@@ -604,19 +640,10 @@ function ListenerRegistry.FireListenersExact(
 		-- Fast path: no wildcard listeners have ever been registered; walk directly to
 		-- the exact node without the O(depth²) collectMatchingNodes traversal.
 		local node = getNode(root, path)
-		if node == nil or #node.Listeners == 0 then
+		if node == nil then
 			return
 		end
-		fireListenersOnNode(
-			node.Listeners,
-			root,
-			path,
-			eventData,
-			baseRelativeDepth,
-			fireDeferred,
-			debugMode,
-			eventType
-		)
+		fireListenersOnNode(node, eventType, eventData, baseRelativeDepth, fireDeferred, debugMode)
 		return
 	end
 
@@ -638,17 +665,40 @@ function ListenerRegistry.FireListenersExact(
 			fireEventData = table.clone(eventData)
 			fireEventData.Metadata = newMetadata
 		end
-		fireListenersOnNode(
-			result.node.Listeners,
-			root,
-			result.nodePath,
-			fireEventData,
-			baseRelativeDepth,
-			fireDeferred,
-			debugMode,
-			eventType
-		)
+		fireListenersOnNode(result.node, eventType, fireEventData, baseRelativeDepth, fireDeferred, debugMode)
 	end
+end
+
+--[=[
+	Conservative O(depth) coverage check: true if a change at `path` could
+	reach some registered listener — one AT path, an ANCESTOR of it (ancestor
+	ValueChanged/KeyChanged delivery), or a DESCENDANT of it (a deep write
+	restructures the subtree a descendant listener watches). Never under-
+	reports (a depth-limited listener that wouldn't actually fire still counts
+	as coverage), so callers can safely skip diff work whenever this is false.
+
+	@param path The path a write is about to land on.
+	@return true if some listener could be affected by a change at `path`.
+]=]
+function ListenerRegistry:CoversChangesAt(path: PathArray): boolean
+	if self._hasWildcards then
+		return true -- a wildcard could match anywhere; no cheap way to rule it out
+	end
+	local node = self._root
+	if node.Count > 0 then
+		return true -- a root listener is an ancestor of every path
+	end
+	for _, segment in path do
+		local child = node.Children[segment]
+		if child == nil then
+			return false -- no listener at this prefix, nor anywhere below it
+		end
+		node = child
+		if node.Count > 0 then
+			return true -- listener at an ancestor of `path` (or at `path` itself)
+		end
+	end
+	return node.Subtree > 0 -- listener at `path` or somewhere in its subtree
 end
 
 function ListenerRegistry.Destroy(self: ListenerRegistry)
@@ -662,10 +712,14 @@ function ListenerRegistry.Destroy(self: ListenerRegistry)
 	-- the array being iterated (skipping every other listener) and runs
 	-- redundant cleanupNode passes on a tree that is being cleared wholesale.
 	local function destroyNode(node: ListenerNode)
-		for _, listener in node.Listeners do
-			listener.Connection.Connected = false
+		for _, bucket in node.Listeners do
+			for _, listener in bucket do
+				listener.Connection.Connected = false
+			end
 		end
 		table.clear(node.Listeners)
+		node.Count = 0
+		node.Subtree = 0
 
 		for _, child in node.Children do
 			destroyNode(child)
@@ -673,9 +727,7 @@ function ListenerRegistry.Destroy(self: ListenerRegistry)
 		table.clear(node.Children)
 	end
 
-	for _, root in self._listenerTrees do
-		destroyNode(root)
-	end
+	destroyNode(self._root)
 end
 
 return ListenerRegistry
