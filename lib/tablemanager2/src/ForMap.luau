@@ -142,7 +142,8 @@ function ForMap.makeKeyedReconciler(
 				else
 					item.Value = value
 					if onRefresh then
-						onRefresh(item, key, value, metadata)
+						-- luau is being dumb and thinks onRefresh is still nil for some reason
+						(onRefresh :: any)(item, key, value, metadata)
 					end
 				end
 			end
@@ -218,18 +219,6 @@ function ForMap.makeValueReconciler(
 	end
 
 	return ForMap.wireReconcileConnection(self, parsedPath, reconcile, teardownAll, options, nil)
-end
-
--- Registers `item` (cleaned up via `methodName`) in `manager`'s lazily-created
--- owned-cleanup Janitor, so it is torn down when `manager` is destroyed. Used
--- by `Map*` to tie the derived manager's lifetime to its source subscription.
-function ForMap.attachOwnedCleanup(manager: TM_Internal<any>, item: any, methodName: string)
-	local ownedCleanup = manager._ownedCleanup
-	if ownedCleanup == nil then
-		ownedCleanup = JanitorModule.new()
-		manager._ownedCleanup = ownedCleanup
-	end
-	ownedCleanup:Add(item, methodName)
 end
 
 return ForMap

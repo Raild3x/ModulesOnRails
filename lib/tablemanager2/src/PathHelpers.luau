@@ -190,9 +190,10 @@ end
 --[=[
 	Extracts the parent path and the last key from a path.
 
+	Asserts if `path` is empty (has no last key).
+
 	@param path The path array
 	@return The parent path array and the last key
-	@throws If path is empty (has no last key)
 ]=]
 function PathHelpers.GetPathParentAndKey(path: PathArray): (PathArray, any)
 	local parentPath = table.clone(path)

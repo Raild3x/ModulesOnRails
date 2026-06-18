@@ -129,7 +129,6 @@ type ProxyManager<T> = ProxyManagerModule.ProxyManager<T>
 const TableManager = {}
 const TableManager_MT = { __index = TableManager }
 
--- Re-export T so schema users do not need to import it separately.
 TableManager.T = T
 
 -- Write-core helpers live in Mutator.luau; local aliases keep call sites unchanged.
@@ -152,23 +151,22 @@ const makeEmit = EmitterModule.makeEmit
 -- Shared For/Map reconcile drivers live in ForMap.luau; local aliases keep call sites unchanged.
 const makeKeyedReconciler = ForMapModule.makeKeyedReconciler
 const makeValueReconciler = ForMapModule.makeValueReconciler
-const attachOwnedCleanup = ForMapModule.attachOwnedCleanup
 
 
 -----------------------------------------------------------------------------------
 --// Constructor //--
 -----------------------------------------------------------------------------------
 
--- Validates `self._originalData` against `self._schema` (set just before this
+-- Validates `self.Raw` against `self._schema` (set just before this
 -- is called). Separated from the constructor's straight-line field setup
 -- since it has its own branching/error-reporting logic.
 const function validateInitialSchema<T>(self: TM_Internal<T>)
 	if self._schema then
-		const ok, err = SchemaNavigatorModule.Validate(self._schema, {}, self._originalData)
+		const ok, err = SchemaNavigatorModule.Validate(self._schema, {}, self.Raw)
 		if not ok then
 			const message = err or "Schema validation failed at <root>"
 			if self._onValidationFailed then
-				self._onValidationFailed({}, self._originalData, message)
+				self._onValidationFailed({}, self.Raw, message)
 			end
 			error(message, 2)
 		end
@@ -178,34 +176,28 @@ end
 -- Resolves `Config.EnableProxies` and creates (or nils out) `self._proxyManager`/
 -- `self.Proxy` accordingly, warning on the misconfigured EnableProxies=false +
 -- DuplicateReferenceMode combo.
-const function initProxyManager<T>(self: TM_Internal<T>, resolvedConfig: { [string]: any? })
+const function initProxyManager<T>(self: TM_Internal<T>, resolvedConfig: { [string]: any? }): ProxyManager<T>?
 	const enableProxies = resolvedConfig.EnableProxies ~= false
 	if not enableProxies and resolvedConfig.DuplicateReferenceMode ~= nil then
 		warn("DuplicateReferenceMode has no effect when Config.EnableProxies = false")
 	end
 
-	if enableProxies then
-		self._proxyManager = ProxyManagerModule.new(self._originalData)
-	else
-		self._proxyManager = nil
-		self.Proxy = nil :: any
-	end
+	return if enableProxies then ProxyManagerModule.new(self.Raw) else nil
 end
 
 -- Wires the proxy-free write core into `self._proxyManager` (if proxies are
 -- enabled) and creates the root proxy. No-op when `EnableProxies = false`.
-const function wireProxyWriteHandler<T>(self: TM_Internal<T>)
+const function wireProxyWriteHandler<T>(self: TM_Internal<T>): Proxy<T, "">?
 	const proxyManager = self._proxyManager
-	if proxyManager then
-		-- Single write-integration point: every proxy write resolves its live path
-		-- and unwrapped value, then flows through the proxy-free write core.
-		proxyManager:SetWriteHandler(function(path: PathArray, value: any)
-			applyWrite(self, path, value)
-		end)
+	if not proxyManager then return end
+	-- Single write-integration point: every proxy write resolves its live path
+	-- and unwrapped value, then flows through the proxy-free write core.
+	proxyManager:SetWriteHandler(function(path: PathArray, value: any)
+		applyWrite(self, path, value)
+	end)
 
-		-- Create root proxy (no parent, no key)
-		self.Proxy = proxyManager:CreateProxy(self._originalData, nil, nil)
-	end
+	-- Create root proxy (no parent, no key)
+	return proxyManager:CreateProxy(self.Raw, nil, nil)
 end
 
 --[=[
@@ -223,30 +215,26 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	const self: TM_Internal<T> = (setmetatable({}, TableManager_MT) :: any) :: TM_Internal<T>
 	const resolvedConfig = config or {} :: { [string]: any? }
 	const duplicateReferenceMode: DuplicateReferenceMode = resolvedConfig.DuplicateReferenceMode or "error"
-
+	
 	assert(type(initialData) == "table", "Initial data must be a table")
 	-- Store original data
 	self.Raw = initialData
 	self._schema = resolvedConfig.Schema
 	self._onValidationFailed = resolvedConfig.OnValidationFailed
 	self._duplicateReferenceMode = duplicateReferenceMode
-
+	
 	-- Validate initial data against the root schema at construction time.
 	validateInitialSchema(self)
-
+	
 	-- Batch state (reset at start of each Suspend/Resume cycle)
 	self._batchDepth = 0
 	self._batch = nil
-
+	
 	-- Lazily created on first use by a `Map*` helper (see `attachOwnedCleanup`).
-	self._ownedCleanup = nil
-
-	-- Opacity registries (per-manager `Opaque`/`OpaqueChildren`; `GlobalOpaque`/
-	-- `GlobalOpaqueChildren` live in OpaqueRegistry's own module-globals) and the
-	-- ignored-path prefix trie, seeded from config. Both are handed to
-	-- ChangeDetector below so it can build/consult the diff oracle.
+	self._janitor = Janitor.new()
+	
 	self._opaqueRegistries = OpaqueRegistryModule.NewRegistries()
-	self._ignoreTrie = IgnoreTrieModule.New()
+	self._ignoreTrie = IgnoreTrieModule.new()
 	-- Persistent diff baseline for observed regions (see Shadow.luau / Flush).
 	self._shadow = ShadowModule.new()
 	if resolvedConfig.IgnoredPaths then
@@ -254,19 +242,15 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 			IgnoreTrieModule.SetPathIgnored(self._ignoreTrie, ignoredPath, true)
 		end
 	end
-
-	-- Exposes `makeEmit` (write/fire core) to BatchFlush without a circular require.
-	self._MakeEmit = function(path: PathArray)
-		return makeEmit(self, path)
-	end
-
+	
 	-- Initialize subsystems
-	initProxyManager(self, resolvedConfig)
+	self._proxyManager = initProxyManager(self, resolvedConfig)
 	self._listenerRegistry = ListenerRegistryModule.new {
 		DebugMode = false,
 		FireDeferred = resolvedConfig.ListenersFireDeferred == true,
 	}
-
+	self.Proxy = wireProxyWriteHandler(self)
+	
 	-- Initialize signals (fire once per change)
 	self.ValueChanged = Signal.new() :: any
 	self.KeyAdded = Signal.new() :: any
@@ -275,7 +259,7 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	self.ArrayInserted = Signal.new() :: any
 	self.ArrayRemoved = Signal.new() :: any
 	self.ArraySet = Signal.new() :: any
-
+	
 	-- Initialize ChangeDetector with callbacks (signal+listener dual-fire in Emitter).
 	-- `:: any` bypasses the generic-vs-non-generic callback signature mismatch
 	-- (same pattern the original inline closures used to avoid).
@@ -285,12 +269,11 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 		self._opaqueRegistries,
 		self._ignoreTrie
 	)
-
-	wireProxyWriteHandler(self)
-
+	
+	
 	-- Public linking facade (lightweight; heavy link state stays lazy).
 	self.Linker = LinkerModule.new(self)
-
+	
 	-- Opt-in auto-link: form any links implied by the current tree topology
 	-- (this manager nested inside another, or others nested inside it).
 	if resolvedConfig.AutoLink then
@@ -336,7 +319,7 @@ function TableManager._NotifyApplied<T>(self: TM_Internal<T>, op: AppliedOp)
 	const ok, err = pcall(function()
 		if op.Kind == "Set" then
 			pruneDetachedValue(self, op.OldValue, op.NewValue)
-			self._changeDetector:CheckForChangesBetween(op.OldValue, op.NewValue, op.Path, self._originalData)
+			self._changeDetector:CheckForChangesBetween(op.OldValue, op.NewValue, op.Path, self.Raw)
 			-- This bypasses applyWrite entirely (the write already landed via
 			-- the ORIGIN manager), so the shadow needs its own sync here —
 			-- applyWrite's ensureShadowSeeded/_doFlush never run for this path.
@@ -347,7 +330,7 @@ function TableManager._NotifyApplied<T>(self: TM_Internal<T>, op: AppliedOp)
 			if CoverageModule.IsTrackable(self, op.Path) then
 				const ctx = self._changeDetector:GetOpaqueCtx()
 				if not CoverageModule.PassesThroughOpaqueAncestor(self, op.Path, ctx) then
-					self._shadow:Materialize(op.Path, self._originalData, ctx)
+					self._shadow:Materialize(op.Path, self.Raw, ctx)
 				end
 			end
 		elseif op.Kind == "ArrayInsert" then
@@ -398,7 +381,7 @@ function TableManager.Extend<T, S>(
 		-- Raw value already in the tree: locate it by identity (it may not have
 		-- a proxy yet if it was never accessed via Get/GetProxy). Falls back to
 		-- treating `target` as a path (string or array) if not found.
-		const foundPath = if type(target) == "table" then LinkGroupModule.FindPathOf(self._originalData, target) else nil
+		const foundPath = if type(target) == "table" then LinkGroupModule.FindPathOf(self.Raw, target) else nil
 		if foundPath ~= nil then
 			anchorPath = foundPath
 		else
@@ -648,7 +631,7 @@ function TableManager.MapKeys<T, S>(
 			derived:Batch(fire)
 		end
 	)
-	attachOwnedCleanup(derived, connection, "Disconnect")
+	derived._janitor:Add(connection, "Disconnect")
 
 	return derived :: any
 end
@@ -682,7 +665,7 @@ function TableManager.MapValues<T, S>(
 			derived:Batch(fire)
 		end
 	)
-	attachOwnedCleanup(derived, connection, "Disconnect")
+	derived._janitor:Add(connection, "Disconnect")
 
 	return derived :: any
 end
@@ -725,7 +708,7 @@ function TableManager.MapPairs<T, S>(
 			derived:Batch(fire)
 		end
 	)
-	attachOwnedCleanup(derived, connection, "Disconnect")
+	derived._janitor:Add(connection, "Disconnect")
 
 	return derived :: any
 end
@@ -740,7 +723,7 @@ end
 function TableManager.Get<T, S>(self: TM_Internal<T>, path: Path<S>, suppressNilPartialPaths: boolean?): ValueAtPath<T, S>?
 	debug.profilebegin("TM.Get")
 	const parsedPath = PathHelpers.ParsePath(path)
-	local current = self._originalData :: T & table
+	local current = self.Raw :: T & table
 	for _, key in parsedPath do
 		if type(current) ~= "table" then
 			if suppressNilPartialPaths then
@@ -817,7 +800,7 @@ function TableManager.Set<T, S>(
 	-- Only build intermediate tables when setting non-nil values; removing (nil) doesn't need them
 	const shouldBuild = buildTablesDynamically and unwrappedValue ~= nil
 
-	local parent: any = self._originalData
+	local parent: any = self.Raw
 	for i = 1, #parsedPath - 1 do
 		const nextValue = parent[parsedPath[i]]
 		if type(nextValue) ~= "table" then
@@ -1045,7 +1028,9 @@ end
 
 	Pair with `Resume()`. Nested calls are no-ops (the outermost window wins).
 ]=]
-TableManager.Suspend = BatchFlushModule.Suspend
+function TableManager.Suspend(self: TM_Internal)
+	BatchFlushModule.Suspend(self)
+end
 
 --[=[
 	Resumes after `Suspend()` and flushes all pending changes.
@@ -1057,7 +1042,9 @@ TableManager.Suspend = BatchFlushModule.Suspend
 	2. **Array flush** — For each tracked array path, diffs the pre-batch
 	   snapshot against the current value via LCS (`ArrayDiff.emitDiff`).
 ]=]
-TableManager.Resume = BatchFlushModule.Resume
+function TableManager.Resume(self: TM_Internal)
+	BatchFlushModule.Resume(self)
+end
 
 --[=[
 	Internal, unconditional diff+fire+reconcile for `path`: diffs the
@@ -1071,8 +1058,8 @@ function TableManager._doFlush<T>(self: TM_Internal<T>, path: PathArray)
 	const ctx = self._changeDetector:GetOpaqueCtx()
 	const old = self._shadow:Get(path)
 	const new_ = self:Get(path :: any, true)
-	self._changeDetector:CheckForChangesBetween(old, new_, path, self._originalData)
-	self._shadow:Reconcile(path, self._originalData, ctx)
+	self._changeDetector:CheckForChangesBetween(old, new_, path, self.Raw)
+	self._shadow:Reconcile(path, self.Raw, ctx)
 end
 
 --[=[
@@ -1285,7 +1272,7 @@ function TableManager.ForceNotify<T, S>(self: TM_Internal<T>, path: Path<S>)
 			new = currentValue,
 			children = nil,
 		},
-		Snapshot = createSyntheticSnapshot(self._originalData, parsedPath, currentValue),
+		Snapshot = createSyntheticSnapshot(self.Raw, parsedPath, currentValue),
 	}
 
 	-- Fire ValueChanged at exact path
@@ -1317,9 +1304,7 @@ function TableManager.Destroy<T>(self: TM_Internal<T>)
 	-- Tear down anything this manager owns (e.g. a `Map*` derived manager's
 	-- subscription to its source) BEFORE dismantling our own subsystems below,
 	-- since that teardown writes through `self:Set` to clear output entries.
-	if self._ownedCleanup then
-		self._ownedCleanup:Destroy()
-	end
+	self._janitor:Destroy()
 
 	self.Linker:Unlink()
 	LinkGroupModule.UnregisterAutoLink(self)

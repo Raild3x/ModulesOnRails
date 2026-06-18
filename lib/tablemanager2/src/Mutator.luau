@@ -65,7 +65,7 @@ function Mutator.resolveArrayForWrite<T, S>(self: TM_Internal<T>, pathOrProxy: P
 end
 
 function Mutator.getParentOriginalAtPath<T, S>(self: TM_Internal<T>, parentPath: PathArray<S>, opName: string): {}
-	local parentOriginal = if #parentPath == 0 then self._originalData else self:Get(parentPath)
+	local parentOriginal = if #parentPath == 0 then self.Raw else self:Get(parentPath)
 	if type(parentOriginal) ~= "table" then
 		error(`{opName} destination parent must be a table`)
 	end
@@ -236,7 +236,7 @@ const shouldTrackChangesAt = CoverageModule.IsTrackable
 -- not yet materialized — e.g. the first write since a listener started
 -- covering it. `oldValue == nil` needs no seeding: a missing shadow entry
 -- already reads as `nil`, which is the correct baseline when the key never
--- existed. Must be called BEFORE the write so `oldValue`/`self._originalData`
+-- existed. Must be called BEFORE the write so `oldValue`/`self.Raw`
 -- still reflect the pre-write state. Callers must check
 -- `not Coverage.PassesThroughOpaqueAncestor(...)` first — Materialize cannot
 -- safely seed through an opaque ancestor (see Coverage.luau).
@@ -247,7 +247,7 @@ local function ensureShadowSeeded<T, S>(self: TM_Internal<T>, path: PathArray<S>
 	if self._shadow:Get(path) ~= nil then
 		return
 	end
-	self._shadow:Materialize(path, self._originalData, ctx)
+	self._shadow:Materialize(path, self.Raw, ctx)
 end
 
 -- ---------------------------------------------------------------------------
@@ -268,7 +268,7 @@ local function onArrayAppended<T, S>(self: TM_Internal<T>, path: PathArray<S>, i
 	end
 	const insertPath: { any } = PathHelpers.Append(path :: any, index)
 	const metadata = EmitterModule.makeSyntheticMetadata(
-		self._originalData,
+		self.Raw,
 		insertPath,
 		"added",
 		index,
@@ -366,7 +366,7 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 	const parentPath, key = PathHelpers.GetPathParentAndKey(parsedPath)
 
 	-- Navigate to the parent table of the write.
-	local current: any = self._originalData
+	local current: any = self.Raw
 	for _, segment in parentPath do
 		if type(current) ~= "table" then
 			error(`Path segment {segment} is not a table`)
@@ -463,7 +463,7 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 	end
 	Mutator.pruneDetachedValue(self, oldValue, newValue)
 	if opaqueBypass then
-		self._changeDetector:CheckForChangesBetween(oldValue, newValue, parsedPath, self._originalData)
+		self._changeDetector:CheckForChangesBetween(oldValue, newValue, parsedPath, self.Raw)
 	elseif trackable then
 		self:_doFlush(parsedPath)
 	end
@@ -483,7 +483,7 @@ function Mutator.applyRootSet<T>(self: TM_Internal<T>, newRoot: any)
 		error("Cannot set the root to a non-table value; the root must remain a table")
 	end
 
-	const oldRoot = self._originalData
+	const oldRoot = self.Raw
 	if newRoot == oldRoot then
 		return
 	end
@@ -511,8 +511,8 @@ function Mutator.applyRootSet<T>(self: TM_Internal<T>, newRoot: any)
 		return
 	end
 
-	-- Seed the shadow from `oldRoot` BEFORE swapping `self._originalData` —
-	-- `ensureShadowSeeded` reads "current live" off `self._originalData`,
+	-- Seed the shadow from `oldRoot` BEFORE swapping `self.Raw` —
+	-- `ensureShadowSeeded` reads "current live" off `self.Raw`,
 	-- which is still `oldRoot` at this point.
 	const trackable = shouldTrackChangesAt(self, rootPath)
 	if trackable then
@@ -523,7 +523,7 @@ function Mutator.applyRootSet<T>(self: TM_Internal<T>, newRoot: any)
 
 	-- Swap identity. `oldRoot` keeps its contents (we only repoint references and
 	-- never mutate the old object), so the diff below sees the true prior state.
-	self._originalData = newRoot
+	self.Raw = newRoot
 	self.Raw = newRoot
 	if self._proxyManager ~= nil then
 		self._proxyManager:RetargetRoot(oldRoot, newRoot)

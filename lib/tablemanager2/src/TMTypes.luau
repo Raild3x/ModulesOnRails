@@ -353,7 +353,6 @@ export type TM_Internal<T = { [any]: any }> = TableManager<T> & {
 	_proxyManager: ProxyManagerModule.ProxyManager<T>?,
 	_listenerRegistry: ListenerRegistry,
 	_changeDetector: ChangeDetector,
-	_originalData: T,
 	_schema: SchemaCheck?,
 	_onValidationFailed: (<S>(path: Path<S>, value: any, err: string) -> ())?,
 	_duplicateReferenceMode: DuplicateReferenceMode,
@@ -362,44 +361,23 @@ export type TM_Internal<T = { [any]: any }> = TableManager<T> & {
 	-- Batch state
 	_batchDepth: number,
 	_batch: BatchState?,
-	-- Exposes the write/fire core's `makeEmit` to BatchFlush without a circular require.
-	_MakeEmit: (path: PathArray) -> ArrayDiffModule.Emit,
+
 	-- Link state
 	_linkGroups: { LinkGroup }?,
 	_suppressLinkFanOut: boolean?,
 	-- Set from `Config.AutoLink`; gates the direct write-path auto-link hook.
 	_autoLink: boolean?,
-	-- Lazily-created Janitor holding resources this manager owns but that live
-	-- outside it (e.g. a `Map*` derived manager's subscription to its source).
-	-- Flushed in `Destroy`. Reusable extension point for future derived helpers.
-	_ownedCleanup: Janitor?,
+	_janitor: Janitor,
 
-	-- Per-manager opacity registries backing `Opaque`/`OpaqueChildren` (see
-	-- `OpaqueRegistry`); handed to `_changeDetector` at construction so it can
-	-- build the diff oracle. `GlobalOpaque`/`GlobalOpaqueChildren` live in
-	-- OpaqueRegistry's own module-global registries instead.
 	_opaqueRegistries: OpaqueRegistries,
-	-- Per-manager ignored-path prefix trie (see `IgnoreTrie`); handed to
-	-- `_changeDetector` at construction (mutable, shared by reference) so
-	-- `SetPathIgnored` calls take effect without re-wiring anything.
 	_ignoreTrie: IgnoreTrieNode,
-
-	-- Persistent diff baseline for observed regions (see `Shadow`). Seeded
-	-- lazily on the first trackable write/flush that touches a given path;
-	-- never shrinks back when coverage later drops (no `Release` wiring yet).
 	_shadow: Shadow,
-
-	-- Internal, unconditional diff+fire+reconcile for `path`: diffs
-	-- `_shadow:Get(path)` against the live value, fires via
-	-- `CheckForChangesBetween`, then reconciles the shadow to live. Called by
-	-- the immediate (non-batched) write path and by `Flush`; does NOT consult
-	-- batch state or the coverage gate itself (callers already have).
-	_doFlush: (self: TM_Internal<T>, path: PathArray) -> (),
-
+	
 	-- Re-fires listeners/signals for an op that has ALREADY been applied to the
 	-- shared raw, WITHOUT mutating or snapshot-diffing. Used only by LinkGroup
 	-- fan-out; `op.Path` is in this manager's own coordinates.
 	_NotifyApplied: (self: TM_Internal<T>, op: AppliedOp) -> (),
+	_doFlush: (self: TM_Internal<T>, path: PathArray) -> (),
 }
 
 export type TableManagerLike = TM_Internal<{[any]:any}>

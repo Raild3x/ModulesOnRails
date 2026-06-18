@@ -29,10 +29,11 @@ const Diff = require("./Diff")
 --// Types //--
 type PathArray<S = string> = PathHelpers.PathArray<S>
 type TM_Internal<T> = TMTypes.TM_Internal<T>
+type TableManagerLike = TMTypes.TableManagerLike
 
 const Coverage = {}
 
-function Coverage.IsTrackable<T, S>(self: TM_Internal<T>, path: PathArray<S>): boolean
+function Coverage.IsTrackable(self: TableManagerLike, path: PathArray): boolean
 	if self._linkGroups ~= nil and self._linkGroups[1] ~= nil then
 		return true
 	end
@@ -66,11 +67,11 @@ end
 	back to a one-off diff using a value already read fresh from live data —
 	matching the old per-write CaptureSnapshot behavior for this narrow case.
 ]=]
-function Coverage.PassesThroughOpaqueAncestor<T, S>(self: TM_Internal<T>, path: PathArray<S>, ctx: Diff.Ctx?): boolean
+function Coverage.PassesThroughOpaqueAncestor(self: TableManagerLike, path: PathArray, ctx: Diff.Ctx?): boolean
 	if ctx == nil then
 		return false
 	end
-	local current: any = self._originalData
+	local current: any = self.Raw
 	for i = 1, #path - 1 do
 		if type(current) ~= "table" then
 			return false

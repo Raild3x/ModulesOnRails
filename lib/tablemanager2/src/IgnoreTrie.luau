@@ -15,11 +15,12 @@
 
 local PathHelpers = require("./PathHelpers")
 
-export type Node = { [any]: Node, _ignored: boolean? }
+const IGNORED_KEY = newproxy()
+export type Node = { [any]: Node }
 
 local IgnoreTrie = {}
 
-function IgnoreTrie.New(): Node
+function IgnoreTrie.new(): Node
 	return {} :: any
 end
 
@@ -30,11 +31,11 @@ function IgnoreTrie.SetPathIgnored<S>(root: Node, path: PathHelpers.Path<S>, ign
 		local child = node[segment]
 		if child == nil then
 			child = {}
-			node[segment] = child
+			node[segment] = child :: any
 		end
 		node = child
 	end
-	node._ignored = if ignored then true else nil
+	node[IGNORED_KEY] = if ignored then true else nil
 end
 
 -- `path` must already be a parsed PathArray (no string-path parsing here —
@@ -44,7 +45,7 @@ function IgnoreTrie.IsPathIgnored(root: Node?, path: { any }): boolean
 		return false
 	end
 	local node: Node? = root
-	if node and node._ignored then
+	if node and node[IGNORED_KEY] then
 		return true
 	end
 	for _, segment in path do
@@ -52,7 +53,7 @@ function IgnoreTrie.IsPathIgnored(root: Node?, path: { any }): boolean
 			return false
 		end
 		node = node[segment]
-		if node and node._ignored then
+		if node and node[IGNORED_KEY] then
 			return true
 		end
 	end

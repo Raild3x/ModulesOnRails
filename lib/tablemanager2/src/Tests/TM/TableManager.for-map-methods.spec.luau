@@ -64,7 +64,7 @@ return function(t: tiniest)
 					destroyed = true
 				end)
 			end)
-			expect(destroyed).is_false()
+			expect(destroyed).never_is_true()
 
 			manager:Set("a", nil :: any)
 			expect(destroyed).is_true()
@@ -105,7 +105,7 @@ return function(t: tiniest)
 			manager:ArraySwapRemove("items", 1) -- removes "a", backfills with "b"
 
 			expect(addCount).is(2) -- "b"'s occurrence was never torn down/recreated
-			expect(bDestroyed).is_false()
+			expect(bDestroyed).never_is_true()
 
 			manager:Destroy()
 		end)

@@ -664,6 +664,8 @@ local function unregisterAutoLink(tm: TableManagerLike)
 end
 
 --[=[
+	@within LinkGroup
+
 	O(1) direct write-path hook: if a *directly assigned* table value is the root
 	of another AutoLink manager, link it at the write location. Only the assigned
 	value itself is checked (no subtree scan) — roots buried inside a composite

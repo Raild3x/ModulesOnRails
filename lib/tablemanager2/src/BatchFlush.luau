@@ -26,12 +26,6 @@ const getSnapshotRef = BatchUtilsModule.GetSnapshotRef
 --// Types //--
 type PathArray = PathHelpers.PathArray
 type BatchState = BatchUtilsModule.BatchState
-
--- `TableManagerLike` (= `TM_Internal<any>`) is defined in `TMTypes` (a leaf
--- module), so this module can reference the real TableManager type without a
--- circular require with TableManager.luau (which requires this module).
--- `_MakeEmit` is set in `TableManager.new` to give BatchFlush access to the
--- write/fire core's `makeEmit` without a cycle.
 type TableManagerLike = TMTypes.TableManagerLike
 
 const BatchFlush = {}
@@ -78,7 +72,7 @@ const function maskTrackedArraysForBranchDiff(
 	local masked = branchValue
 	for _, trackedPath in pathsToMask do
 		-- Only mask while the array still exists as a table.
-		local liveValue: any = self._originalData
+		local liveValue: any = self.Raw
 		for _, key in trackedPath do
 			if type(liveValue) ~= "table" then
 				break
@@ -159,7 +153,7 @@ const function resolveDirtyBranchKeys(self: TableManagerLike, batch: BatchState)
 				branchKeys[key] = true
 			end
 		end
-		for key in self._originalData :: any do
+		for key in self.Raw :: any do
 			branchKeys[key] = true
 		end
 	else
@@ -197,10 +191,9 @@ const function flushNonArrayBranches(self: TableManagerLike, batch: BatchState, 
 
 		-- Current live value for this branch, with still-existing tracked
 		-- arrays substituted by their pre-batch values (no change to report).
-		const newBranchValue: any =
-			maskTrackedArraysForBranchDiff(self, batch, branchKey, (self._originalData :: any)[branchKey])
+		const newBranchValue: any = maskTrackedArraysForBranchDiff(self, batch, branchKey, (self.Raw :: any)[branchKey])
 
-		self._changeDetector:CheckForChangesBetween(oldBranchValue, newBranchValue, { branchKey }, self._originalData)
+		self._changeDetector:CheckForChangesBetween(oldBranchValue, newBranchValue, { branchKey }, self.Raw)
 	end
 end
 
@@ -211,6 +204,8 @@ end
 	their removal flows through the non-array branch diff instead.
 ]]
 const function flushTrackedArrays(self: TableManagerLike, batch: BatchState)
+	const makeEmit =
+		require("./Emitter").makeEmit :: (self: TableManagerLike, path: PathHelpers.PathArray) -> ArrayDiffModule.Emit
 	for _, path in batch.TrackedPaths do
 		const currentArray = self:Get(path)
 		if type(currentArray) ~= "table" then
@@ -218,7 +213,7 @@ const function flushTrackedArrays(self: TableManagerLike, batch: BatchState)
 		end
 
 		const oldArray: { any } = getSnapshotValue(batch.StartSnapshot, path) or {}
-		ArrayDiffModule.emitDiff(oldArray, currentArray, self._MakeEmit(path), true)
+		ArrayDiffModule.emitDiff(oldArray, currentArray, makeEmit(self, path), true)
 	end
 end
 
@@ -231,23 +226,23 @@ end
 	pass does no diffing/firing of its own, just `Materialize`s whichever
 	touched paths are still trackable now that the batch is done.
 ]]
-const function reconcileShadowAfterBatch(
-	self: TableManagerLike,
-	batch: BatchState,
-	branchKeys: { [any]: boolean }
-)
+const function reconcileShadowAfterBatch(self: TableManagerLike, batch: BatchState, branchKeys: { [any]: boolean })
 	const ctx = self._changeDetector:GetOpaqueCtx()
 	-- Skipped through an opaque ancestor (see Coverage.PassesThroughOpaqueAncestor)
 	-- since Materialize can't safely persist there.
 	for branchKey in branchKeys do
 		const path = { branchKey }
-		if CoverageModule.IsTrackable(self, path) and not CoverageModule.PassesThroughOpaqueAncestor(self, path, ctx) then
-			self._shadow:Materialize(path, self._originalData, ctx)
+		if
+			CoverageModule.IsTrackable(self, path) and not CoverageModule.PassesThroughOpaqueAncestor(self, path, ctx)
+		then
+			self._shadow:Materialize(path, self.Raw, ctx)
 		end
 	end
 	for _, path in batch.TrackedPaths do
-		if CoverageModule.IsTrackable(self, path) and not CoverageModule.PassesThroughOpaqueAncestor(self, path, ctx) then
-			self._shadow:Materialize(path, self._originalData, ctx)
+		if
+			CoverageModule.IsTrackable(self, path) and not CoverageModule.PassesThroughOpaqueAncestor(self, path, ctx)
+		then
+			self._shadow:Materialize(path, self.Raw, ctx)
 		end
 	end
 end
@@ -267,7 +262,7 @@ function BatchFlush.Suspend(self: TableManagerLike)
 	-- snapshot/diff work is done during the window. Tracked array paths are
 	-- diffed against this snapshot via LCS at flush time.
 	self._batch = {
-		StartSnapshot = self._changeDetector:CaptureSnapshot(self._originalData, {}),
+		StartSnapshot = self._changeDetector:CaptureSnapshot(self.Raw, {}),
 		TrackedPaths = {},
 		DirtyBranches = {},
 		PendingPrunes = {},

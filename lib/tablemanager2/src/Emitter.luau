@@ -118,7 +118,7 @@ end
 --[[
 	Fires the appropriate `Array*` signal + exact-path listeners + ancestor
 	ValueChanged callbacks, and fans out to any linked managers. Must be
-	called AFTER the mutation so `manager._originalData` reflects the new state.
+	called AFTER the mutation so `manager.Raw` reflects the new state.
 ]]
 function Emitter.fireArrayOperation(
 	manager: TableManagerLike,
@@ -162,7 +162,7 @@ function Emitter.fireArrayOperation(
 	if CoverageModule.IsTrackable(manager, basePath) then
 		const ctx = manager._changeDetector:GetOpaqueCtx()
 		if not CoverageModule.PassesThroughOpaqueAncestor(manager, basePath, ctx) then
-			manager._shadow:Materialize(basePath, manager._originalData, ctx)
+			manager._shadow:Materialize(basePath, manager.Raw, ctx)
 		end
 	end
 end
@@ -171,9 +171,6 @@ end
 	Builds the `Emit` interface for a single array path, wiring the three
 	callbacks to fire `ArrayRemoved`/`ArrayInserted`/`ArraySet` signals,
 	exact-path listeners, and ancestor callbacks in the correct order.
-
-	The returned table is stored on `self._MakeEmit` so BatchFlush can call
-	it without a circular require.
 ]]
 -- Return type is intentionally unannotated: the `set` callback accepts an
 -- optional 4th `move` arg (used by ArraySwapRemove) beyond what
@@ -183,7 +180,7 @@ function Emitter.makeEmit(manager: TableManagerLike, path: PathArray)
 		removed = function(index: number, oldValue: any, move: MoveMetadata?)
 			const removedPath: PathArray = PathHelpers.Append(path, index)
 			const metadata = createSyntheticMetadata(
-				manager._originalData,
+				manager.Raw,
 				removedPath,
 				"removed",
 				index,
@@ -201,7 +198,7 @@ function Emitter.makeEmit(manager: TableManagerLike, path: PathArray)
 		inserted = function(index: number, newValue: any, move: MoveMetadata?)
 			const insertedPath = PathHelpers.Append(path, index)
 			const metadata = createSyntheticMetadata(
-				manager._originalData,
+				manager.Raw,
 				insertedPath,
 				"added",
 				index,
@@ -219,7 +216,7 @@ function Emitter.makeEmit(manager: TableManagerLike, path: PathArray)
 		set = function(index: number, newValue: any, oldValue: any, move: MoveMetadata?)
 			const setPath = PathHelpers.Append(path, index)
 			const metadata = createSyntheticMetadata(
-				manager._originalData,
+				manager.Raw,
 				setPath,
 				"changed",
 				index,
