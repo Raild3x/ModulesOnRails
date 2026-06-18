@@ -15,6 +15,7 @@
 const PathHelpers = require("./PathHelpers")
 const BatchUtilsModule = require("./BatchUtils")
 const ArrayDiffModule = require("./ArrayDiff")
+const CoverageModule = require("./Coverage")
 const TMTypes = require("./TMTypes")
 
 --// Localize batch utils to avoid function call overhead //--
@@ -140,30 +141,17 @@ const function pruneArraysCreatedDuringBatch(batch: BatchState)
 end
 
 --[[
-	Non-array flush: diff only the branches that were actually mutated during
-	the batch. This avoids traversing the whole table when only a small subset
-	of keys changed. For each dirty branch key we extract the pre-batch value
-	from the root snapshot's Diff.Snapshot children and compare it against the
-	current live value, letting ChangeDetector fire all leaf + ancestor events.
-
-	Tracked-array subtrees are MASKED out of each branch diff (see
-	maskTrackedArraysForBranchDiff): flushTrackedArrays is the sole owner of
-	their content changes, so the branch diff must not also carry them.
+	Resolves the set of top-level root keys whose branch needs a flush:
+	either every dirty key tracked individually, or (when a "__root__" dirty
+	marker means a root-level key was written directly) every root key,
+	pre-batch and current. Shared by `flushNonArrayBranches` and the
+	post-Resume shadow reconciliation, which both need to iterate the exact
+	same set.
 ]]
-const function flushNonArrayBranches(self: TableManagerLike, batch: BatchState)
-	if not batch.StartSnapshot then
-		return
-	end
-
+const function resolveDirtyBranchKeys(self: TableManagerLike, batch: BatchState): { [any]: boolean }
 	const rootSnapshot = batch.StartSnapshot
-	const rootSnapshotData: any = rootSnapshot.Data -- Diff.Snapshot
+	const rootSnapshotData: any = if rootSnapshot then rootSnapshot.Data else nil
 
-	-- A "__root__" dirty marker means a root-level key was written directly.
-	-- Expand it to EVERY root key (pre-batch and current) so each key flushes
-	-- through the same masked per-branch diff. A full-root CheckForChanges
-	-- cannot be used here: captured at path {}, it fires no ancestor
-	-- delivery (root OnChange listeners would never see the operation) and
-	-- its diff would re-include tracked-array changes.
 	local branchKeys: { [any]: boolean } = {}
 	if batch.DirtyBranches["__root__"] then
 		if rootSnapshotData and rootSnapshotData.children then
@@ -179,6 +167,27 @@ const function flushNonArrayBranches(self: TableManagerLike, batch: BatchState)
 			branchKeys[branchKey] = true
 		end
 	end
+	return branchKeys
+end
+
+--[[
+	Non-array flush: diff only the branches that were actually mutated during
+	the batch. This avoids traversing the whole table when only a small subset
+	of keys changed. For each dirty branch key we extract the pre-batch value
+	from the root snapshot's Diff.Snapshot children and compare it against the
+	current live value, letting ChangeDetector fire all leaf + ancestor events.
+
+	Tracked-array subtrees are MASKED out of each branch diff (see
+	maskTrackedArraysForBranchDiff): flushTrackedArrays is the sole owner of
+	their content changes, so the branch diff must not also carry them.
+]]
+const function flushNonArrayBranches(self: TableManagerLike, batch: BatchState, branchKeys: { [any]: boolean })
+	if not batch.StartSnapshot then
+		return
+	end
+
+	const rootSnapshot = batch.StartSnapshot
+	const rootSnapshotData: any = rootSnapshot.Data -- Diff.Snapshot
 
 	for branchKey in branchKeys do
 		-- Extract old branch value from the pre-batch snapshot's children map.
@@ -210,6 +219,36 @@ const function flushTrackedArrays(self: TableManagerLike, batch: BatchState)
 
 		const oldArray: { any } = getSnapshotValue(batch.StartSnapshot, path) or {}
 		ArrayDiffModule.emitDiff(oldArray, currentArray, self._MakeEmit(path), true)
+	end
+end
+
+--[[
+	Brings the persistent shadow (see Shadow.luau / TableManager:Flush) up to
+	date for every branch/array touched by this batch, so the NEXT immediate
+	(non-batched) flush anywhere in this batch's touched regions diffs against
+	today's post-batch state instead of a stale pre-batch one. Only the two
+	per-op flush phases above actually fired events for this batch — this
+	pass does no diffing/firing of its own, just `Materialize`s whichever
+	touched paths are still trackable now that the batch is done.
+]]
+const function reconcileShadowAfterBatch(
+	self: TableManagerLike,
+	batch: BatchState,
+	branchKeys: { [any]: boolean }
+)
+	const ctx = self._changeDetector:GetOpaqueCtx()
+	-- Skipped through an opaque ancestor (see Coverage.PassesThroughOpaqueAncestor)
+	-- since Materialize can't safely persist there.
+	for branchKey in branchKeys do
+		const path = { branchKey }
+		if CoverageModule.IsTrackable(self, path) and not CoverageModule.PassesThroughOpaqueAncestor(self, path, ctx) then
+			self._shadow:Materialize(path, self._originalData, ctx)
+		end
+	end
+	for _, path in batch.TrackedPaths do
+		if CoverageModule.IsTrackable(self, path) and not CoverageModule.PassesThroughOpaqueAncestor(self, path, ctx) then
+			self._shadow:Materialize(path, self._originalData, ctx)
+		end
 	end
 end
 
@@ -263,8 +302,10 @@ function BatchFlush.Resume(self: TableManagerLike)
 	batch.Flushing = true
 
 	pruneArraysCreatedDuringBatch(batch)
-	flushNonArrayBranches(self, batch)
+	const branchKeys = resolveDirtyBranchKeys(self, batch)
+	flushNonArrayBranches(self, batch, branchKeys)
 	flushTrackedArrays(self, batch)
+	reconcileShadowAfterBatch(self, batch, branchKeys)
 
 	-- Clear batch state
 	batch.Flushing = false

@@ -67,7 +67,7 @@ type Op = {
 --// Module //--
 --------------------------------------------------------------------------------
 
-local ArrayDiff = {}
+const ArrayDiff = {}
 
 --[=[
 	@within ArrayDiff
