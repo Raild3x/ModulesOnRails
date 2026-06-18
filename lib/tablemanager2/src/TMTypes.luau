@@ -10,6 +10,7 @@ const ArrayDiffModule = require("./ArrayDiff")
 const BatchUtilsModule = require("./BatchUtils")
 const OpaqueRegistryModule = require("./OpaqueRegistry")
 const IgnoreTrieModule = require("./IgnoreTrie")
+const ShadowModule = require("./Shadow")
 const Signal = require("../Signal")
 const JanitorModule = require("../Janitor")
 
@@ -31,6 +32,7 @@ type SchemaCheck = SchemaNavigatorModule.Check
 type BatchState = BatchUtilsModule.BatchState
 type OpaqueRegistries = OpaqueRegistryModule.Registries
 type IgnoreTrieNode = IgnoreTrieModule.Node
+type Shadow = ShadowModule.Shadow
 
 export type Proxy<T, S> = ProxyManagerModule.Proxy<T, S>
 
@@ -316,6 +318,15 @@ export type TableManager<T = { [any]: any }> = {
 	Suspend: (self: TableManager<T>) -> (),
 	Resume: (self: TableManager<T>) -> (),
 
+	--- Diffs the persistent shadow baseline against the live value at `path`
+	--- (the whole tree when omitted), fires any resulting events, then
+	--- reconciles the shadow to the current live value. A no-op when nothing
+	--- observes `path`. Outside a batch this runs immediately; inside one it
+	--- just marks the branch dirty for `Resume`'s flush, so an explicit
+	--- `Flush` can never break batch atomicity. Also the supported way to
+	--- surface a mutation made by external code that bypassed `Set`/`Proxy`.
+	Flush: <S>(self: TableManager<T>, path: Path<S>?) -> (),
+
 	--- Marks `path` (and every descendant of it) as ignored or not: an ignored
 	--- write still happens, but skips all diff/snapshot/event work. See
 	--- `TableManagerConfig.IgnoredPaths` for the config-time equivalent.
@@ -372,6 +383,18 @@ export type TM_Internal<T = { [any]: any }> = TableManager<T> & {
 	-- `_changeDetector` at construction (mutable, shared by reference) so
 	-- `SetPathIgnored` calls take effect without re-wiring anything.
 	_ignoreTrie: IgnoreTrieNode,
+
+	-- Persistent diff baseline for observed regions (see `Shadow`). Seeded
+	-- lazily on the first trackable write/flush that touches a given path;
+	-- never shrinks back when coverage later drops (no `Release` wiring yet).
+	_shadow: Shadow,
+
+	-- Internal, unconditional diff+fire+reconcile for `path`: diffs
+	-- `_shadow:Get(path)` against the live value, fires via
+	-- `CheckForChangesBetween`, then reconciles the shadow to live. Called by
+	-- the immediate (non-batched) write path and by `Flush`; does NOT consult
+	-- batch state or the coverage gate itself (callers already have).
+	_doFlush: (self: TM_Internal<T>, path: PathArray) -> (),
 
 	-- Re-fires listeners/signals for an op that has ALREADY been applied to the
 	-- shared raw, WITHOUT mutating or snapshot-diffing. Used only by LinkGroup

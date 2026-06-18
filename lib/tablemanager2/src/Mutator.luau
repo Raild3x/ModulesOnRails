@@ -17,6 +17,7 @@ const SchemaNavigatorModule = require("./SchemaNavigator")
 const LinkGroupModule = require("./LinkGroup")
 const EmitterModule = require("./Emitter")
 const IgnoreTrieModule = require("./IgnoreTrie")
+const CoverageModule = require("./Coverage")
 const T = require("../T")
 const TMTypes = require("./TMTypes")
 
@@ -221,30 +222,32 @@ end
 -- Observation gate (module-internal, used only by applyWrite/onArrayAppended)
 -- ---------------------------------------------------------------------------
 
--- Conservative check: true if a write at `path` could be observed by
--- anything at all — a registry listener covering `path`
--- (ListenerRegistry:CoversChangesAt), a connection on one of the 7 global
--- Signals (each fires for ANY path, so any connection forces full tracking),
--- or an active link group (cross-manager fan-out rides inside the same
--- diff-dispatch this gate would otherwise skip, see LinkGroup.FanOutSet/
--- FanOutArrayOp). False means the upcoming snapshot/diff is provably
--- unobservable and can be skipped.
-local function shouldTrackChangesAt<T, S>(self: TM_Internal<T>, path: PathArray<S>): boolean
-	if self._linkGroups ~= nil and self._linkGroups[1] ~= nil then
-		return true
+-- See Coverage.luau: true if a write at `path` could be observed by anything
+-- at all. False means the upcoming shadow-seed/diff is provably unobservable
+-- and can be skipped. Kept as a local alias so call sites below stay unchanged.
+const shouldTrackChangesAt = CoverageModule.IsTrackable
+
+-- ---------------------------------------------------------------------------
+-- Shadow seeding (module-internal, used only by applyWrite/applyRootSet)
+-- ---------------------------------------------------------------------------
+
+-- Seeds the persistent shadow at `path` with `oldValue` (the live value
+-- immediately before this write) the FIRST time `path` is found trackable but
+-- not yet materialized — e.g. the first write since a listener started
+-- covering it. `oldValue == nil` needs no seeding: a missing shadow entry
+-- already reads as `nil`, which is the correct baseline when the key never
+-- existed. Must be called BEFORE the write so `oldValue`/`self._originalData`
+-- still reflect the pre-write state. Callers must check
+-- `not Coverage.PassesThroughOpaqueAncestor(...)` first — Materialize cannot
+-- safely seed through an opaque ancestor (see Coverage.luau).
+local function ensureShadowSeeded<T, S>(self: TM_Internal<T>, path: PathArray<S>, oldValue: any, ctx: any)
+	if oldValue == nil then
+		return
 	end
-	if
-		self.ValueChanged:IsConnectedTo()
-		or self.KeyAdded:IsConnectedTo()
-		or self.KeyRemoved:IsConnectedTo()
-		or self.KeyChanged:IsConnectedTo()
-		or self.ArrayInserted:IsConnectedTo()
-		or self.ArrayRemoved:IsConnectedTo()
-		or self.ArraySet:IsConnectedTo()
-	then
-		return true
+	if self._shadow:Get(path) ~= nil then
+		return
 	end
-	return self._listenerRegistry:CoversChangesAt(path)
+	self._shadow:Materialize(path, self._originalData, ctx)
 end
 
 -- ---------------------------------------------------------------------------
@@ -355,7 +358,8 @@ end
 	The single proxy-free write core. `parsedPath` is the full path (including
 	the final key); `value` must already be unwrapped
 	(`ProxyManagerModule.Unwrap`). Order: duplicate-check → validation →
-	array-append fast path → batch dirty-marking → snapshot/write/diff.
+	array-append fast path → batched dirty-marking (no flush) OR
+	shadow-seed/write/flush (immediate).
 ]]
 function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>, newValue: any)
 	debug.profilebegin("applyWrite")
@@ -423,11 +427,33 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 			ensureBatchPathTracking(batch, parentPath)
 		end
 		markBatchBranchDirty(batch, parentPath)
+
+		-- Batched writes don't flush per-op — Resume's two-phase flush owns
+		-- firing for everything marked dirty above.
+		const oldValue = parentTable[key]
+		parentTable[key] = newValue
+		if not self._suppressLinkFanOut then
+			LinkGroupModule.CheckDivergence(self, parsedPath)
+			if self._autoLink then
+				LinkGroupModule.CheckAutoLink(self, parsedPath, newValue)
+			end
+		end
+		Mutator.pruneDetachedValue(self, oldValue, newValue)
+		debug.profileend()
+		return
 	end
 
 	const oldValue = parentTable[key]
-	const tracked = not ignored and shouldTrackChangesAt(self, parsedPath)
-	const snapshot = if tracked then self._changeDetector:CaptureSnapshot(self._originalData, parsedPath) else nil
+	const trackable = not ignored and shouldTrackChangesAt(self, parsedPath)
+	const ctx = if trackable then self._changeDetector:GetOpaqueCtx() else nil
+	-- An opaque ancestor can't safely host a persistent shadow entry for a
+	-- descendant path (see Coverage.PassesThroughOpaqueAncestor): fall back to
+	-- a one-off diff using `oldValue` already read fresh above, instead of
+	-- going through the shadow at all.
+	const opaqueBypass = trackable and CoverageModule.PassesThroughOpaqueAncestor(self, parsedPath, ctx)
+	if trackable and not opaqueBypass then
+		ensureShadowSeeded(self, parsedPath, oldValue, ctx)
+	end
 	parentTable[key] = newValue
 	if not self._suppressLinkFanOut then
 		LinkGroupModule.CheckDivergence(self, parsedPath)
@@ -436,8 +462,10 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 		end
 	end
 	Mutator.pruneDetachedValue(self, oldValue, newValue)
-	if tracked then
-		self._changeDetector:CheckForChanges(snapshot :: any)
+	if opaqueBypass then
+		self._changeDetector:CheckForChangesBetween(oldValue, newValue, parsedPath, self._originalData)
+	elseif trackable then
+		self:_doFlush(parsedPath)
 	end
 	debug.profileend()
 end
@@ -483,6 +511,16 @@ function Mutator.applyRootSet<T>(self: TM_Internal<T>, newRoot: any)
 		return
 	end
 
+	-- Seed the shadow from `oldRoot` BEFORE swapping `self._originalData` —
+	-- `ensureShadowSeeded` reads "current live" off `self._originalData`,
+	-- which is still `oldRoot` at this point.
+	const trackable = shouldTrackChangesAt(self, rootPath)
+	if trackable then
+		-- rootPath is always {}, so this never builds an intermediate spine
+		-- (no opaque-ancestor risk; the root itself can never be opaque).
+		ensureShadowSeeded(self, rootPath, oldRoot, self._changeDetector:GetOpaqueCtx())
+	end
+
 	-- Swap identity. `oldRoot` keeps its contents (we only repoint references and
 	-- never mutate the old object), so the diff below sees the true prior state.
 	self._originalData = newRoot
@@ -497,9 +535,11 @@ function Mutator.applyRootSet<T>(self: TM_Internal<T>, newRoot: any)
 		LinkGroupModule.OnRootReplaced(self)
 	end
 
-	-- Fire change events for the full root diff. Passing `newRoot` as the root
-	-- table makes root/ancestor listeners observe post-swap state.
-	self._changeDetector:CheckForChangesBetween(oldRoot, newRoot, rootPath, newRoot)
+	-- Fire change events for the full root diff (shadow@{} vs the now-live
+	-- newRoot), then reconcile the shadow to newRoot.
+	if trackable then
+		self:_doFlush(rootPath)
+	end
 end
 
 -- ---------------------------------------------------------------------------

@@ -131,6 +131,7 @@ export type ProxyManager<T = { [any]: any }> = {
 	--- standalone ProxyManager tests).
 	SetWriteHandler: <S>(self: ProxyManager<T>, handler: (path: PathArray<S>, value: any) -> ()) -> (),
 	ReparentProxy: <S>(self: ProxyManager<T>, proxy: Proxy<T, S>, newParentOriginal: any?, newKey: any?) -> (),
+	RetargetRoot: (self: ProxyManager<T>, oldRoot: any, newRoot: any) -> (),
 	--- Update the Key metadata for all direct child proxies of `arrayOriginal` whose
 	--- numeric key is >= `fromIndex` by adding `delta`. Called by TableManager after
 	--- every ArrayInsert (+1) or ArrayRemove (-1) so held proxies report the correct path.
@@ -396,7 +397,7 @@ function ProxyManager._GetLivePath(self: ProxyManager, proxy: Proxy<any>): PathA
 	const keys: PathArray<any> = {}
 	local current = meta
 	while current ~= nil and current.Key ~= nil do
-		keys[#keys + 1] = current.Key  -- collect leaf→root; reverse below
+		keys[#keys + 1] = current.Key -- collect leaf→root; reverse below
 		if current.Parent == nil then
 			break
 		end

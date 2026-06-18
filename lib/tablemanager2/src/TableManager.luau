@@ -80,6 +80,9 @@ const EmitterModule = require("./Emitter")
 const MutatorModule = require("./Mutator")
 const OpaqueRegistryModule = require("./OpaqueRegistry")
 const IgnoreTrieModule = require("./IgnoreTrie")
+const ShadowModule = require("./Shadow")
+const CoverageModule = require("./Coverage")
+const ForMapModule = require("./ForMap")
 
 --// Localize batch utils to avoid function call overhead //--
 const createSyntheticSnapshot = BatchUtilsModule.CreateSyntheticSnapshot
@@ -146,10 +149,64 @@ const trackArrayMutation = MutatorModule.trackArrayMutation
 const fireAncestorValueChangedNotifications = EmitterModule.fireAncestorValueChangedNotifications
 const makeEmit = EmitterModule.makeEmit
 
+-- Shared For/Map reconcile drivers live in ForMap.luau; local aliases keep call sites unchanged.
+const makeKeyedReconciler = ForMapModule.makeKeyedReconciler
+const makeValueReconciler = ForMapModule.makeValueReconciler
+const attachOwnedCleanup = ForMapModule.attachOwnedCleanup
+
 
 -----------------------------------------------------------------------------------
 --// Constructor //--
 -----------------------------------------------------------------------------------
+
+-- Validates `self._originalData` against `self._schema` (set just before this
+-- is called). Separated from the constructor's straight-line field setup
+-- since it has its own branching/error-reporting logic.
+const function validateInitialSchema<T>(self: TM_Internal<T>)
+	if self._schema then
+		const ok, err = SchemaNavigatorModule.Validate(self._schema, {}, self._originalData)
+		if not ok then
+			const message = err or "Schema validation failed at <root>"
+			if self._onValidationFailed then
+				self._onValidationFailed({}, self._originalData, message)
+			end
+			error(message, 2)
+		end
+	end
+end
+
+-- Resolves `Config.EnableProxies` and creates (or nils out) `self._proxyManager`/
+-- `self.Proxy` accordingly, warning on the misconfigured EnableProxies=false +
+-- DuplicateReferenceMode combo.
+const function initProxyManager<T>(self: TM_Internal<T>, resolvedConfig: { [string]: any? })
+	const enableProxies = resolvedConfig.EnableProxies ~= false
+	if not enableProxies and resolvedConfig.DuplicateReferenceMode ~= nil then
+		warn("DuplicateReferenceMode has no effect when Config.EnableProxies = false")
+	end
+
+	if enableProxies then
+		self._proxyManager = ProxyManagerModule.new(self._originalData)
+	else
+		self._proxyManager = nil
+		self.Proxy = nil :: any
+	end
+end
+
+-- Wires the proxy-free write core into `self._proxyManager` (if proxies are
+-- enabled) and creates the root proxy. No-op when `EnableProxies = false`.
+const function wireProxyWriteHandler<T>(self: TM_Internal<T>)
+	const proxyManager = self._proxyManager
+	if proxyManager then
+		-- Single write-integration point: every proxy write resolves its live path
+		-- and unwrapped value, then flows through the proxy-free write core.
+		proxyManager:SetWriteHandler(function(path: PathArray, value: any)
+			applyWrite(self, path, value)
+		end)
+
+		-- Create root proxy (no parent, no key)
+		self.Proxy = proxyManager:CreateProxy(self._originalData, nil, nil)
+	end
+end
 
 --[=[
 	@within TableManager
@@ -169,23 +226,13 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 
 	assert(type(initialData) == "table", "Initial data must be a table")
 	-- Store original data
-	self._originalData = initialData
-	self.Raw = self._originalData
+	self.Raw = initialData
 	self._schema = resolvedConfig.Schema
 	self._onValidationFailed = resolvedConfig.OnValidationFailed
 	self._duplicateReferenceMode = duplicateReferenceMode
 
 	-- Validate initial data against the root schema at construction time.
-	if self._schema then
-		const ok, err = SchemaNavigatorModule.Validate(self._schema, {}, self._originalData)
-		if not ok then
-			const message = err or "Schema validation failed at <root>"
-			if self._onValidationFailed then
-				self._onValidationFailed({}, self._originalData, message)
-			end
-			error(message, 2)
-		end
-	end
+	validateInitialSchema(self)
 
 	-- Batch state (reset at start of each Suspend/Resume cycle)
 	self._batchDepth = 0
@@ -200,6 +247,8 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	-- ChangeDetector below so it can build/consult the diff oracle.
 	self._opaqueRegistries = OpaqueRegistryModule.NewRegistries()
 	self._ignoreTrie = IgnoreTrieModule.New()
+	-- Persistent diff baseline for observed regions (see Shadow.luau / Flush).
+	self._shadow = ShadowModule.new()
 	if resolvedConfig.IgnoredPaths then
 		for _, ignoredPath in resolvedConfig.IgnoredPaths :: { PathHelpers.Path<any> } do
 			IgnoreTrieModule.SetPathIgnored(self._ignoreTrie, ignoredPath, true)
@@ -211,18 +260,8 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 		return makeEmit(self, path)
 	end
 
-	const enableProxies = resolvedConfig.EnableProxies ~= false
-	if not enableProxies and resolvedConfig.DuplicateReferenceMode ~= nil then
-		warn("DuplicateReferenceMode has no effect when Config.EnableProxies = false")
-	end
-
 	-- Initialize subsystems
-	if enableProxies then
-		self._proxyManager = ProxyManagerModule.new(self._originalData)
-	else
-		self._proxyManager = nil
-		self.Proxy = nil :: any
-	end
+	initProxyManager(self, resolvedConfig)
 	self._listenerRegistry = ListenerRegistryModule.new {
 		DebugMode = false,
 		FireDeferred = resolvedConfig.ListenersFireDeferred == true,
@@ -247,17 +286,7 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 		self._ignoreTrie
 	)
 
-	const proxyManager = self._proxyManager
-	if proxyManager then
-		-- Single write-integration point: every proxy write resolves its live path
-		-- and unwrapped value, then flows through the proxy-free write core.
-		proxyManager:SetWriteHandler(function(path: PathArray, value: any)
-			applyWrite(self, path, value)
-		end)
-
-		-- Create root proxy (no parent, no key)
-		self.Proxy = proxyManager:CreateProxy(self._originalData, nil, nil)
-	end
+	wireProxyWriteHandler(self)
 
 	-- Public linking facade (lightweight; heavy link state stays lazy).
 	self.Linker = LinkerModule.new(self)
@@ -308,6 +337,19 @@ function TableManager._NotifyApplied<T>(self: TM_Internal<T>, op: AppliedOp)
 		if op.Kind == "Set" then
 			pruneDetachedValue(self, op.OldValue, op.NewValue)
 			self._changeDetector:CheckForChangesBetween(op.OldValue, op.NewValue, op.Path, self._originalData)
+			-- This bypasses applyWrite entirely (the write already landed via
+			-- the ORIGIN manager), so the shadow needs its own sync here —
+			-- applyWrite's ensureShadowSeeded/_doFlush never run for this path.
+			-- Skipped through an opaque ancestor (see
+			-- Coverage.PassesThroughOpaqueAncestor) since Materialize can't
+			-- safely persist there; the diff above already fired correctly
+			-- using op.OldValue/op.NewValue directly, independent of the shadow.
+			if CoverageModule.IsTrackable(self, op.Path) then
+				const ctx = self._changeDetector:GetOpaqueCtx()
+				if not CoverageModule.PassesThroughOpaqueAncestor(self, op.Path, ctx) then
+					self._shadow:Materialize(op.Path, self._originalData, ctx)
+				end
+			end
 		elseif op.Kind == "ArrayInsert" then
 			const index = op.Index :: number
 			shiftArrayKeys(self._proxyManager, self:Get(op.Path, true), index, 1)
@@ -498,216 +540,11 @@ end
 --------------------------------------------------------------------------------
 --// For / Map //--
 --------------------------------------------------------------------------------
--- Shared identity-based reconcile driver behind `ForKeys`/`ForValues`/`ForPairs`
--- and `MapKeys`/`MapValues`/`MapPairs`. See TMTypes.luau for the public
--- semantics table; this section is the implementation only.
-
-type ForItem = {
-	Value: any,
-	Janitor: Janitor,
-}
-
-type ValueItem = {
-	Janitor: Janitor,
-}
-
--- Wires the `OnChange` listener that drives `reconcile` and the initial fire
--- (deferred per `options.Defer`/the registry's fire-deferred mode, mirroring
--- `Observe`). Unlike `Observe`, the listener is registered BEFORE the initial
--- fire is scheduled: if the initial reconcile yields (a handler awaits
--- something), a change arriving mid-reconcile must still be observed instead
--- of silently lost. `reconcile` is idempotent against the live table, so a
--- redundant extra pass triggered by this ordering is harmless.
-local function wireReconcileConnection(
-	self: TM_Internal<any>,
-	parsedPath: PathArray,
-	reconcile: (metadata: ChangeMetadata?) -> (),
-	teardownAll: () -> (),
-	options: ForOptions?,
-	wrapInitialFire: ((fire: () -> ()) -> ())?
-): Connection
-	const listenerConnection = self:OnChange(parsedPath, function(_newValue, _oldValue, metadata)
-		reconcile(metadata)
-	end, { ListenDepth = 1 })
-
-	if options == nil or options.FireForExisting ~= false then
-		const function fireInitial()
-			if wrapInitialFire then
-				wrapInitialFire(function()
-					reconcile(nil)
-				end)
-			else
-				reconcile(nil)
-			end
-		end
-
-		if (options and options.Defer) or self._listenerRegistry._fireDeferred then
-			task.defer(fireInitial)
-		else
-			task.spawn(fireInitial)
-		end
-	end
-
-	const connection = {} :: Connection
-	connection.Connected = true
-	connection.Disconnect = function(conn: Connection)
-		if not conn.Connected then
-			return
-		end
-		conn.Connected = false
-		listenerConnection:Disconnect()
-		teardownAll()
-	end
-
-	return connection
-end
-
---[=[
-	Shared driver for `ForKeys`/`ForPairs`/`MapKeys`/`MapValues`/`MapPairs`:
-	items are tracked BY KEY. When `recreateOnValueChange` is true
-	(`ForPairs`/`MapValues`/`MapPairs`), a value change at an existing key
-	tears down the old item and runs `onAdd` again for the new one. When false
-	(`ForKeys`/`MapKeys`), a value change at an existing key calls `onRefresh`
-	instead and the item (and its Janitor) stays alive.
-]=]
-local function makeKeyedReconciler(
-	self: TM_Internal<any>,
-	parsedPath: PathArray,
-	recreateOnValueChange: boolean,
-	onAdd: (itemJanitor: Janitor, key: any, value: any, metadata: ChangeMetadata?) -> (),
-	onRemove: ((item: ForItem, key: any) -> ())?,
-	onRefresh: ((item: ForItem, key: any, newValue: any, metadata: ChangeMetadata?) -> ())?,
-	options: ForOptions?,
-	wrapInitialFire: ((fire: () -> ()) -> ())?
-): Connection
-	const items: { [any]: ForItem } = {}
-
-	const function destroyItem(key: any, item: ForItem)
-		items[key] = nil
-		if onRemove then
-			onRemove(item, key)
-		end
-		item.Janitor:Destroy()
-	end
-
-	const function reconcile(metadata: ChangeMetadata?)
-		const current = self:Get(parsedPath, true)
-
-		-- Removal pass first (safe to nil existing table keys mid `pairs`/`for...in`).
-		for key, item in items do
-			if type(current) ~= "table" or (current :: any)[key] == nil then
-				destroyItem(key, item)
-			end
-		end
-
-		if type(current) ~= "table" then
-			return
-		end
-
-		for key, value in current :: any do
-			const item = items[key]
-			if item == nil then
-				const itemJanitor = Janitor.new()
-				items[key] = { Value = value, Janitor = itemJanitor }
-				onAdd(itemJanitor, key, value, metadata)
-			elseif item.Value ~= value then
-				if recreateOnValueChange then
-					destroyItem(key, item)
-					const itemJanitor = Janitor.new()
-					items[key] = { Value = value, Janitor = itemJanitor }
-					onAdd(itemJanitor, key, value, metadata)
-				else
-					item.Value = value
-					if onRefresh then
-						onRefresh(item, key, value, metadata)
-					end
-				end
-			end
-		end
-	end
-
-	const function teardownAll()
-		for key, item in items do
-			destroyItem(key, item)
-		end
-	end
-
-	return wireReconcileConnection(self, parsedPath, reconcile, teardownAll, options, wrapInitialFire)
-end
-
---[=[
-	Shared driver for `ForValues`: items are tracked BY VALUE as a multiset, so
-	duplicate values are tracked as independent items and a value moving
-	between keys/indices does not re-run `onAdd`.
-]=]
-local function makeValueReconciler(
-	self: TM_Internal<any>,
-	parsedPath: PathArray,
-	onAdd: (itemJanitor: Janitor, value: any, metadata: ChangeMetadata?) -> (),
-	options: ForOptions?
-): Connection
-	const items: { [any]: { ValueItem } } = {}
-
-	const function reconcile(metadata: ChangeMetadata?)
-		const current = self:Get(parsedPath, true)
-		const counts: { [any]: number } = {}
-
-		if type(current) == "table" then
-			for _, value in current :: any do
-				counts[value] = (counts[value] or 0) + 1
-			end
-		end
-
-		for value, count in counts do
-			local list = items[value]
-			if list == nil then
-				list = {}
-				items[value] = list
-			end
-			while #list < count do
-				const itemJanitor = Janitor.new()
-				table.insert(list, { Janitor = itemJanitor })
-				onAdd(itemJanitor, value, metadata)
-			end
-			while #list > count do
-				const item = table.remove(list) :: ValueItem
-				item.Janitor:Destroy()
-			end
-		end
-
-		for value, list in items do
-			if counts[value] == nil then
-				for _, item in list do
-					item.Janitor:Destroy()
-				end
-				items[value] = nil
-			end
-		end
-	end
-
-	const function teardownAll()
-		for _, list in items do
-			for _, item in list do
-				item.Janitor:Destroy()
-			end
-		end
-		table.clear(items)
-	end
-
-	return wireReconcileConnection(self, parsedPath, reconcile, teardownAll, options, nil)
-end
-
--- Registers `item` (cleaned up via `methodName`) in `manager`'s lazily-created
--- owned-cleanup Janitor, so it is torn down when `manager` is destroyed. Used
--- by `Map*` to tie the derived manager's lifetime to its source subscription.
-local function attachOwnedCleanup(manager: TM_Internal<any>, item: any, methodName: string)
-	local ownedCleanup = manager._ownedCleanup
-	if ownedCleanup == nil then
-		ownedCleanup = Janitor.new()
-		manager._ownedCleanup = ownedCleanup
-	end
-	ownedCleanup:Add(item, methodName)
-end
+-- Thin orchestration methods. The shared identity-based reconcile drivers
+-- (`makeKeyedReconciler`/`makeValueReconciler`/`attachOwnedCleanup`) live in
+-- ForMap.luau and are aliased above; `MapKeys`/`MapValues`/`MapPairs` stay
+-- here because they call `TableManager.new` directly to create the derived
+-- manager, which ForMap.luau cannot do without a circular require.
 
 --[=[
 	Reconciles the items found at `path` by KEY: `handler` runs once per key
@@ -1221,6 +1058,51 @@ TableManager.Suspend = BatchFlushModule.Suspend
 	   snapshot against the current value via LCS (`ArrayDiff.emitDiff`).
 ]=]
 TableManager.Resume = BatchFlushModule.Resume
+
+--[=[
+	Internal, unconditional diff+fire+reconcile for `path`: diffs the
+	persistent shadow's last-flushed value against the current live value,
+	fires the resulting events via `CheckForChangesBetween`, then reconciles
+	the shadow to live. Callers (the immediate write path, `Flush`,
+	`_NotifyApplied`, `BatchFlush.Resume`) are responsible for the coverage
+	gate and batch-state check; this always runs.
+]=]
+function TableManager._doFlush<T>(self: TM_Internal<T>, path: PathArray)
+	const ctx = self._changeDetector:GetOpaqueCtx()
+	const old = self._shadow:Get(path)
+	const new_ = self:Get(path :: any, true)
+	self._changeDetector:CheckForChangesBetween(old, new_, path, self._originalData)
+	self._shadow:Reconcile(path, self._originalData, ctx)
+end
+
+--[=[
+	Diffs the persistent shadow baseline against the live value at `path`
+	(the whole tree when omitted), fires any resulting events, then
+	reconciles the shadow to the current live value. A no-op when nothing
+	observes `path` (no registered listener covers it, no global Signal is
+	connected, and no link group is active).
+
+	Outside a batch this runs immediately. Inside a `Suspend`/`Batch` window
+	it just marks the branch dirty for `Resume`'s flush instead of firing, so
+	an explicit `Flush` can never break batch atomicity.
+
+	This is also the supported way to surface a mutation made by code that
+	bypassed `Set`/`Proxy` and wrote directly into the underlying table.
+]=]
+function TableManager.Flush<T, S>(self: TM_Internal<T>, path: Path<S>?)
+	const parsedPath: PathArray = if path ~= nil then PathHelpers.ParsePath(path) else {}
+	if not CoverageModule.IsTrackable(self, parsedPath) then
+		return
+	end
+	if self._batchDepth > 0 then
+		const batch = self._batch
+		if batch then
+			BatchUtilsModule.MarkBatchBranchDirty(batch, parsedPath)
+		end
+		return
+	end
+	self:_doFlush(parsedPath)
+end
 
 --[=[
 	Marks `path` (and every descendant of it) as ignored or not. An ignored
