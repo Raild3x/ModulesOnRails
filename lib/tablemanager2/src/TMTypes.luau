@@ -11,6 +11,7 @@ const BatchUtilsModule = require("./BatchUtils")
 const OpaqueRegistryModule = require("./OpaqueRegistry")
 const IgnoreTrieModule = require("./IgnoreTrie")
 const ShadowModule = require("./Shadow")
+const DiffModule = require("./Diff")
 const Signal = require("../Signal")
 const JanitorModule = require("../Janitor")
 
@@ -33,6 +34,7 @@ type BatchState = BatchUtilsModule.BatchState
 type OpaqueRegistries = OpaqueRegistryModule.Registries
 type IgnoreTrieNode = IgnoreTrieModule.Node
 type Shadow = ShadowModule.Shadow
+type DiffNode = DiffModule.DiffNode
 
 export type Proxy<T, S> = ProxyManagerModule.Proxy<T, S>
 
@@ -76,6 +78,14 @@ export type AppliedOp = {
 	NewValue: any?,
 	OldValue: any?,
 	Index: number?,
+	-- Phase B (linked fan-out): the origin's already-computed diff node for a
+	-- "Set", so a recipient can dispatch it WITHOUT re-running `Diff.diff`. Only
+	-- populated when the origin had no opacity active (`OriginHasNoOpacity`) —
+	-- the diff tree's shape is otherwise per-manager opacity-dependent.
+	Diff: DiffNode?,
+	-- True when the origin's opacity ctx was nil at fan-out time. A recipient
+	-- may only reuse `Diff` when it ALSO has no opacity active.
+	OriginHasNoOpacity: boolean?,
 }
 
 -- An op relative to the shared object, computed by the fan-out hooks before
@@ -86,6 +96,9 @@ export type RelativeOp = {
 	NewValue: any?,
 	OldValue: any?,
 	Index: number?,
+	-- See `AppliedOp.Diff`/`OriginHasNoOpacity`; carried through `NotifyChange`.
+	Diff: DiffNode?,
+	OriginHasNoOpacity: boolean?,
 }
 
 -- Payload shape passed from `fireArrayOperation` for array-op fan-out.

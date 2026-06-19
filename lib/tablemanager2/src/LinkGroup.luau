@@ -16,9 +16,11 @@
 local PathHelpers = require("./PathHelpers")
 local Signal = require("../Signal")
 local TMTypes = require("./TMTypes")
+local Diff = require("./Diff")
 
 type PathArray<S = string> = PathHelpers.PathArray<S>
 type Path<S> = PathHelpers.Path<S>
+type DiffNode = Diff.DiffNode
 type Signal<Fn, Args...> = Signal.Signal<Fn, Args...>
 
 --// Types //--
@@ -234,6 +236,10 @@ function LinkGroup.NotifyChange(self: LinkGroup, originManager: TableManagerLike
 			NewValue = op.NewValue,
 			OldValue = op.OldValue,
 			Index = op.Index,
+			-- Phase B: carry the origin's diff node (and its opacity state) so the
+			-- recipient can replay it without re-diffing (see _NotifyApplied).
+			Diff = op.Diff,
+			OriginHasNoOpacity = op.OriginHasNoOpacity,
 		}
 
 		-- Isolate each member's delivery: a throwing listener on one member
@@ -421,11 +427,20 @@ end
 	ChangeDetector callback). `path` is the changed location, in `self`'s own
 	coordinates.
 ]=]
-local function fanOutSet(self: TableManagerLike, path: PathArray, newValue: any, oldValue: any)
+local function fanOutSet(self: TableManagerLike, path: PathArray, newValue: any, oldValue: any, diffNode: DiffNode?)
 	local groups = self._linkGroups
 	if groups == nil then
 		return
 	end
+
+	-- Phase B: a recipient may only reuse `diffNode` when neither side has any
+	-- PER-MANAGER opaque marks. Global opacity is shared by every manager, so it
+	-- shapes the origin's and the recipient's diff identically and is safe to
+	-- reuse across — hence we check the per-manager registry count, NOT
+	-- `GetOpaqueCtx()` (which also reflects the session-wide global count and
+	-- would needlessly disable reuse). Recipients re-check their own count in
+	-- `_NotifyApplied`.
+	local originHasNoOpacity = self._opaqueRegistries.Count == 0
 
 	for _, group in table.clone(groups) do
 		local anchorPath = group:GetAnchorPath(self)
@@ -453,6 +468,8 @@ local function fanOutSet(self: TableManagerLike, path: PathArray, newValue: any,
 				RelativePath = relativePath,
 				NewValue = newValue,
 				OldValue = oldValue,
+				Diff = diffNode,
+				OriginHasNoOpacity = originHasNoOpacity,
 			})
 		end
 	end

@@ -335,16 +335,35 @@ function TableManager._NotifyApplied<T>(self: TM_Internal<T>, op: AppliedOp)
 	const ok, err = pcall(function()
 		if op.Kind == "Set" then
 			pruneDetachedValue(self, op.OldValue, op.NewValue)
-			self._changeDetector:CheckForChangesBetween(op.OldValue, op.NewValue, op.Path, self.Raw)
+			const ctx = self._changeDetector:GetOpaqueCtx()
+			-- Phase A: only dispatch if THIS manager observes the path. When it
+			-- doesn't, no listener/signal of its own would fire, so the diff is
+			-- pure waste — skip it. (The shadow is still synced below: this
+			-- manager can later ORIGINATE a write whose fan-out oldValue reads
+			-- from its shadow, so the baseline must stay current regardless.)
+			if CoverageModule.IsLocallyObserved(self, op.Path) then
+				-- Phase B: reuse the origin's already-computed diff node instead
+				-- of re-diffing the identical old/new, but only when neither the
+				-- origin (op.OriginHasNoOpacity) nor this manager has any
+				-- PER-MANAGER opaque marks. Global opacity is shared, so it shapes
+				-- both diffs identically and is safe to reuse across; only
+				-- per-manager marks can diverge the trees. (Checking the registry
+				-- count, not `ctx == nil`, also keeps reuse alive when some
+				-- unrelated manager elsewhere has used GlobalOpaque this session.)
+				if op.Diff ~= nil and op.OriginHasNoOpacity and self._opaqueRegistries.Count == 0 then
+					self._changeDetector:DispatchDiffNode(op.Diff, op.Path, self.Raw)
+				else
+					self._changeDetector:CheckForChangesBetween(op.OldValue, op.NewValue, op.Path, self.Raw)
+				end
+			end
 			-- This bypasses applyWrite entirely (the write already landed via
 			-- the ORIGIN manager), so the shadow needs its own sync here —
 			-- applyWrite's ensureShadowSeeded/_doFlush never run for this path.
 			-- Skipped through an opaque ancestor (see
 			-- Coverage.PassesThroughOpaqueAncestor) since Materialize can't
-			-- safely persist there; the diff above already fired correctly
+			-- safely persist there; the dispatch above already fired correctly
 			-- using op.OldValue/op.NewValue directly, independent of the shadow.
 			if CoverageModule.IsTrackable(self, op.Path) then
-				const ctx = self._changeDetector:GetOpaqueCtx()
 				if not CoverageModule.PassesThroughOpaqueAncestor(self, op.Path, ctx) then
 					self._shadow:Materialize(op.Path, self.Raw, ctx)
 				end
@@ -818,7 +837,7 @@ function TableManager.Set<T, S>(
 
 	local parent: any = self.Raw
 	for i = 1, #parsedPath - 1 do
-		const nextValue = parent[parsedPath[i]]
+		local nextValue = parent[parsedPath[i]]
 		if type(nextValue) ~= "table" then
 			if not shouldBuild then
 				if unwrappedValue == nil then
@@ -826,26 +845,8 @@ function TableManager.Set<T, S>(
 				end
 				error(`Path segment {parsedPath[i]} is not a table`)
 			end
-			-- Build the remaining segments as ONE plain subtree with the value at
-			-- the leaf, then apply it as a single write so the whole creation is
-			-- captured by one change-detection pass. Writing level-by-level would
-			-- otherwise produce one diff per intermediate table.
-			const subtree: { [any]: any } = {}
-			local cursor = subtree
-			for j = i + 1, #parsedPath - 1 do
-				const nested: { [any]: any } = {}
-				cursor[parsedPath[j]] = nested
-				cursor = nested
-			end
-			cursor[parsedPath[#parsedPath]] = unwrappedValue
-
-			const subtreePath: PathArray = table.create(i)
-			for j = 1, i do
-				subtreePath[j] = parsedPath[j]
-			end
-			parsedPath = subtreePath
-			unwrappedValue = subtree
-			break
+			nextValue = {}
+			parent[parsedPath[i]] = nextValue
 		end
 		parent = nextValue
 	end

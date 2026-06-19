@@ -75,6 +75,16 @@ export type ChangeDetector = {
 		basePath: PathArray<S>,
 		rootTable: T?
 	) -> (),
+	--- Dispatches an ALREADY-BUILT root diff node at `basePath` (fires the same
+	--- leaf + ancestor callbacks as `CheckForChangesBetween`) WITHOUT running
+	--- `Diff.diff`. Used by linked fan-out to reuse the origin's diff node
+	--- instead of re-diffing the same old/new (see `TableManager._NotifyApplied`).
+	DispatchDiffNode: <T, S>(
+		self: ChangeDetector,
+		node: Diff.DiffNode,
+		basePath: PathArray<S>,
+		rootTable: T
+	) -> (),
 	--- Suspends change detection. While suspended, `CaptureSnapshot` is a
 	--- cheap O(1) no-op. Used by `TableManager:Batch()`.
 	Suspend: (self: ChangeDetector) -> (),
@@ -348,37 +358,31 @@ function ChangeDetector:CheckForChangesBetween(
 		RootTable = tempRootTable,
 	}
 
+	-- Diff.diff stays INSIDE the dispatch closure so a re-entrant check queued
+	-- by _dispatch diffs against state at DRAIN time (see _dispatch's note on
+	-- collapsing chained re-entrant writes).
 	self:_dispatch(function()
-		-- Use Diff module to generate tree
 		local rootDiffNode = Diff.diff(oldValue, newValue, nil, nil, ctx)
+		self:_emitRootNode(rootDiffNode, basePath, ancestorSnapshot)
+	end)
+end
 
-		-- Process the root node if there are changes
-		if rootDiffNode then
-			local rootParentPath: Path = {}
-			local rootKey: any? = nil
-			if #basePath > 0 then
-				rootParentPath = table.create(#basePath - 1)
-				table.move(basePath, 1, #basePath - 1, 1, rootParentPath)
-				rootKey = basePath[#basePath]
-			end
+--[=[
+	Dispatches an already-built `node` at `basePath` against `rootTable` — fires
+	the exact same leaf + ancestor callbacks as `CheckForChangesBetween`, just
+	without re-running `Diff.diff`. The node is immutable here (there is nothing
+	to re-diff at drain time), so it is simply emitted through the same
+	re-entrancy-ordered dispatch queue.
 
-			-- Process all leaf changes via DFS
-			-- Pass the basePath as both the current path and origin
-			-- Include the ancestor snapshot for context
-			self:_processDiffNode(
-				rootDiffNode,
-				basePath,
-				rootParentPath,
-				rootKey,
-				basePath,
-				rootDiffNode,
-				ancestorSnapshot
-			)
-
-			-- Fire ancestor callbacks for the base level
-			-- The origin is the basePath (where the assignment happened)
-			self:_fireAncestorCallbacks(basePath, rootDiffNode, ancestorSnapshot)
-		end
+	Used by linked fan-out (`TableManager._NotifyApplied`) to replay the ORIGIN's
+	diff node on a recipient instead of recomputing the identical diff.
+]=]
+function ChangeDetector:DispatchDiffNode(node: Diff.DiffNode, basePath: PathArray, rootTable: { [any]: any })
+	local ancestorSnapshot: AncestorSnapshot = {
+		RootTable = rootTable,
+	}
+	self:_dispatch(function()
+		self:_emitRootNode(node, basePath, ancestorSnapshot)
 	end)
 end
 
@@ -477,6 +481,31 @@ local function fireNodeCallbacks(
 		end
 		OnValueChanged(nodePath, nil, diffNode.old, metadata)
 	end
+end
+
+--[[
+	Shared tail of `CheckForChangesBetween` and `DispatchDiffNode`: given an
+	already-built root diff `node` for `basePath`, runs the DFS leaf callbacks
+	and the base-level ancestor callbacks. No-op when `node` is nil (no changes).
+	Must be called inside a `_dispatch` closure.
+]]
+function ChangeDetector:_emitRootNode(node: Diff.DiffNode?, basePath: PathArray, ancestorSnapshot: AncestorSnapshot)
+	if not node then
+		return
+	end
+
+	local rootParentPath: Path = {}
+	local rootKey: any? = nil
+	if #basePath > 0 then
+		rootParentPath = table.create(#basePath - 1)
+		table.move(basePath, 1, #basePath - 1, 1, rootParentPath)
+		rootKey = basePath[#basePath]
+	end
+
+	-- Process all leaf changes via DFS; basePath is both the current path and
+	-- the origin. Fire ancestor callbacks for the base level afterward.
+	self:_processDiffNode(node, basePath, rootParentPath, rootKey, basePath, node, ancestorSnapshot)
+	self:_fireAncestorCallbacks(basePath, node, ancestorSnapshot)
 end
 
 --[=[

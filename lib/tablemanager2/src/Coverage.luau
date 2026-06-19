@@ -33,10 +33,15 @@ type TableManagerLike = TMTypes.TableManagerLike
 
 const Coverage = {}
 
-function Coverage.IsTrackable(self: TableManagerLike, path: PathArray): boolean
-	if self._linkGroups ~= nil and self._linkGroups[1] ~= nil then
-		return true
-	end
+--[=[
+	True if a change at `path` would fire any of THIS manager's own
+	listeners/signals — a global Signal connection (each fires for any path) or
+	a registry listener covering `path` (including via an ancestor/subtree, see
+	`ListenerRegistry.CoversChangesAt`). Unlike `IsTrackable`, membership in a
+	link group does NOT make this true: it answers "does this manager itself
+	observe `path`", independent of fan-out obligations.
+]=]
+function Coverage.IsLocallyObserved(self: TableManagerLike, path: PathArray): boolean
 	if
 		self.ValueChanged:IsConnectedTo()
 		or self.KeyAdded:IsConnectedTo()
@@ -49,6 +54,16 @@ function Coverage.IsTrackable(self: TableManagerLike, path: PathArray): boolean
 		return true
 	end
 	return self._listenerRegistry:CoversChangesAt(path)
+end
+
+function Coverage.IsTrackable(self: TableManagerLike, path: PathArray): boolean
+	-- An active link group forces tracking even with no local observers: a
+	-- member's own write must still diff so it can fan out to members that DO
+	-- observe (cross-manager fan-out rides inside this diff-dispatch).
+	if self._linkGroups ~= nil and self._linkGroups[1] ~= nil then
+		return true
+	end
+	return Coverage.IsLocallyObserved(self, path)
 end
 
 --[=[

@@ -376,8 +376,10 @@ function Emitter.makeChangeDetectorCallbacks(manager: TableManagerLike)
 				Metadata = metadata,
 			})
 			-- Link fan-out: only for leaf changes, never while replaying fan-out.
+			-- Pass the already-built diff node so recipients can replay it without
+			-- re-diffing (see LinkGroup.FanOutSet / TableManager._NotifyApplied).
 			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" and not manager._suppressLinkFanOut then
-				LinkGroupModule.FanOutSet(manager, path, newValue, oldValue)
+				LinkGroupModule.FanOutSet(manager, path, newValue, oldValue, metadata.Diff)
 			end
 		end,
 	}
