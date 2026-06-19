@@ -16,6 +16,7 @@ const PathHelpers = require("./PathHelpers")
 const BatchUtilsModule = require("./BatchUtils")
 const ArrayDiffModule = require("./ArrayDiff")
 const CoverageModule = require("./Coverage")
+const CoalescedFlushModule = require("./CoalescedFlush")
 const TMTypes = require("./TMTypes")
 
 --// Localize batch utils to avoid function call overhead //--
@@ -256,6 +257,16 @@ function BatchFlush.Suspend(self: TableManagerLike)
 	if self._batchDepth > 0 then
 		return -- Already suspended; nested Suspend is a no-op
 	end
+	-- Drain any outstanding coalesced flush BEFORE capturing the pre-batch
+	-- snapshot below. The snapshot is read directly off live data; if a
+	-- coalesced flush were still pending, that read would silently become the
+	-- new baseline and the transition the pending flush was holding (shadow
+	-- vs. the live value just before THIS snapshot) would never reach any
+	-- listener — the pending flush later no-ops once the batch's own Resume
+	-- has already reconciled the shadow past it. Flushing first makes the
+	-- shadow authoritative again, so the snapshot below picks up cleanly from
+	-- it.
+	CoalescedFlushModule.FlushPending(self)
 	-- Capture the pre-batch snapshot BEFORE suspending ChangeDetector so that
 	-- CheckForChangesBetween at flush time can diff old-vs-current correctly.
 	-- `CaptureSnapshot` inside `ChangeDetector` returns a sentinel (O(1)) so no

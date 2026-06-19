@@ -104,7 +104,7 @@ end
 	value there. Requires `path`'s parent to already exist in the mirror (root
 	always does); use `Materialize` to seed a never-before-tracked path.
 ]=]
-function Shadow.Reconcile(self: Shadow, path: PathArray<any>, live: any, ctx: Diff.Ctx?)
+function Shadow.Reconcile(self: Shadow, path: PathArray, live: any, ctx: Diff.Ctx?)
 	const value = resolveAtPath(live, path)
 	const copy = copyForShadow(value, ctx)
 	if #path == 0 then
@@ -134,7 +134,7 @@ end
 	report that sibling's removal, since the diff sees it as "already absent"
 	on both sides instead of genuinely removed.
 ]=]
-function Shadow.Materialize(self: Shadow, path: PathArray<any>, live: any, ctx: Diff.Ctx?)
+function Shadow.Materialize(self: Shadow, path: PathArray, live: any, ctx: Diff.Ctx?)
 	if #path == 0 then
 		self:Reconcile(path, live, ctx)
 		return
@@ -159,7 +159,7 @@ end
 	Drops the mirror subtree at `path` (e.g. once nothing covers it anymore).
 	No-op if `path`'s parent isn't materialized.
 ]=]
-function Shadow.Release(self: Shadow, path: PathArray<any>)
+function Shadow.Release(self: Shadow, path: PathArray)
 	if #path == 0 then
 		self._mirror = nil
 		return

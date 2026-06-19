@@ -18,6 +18,7 @@ const LinkGroupModule = require("./LinkGroup")
 const EmitterModule = require("./Emitter")
 const IgnoreTrieModule = require("./IgnoreTrie")
 const CoverageModule = require("./Coverage")
+const CoalescedFlushModule = require("./CoalescedFlush")
 const T = require("../T")
 const TMTypes = require("./TMTypes")
 
@@ -457,7 +458,7 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 	if opaqueBypass then
 		self._changeDetector:CheckForChangesBetween(oldValue, newValue, parsedPath, self.Raw)
 	elseif trackable then
-		self:_doFlush(parsedPath)
+		CoalescedFlushModule.Request(self, parsedPath)
 	end
 	debug.profileend()
 end
@@ -530,7 +531,7 @@ function Mutator.applyRootSet<T>(self: TM_Internal<T>, newRoot: any)
 	-- Fire change events for the full root diff (shadow@{} vs the now-live
 	-- newRoot), then reconcile the shadow to newRoot.
 	if trackable then
-		self:_doFlush(rootPath)
+		CoalescedFlushModule.Request(self, rootPath)
 	end
 end
 

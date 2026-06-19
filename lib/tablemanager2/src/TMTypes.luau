@@ -54,6 +54,14 @@ export type ListenerFireMode = ListenerRegistryModule.FireMode
 -- `:Fire` (see `Emitter.fireSignal`).
 export type SignalFireMode = "immediate" | "deferred" | "bindable" | "coalesced"
 
+-- Controls WHEN `_doFlush` (the shadow diff + fire + reconcile cycle) runs for
+-- a direct write. "immediate" (default) runs it synchronously, same as today.
+-- "coalesced" defers it to frame-end (`task.defer`) and merges every flush
+-- request made before then into one flush at their common ancestor path, so a
+-- frame with N writes under one subtree costs one diff/fire instead of N. See
+-- `CoalescedFlush.luau`.
+export type FlushMode = "immediate" | "coalesced"
+
 --------------------------------------------------------------------------------
 --// Link type shapes (implemented by LinkGroup.luau / Linker.luau) //--
 --------------------------------------------------------------------------------
@@ -129,6 +137,7 @@ export type Linker = {
 	.OnValidationFailed (path: PathArray, value: any, err: string) -> ()?
 	.ListenerFireMode ListenerFireMode? -- Controls how listener callbacks (OnChange, OnValueChange, etc.) are scheduled when fired. Defaults to "immediate".
 	.SignalFireMode SignalFireMode? -- Controls how the per-change Signals (ValueChanged, KeyAdded, etc.) are scheduled when fired. Defaults to "immediate".
+	.FlushMode FlushMode? -- Controls WHEN a direct write's diff+fire+reconcile cycle runs. Defaults to "immediate". See `FlushMode`.
 	.DuplicateReferenceMode DuplicateReferenceMode? -- Experimental
 	.EnableProxies boolean? -- Defaults to true. When false, `Proxy`/`GetProxy` are unavailable.
 	.AutoLink boolean? -- When true, this manager auto-links (via `tm.Linker`) with any OTHER AutoLink manager with shared tables
@@ -147,6 +156,7 @@ export type TableManagerConfig = {
 	OnValidationFailed: ((path: PathArray, value: any, err: string) -> ())?,
 	ListenerFireMode: ListenerFireMode?,
 	SignalFireMode: SignalFireMode?,
+	FlushMode: FlushMode?,
 	DuplicateReferenceMode: DuplicateReferenceMode?,
 	EnableProxies: boolean?,
 	AutoLink: boolean?,
@@ -378,6 +388,14 @@ export type TM_Internal<T = { [any]: any }> = TableManager<T> & {
 	-- Batch state
 	_batchDepth: number,
 	_batch: BatchState?,
+
+	-- Set from `Config.FlushMode`; controls `CoalescedFlush.Request` routing.
+	_flushMode: FlushMode,
+	-- The running common-ancestor path of every flush requested since the last
+	-- coalesced flush drained, or nil when nothing is pending. See `CoalescedFlush`.
+	_pendingFlushRoot: PathArray?,
+	-- True while a `task.defer` is outstanding to drain `_pendingFlushRoot`.
+	_coalescedFlushScheduled: boolean?,
 
 	-- Link state
 	_linkGroups: { LinkGroup }?,

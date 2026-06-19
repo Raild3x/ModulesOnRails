@@ -77,6 +77,7 @@ const IgnoreTrieModule = require("./IgnoreTrie")
 const ShadowModule = require("./Shadow")
 const CoverageModule = require("./Coverage")
 const ForMapModule = require("./ForMap")
+const CoalescedFlushModule = require("./CoalescedFlush")
 
 --// Types //--
 type Path<S> = PathHelpers.Path<S>
@@ -117,6 +118,7 @@ type ProxyManager<T> = ProxyManagerModule.ProxyManager<T>
 const DEFAULT_DUPLICATE_REFERENCE_MODE: DuplicateReferenceMode = "error"
 const DEFAULT_SIGNAL_FIRE_MODE: Types.SignalFireMode = "bindable"
 const DEFAULT_LISTENER_FIRE_MODE: ListenerRegistryModule.FireMode = "bindable"
+const DEFAULT_FLUSH_MODE: Types.FlushMode = "immediate"
 
 --------------------------------------------------------------------------------
 --// Module //--
@@ -168,6 +170,18 @@ const function validateInitialSchema<T>(self: TM_Internal<T>)
 			error(message, 2)
 		end
 	end
+end
+
+-- Lowercases `Config.SignalFireMode` so it matches the lowercase literals
+-- `Emitter.fireSignal` compares against (`ListenerRegistry.resolveFireMode`
+-- already does the same for `ListenerFireMode`) -- without this, a
+-- differently-cased value (e.g. "Coalesced") silently fails every comparison
+-- in `fireSignal` and falls through to its immediate-fire `else` branch.
+const function normalizeSignalFireMode(mode: Types.SignalFireMode?): Types.SignalFireMode
+	if mode == nil then
+		return DEFAULT_SIGNAL_FIRE_MODE
+	end
+	return (mode :: any):lower() :: Types.SignalFireMode
 end
 
 -- Resolves `Config.EnableProxies` and creates (or nils out) `self._proxyManager`/
@@ -246,7 +260,10 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 		DebugMode = false,
 		FireMode = resolvedConfig.ListenerFireMode or DEFAULT_LISTENER_FIRE_MODE,
 	}
-	self._signalFireMode = resolvedConfig.SignalFireMode or DEFAULT_SIGNAL_FIRE_MODE
+	self._signalFireMode = normalizeSignalFireMode(resolvedConfig.SignalFireMode)
+	self._flushMode = resolvedConfig.FlushMode or DEFAULT_FLUSH_MODE
+	self._pendingFlushRoot = nil
+	self._coalescedFlushScheduled = false
 	self.Proxy = wireProxyWriteHandler(self)
 	
 	-- Initialize signals (fire once per change)
@@ -1088,6 +1105,11 @@ function TableManager.Flush<T, S>(self: TM_Internal<T>, path: Path<S>?)
 		end
 		return
 	end
+	-- An explicit Flush is always synchronous regardless of FlushMode (same
+	-- manual-control contract as Suspend/Resume). Drain any outstanding
+	-- coalesced flush first so this synchronous diff reads an authoritative
+	-- shadow baseline instead of racing the deferred one.
+	CoalescedFlushModule.FlushPending(self)
 	self:_doFlush(parsedPath)
 end
 
