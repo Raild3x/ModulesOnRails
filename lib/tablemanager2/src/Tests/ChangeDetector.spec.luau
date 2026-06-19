@@ -1,15 +1,15 @@
 --!strict
 --[[
 	IMPORTANT: Callback Classification
-	
+
 	ChangeDetector uses metadata.Diff to distinguish between callback types:
-	
+
 	- **Leaf Callback**: A direct value change (added, removed, changed)
 	  - Check: metadata.Diff ~= nil AND metadata.Diff.type ~= "descendantChanged"
-	  
+
 	- **Ancestor Callback**: A container table affected by descendant changes
 	  - Check: metadata.Diff == nil OR metadata.Diff.type == "descendantChanged"
-	  
+
 	The "descendantChanged" type is used for intermediate tables in the path
 	between the captured snapshot and the actual changed value. These should
 	be treated as ancestor notifications, not leaf changes.
@@ -21,6 +21,19 @@ return function(t: tiniest)
 	local test = t.test
 	local describe = t.describe
 	local expect = t.expect
+
+	-- Navigates `root` via `path`, mirroring how CheckForChangesBetween's
+	-- callers resolve the post-mutation value at a captured path.
+	local function valueAt(root: any, path: { any }): any
+		local cursor = root
+		for _, key in path do
+			if cursor == nil then
+				return nil
+			end
+			cursor = cursor[key]
+		end
+		return cursor
+	end
 
 	test("should capture snapshot and detect changes", function()
 		local changes = {}
@@ -45,8 +58,8 @@ return function(t: tiniest)
 		myTable.root.x = 10
 		myTable.root.z = 3
 
-		-- Check for changes using snapshot object
-		detector:CheckForChanges(snapshot)
+		-- Check for changes via direct comparison against the captured baseline
+		detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, { "root" }), { "root" }, myTable)
 
 		expect(#changes >= 2).is_true()
 	end)
@@ -69,7 +82,7 @@ return function(t: tiniest)
 		-- Make nested change
 		myTable.a.b = 2
 
-		detector:CheckForChanges(snapshot)
+		detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, {}), {}, myTable)
 
 		-- Should get the leaf change (not the descendantChanged node for 'a')
 		expect(#changes).is(1)
@@ -155,7 +168,7 @@ return function(t: tiniest)
 		local snapshot = detector:CaptureSnapshot(myTable, {})
 		myTable.a.b = 2
 
-		detector:CheckForChanges(snapshot)
+		detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, {}), {}, myTable)
 
 		expect(sawDescendantChanged).is_true()
 	end)
@@ -170,25 +183,6 @@ return function(t: tiniest)
 		expect(ok).is(false)
 		expect(type(err)).is("string")
 		expect((err :: string):find("CaptureSnapshot expects rootTable to be a plain table", 1, true) ~= nil).is_true()
-	end)
-
-	test("CheckForChanges rejects snapshots with non-table RootTable", function()
-		local detector = ChangeDetector.new {}
-
-		local badSnapshot = {
-			RootTable = 123,
-			Path = {},
-			Data = { value = 1, ref = nil, children = nil },
-			Timestamp = os.clock(),
-		}
-
-		local ok, err = pcall(function()
-			detector:CheckForChanges(badSnapshot :: any)
-		end)
-
-		expect(ok).is(false)
-		expect(type(err)).is("string")
-		expect((err :: string):find("Snapshot.RootTable must be a plain table", 1, true) ~= nil).is_true()
 	end)
 
 	test("should support historical diffing with multiple snapshots", function()
@@ -231,10 +225,10 @@ return function(t: tiniest)
 		}
 
 		-- Check against snapshot1 (100/50 -> 50/70)
-		detector1:CheckForChanges(snapshot1)
+		detector1:CheckForChangesBetween(snapshot1.Data.value, myTable, {}, myTable)
 
 		-- Check against snapshot2 (75/60 -> 50/70)
-		detector2:CheckForChanges(snapshot2)
+		detector2:CheckForChangesBetween(snapshot2.Data.value, myTable, {}, myTable)
 
 		-- Both should detect changes, but with different old values
 		expect(#changes1).is(2)
@@ -268,7 +262,6 @@ return function(t: tiniest)
 					table.insert(ancestorCallbacks, {
 						path = table.clone(path),
 						pathStr = table.concat(path, "."),
-						snapshotPath = table.concat(metadata.Snapshot.Path, "."),
 						rootTable = metadata.Snapshot.RootTable,
 						newValue = newValue, -- Now contains true current value!
 					})
@@ -283,7 +276,12 @@ return function(t: tiniest)
 		-- Make changes
 		myTable.player.stats.Health = 75
 
-		detector:CheckForChanges(snapshot)
+		detector:CheckForChangesBetween(
+			snapshot.Data.value,
+			valueAt(myTable, { "player", "stats" }),
+			{ "player", "stats" },
+			myTable
+		)
 
 		-- Should have ancestor callbacks for "player" and root
 		expect(#ancestorCallbacks >= 1).is_true()
@@ -355,7 +353,7 @@ return function(t: tiniest)
 		-- Make nested change
 		myTable.player.stats.health = 75
 
-		detector:CheckForChanges(snapshot)
+		detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, {}), {}, myTable)
 
 		-- Changes for paths {"player", "stats", "health"}, {"player", "stats"}, {"player"}, {}
 		expect(#valueChanges).is(4)
@@ -397,7 +395,7 @@ return function(t: tiniest)
 		myTable.player.stats.health = 75
 		myTable.player.position.x = 15
 
-		detector:CheckForChanges(snapshot)
+		detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, { "player" }), { "player" }, myTable)
 
 		-- Should fire OnValueChanged callbacks for:
 		-- - health (changed)
@@ -423,7 +421,7 @@ return function(t: tiniest)
 
 		local snapshot = detector:CaptureSnapshot(myTable, {})
 		myTable.player.health = 75
-		detector:CheckForChanges(snapshot)
+		detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, {}), {}, myTable)
 
 		-- Keys: "health", "player"
 		expect(#changes).is(2)
@@ -453,7 +451,12 @@ return function(t: tiniest)
 		-- Make change
 		myTable.Player.Stats.Health = 50
 
-		detector:CheckForChanges(snapshot)
+		detector:CheckForChangesBetween(
+			snapshot.Data.value,
+			valueAt(myTable, { "Player", "Stats" }),
+			{ "Player", "Stats" },
+			myTable
+		)
 
 		-- Should fire callbacks for:
 		-- 1. Leaf: Health changed (Diff present) at path Player.Stats.Health
@@ -514,11 +517,12 @@ return function(t: tiniest)
 		local myTable = { Root = { Game = { World = { Player = { Stats = { x = 10 } } } } } }
 
 		-- Capture at very nested path
-		local snapshot = detector:CaptureSnapshot(myTable, { "Root", "Game", "World", "Player", "Stats" })
+		local path = { "Root", "Game", "World", "Player", "Stats" }
+		local snapshot = detector:CaptureSnapshot(myTable, path)
 
 		myTable.Root.Game.World.Player.Stats.x = 20
 
-		detector:CheckForChanges(snapshot)
+		detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, path), path, myTable)
 
 		-- Should fire callbacks for all ancestors plus the leaf
 		local ancestorKeys = {}
@@ -560,7 +564,7 @@ return function(t: tiniest)
 
 		myTable.x = 2
 
-		detector:CheckForChanges(snapshot)
+		detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, {}), {}, myTable)
 
 		-- Should only have the leaf change for 'x', no ancestors
 		expect(#keyChanges).is(1)
@@ -626,7 +630,7 @@ return function(t: tiniest)
 		myTable.data.x = 15
 		myTable.data.y.z = 25
 
-		detector:CheckForChanges(snapshot)
+		detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, { "data" }), { "data" }, myTable)
 
 		-- Check that leaf changes have Diff present
 		local foundXLeaf = false
@@ -668,11 +672,12 @@ return function(t: tiniest)
 		}
 
 		local myTable = { Root = { Player = { value = 100 } } }
-		local snapshot = detector:CaptureSnapshot(myTable, { "Root", "Player" })
+		local path = { "Root", "Player" }
+		local snapshot = detector:CaptureSnapshot(myTable, path)
 
 		myTable.Root.Player.value = 200
 
-		detector:CheckForChanges(snapshot)
+		detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, path), path, myTable)
 
 		-- Should have both leaf callback and ancestor callbacks
 		local leafCallbacks = 0
@@ -708,7 +713,7 @@ return function(t: tiniest)
 
 		myTable.Root.nested.deeply.value = 2
 
-		detector:CheckForChanges(snapshot)
+		detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, { "Root" }), { "Root" }, myTable)
 
 		-- All callbacks should have OriginPath pointing to captured path (Root)
 		-- This is the assignment-as-operation model
@@ -750,7 +755,7 @@ return function(t: tiniest)
 
 		myTable.data.newKey = 100
 
-		detector:CheckForChanges(snapshot)
+		detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, { "data" }), { "data" }, myTable)
 
 		-- Should have leaf addition with metadata
 		local foundLeaf = false
@@ -785,7 +790,7 @@ return function(t: tiniest)
 
 		myTable.data.toRemove = nil
 
-		detector:CheckForChanges(snapshot)
+		detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, { "data" }), { "data" }, myTable)
 
 		-- Should have leaf removal with metadata
 		local foundLeaf = false
@@ -809,11 +814,12 @@ return function(t: tiniest)
 		}
 
 		local myTable = { Player = { Stats = { Health = 100 } } }
-		local snapshot = detector:CaptureSnapshot(myTable, { "Player", "Stats" })
+		local path = { "Player", "Stats" }
+		local snapshot = detector:CaptureSnapshot(myTable, path)
 
 		myTable.Player.Stats.Health = 50
 
-		detector:CheckForChanges(snapshot)
+		detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, path), path, myTable)
 
 		-- originKey should be derivable from originPath (captured path)
 		-- OriginPath = {"Player", "Stats"} for all callbacks
@@ -855,7 +861,7 @@ return function(t: tiniest)
 		myTable.data.newKey = "added" -- added
 		myTable.data.nested.value = 2 -- nested change
 
-		detector:CheckForChanges(snapshot)
+		detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, { "data" }), { "data" }, myTable)
 
 		-- Validate all metadata has required structure
 		for _, entry in ipairs(allMetadata) do
@@ -901,7 +907,7 @@ return function(t: tiniest)
 		myTable.score = 150
 		myTable.name = "Bob"
 
-		detector:CheckForChanges(snapshot)
+		detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, {}), {}, myTable)
 
 		-- Find the leaf changes and verify old/new values are in the diff
 		for _, change in ipairs(changes) do
@@ -933,7 +939,7 @@ return function(t: tiniest)
 
 		myTable.level1.level2.value = 2
 
-		detector:CheckForChanges(snapshot)
+		detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, {}), {}, myTable)
 
 		-- Should have leaf (Diff present) and ancestors (Diff nil)
 		local leaves = 0
@@ -975,7 +981,7 @@ return function(t: tiniest)
 
 			myTable.x = 10
 
-			detector:CheckForChanges(snapshot)
+			detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, {}), {}, myTable)
 
 			expect(#changes).is(1)
 			expect(changes[1].key).is("x")
@@ -999,7 +1005,7 @@ return function(t: tiniest)
 
 			myTable.x = nil
 
-			detector:CheckForChanges(snapshot)
+			detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, {}), {}, myTable)
 
 			expect(#changes).is(1)
 			expect(changes[1].key).is("x")
@@ -1022,7 +1028,7 @@ return function(t: tiniest)
 
 			myTable.newKey = "added"
 
-			detector:CheckForChanges(snapshot)
+			detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, {}), {}, myTable)
 
 			expect(#changes >= 1).is_true()
 		end)
@@ -1038,7 +1044,7 @@ return function(t: tiniest)
 			local myTable = {}
 			local snapshot = detector:CaptureSnapshot(myTable, {})
 
-			detector:CheckForChanges(snapshot)
+			detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, {}), {}, myTable)
 
 			expect(#changes).is(0)
 		end)
@@ -1059,7 +1065,7 @@ return function(t: tiniest)
 			myTable.x = 2
 			myTable.x = 3 -- Only final state should be detected
 
-			detector:CheckForChanges(snapshot)
+			detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, {}), {}, myTable)
 
 			expect(#changes).is(1)
 			expect(changes[1].old).is(1)
@@ -1081,7 +1087,7 @@ return function(t: tiniest)
 
 			myTable.a.b.c = 10
 
-			detector:CheckForChanges(snapshot)
+			detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, {}), {}, myTable)
 
 			expect(#changes).is(1)
 			expect(changes[1].path[1]).is("a")
@@ -1104,7 +1110,7 @@ return function(t: tiniest)
 
 			myTable.nested = { y = 2 } -- Completely different table
 
-			detector:CheckForChanges(snapshot)
+			detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, {}), {}, myTable)
 
 			-- Should detect removal of x and addition of y
 			expect(#changes >= 2).is_true()
@@ -1137,7 +1143,7 @@ return function(t: tiniest)
 
 			myTable.config = { host = "localhost" }
 
-			detector:CheckForChanges(snapshot)
+			detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, {}), {}, myTable)
 
 			-- scalar -> table is a single "changed" at the key (NOT a removal),
 			-- carrying the whole new table, plus the new table's keys reported
@@ -1170,7 +1176,7 @@ return function(t: tiniest)
 
 			myTable.config = "disabled"
 
-			detector:CheckForChanges(snapshot)
+			detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, {}), {}, myTable)
 
 			-- Teardown events for the old subtree (paths deeper than {config})
 			-- must all precede the single scalar event at {config}, which is last.
@@ -1212,7 +1218,7 @@ return function(t: tiniest)
 			myTable.b = nil -- removed
 			myTable.d = 4 -- added
 
-			detector:CheckForChanges(snapshot)
+			detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, {}), {}, myTable)
 
 			-- Should have 3 changes: 1 added, 1 removed, 1 changed
 			expect(#allChanges).is(3)
@@ -1269,7 +1275,7 @@ return function(t: tiniest)
 
 			-- No changes made
 
-			detector:CheckForChanges(snapshot)
+			detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, {}), {}, myTable)
 
 			expect(#changes).is(0)
 		end)
@@ -1289,7 +1295,7 @@ return function(t: tiniest)
 
 			myTable.enabled = false
 
-			detector:CheckForChanges(snapshot)
+			detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, {}), {}, myTable)
 
 			expect(#changes).is(1)
 			expect(changes[1].old).is(true)
@@ -1311,7 +1317,7 @@ return function(t: tiniest)
 
 			myTable.name = "Bob"
 
-			detector:CheckForChanges(snapshot)
+			detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, {}), {}, myTable)
 
 			expect(#changes).is(1)
 			expect(changes[1].old).is("Alice")
@@ -1339,7 +1345,7 @@ return function(t: tiniest)
 
 			myTable.value = "123"
 
-			detector:CheckForChanges(snapshot)
+			detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, {}), {}, myTable)
 
 			expect(#changes).is(1)
 			expect(changes[1].oldType).is("number")
@@ -1361,7 +1367,7 @@ return function(t: tiniest)
 
 			myTable[2] = 20
 
-			detector:CheckForChanges(snapshot)
+			detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, {}), {}, myTable)
 
 			expect(#changes).is(1)
 		end)
@@ -1382,7 +1388,7 @@ return function(t: tiniest)
 			myTable["key-with-dash"] = 10
 			myTable["key.with.dot"] = 20
 
-			detector:CheckForChanges(snapshot)
+			detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, {}), {}, myTable)
 
 			expect(#changes).is(2)
 		end)
@@ -1416,7 +1422,7 @@ return function(t: tiniest)
 			myTable.Root.a = 10
 			myTable.Root.b = 20
 
-			detector:CheckForChanges(snapshot)
+			detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, { "Root" }), { "Root" }, myTable)
 
 			-- Should have leaf callbacks for 'a' and 'b'
 			expect(#leafCallbacks).is(2)
@@ -1447,7 +1453,7 @@ return function(t: tiniest)
 
 			myTable.a.b.c.d.e.f = 2
 
-			detector:CheckForChanges(snapshot)
+			detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, {}), {}, myTable)
 
 			expect(#changes).is(1)
 			expect(changes[1].depth).is(6) -- 6 levels deep
@@ -1471,7 +1477,7 @@ return function(t: tiniest)
 
 			myTable.nested.value = 2
 
-			detector:CheckForChanges(snapshot)
+			detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, {}), {}, myTable)
 
 			-- Ancestor callbacks should have OriginDiff
 			if #ancestorCallbacks > 0 then
@@ -1496,7 +1502,7 @@ return function(t: tiniest)
 			myTable[1] = "ONE"
 			myTable.name = "TEST"
 
-			detector:CheckForChanges(snapshot)
+			detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, {}), {}, myTable)
 
 			expect(#changes).is(2)
 
@@ -1526,11 +1532,12 @@ return function(t: tiniest)
 			}
 
 			local myTable = { a = { b = nil } }
-			local snapshot = detector:CaptureSnapshot(myTable, { "a", "b" })
+			local path = { "a", "b" }
+			local snapshot = detector:CaptureSnapshot(myTable, path)
 
 			myTable.a.b = 10
 
-			detector:CheckForChanges(snapshot)
+			detector:CheckForChangesBetween(snapshot.Data.value, valueAt(myTable, path), path, myTable)
 
 			expect(#changes).is(1)
 			expect(changes[1].pathStr).is("a.b")

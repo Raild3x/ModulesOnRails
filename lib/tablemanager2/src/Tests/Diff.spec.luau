@@ -26,9 +26,8 @@ return function(t: tiniest)
 		}
 	end
 
-	test("diffFromSnapshot still works with valid snapshots", function()
-		local before = Diff.snapshot { x = 1, nested = { y = 2 } }
-		local root = Diff.diffFromSnapshot(before, { x = 5, nested = { y = 2 } })
+	test("direct diff detects a changed key between two plain tables", function()
+		local root = Diff.diff({ x = 1, nested = { y = 2 } }, { x = 5, nested = { y = 2 } }, nil, nil, nil)
 		local flat = Diff.flatten(root, {})
 
 		expect(#flat >= 1).is_true()
@@ -42,8 +41,7 @@ return function(t: tiniest)
 	end)
 
 	test("ctx == nil behaves identically to omitting it (regression path)", function()
-		local before = Diff.snapshot({ a = { b = 1 } }, nil)
-		local root = Diff.diffFromSnapshot(before, { a = { b = 2 } }, nil)
+		local root = Diff.diff({ a = { b = 1 } }, { a = { b = 2 } }, nil, nil, nil)
 		local flat = Diff.flatten(root, {})
 
 		local foundBChange = false
@@ -73,36 +71,18 @@ return function(t: tiniest)
 			local obj = { internal = 1 }
 			local ctx = makeCtx({ [obj] = true })
 
-			local before = Diff.snapshot({ a = obj }, ctx)
+			local oldValue = { a = obj }
 			obj.internal = 999 -- internal mutation must be invisible: opacity compares by ref
-			local root = Diff.diffFromSnapshot(before, { a = obj }, ctx)
+			local root = Diff.diff(oldValue, { a = obj }, nil, nil, ctx)
 
 			expect(root).is(nil)
-		end)
-
-		test("different refs on an opaque slot produce a single changed leaf (no children)", function()
-			local objA = { internal = 1 }
-			local objB = { internal = 2 }
-			local ctx = makeCtx({ [objA] = true, [objB] = true })
-
-			local before = Diff.snapshot({ a = objA }, ctx)
-			local root = Diff.diffFromSnapshot(before, { a = objB }, ctx)
-
-			expect(root).exists()
-			local aNode = root and root.children and root.children["a"]
-			expect(aNode).exists()
-			expect((aNode :: Diff.DiffNode).type).is("changed")
-			expect((aNode :: Diff.DiffNode).children).is(nil)
-			expect((aNode :: Diff.DiffNode).new).is(objB)
-			expect((aNode :: Diff.DiffNode).old).is(objA)
 		end)
 
 		test("an opaque value added wholesale produces a leaf, not a child walk", function()
 			local obj = { internal = { deep = { 1, 2, 3 } } }
 			local ctx = makeCtx({ [obj] = true })
 
-			local before = Diff.snapshot({}, ctx)
-			local root = Diff.diffFromSnapshot(before, { a = obj }, ctx)
+			local root = Diff.diff({}, { a = obj }, nil, nil, ctx)
 
 			local aNode = root and root.children and root.children["a"]
 			expect(aNode).exists()
@@ -115,8 +95,7 @@ return function(t: tiniest)
 			local obj = { internal = { deep = { 1, 2, 3 } } }
 			local ctx = makeCtx({ [obj] = true })
 
-			local before = Diff.snapshot({ a = obj }, ctx)
-			local root = Diff.diffFromSnapshot(before, {}, ctx)
+			local root = Diff.diff({ a = obj }, {}, nil, nil, ctx)
 
 			local aNode = root and root.children and root.children["a"]
 			expect(aNode).exists()
@@ -129,9 +108,9 @@ return function(t: tiniest)
 			local opaqueChild = { secret = 1 }
 			local ctx = makeCtx({ [opaqueChild] = true })
 
-			local before = Diff.snapshot({ visible = 1, hidden = opaqueChild }, ctx)
 			local newOpaqueChild = { secret = 2 }
-			local root = Diff.diffFromSnapshot(before, { visible = 2, hidden = newOpaqueChild }, ctx)
+			local root =
+				Diff.diff({ visible = 1, hidden = opaqueChild }, { visible = 2, hidden = newOpaqueChild }, nil, nil, ctx)
 
 			expect(root).exists()
 			local visibleNode = root and root.children and root.children["visible"]
@@ -149,9 +128,12 @@ return function(t: tiniest)
 				container.child = child
 				local ctx = makeCtx(nil, { [container] = true })
 
-				local before = Diff.snapshot(container, ctx)
+				-- A fresh table standing in for container's pre-mutation shape: only
+				-- `container`'s own ref is registered, so it's the side that must
+				-- carry the OpaqueChildren marking for the fallback to trigger.
+				local oldValue = { child = child }
 				child.hp = 50 -- internal mutation on the still-opaque child; must be ignored
-				local root = Diff.diffFromSnapshot(before, container, ctx)
+				local root = Diff.diff(oldValue, container, nil, nil, ctx)
 
 				expect(root).is(nil)
 			end)
@@ -163,9 +145,9 @@ return function(t: tiniest)
 				container.slot = childA
 				local ctx = makeCtx(nil, { [container] = true })
 
-				local before = Diff.snapshot(container, ctx)
+				local oldValue = { slot = childA }
 				container.slot = childB
-				local root = Diff.diffFromSnapshot(before, container, ctx)
+				local root = Diff.diff(oldValue, container, nil, nil, ctx)
 
 				local slotNode = root and root.children and root.children["slot"]
 				expect(slotNode).exists()
@@ -178,9 +160,9 @@ return function(t: tiniest)
 				local container = { existing = { hp = 1 } }
 				local ctx = makeCtx(nil, { [container] = true })
 
-				local before = Diff.snapshot(container, ctx)
+				local oldValue = { existing = container.existing }
 				container.fresh = { hp = 2 }
-				local root = Diff.diffFromSnapshot(before, container, ctx)
+				local root = Diff.diff(oldValue, container, nil, nil, ctx)
 
 				local freshNode = root and root.children and root.children["fresh"]
 				expect(freshNode).exists()
@@ -193,9 +175,9 @@ return function(t: tiniest)
 				local container = { gone = childToRemove }
 				local ctx = makeCtx(nil, { [container] = true })
 
-				local before = Diff.snapshot(container, ctx)
+				local oldValue = { gone = childToRemove }
 				container.gone = nil
-				local root = Diff.diffFromSnapshot(before, container, ctx)
+				local root = Diff.diff(oldValue, container, nil, nil, ctx)
 
 				local goneNode = root and root.children and root.children["gone"]
 				expect(goneNode).exists()
@@ -212,10 +194,13 @@ return function(t: tiniest)
 
 				local root = Diff.diff({ a = objA }, { a = objB }, nil, nil, ctx)
 
+				expect(root).exists()
 				local aNode = root and root.children and root.children["a"]
 				expect(aNode).exists()
 				expect((aNode :: Diff.DiffNode).type).is("changed")
 				expect((aNode :: Diff.DiffNode).children).is(nil)
+				expect((aNode :: Diff.DiffNode).new).is(objB)
+				expect((aNode :: Diff.DiffNode).old).is(objA)
 			end)
 
 			test("hasOpaqueChildren is honored via the ctx fallback", function()

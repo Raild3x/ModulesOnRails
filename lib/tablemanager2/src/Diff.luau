@@ -396,11 +396,6 @@ end
 
 -- ─── Public API ──────────────────────────────────────────────────────────────
 
-local function diff_from_snapshot(before: Snapshot, after_value: any, ctx: Ctx?): DiffNode?
-	local after = snapshot(after_value, ctx)
-	return diff(before.value, after.value, before, after, ctx)
-end
-
 --------------------------------------------------------------------------------
 --// Final Return //--
 --------------------------------------------------------------------------------
@@ -410,7 +405,6 @@ local Module = {}
 Module.diff = diff
 Module.flatten = flatten
 Module.snapshot = snapshot
-Module.diffFromSnapshot = diff_from_snapshot
 -- The sentinel DiffTree key for the scalar side of a table<->scalar transition.
 Module.ScalarSentinel = SCALAR_SENTINEL
 

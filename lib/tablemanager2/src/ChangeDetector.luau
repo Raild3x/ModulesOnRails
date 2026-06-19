@@ -5,17 +5,15 @@
 
 	Detects and reports nested table/value changes using snapshot-based diffing.
 
-	## Workflows
-	1. Capture then check (stateful):
-	```lua
-	local snapshot = detector:CaptureSnapshot(root, {"player", "stats"})
-	-- mutate root...
-	detector:CheckForChanges(snapshot)
-	```
-	2. Direct compare (one-off):
+	## Workflow
+	Direct compare (one-off):
 	```lua
 	detector:CheckForChangesBetween(oldValue, newValue, {"player", "stats"})
 	```
+
+	`CaptureSnapshot` is also available as a standalone baseline primitive for
+	callers (e.g. `TableManager`'s batch flush) that need to diff a captured
+	pre-batch value against the live value later via `CheckForChangesBetween`.
 
 	## Change Types
 	The detector handles table/scalar/nil transitions, including root-level changes.
@@ -45,7 +43,8 @@ type MoveMetadata = ArrayDiffModule.MoveMetadata
 	.Data Diff.Snapshot -- The Diff.Snapshot of the value at the captured path
 	.Timestamp number -- Capture timestamp (debugging/ordering)
 
-	State captured at a path and reused by CheckForChanges.
+	A baseline captured at a path (e.g. at batch start), later diffed against
+	a live value via `CheckForChangesBetween`.
 ]=]
 export type Snapshot<T = { [any]: any }, S = string> = {
 	RootTable: T,
@@ -54,9 +53,21 @@ export type Snapshot<T = { [any]: any }, S = string> = {
 	Timestamp: number,
 }
 
+--[=[
+	@within TableManager
+	@interface AncestorSnapshot
+	.RootTable { [any]: any } -- Reference to the root table, for ancestor value navigation.
+
+	The lightweight context handed to callbacks via `ChangeMetadata.Snapshot`.
+	Unlike `Snapshot`, this carries no captured baseline — it exists solely so a
+	callback can navigate to live ancestor values via `RootTable`.
+]=]
+export type AncestorSnapshot<T = { [any]: any }> = {
+	RootTable: T,
+}
+
 export type ChangeDetector = {
 	CaptureSnapshot: <T, S>(self: ChangeDetector, rootTable: T, path: PathArray<S>) -> Snapshot<T, S>,
-	CheckForChanges: <T, S>(self: ChangeDetector, snapshot: Snapshot<T, S>) -> (),
 	CheckForChangesBetween: <T, S>(
 		self: ChangeDetector,
 		oldValue: any,
@@ -64,25 +75,24 @@ export type ChangeDetector = {
 		basePath: PathArray<S>,
 		rootTable: T?
 	) -> (),
-	--- Suspends change detection. While suspended, `CaptureSnapshot` and
-	--- `CheckForChanges` are no-ops (O(1)). Used by `TableManager:Batch()`.
+	--- Suspends change detection. While suspended, `CaptureSnapshot` is a
+	--- cheap O(1) no-op. Used by `TableManager:Batch()`.
 	Suspend: (self: ChangeDetector) -> (),
 	--- Resumes change detection after a `Suspend` call.
 	Resume: (self: ChangeDetector) -> (),
 	--- Returns the opacity oracle to pass to `Diff`, or `nil` when nothing is
 	--- marked opaque (per-manager or global) — lets other modules building
-	--- their own `Diff.snapshot` calls (e.g. synthetic array-op metadata)
-	--- avoid cloning opaque values too.
+	--- their own `Diff.diff`/`Diff.snapshot` calls pass the same opacity rules.
 	GetOpaqueCtx: (self: ChangeDetector) -> Diff.Ctx?,
 }
 
 --[=[
-	@within ChangeDetector
+	@within TableManager
 	@interface ChangeMetadata
-	Diff Diff.DiffNode -- Diff node for this callback level; nil for ancestor notifications.
-	OriginPath Path -- The path where the assignment operation occurred (captured path)
-	OriginDiff Diff.DiffNode -- Root diff node for the assignment operation.
-	Snapshot Snapshot -- Snapshot used for this comparison.
+	.Diff Diff.DiffNode -- Diff node for this callback level; nil for ancestor notifications.
+	.OriginPath Path -- The path where the assignment operation occurred (captured path)
+	.OriginDiff Diff.DiffNode -- Root diff node for the assignment operation.
+	.Snapshot AncestorSnapshot -- Carries RootTable for ancestor value navigation.
 
 	`OriginPath` is the assignment origin for both leaf and ancestor callbacks.
 ]=]
@@ -90,7 +100,7 @@ export type ChangeMetadata = {
 	Diff: Diff.DiffNode?,
 	OriginPath: PathArray,
 	OriginDiff: Diff.DiffNode,
-	Snapshot: Snapshot,
+	Snapshot: AncestorSnapshot,
 	-- The literal keys matched by each "*" segment of the listener's registered
 	-- path, in left-to-right order. Set by ListenerRegistry; nil if the
 	-- listener path had no wildcards.
@@ -147,7 +157,8 @@ function ChangeDetector.new(
 		_debugMode = debugMode or false,
 		_suspended = false,
 		-- Sentinel snapshot: a fixed table that CaptureSnapshot returns when
-		-- suspended. CheckForChanges recognises it and returns immediately.
+		-- suspended, so callers reading it via BatchUtils.GetSnapshotValue/
+		-- GetSnapshotRef get nil instead of paying for a real capture.
 		_sentinelSnapshot = {} :: any,
 		-- Re-entrancy guard: while a check is dispatching callbacks, checks
 		-- triggered from inside those callbacks are queued and run afterwards.
@@ -198,22 +209,23 @@ end
 
 --[=[
 	Captures a snapshot of the table at the specified path and returns a snapshot object.
-	The snapshot can later be passed to CheckForChanges.
-	
+	The snapshot's `.Data` can later be read (e.g. via `BatchUtils.GetSnapshotValue`)
+	or diffed against a live value via `CheckForChangesBetween`.
+
 	@param rootTable -- The root table to track changes on
 	@param path -- The path to the value to snapshot (e.g., {"player", "stats"})
 	@return Snapshot
-	
+
 	```lua
 	local gameState = { player = { health = 50 } }
 	local snapshot = detector:CaptureSnapshot(gameState, {"player"})
+	local oldPlayer = snapshot.Data.value
 	gameState.player.health = 100
-	detector:CheckForChanges(snapshot)
+	detector:CheckForChangesBetween(oldPlayer, gameState.player, {"player"}, gameState)
 	```
 ]=]
 function ChangeDetector:CaptureSnapshot(rootTable: { [any]: any }, path: PathArray): Snapshot
 	-- While suspended, skip all snapshot work and return the sentinel.
-	-- CheckForChanges will recognise it and return immediately too.
 	if self._suspended then
 		return self._sentinelSnapshot
 	end
@@ -246,116 +258,6 @@ function ChangeDetector:CaptureSnapshot(rootTable: { [any]: any }, path: PathArr
 	}
 
 	return snapshot
-end
-
---[=[
-	Checks for changes between a captured snapshot and the current state of the table.
-	
-	@param snapshot -- The snapshot object to compare against (from CaptureSnapshot)
-	
-	```lua
-	local detector = ChangeDetector.new({
-		OnKeyRemoved = function(path, key, oldValue, metadata)
-			print("Key removed:", key, "from", table.concat(path, "."))
-			print("  Had value:", oldValue)
-		end,
-		OnValueChanged = function(path, newValue, oldValue, metadata)
-			if metadata.Diff then
-				print("Value at", table.concat(path, "."), "changed")
-				print("  ", oldValue, "->", newValue)
-			else
-				print("Ancestor at", table.concat(path, "."), "notified")
-				print("  Origin:", table.concat(metadata.OriginPath, "."))
-			end
-		end,
-	})
-	
-	local myTable = { 
-		player = { 
-			name = "Alice", 
-			inventory = { "sword", "shield" } 
-		} 
-	}
-	
-	local snapshot = detector:CaptureSnapshot(myTable, {"player"})
-	
-	-- Make changes...
-	myTable.player.name = "Bob"
-	myTable.player.inventory = nil
-	
-	-- Detect changes
-	detector:CheckForChanges(snapshot)
-	
-	-- Output:
-	-- Value at player.name changed
-	--   Alice -> Bob
-	-- Key removed: inventory from player
-	--   Had value: table
-	-- Ancestor at player has changes
-	--   Current: { name = "Bob" }
-	```
-]=]
-function ChangeDetector:CheckForChanges(snapshot: Snapshot)
-	-- Sentinel returned by CaptureSnapshot while suspended — nothing to diff.
-	if snapshot == self._sentinelSnapshot then
-		return
-	end
-
-	if not snapshot or not snapshot.RootTable then
-		error("Invalid snapshot object. Must be created with CaptureSnapshot().")
-	end
-
-	if type(snapshot.RootTable) ~= "table" then
-		error("Invalid snapshot object. Snapshot.RootTable must be a plain table.")
-	end
-
-	if self._debugMode then
-		print("CheckForChanges called:")
-		print("  path:", table.concat(snapshot.Path, "."))
-		print("  timestamp:", snapshot.Timestamp)
-	end
-
-	self:_dispatch(function()
-		-- Navigate to current state using stored path and root table reference
-		local currentValue = snapshot.RootTable
-		for _, key in ipairs(snapshot.Path) do
-			currentValue = currentValue[key]
-			if currentValue == nil then
-				-- Path no longer exists - entire subtree was removed
-				break
-			end
-		end
-
-		-- Use diffFromSnapshot to compare against the captured Diff.Snapshot
-		local rootDiffNode = Diff.diffFromSnapshot(snapshot.Data, currentValue, self:_oracle())
-
-		-- Process the root node if there are changes
-		if rootDiffNode then
-			local rootParentPath: Path = {}
-			local rootKey: any? = nil
-			if #snapshot.Path > 0 then
-				rootParentPath = table.create(#snapshot.Path - 1)
-				table.move(snapshot.Path, 1, #snapshot.Path - 1, 1, rootParentPath)
-				rootKey = snapshot.Path[#snapshot.Path]
-			end
-
-			-- Process all leaf changes via DFS
-			-- Pass the snapshot to all callbacks for context
-			self:_processDiffNode(
-				rootDiffNode,
-				snapshot.Path,
-				rootParentPath,
-				rootKey,
-				snapshot.Path,
-				rootDiffNode,
-				snapshot
-			)
-
-			-- Fire ancestor callbacks for the captured level
-			-- The origin is the captured path (where the assignment happened)
-			self:_fireAncestorCallbacks(snapshot.Path, rootDiffNode, snapshot)
-		end
-	end)
 end
 
 --[=[
@@ -416,9 +318,8 @@ function ChangeDetector:CheckForChangesBetween(
 		print("  newValue type:", type(newValue))
 	end
 
-	-- Create a temporary snapshot for the old value.
-	-- If no real root table is provided, synthesize one so ancestor callbacks remain
-	-- backward-compatible and can still navigate values at `basePath`.
+	-- If no real root table is provided, synthesize one so ancestor callbacks
+	-- can still navigate to values at `basePath`.
 	local tempRootTable: { [any]: any }
 	if rootTable then
 		tempRootTable = rootTable
@@ -440,11 +341,11 @@ function ChangeDetector:CheckForChangesBetween(
 		end
 	end
 	local ctx = self:_oracle()
-	local tempSnapshot: Snapshot = {
+	-- No deep snapshot of oldValue here: Diff.diff below compares oldValue/
+	-- newValue directly (snap1/snap2 = nil), so the only thing callbacks need
+	-- from this object is RootTable for their own ancestor navigation.
+	local ancestorSnapshot: AncestorSnapshot = {
 		RootTable = tempRootTable,
-		Path = basePath,
-		Data = Diff.snapshot(oldValue, ctx), -- Snapshot the old value
-		Timestamp = os.clock(),
 	}
 
 	self:_dispatch(function()
@@ -463,12 +364,20 @@ function ChangeDetector:CheckForChangesBetween(
 
 			-- Process all leaf changes via DFS
 			-- Pass the basePath as both the current path and origin
-			-- Include the temporary snapshot for context
-			self:_processDiffNode(rootDiffNode, basePath, rootParentPath, rootKey, basePath, rootDiffNode, tempSnapshot)
+			-- Include the ancestor snapshot for context
+			self:_processDiffNode(
+				rootDiffNode,
+				basePath,
+				rootParentPath,
+				rootKey,
+				basePath,
+				rootDiffNode,
+				ancestorSnapshot
+			)
 
 			-- Fire ancestor callbacks for the base level
 			-- The origin is the basePath (where the assignment happened)
-			self:_fireAncestorCallbacks(basePath, rootDiffNode, tempSnapshot)
+			self:_fireAncestorCallbacks(basePath, rootDiffNode, ancestorSnapshot)
 		end
 	end)
 end
@@ -476,10 +385,9 @@ end
 --[=[
 	Suspends change detection.
 
-	While suspended, `CaptureSnapshot` returns a cheap sentinel value and
-	`CheckForChanges` is a no-op when given that sentinel. This means every
-	assignment through `ProxyManager.__newindex` costs O(1) instead of performing
-	a full snapshot + diff cycle.
+	While suspended, `CaptureSnapshot` returns a cheap sentinel value instead of
+	performing a full snapshot. This means every assignment through
+	`ProxyManager.__newindex` costs O(1) instead of a full snapshot cycle.
 
 	Used by `TableManager:Suspend()` / `TableManager:Batch()`. Always pair with
 	a matching `Resume()` call.
@@ -582,7 +490,7 @@ function ChangeDetector:_processDiffNode(
 	nodeKey: any?,
 	originPath: PathArray,
 	originDiff: Diff.DiffNode,
-	snapshot: Snapshot
+	snapshot: AncestorSnapshot
 )
 	-- Ignored-path pruning: skip this node AND its descendants entirely (no
 	-- recursion, no callbacks). `nodePath` is already the absolute path, so
@@ -679,8 +587,19 @@ function ChangeDetector.EmitAncestorNotifications(
 	metadata: ChangeMetadata,
 	rootTable: any?,
 	keyChangedMode: "parent" | "child" | "none",
-	emitKeyChanged: (path: PathArray, key: any, newValue: any, oldValue: any, metadata: ChangeMetadata) -> (),
-	emitValueChanged: (path: PathArray, newValue: any, oldValue: any, metadata: ChangeMetadata) -> ()
+	emitKeyChanged: (
+		path: PathArray,
+		key: any,
+		newValue: any,
+		oldValue: any,
+		metadata: ChangeMetadata
+	) -> (),
+	emitValueChanged: (
+		path: PathArray,
+		newValue: any,
+		oldValue: any,
+		metadata: ChangeMetadata
+	) -> ()
 )
 	-- Pre-navigate rootTable once, caching the value at each depth 0..fromDepth.
 	-- The original code re-navigated from the root at every ancestor level
@@ -740,7 +659,11 @@ end
 	Notifies parent levels above the captured path once per assignment operation.
 	Ancestor callbacks receive Diff=nil and share OriginPath/OriginDiff metadata.
 ]=]
-function ChangeDetector:_fireAncestorCallbacks(capturedPath: PathArray, rootDiff: Diff.DiffNode, snapshot: Snapshot)
+function ChangeDetector:_fireAncestorCallbacks(
+	capturedPath: PathArray,
+	rootDiff: Diff.DiffNode,
+	snapshot: AncestorSnapshot
+)
 	-- If captured at root level (empty path), no ancestors to notify
 	if #capturedPath == 0 then
 		return
