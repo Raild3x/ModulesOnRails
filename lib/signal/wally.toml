@@ -1,0 +1,16 @@
+[package]
+name = "raild3x/signal"
+description = "A Roblox and Lune compatible version of Better-Signal"
+authors = ["Logan Hunt (Raildex)"]
+version = "0.1.0"
+license = "MIT"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+
+[custom]
+# The properly capitalized and spaced name of the library
+formattedName = "Signal"
+# The intro page for the documentation
+docsLink = "Signal"
+
+[dependencies]
