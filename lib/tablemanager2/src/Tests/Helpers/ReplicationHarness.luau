@@ -99,6 +99,12 @@ end
 
 --// Harness //--
 
+--[=[
+	@class ReplicationHarness
+	@ignore
+
+	Test helper for the replication-fidelity spec.
+]=]
 local ReplicationHarness = {}
 ReplicationHarness.__index = ReplicationHarness
 
@@ -163,122 +169,115 @@ end
 	KeyChanged are derivable diagnostics on both sides.
 ]]
 function ReplicationHarness._connectReplicaRecorders(self: ReplicationHarness)
-	local replica = self.Replica
-	local connections = self._connections
-	local replicaOpLog = self._replicaOpLog
+	const replica = self.Replica
+	const connections = self._connections
+	const replicaOpLog = self._replicaOpLog
 
-	table.insert(
-		connections,
-		replica.ValueChanged:Connect(function(path, newValue, oldValue)
-			table.insert(
-				replicaOpLog,
-				{ Signal = "ValueChanged", Path = wireCopy(path), New = newValue, Old = oldValue } :: OpLogEntry
-			)
-		end)
-	)
-	table.insert(
-		connections,
-		replica.ArrayInserted:Connect(function(path, index, newValue)
-			table.insert(
-				replicaOpLog,
-				{ Signal = "ArrayInserted", Path = wireCopy(path), Index = index, New = newValue } :: OpLogEntry
-			)
-		end)
-	)
-	table.insert(
-		connections,
-		replica.ArrayRemoved:Connect(function(path, index, oldValue)
-			table.insert(
-				replicaOpLog,
-				{ Signal = "ArrayRemoved", Path = wireCopy(path), Index = index, Old = oldValue } :: OpLogEntry
-			)
-		end)
-	)
-	table.insert(
-		connections,
-		replica.ArraySet:Connect(function(path, index, newValue, oldValue)
-			table.insert(
-				replicaOpLog,
-				{ Signal = "ArraySet", Path = wireCopy(path), Index = index, New = newValue, Old = oldValue } :: OpLogEntry
-			)
-		end)
-	)
+	const valueChangedConn = replica.ValueChanged:Connect(function(path, newValue, oldValue)
+		table.insert(
+			replicaOpLog,
+			{ Signal = "ValueChanged", Path = wireCopy(path), New = newValue, Old = oldValue } :: OpLogEntry
+		)
+	end)
+	table.insert(connections, valueChangedConn)
+
+	const arrayInsertedConn = replica.ArrayInserted:Connect(function(path, index, newValue)
+		table.insert(
+			replicaOpLog,
+			{ Signal = "ArrayInserted", Path = wireCopy(path), Index = index, New = newValue } :: OpLogEntry
+		)
+	end)
+	table.insert(connections, arrayInsertedConn)
+
+	const arrayRemovedConn = replica.ArrayRemoved:Connect(function(path, index, oldValue)
+		table.insert(
+			replicaOpLog,
+			{ Signal = "ArrayRemoved", Path = wireCopy(path), Index = index, Old = oldValue } :: OpLogEntry
+		)
+	end)
+	table.insert(connections, arrayRemovedConn)
+
+	const arraySetConn = replica.ArraySet:Connect(function(path, index, newValue, oldValue)
+		table.insert(
+			replicaOpLog,
+			{ Signal = "ArraySet", Path = wireCopy(path), Index = index, New = newValue, Old = oldValue } :: OpLogEntry
+		)
+	end)
+	table.insert(connections, arraySetConn)
 end
 
 --// Feed: signals //--
 
 function ReplicationHarness._connectSignalFeed(self: ReplicationHarness)
-	local source = self.Source
-	local replica = self.Replica
-	local connections = self._connections
-	local opLog = self._opLog
+	const source = self.Source
+	const replica = self.Replica
+	const connections = self._connections
+	const opLog = self._opLog
 
-	table.insert(
-		connections,
-		source.ValueChanged:Connect(function(path, newValue, oldValue)
-			local wirePath = wireCopy(path)
-			table.insert(opLog, { Signal = "ValueChanged", Path = wirePath, New = newValue, Old = oldValue })
+	const valueChangedConn = source.ValueChanged:Connect(function(path, newValue, oldValue)
+		const wirePath = wireCopy(path)
+		const opLogEntry: OpLogEntry = { Signal = "ValueChanged", Path = wirePath, New = newValue, Old = oldValue }
+		table.insert(opLog, opLogEntry)
 
-			if #wirePath == 0 then
-				-- Only reachable via ForceNotify(root) where old == new; nothing to apply.
-				return
+		if #wirePath == 0 then
+			-- Only reachable via ForceNotify(root) where old == new; nothing to apply.
+			return
+		end
+
+		self:_apply(`ValueChanged {describePath(wirePath)}`, function()
+			if newValue == nil then
+				replica:Set(wirePath, nil, true)
+			else
+				replica:Set(wirePath, wireCopy(newValue), true)
 			end
-
-			self:_apply(`ValueChanged {describePath(wirePath)}`, function()
-				if newValue == nil then
-					replica:Set(wirePath, nil, true)
-				else
-					replica:Set(wirePath, wireCopy(newValue), true)
-				end
-			end)
 		end)
-	)
+	end)
+	table.insert(connections, valueChangedConn)
 
-	table.insert(
-		connections,
-		source.ArrayInserted:Connect(function(path, index, newValue)
-			local wirePath = wireCopy(path)
-			table.insert(opLog, { Signal = "ArrayInserted", Path = wirePath, Index = index, New = newValue })
-			self:_apply(`ArrayInserted {describePath(wirePath)}@{index}`, function()
-				replica:ArrayInsert(wirePath, index, wireCopy(newValue))
-			end)
+	const arrayInsertedConn = source.ArrayInserted:Connect(function(path, index, newValue)
+		const wirePath = wireCopy(path)
+		const opLogEntry: OpLogEntry = { Signal = "ArrayInserted", Path = wirePath, Index = index, New = newValue }
+		table.insert(opLog, opLogEntry)
+
+		self:_apply(`ArrayInserted {describePath(wirePath)}@{index}`, function()
+			replica:ArrayInsert(wirePath, index, wireCopy(newValue))
 		end)
-	)
+	end)
+	table.insert(connections, arrayInsertedConn)
 
-	table.insert(
-		connections,
-		source.ArrayRemoved:Connect(function(path, index, oldValue)
-			local wirePath = wireCopy(path)
-			table.insert(opLog, { Signal = "ArrayRemoved", Path = wirePath, Index = index, Old = oldValue })
-			self:_apply(`ArrayRemoved {describePath(wirePath)}@{index}`, function()
-				replica:ArrayRemove(wirePath, index)
-			end)
+	const arrayRemovedConn = source.ArrayRemoved:Connect(function(path, index, oldValue)
+		const wirePath = wireCopy(path)
+		const opLogEntry: OpLogEntry = { Signal = "ArrayRemoved", Path = wirePath, Index = index, Old = oldValue }
+		table.insert(opLog, opLogEntry)
+
+		self:_apply(`ArrayRemoved {describePath(wirePath)}@{index}`, function()
+			replica:ArrayRemove(wirePath, index)
 		end)
-	)
+	end)
+	table.insert(connections, arrayRemovedConn)
 
-	table.insert(
-		connections,
-		source.ArraySet:Connect(function(path, index, newValue, oldValue)
-			local wirePath = wireCopy(path)
-			table.insert(opLog, { Signal = "ArraySet", Path = wirePath, Index = index, New = newValue, Old = oldValue })
+	const arraySetConn = source.ArraySet:Connect(function(path, index, newValue, oldValue)
+		const wirePath = wireCopy(path)
+		const opLogEntry: OpLogEntry =
+			{ Signal = "ArraySet", Path = wirePath, Index = index, New = newValue, Old = oldValue }
+		table.insert(opLog, opLogEntry)
 
-			self:_apply(`ArraySet {describePath(wirePath)}@{index}`, function()
-				local elementPath = table.clone(wirePath)
-				table.insert(elementPath, index)
-				replica:Set(elementPath, wireCopy(newValue), true)
-			end)
+		self:_apply(`ArraySet {describePath(wirePath)}@{index}`, function()
+			const elementPath = table.clone(wirePath)
+			table.insert(elementPath, index)
+			replica:Set(elementPath, wireCopy(newValue), true)
 		end)
-	)
+	end)
+	table.insert(connections, arraySetConn)
 
 	-- Diagnostics only - NOT applied. Redundant with ValueChanged for
 	-- replication; applying these too would double-apply dictionary changes.
 	for _, signalName in { "KeyAdded", "KeyRemoved", "KeyChanged" } do
-		table.insert(
-			connections,
-			(source[signalName] :: any):Connect(function(path, ...)
-				table.insert(opLog, { Signal = signalName, Path = wireCopy(path), Args = table.pack(...) })
-			end)
-		)
+		const conn = (source[signalName] :: any):Connect(function(path, ...)
+			const opLogEntry: OpLogEntry = { Signal = signalName, Path = wireCopy(path), Args = table.pack(...) }
+			table.insert(opLog, opLogEntry)
+		end)
+		table.insert(connections, conn)
 	end
 end
 
@@ -323,12 +322,15 @@ function ReplicationHarness._connectDiffFeed(self: ReplicationHarness)
 		end
 
 		local originPath = wireCopy(metadata.OriginPath)
-		table.insert(opLog, {
-			Signal = "Diff",
-			OriginPath = originPath,
-			OriginDiff = metadata.OriginDiff,
-			ArrayOp = metadata.ArrayOp,
-		} :: OpLogEntry)
+		table.insert(
+			opLog,
+			{
+				Signal = "Diff",
+				OriginPath = originPath,
+				OriginDiff = metadata.OriginDiff,
+				ArrayOp = metadata.ArrayOp,
+			} :: OpLogEntry
+		)
 
 		local arrayOp = metadata.ArrayOp
 		if arrayOp then

@@ -64,7 +64,7 @@ function ForMap.wireReconcileConnection(
 			end
 		end
 
-		if (options and options.Defer) or self._listenerRegistry._fireDeferred then
+		if (options and options.Defer) or self._listenerRegistry._fireMode ~= "immediate" then
 			task.defer(fireInitial)
 		else
 			task.spawn(fireInitial)

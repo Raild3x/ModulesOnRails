@@ -8,7 +8,7 @@
 	events and snapshots for any changes made to the managed table or its descendants — all 
 	without needing to manually fire events or manage listener connections.
 
-	## What is TableManager good for?
+	### What is TableManager good for?
 	- Tracking changes to nested tables and arrays.
 	- Emitting detailed change events for any modifications.
 	- Providing snapshots of the current state for debugging or synchronization.
@@ -25,7 +25,7 @@
 	rapidly changing data.
 
 	
-	## Usage
+	### Usage
 	
 	```lua
 	const manager = TableManager.new({
@@ -34,19 +34,13 @@
 	})
 	
 	-- Listen to direct changes only
-	manager:OnValueChange("player", function(newValue, oldValue, metadata)
-		if metadata.Diff then
-			print("Player table replaced!")
-		end
+	manager:OnChange("player", function(newValue, oldValue, metadata)
+
 	end)
 	
 	-- Listen to all changes (including descendants)
 	manager:OnValueChange("player", function(newValue, oldValue, metadata)
-		if metadata.Diff then
-			print("Direct change to player")
-		else
-			print("Descendant changed at:", table.concat(metadata.OriginPath, "."))
-		end
+
 	end)
 	
 	-- Array operations with ancestor notifications
@@ -59,7 +53,7 @@
 
 	- Avoid mixed tables.
 
-	- Avoid 
+	- Utilize pure string keys so the linter can try to infer your types.
 ]=]
 
 --// Imports //--
@@ -83,9 +77,6 @@ const IgnoreTrieModule = require("./IgnoreTrie")
 const ShadowModule = require("./Shadow")
 const CoverageModule = require("./Coverage")
 const ForMapModule = require("./ForMap")
-
---// Localize batch utils to avoid function call overhead //--
-const createSyntheticSnapshot = BatchUtilsModule.CreateSyntheticSnapshot
 
 --// Types //--
 type Path<S> = PathHelpers.Path<S>
@@ -122,6 +113,11 @@ export type OpaqueWrapper = Types.OpaqueWrapper
 export type TM_Internal<T = { [any]: any }> = Types.TM_Internal<T>
 type ProxyManager<T> = ProxyManagerModule.ProxyManager<T>
 
+--// Constants //--
+const DEFAULT_DUPLICATE_REFERENCE_MODE: DuplicateReferenceMode = "error"
+const DEFAULT_SIGNAL_FIRE_MODE: Types.SignalFireMode = "bindable"
+const DEFAULT_LISTENER_FIRE_MODE: ListenerRegistryModule.FireMode = "bindable"
+
 --------------------------------------------------------------------------------
 --// Module //--
 --------------------------------------------------------------------------------
@@ -152,6 +148,7 @@ const makeEmit = EmitterModule.makeEmit
 const makeKeyedReconciler = ForMapModule.makeKeyedReconciler
 const makeValueReconciler = ForMapModule.makeValueReconciler
 
+const createAncestorSnapshot = BatchUtilsModule.CreateAncestorSnapshot
 
 -----------------------------------------------------------------------------------
 --// Constructor //--
@@ -176,7 +173,7 @@ end
 -- Resolves `Config.EnableProxies` and creates (or nils out) `self._proxyManager`/
 -- `self.Proxy` accordingly, warning on the misconfigured EnableProxies=false +
 -- DuplicateReferenceMode combo.
-const function initProxyManager<T>(self: TM_Internal<T>, resolvedConfig: { [string]: any? }): ProxyManager<T>?
+const function initProxyManager<T>(self: TM_Internal<T>, resolvedConfig: TableManagerConfig): ProxyManager<T>?
 	const enableProxies = resolvedConfig.EnableProxies ~= false
 	if not enableProxies and resolvedConfig.DuplicateReferenceMode ~= nil then
 		warn("DuplicateReferenceMode has no effect when Config.EnableProxies = false")
@@ -213,8 +210,8 @@ end
 function TableManager.new<T>(initialData: T, config: TableManagerConfig?): TableManager<T>
 	debug.profilebegin("TM.new")
 	const self: TM_Internal<T> = (setmetatable({}, TableManager_MT) :: any) :: TM_Internal<T>
-	const resolvedConfig = config or {} :: { [string]: any? }
-	const duplicateReferenceMode: DuplicateReferenceMode = resolvedConfig.DuplicateReferenceMode or "error"
+	const resolvedConfig: TableManagerConfig = config or {} :: { [string]: any? }
+	const duplicateReferenceMode: DuplicateReferenceMode = resolvedConfig.DuplicateReferenceMode or DEFAULT_DUPLICATE_REFERENCE_MODE
 	
 	assert(type(initialData) == "table", "Initial data must be a table")
 	-- Store original data
@@ -247,8 +244,9 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	self._proxyManager = initProxyManager(self, resolvedConfig)
 	self._listenerRegistry = ListenerRegistryModule.new {
 		DebugMode = false,
-		FireDeferred = resolvedConfig.ListenersFireDeferred == true,
+		FireMode = resolvedConfig.ListenerFireMode or DEFAULT_LISTENER_FIRE_MODE,
 	}
+	self._signalFireMode = resolvedConfig.SignalFireMode or DEFAULT_SIGNAL_FIRE_MODE
 	self.Proxy = wireProxyWriteHandler(self)
 	
 	-- Initialize signals (fire once per change)
@@ -305,6 +303,7 @@ end
 TableManager.Link = LinkGroupModule.Link
 
 --[=[
+	@private
 	Re-fires listeners/signals for an op that has ALREADY been applied to the
 	shared raw (by another linked manager), without mutating or
 	snapshot-diffing. `op.Path` is in this manager's own coordinates. Used only
@@ -452,7 +451,7 @@ function TableManager.Observe<T, S>(
 		callback(currentValue, nil, nil)
 	end
 
-	if self._listenerRegistry._fireDeferred then
+	if self._listenerRegistry._fireMode ~= "immediate" then
 		task.defer(fireInitial)
 	else
 		task.spawn(fireInitial)
@@ -1047,6 +1046,7 @@ function TableManager.Resume(self: TM_Internal)
 end
 
 --[=[
+	@private
 	Internal, unconditional diff+fire+reconcile for `path`: diffs the
 	persistent shadow's last-flushed value against the current live value,
 	fires the resulting events via `CheckForChangesBetween`, then reconciles
@@ -1272,7 +1272,7 @@ function TableManager.ForceNotify<T, S>(self: TM_Internal<T>, path: Path<S>)
 			new = currentValue,
 			children = nil,
 		},
-		Snapshot = createSyntheticSnapshot(self.Raw, parsedPath, currentValue),
+		Snapshot = createAncestorSnapshot(self.Raw),
 	}
 
 	-- Fire ValueChanged at exact path

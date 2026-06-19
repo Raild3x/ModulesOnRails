@@ -61,6 +61,8 @@ local function resolveAnchorPath(path: Path<any>?): PathArray
 end
 
 --[=[
+	@within LinkGroup
+
 	Removes `manager` from `group`'s membership bookkeeping (both directions),
 	fires `MemberRemoved`, and dissolves the group if membership drops below 2.
 ]=]
@@ -300,12 +302,16 @@ local function getOrCreateGroup(object: any): LinkGroup
 end
 
 --[=[
+	@within LinkGroup
+
 	`TableManager.Link` implementation. Two call forms:
 	- `Link({ {manager, path?}, {manager, path?}, ... })`
 	- `Link(managerA, pathA, managerB, pathB)`
 
 	All anchors must resolve to the same shared object (by identity); they are
 	joined into that object's canonical `LinkGroup`.
+
+	@param ... Either a single list of `{manager, path?}` anchors, or pairs of `manager, path?` arguments.
 ]=]
 local function link(...): LinkGroup
 	local argCount = select("#", ...)
@@ -342,6 +348,8 @@ local function link(...): LinkGroup
 end
 
 --[=[
+	@within LinkGroup
+
 	Identity-based divergence check, called directly from `applyWrite` right
 	after a write is applied (before change detection runs). If `writePath` is
 	at or above one of `self`'s link anchors and that anchor no longer resolves
@@ -378,6 +386,8 @@ local function checkDivergence(self: TableManagerLike, writePath: PathArray)
 end
 
 --[=[
+	@within LinkGroup
+
 	Called when `self`'s root table identity has been replaced
 	(`Set({}, newRoot)`). The manager's cached anchor proxies pointed into the
 	now-pruned old tree, so clear them (GetAnchorPath then falls back to the
@@ -405,6 +415,8 @@ local function onRootReplaced(self: TableManagerLike)
 end
 
 --[=[
+	@within LinkGroup
+
 	Fan-out hook for "Set"-kind changes (called from the OnValueChanged
 	ChangeDetector callback). `path` is the changed location, in `self`'s own
 	coordinates.
@@ -447,6 +459,8 @@ local function fanOutSet(self: TableManagerLike, path: PathArray, newValue: any,
 end
 
 --[=[
+	@within LinkGroup
+
 	Fan-out hook for array-op changes (called from `fireArrayOperation`).
 	`basePath` is the array's own path, in `self`'s own coordinates.
 ]=]
@@ -581,6 +595,8 @@ local function findPathOf(root: any, target: any): PathArray?
 end
 
 --[=[
+	@within LinkGroup
+
 	Downward pass: scans `tm`'s subtree at `path` (default root) for table nodes
 	that are the root of *another* AutoLink manager, and links each at its found
 	location. Recurses fully, so roots nested inside an already-found child are
@@ -608,6 +624,8 @@ local function findChildLinks(tm: TableManagerLike, path: Path<any>?)
 end
 
 --[=[
+	@within LinkGroup
+
 	Upward pass for the child-created-after-parent case: if `tm`'s own root sits
 	inside an already-registered AutoLink manager `Y`, link them at that location.
 	Uses Y's proxy graph for the path when available, else a bounded DFS of Y.
@@ -644,6 +662,8 @@ local function findParentLinks(tm: TableManagerLike)
 end
 
 --[=[
+	@within LinkGroup
+
 	Registers `tm` as an AutoLink manager and forms any links implied by current
 	tree topology — both directions: `tm` nested inside an existing manager
 	(`findParentLinks`) and existing managers nested inside `tm` (`findChildLinks`).

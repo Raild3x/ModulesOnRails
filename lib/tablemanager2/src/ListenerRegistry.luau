@@ -139,8 +139,9 @@
 	```
 ]=]
 
-local PathHelpers = require("./PathHelpers")
-local ArrayDiffModule = require("./ArrayDiff")
+const PathHelpers = require("./PathHelpers")
+const ArrayDiffModule = require("./ArrayDiff")
+const IsDeferred = require("./IsDeferred")
 
 --// Types //--
 -- type Path = PathHelpers.Path
@@ -196,9 +197,17 @@ export type Connection = {
 	Connected: boolean,
 }
 
+-- How listener callbacks are scheduled when fired:
+-- "immediate": run now via the free-thread pool (task.spawn), like an RBXScriptSignal in immediate mode.
+-- "deferred": run via task.defer, like an RBXScriptSignal in deferred mode.
+-- "bindable": mirrors the engine's actual Enum.SignalBehavior (resolved once, at construction time).
+-- "coalesced": like "deferred", but repeated fires of the SAME listener before the deferred flush runs
+-- collapse into a single call carrying the latest event data, instead of one call per fire.
+export type FireMode = "immediate" | "deferred" | "bindable" | "coalesced"
+
 export type ListenerRegistryConfig = {
 	DebugMode: boolean?,
-	FireDeferred: boolean?,
+	FireMode: FireMode,
 }
 
 type Listener = {
@@ -208,6 +217,9 @@ type Listener = {
 	Once: boolean,
 	PathLength: number,
 	Connection: Connection,
+	-- "coalesced" fire-mode pending state; see `flushCoalescedListener`.
+	_coalescePending: boolean?,
+	_coalesceEventData: EventData?,
 }
 
 -- Tree node structure for efficient path-based lookups. A single tree serves
@@ -251,7 +263,8 @@ export type ListenerRegistry = {
 
 	_root: ListenerNode,
 	_debugMode: boolean,
-	_fireDeferred: boolean,
+	-- Resolved fire mode; "bindable" is collapsed into "immediate"/"deferred" at construction.
+	_fireMode: "immediate" | "deferred" | "coalesced",
 	_destroyed: boolean,
 	_hasWildcards: boolean,
 }
@@ -260,13 +273,13 @@ export type ListenerRegistry = {
 --// Module //--
 --------------------------------------------------------------------------------
 
-local ListenerRegistry = {}
-local ListenerRegistry_MT = { __index = ListenerRegistry }
+const ListenerRegistry = {}
+const ListenerRegistry_MT = { __index = ListenerRegistry }
 
 -- The currently idle thread to run the next listener callback on.
 local freeRunnerThread: thread? = nil
 
-local function executeListenerCallback(
+const function executeListenerCallback(
 	callback: (...any) -> (),
 	eventType: EventType,
 	eventData: EventData,
@@ -295,7 +308,7 @@ local function executeListenerCallback(
 	end
 end
 
-local function acquireRunnerThreadAndCall(
+const function acquireRunnerThreadAndCall(
 	callback: (...any) -> (),
 	eventType: EventType,
 	eventData: EventData,
@@ -311,16 +324,29 @@ end
 -- Argless on purpose: the runner thread is primed with an empty resume so it
 -- parks at coroutine.yield() before receiving any payload. Taking the first
 -- payload as function parameters instead would pin that payload (callback +
--- eventData, including its deep Metadata.Snapshot) on the thread's stack for
--- the thread's entire lifetime.
-local function runListenerCallbackInFreeThread()
+-- eventData, including its Metadata.Snapshot.RootTable reference) on the
+-- thread's stack for the thread's entire lifetime.
+const function runListenerCallbackInFreeThread()
 	while true do
 		acquireRunnerThreadAndCall(coroutine.yield())
 	end
 end
 
+-- "coalesced" fire-mode flush: runs once via task.defer per pending listener,
+-- regardless of how many times that listener was "fired" before this ran.
+-- Re-checks Connected at flush time (unlike the "deferred" path) since a
+-- coalesced flush can be scheduled well after the listener disconnects.
+const function flushCoalescedListener(listener: Listener, eventType: EventType, debugMode: boolean)
+	listener._coalescePending = false
+	local eventData = listener._coalesceEventData :: EventData
+	listener._coalesceEventData = nil
+	if listener.Connection.Connected then
+		executeListenerCallback(listener.Callback, eventType, eventData, debugMode)
+	end
+end
+
 -- Helper to create a new tree node
-local function createNode(parent: ListenerNode?, key: any?): ListenerNode
+const function createNode(parent: ListenerNode?, key: any?): ListenerNode
 	return {
 		Listeners = {},
 		Count = 0,
@@ -334,7 +360,7 @@ end
 -- Helper to get or create a node at a path. Bumps Subtree by 1 at every node
 -- visited (root included) since the caller is about to register exactly one
 -- listener at the returned node.
-local function getOrCreateNode(root: ListenerNode, path: PathArray): ListenerNode
+const function getOrCreateNode(root: ListenerNode, path: PathArray): ListenerNode
 	local current = root
 	current.Subtree += 1
 	for _, segment in path do
@@ -351,7 +377,7 @@ end
 
 -- Reserved path segment used to register a listener that matches any literal
 -- key at that position (e.g. {"Players", "*", "Health"}).
-local WILDCARD = "*"
+const WILDCARD = "*"
 
 type MatchedNode = {
 	node: ListenerNode,
@@ -365,7 +391,7 @@ type MatchedNode = {
 
 -- Recursively walks `path`, following both literal-segment children and "*"
 -- (wildcard) children, collecting every listener node that matches.
-local function collectMatchingNodes(
+const function collectMatchingNodes(
 	node: ListenerNode,
 	path: PathArray,
 	index: number,
@@ -405,7 +431,7 @@ end
 -- (Count == 0 and Subtree == 0) along the way. `node.Count` must already
 -- reflect the removal before this runs. Pruning is mandatory (not optional)
 -- so a registry with churny listeners never accumulates dead spine nodes.
-local function decrementAndPrune(node: ListenerNode, amount: number)
+const function decrementAndPrune(node: ListenerNode, amount: number)
 	local current: ListenerNode? = node
 	while current ~= nil do
 		current.Subtree -= amount
@@ -418,7 +444,7 @@ local function decrementAndPrune(node: ListenerNode, amount: number)
 end
 
 -- Non-creating node lookup: returns the node at `path` or nil if any segment is absent.
-local function getNode(root: ListenerNode, path: PathArray): ListenerNode?
+const function getNode(root: ListenerNode, path: PathArray): ListenerNode?
 	local current = root
 	for _, segment in path do
 		current = current.Children[segment]
@@ -433,7 +459,7 @@ end
 -- listener's registered path the change originated.
 -- relativeDepth = 0: change is AT the listener's exact path.
 -- relativeDepth > 0: change originated that many levels deeper (ancestor notification).
-local function shouldFireListener(listener: Listener, relativeDepth: number): boolean
+const function shouldFireListener(listener: Listener, relativeDepth: number): boolean
 	if listener.Depth == nil then
 		return true
 	end
@@ -447,12 +473,12 @@ end
 -- Fires all listeners of `eventType` on a single already-located node and
 -- handles Once cleanup. Extracted so both the no-wildcard fast path and the
 -- wildcard path share one implementation of the inner fire loop.
-local function fireListenersOnNode(
+const function fireListenersOnNode(
 	node: ListenerNode,
 	eventType: EventType,
 	fireEventData: EventData,
 	baseRelativeDepth: number,
-	fireDeferred: boolean,
+	fireMode: "immediate" | "deferred" | "coalesced",
 	debugMode: boolean
 )
 	local listeners = node.Listeners[eventType]
@@ -471,8 +497,16 @@ local function fireListenersOnNode(
 			listener.Connection.Connected = false
 			hasOnceFired = true
 		end
-		if fireDeferred then
+		if fireMode == "deferred" then
 			task.defer(executeListenerCallback, listener.Callback, eventType, fireEventData, debugMode)
+		elseif fireMode == "coalesced" then
+			if listener._coalescePending then
+				listener._coalesceEventData = fireEventData
+			else
+				listener._coalescePending = true
+				listener._coalesceEventData = fireEventData
+				task.defer(flushCoalescedListener, listener, eventType, debugMode)
+			end
 		else
 			if not freeRunnerThread then
 				freeRunnerThread = coroutine.create(runListenerCallbackInFreeThread)
@@ -497,15 +531,30 @@ local function fireListenersOnNode(
 	end
 end
 
+const function resolveFireMode(configuredMode: FireMode): "immediate" | "deferred" | "coalesced"
+	assert(
+		type(configuredMode) == "string",
+		`ListenerRegistry: FireMode must be a string, got {typeof(configuredMode)}`
+	)
+	configuredMode = configuredMode:lower()
+	if configuredMode == "bindable" then
+		return if IsDeferred() then "deferred" else "immediate"
+	elseif configuredMode == "immediate" or configuredMode == "deferred" or configuredMode == "coalesced" then
+		return configuredMode
+	end
+	error(
+		`ListenerRegistry: Invalid FireMode "{configuredMode}". Must be "immediate", "deferred", "bindable", or "coalesced".`
+	)
+end
+
 function ListenerRegistry.new(config: ListenerRegistryConfig?): ListenerRegistry
 	local self: ListenerRegistry = setmetatable({}, ListenerRegistry_MT) :: ListenerRegistry
-	local resolvedConfig = config or {} :: ListenerRegistryConfig
+	const resolvedConfig: ListenerRegistryConfig = config or {} :: any
 	local debugMode = if resolvedConfig.DebugMode ~= nil then resolvedConfig.DebugMode else false
-	local fireDeferred = if resolvedConfig.FireDeferred == true then true else false
 
 	self._root = createNode(nil, nil)
 	self._debugMode = debugMode
-	self._fireDeferred = fireDeferred
+	self._fireMode = resolveFireMode(resolvedConfig.FireMode or "bindable")
 	self._destroyed = false
 	self._hasWildcards = false
 
@@ -623,7 +672,7 @@ function ListenerRegistry.FireListenersExact(
 )
 	local root = self._root
 	local debugMode = self._debugMode
-	local fireDeferred = self._fireDeferred
+	local fireMode = self._fireMode
 
 	-- For ancestor notifications (Diff == nil), compute relative depth from OriginPath.
 	-- Direct change notifications always have relativeDepth = 0 (change is at the listener's path).
@@ -643,7 +692,7 @@ function ListenerRegistry.FireListenersExact(
 		if node == nil then
 			return
 		end
-		fireListenersOnNode(node, eventType, eventData, baseRelativeDepth, fireDeferred, debugMode)
+		fireListenersOnNode(node, eventType, eventData, baseRelativeDepth, fireMode, debugMode)
 		return
 	end
 
@@ -665,7 +714,7 @@ function ListenerRegistry.FireListenersExact(
 			fireEventData = table.clone(eventData)
 			fireEventData.Metadata = newMetadata
 		end
-		fireListenersOnNode(result.node, eventType, fireEventData, baseRelativeDepth, fireDeferred, debugMode)
+		fireListenersOnNode(result.node, eventType, fireEventData, baseRelativeDepth, fireMode, debugMode)
 	end
 end
 

@@ -9,7 +9,6 @@
 ]=]
 
 --// Imports //--
-const Diff = require("./Diff")
 const ChangeDetector = require("./ChangeDetector")
 
 --// Types //--
@@ -28,20 +27,12 @@ export type BatchState = {
 
 const BatchUtils = {}
 
--- Creates a synthetic snapshot for array operations and ForceNotify.
--- These operations bypass normal ChangeDetector flow, so we create a compatible
--- Snapshot payload using Diff's canonical snapshot builder.
-function BatchUtils.CreateSyntheticSnapshot<T>(
-	rootTable: T,
-	path: { any },
-	value: any,
-	ctx: Diff.Ctx?
-): ChangeDetector.Snapshot
+-- Creates the ChangeMetadata.Snapshot context for array operations and
+-- ForceNotify, which bypass normal ChangeDetector flow. Only RootTable is
+-- ever read (ancestor value navigation), so no deep copy is taken.
+function BatchUtils.CreateAncestorSnapshot<T>(rootTable: T): ChangeDetector.AncestorSnapshot<T>
 	return {
 		RootTable = rootTable,
-		Path = path,
-		Data = Diff.snapshot(value, ctx),
-		Timestamp = os.clock(),
 	}
 end
 

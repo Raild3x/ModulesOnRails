@@ -35,6 +35,7 @@ const Linker = {}
 const Linker_MT = { __index = Linker }
 
 --[=[
+	@function new
 	@within Linker
 	@private
 

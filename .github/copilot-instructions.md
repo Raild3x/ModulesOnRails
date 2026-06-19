@@ -53,7 +53,7 @@ Important notes:
 - Base-scope constants should use SCREAMING_SNAKE_CASE unless they are mutable-content tables.
 - If a variable is declared and immediately assigned later, treat it as non-const for policy purposes.
 - Exceptions to the constant naming policy may be made when justified by readability, practicality, or consistency with existing code. Ex: Roblox services and required modules should be consts at the base scope, but they should be PascalCase even though they are never reassigned.
-- local functions should almost always be const.
+- Functions should almost always be const. `const function` is preferred over `local function` for functions that are never reassigned. This is because it makes it clear that the function is not intended to be reassigned, and it can help prevent accidental reassignment.
 
 Declaration matrix:
 
@@ -85,7 +85,7 @@ Declaration matrix:
 - Prefer extra context over minimal logs so follow-up decisions can be made from one run.
 
 ## Planning
-- Plans should be broken up into phases that can be executed independently without breaking a system. Each phase should have a clear goal and a defined set of tasks.
+- Plans should be broken up into phases that can be executed independently without breaking a system. Each phase should have a clear goal and a defined-ordered set of tasks.
 - Phases should note touched files and the expected impact on those files. This helps with code review and ensures that changes are intentional and well-understood.
 
 ## Reference Links

@@ -1,6 +1,7 @@
 --!strict
 --[=[
 	@class SchemaNavigator
+	@ignore
 
 	Resolves and validates path-based schema checks using T metadata
 	introspection (`T.GetMeta`).

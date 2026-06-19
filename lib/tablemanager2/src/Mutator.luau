@@ -267,15 +267,7 @@ local function onArrayAppended<T, S>(self: TM_Internal<T>, path: PathArray<S>, i
 		return
 	end
 	const insertPath: { any } = PathHelpers.Append(path :: any, index)
-	const metadata = EmitterModule.makeSyntheticMetadata(
-		self.Raw,
-		insertPath,
-		"added",
-		index,
-		newValue,
-		nil,
-		self._changeDetector:GetOpaqueCtx()
-	)
+	const metadata = EmitterModule.makeSyntheticMetadata(self.Raw, insertPath, "added", index, newValue, nil)
 	EmitterModule.fireArrayOperation(self, "ArrayInserted", path, insertPath, {
 		Index = index,
 		NewValue = newValue,

@@ -1016,7 +1016,7 @@ return function(t: tiniest)
 	describe("deferred listeners (smoke)", function()
 		test("a deferred-mode source still converges after the scheduler drains", function()
 			local harness = ReplicationHarness.new({ player = { health = 100 }, items = { "a" } }, "signals", {
-				ListenersFireDeferred = true,
+				ListenerFireMode = "Deferred",
 			})
 			harness:Connect()
 

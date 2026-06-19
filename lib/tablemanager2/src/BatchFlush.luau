@@ -257,7 +257,7 @@ function BatchFlush.Suspend(self: TableManagerLike)
 		return -- Already suspended; nested Suspend is a no-op
 	end
 	-- Capture the pre-batch snapshot BEFORE suspending ChangeDetector so that
-	-- CheckForChanges at flush time can diff old-vs-current correctly.
+	-- CheckForChangesBetween at flush time can diff old-vs-current correctly.
 	-- `CaptureSnapshot` inside `ChangeDetector` returns a sentinel (O(1)) so no
 	-- snapshot/diff work is done during the window. Tracked array paths are
 	-- diffed against this snapshot via LCS at flush time.
@@ -287,7 +287,7 @@ function BatchFlush.Resume(self: TableManagerLike)
 		return -- Not suspended
 	end
 
-	-- Re-enable ChangeDetector before the flush so CheckForChanges works normally.
+	-- Re-enable ChangeDetector before the flush so CheckForChangesBetween works normally.
 	self._changeDetector:Resume()
 	const batch = self._batch
 	if not batch then

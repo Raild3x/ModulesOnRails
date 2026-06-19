@@ -27,15 +27,86 @@ type MoveMetadata = ArrayDiffModule.MoveMetadata
 type DiffNode = Diff.DiffNode
 type TableManagerLike = TMTypes.TableManagerLike
 
-const createSyntheticSnapshot = BatchUtilsModule.CreateSyntheticSnapshot
+const createAncestorSnapshot = BatchUtilsModule.CreateAncestorSnapshot
 
 const Emitter = {}
+
+-- ---------------------------------------------------------------------------
+-- SignalFireMode dispatch
+-- ---------------------------------------------------------------------------
+
+-- 1-based index, within a signal's packed args, of its "OldValue"-style
+-- payload arg -- the one a coalesced merge must preserve from the FIRST fire
+-- in the window rather than overwrite with each subsequent fire's value.
+-- Signals with no such arg (KeyAdded, ArrayInserted) return nil: every
+-- position there is "latest wins", so a full overwrite is already correct.
+const function getOldValueArgIndex(manager: TableManagerLike, signal: any): number?
+	if signal == manager.ValueChanged then
+		return 3 -- path, newValue, oldValue
+	elseif signal == manager.KeyChanged then
+		return 4 -- path, key, newValue, oldValue
+	elseif signal == manager.KeyRemoved then
+		return 3 -- path, key, oldValue
+	elseif signal == manager.ArrayRemoved then
+		return 3 -- basePath, index, oldValue
+	elseif signal == manager.ArraySet then
+		return 4 -- basePath, index, newValue, oldValue
+	end
+	return nil
+end
+
+-- "coalesced" SignalFireMode: collapses repeated fires of the SAME signal
+-- within a tick into a single `:Fire` call carrying the latest args, instead
+-- of one call per fire. Implemented here (rather than as a `Signal` method)
+-- because the runtime `Signal` module is resolved via `require("../Signal")`,
+-- which Wally installs from the external `howmanysmall/better-signal`
+-- package -- not the first-party `lib/signal` fork in this repo. A new method
+-- added only to the fork would be missing on the actual installed dependency.
+const function fireSignalCoalesced(manager: TableManagerLike, signal: any, ...: any)
+	if not manager._signalCoalesceState then
+		(manager :: any)._signalCoalesceState = {}
+	end
+	const state = manager._signalCoalesceState :: { [any]: { Args: { n: number, [number]: any } } }
+
+	const entry = state[signal]
+	if entry then
+		const oldValueIndex = getOldValueArgIndex(manager, signal)
+		const preservedOldValue = if oldValueIndex then entry.Args[oldValueIndex] else nil
+		entry.Args = table.pack(...)
+		if oldValueIndex then
+			entry.Args[oldValueIndex] = preservedOldValue
+		end
+		return
+	end
+
+	const newEntry = { Args = table.pack(...) }
+	state[signal] = newEntry
+	task.defer(function()
+		state[signal] = nil
+		signal:Fire(table.unpack(newEntry.Args, 1, newEntry.Args.n))
+	end)
+end
+
+-- Dispatches a fire on one of `manager`'s public per-change Signals according
+-- to `manager._signalFireMode` (see `TMTypes.SignalFireMode`).
+const function fireSignal(manager: TableManagerLike, signal: any, ...: any)
+	const mode = manager._signalFireMode
+	if mode == "deferred" then
+		signal:FireDeferred(...)
+	elseif mode == "bindable" then
+		signal:FireBindable(...)
+	elseif mode == "coalesced" then
+		fireSignalCoalesced(manager, signal, ...)
+	else
+		signal:Fire(...)
+	end
+end
 
 -- ---------------------------------------------------------------------------
 -- Synthetic metadata helpers
 -- ---------------------------------------------------------------------------
 
-local function createSyntheticDiffNode(
+const function createSyntheticDiffNode(
 	kind: "added" | "removed" | "changed",
 	key: any,
 	newValue: any,
@@ -49,20 +120,19 @@ local function createSyntheticDiffNode(
 	}
 end
 
-local function createSyntheticMetadata(
+const function createSyntheticMetadata(
 	rootTable: any,
 	leafPath: PathArray,
 	kind: "added" | "removed" | "changed",
 	key: any,
 	newValue: any,
-	oldValue: any,
-	ctx: Diff.Ctx?
+	oldValue: any
 ): ChangeMetadata
 	return {
 		Diff = createSyntheticDiffNode(kind, key, newValue, oldValue),
 		OriginPath = leafPath,
 		OriginDiff = createSyntheticDiffNode(kind, key, newValue, oldValue),
-		Snapshot = createSyntheticSnapshot(rootTable, leafPath, newValue, ctx),
+		Snapshot = createAncestorSnapshot(rootTable),
 	}
 end
 
@@ -138,11 +208,11 @@ function Emitter.fireArrayOperation(
 	Emitter.fireAncestorValueChangedNotifications(manager, basePath, payload.Metadata)
 
 	if eventName == "ArrayInserted" then
-		manager.ArrayInserted:Fire(basePath, payload.Index, payload.NewValue)
+		fireSignal(manager, manager.ArrayInserted, basePath, payload.Index, payload.NewValue)
 	elseif eventName == "ArrayRemoved" then
-		manager.ArrayRemoved:Fire(basePath, payload.Index, payload.OldValue)
+		fireSignal(manager, manager.ArrayRemoved, basePath, payload.Index, payload.OldValue)
 	elseif eventName == "ArraySet" then
-		manager.ArraySet:Fire(basePath, payload.Index, payload.NewValue, payload.OldValue)
+		fireSignal(manager, manager.ArraySet, basePath, payload.Index, payload.NewValue, payload.OldValue)
 	end
 
 	if not manager._suppressLinkFanOut then
@@ -179,15 +249,7 @@ function Emitter.makeEmit(manager: TableManagerLike, path: PathArray)
 	return {
 		removed = function(index: number, oldValue: any, move: MoveMetadata?)
 			const removedPath: PathArray = PathHelpers.Append(path, index)
-			const metadata = createSyntheticMetadata(
-				manager.Raw,
-				removedPath,
-				"removed",
-				index,
-				nil,
-				oldValue,
-				manager._changeDetector:GetOpaqueCtx()
-			)
+			const metadata = createSyntheticMetadata(manager.Raw, removedPath, "removed", index, nil, oldValue)
 			metadata.Move = move
 			Emitter.fireArrayOperation(manager, "ArrayRemoved", path, removedPath, {
 				Index = index,
@@ -197,15 +259,7 @@ function Emitter.makeEmit(manager: TableManagerLike, path: PathArray)
 		end,
 		inserted = function(index: number, newValue: any, move: MoveMetadata?)
 			const insertedPath = PathHelpers.Append(path, index)
-			const metadata = createSyntheticMetadata(
-				manager.Raw,
-				insertedPath,
-				"added",
-				index,
-				newValue,
-				nil,
-				manager._changeDetector:GetOpaqueCtx()
-			)
+			const metadata = createSyntheticMetadata(manager.Raw, insertedPath, "added", index, newValue, nil)
 			metadata.Move = move
 			Emitter.fireArrayOperation(manager, "ArrayInserted", path, insertedPath, {
 				Index = index,
@@ -215,15 +269,7 @@ function Emitter.makeEmit(manager: TableManagerLike, path: PathArray)
 		end,
 		set = function(index: number, newValue: any, oldValue: any, move: MoveMetadata?)
 			const setPath = PathHelpers.Append(path, index)
-			const metadata = createSyntheticMetadata(
-				manager.Raw,
-				setPath,
-				"changed",
-				index,
-				newValue,
-				oldValue,
-				manager._changeDetector:GetOpaqueCtx()
-			)
+			const metadata = createSyntheticMetadata(manager.Raw, setPath, "changed", index, newValue, oldValue)
 			metadata.Move = move
 			Emitter.fireArrayOperation(manager, "ArraySet", path, setPath, {
 				Index = index,
@@ -245,10 +291,9 @@ function Emitter.makeSyntheticMetadata(
 	kind: "added" | "removed" | "changed",
 	key: any,
 	newValue: any,
-	oldValue: any,
-	ctx: Diff.Ctx?
+	oldValue: any
 ): ChangeMetadata
-	return createSyntheticMetadata(rootTable, leafPath, kind, key, newValue, oldValue, ctx)
+	return createSyntheticMetadata(rootTable, leafPath, kind, key, newValue, oldValue)
 end
 
 -- ---------------------------------------------------------------------------
@@ -277,7 +322,7 @@ function Emitter.makeChangeDetectorCallbacks(manager: TableManagerLike)
 			-- write its nested signal fires after this one, keeping the public
 			-- signal stream in write-initiation order (deterministic for replication).
 			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
-				manager.KeyAdded:Fire(path, key, newValue)
+				fireSignal(manager, manager.KeyAdded, path, key, newValue)
 			end
 			manager._listenerRegistry:FireListenersExact("KeyAdded", path, {
 				NewValue = newValue,
@@ -291,7 +336,7 @@ function Emitter.makeChangeDetectorCallbacks(manager: TableManagerLike)
 				return
 			end
 			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
-				manager.KeyRemoved:Fire(path, key, oldValue)
+				fireSignal(manager, manager.KeyRemoved, path, key, oldValue)
 			end
 			manager._listenerRegistry:FireListenersExact("KeyRemoved", path, {
 				OldValue = oldValue,
@@ -305,7 +350,7 @@ function Emitter.makeChangeDetectorCallbacks(manager: TableManagerLike)
 				return
 			end
 			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
-				manager.KeyChanged:Fire(path, key, newValue, oldValue)
+				fireSignal(manager, manager.KeyChanged, path, key, newValue, oldValue)
 			end
 			manager._listenerRegistry:FireListenersExact("KeyChanged", path, {
 				NewValue = newValue,
@@ -323,7 +368,7 @@ function Emitter.makeChangeDetectorCallbacks(manager: TableManagerLike)
 			end
 			-- Signal before listeners (see OnKeyAdded for rationale).
 			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
-				manager.ValueChanged:Fire(path, newValue, oldValue)
+				fireSignal(manager, manager.ValueChanged, path, newValue, oldValue)
 			end
 			manager._listenerRegistry:FireListenersExact("ValueChanged", path, {
 				NewValue = newValue,

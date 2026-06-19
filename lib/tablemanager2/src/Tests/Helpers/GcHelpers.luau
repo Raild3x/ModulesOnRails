@@ -9,6 +9,12 @@
 	clears or an iteration cap is reached.
 ]]
 
+--[=[
+	@class GcHelpers
+	@ignore
+
+	Test helpers for memory-leak specs.
+]=]
 const GcHelpers = {}
 
 -- Elements per throwaway allocation in WaitForCollection. Large enough that the

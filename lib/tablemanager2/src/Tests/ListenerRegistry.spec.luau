@@ -11,6 +11,8 @@
 
 return function(t: tiniest)
 	local ListenerRegistry = require("../ListenerRegistry")
+	local IsDeferred = require("../IsDeferred")
+	assert(IsDeferred() == false, "Tests assume deferred event dispatch is disabled")
 
 	local test = t.test
 	local describe = t.describe
@@ -740,8 +742,8 @@ return function(t: tiniest)
 			registry:Destroy()
 		end)
 
-		test("fires deferred when FireDeferred=true", function()
-			local registry = ListenerRegistry.new { DebugMode = false, FireDeferred = true }
+		test("fires deferred when FireMode=Deferred", function()
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "Deferred" }
 			local callOrder = {}
 
 			registry:RegisterListener("ValueChanged", { "player", "health" }, function()
@@ -765,6 +767,74 @@ return function(t: tiniest)
 			expect(callOrder[1]).is("before-fire")
 			expect(callOrder[2]).is("after-fire")
 			expect(callOrder[3]).is("listener")
+
+			registry:Destroy()
+		end)
+
+		test("collapses repeated fires into one call when FireMode=Coalesced", function()
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "Coalesced" }
+			local fireCount = 0
+			local lastNewValue: number? = nil
+
+			registry:RegisterListener("ValueChanged", { "player", "health" }, function(newValue: number)
+				fireCount += 1
+				lastNewValue = newValue
+			end)
+
+			local function fireHealthChange(newValue: number, oldValue: number)
+				registry:FireListenersExact("ValueChanged", { "player", "health" }, {
+					NewValue = newValue,
+					OldValue = oldValue,
+					Metadata = {
+						Diff = { type = "changed" },
+						OriginPath = { "player", "health" },
+						OriginDiff = { type = "changed" },
+					},
+				})
+			end
+
+			-- Two fires before yielding should collapse into a single callback
+			-- invocation carrying the LATEST data.
+			fireHealthChange(75, 100)
+			fireHealthChange(50, 75)
+
+			expect(fireCount).is(0) -- nothing has run synchronously
+
+			task.wait()
+
+			expect(fireCount).is(1)
+			expect(lastNewValue).is(50)
+
+			registry:Destroy()
+		end)
+
+		test("resolves Bindable to either Immediate or Deferred ordering", function()
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "Bindable" }
+			local callOrder = {}
+
+			registry:RegisterListener("ValueChanged", { "player", "health" }, function()
+				table.insert(callOrder, "listener")
+			end)
+
+			table.insert(callOrder, "before-fire")
+			registry:FireListenersExact("ValueChanged", { "player", "health" }, {
+				NewValue = 50,
+				OldValue = 100,
+				Metadata = {
+					Diff = { type = "changed" },
+					OriginPath = { "player", "health" },
+					OriginDiff = { type = "changed" },
+				},
+			})
+			table.insert(callOrder, "after-fire")
+
+			task.wait()
+
+			-- "Bindable" mirrors the engine's actual SignalBehavior, so either
+			-- ordering is valid depending on the environment; what matters is
+			-- that the listener ran exactly once.
+			expect(#callOrder).is(3)
+			expect(table.find(callOrder, "listener") ~= nil).is(true)
 
 			registry:Destroy()
 		end)
@@ -801,7 +871,7 @@ return function(t: tiniest)
 		end)
 
 		test("destroy disconnects consumed once connections", function()
-			local registry = ListenerRegistry.new { DebugMode = false, FireDeferred = true }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "Deferred" }
 			local onceConnection = registry:RegisterListener("ValueChanged", { "player", "health" }, function() end, {
 				Once = true,
 			})

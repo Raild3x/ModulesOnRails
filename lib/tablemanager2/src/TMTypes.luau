@@ -43,6 +43,17 @@ export type OpaqueWrapper = OpaqueRegistryModule.Wrapper
 
 export type DuplicateReferenceMode = "error" | "warn" | "allow" | "move" | "copy"
 
+-- Re-export of `ListenerRegistry.FireMode` for config-surface convenience.
+export type ListenerFireMode = ListenerRegistryModule.FireMode
+
+-- Controls how the per-change Signals (`ValueChanged`, `KeyAdded`, etc.) are
+-- dispatched. Defined here rather than in the `Signal` package itself since
+-- it's a TableManager-level dispatch policy, not a native `Signal` method:
+-- "Immediate"/"Deferred"/"Bindable" map onto `Signal:Fire`/`:FireDeferred`/
+-- `:FireBindable`; "Coalesced" is implemented in `Emitter.luau` by wrapping
+-- `:Fire` (see `Emitter.fireSignal`).
+export type SignalFireMode = "immediate" | "deferred" | "bindable" | "coalesced"
+
 --------------------------------------------------------------------------------
 --// Link type shapes (implemented by LinkGroup.luau / Linker.luau) //--
 --------------------------------------------------------------------------------
@@ -116,7 +127,8 @@ export type Linker = {
 	@interface TableManagerConfig
 	.Schema SchemaCheck?
 	.OnValidationFailed (path: PathArray, value: any, err: string) -> ()?
-	.ListenersFireDeferred boolean?
+	.ListenerFireMode ListenerFireMode? -- Controls how listener callbacks (OnChange, OnValueChange, etc.) are scheduled when fired. Defaults to "immediate".
+	.SignalFireMode SignalFireMode? -- Controls how the per-change Signals (ValueChanged, KeyAdded, etc.) are scheduled when fired. Defaults to "immediate".
 	.DuplicateReferenceMode DuplicateReferenceMode? -- Experimental
 	.EnableProxies boolean? -- Defaults to true. When false, `Proxy`/`GetProxy` are unavailable.
 	.AutoLink boolean? -- When true, this manager auto-links (via `tm.Linker`) with any OTHER AutoLink manager with shared tables
@@ -133,7 +145,8 @@ export type Linker = {
 export type TableManagerConfig = {
 	Schema: SchemaCheck?,
 	OnValidationFailed: ((path: PathArray, value: any, err: string) -> ())?,
-	ListenersFireDeferred: boolean?,
+	ListenerFireMode: ListenerFireMode?,
+	SignalFireMode: SignalFireMode?,
 	DuplicateReferenceMode: DuplicateReferenceMode?,
 	EnableProxies: boolean?,
 	AutoLink: boolean?,
@@ -353,8 +366,12 @@ export type TM_Internal<T = { [any]: any }> = TableManager<T> & {
 	_proxyManager: ProxyManagerModule.ProxyManager<T>?,
 	_listenerRegistry: ListenerRegistry,
 	_changeDetector: ChangeDetector,
+	-- Set from `Config.SignalFireMode`; controls `Emitter.fireSignal` dispatch.
+	_signalFireMode: SignalFireMode,
+	-- Lazily created by `Emitter.fireSignalCoalesced` when `SignalFireMode == "Coalesced"`.
+	_signalCoalesceState: { [any]: { Args: { n: number, [number]: any } } }?,
 	_schema: SchemaCheck?,
-	_onValidationFailed: (<S>(path: Path<S>, value: any, err: string) -> ())?,
+	_onValidationFailed: ((path: PathArray, value: any, err: string) -> ())?,
 	_duplicateReferenceMode: DuplicateReferenceMode,
 	_isDuplicateMoveInProgress: boolean?,
 	_Destroyed: boolean?,

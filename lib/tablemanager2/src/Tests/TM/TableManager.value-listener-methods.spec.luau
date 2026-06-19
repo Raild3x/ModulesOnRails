@@ -590,4 +590,37 @@ return function(t: tiniest)
 			manager:Destroy()
 		end)
 	end)
+
+	describe("Config: SignalFireMode", function()
+		test("Coalesced collapses repeated Sets to the same path into one ValueChanged fire", function()
+			local manager = TableManager.new({
+				player = { health = 100 },
+			}, {
+				SignalFireMode = "Coalesced",
+			})
+
+			local fireCount = 0
+			local lastNewValue = nil
+			local lastOldValue = nil
+
+			manager.ValueChanged:Connect(function(_path, newValue, oldValue)
+				fireCount += 1
+				lastNewValue = newValue
+				lastOldValue = oldValue
+			end)
+
+			manager:Set({ "player", "health" }, 75)
+			manager:Set({ "player", "health" }, 50)
+
+			expect(fireCount).is(0) -- nothing has run synchronously yet
+
+			task.wait()
+
+			expect(fireCount).is(1)
+			expect(lastNewValue).is(50)
+			expect(lastOldValue).is(100)
+
+			manager:Destroy()
+		end)
+	end)
 end
