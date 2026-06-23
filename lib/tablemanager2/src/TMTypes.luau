@@ -119,6 +119,12 @@ export type LinkGroup = {
 	_object: any,
 	_members: { any },
 	_destroyed: boolean,
+	-- Phase C: one shadow baseline shared by all members for the shared region,
+	-- created lazily when sharing is active. nil while sharing is inactive.
+	_sharedShadow: Shadow?,
+	-- True iff the group has >= 2 members and none has per-manager opaque marks,
+	-- so a single shared shadow can serve every member (see `ResolveSharedShadow`).
+	_shadowSharingActive: boolean,
 	MemberRemoved: Signal<(manager: any) -> (), any>,
 	Dissolved: Signal<() -> ()>,
 	Add: (self: LinkGroup, manager: any, path: Path<any>?) -> (),

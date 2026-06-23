@@ -23,22 +23,40 @@ const Diff = require("./Diff")
 
 --// Types //--
 type PathArray<S = string> = PathHelpers.PathArray<S>
+type table = { [any]: any }
+
+--[=[
+	Optional routing hook (injected by `TableManager`, backed by `LinkGroup`).
+	Given a path in this shadow's owner's coordinates, returns the GROUP-owned
+	shared shadow, the anchor-relative path within it, and the shared-object root
+	to read live values from — or `nil` to operate on this shadow's own mirror.
+	Lets linked members keep ONE shared baseline for a shared region instead of
+	a private copy each (see `LinkGroup.ResolveSharedShadow`).
+]=]
+export type Resolver = (path: PathArray) -> (Shadow?, PathArray?, any?)
 
 export type Shadow = {
 	_mirror: any,
+	_resolver: Resolver?,
 	--- Returns the last-flushed value at `path` (the diff baseline). `nil`
 	--- when `path` (or an ancestor of it) was never materialized.
-	Get: (self: Shadow, path: PathArray<any>) -> any,
+	Get: (self: Shadow, path: PathArray) -> any,
 	--- Sets the mirror at `path` to a fresh `copyForShadow` of `live`'s
 	--- current value there. Requires `path`'s parent to already exist in the
 	--- mirror; use `Materialize` to seed a never-before-tracked path.
-	Reconcile: (self: Shadow, path: PathArray<any>, live: any, ctx: Diff.Ctx?) -> (),
+	Reconcile: (self: Shadow, path: PathArray, live: any, ctx: Diff.Ctx?) -> (),
 	--- Seeds the mirror spine down to `path` (creating missing intermediate
 	--- tables) and then `Reconcile`s the leaf. Safe to call on an
 	--- already-materialized path.
-	Materialize: (self: Shadow, path: PathArray<any>, live: any, ctx: Diff.Ctx?) -> (),
+	Materialize: (self: Shadow, path: PathArray, live: any, ctx: Diff.Ctx?) -> (),
 	--- Drops the mirror subtree at `path`. No-op if `path`'s parent isn't materialized.
-	Release: (self: Shadow, path: PathArray<any>) -> (),
+	Release: (self: Shadow, path: PathArray) -> (),
+	--- Like `Release`, but always operates on THIS shadow's own mirror, never
+	--- routing to a shared shadow. Used by `LinkGroup` lifecycle to clear a
+	--- member's private region when it starts/stops sharing.
+	ReleaseLocal: (self: Shadow, path: PathArray) -> (),
+	--- Installs (or clears) the routing hook. See `Resolver`.
+	SetResolver: (self: Shadow, resolver: Resolver?) -> (),
 }
 
 const Shadow = {}
@@ -50,7 +68,7 @@ const Shadow_MT = { __index = Shadow }
 
 -- Mirrors Diff.snapshot's shape decisions, but produces a plain (unfrozen)
 -- table and keeps opaque values/children by reference instead of cloning.
-local function copyForShadow(value: any, ctx: Diff.Ctx?): any
+const function copyForShadow(value: any, ctx: Diff.Ctx?): any
 	if type(value) ~= "table" then
 		return value
 	end
@@ -71,7 +89,7 @@ end
 
 -- Walks `root` along `path`, returning the value found or nil if any
 -- intermediate segment is not a table.
-local function resolveAtPath(root: any, path: PathArray<any>): any
+const function resolveAtPath(root: any, path: PathArray): any
 	local current: any = root
 	for _, key in path do
 		if type(current) ~= "table" then
@@ -82,12 +100,35 @@ local function resolveAtPath(root: any, path: PathArray<any>): any
 	return current
 end
 
+-- Routes `path` through the optional resolver. Returns `(target, routedPath,
+-- liveRoot)`: when `path` falls in a sharing-active link region, `target` is
+-- the GROUP shadow, `routedPath` is anchor-relative, and `liveRoot` is the
+-- shared object (the root to read live values from for Reconcile/Materialize).
+-- Otherwise `target == self`, `routedPath == path`, `liveRoot == nil`. The
+-- group shadow itself carries no resolver, so a routed call recurses only once.
+const function route(self: Shadow, path: PathArray): (Shadow, PathArray, any)
+	const resolver = self._resolver
+	if resolver ~= nil then
+		const target, routedPath, liveRoot = resolver(path)
+		if target ~= nil then
+			return target, routedPath :: PathArray<any>, liveRoot
+		end
+	end
+	return self, path, nil
+end
+
 -- ---------------------------------------------------------------------------
 -- Public API
 -- ---------------------------------------------------------------------------
 
 function Shadow.new(): Shadow
-	return (setmetatable({ _mirror = nil }, Shadow_MT) :: any) :: Shadow
+	return (setmetatable({ _mirror = nil, _resolver = nil }, Shadow_MT) :: any) :: Shadow
+end
+
+--- Installs (or clears) the routing hook used to redirect shared-region paths
+--- to a group-owned shadow. See `Resolver`.
+function Shadow.SetResolver(self: Shadow, resolver: Resolver?)
+	self._resolver = resolver
 end
 
 --[=[
@@ -96,6 +137,10 @@ end
 	treat this as "the real value is nil" without checking coverage first.
 ]=]
 function Shadow.Get(self: Shadow, path: PathArray<any>): any
+	const target, routedPath = route(self, path)
+	if target ~= self then
+		return target:Get(routedPath)
+	end
 	return resolveAtPath(self._mirror, path)
 end
 
@@ -105,6 +150,12 @@ end
 	always does); use `Materialize` to seed a never-before-tracked path.
 ]=]
 function Shadow.Reconcile(self: Shadow, path: PathArray, live: any, ctx: Diff.Ctx?)
+	const target, routedPath, liveRoot = route(self, path)
+	if target ~= self then
+		-- Read live from the shared object (liveRoot), at the anchor-relative path.
+		target:Reconcile(routedPath, liveRoot, ctx)
+		return
+	end
 	const value = resolveAtPath(live, path)
 	const copy = copyForShadow(value, ctx)
 	if #path == 0 then
@@ -135,6 +186,11 @@ end
 	on both sides instead of genuinely removed.
 ]=]
 function Shadow.Materialize(self: Shadow, path: PathArray, live: any, ctx: Diff.Ctx?)
+	const target, routedPath, liveRoot = route(self, path)
+	if target ~= self then
+		target:Materialize(routedPath, liveRoot, ctx)
+		return
+	end
 	if #path == 0 then
 		self:Reconcile(path, live, ctx)
 		return
@@ -156,10 +212,25 @@ function Shadow.Materialize(self: Shadow, path: PathArray, live: any, ctx: Diff.
 end
 
 --[=[
-	Drops the mirror subtree at `path` (e.g. once nothing covers it anymore).
-	No-op if `path`'s parent isn't materialized.
+	Drops the subtree at `path` (e.g. once nothing covers it anymore). Routes to
+	the shared shadow for a shared-region path; otherwise drops from this
+	shadow's own mirror. No-op if `path`'s parent isn't materialized.
 ]=]
 function Shadow.Release(self: Shadow, path: PathArray)
+	const target, routedPath = route(self, path)
+	if target ~= self then
+		target:Release(routedPath)
+		return
+	end
+	self:ReleaseLocal(path)
+end
+
+--[=[
+	Drops the subtree at `path` from THIS shadow's own mirror, never routing.
+	Used by `LinkGroup` lifecycle to clear a member's private region as it starts
+	or stops sharing, independent of whether routing is currently active.
+]=]
+function Shadow.ReleaseLocal(self: Shadow, path: PathArray)
 	if #path == 0 then
 		self._mirror = nil
 		return
