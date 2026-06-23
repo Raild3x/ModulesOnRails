@@ -575,6 +575,70 @@ function ReplicationHarness.Destroy(self: ReplicationHarness)
 	self.Replica:Destroy()
 end
 
+--// Standalone event-stream oracle //--
+
+--[[
+	Attaches to ANY TableManager and records a normalized, wire-safe stream of
+	every per-change Signal it fires, so a spec can assert that a manager
+	produced an exact event stream (a "golden"). Independent of the
+	Source/Replica convergence machinery above.
+
+	Pass a shared `stream` (and distinct `label`s) to record several managers
+	into ONE ordered stream — this is how cross-manager propagation-ordering
+	goldens express "observer A fired before observer B" for a single change.
+
+	Returns `{ Stream, Disconnect }`. `Stream` is the live array of entries
+	(each `{ Manager = label?, Signal, Path, ... }`); `Disconnect` drops every
+	connection. Values are `wireCopy`'d so the stream is self-contained.
+]]
+function ReplicationHarness.RecordEvents(manager: any, label: string?, stream: { any }?): { Stream: { any }, Disconnect: () -> () }
+	const out: { any } = stream or {}
+	const connections: { any } = {}
+
+	const function record(entry: any)
+		entry.Manager = label
+		table.insert(out, entry)
+	end
+
+	table.insert(connections, manager.ValueChanged:Connect(function(path, newValue, oldValue)
+		record { Signal = "ValueChanged", Path = wireCopy(path), New = wireCopy(newValue), Old = wireCopy(oldValue) }
+	end))
+	table.insert(connections, manager.KeyAdded:Connect(function(path, key, newValue)
+		record { Signal = "KeyAdded", Path = wireCopy(path), Key = key, New = wireCopy(newValue) }
+	end))
+	table.insert(connections, manager.KeyRemoved:Connect(function(path, key, oldValue)
+		record { Signal = "KeyRemoved", Path = wireCopy(path), Key = key, Old = wireCopy(oldValue) }
+	end))
+	table.insert(connections, manager.KeyChanged:Connect(function(path, key, newValue, oldValue)
+		record { Signal = "KeyChanged", Path = wireCopy(path), Key = key, New = wireCopy(newValue), Old = wireCopy(oldValue) }
+	end))
+	table.insert(connections, manager.ArrayInserted:Connect(function(path, index, newValue)
+		record { Signal = "ArrayInserted", Path = wireCopy(path), Index = index, New = wireCopy(newValue) }
+	end))
+	table.insert(connections, manager.ArrayRemoved:Connect(function(path, index, oldValue)
+		record { Signal = "ArrayRemoved", Path = wireCopy(path), Index = index, Old = wireCopy(oldValue) }
+	end))
+	table.insert(connections, manager.ArraySet:Connect(function(path, index, newValue, oldValue)
+		record { Signal = "ArraySet", Path = wireCopy(path), Index = index, New = wireCopy(newValue), Old = wireCopy(oldValue) }
+	end))
+
+	return {
+		Stream = out,
+		Disconnect = function()
+			for _, conn in connections do
+				conn:Disconnect()
+			end
+		end,
+	}
+end
+
+--- Deep equality over two captured op/event streams. A spec asserts a
+--- recorded stream matches a golden (or that two managers produced the same
+--- stream) with this.
+function ReplicationHarness.OpStreamsEqual(a: { any }, b: { any }): boolean
+	return deepEqual(a, b)
+end
+
 ReplicationHarness.wireCopy = wireCopy
 ReplicationHarness.deepEqual = deepEqual
 ReplicationHarness.isArrayLike = isArrayLike

@@ -1,7 +1,7 @@
 # ModulesOnRails Copilot Instructions
 
 ## Goal
-This repository contains multiple Roblox Wally modules. Favor consistency inside the package you are editing over consistency with the rest of the repository. We use Luau, not Lua.
+This repository contains multiple Roblox Wally modules. Favor consistency inside the package you are editing over consistency with the rest of the repository. We use Luau, not Lua. Do not look outside your current package and into another package unless given permission.
 
 ## Priority Order
 1. Follow the local style of the current package first.

@@ -293,4 +293,48 @@ return function(t: tiniest)
 			manager:Destroy()
 		end)
 	end)
+
+	-- Phase 0 golden (see Docs/CONTRACT.md §7): opacity is PER-VIEWER. The same
+	-- live table can be an opaque leaf to one manager (skip big diffs) while a
+	-- different manager observes it transparently for its own granular changes.
+	-- This property must survive the shadow/linking/opacity re-architecture.
+	describe("Per-viewer opacity (Inventory/Sword)", function()
+		test("the same table is opaque to one manager and transparent to another", function()
+			local sword = { damage = 10, name = "Sword" }
+
+			-- Sword manager: rooted at the sword, observes it TRANSPARENTLY.
+			local swordMgr = TableManager.new(sword)
+			-- Inventory manager: holds the SAME sword as an OPAQUE leaf.
+			local inventoryTM = TableManager.new { equipped = {} }
+			inventoryTM:Set("equipped", TableManager.Opaque(sword))
+
+			local swordSaw: number? = nil
+			swordMgr:OnValueChange("damage", function(value)
+				swordSaw = value
+			end)
+
+			local inventorySawInternal = 0
+			inventoryTM:OnChange("equipped", function()
+				inventorySawInternal += 1
+			end)
+
+			-- Transparent viewer: a granular write through its own API is seen.
+			swordMgr:Set("damage", 20)
+			expect(swordSaw).is(20)
+
+			-- Opaque viewer: an ancestor-level diff over `equipped` never walks into
+			-- the opaque sword, so an internal change is invisible to inventory.
+			inventoryTM:Batch(function()
+				inventoryTM.Proxy.equipped.damage = 99
+			end)
+			expect(inventorySawInternal).is(0)
+
+			-- Same identity throughout, so the underlying value is consistent for both.
+			expect(swordMgr.Raw.damage).is(99)
+			expect(inventoryTM.Raw.equipped.damage).is(99)
+
+			swordMgr:Destroy()
+			inventoryTM:Destroy()
+		end)
+	end)
 end

@@ -256,6 +256,28 @@ return function(t: tiniest)
 			expect(next(tm._listenerRegistry._root.Children)).never_exists()
 			expect(tm._listenerRegistry._root.Count).is(0)
 		end)
+
+		-- Phase 0 golden (Docs/CONTRACT.md §8): severing a shared region must
+		-- release the link/observer bookkeeping on the survivor. Under the
+		-- refcounted-observer model this is the last-observer-release path; today
+		-- it is the group dissolving below two members.
+		test("destroying a linked member releases link bookkeeping on the survivor", function()
+			local shared = { hp = 100 }
+			local a = TableManager.new({ Stats = shared }) :: any
+			local b = TableManager.new({ Stats = shared }) :: any
+			TableManager.Link({ { a, "Stats" }, { b, "Stats" } })
+
+			expect(a._linkGroups).exists()
+			expect(b._linkGroups).exists()
+
+			a:Destroy()
+
+			-- Group drops below two members and dissolves; the survivor keeps no
+			-- dangling link/observer bookkeeping for the shared region.
+			expect(b._linkGroups == nil or next(b._linkGroups) == nil).is_true()
+
+			b:Destroy()
+		end)
 	end)
 
 	describe("GC collectability (best-effort, pressure-driven)", function()
@@ -307,6 +329,27 @@ return function(t: tiniest)
 				local probe = GcHelpers.WeakProbe(payload)
 				tm:Set("v", 0)
 				tm:Destroy()
+				return probe
+			end)()
+
+			recycleRunnerThread()
+			expect(GcHelpers.WaitForCollection(isAlive)).is_true()
+		end)
+
+		-- Phase 0 golden (Docs/CONTRACT.md §8): a region shared by linked managers
+		-- must not be pinned alive by the link/shadow registry once every member is
+		-- gone. The re-architecture (identity-keyed, refcounted ShadowNodes) must
+		-- keep this property.
+		test("a shared linked region is collectable once all members are gone", function()
+			local isAlive = (function()
+				local shared = { hp = 100 }
+				local a = TableManager.new({ Stats = shared }) :: any
+				local b = TableManager.new({ Stats = shared }) :: any
+				TableManager.Link({ { a, "Stats" }, { b, "Stats" } })
+				a:Set("Stats.hp", 50) -- exercise the shared baseline before teardown
+				local probe = GcHelpers.WeakProbe(shared)
+				a:Destroy()
+				b:Destroy()
 				return probe
 			end)()
 
