@@ -19,6 +19,7 @@ const EmitterModule = require("./Emitter")
 const IgnoreTrieModule = require("./IgnoreTrie")
 const CoverageModule = require("./Coverage")
 const CoalescedFlushModule = require("./CoalescedFlush")
+const BaselineModule = require("./Baseline")
 const T = require("../T")
 const TMTypes = require("./TMTypes")
 
@@ -229,27 +230,9 @@ end
 const shouldTrackChangesAt = CoverageModule.IsTrackable
 
 -- ---------------------------------------------------------------------------
--- Shadow seeding (module-internal, used only by applyWrite/applyRootSet)
+-- Shadow seeding lives in `Baseline.SeedIfNeeded` (the baseline seam). Callers
+-- here still own the trackable / opaque-ancestor gate before invoking it.
 -- ---------------------------------------------------------------------------
-
--- Seeds the persistent shadow at `path` with `oldValue` (the live value
--- immediately before this write) the FIRST time `path` is found trackable but
--- not yet materialized — e.g. the first write since a listener started
--- covering it. `oldValue == nil` needs no seeding: a missing shadow entry
--- already reads as `nil`, which is the correct baseline when the key never
--- existed. Must be called BEFORE the write so `oldValue`/`self.Raw`
--- still reflect the pre-write state. Callers must check
--- `not Coverage.PassesThroughOpaqueAncestor(...)` first — Materialize cannot
--- safely seed through an opaque ancestor (see Coverage.luau).
-local function ensureShadowSeeded<T, S>(self: TM_Internal<T>, path: PathArray<S>, oldValue: any, ctx: any)
-	if oldValue == nil then
-		return
-	end
-	if self._shadow:Get(path) ~= nil then
-		return
-	end
-	self._shadow:Materialize(path, self.Raw, ctx)
-end
 
 -- ---------------------------------------------------------------------------
 -- Array-append notification (module-internal, used only by applyWrite)
@@ -278,69 +261,45 @@ end
 
 -- ---------------------------------------------------------------------------
 -- Duplicate-reference policy (module-internal)
+--
+-- A table written to a SECOND live location is, by default ("allow"), a
+-- supported multi-location reference: both paths simply share identity, and
+-- this write fires its own independent change events at the new path (the
+-- proxy graph still reports a single "primary" anchor — see
+-- `ProxyManager._originalToProxy`'s single-slot memo). "copy" opts OUT of
+-- sharing for this one write by deep-cloning the value first.
 -- ---------------------------------------------------------------------------
 
-local function resolveDuplicateReferencePolicy<T, S1, S2>(
-	self: TM_Internal<T>,
-	writePath: PathArray<S1>,
-	existingPath: PathArray<S2>,
-	value: any
-): boolean
-	if self._duplicateReferenceMode == "allow" then
-		return true
-	end
-	const writePathStr = PathHelpers.PathToString(writePath)
-	const existingPathStr = PathHelpers.PathToString(existingPath)
-	const duplicateMessage =
-		`Duplicate table reference detected: existing at {existingPathStr}, attempted write to {writePathStr}`
-	if self._duplicateReferenceMode == "warn" then
-		warn(duplicateMessage)
-		return true
-	end
-	if self._duplicateReferenceMode == "move" then
-		if self._isDuplicateMoveInProgress then
-			return true
-		end
-		self._isDuplicateMoveInProgress = true
-		local ok, moveErr = pcall(function()
-			self:MoveTo(existingPath, writePath)
-		end)
-		self._isDuplicateMoveInProgress = false
-		if not ok then
-			error(`Failed to move duplicate table reference: {tostring(moveErr)}`, 2)
-		end
-		if self:Get(writePath) ~= value then
-			error(
-				`DuplicateReferenceMode 'move' is not fully implemented yet. Expected MoveTo to place the value at {writePathStr}`,
-				2
-			)
-		end
-		return false
-	end
+-- Returns the value to actually write: `value` unchanged (default), or a
+-- fresh deep clone of it when `Config.DuplicateReferenceMode == "copy"`.
+local function resolveDuplicateReferencePolicy<T>(self: TM_Internal<T>, value: any): any
 	if self._duplicateReferenceMode == "copy" then
-		error("DuplicateReferenceMode 'copy' is not implemented yet", 2)
+		return Mutator.deepCloneValue(value)
 	end
-	error(duplicateMessage, 2)
+	return value
 end
 
-local function checkDuplicateTableWrite<T, S>(self: TM_Internal<T>, writePath: PathArray<S>, value: any): boolean
+-- Returns the value to write at `writePath`: `value` unchanged unless it is
+-- ALREADY live (non-orphaned) at a different path, in which case the
+-- duplicate-reference policy above resolves what to write instead.
+local function checkDuplicateTableWrite<T, S>(self: TM_Internal<T>, writePath: PathArray<S>, value: any): any
 	const proxyManager = self._proxyManager
 	if proxyManager == nil then
-		return true
+		return value
 	end
 	const existingProxy = proxyManager:GetProxyFromOriginal(value)
 	if existingProxy == nil then
-		return true
+		return value
 	end
 	const existingPath = proxyManager:GetPath(existingProxy)
 	if existingPath == nil or PathHelpers.ArePathsEqual(existingPath, writePath) then
-		return true
+		return value
 	end
 	const isOrphan = self:Get(existingPath, true) ~= value
 	if isOrphan then
-		return true
+		return value
 	end
-	return resolveDuplicateReferencePolicy(self, writePath, existingPath, value)
+	return resolveDuplicateReferencePolicy(self, value)
 end
 
 -- ---------------------------------------------------------------------------
@@ -371,13 +330,11 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 	end
 	const parentTable: { [any]: any } = current
 
-	-- Check if the value is a table and if it is already managed by this TableManager.
+	-- If the value is a table already live at a different path, the duplicate-
+	-- reference policy resolves what to actually write (itself, by default, or
+	-- a fresh clone under DuplicateReferenceMode = "copy").
 	if type(newValue) == "table" and self._proxyManager ~= nil then
-		const shouldProceed = checkDuplicateTableWrite(self, parsedPath, newValue)
-		if not shouldProceed then
-			debug.profileend()
-			return
-		end
+		newValue = checkDuplicateTableWrite(self, parsedPath, newValue)
 	end
 
 	-- Verify the write against the schema, if one is configured.
@@ -407,8 +364,11 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 		if not ignored then
 			onArrayAppended(self, parentPath, key, newValue)
 		end
-		if self._autoLink and not self._suppressLinkFanOut then
-			LinkGroupModule.CheckAutoLink(self, parsedPath, newValue)
+		if not self._suppressLinkFanOut then
+			if self._autoLink then
+				LinkGroupModule.CheckAutoLink(self, parsedPath, newValue)
+			end
+			LinkGroupModule.RegisterSubtree(self, newValue)
 		end
 		debug.profileend()
 		return
@@ -430,6 +390,7 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 			if self._autoLink then
 				LinkGroupModule.CheckAutoLink(self, parsedPath, newValue)
 			end
+			LinkGroupModule.RegisterSubtree(self, newValue)
 		end
 		Mutator.pruneDetachedValue(self, oldValue, newValue)
 		debug.profileend()
@@ -445,7 +406,7 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 	-- going through the shadow at all.
 	const opaqueBypass = trackable and CoverageModule.PassesThroughOpaqueAncestor(self, parsedPath, ctx)
 	if trackable and not opaqueBypass then
-		ensureShadowSeeded(self, parsedPath, oldValue, ctx)
+		BaselineModule.SeedIfNeeded(self, parsedPath, oldValue, ctx)
 	end
 	parentTable[key] = newValue
 	if not self._suppressLinkFanOut then
@@ -453,6 +414,9 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 		if self._autoLink then
 			LinkGroupModule.CheckAutoLink(self, parsedPath, newValue)
 		end
+		-- Implicit sharing: a newly-written table already present in another
+		-- manager auto-links here (no-op unless implicit sharing is enabled).
+		LinkGroupModule.RegisterSubtree(self, newValue)
 	end
 	Mutator.pruneDetachedValue(self, oldValue, newValue)
 	if opaqueBypass then
@@ -487,13 +451,11 @@ function Mutator.applyRootSet<T>(self: TM_Internal<T>, newRoot: any)
 
 	const rootPath = {} :: PathArray<any>
 
-	-- Duplicate-reference guard: an already-managed table cannot silently become
-	-- the root under the configured DuplicateReferenceMode.
+	-- If the new root is already live elsewhere in this manager, the duplicate-
+	-- reference policy resolves what to actually use as the new root (itself, by
+	-- default, or a fresh clone under DuplicateReferenceMode = "copy").
 	if type(newRoot) == "table" and self._proxyManager ~= nil then
-		const shouldProceed = checkDuplicateTableWrite(self, rootPath, newRoot)
-		if not shouldProceed then
-			return
-		end
+		newRoot = checkDuplicateTableWrite(self, rootPath, newRoot)
 	end
 
 	const ok, err = validateWrite(self, rootPath, newRoot)
@@ -505,13 +467,13 @@ function Mutator.applyRootSet<T>(self: TM_Internal<T>, newRoot: any)
 	end
 
 	-- Seed the shadow from `oldRoot` BEFORE swapping `self.Raw` —
-	-- `ensureShadowSeeded` reads "current live" off `self.Raw`,
+	-- `Baseline.SeedIfNeeded` reads "current live" off `self.Raw`,
 	-- which is still `oldRoot` at this point.
 	const trackable = shouldTrackChangesAt(self, rootPath)
 	if trackable then
 		-- rootPath is always {}, so this never builds an intermediate spine
 		-- (no opaque-ancestor risk; the root itself can never be opaque).
-		ensureShadowSeeded(self, rootPath, oldRoot, self._changeDetector:GetOpaqueCtx())
+		BaselineModule.SeedIfNeeded(self, rootPath, oldRoot, self._changeDetector:GetOpaqueCtx())
 	end
 
 	-- Swap identity. `oldRoot` keeps its contents (we only repoint references and
@@ -526,6 +488,8 @@ function Mutator.applyRootSet<T>(self: TM_Internal<T>, newRoot: any)
 	-- object are severed (the `{}` case of the ancestor-replacement handling).
 	if not self._suppressLinkFanOut then
 		LinkGroupModule.OnRootReplaced(self)
+		-- Implicit sharing: re-register the new root tree by identity.
+		LinkGroupModule.RegisterSubtree(self, newRoot)
 	end
 
 	-- Fire change events for the full root diff (shadow@{} vs the now-live

@@ -15,7 +15,7 @@
 const PathHelpers = require("./PathHelpers")
 const BatchUtilsModule = require("./BatchUtils")
 const ArrayDiffModule = require("./ArrayDiff")
-const CoverageModule = require("./Coverage")
+const BaselineModule = require("./Baseline")
 const CoalescedFlushModule = require("./CoalescedFlush")
 const TMTypes = require("./TMTypes")
 
@@ -228,23 +228,13 @@ end
 	touched paths are still trackable now that the batch is done.
 ]]
 const function reconcileShadowAfterBatch(self: TableManagerLike, batch: BatchState, branchKeys: { [any]: boolean })
-	const ctx = self._changeDetector:GetOpaqueCtx()
-	-- Skipped through an opaque ancestor (see Coverage.PassesThroughOpaqueAncestor)
-	-- since Materialize can't safely persist there.
+	-- The trackable / opaque-ancestor gate (Materialize can't safely persist
+	-- through an opaque ancestor) lives in `Baseline.Materialize`.
 	for branchKey in branchKeys do
-		const path = { branchKey }
-		if
-			CoverageModule.IsTrackable(self, path) and not CoverageModule.PassesThroughOpaqueAncestor(self, path, ctx)
-		then
-			self._shadow:Materialize(path, self.Raw, ctx)
-		end
+		BaselineModule.Materialize(self, { branchKey })
 	end
 	for _, path in batch.TrackedPaths do
-		if
-			CoverageModule.IsTrackable(self, path) and not CoverageModule.PassesThroughOpaqueAncestor(self, path, ctx)
-		then
-			self._shadow:Materialize(path, self.Raw, ctx)
-		end
+		BaselineModule.Materialize(self, path)
 	end
 end
 

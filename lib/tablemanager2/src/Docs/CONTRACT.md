@@ -191,11 +191,12 @@ For a single change, observed order is:
   manager.
 - A member whose anchor stops resolving to the shared object (the reference was replaced) leaves the
   link; the remaining members keep sharing the original object.
-- **[PLANNED CHANGE]** Under the re-architecture, sharing a table identity *is* linking (any 2+ managers
-  observing one identity, root or interior, propagate), `DuplicateReferenceMode`'s `error`/`warn`/`move`
-  are retired (duplicate references become a supported feature; opt-in `copy` remains), and opacity is
-  the way to opt a region out of propagation. Cross-manager delivery order will be defined explicitly by
-  the Phase 0 propagation-ordering golden.
+- **[IMPLEMENTED, flag-gated]** Sharing a table identity *is* linking: with implicit sharing enabled
+  (`LinkGroup.SetImplicitSharing(true)`; off by default), any table reachable in 2+ managers' trees (root
+  or interior, e.g. `Player.Stats` and `Tycoon.Stats`) auto-links via the same `Link`/fan-out machinery —
+  no explicit `Link` call needed. Opacity is the boundary: an opaque value (or an `OpaqueChildren`
+  child) is never registered and never propagates. Cross-manager delivery order: the *originating*
+  manager's listeners fire before propagated members' (see `Tests/TM/TableManager.shared-baseline.spec`).
 
 ---
 
@@ -203,8 +204,8 @@ For a single change, observed order is:
 
 `Schema`, `OnValidationFailed`, `ListenerFireMode`, `SignalFireMode`, `FlushMode`
 (`"immediate"`/`"coalesced"`), `EnableProxies` (default true; `Proxy`/`GetProxy` unavailable when
-false), `AutoLink`, `IgnoredPaths`, `DuplicateReferenceMode` (**[PLANNED CHANGE]** reduced to opt-in
-`copy`).
+false), `AutoLink`, `IgnoredPaths`, `DuplicateReferenceMode` (`"allow"` default — multi-location
+references are a supported feature; `"copy"` opts out by deep-cloning the value at write time).
 
 ---
 
@@ -214,8 +215,10 @@ false), `AutoLink`, `IgnoredPaths`, `DuplicateReferenceMode` (**[PLANNED CHANGE]
 - Iterate with generic `for`. `pairs`/`ipairs`/`table.*`/`==` against the raw table are unsupported on
   proxies (use the manager's array methods and `Get`).
 - A proxy tracks its live path across array shifts / `MoveTo` / `Swap`.
-- **[PLANNED CHANGE]** Proxy reporting for a table that exists at multiple locations (primary-anchor vs
-  multi-anchor) is an open decision in Phase 5.
+- A table referenced at multiple locations has ONE proxy, reporting a single **primary anchor** —
+  whichever path established its proxy first (`ProxyManager._originalToProxy`'s single-slot-per-identity
+  memo). `GetProxy` at a second location returns that same proxy (and its `GetPath`), not a proxy rooted
+  at the second path.
 
 ---
 

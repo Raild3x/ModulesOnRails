@@ -12,25 +12,16 @@
 	    observers, exactly once each, with a defined order and no missed event.
 
 	The TARGET model is "sharing a table identity = being linked" (implicit
-	propagation, no explicit Link call). That behavior does not exist until
-	Phase 3, so the implicit-propagation assertions are gated behind
-	`IMPLICIT_SHARING_ENABLED`. The explicit-`Link` tests below exercise the
-	same propagation guarantees against today's implementation and become the
-	regression watch the implicit model must keep satisfying.
-
-	When Phase 3 lands: flip `IMPLICIT_SHARING_ENABLED` to true. The
-	"current behavior: unlinked sharing does NOT propagate" test is inverted by
-	the flag (it documents the pre-Phase-3 reality and turns off once implicit
-	propagation is the contract).
+	propagation, no explicit Link call), implemented in Phase 3 behind a runtime
+	flag (`LinkGroup.SetImplicitSharing`). The implicit tests below enable that
+	flag for their duration; the explicit-`Link` tests exercise the same
+	propagation guarantees against the always-on path and are the regression watch
+	the implicit model must keep satisfying.
 ]]
-
--- Phase 3 gate. Flip to `true` when implicit shared-identity propagation lands.
--- Typed `boolean` (not inferred `false`) so both branches stay type-checked and
--- the analyzer does not flag the Phase-3 branch as unreachable.
-local IMPLICIT_SHARING_ENABLED: boolean = false
 
 return function(t: tiniest)
 	local TableManager = require("../../TableManager")
+	local LinkGroup = require("../../LinkGroup")
 	local ReplicationHarness = require("../Helpers/ReplicationHarness")
 
 	local test = t.test
@@ -148,9 +139,21 @@ return function(t: tiniest)
 		end)
 	end)
 
-	describe("Shared interior region — implicit (Phase 3 target)", function()
-		if IMPLICIT_SHARING_ENABLED then
-			test("two managers sharing a table propagate to each other WITHOUT an explicit Link", function()
+	-- Runs `body` with implicit sharing enabled, restoring the flag afterward even
+	-- if an assertion throws (the flag is module-global, so leaking it on would
+	-- affect other specs).
+	local function withImplicitSharing(body: () -> ())
+		LinkGroup.SetImplicitSharing(true)
+		local ok, err = pcall(body)
+		LinkGroup.SetImplicitSharing(false)
+		if not ok then
+			error(err, 0)
+		end
+	end
+
+	describe("Shared interior region — implicit (no explicit Link)", function()
+		test("two managers sharing a table propagate to each other WITHOUT an explicit Link", function()
+			withImplicitSharing(function()
 				local _stats, playerTM, tycoonTM = makeSharedScenario()
 				-- NOTE: no TableManager.Link call — sharing the identity is enough.
 
@@ -169,29 +172,27 @@ return function(t: tiniest)
 				playerTM:Destroy()
 				tycoonTM:Destroy()
 			end)
-		else
-			-- Pre-Phase-3 reality: a shared reference mutates BOTH raw tables (pass
-			-- by reference) but does NOT fire events on the non-writing manager
-			-- without a Link. This documents the starting point; it is removed once
-			-- IMPLICIT_SHARING_ENABLED flips.
-			test("current behavior: unlinked shared region does NOT propagate events", function()
-				local _stats, playerTM, tycoonTM = makeSharedScenario()
+		end)
+	end)
 
-				local tycoonFires = 0
-				tycoonTM:OnChange({ "Stats" }, function()
-					tycoonFires += 1
-				end)
+	describe("Shared interior region — implicit OFF (default)", function()
+		test("with implicit sharing disabled, an unlinked shared region does NOT propagate events", function()
+			-- Default behavior: a shared reference mutates BOTH raw tables (pass by
+			-- reference) but fires events only on the writing manager.
+			local _stats, playerTM, tycoonTM = makeSharedScenario()
 
-				playerTM:Set({ "Stats", "health" }, 50)
-
-				expect(tycoonFires).is(0)
-				-- Raw IS shared by reference, so the value is present even though no
-				-- event fired on tycoon.
-				expect(tycoonTM.Raw.Stats.health).is(50)
-
-				playerTM:Destroy()
-				tycoonTM:Destroy()
+			local tycoonFires = 0
+			tycoonTM:OnChange({ "Stats" }, function()
+				tycoonFires += 1
 			end)
-		end
+
+			playerTM:Set({ "Stats", "health" }, 50)
+
+			expect(tycoonFires).is(0)
+			expect(tycoonTM.Raw.Stats.health).is(50)
+
+			playerTM:Destroy()
+			tycoonTM:Destroy()
+		end)
 	end)
 end

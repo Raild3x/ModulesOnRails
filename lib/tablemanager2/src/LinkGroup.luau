@@ -838,6 +838,104 @@ local function checkAutoLink(tm: TableManagerLike, writePath: PathArray, value: 
 	end
 end
 
+--------------------------------------------------------------------------------
+--// Implicit sharing (Phase 3) //--
+--
+-- "Sharing a table identity = being linked." When enabled, any table reachable
+-- in 2+ managers' trees (by identity, at ANY depth — not just manager roots like
+-- AutoLink) is auto-linked at its location in each, so a change via one
+-- propagates to the others through the SAME proven fan-out path as an explicit
+-- `Link`. Discovery is by a global identity -> owners registry, populated as
+-- tables enter a manager's tree (construction / table writes / inserts).
+--
+-- Gated by a runtime flag (default off) so existing behavior is unchanged until
+-- validated; the Phase 0 shared-baseline goldens flip it on. Opacity is the
+-- boundary: an opaque value (or an `OpaqueChildren` child) is not walked, so it
+-- is never registered and never propagates — see `registerSubtree`.
+--------------------------------------------------------------------------------
+
+local IMPLICIT_SHARING = false
+
+-- Identity -> set of managers that currently contain that table. Both levels are
+-- weak-keyed so a collected table or manager drops out automatically (the index
+-- never pins anything alive). Stale entries are harmless: `registerOwner`'s
+-- auto-link is path-checked, so an owner that no longer holds the table is
+-- skipped (its path resolves to nil).
+local TABLE_TO_OWNERS: { [any]: { [any]: true } } = setmetatable({}, { __mode = "k" }) :: any
+
+-- Resolves the live path to `target` within `manager`, preferring the proxy
+-- graph (correct across array shifts / MoveTo / Swap) and falling back to a DFS
+-- of the raw tree. nil if `target` is not (or no longer) in the manager.
+local function pathOfTableIn(manager: TableManagerLike, target: any): PathArray?
+	local proxyManager = manager._proxyManager
+	if proxyManager then
+		local existing = proxyManager:GetProxyFromOriginal(target)
+		if existing ~= nil then
+			local livePath = proxyManager:GetPath(existing)
+			if livePath ~= nil then
+				return livePath
+			end
+		end
+	end
+	return findPathOf(manager:Get({}, true), target)
+end
+
+-- Records `manager` as an owner of table `t`, auto-linking it with any existing
+-- owners first. The link is path-checked on both sides, so a stale owner entry
+-- (a manager that no longer holds `t`) is silently skipped.
+local function registerOwner(manager: TableManagerLike, t: any)
+	local owners = TABLE_TO_OWNERS[t]
+	if owners == nil then
+		owners = setmetatable({}, { __mode = "k" }) :: any
+		TABLE_TO_OWNERS[t] = owners
+	end
+	if owners[manager] then
+		return
+	end
+	for other in owners do
+		if other ~= manager and not (other :: TableManagerLike)._Destroyed then
+			local pOther = pathOfTableIn(other, t)
+			local pSelf = pathOfTableIn(manager, t)
+			if pOther ~= nil and pSelf ~= nil then
+				link { { other, pOther }, { manager, pSelf } }
+			end
+		end
+	end
+	owners[manager] = true
+end
+
+-- Walks `value`'s table graph (cycle-guarded) registering each node as owned by
+-- `manager`. Stops at the opacity boundary: an opaque table is neither registered
+-- nor descended into, and the table children of an `OpaqueChildren` parent are
+-- skipped — so opaque regions never participate in implicit sharing.
+local function registerSubtree(manager: TableManagerLike, value: any)
+	if not IMPLICIT_SHARING or type(value) ~= "table" then
+		return
+	end
+	local ctx = manager._changeDetector:GetOpaqueCtx()
+	local seen: { [any]: true } = {}
+	local function recurse(node: any)
+		if type(node) ~= "table" or seen[node] then
+			return
+		end
+		if ctx ~= nil and ctx.isOpaque(node) then
+			return
+		end
+		seen[node] = true
+		registerOwner(manager, node)
+		local childrenOpaque = ctx ~= nil and ctx.hasOpaqueChildren(node)
+		if childrenOpaque then
+			return -- direct table children are opaque leaves: do not descend
+		end
+		for _, child in node do
+			if type(child) == "table" then
+				recurse(child)
+			end
+		end
+	end
+	recurse(value)
+end
+
 return {
 	Link = link,
 	GetOrCreateGroup = getOrCreateGroup,
@@ -852,4 +950,12 @@ return {
 	FindPathOf = findPathOf,
 	ResolveSharedShadow = resolveSharedShadow,
 	RecomputeSharingForManager = recomputeSharingForManager,
+	-- Implicit sharing (Phase 3)
+	RegisterSubtree = registerSubtree,
+	SetImplicitSharing = function(enabled: boolean)
+		IMPLICIT_SHARING = enabled
+	end,
+	IsImplicitSharing = function(): boolean
+		return IMPLICIT_SHARING
+	end,
 }

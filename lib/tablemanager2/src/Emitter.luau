@@ -16,7 +16,7 @@ const BatchFlushModule = require("./BatchFlush")
 const ArrayDiffModule = require("./ArrayDiff")
 const ChangeDetectorModule = require("./ChangeDetector")
 const LinkGroupModule = require("./LinkGroup")
-const CoverageModule = require("./Coverage")
+const BaselineModule = require("./Baseline")
 const Diff = require("./Diff")
 const TMTypes = require("./TMTypes")
 
@@ -220,21 +220,15 @@ function Emitter.fireArrayOperation(
 	end
 
 	-- Array ops are synthetic (never diffed against the shadow), but the
-	-- shadow still needs to end up reflecting the array's new contents so a
+	-- baseline still needs to end up reflecting the array's new contents so a
 	-- LATER flush at/above `basePath` (e.g. its parent table being replaced)
-	-- diffs against current data instead of a stale pre-op copy. Only
-	-- attempted when this op was actually trackable, so an unobserved
-	-- array's shadow stays untouched (no wasted copy); `Materialize` is
-	-- otherwise idempotent/safe whether or not `basePath` was already seeded.
-	-- Skipped entirely if `basePath` passes through an opaque ancestor — see
-	-- Coverage.PassesThroughOpaqueAncestor; the shadow can't safely persist
-	-- through one, so that array's shadow just stays unseeded.
-	if CoverageModule.IsTrackable(manager, basePath) then
-		const ctx = manager._changeDetector:GetOpaqueCtx()
-		if not CoverageModule.PassesThroughOpaqueAncestor(manager, basePath, ctx) then
-			manager._shadow:Materialize(basePath, manager.Raw, ctx)
-		end
-	end
+	-- diffs against current data instead of a stale pre-op copy. Applied
+	-- INCREMENTALLY (the same known op, not a full re-copy of the array) — see
+	-- `Baseline.ApplyArrayOp`, which also owns the trackable / opaque-ancestor
+	-- gate and falls back to a full `Materialize` the first time this array is
+	-- tracked.
+	const arrayOpValue = if eventName == "ArrayRemoved" then nil else payload.NewValue
+	BaselineModule.ApplyArrayOp(manager, basePath, eventName, payload.Index, arrayOpValue)
 end
 
 --[[

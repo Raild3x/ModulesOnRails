@@ -43,7 +43,14 @@ export type Proxy<T, S> = ProxyManagerModule.Proxy<T, S>
 -- at write time; the literal value stored at the path is always the bare inner.
 export type OpaqueWrapper = OpaqueRegistryModule.Wrapper
 
-export type DuplicateReferenceMode = "error" | "warn" | "allow" | "move" | "copy"
+-- "allow" (default): a table written to a second location is a SUPPORTED
+-- multi-location reference, not an error — both paths share identity, and the
+-- write fires its own independent change events at the new path. The proxy
+-- graph still reports a single "primary" anchor (whichever path established
+-- the value's proxy first; see `ProxyManager._originalToProxy`). "copy": opt
+-- OUT of sharing for this write by deep-cloning the value first, so the new
+-- path gets its own, independent identity instead.
+export type DuplicateReferenceMode = "allow" | "copy"
 
 -- Re-export of `ListenerRegistry.FireMode` for config-surface convenience.
 export type ListenerFireMode = ListenerRegistryModule.FireMode
@@ -157,7 +164,7 @@ export type Linker = {
 	.ListenerFireMode ListenerFireMode? -- Controls how listener callbacks (OnChange, OnValueChange, etc.) are scheduled when fired. Defaults to "immediate".
 	.SignalFireMode SignalFireMode? -- Controls how the per-change Signals (ValueChanged, KeyAdded, etc.) are scheduled when fired. Defaults to "immediate".
 	.FlushMode FlushMode? -- Controls WHEN a direct write's diff+fire+reconcile cycle runs. Defaults to "immediate". See `FlushMode`.
-	.DuplicateReferenceMode DuplicateReferenceMode? -- Experimental
+	.DuplicateReferenceMode DuplicateReferenceMode? -- Defaults to "allow" (multi-location references are supported). See `DuplicateReferenceMode`.
 	.EnableProxies boolean? -- Defaults to true. When false, `Proxy`/`GetProxy` are unavailable.
 	.AutoLink boolean? -- When true, this manager auto-links (via `tm.Linker`) with any OTHER AutoLink manager with shared tables
 	.IgnoredPaths { Path }? -- Paths (and their descendants) that skip diff/snapshot/event work entirely; see `SetPathIgnored`.
@@ -402,7 +409,6 @@ export type TM_Internal<T = { [any]: any }> = TableManager<T> & {
 	_schema: SchemaCheck?,
 	_onValidationFailed: ((path: PathArray, value: any, err: string) -> ())?,
 	_duplicateReferenceMode: DuplicateReferenceMode,
-	_isDuplicateMoveInProgress: boolean?,
 	_Destroyed: boolean?,
 	-- Batch state
 	_batchDepth: number,

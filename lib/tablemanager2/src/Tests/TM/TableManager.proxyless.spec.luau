@@ -195,7 +195,7 @@ return function(t: tiniest)
 			local ok = pcall(function()
 				local manager = TableManager.new(
 					{ player = { health = 100 } },
-					{ EnableProxies = false, DuplicateReferenceMode = "warn" }
+					{ EnableProxies = false, DuplicateReferenceMode = "copy" }
 				)
 				manager:Destroy()
 			end)

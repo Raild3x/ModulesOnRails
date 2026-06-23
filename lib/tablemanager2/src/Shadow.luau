@@ -49,6 +49,20 @@ export type Shadow = {
 	--- tables) and then `Reconcile`s the leaf. Safe to call on an
 	--- already-materialized path.
 	Materialize: (self: Shadow, path: PathArray, live: any, ctx: Diff.Ctx?) -> (),
+	--- Applies a known array mutation (insert/remove/set, exactly as already
+	--- applied to `live`) directly to the existing mirror array at `path`,
+	--- instead of re-copying the whole array. Returns `false` (no-op) when
+	--- `path` has no materialized mirror array yet — the caller should fall
+	--- back to `Materialize` in that case.
+	ApplyArrayOp: (
+		self: Shadow,
+		path: PathArray,
+		live: any,
+		opKind: "ArrayInserted" | "ArrayRemoved" | "ArraySet",
+		index: number,
+		newValue: any,
+		ctx: Diff.Ctx?
+	) -> boolean,
 	--- Drops the mirror subtree at `path`. No-op if `path`'s parent isn't materialized.
 	Release: (self: Shadow, path: PathArray) -> (),
 	--- Like `Release`, but always operates on THIS shadow's own mirror, never
@@ -209,6 +223,50 @@ function Shadow.Materialize(self: Shadow, path: PathArray, live: any, ctx: Diff.
 		node = node[segment]
 	end
 	self:Reconcile(path, live, ctx)
+end
+
+--[=[
+	Applies a known array op (insert/remove/set, already applied to `live`)
+	directly to the EXISTING mirror array at `path`, instead of re-copying the
+	whole array via `Materialize`/`Reconcile`. Returns `false` when `path` has
+	no materialized mirror array yet (the caller should fall back to
+	`Materialize`, which seeds it from the current — already post-op — live
+	value, same as before this optimization existed).
+
+	Safe even when the mirror entry at `path` is the LIVE array itself by
+	reference (the array, or an ancestor's `OpaqueChildren` mark, made it
+	opaque): such an entry is BY DEFINITION already current, so this detects
+	that case (identity match) and skips mutating it — applying the op again
+	would double-mutate the live array.
+]=]
+function Shadow.ApplyArrayOp(
+	self: Shadow,
+	path: PathArray,
+	live: any,
+	opKind: "ArrayInserted" | "ArrayRemoved" | "ArraySet",
+	index: number,
+	newValue: any,
+	ctx: Diff.Ctx?
+): boolean
+	const target, routedPath, liveRoot = route(self, path)
+	if target ~= self then
+		return target:ApplyArrayOp(routedPath, liveRoot, opKind, index, newValue, ctx)
+	end
+	const mirrorArray = resolveAtPath(self._mirror, path)
+	if type(mirrorArray) ~= "table" then
+		return false
+	end
+	if mirrorArray == resolveAtPath(live, path) then
+		return true -- stored by reference (opaque): already current by definition.
+	end
+	if opKind == "ArrayInserted" then
+		table.insert(mirrorArray, index, copyForShadow(newValue, ctx))
+	elseif opKind == "ArrayRemoved" then
+		table.remove(mirrorArray, index)
+	elseif opKind == "ArraySet" then
+		mirrorArray[index] = copyForShadow(newValue, ctx)
+	end
+	return true
 end
 
 --[=[

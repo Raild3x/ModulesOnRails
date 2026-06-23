@@ -74,10 +74,10 @@ const EmitterModule = require("./Emitter")
 const MutatorModule = require("./Mutator")
 const OpaqueRegistryModule = require("./OpaqueRegistry")
 const IgnoreTrieModule = require("./IgnoreTrie")
-const ShadowModule = require("./Shadow")
 const CoverageModule = require("./Coverage")
 const ForMapModule = require("./ForMap")
 const CoalescedFlushModule = require("./CoalescedFlush")
+const BaselineModule = require("./Baseline")
 
 --// Types //--
 type Path<S> = PathHelpers.Path<S>
@@ -115,7 +115,7 @@ export type TM_Internal<T = { [any]: any }> = Types.TM_Internal<T>
 type ProxyManager<T> = ProxyManagerModule.ProxyManager<T>
 
 --// Constants //--
-const DEFAULT_DUPLICATE_REFERENCE_MODE: DuplicateReferenceMode = "error"
+const DEFAULT_DUPLICATE_REFERENCE_MODE: DuplicateReferenceMode = "allow"
 const DEFAULT_SIGNAL_FIRE_MODE: Types.SignalFireMode = "bindable"
 const DEFAULT_LISTENER_FIRE_MODE: ListenerRegistryModule.FireMode = "bindable"
 const DEFAULT_FLUSH_MODE: Types.FlushMode = "immediate"
@@ -246,8 +246,10 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	
 	self._opaqueRegistries = OpaqueRegistryModule.NewRegistries()
 	self._ignoreTrie = IgnoreTrieModule.new()
-	-- Persistent diff baseline for observed regions (see Shadow.luau / Flush).
-	self._shadow = ShadowModule.new()
+	-- Persistent diff baseline for observed regions (see Baseline.luau / Flush).
+	-- The concrete store (Shadow or the identity-keyed ShadowNode) is chosen by
+	-- the baseline seam; every access goes through `Baseline.*` or the resolver.
+	self._shadow = BaselineModule.NewStore()
 	-- Phase C: route shadow access for shared link regions to a group-owned
 	-- shadow when sharing is active (no-op until this manager joins a link
 	-- group; `_linkGroups` is nil here, so the resolver returns nil).
@@ -302,6 +304,11 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 		LinkGroupModule.RegisterAutoLink(self)
 	end
 
+	-- Implicit sharing (Phase 3): register every table in the initial tree by
+	-- identity, auto-linking with any other manager that already shares one. No-op
+	-- unless implicit sharing is enabled (see LinkGroup.RegisterSubtree).
+	LinkGroupModule.RegisterSubtree(self, self.Raw)
+
 	debug.profileend()
 	return self :: any
 end
@@ -341,7 +348,6 @@ function TableManager._NotifyApplied<T>(self: TM_Internal<T>, op: AppliedOp)
 	const ok, err = pcall(function()
 		if op.Kind == "Set" then
 			pruneDetachedValue(self, op.OldValue, op.NewValue)
-			const ctx = self._changeDetector:GetOpaqueCtx()
 			-- Phase A: only dispatch if THIS manager observes the path. When it
 			-- doesn't, no listener/signal of its own would fire, so the diff is
 			-- pure waste — skip it. (The shadow is still synced below: this
@@ -362,18 +368,13 @@ function TableManager._NotifyApplied<T>(self: TM_Internal<T>, op: AppliedOp)
 					self._changeDetector:CheckForChangesBetween(op.OldValue, op.NewValue, op.Path, self.Raw)
 				end
 			end
-			-- This bypasses applyWrite entirely (the write already landed via
-			-- the ORIGIN manager), so the shadow needs its own sync here —
-			-- applyWrite's ensureShadowSeeded/_doFlush never run for this path.
-			-- Skipped through an opaque ancestor (see
-			-- Coverage.PassesThroughOpaqueAncestor) since Materialize can't
-			-- safely persist there; the dispatch above already fired correctly
-			-- using op.OldValue/op.NewValue directly, independent of the shadow.
-			if CoverageModule.IsTrackable(self, op.Path) then
-				if not CoverageModule.PassesThroughOpaqueAncestor(self, op.Path, ctx) then
-					self._shadow:Materialize(op.Path, self.Raw, ctx)
-				end
-			end
+			-- This bypasses applyWrite entirely (the write already landed via the
+			-- ORIGIN manager), so the baseline needs its own sync here —
+			-- applyWrite's seed/_doFlush never run for this path. The trackable /
+			-- opaque-ancestor gate (Materialize can't safely persist through an
+			-- opaque ancestor) lives in `Baseline.Materialize`; the dispatch above
+			-- already fired correctly using op.OldValue/op.NewValue directly.
+			BaselineModule.Materialize(self, op.Path)
 		elseif op.Kind == "ArrayInsert" then
 			const index = op.Index :: number
 			shiftArrayKeys(self._proxyManager, self:Get(op.Path, true), index, 1)
@@ -902,9 +903,13 @@ function TableManager.ArrayInsert<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 	-- Update Key metadata for all proxies that were shifted right by this insert.
 	shiftArrayKeys(self._proxyManager, array, pos, 1)
 	-- Direct auto-link for an inserted managed table.
-	if self._autoLink and not self._suppressLinkFanOut then
+	if not self._suppressLinkFanOut then
 		const elementPath = PathHelpers.Append(parsedPath, pos)
-		LinkGroupModule.CheckAutoLink(self :: any, elementPath, unwrappedValue)
+		if self._autoLink then
+			LinkGroupModule.CheckAutoLink(self :: any, elementPath, unwrappedValue)
+		end
+		-- Implicit sharing: an inserted table already present elsewhere auto-links.
+		LinkGroupModule.RegisterSubtree(self :: any, unwrappedValue)
 	end
 
 	if not inBatch then 
@@ -1090,10 +1095,10 @@ end
 ]=]
 function TableManager._doFlush<T>(self: TM_Internal<T>, path: PathArray)
 	const ctx = self._changeDetector:GetOpaqueCtx()
-	const old = self._shadow:Get(path)
+	const old = BaselineModule.Get(self, path)
 	const new_ = self:Get(path :: any, true)
 	self._changeDetector:CheckForChangesBetween(old, new_, path, self.Raw)
-	self._shadow:Reconcile(path, self.Raw, ctx)
+	BaselineModule.Reconcile(self, path, ctx)
 end
 
 --[=[

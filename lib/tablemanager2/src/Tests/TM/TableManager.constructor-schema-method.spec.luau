@@ -62,23 +62,25 @@ return function(t: tiniest)
 			expect(type(capturedMessage)).is("string")
 		end)
 
-		test("default duplicate mode errors on duplicate references", function()
+		test("default duplicate mode (allow) permits multi-location references", function()
 			local manager = TableManager.new {
 				a = { value = 1 },
 				b = { value = 2 },
 			}
 
-			expect(function()
-				manager.Proxy.b = manager.Proxy.a
-			end).fails_with("Duplicate table reference detected")
+			manager.Proxy.b = manager.Proxy.a
 
-			expect(manager.Proxy.a.value).is(1)
-			expect(manager.Proxy.b.value).is(2)
+			-- Both paths now share the SAME identity; the proxy graph reports the
+			-- single primary anchor ("a", established first), so GetProxy at "b"
+			-- resolves to the same proxy as "a".
+			expect(manager.Proxy.b).is(manager.Proxy.a)
+			expect(manager.Proxy.b.value).is(1)
+			expect(manager.Raw.b).is(manager.Raw.a)
 
 			manager:Destroy()
 		end)
 
-		test("DuplicateReferenceMode allow permits duplicate references", function()
+		test("DuplicateReferenceMode allow permits duplicate references (explicit)", function()
 			local manager = TableManager.new({
 				a = { value = 1 },
 				b = { value = 2 },
@@ -94,23 +96,7 @@ return function(t: tiniest)
 			manager:Destroy()
 		end)
 
-		test("DuplicateReferenceMode warn permits duplicate references", function()
-			local manager = TableManager.new({
-				a = { value = 1 },
-				b = { value = 2 },
-			}, {
-				DuplicateReferenceMode = "warn",
-			})
-
-			manager.Proxy.b = manager.Proxy.a
-
-			expect(manager.Proxy.b).is(manager.Proxy.a)
-			expect(manager.Proxy.b.value).is(1)
-
-			manager:Destroy()
-		end)
-
-		test("DuplicateReferenceMode copy is not implemented", function()
+		test("DuplicateReferenceMode copy writes a fresh clone instead of sharing identity", function()
 			local manager = TableManager.new({
 				a = { value = 1 },
 				b = { value = 2 },
@@ -118,24 +104,14 @@ return function(t: tiniest)
 				DuplicateReferenceMode = "copy",
 			})
 
-			expect(function()
-				manager.Proxy.b = manager.Proxy.a
-			end).fails_with("DuplicateReferenceMode 'copy' is not implemented yet")
-
-			manager:Destroy()
-		end)
-
-		test("DuplicateReferenceMode move relocates duplicate references", function()
-			local manager = TableManager.new({
-				a = { value = 1 },
-				b = { value = 2 },
-			}, {
-				DuplicateReferenceMode = "move",
-			})
-
 			manager.Proxy.b = manager.Proxy.a
 
-			expect(manager.Proxy.a).is(nil)
+			-- The write succeeded, but "b" got an INDEPENDENT clone, not the same
+			-- identity as "a" — mutating one must not affect the other.
+			expect(manager.Raw.b).never_is(manager.Raw.a)
+			expect(manager.Proxy.b.value).is(1)
+
+			manager.Proxy.a.value = 99
 			expect(manager.Proxy.b.value).is(1)
 
 			manager:Destroy()
