@@ -15,9 +15,9 @@
 	- a `ListenerRegistry` listener covering `path` (`CoversChangesAt`);
 	- a connection on one of the 7 global Signals (each fires for ANY path,
 	  so any connection forces full tracking);
-	- an active link group (cross-manager fan-out rides inside the same
-	  diff-dispatch this gate would otherwise skip — see
-	  `LinkGroup.FanOutSet`/`FanOutArrayOp`).
+	- co-observing a shared table identity with another manager (cross-manager
+	  fan-out rides inside the same diff-dispatch this gate would otherwise skip —
+	  see `Propagation.FanOutSet`/`FanOutArrayOp`).
 
 	False means a write at `path` is provably unobservable right now.
 ]=]
@@ -57,10 +57,11 @@ function Coverage.IsLocallyObserved(self: TableManagerLike, path: PathArray): bo
 end
 
 function Coverage.IsTrackable(self: TableManagerLike, path: PathArray): boolean
-	-- An active link group forces tracking even with no local observers: a
-	-- member's own write must still diff so it can fan out to members that DO
-	-- observe (cross-manager fan-out rides inside this diff-dispatch).
-	if self._linkGroups ~= nil and self._linkGroups[1] ~= nil then
+	-- Co-observing a shared identity forces tracking even with no local
+	-- observers: a member's own write must still diff so it can fan out to
+	-- managers that DO observe (cross-manager fan-out rides inside this
+	-- diff-dispatch). See `Propagation` for the `_sharesObservers` flag.
+	if self._sharesObservers then
 		return true
 	end
 	return Coverage.IsLocallyObserved(self, path)

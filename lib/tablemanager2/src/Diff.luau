@@ -46,7 +46,36 @@ export type Snapshot = {
 export type Ctx = {
 	isOpaque: (ref: any) -> boolean,
 	hasOpaqueChildren: (ref: any) -> boolean,
+	-- Resolves a baseline content node to the live identity it mirrors (nil for
+	-- anything that isn't such a node). Lets the opaque branch compare a
+	-- content-node slot by the child's real identity rather than the copy.
+	identityOf: ((node: any) -> any?)?,
 }
+
+-- An entry collected into an `arraySink` (see `diff`): a changed array-like node
+-- excluded from the dict diff tree so the flush can re-diff it via LCS into
+-- shift-faithful `Array*` events. `path` is relative to the diff root.
+export type ArraySinkEntry = { path: Path, old: any, new: any }
+
+-- True if `t` is a Lua sequence (array-like): empty, or keys are exactly the
+-- contiguous integers 1..#t. Used only in array-aware diff mode (`arraySink`
+-- present) to decide whether a both-tables node is an array to LCS-diff rather
+-- than dict-diff positionally.
+local function isSequence(t: { [any]: any }): boolean
+	local n = 0
+	for k in t do
+		n += 1
+		if type(k) ~= "number" or k % 1 ~= 0 or k < 1 then
+			return false
+		end
+	end
+	for i = 1, n do
+		if t[i] == nil then
+			return false
+		end
+	end
+	return true
+end
 
 -- ─── Opacity helpers ─────────────────────────────────────────────────────────
 
@@ -78,12 +107,22 @@ end
 -- comparison so a non-opaque side (its own `t[k]` may be a frozen clone,
 -- e.g. `before.value[k]`/`after.value[k]`) still reports the real reference,
 -- not the clone, as `old`/`new`.
-local function liveValue(v: any, snap: Snapshot?): any
+local function liveValue(v: any, snap: Snapshot?, ctx: Ctx?): any
+	if snap ~= nil and snap.ref ~= nil then
+		return snap.ref
+	end
+	-- No live ref to read from the snapshot (snapshot-less call shape, or a
+	-- scalar snapshot): `v` itself may be a baseline CONTENT NODE standing in for
+	-- an opaque viewer's child slot. Resolve it to the live identity it mirrors so
+	-- the opaque comparison is by reference, not against the (always-unequal) copy.
+	if ctx ~= nil and ctx.identityOf ~= nil then
+		local identity = ctx.identityOf(v)
+		if identity ~= nil then
+			return identity
+		end
+	end
 	if snap == nil then
 		return v
-	end
-	if snap.ref ~= nil then
-		return snap.ref
 	end
 	return snap.value
 end
@@ -188,7 +227,9 @@ local function diff_tables(
 	t2: { [any]: any },
 	snap1: Snapshot?,
 	snap2: Snapshot?,
-	ctx: Ctx?
+	ctx: Ctx?,
+	path: Path?,
+	arraySink: { ArraySinkEntry }?
 ): DiffTree?
 	local tree: DiffTree = {}
 	local visited = {}
@@ -211,7 +252,7 @@ local function diff_tables(
 			isOpaqueValue(v1, child_snap1, ctx, parentChildrenOpaque)
 			or isOpaqueValue(v2, child_snap2, ctx, parentChildrenOpaque)
 		then
-			local leaf = make_opaque_leaf(liveValue(v1, child_snap1), liveValue(v2, child_snap2))
+			local leaf = make_opaque_leaf(liveValue(v1, child_snap1, ctx), liveValue(v2, child_snap2, ctx))
 			if leaf then
 				tree[k] = leaf
 			end
@@ -227,13 +268,22 @@ local function diff_tables(
 		if v2 == nil then
 			tree[k] = make_removal_tree(v1, ctx)
 		elseif is_v1_table and is_v2_table then
-			local ref_changed = ref1 ~= nil and ref2 ~= nil and ref1 ~= ref2
-			local child_tree = diff_tables(v1, v2, child_snap1, child_snap2, ctx)
+			-- Array-aware mode: a both-tables node that is array-like on BOTH sides
+			-- is collected for LCS re-diffing and excluded from the dict tree (so it
+			-- never appears as positional changes in the OriginDiff). Creation/removal
+			-- (one side not a table) still flows through the dict add/remove paths.
+			if arraySink ~= nil and isSequence(v1) and isSequence(v2) then
+				table.insert(arraySink, { path = PathHelpers.Append(path :: Path, k), old = v1, new = v2 })
+			else
+				local ref_changed = ref1 ~= nil and ref2 ~= nil and ref1 ~= ref2
+				local childPath: Path? = if arraySink ~= nil then PathHelpers.Append(path :: Path, k) else nil
+				local child_tree = diff_tables(v1, v2, child_snap1, child_snap2, ctx, childPath, arraySink)
 
-			if ref_changed and child_tree == nil then
-				tree[k] = { type = "changed", old = v1, new = v2, children = nil }
-			elseif child_tree ~= nil then
-				tree[k] = make_descendant_node(v1, v2, child_tree)
+				if ref_changed and child_tree == nil then
+					tree[k] = { type = "changed", old = v1, new = v2, children = nil }
+				elseif child_tree ~= nil then
+					tree[k] = make_descendant_node(v1, v2, child_tree)
+				end
 			end
 		elseif is_v1_table and not is_v2_table then
 			local children: DiffTree = {}
@@ -276,7 +326,7 @@ local function diff_tables(
 
 		local child_snap2 = if snap2 and snap2.children then snap2.children[k] else nil
 		if isOpaqueValue(v2, child_snap2, ctx, parentChildrenOpaque) then
-			tree[k] = { type = "added", old = nil, new = liveValue(v2, child_snap2), children = nil }
+			tree[k] = { type = "added", old = nil, new = liveValue(v2, child_snap2, ctx), children = nil }
 		else
 			tree[k] = make_addition_tree(v2, ctx)
 		end
@@ -285,19 +335,32 @@ local function diff_tables(
 	return if next(tree) ~= nil then tree else nil
 end
 
-local function diff(v1: any, v2: any, snap1: Snapshot?, snap2: Snapshot?, ctx: Ctx?): DiffNode?
+local function diff(
+	v1: any,
+	v2: any,
+	snap1: Snapshot?,
+	snap2: Snapshot?,
+	ctx: Ctx?,
+	arraySink: { ArraySinkEntry }?
+): DiffNode?
 	-- Opacity overrides the table/scalar branching entirely: an opaque value
 	-- (or nil) on either side is compared like a scalar, regardless of what
 	-- the other side is.
 	if isOpaqueValue(v1, snap1, ctx, false) or isOpaqueValue(v2, snap2, ctx, false) then
-		return make_opaque_leaf(liveValue(v1, snap1), liveValue(v2, snap2))
+		return make_opaque_leaf(liveValue(v1, snap1, ctx), liveValue(v2, snap2, ctx))
 	end
 
 	local is_v1_table = type(v1) == "table"
 	local is_v2_table = type(v2) == "table"
 
 	if is_v1_table and is_v2_table then
-		local children = diff_tables(v1, v2, snap1, snap2, ctx)
+		-- Array-aware mode: the root itself being an array on both sides is
+		-- collected for LCS re-diffing and produces no dict tree.
+		if arraySink ~= nil and isSequence(v1) and isSequence(v2) then
+			table.insert(arraySink, { path = {}, old = v1, new = v2 })
+			return nil
+		end
+		local children = diff_tables(v1, v2, snap1, snap2, ctx, {}, arraySink)
 		if children then
 			-- Wrap in a root node with descendantChanged type
 			return make_descendant_node(v1, v2, children)

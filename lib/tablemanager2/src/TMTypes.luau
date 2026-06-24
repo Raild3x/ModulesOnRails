@@ -72,7 +72,7 @@ export type SignalFireMode = "immediate" | "deferred" | "bindable" | "coalesced"
 export type FlushMode = "immediate" | "coalesced"
 
 --------------------------------------------------------------------------------
---// Link type shapes (implemented by LinkGroup.luau / Linker.luau) //--
+--// Cross-manager fan-out type shapes (see Propagation.luau / Linker.luau) //--
 --------------------------------------------------------------------------------
 
 type opKind = "Set" | "ArrayInsert" | "ArrayRemove" | "ArraySet"
@@ -95,19 +95,6 @@ export type AppliedOp = {
 	OriginHasNoOpacity: boolean?,
 }
 
--- An op relative to the shared object, computed by the fan-out hooks before
--- being translated into each member's own coordinates.
-export type RelativeOp = {
-	Kind: opKind,
-	RelativePath: PathArray,
-	NewValue: any?,
-	OldValue: any?,
-	Index: number?,
-	-- See `AppliedOp.Diff`/`OriginHasNoOpacity`; carried through `NotifyChange`.
-	Diff: DiffNode?,
-	OriginHasNoOpacity: boolean?,
-}
-
 -- Payload shape passed from `fireArrayOperation` for array-op fan-out.
 export type ArrayOpPayload = {
 	NewValue: any?,
@@ -115,35 +102,12 @@ export type ArrayOpPayload = {
 	Index: number?,
 }
 
--- A positional 2-tuple { manager, path } naming a shared node inside a TM.
--- `manager` is typed loosely (`any`, not `TableManagerLike`) to avoid an
--- irregular recursive instantiation of `TM_Internal` (TM_Internal<T> ->
--- LinkGroup -> TableManagerLike -> TM_Internal<any>), which the Luau
--- type-checker cannot resolve and would poison every field of `TM_Internal`.
-export type LinkAnchor = { any | Path<any> }
-
-export type LinkGroup = {
-	_object: any,
-	_members: { any },
-	_destroyed: boolean,
-	MemberRemoved: Signal<(manager: any) -> (), any>,
-	Dissolved: Signal<() -> ()>,
-	Add: (self: LinkGroup, manager: any, path: Path<any>?) -> (),
-	Remove: (self: LinkGroup, manager: any) -> (),
-	Members: (self: LinkGroup) -> { any },
-	HasMember: (self: LinkGroup, manager: any) -> boolean,
-	GetAnchorPath: (self: LinkGroup, manager: any) -> PathArray?,
-	NotifyChange: (self: LinkGroup, originManager: any, op: RelativeOp) -> (),
-	Destroy: (self: LinkGroup) -> (),
-}
-
+-- Slim introspection facade over the implicit-sharing model (`tm.Linker`).
+-- "Linked" = co-observing at least one live table identity; there is no manual
+-- link/unlink (sharing a table identity IS the link — see `Propagation`).
 export type Linker = {
-	With: (self: Linker, other: any, selfPath: Path<any>?, otherPath: Path<any>?) -> (),
-	Ensure: (self: Linker, path: Path<any>?) -> (),
-	Unlink: (self: Linker, target: any?) -> (),
 	GetManagers: (self: Linker) -> { any },
 	IsLinkedWith: (self: Linker, other: any) -> boolean,
-	GetGroups: (self: Linker) -> { LinkGroup },
 }
 
 --------------------------------------------------------------------------------
@@ -160,15 +124,12 @@ export type Linker = {
 	.FlushMode FlushMode? -- Controls WHEN a direct write's diff+fire+reconcile cycle runs. Defaults to "immediate". See `FlushMode`.
 	.DuplicateReferenceMode DuplicateReferenceMode? -- Defaults to "allow" (multi-location references are supported). See `DuplicateReferenceMode`.
 	.EnableProxies boolean? -- Defaults to true. When false, `Proxy`/`GetProxy` are unavailable.
-	.AutoLink boolean? -- When true, this manager auto-links (via `tm.Linker`) with any OTHER AutoLink manager with shared tables
 	.IgnoredPaths { Path }? -- Paths (and their descendants) that skip diff/snapshot/event work entirely; see `SetPathIgnored`.
 
-	:::caution Auto Linking
-	AutoLinking is an experimental feature.
-	AutoLinking only supports linking with other managers that have AutoLink enabled. If you attempt
-	to link with a manager that does not have AutoLink enabled, the link will not be established. AutoLinking
-	also only works when you are setting/inserting a managed table directly. It will not automatically link
-	nested tables that are placed in bulk. You can use `tm.Linker:Ensure(path)` to link nested tables.
+	:::note Implicit sharing
+	Linking is automatic: any table reachable (transparently) in two or more
+	managers' trees is observed by all of them, and a write through one propagates
+	to the others. Mark a region `Opaque`/`OpaqueChildren` to opt it out.
 	:::
 ]=]
 export type TableManagerConfig = {
@@ -179,7 +140,6 @@ export type TableManagerConfig = {
 	FlushMode: FlushMode?,
 	DuplicateReferenceMode: DuplicateReferenceMode?,
 	EnableProxies: boolean?,
-	AutoLink: boolean?,
 	IgnoredPaths: { Path<any> }?,
 }
 
@@ -416,20 +376,22 @@ export type TM_Internal<T = { [any]: any }> = TableManager<T> & {
 	-- True while a `task.defer` is outstanding to drain `_pendingFlushRoot`.
 	_coalescedFlushScheduled: boolean?,
 
-	-- Link state
-	_linkGroups: { LinkGroup }?,
+	-- Cross-manager sharing state. `_suppressLinkFanOut` guards against
+	-- re-fanning-out while replaying a propagated op. `_sharesObservers` is a
+	-- sticky flag set when this manager comes to co-observe a table identity with
+	-- another, so `Coverage.IsTrackable` forces its writes to flush (so a write by
+	-- a member with no local listeners still diffs and fans out). See `Propagation`.
 	_suppressLinkFanOut: boolean?,
-	-- Set from `Config.AutoLink`; gates the direct write-path auto-link hook.
-	_autoLink: boolean?,
+	_sharesObservers: boolean?,
 	_janitor: Janitor,
 
 	_opaqueRegistries: OpaqueRegistries,
 	_ignoreTrie: IgnoreTrieNode,
 	_shadow: ShadowNode,
-	
+
 	-- Re-fires listeners/signals for an op that has ALREADY been applied to the
-	-- shared raw, WITHOUT mutating or snapshot-diffing. Used only by LinkGroup
-	-- fan-out; `op.Path` is in this manager's own coordinates.
+	-- shared raw, WITHOUT mutating or snapshot-diffing. Used only by cross-manager
+	-- fan-out (see `Propagation`); `op.Path` is in this manager's own coordinates.
 	_NotifyApplied: (self: TM_Internal<T>, op: AppliedOp) -> (),
 	_doFlush: (self: TM_Internal<T>, path: PathArray) -> (),
 }

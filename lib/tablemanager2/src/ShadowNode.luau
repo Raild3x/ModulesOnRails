@@ -14,20 +14,30 @@
 	other operation is handed `live` directly by `Baseline.*` and resolves
 	through the registry from there.
 
-	Opaque values/children are kept BY REFERENCE (never copied, never
-	registered) — identity comparison against them still works, exactly as in
-	the pre-unification `Shadow`.
+	Each table slot's shape — a deep content node vs. the live ref — is chosen by
+	GLOBAL observership (the injected `isObserved` predicate), NOT by the
+	reconciling manager's opacity: a content node iff SOME manager observes the
+	child transparently, otherwise the live ref (opaque to everyone / unobserved —
+	never copied, never walked). Because the choice is global, every manager
+	reconciles a shared slot to the SAME shape, so co-observers that disagree on a
+	child's opacity cannot corrupt each other's baseline. An opaque viewer reading
+	a content-node slot still recovers the child's identity via `IdentityOf`, so
+	identity comparison keeps working exactly as before.
 ]=]
 
 const PathHelpers = require("./PathHelpers")
 const Diff = require("./Diff")
 
 --// Types //--
-type PathArray<S = string> = PathHelpers.PathArray<S>
+type PathArray = PathHelpers.PathArray<string>
 type table = { [any]: any }
 
 export type ShadowNode = {
 	_manager: any,
+	-- Injected at construction (see `new`): the global "is anyone observing this
+	-- table transparently?" predicate. Decides each table slot's shape — content
+	-- node vs. live ref — independently of any one manager's opacity.
+	_isObserved: (child: any) -> boolean,
 	Get: (self: ShadowNode, path: PathArray) -> any,
 	Reconcile: (self: ShadowNode, path: PathArray, live: any, ctx: Diff.Ctx?) -> (),
 	Materialize: (self: ShadowNode, path: PathArray, live: any, ctx: Diff.Ctx?) -> (),
@@ -58,17 +68,39 @@ const ShadowNode_MT = { __index = ShadowNode }
 -- pins live data alive.
 const REGISTRY: { [table]: table } = (setmetatable({}, { __mode = "k" }) :: any) :: { [table]: table }
 
+-- Node -> live identity back-reference. Records, for every content node built by
+-- `copyForShadow`, the live table it mirrors. Weak in BOTH keys and values so it
+-- never pins a node or a live table alive (the baseline must hold copies, not
+-- live data — see `MemoryLeaks.spec`). Read via `ShadowNode.IdentityOf`: lets an
+-- opaque viewer reading a CONTENT-node slot recover the child's real identity to
+-- compare against live, instead of comparing the (always-unequal) copy.
+const IDENTITY_OF: { [table]: any } = (setmetatable({}, { __mode = "kv" }) :: any) :: { [table]: any }
+
+-- Default observership predicate for stores constructed without an injected one
+-- (e.g. the isolated `ShadowNode` unit tests, which never register observership):
+-- treat every table as observed, reproducing the pre-fix "always build a content
+-- node" behavior so those tests stay byte-identical.
+const function DEFAULT_IS_OBSERVED(_child: any): boolean
+	return true
+end
+
 -- Refreshes (or creates) `REGISTRY[value]` to mirror `value`'s CURRENT
--- content, recursing into transparent children. Reuses the SAME node table on
+-- content, recursing into observed children. Reuses the SAME node table on
 -- every call so every other slot already holding a reference to it (from a
 -- different manager, or a different path in this one) sees the refresh
--- without needing to re-fetch it. Opaque values/children are kept BY
--- REFERENCE and are deliberately never registered.
-const function copyForShadow(value: any, ctx: Diff.Ctx?): any
+-- without needing to re-fetch it.
+--
+-- The slot shape is chosen by GLOBAL observership, not by any one manager's
+-- opacity: a table is stored as a content node iff SOME manager observes it
+-- transparently (`isObserved`), otherwise it is kept BY REFERENCE (opaque to
+-- everyone / unobserved — never copied, never walked). Because the gate is
+-- global, every manager reconciles the same slot to the same shape, so two
+-- co-observers with different opacity can no longer corrupt each other.
+const function copyForShadow(value: any, isObserved: (any) -> boolean): any
 	if type(value) ~= "table" then
 		return value
 	end
-	if ctx ~= nil and ctx.isOpaque(value) then
+	if not isObserved(value) then
 		return value
 	end
 	local out = REGISTRY[value]
@@ -78,13 +110,9 @@ const function copyForShadow(value: any, ctx: Diff.Ctx?): any
 	else
 		table.clear(out)
 	end
-	const childrenOpaque = ctx ~= nil and ctx.hasOpaqueChildren(value)
+	IDENTITY_OF[out] = value
 	for k, v in value do
-		if childrenOpaque and type(v) == "table" then
-			out[k] = v
-		else
-			out[k] = copyForShadow(v, ctx)
-		end
+		out[k] = copyForShadow(v, isObserved)
 	end
 	return out
 end
@@ -106,9 +134,24 @@ end
 -- Public API
 -- ---------------------------------------------------------------------------
 
-function ShadowNode.new(manager: any): ShadowNode
-	const self = setmetatable({ _manager = manager }, ShadowNode_MT)
+function ShadowNode.new(manager: any, isObserved: ((child: any) -> boolean)?): ShadowNode
+	const self = setmetatable({
+		_manager = manager,
+		_isObserved = isObserved or DEFAULT_IS_OBSERVED,
+	}, ShadowNode_MT)
 	return (self :: any) :: ShadowNode
+end
+
+--[=[
+	Returns the live identity that the baseline content `node` mirrors, or `nil`
+	if `node` is not a registered content node. Lets the diff's opaque branch
+	compare a content-node slot by the child's real identity (not the copy).
+]=]
+function ShadowNode.IdentityOf(node: any): any
+	if type(node) ~= "table" then
+		return nil
+	end
+	return IDENTITY_OF[node]
 end
 
 --[=[
@@ -116,7 +159,7 @@ end
 	this manager's root node. `nil` when `path` (or an ancestor of it) was
 	never materialized.
 ]=]
-function ShadowNode.Get(self: ShadowNode, path: PathArray<any>): any
+function ShadowNode.Get(self: ShadowNode, path: PathArray): any
 	return resolveAtPath(REGISTRY[self._manager.Raw], path)
 end
 
@@ -127,7 +170,7 @@ end
 ]=]
 function ShadowNode.Reconcile(self: ShadowNode, path: PathArray, live: any, ctx: Diff.Ctx?)
 	const value = resolveAtPath(live, path)
-	const copy = copyForShadow(value, ctx)
+	const copy = copyForShadow(value, self._isObserved)
 	if #path == 0 then
 		return
 	end
@@ -157,7 +200,7 @@ function ShadowNode.Materialize(self: ShadowNode, path: PathArray, live: any, ct
 		const segment = path[i]
 		table.insert(partialPath, segment)
 		if type(node[segment]) ~= "table" then
-			node[segment] = copyForShadow(resolveAtPath(live, partialPath), ctx)
+			node[segment] = copyForShadow(resolveAtPath(live, partialPath), self._isObserved)
 		end
 		node = node[segment]
 	end
@@ -187,11 +230,11 @@ function ShadowNode.ApplyArrayOp(
 		return true -- stored by reference (opaque): already current by definition.
 	end
 	if opKind == "ArrayInserted" then
-		table.insert(mirrorArray, index, copyForShadow(newValue, ctx))
+		table.insert(mirrorArray, index, copyForShadow(newValue, self._isObserved))
 	elseif opKind == "ArrayRemoved" then
 		table.remove(mirrorArray, index)
 	elseif opKind == "ArraySet" then
-		mirrorArray[index] = copyForShadow(newValue, ctx)
+		mirrorArray[index] = copyForShadow(newValue, self._isObserved)
 	end
 	return true
 end

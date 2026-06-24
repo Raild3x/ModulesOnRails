@@ -15,6 +15,7 @@ const PathHelpers = require("./PathHelpers")
 const CoverageModule = require("./Coverage")
 const TMTypes = require("./TMTypes")
 const ShadowNodeModule = require("./ShadowNode")
+const PropagationModule = require("./Propagation")
 
 --// Types //--
 type PathArray = PathHelpers.PathArray
@@ -22,9 +23,12 @@ type TableManagerLike = TMTypes.TableManagerLike
 
 const Baseline = {}
 
--- Creates the baseline store for a new manager (its `self._shadow`).
+-- Creates the baseline store for a new manager (its `self._shadow`). The store
+-- is handed the global `IsObserved` predicate so each table slot's shape
+-- (content node vs. live ref) is keyed on global observership, independent of
+-- this manager's own opacity — see `ShadowNode.copyForShadow`.
 function Baseline.NewStore(manager: TableManagerLike): any
-	return ShadowNodeModule.new(manager)
+	return ShadowNodeModule.new(manager, PropagationModule.IsObserved)
 end
 
 --[[

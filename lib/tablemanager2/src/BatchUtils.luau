@@ -62,9 +62,7 @@ function BatchUtils.GetSnapshotValue(snapshot: ChangeDetector.Snapshot, path: { 
 end
 
 -- Like GetSnapshotValue but returns the ORIGINAL table reference captured at
--- `path` pre-batch (Diff.Snapshot.ref), not the frozen copy. Used by
--- pruneArraysCreatedDuringBatch to detect arrays created during the batch
--- (no pre-batch ref).
+-- `path` pre-batch (Diff.Snapshot.ref), not the frozen copy.
 function BatchUtils.GetSnapshotRef(snapshot: ChangeDetector.Snapshot, path: { any }): any?
 	local snap: any = snapshot.Data
 	for _, key in path do

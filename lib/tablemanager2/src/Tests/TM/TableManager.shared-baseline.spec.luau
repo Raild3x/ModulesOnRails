@@ -1,27 +1,18 @@
 --!strict
 --[[
-	Phase 0 golden specs for the shadow/linking/opacity re-architecture
-	(see ~/.claude/plans/evaluate-if-starting-from-elegant-lagoon.md and
+	Golden specs for shared-region cross-manager propagation (see
+	~/.claude/plans/evaluate-if-starting-from-elegant-lagoon.md and
 	Docs/CONTRACT.md §8).
 
-	These lock the OBSERVABLE behavior of shared regions and cross-manager
-	propagation so the rewrite is held to it:
-
-	  * Tasks 0.3 / 0.5 — a region shared by two managers (interior, e.g.
-	    Player.Stats and Tycoon.Stats) propagates a single change to BOTH
-	    observers, exactly once each, with a defined order and no missed event.
-
-	The TARGET model is "sharing a table identity = being linked" (implicit
-	propagation, no explicit Link call), implemented in Phase 3 behind a runtime
-	flag (`LinkGroup.SetImplicitSharing`). The implicit tests below enable that
-	flag for their duration; the explicit-`Link` tests exercise the same
-	propagation guarantees against the always-on path and are the regression watch
-	the implicit model must keep satisfying.
+	The model is "sharing a table identity = being linked": a region shared by two
+	managers (interior, e.g. Player.Stats and Tycoon.Stats) propagates a single
+	change to BOTH observers, exactly once each, with a defined order and no missed
+	event — with NO explicit link call. Propagation rides the identity-keyed
+	observer registry (see `Propagation`); opacity is the opt-out.
 ]]
 
 return function(t: tiniest)
 	local TableManager = require("../../TableManager")
-	local LinkGroup = require("../../LinkGroup")
 	local ReplicationHarness = require("../Helpers/ReplicationHarness")
 
 	local test = t.test
@@ -58,10 +49,9 @@ return function(t: tiniest)
 		return nil
 	end
 
-	describe("Shared interior region — explicit Link (current behavior, must keep passing)", function()
+	describe("Shared interior region — implicit (no explicit link)", function()
 		test("a single write propagates ValueChanged to BOTH observers exactly once", function()
 			local _stats, playerTM, tycoonTM = makeSharedScenario()
-			TableManager.Link({ { playerTM, "Stats" }, { tycoonTM, "Stats" } })
 
 			local stream: { any } = {}
 			local recP = ReplicationHarness.RecordEvents(playerTM, "player", stream)
@@ -91,7 +81,6 @@ return function(t: tiniest)
 
 		test("propagation order is defined: the originating manager fires before the propagated one", function()
 			local _stats, playerTM, tycoonTM = makeSharedScenario()
-			TableManager.Link({ { playerTM, "Stats" }, { tycoonTM, "Stats" } })
 
 			local stream: { any } = {}
 			local recP = ReplicationHarness.RecordEvents(playerTM, "player", stream)
@@ -99,7 +88,7 @@ return function(t: tiniest)
 
 			playerTM:Set({ "Stats", "mana" }, 10)
 
-			-- LOCKED ORDER (Phase 0 decision): origin first, then propagated members.
+			-- LOCKED ORDER: origin first, then propagated observers.
 			local originIndex = firstIndexOf(stream, "player", "ValueChanged")
 			local propagatedIndex = firstIndexOf(stream, "tycoon", "ValueChanged")
 			expect(originIndex).exists()
@@ -114,7 +103,6 @@ return function(t: tiniest)
 
 		test("no missed event regardless of which side originates the write", function()
 			local _stats, playerTM, tycoonTM = makeSharedScenario()
-			TableManager.Link({ { playerTM, "Stats" }, { tycoonTM, "Stats" } })
 
 			local playerFires, tycoonFires = 0, 0
 			playerTM:OnChange({ "Stats" }, function()
@@ -139,61 +127,37 @@ return function(t: tiniest)
 		end)
 	end)
 
-	-- Runs `body` with implicit sharing DISABLED, restoring the default (on) even
-	-- if an assertion throws (the flag is module-global, so leaking it would
-	-- affect other specs).
-	local function withImplicitSharingDisabled(body: () -> ())
-		LinkGroup.SetImplicitSharing(false)
-		local ok, err = pcall(body)
-		LinkGroup.SetImplicitSharing(true)
-		if not ok then
-			error(err, 0)
-		end
-	end
+	describe("Shared interior region — opacity is the boundary", function()
+		test("a manager that marks a shared region opaque is not a co-observer of it", function()
+			-- `playerTM` marks its `Stats` opaque (via Set, the supported way — the
+			-- bare `stats` is stored and marked opaque); the opaque value is never
+			-- registered, so it does not participate in implicit sharing even though
+			-- `tycoonTM` references the same live table transparently.
+			local stats = { health = 100, mana = 50 }
+			local tycoonTM = TableManager.new { Stats = stats }
+			-- Construct WITHOUT `stats` so it is never registered transparently first,
+			-- then attach it as an opaque leaf.
+			local playerTM = TableManager.new { Owner = "Bob" }
+			playerTM:Set("Stats", TableManager.Opaque(stats))
 
-	describe("Shared interior region — implicit (default; no explicit Link)", function()
-		test("two managers sharing a table propagate to each other WITHOUT an explicit Link", function()
-			-- Implicit sharing is ON by default — sharing the `stats` identity is
-			-- enough; no TableManager.Link call.
-			local _stats, playerTM, tycoonTM = makeSharedScenario()
+			expect(playerTM.Linker:IsLinkedWith(tycoonTM)).never_is_true()
+			expect(tycoonTM.Linker:IsLinkedWith(playerTM)).never_is_true()
 
-			local stream: { any } = {}
-			local recP = ReplicationHarness.RecordEvents(playerTM, "player", stream)
-			local recT = ReplicationHarness.RecordEvents(tycoonTM, "tycoon", stream)
+			local playerFires = 0
+			playerTM:OnChange({ "Stats" }, function()
+				playerFires += 1
+			end)
 
-			playerTM:Set({ "Stats", "health" }, 50)
+			-- `tycoon` writes the shared table transparently; `player` was never
+			-- registered as an observer of it, so it receives no cross-manager event
+			-- (the shared raw still updates by reference).
+			tycoonTM:Set({ "Stats", "health" }, 50)
 
-			expect(#entriesFor(stream, "player", "ValueChanged")).is(1)
-			expect(#entriesFor(stream, "tycoon", "ValueChanged")).is(1)
-			expect(tycoonTM.Raw.Stats.health).is(50)
+			expect(playerFires).is(0)
+			expect(playerTM.Raw.Stats.health).is(50)
 
-			recP.Disconnect()
-			recT.Disconnect()
 			playerTM:Destroy()
 			tycoonTM:Destroy()
-		end)
-	end)
-
-	describe("Shared interior region — implicit escape hatch (disabled)", function()
-		test("with implicit sharing disabled, an unlinked shared region does NOT propagate events", function()
-			withImplicitSharingDisabled(function()
-				-- With the escape hatch off, a shared reference still mutates BOTH raw
-				-- tables (pass by reference) but fires events only on the writing manager.
-				local _stats, playerTM, tycoonTM = makeSharedScenario()
-
-				local tycoonFires = 0
-				tycoonTM:OnChange({ "Stats" }, function()
-					tycoonFires += 1
-				end)
-
-				playerTM:Set({ "Stats", "health" }, 50)
-
-				expect(tycoonFires).is(0)
-				expect(tycoonTM.Raw.Stats.health).is(50)
-
-				playerTM:Destroy()
-				tycoonTM:Destroy()
-			end)
 		end)
 	end)
 end

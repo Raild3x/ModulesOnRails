@@ -2,19 +2,17 @@
 --[=[
 	@class Linker
 
-	Per-instance facade hosting all linking operations for a TableManager,
-	reachable via `tm.Linker`. Hosts the linking methods so they do not crowd the
-	core TableManager surface; the heavy state (`_linkGroups`) and the hot-path
-	fan-out / auto-link hooks live on the manager itself, so the zero-ceremony
-	`AutoLink` path never goes through this facade.
+	Slim per-instance introspection facade reachable via `tm.Linker`. Under the
+	implicit-sharing model there is no manual link/unlink: any table reachable
+	(transparently) in two or more managers' trees is observed by all of them and
+	writes propagate automatically (see `Propagation`). This facade only answers
+	"who am I currently sharing with"; to share a region, just place the same
+	table in another manager (or use `tm:Extend(path)`), and to stop, replace the
+	reference. Opacity (`Opaque`/`OpaqueChildren`) opts a region out.
 ]=]
 
-const LinkGroupModule = require("./LinkGroup")
-const PathHelpers = require("./PathHelpers")
+const PropagationModule = require("./Propagation")
 const TMTypes = require("./TMTypes")
-
-type Path<S> = PathHelpers.Path<S>
-type LinkGroup = LinkGroupModule.LinkGroup
 
 -- `Linker` and `TableManagerLike` (= `TM_Internal<any>`) are defined in
 -- `TMTypes` (a leaf module), so this module can reference the real
@@ -39,8 +37,7 @@ const Linker_MT = { __index = Linker }
 	@within Linker
 	@private
 
-	Constructs the lazy `Linker` facade for `tm`. Allocated once at
-	construction; negligible next to the other per-instance state.
+	Constructs the lazy `Linker` facade for `tm`.
 ]=]
 const function new(tm: TableManagerLike): Linker
 	return setmetatable({ _tm = tm }, Linker_MT) :: any
@@ -48,108 +45,19 @@ end
 
 --[=[
 	@within Linker
-	Links this manager to `other` so writes fan out between them. With no paths,
-	both anchors are the managers' roots; pass `selfPath`/`otherPath` to link
-	interior nodes that resolve to the same shared table by identity.
-]=]
-function Linker.With(self: LinkerImpl, other: any, selfPath: Path<any>?, otherPath: Path<any>?)
-	LinkGroupModule.Link({ { self._tm :: any, selfPath }, { other, otherPath } })
-end
-
---[=[
-	@within Linker
-	Scans this manager's subtree at `path` (default root) and links any node that
-	is the root of another `AutoLink` manager. The explicit, recursive form of the
-	direct write-path auto-link; use after a nested/bulk insert. Idempotent.
-]=]
-function Linker.Ensure(self: LinkerImpl, path: Path<any>?)
-	LinkGroupModule.FindChildLinks(self._tm :: any, path)
-end
-
---[=[
-	@within Linker
-	Removes this manager from `target`: `nil` → all of its groups; a manager →
-	every group also containing that manager; a `LinkGroup` → just that group.
-]=]
-function Linker.Unlink(self: LinkerImpl, target: any?)
-	const tm = self._tm
-	const groups = tm._linkGroups
-
-	-- Whole detach (no target).
-	if target == nil then
-		if groups == nil then
-			return
-		end
-		for _, g in table.clone(groups) do
-			g:Remove(tm :: any)
-		end
-		return
-	end
-
-	-- A LinkGroup carries `_members`; anything else is treated as a manager.
-	if type(target) == "table" and (target :: any)._members ~= nil then
-		(target :: any):Remove(tm :: any)
-		return
-	end
-
-	if groups == nil then
-		return
-	end
-	for _, g in table.clone(groups) do
-		if g:HasMember(target) then
-			g:Remove(tm :: any)
-		end
-	end
-end
-
---[=[
-	@within Linker
-	Returns the managers currently linked to this one (de-duplicated across
-	groups, excluding self).
+	Returns the other managers currently sharing (co-observing) at least one live
+	table identity with this one — de-duplicated, excluding self.
 ]=]
 function Linker.GetManagers(self: LinkerImpl): { any }
-	const tm = self._tm
-	const result = {}
-	const groups = tm._linkGroups
-	if groups == nil then
-		return result
-	end
-	const seen: { [any]: true } = {}
-	for _, g in groups do
-		for _, m in g:Members() do
-			if m ~= tm and not seen[m] then
-				seen[m] = true
-				table.insert(result, m)
-			end
-		end
-	end
-	return result
+	return PropagationModule.GetCoObservers(self._tm)
 end
 
 --[=[
 	@within Linker
-	Returns true if this manager shares a group with `other`.
+	Returns true if this manager currently shares a live table identity with `other`.
 ]=]
 function Linker.IsLinkedWith(self: LinkerImpl, other: any): boolean
-	const groups = self._tm._linkGroups
-	if groups == nil then
-		return false
-	end
-	for _, g in groups do
-		if g:HasMember(other) then
-			return true
-		end
-	end
-	return false
-end
-
---[=[
-	@within Linker
-	Advanced: the underlying `LinkGroup`s this manager participates in (a copy).
-]=]
-function Linker.GetGroups(self: LinkerImpl): { LinkGroup }
-	const groups = self._tm._linkGroups
-	return if groups then table.clone(groups) else {}
+	return PropagationModule.IsLinkedWith(self._tm, other)
 end
 
 return {

@@ -14,7 +14,7 @@ const PathHelpers = require("./PathHelpers")
 const BatchUtilsModule = require("./BatchUtils")
 const ProxyManagerModule = require("./ProxyManager")
 const SchemaNavigatorModule = require("./SchemaNavigator")
-const LinkGroupModule = require("./LinkGroup")
+const PropagationModule = require("./Propagation")
 const EmitterModule = require("./Emitter")
 const IgnoreTrieModule = require("./IgnoreTrie")
 const CoverageModule = require("./Coverage")
@@ -365,10 +365,7 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 			onArrayAppended(self, parentPath, key, newValue)
 		end
 		if not self._suppressLinkFanOut then
-			if self._autoLink then
-				LinkGroupModule.CheckAutoLink(self, parsedPath, newValue)
-			end
-			LinkGroupModule.RegisterSubtree(self, newValue)
+			PropagationModule.RegisterSubtree(self, newValue)
 		end
 		debug.profileend()
 		return
@@ -386,11 +383,7 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 		const oldValue = parentTable[key]
 		parentTable[key] = newValue
 		if not self._suppressLinkFanOut then
-			LinkGroupModule.CheckDivergence(self, parsedPath)
-			if self._autoLink then
-				LinkGroupModule.CheckAutoLink(self, parsedPath, newValue)
-			end
-			LinkGroupModule.RegisterSubtree(self, newValue)
+			PropagationModule.RegisterSubtree(self, newValue)
 		end
 		Mutator.pruneDetachedValue(self, oldValue, newValue)
 		debug.profileend()
@@ -410,13 +403,10 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 	end
 	parentTable[key] = newValue
 	if not self._suppressLinkFanOut then
-		LinkGroupModule.CheckDivergence(self, parsedPath)
-		if self._autoLink then
-			LinkGroupModule.CheckAutoLink(self, parsedPath, newValue)
-		end
-		-- Implicit sharing: a newly-written table already present in another
-		-- manager auto-links here (no-op unless implicit sharing is enabled).
-		LinkGroupModule.RegisterSubtree(self, newValue)
+		-- Implicit sharing: a newly-written table already observed by another
+		-- manager becomes a shared region (divergence of any replaced reference
+		-- is handled lazily at dispatch time — see Propagation).
+		PropagationModule.RegisterSubtree(self, newValue)
 	end
 	Mutator.pruneDetachedValue(self, oldValue, newValue)
 	if opaqueBypass then
@@ -488,12 +478,11 @@ function Mutator.applyRootSet<T>(self: TM_Internal<T>, newRoot: any)
 	-- `Baseline.Get({})` still finds the seeded pre-swap baseline.
 	BaselineModule.RebindRoot(self, oldRoot, newRoot)
 
-	-- Reconcile link groups: anchors that no longer resolve to their shared
-	-- object are severed (the `{}` case of the ancestor-replacement handling).
+	-- Re-register the new root tree by identity. Observers of the OLD root that
+	-- no longer resolve to it are skipped lazily at dispatch (see Propagation);
+	-- no explicit divergence severing is needed.
 	if not self._suppressLinkFanOut then
-		LinkGroupModule.OnRootReplaced(self)
-		-- Implicit sharing: re-register the new root tree by identity.
-		LinkGroupModule.RegisterSubtree(self, newRoot)
+		PropagationModule.RegisterSubtree(self, newRoot)
 	end
 
 	-- Fire change events for the full root diff (shadow@{} vs the now-live

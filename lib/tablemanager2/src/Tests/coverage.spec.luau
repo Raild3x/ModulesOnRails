@@ -159,15 +159,15 @@ return function(t: tiniest)
 			manager:Destroy()
 		end)
 
-		test("an active link group fans out a write with no direct listener on the source", function()
+		test("co-observing a shared identity fans out a write with no direct listener on the source", function()
 			local shared = { health = 100 }
 			local a = TableManager.new(shared)
 			local b = TableManager.new(shared)
-
-			TableManager.Link({ { a }, { b } })
+			-- Implicit sharing: `a` and `b` both root at `shared`, so they co-observe
+			-- it automatically (no explicit link).
 
 			-- `a` has no direct OnChange/OnValueChange listener and no connected
-			-- global Signal: without the link-group bypass, `a`'s write would be
+			-- global Signal: without the shared-observer bypass, `a`'s write would be
 			-- gated out, its OnValueChanged dispatch (which FanOutSet rides
 			-- inside of) would never run, and `b`'s listener would never fire.
 			local bNew, bOld

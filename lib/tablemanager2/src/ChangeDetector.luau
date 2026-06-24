@@ -29,6 +29,7 @@ local PathHelpers = require("./PathHelpers")
 local ArrayDiffModule = require("./ArrayDiff")
 local OpaqueRegistry = require("./OpaqueRegistry")
 local IgnoreTrieModule = require("./IgnoreTrie")
+local ShadowNode = require("./ShadowNode")
 
 --// Types //--
 type Path<S = string> = PathHelpers.Path<S>
@@ -73,7 +74,11 @@ export type ChangeDetector = {
 		oldValue: any,
 		newValue: any,
 		basePath: PathArray<S>,
-		rootTable: T?
+		rootTable: T?,
+		-- Array-aware mode (batch flush): when provided, array-like nodes are
+		-- collected here (absolute paths) and excluded from the dict diff/OriginDiff
+		-- for the caller to LCS-re-diff into Array* events. nil = positional behavior.
+		arraySink: { Diff.ArraySinkEntry }?
 	) -> (),
 	--- Dispatches an ALREADY-BUILT root diff node at `basePath` (fires the same
 	--- leaf + ancestor callbacks as `CheckForChangesBetween`) WITHOUT running
@@ -204,7 +209,13 @@ function ChangeDetector:_oracle(): Diff.Ctx?
 		return nil
 	end
 	if self._opaqueCtx == nil then
-		self._opaqueCtx = OpaqueRegistry.MakeCtx(registries)
+		-- Wire the baseline's node -> identity resolver onto the ctx at its single
+		-- construction site (every consumer reads this cached object via `_oracle`/
+		-- `GetOpaqueCtx`), so the opaque diff branch can compare a content-node slot
+		-- by the child's real identity instead of the always-unequal copy.
+		local ctx: Diff.Ctx = OpaqueRegistry.MakeCtx(registries)
+		ctx.identityOf = ShadowNode.IdentityOf
+		self._opaqueCtx = ctx
 	end
 	return self._opaqueCtx
 end
@@ -319,7 +330,8 @@ function ChangeDetector:CheckForChangesBetween(
 	oldValue: any,
 	newValue: any,
 	basePath: PathArray,
-	rootTable: { [any]: any }?
+	rootTable: { [any]: any }?,
+	arraySink: { Diff.ArraySinkEntry }?
 )
 	if self._debugMode then
 		print("CheckForChangesBetween called:")
@@ -358,13 +370,31 @@ function ChangeDetector:CheckForChangesBetween(
 		RootTable = tempRootTable,
 	}
 
+	-- Array-aware mode (batch flush): when `arraySink` is provided, array-like
+	-- nodes are collected (relative paths) and excluded from the dict tree, so the
+	-- OriginDiff stays clean. They are converted to ABSOLUTE paths and appended to
+	-- the caller's sink below; the caller LCS-re-diffs them into shift-faithful
+	-- Array* events after all dict branches have dispatched. `localArrays` keeps
+	-- the per-call relative entries separate from the shared absolute sink.
+	const localArrays: { Diff.ArraySinkEntry }? = if arraySink ~= nil then {} else nil
+
 	-- Diff.diff stays INSIDE the dispatch closure so a re-entrant check queued
 	-- by _dispatch diffs against state at DRAIN time (see _dispatch's note on
 	-- collapsing chained re-entrant writes).
 	self:_dispatch(function()
-		local rootDiffNode = Diff.diff(oldValue, newValue, nil, nil, ctx)
+		local rootDiffNode = Diff.diff(oldValue, newValue, nil, nil, ctx, localArrays)
 		self:_emitRootNode(rootDiffNode, basePath, ancestorSnapshot)
 	end)
+
+	if arraySink ~= nil and localArrays ~= nil then
+		for _, entry in localArrays do
+			const absPath: Diff.Path = table.clone(basePath) :: any
+			for _, segment in entry.path do
+				table.insert(absPath, segment)
+			end
+			table.insert(arraySink, { path = absPath, old = entry.old, new = entry.new })
+		end
+	end
 end
 
 --[=[

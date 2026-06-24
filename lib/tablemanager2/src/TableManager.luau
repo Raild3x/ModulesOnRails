@@ -67,7 +67,7 @@ const ProxyManagerModule = require("./ProxyManager")
 const ListenerRegistryModule = require("./ListenerRegistry")
 const ChangeDetectorModule = require("./ChangeDetector")
 const SchemaNavigatorModule = require("./SchemaNavigator")
-const LinkGroupModule = require("./LinkGroup")
+const PropagationModule = require("./Propagation")
 const LinkerModule = require("./Linker")
 const Types = require("./TMTypes")
 const EmitterModule = require("./Emitter")
@@ -98,8 +98,6 @@ type table = { [any]: any }
 
 export type Proxy<T, S> = Types.Proxy<T, S>
 
-export type LinkGroup = Types.LinkGroup
-export type LinkAnchor = Types.LinkAnchor
 export type AppliedOp = Types.AppliedOp
 
 export type DuplicateReferenceMode = Types.DuplicateReferenceMode
@@ -288,20 +286,14 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	)
 	
 	
-	-- Public linking facade (lightweight; heavy link state stays lazy).
+	-- Lightweight linking-introspection facade (`tm.Linker`).
 	self.Linker = LinkerModule.new(self)
-	
-	-- Opt-in auto-link: form any links implied by the current tree topology
-	-- (this manager nested inside another, or others nested inside it).
-	if resolvedConfig.AutoLink then
-		self._autoLink = true
-		LinkGroupModule.RegisterAutoLink(self)
-	end
 
-	-- Implicit sharing (Phase 3): register every table in the initial tree by
-	-- identity, auto-linking with any other manager that already shares one. No-op
-	-- unless implicit sharing is enabled (see LinkGroup.RegisterSubtree).
-	LinkGroupModule.RegisterSubtree(self, self.Raw)
+	-- Implicit sharing: register every table in the initial tree by identity, so
+	-- any table also reachable in another manager is observed by both and writes
+	-- propagate between them (sharing a table identity = being linked). Opacity is
+	-- the boundary (opaque regions are not registered). See `Propagation`.
+	PropagationModule.RegisterSubtree(self, self.Raw)
 
 	debug.profileend()
 	return self :: any
@@ -312,26 +304,11 @@ end
 --------------------------------------------------------------------------------
 
 --[=[
-	@within TableManager
-	@function Link
-
-	Joins TableManagers (or interior nodes within them) that share one
-	underlying table by identity into a notify-only `LinkGroup`. A write
-	applied through any member fans out to every other current member,
-	translated into that member's own path coordinates. See `LinkGroup`.
-
-	Two call forms:
-	- `TableManager.Link({ {managerA, pathA?}, {managerB, pathB?}, ... })`
-	- `TableManager.Link(managerA, pathA, managerB, pathB)`
-]=]
-TableManager.Link = LinkGroupModule.Link
-
---[=[
 	@private
 	Re-fires listeners/signals for an op that has ALREADY been applied to the
-	shared raw (by another linked manager), without mutating or
-	snapshot-diffing. `op.Path` is in this manager's own coordinates. Used only
-	by `LinkGroup` fan-out.
+	shared raw (by another manager observing the same table identity), without
+	mutating or snapshot-diffing. `op.Path` is in this manager's own coordinates.
+	Used only by cross-manager fan-out (see `Propagation`).
 ]=]
 function TableManager._NotifyApplied<T>(self: TM_Internal<T>, op: AppliedOp)
 	if self._Destroyed then
@@ -417,7 +394,7 @@ function TableManager.Extend<T, S>(
 		-- Raw value already in the tree: locate it by identity (it may not have
 		-- a proxy yet if it was never accessed via Get/GetProxy). Falls back to
 		-- treating `target` as a path (string or array) if not found.
-		const foundPath = if type(target) == "table" then LinkGroupModule.FindPathOf(self.Raw, target) else nil
+		const foundPath = if type(target) == "table" then PropagationModule.FindPathOf(self.Raw, target) else nil
 		if foundPath ~= nil then
 			anchorPath = foundPath
 		else
@@ -430,8 +407,13 @@ function TableManager.Extend<T, S>(
 		error("Extend target must resolve to a table")
 	end
 
+	-- The new manager is rooted at the SAME live `object`, so implicit sharing
+	-- registers both as observers of that identity (and its subtree) at
+	-- construction — writes on either side propagate to the other automatically,
+	-- with no explicit link. If `self` later replaces `object`, it stops resolving
+	-- to that identity and propagation between them lapses (the extended manager
+	-- keeps `object` as its root).
 	const extended = TableManager.new(object)
-	LinkGroupModule.Link({ { self , anchorPath }, { extended } })
 
 	return extended
 end
@@ -886,14 +868,10 @@ function TableManager.ArrayInsert<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 	table.insert(array, pos, unwrappedValue)
 	-- Update Key metadata for all proxies that were shifted right by this insert.
 	shiftArrayKeys(self._proxyManager, array, pos, 1)
-	-- Direct auto-link for an inserted managed table.
+	-- Implicit sharing: an inserted table already observed elsewhere becomes a
+	-- shared region (writes propagate between observers).
 	if not self._suppressLinkFanOut then
-		const elementPath = PathHelpers.Append(parsedPath, pos)
-		if self._autoLink then
-			LinkGroupModule.CheckAutoLink(self :: any, elementPath, unwrappedValue)
-		end
-		-- Implicit sharing: an inserted table already present elsewhere auto-links.
-		LinkGroupModule.RegisterSubtree(self :: any, unwrappedValue)
+		PropagationModule.RegisterSubtree(self :: any, unwrappedValue)
 	end
 
 	if not inBatch then 
@@ -920,9 +898,6 @@ function TableManager.ArrayRemove<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 	-- being shifted to key=0.
 	shiftArrayKeys(self._proxyManager, array, index + 1, -1)
 	pruneDetachedValue(self, oldValue, nil)
-	if not self._suppressLinkFanOut then
-		LinkGroupModule.CheckDivergence(self, parsedPath)
-	end
 
 	if inBatch then return oldValue end
 
@@ -972,9 +947,6 @@ function TableManager.ArraySwapRemove<T, S>(self: TM_Internal<T>, pathOrProxy: P
 	end
 	array[lastIndex] = nil
 	pruneDetachedValue(self, oldValue, nil)
-	if not self._suppressLinkFanOut then
-		LinkGroupModule.CheckDivergence(self, parsedPath)
-	end
 
 	if inBatch then return oldValue end
 
@@ -1057,12 +1029,10 @@ end
 --[=[
 	Resumes after `Suspend()` and flushes all pending changes.
 
-	Flush is two-phase:
-	1. **Non-array flush** — per dirty branch, `CheckForChangesBetween` diffs the
-	   pre-batch value against the current value (with tracked-array subtrees
-	   masked out — the array flush owns those), firing all non-array events.
-	2. **Array flush** — For each tracked array path, diffs the pre-batch
-	   snapshot against the current value via LCS (`ArrayDiff.emitDiff`).
+	Flush is a single array-aware pass: per dirty branch, `CheckForChangesBetween`
+	diffs the pre-batch value against the current value, collecting array-like
+	nodes out of the dict diff; those are then re-diffed via LCS
+	(`ArrayDiff.emitDiff`) into shift-faithful `Array*` events. See `BatchFlush`.
 ]=]
 function TableManager.Resume(self: TM_Internal)
 	BatchFlushModule.Resume(self)
@@ -1334,8 +1304,9 @@ function TableManager.Destroy<T>(self: TM_Internal<T>)
 	-- since that teardown writes through `self:Set` to clear output entries.
 	self._janitor:Destroy()
 
-	self.Linker:Unlink()
-	LinkGroupModule.UnregisterAutoLink(self)
+	-- Observer entries are weak-keyed by manager, so this manager drops out of
+	-- the propagation registry automatically once it is unreferenced; dispatch
+	-- also skips `_Destroyed` managers immediately (see `Propagation`).
 
 	-- If destroyed mid-batch (Suspend without Resume), release the batch state.
 	const batch = self._batch

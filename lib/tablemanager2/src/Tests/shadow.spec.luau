@@ -347,11 +347,11 @@ return function(t: tiniest)
 			manager:Destroy()
 		end)
 
-		test("link fan-out keeps the target manager's shadow in sync", function()
+		test("cross-manager fan-out keeps the target manager's shadow in sync", function()
 			const shared = { health = 100 }
 			const a = TableManager.new(shared)
 			const b = TableManager.new(shared)
-			TableManager.Link({ { a }, { b } })
+			-- Implicit sharing: both root at `shared`, so they co-observe it.
 
 			b:OnValueChange("health", function() end)
 			a:Set("health", 50)

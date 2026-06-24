@@ -51,6 +51,13 @@ Registration methods and callback signatures:
 
 All return a `Connection { Connected: boolean, Disconnect() }`.
 
+A scalar `oldValue` is immutable and always safe to retain. A **table** `oldValue` is the baseline
+mirror node and is a stable snapshot only for the **duration of the synchronous callback**: if the same
+live table is later mutated in place and reconciled, the baseline node is refreshed in place (it is
+shared by identity so co-observers see the update), which can change a retained table `oldValue`. Copy a
+table `oldValue` if you need to keep it past the callback. (Writes that assign a *new* table replace
+identity and never affect an earlier `oldValue`.)
+
 `path` accepts a string (`"player.health"`), a path array (`{"player","health"}`), or (for the array/
 write methods) a `Proxy` obtained from this manager. The empty path (`{}` / `""`) is the root.
 
@@ -179,24 +186,33 @@ For a single change, observed order is:
 - Marking is by value reference (survives array shifts / `MoveTo` / `Swap`), via weak registries.
 - **Opacity is per-viewer**: the same live table may be opaque to one manager and transparent to
   another. This MUST remain true (e.g. an Inventory manager treats a `sword` as an opaque leaf while a
-  dedicated Sword manager observes that same table transparently).
+  dedicated Sword manager observes that same table transparently). It holds **even when the two
+  managers co-observe a shared parent** of that table: the opaque viewer never fires for the shared
+  child's internal mutations, while the transparent co-observer still does. (The shared diff baseline
+  picks each slot's shape by global observership, so neither viewer corrupts the other's baseline.)
 
 ---
 
-## 8. Linking (`Link` / `Extend` / `AutoLink`)
+## 8. Linking — implicit sharing (`Extend`)
 
-- Managers anchored to the same shared table (by identity) propagate changes to one another: a write via
-  one member is reflected to the others, translated into each member's own path coordinates.
-- `Extend(target)` returns a plain `TableManager` rooted at the shared table at `target`, linked to this
-  manager.
-- A member whose anchor stops resolving to the shared object (the reference was replaced) leaves the
-  link; the remaining members keep sharing the original object.
-- **[IMPLEMENTED, flag-gated]** Sharing a table identity *is* linking: with implicit sharing enabled
-  (`LinkGroup.SetImplicitSharing(true)`; off by default), any table reachable in 2+ managers' trees (root
-  or interior, e.g. `Player.Stats` and `Tycoon.Stats`) auto-links via the same `Link`/fan-out machinery —
-  no explicit `Link` call needed. Opacity is the boundary: an opaque value (or an `OpaqueChildren`
-  child) is never registered and never propagates. Cross-manager delivery order: the *originating*
-  manager's listeners fire before propagated members' (see `Tests/TM/TableManager.shared-baseline.spec`).
+- **Sharing a table identity *is* being linked.** Any table reachable (transparently) in 2+ managers'
+  trees — root or interior, e.g. `Player.Stats` and `Tycoon.Stats` — is observed by all of them, and a
+  write via one propagates to the others, translated into each manager's own path coordinates. No
+  explicit link call: sharing is automatic as tables enter a tree (construction / table writes / array
+  inserts / root replacement). See `Propagation`.
+- Each recipient is delivered **exactly once** per change, even when it shares several nested identities
+  along the changed path (deduplicated by recipient, via the shallowest shared ancestor).
+- **Opacity is the boundary**: an opaque value (or an `OpaqueChildren` child) is never registered as
+  observed and never propagates. This is the only opt-out (no separate API).
+- **Divergence** is lazy: a manager that replaces a shared reference simply stops resolving a live path
+  to that identity, so propagation to it is skipped and the sharing lapses; other observers keep sharing.
+- `Extend(target)` returns a plain `TableManager` rooted at the shared table at `target`; because it
+  shares that identity, it is automatically a co-observer (writes propagate both ways) until either side
+  replaces the reference.
+- `tm.Linker` is a slim introspection facade: `GetManagers()` (current co-observers) and
+  `IsLinkedWith(other)`. There is no manual link/unlink.
+- Cross-manager delivery order: the *originating* manager's listeners fire before propagated observers'
+  (see `Tests/TM/TableManager.shared-baseline.spec`).
 
 ---
 
@@ -204,8 +220,9 @@ For a single change, observed order is:
 
 `Schema`, `OnValidationFailed`, `ListenerFireMode`, `SignalFireMode`, `FlushMode`
 (`"immediate"`/`"coalesced"`), `EnableProxies` (default true; `Proxy`/`GetProxy` unavailable when
-false), `AutoLink`, `IgnoredPaths`, `DuplicateReferenceMode` (`"allow"` default — multi-location
-references are a supported feature; `"copy"` opts out by deep-cloning the value at write time).
+false), `IgnoredPaths`, `DuplicateReferenceMode` (`"allow"` default — multi-location references are a
+supported feature; `"copy"` opts out by deep-cloning the value at write time). (Linking is implicit —
+there is no `AutoLink` config; see §8.)
 
 ---
 

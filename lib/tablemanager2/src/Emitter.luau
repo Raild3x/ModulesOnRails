@@ -12,10 +12,9 @@
 --// Imports //--
 const PathHelpers = require("./PathHelpers")
 const BatchUtilsModule = require("./BatchUtils")
-const BatchFlushModule = require("./BatchFlush")
 const ArrayDiffModule = require("./ArrayDiff")
 const ChangeDetectorModule = require("./ChangeDetector")
-const LinkGroupModule = require("./LinkGroup")
+const PropagationModule = require("./Propagation")
 const BaselineModule = require("./Baseline")
 const Diff = require("./Diff")
 const TMTypes = require("./TMTypes")
@@ -216,7 +215,7 @@ function Emitter.fireArrayOperation(
 	end
 
 	if not manager._suppressLinkFanOut then
-		LinkGroupModule.FanOutArrayOp(manager, eventName, basePath, payload)
+		PropagationModule.FanOutArrayOp(manager, eventName, basePath, payload)
 	end
 
 	-- Array ops are synthetic (never diffed against the shadow), but the
@@ -301,17 +300,8 @@ end
 	`TableManager.new`.
 ]]
 function Emitter.makeChangeDetectorCallbacks(manager: TableManagerLike)
-	-- Suppresses non-array change events during batch array flush whose location
-	-- is at or under a tracked array path (see BatchFlush.ShouldSuppress).
-	local function shouldSuppress(location: PathArray): boolean
-		return BatchFlushModule.ShouldSuppress(manager :: any, location)
-	end
-
 	return {
 		OnKeyAdded = function(path: PathArray, key: any, newValue: any, metadata: ChangeMetadata)
-			if shouldSuppress(PathHelpers.Append(path, key)) then
-				return
-			end
 			-- Signal before registry listeners: if a listener performs a re-entrant
 			-- write its nested signal fires after this one, keeping the public
 			-- signal stream in write-initiation order (deterministic for replication).
@@ -326,9 +316,6 @@ function Emitter.makeChangeDetectorCallbacks(manager: TableManagerLike)
 		end,
 
 		OnKeyRemoved = function(path: PathArray, key: any, oldValue: any, metadata: ChangeMetadata)
-			if shouldSuppress(PathHelpers.Append(path, key)) then
-				return
-			end
 			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
 				fireSignal(manager, manager.KeyRemoved, path, key, oldValue)
 			end
@@ -340,9 +327,6 @@ function Emitter.makeChangeDetectorCallbacks(manager: TableManagerLike)
 		end,
 
 		OnKeyChanged = function(path: PathArray, key: any, newValue: any, oldValue: any, metadata: ChangeMetadata)
-			if shouldSuppress(PathHelpers.Append(path, key)) then
-				return
-			end
 			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
 				fireSignal(manager, manager.KeyChanged, path, key, newValue, oldValue)
 			end
@@ -355,11 +339,6 @@ function Emitter.makeChangeDetectorCallbacks(manager: TableManagerLike)
 		end,
 
 		OnValueChanged = function(path: PathArray, newValue: any, oldValue: any?, metadata: ChangeMetadata)
-			-- Suppress events at or under a tracked array path during batch array
-			-- flush; those arrays emit their own coalesced Array* events.
-			if shouldSuppress(path) then
-				return
-			end
 			-- Signal before listeners (see OnKeyAdded for rationale).
 			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
 				fireSignal(manager, manager.ValueChanged, path, newValue, oldValue)
@@ -369,11 +348,11 @@ function Emitter.makeChangeDetectorCallbacks(manager: TableManagerLike)
 				OldValue = oldValue,
 				Metadata = metadata,
 			})
-			-- Link fan-out: only for leaf changes, never while replaying fan-out.
-			-- Pass the already-built diff node so recipients can replay it without
-			-- re-diffing (see LinkGroup.FanOutSet / TableManager._NotifyApplied).
+			-- Cross-manager fan-out: only for leaf changes, never while replaying
+			-- fan-out. Pass the already-built diff node so recipients can replay it
+			-- without re-diffing (see Propagation.FanOutSet / TableManager._NotifyApplied).
 			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" and not manager._suppressLinkFanOut then
-				LinkGroupModule.FanOutSet(manager, path, newValue, oldValue, metadata.Diff)
+				PropagationModule.FanOutSet(manager, path, newValue, oldValue, metadata.Diff)
 			end
 		end,
 	}

@@ -1,4 +1,11 @@
 --!strict
+--[[
+	Cross-manager propagation under the implicit-sharing model (see `Propagation`).
+	"Sharing a table identity = being linked": any table reachable (transparently)
+	in two or more managers' trees is observed by all of them, and a write through
+	one propagates to the others — no explicit `Link`/`AutoLink` call. Divergence
+	(replacing a shared reference) lapses the sharing lazily. Opacity is the opt-out.
+]]
 
 return function(t: tiniest)
 	local TableManager = require("../../TableManager")
@@ -7,15 +14,14 @@ return function(t: tiniest)
 	local describe = t.describe
 	local expect = t.expect
 
-	describe("TableManager.Link / LinkGroup", function()
-		test("whole-root link: writes on either side fire ValueChanged on the other", function()
+	describe("Implicit sharing — propagation", function()
+		test("whole-root co-observers: writes on either side fire ValueChanged on the other", function()
 			local shared = { health = 100 }
 			local a = TableManager.new(shared)
 			local b = TableManager.new(shared)
+			-- Both root at `shared`, so they co-observe it automatically.
 
-			local group = TableManager.Link({ { a }, { b } })
-
-			local bPath, bNew, bOld
+			local bNew, bOld
 			b:OnValueChange("health", function(newValue, oldValue)
 				bNew, bOld = newValue, oldValue
 			end)
@@ -34,42 +40,23 @@ return function(t: tiniest)
 			expect(a.Raw.health).is(25)
 			expect(aNew).is(25)
 
-			expect(group:HasMember(a)).is_true()
-			expect(group:HasMember(b)).is_true()
+			expect(a.Linker:IsLinkedWith(b)).is_true()
+			expect(b.Linker:IsLinkedWith(a)).is_true()
 
 			a:Destroy()
 			b:Destroy()
 		end)
 
-		test("4-arg call form links two managers", function()
-			local shared = { value = 1 }
-			local a = TableManager.new(shared)
-			local b = TableManager.new(shared)
-
-			TableManager.Link(a, "", b, "")
-
-			local seen
-			b:OnValueChange("value", function(newValue)
-				seen = newValue
-			end)
-			a:Set("value", 2)
-			expect(seen).is(2)
-
-			a:Destroy()
-			b:Destroy()
-		end)
-
-		test("interior-anchor link: differing anchor paths translate correctly", function()
+		test("interior co-observers: differing anchor paths translate correctly", function()
 			local sharedNode = { x = 1 }
 			local dataA = { B = sharedNode }
 			local dataB = { other = { nested = sharedNode } }
 
 			local a = TableManager.new(dataA)
 			local b = TableManager.new(dataB)
+			-- `sharedNode` lives at "B" in `a` and "other.nested" in `b`.
 
-			TableManager.Link({ { a, "B" }, { b, "other.nested" } })
-
-			local seenPath, seenNew
+			local seenNew
 			b:OnValueChange("other.nested.x", function(newValue)
 				seenNew = newValue
 			end)
@@ -96,8 +83,6 @@ return function(t: tiniest)
 			local shared = { items = { "A", "B", "C" } }
 			local a = TableManager.new(shared)
 			local b = TableManager.new(shared)
-
-			TableManager.Link({ { a }, { b } })
 
 			-- Hold a proxy on b for the element currently at index 2 ("B")
 			local bProxyForB = b:GetProxy({ "items", 2 })
@@ -149,97 +134,11 @@ return function(t: tiniest)
 			b:Destroy()
 		end)
 
-		test("divergence: replacing the anchor object removes that member and dissolves a 2-member group", function()
-			local sharedNode = { x = 1 }
-			local dataA = { B = sharedNode }
-			local dataB = { B = sharedNode }
-
-			local a = TableManager.new(dataA)
-			local b = TableManager.new(dataB)
-
-			local group = TableManager.Link({ { a, "B" }, { b, "B" } })
-
-			local removedMember
-			group.MemberRemoved:Connect(function(manager)
-				removedMember = manager
-			end)
-
-			local dissolved = false
-			group.Dissolved:Connect(function()
-				dissolved = true
-			end)
-
-			-- Replace `B` on a's side entirely; this severs a's anchor.
-			a:Set("B", { x = 99 })
-
-			expect(removedMember).is(a)
-			expect(dissolved).is_true()
-			expect(group:HasMember(a)).never_is_true()
-			expect(group:HasMember(b)).never_is_true()
-
-			-- b's data is untouched by the divergent write.
-			expect(b.Raw.B.x).is(1)
-
-			a:Destroy()
-			b:Destroy()
-		end)
-
-		test("divergence: replacing a member's root via Set({}, ...) severs it", function()
-			local shared = { health = 100 }
-			local a = TableManager.new(shared)
-			local b = TableManager.new(shared)
-
-			local group = TableManager.Link({ { a }, { b } })
-
-			-- Re-root `a` onto a brand-new table; its root anchor no longer points
-			-- at the shared object, so it leaves the group.
-			a:Set({}, { health = 5 })
-
-			expect(group:HasMember(a)).never_is_true()
-			-- b keeps the original shared object, untouched by a's re-root.
-			expect(b.Raw.health).is(100)
-			expect(a.Raw.health).is(5)
-
-			a:Destroy()
-			b:Destroy()
-		end)
-
-		test("topology robustness: destroying the middle member of a 3-way group keeps the others linked", function()
+		test("a throwing listener on one co-observer does not block fan-out to the others", function()
 			local shared = { value = 1 }
 			local a = TableManager.new(shared)
 			local b = TableManager.new(shared)
 			local c = TableManager.new(shared)
-
-			local group = TableManager.Link({ { a }, { b }, { c } })
-			group:Add(c) -- idempotent re-add is a no-op (already linked via Link)
-
-			b:Destroy()
-
-			expect(group:HasMember(a)).is_true()
-			expect(group:HasMember(b)).never_is_true()
-			expect(group:HasMember(c)).is_true()
-
-			local cSeen
-			c:OnValueChange("value", function(newValue)
-				cSeen = newValue
-			end)
-
-			a:Set("value", 2)
-
-			expect(c.Raw.value).is(2)
-			expect(cSeen).is(2)
-
-			a:Destroy()
-			c:Destroy()
-		end)
-
-		test("a throwing listener on one member does not block fan-out to the others", function()
-			local shared = { value = 1 }
-			local a = TableManager.new(shared)
-			local b = TableManager.new(shared)
-			local c = TableManager.new(shared)
-
-			TableManager.Link({ { a }, { b }, { c } })
 
 			b:OnValueChange("value", function()
 				error("boom")
@@ -268,8 +167,6 @@ return function(t: tiniest)
 			local a = TableManager.new(shared)
 			local b = TableManager.new(shared)
 
-			TableManager.Link({ { a }, { b } })
-
 			local aFireCount, bFireCount = 0, 0
 			a.ValueChanged:Connect(function()
 				aFireCount += 1
@@ -287,92 +184,106 @@ return function(t: tiniest)
 			b:Destroy()
 		end)
 
-		test("Unlink removes membership from a specific group or all groups", function()
-			local shared = { value = 1 }
+		test("nested co-observers sharing several identities along a path fire exactly once", function()
+			-- `a` and `b` share BOTH the root and the nested `items` array; a single
+			-- array op must still deliver to the other side exactly once (dedupe by
+			-- recipient, not once per shared ancestor identity).
+			local shared = { items = { "A", "B" } }
 			local a = TableManager.new(shared)
 			local b = TableManager.new(shared)
 
-			local group = TableManager.Link({ { a }, { b } })
+			local inserts = 0
+			b:OnArrayInsert("items", function()
+				inserts += 1
+			end)
 
-			expect(#a.Linker:GetGroups()).is(1)
+			a:ArrayInsert("items", "C")
 
-			a.Linker:Unlink(group)
-
-			expect(#a.Linker:GetGroups()).is(0)
-			expect(group:HasMember(a)).never_is_true()
-
-			a:Destroy()
-			b:Destroy()
-		end)
-
-		test("Destroy unlinks a manager from all of its groups", function()
-			local shared = { value = 1 }
-			local a = TableManager.new(shared)
-			local b = TableManager.new(shared)
-
-			local group = TableManager.Link({ { a }, { b } })
+			expect(inserts).is(1)
+			expect(b.Raw.items[3]).is("C")
 
 			a:Destroy()
-
-			expect(group:HasMember(a)).never_is_true()
-			expect(group:HasMember(b)).never_is_true() -- group dissolved below 2 members
-
 			b:Destroy()
 		end)
 	end)
 
-	describe("Linker facade", function()
-		test("Linker:With links whole roots; fan-out both directions", function()
-			local shared = { value = 1 }
-			local a = TableManager.new(shared)
-			local b = TableManager.new(shared)
-
-			a.Linker:With(b)
-
-			local seen
-			b:OnValueChange("value", function(newValue)
-				seen = newValue
-			end)
-			a:Set("value", 2)
-			expect(seen).is(2)
-
-			local aSeen
-			a:OnValueChange("value", function(newValue)
-				aSeen = newValue
-			end)
-			b:Set("value", 3)
-			expect(aSeen).is(3)
-
-			a:Destroy()
-			b:Destroy()
-		end)
-
-		test("Linker:With links interior nodes via paths", function()
+	describe("Implicit sharing — divergence", function()
+		test("replacing a shared interior reference lapses sharing for that manager", function()
 			local sharedNode = { x = 1 }
 			local a = TableManager.new({ B = sharedNode })
-			local b = TableManager.new({ other = { nested = sharedNode } })
+			local b = TableManager.new({ B = sharedNode })
+			expect(a.Linker:IsLinkedWith(b)).is_true()
 
-			a.Linker:With(b, "B", "other.nested")
+			-- Replace `B` on a's side entirely; a no longer holds `sharedNode`.
+			a:Set("B", { x = 99 })
 
-			local seen
-			b:OnValueChange("other.nested.x", function(newValue)
-				seen = newValue
+			expect(a.Linker:IsLinkedWith(b)).never_is_true()
+			-- b's data is untouched by the divergent write.
+			expect(b.Raw.B.x).is(1)
+
+			-- Further writes on either side no longer cross.
+			local bSaw = false
+			b:OnValueChange("B.x", function()
+				bSaw = true
 			end)
-			a:Set("B.x", 42)
-			expect(b.Raw.other.nested.x).is(42)
-			expect(seen).is(42)
+			a:Set("B.x", 7)
+			expect(bSaw).never_is_true()
+			expect(b.Raw.B.x).is(1)
 
 			a:Destroy()
 			b:Destroy()
 		end)
 
-		test("IsLinkedWith and GetManagers report linked managers", function()
+		test("re-rooting a manager via Set({}, ...) lapses its sharing", function()
+			local shared = { health = 100 }
+			local a = TableManager.new(shared)
+			local b = TableManager.new(shared)
+			expect(a.Linker:IsLinkedWith(b)).is_true()
+
+			-- Re-root `a` onto a brand-new table; it no longer holds `shared`.
+			a:Set({}, { health = 5 })
+
+			expect(a.Linker:IsLinkedWith(b)).never_is_true()
+			-- b keeps the original shared object, untouched by a's re-root.
+			expect(b.Raw.health).is(100)
+			expect(a.Raw.health).is(5)
+
+			a:Destroy()
+			b:Destroy()
+		end)
+
+		test("destroying one of three co-observers keeps the others sharing", function()
 			local shared = { value = 1 }
 			local a = TableManager.new(shared)
 			local b = TableManager.new(shared)
 			local c = TableManager.new(shared)
 
-			TableManager.Link({ { a }, { b }, { c } })
+			b:Destroy()
+
+			expect(a.Linker:IsLinkedWith(c)).is_true()
+			expect(a.Linker:IsLinkedWith(b)).never_is_true()
+
+			local cSeen
+			c:OnValueChange("value", function(newValue)
+				cSeen = newValue
+			end)
+
+			a:Set("value", 2)
+
+			expect(c.Raw.value).is(2)
+			expect(cSeen).is(2)
+
+			a:Destroy()
+			c:Destroy()
+		end)
+	end)
+
+	describe("Linker facade (introspection)", function()
+		test("IsLinkedWith and GetManagers report co-observing managers", function()
+			local shared = { value = 1 }
+			local a = TableManager.new(shared)
+			local b = TableManager.new(shared)
+			local c = TableManager.new(shared)
 
 			expect(a.Linker:IsLinkedWith(b)).is_true()
 			expect(a.Linker:IsLinkedWith(c)).is_true()
@@ -393,21 +304,6 @@ return function(t: tiniest)
 			c:Destroy()
 		end)
 
-		test("Linker:Unlink(manager) severs the link to that manager", function()
-			local shared = { value = 1 }
-			local a = TableManager.new(shared)
-			local b = TableManager.new(shared)
-
-			a.Linker:With(b)
-			expect(a.Linker:IsLinkedWith(b)).is_true()
-
-			a.Linker:Unlink(b)
-			expect(a.Linker:IsLinkedWith(b)).never_is_true()
-
-			a:Destroy()
-			b:Destroy()
-		end)
-
 		test("tm.Linker is the same object across accesses", function()
 			local a = TableManager.new({ value = 1 })
 			expect(a.Linker).is(a.Linker)
@@ -415,12 +311,12 @@ return function(t: tiniest)
 		end)
 	end)
 
-	describe("AutoLink", function()
-		test("nested managers auto-link to a parent (parent created first)", function()
+	describe("Implicit sharing — nested/derived managers (subsumes AutoLink)", function()
+		test("a manager rooted at another's interior table shares it (parent created first)", function()
 			local Data = { Inventory = { { Name = "Sword" } }, Stats = { Health = 100 } }
-			local PlayerTM = TableManager.new(Data, { AutoLink = true })
-			local StatsTM = TableManager.new(Data.Stats, { AutoLink = true })
-			local SwordTM = TableManager.new(Data.Inventory[1], { AutoLink = true })
+			local PlayerTM = TableManager.new(Data)
+			local StatsTM = TableManager.new(Data.Stats)
+			local SwordTM = TableManager.new(Data.Inventory[1])
 
 			local statsSeen
 			PlayerTM:OnValueChange("Stats.Health", function(newValue)
@@ -450,10 +346,10 @@ return function(t: tiniest)
 			SwordTM:Destroy()
 		end)
 
-		test("nested manager auto-links when child created before parent", function()
+		test("sharing is order-independent (child manager created before parent)", function()
 			local statsTable = { Health = 100 }
-			local StatsTM = TableManager.new(statsTable, { AutoLink = true })
-			local PlayerTM = TableManager.new({ Stats = statsTable }, { AutoLink = true })
+			local StatsTM = TableManager.new(statsTable)
+			local PlayerTM = TableManager.new({ Stats = statsTable })
 
 			local seen
 			PlayerTM:OnValueChange("Stats.Health", function(newValue)
@@ -466,10 +362,10 @@ return function(t: tiniest)
 			StatsTM:Destroy()
 		end)
 
-		test("direct insert of a managed table auto-links (no Ensure needed)", function()
-			local PlayerTM = TableManager.new({ Inventory = {} }, { AutoLink = true })
+		test("inserting a managed table into an array shares it", function()
+			local PlayerTM = TableManager.new({ Inventory = {} })
 			local sword = { Name = "Sword" }
-			local SwordTM = TableManager.new(sword, { AutoLink = true })
+			local SwordTM = TableManager.new(sword)
 
 			PlayerTM:ArrayInsert("Inventory", sword)
 
@@ -484,16 +380,14 @@ return function(t: tiniest)
 			SwordTM:Destroy()
 		end)
 
-		test("nested/bulk insert does not link until Linker:Ensure", function()
-			local PlayerTM = TableManager.new({}, { AutoLink = true })
+		test("nested/bulk insert shares immediately (the whole inserted subtree is registered)", function()
+			local PlayerTM = TableManager.new({})
 			local sword = { Name = "Sword" }
-			local SwordTM = TableManager.new(sword, { AutoLink = true })
+			local SwordTM = TableManager.new(sword)
 
-			-- sword is nested one level inside the assigned composite value.
+			-- sword is nested one level inside the assigned composite value; the
+			-- whole subtree is registered, so sharing is immediate (no Ensure step).
 			PlayerTM:Set("bag", { sword })
-			expect(PlayerTM.Linker:IsLinkedWith(SwordTM)).never_is_true()
-
-			PlayerTM.Linker:Ensure("bag")
 			expect(PlayerTM.Linker:IsLinkedWith(SwordTM)).is_true()
 
 			local seen
@@ -503,18 +397,14 @@ return function(t: tiniest)
 			SwordTM:Set("Name", "Dagger")
 			expect(seen).is("Dagger")
 
-			-- Ensure is idempotent
-			PlayerTM.Linker:Ensure("bag")
-			expect(#SwordTM.Linker:GetGroups()).is(1)
-
 			PlayerTM:Destroy()
 			SwordTM:Destroy()
 		end)
 
-		test("removing a nested managed table auto-severs the link", function()
+		test("removing a nested managed table lapses the sharing", function()
 			local Data = { Inventory = { { Name = "Sword" } } }
-			local PlayerTM = TableManager.new(Data, { AutoLink = true })
-			local SwordTM = TableManager.new(Data.Inventory[1], { AutoLink = true })
+			local PlayerTM = TableManager.new(Data)
+			local SwordTM = TableManager.new(Data.Inventory[1])
 
 			expect(PlayerTM.Linker:IsLinkedWith(SwordTM)).is_true()
 
@@ -523,18 +413,6 @@ return function(t: tiniest)
 
 			PlayerTM:Destroy()
 			SwordTM:Destroy()
-		end)
-
-		test("without AutoLink, overlapping managers are not linked", function()
-			local Data = { Stats = { Health = 100 } }
-			local PlayerTM = TableManager.new(Data)
-			local StatsTM = TableManager.new(Data.Stats)
-
-			expect(PlayerTM.Linker:IsLinkedWith(StatsTM)).never_is_true()
-			expect(#PlayerTM.Linker:GetGroups()).is(0)
-
-			PlayerTM:Destroy()
-			StatsTM:Destroy()
 		end)
 	end)
 end

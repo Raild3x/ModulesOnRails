@@ -227,16 +227,15 @@ return function(t: tiniest)
 			harness:Destroy()
 		end)
 
-		-- These exercise `TableManager._NotifyApplied` (the LinkGroup fan-out replay
-		-- path) when `_proxyManager == nil`. The proxy-key-shift step must no-op
-		-- cleanly on a proxyless receiver while the op still converges and re-fires
-		-- the receiver's listeners/signals.
-		test("linked proxyless managers fan out a scalar Set", function()
+		-- These exercise `TableManager._NotifyApplied` (the cross-manager fan-out
+		-- replay path) when `_proxyManager == nil`. The proxy-key-shift step must
+		-- no-op cleanly on a proxyless receiver while the op still converges and
+		-- re-fires the receiver's listeners/signals. Sharing is implicit (both
+		-- managers root at `shared`).
+		test("co-observing proxyless managers fan out a scalar Set", function()
 			local shared = { player = { health = 100 } }
 			local a = TableManager.new(shared, { EnableProxies = false })
 			local b = TableManager.new(shared, { EnableProxies = false })
-
-			TableManager.Link({ { a }, { b } })
 
 			local bNew, bOld
 			b:OnValueChange({ "player", "health" }, function(newValue, oldValue)
@@ -253,12 +252,10 @@ return function(t: tiniest)
 			b:Destroy()
 		end)
 
-		test("linked proxyless managers fan out array insert/remove/set", function()
+		test("co-observing proxyless managers fan out array insert/remove/set", function()
 			local shared = { items = { "A", "B", "C" } }
 			local a = TableManager.new(shared, { EnableProxies = false })
 			local b = TableManager.new(shared, { EnableProxies = false })
-
-			TableManager.Link({ { a }, { b } })
 
 			local inserted = {}
 			local removed = {}
@@ -298,12 +295,11 @@ return function(t: tiniest)
 			b:Destroy()
 		end)
 
-		test("mixed proxied + proxyless link fans out array ops both directions", function()
+		test("mixed proxied + proxyless co-observers fan out array ops both directions", function()
 			local shared = { items = { "A", "B" } }
 			local proxied = TableManager.new(shared)
 			local proxyless = TableManager.new(shared, { EnableProxies = false })
-
-			TableManager.Link({ { proxied }, { proxyless } })
+			-- Implicit sharing: both root at `shared`.
 
 			-- The proxied side holds a proxy that must stay coherent after an op that
 			-- originates on the proxyless side fans out and runs ShiftKeys on the
