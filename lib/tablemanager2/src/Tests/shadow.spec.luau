@@ -22,115 +22,99 @@ return function(t: tiniest)
 	const describe = t.describe
 	const expect = t.expect
 
-	-- `ShadowNode` is a global identity-keyed registry: it reads/writes nodes
-	-- keyed by the live tables it's handed, and finds ITS OWN root node via
-	-- `manager.Raw` (read fresh on every `Get`). A minimal `{ Raw = ... }`
-	-- shell stands in for a real TableManager for these isolated unit tests;
-	-- `Reconcile`/`Materialize` are still handed `live` explicitly, exactly as
-	-- `Baseline.*` hands them `manager.Raw`.
-	const function newShadow(initialRaw: any): (any, { Raw: any })
-		const fakeManager = { Raw = initialRaw }
-		const shadow = ShadowNode.new(fakeManager)
-		return shadow, fakeManager
-	end
+	-- `ShadowNode` is a stateless module backing a global identity-keyed
+	-- registry: every function reads/writes nodes keyed by the live table
+	-- it's handed directly (no per-manager handle to construct). These
+	-- isolated unit tests just pass plain tables in place of `manager.Raw`,
+	-- exactly as `Baseline.*` does for a real manager.
 
 	describe("ShadowNode", function()
 		test("Get returns nil for a never-materialized path", function()
-			const shadow = newShadow({})
-			expect(shadow:Get({ "a" })).never_exists()
+			expect(ShadowNode.Get({}, { "a" })).never_exists()
 		end)
 
 		test("Materialize seeds a scalar leaf and Get returns it", function()
 			const live = { a = { b = 5 } }
-			const shadow = newShadow(live)
-			shadow:Materialize({ "a", "b" }, live)
-			expect(shadow:Get({ "a", "b" })).is(5)
+			ShadowNode.Materialize(live, { "a", "b" })
+			expect(ShadowNode.Get(live, { "a", "b" })).is(5)
 		end)
 
 		test("Materialize deep-copies a table leaf (mutating live doesn't affect the mirror)", function()
 			const live = { a = { x = 1 } }
-			const shadow = newShadow(live)
-			shadow:Materialize({ "a" }, live)
+			ShadowNode.Materialize(live, { "a" })
 			live.a.x = 2
-			expect(shadow:Get({ "a" }).x).is(1)
+			expect(ShadowNode.Get(live, { "a" }).x).is(1)
 		end)
 
 		test("Reconcile refreshes the mirror to the current live value", function()
 			const live = { a = 1 }
-			const shadow = newShadow(live)
-			shadow:Materialize({ "a" }, live)
+			ShadowNode.Materialize(live, { "a" })
 			live.a = 2
-			shadow:Reconcile({ "a" }, live)
-			expect(shadow:Get({ "a" })).is(2)
+			ShadowNode.Reconcile(live, { "a" })
+			expect(ShadowNode.Get(live, { "a" })).is(2)
 		end)
 
 		test("Reconcile at the root replaces the whole mirror", function()
 			const live = { a = 1 }
-			const shadow, fakeManager = newShadow(live)
-			shadow:Materialize({}, live)
-			expect(shadow:Get({ "a" })).is(1)
+			ShadowNode.Materialize(live, {})
+			expect(ShadowNode.Get(live, { "a" })).is(1)
 			const newRoot = { a = 99 }
-			fakeManager.Raw = newRoot
-			shadow:Reconcile({}, newRoot)
-			expect(shadow:Get({ "a" })).is(99)
+			ShadowNode.Reconcile(newRoot, {})
+			expect(ShadowNode.Get(newRoot, { "a" })).is(99)
 		end)
 
 		test("Materialize is idempotent on an already-materialized path", function()
 			const live = { a = { b = 1, c = 2 } }
-			const shadow = newShadow(live)
-			shadow:Materialize({ "a", "b" }, live)
-			shadow:Materialize({ "a", "c" }, live)
+			ShadowNode.Materialize(live, { "a", "b" })
+			ShadowNode.Materialize(live, { "a", "c" })
 			-- Both leaves survive: materializing "a.c" must not wipe out "a.b".
-			expect(shadow:Get({ "a", "b" })).is(1)
-			expect(shadow:Get({ "a", "c" })).is(2)
+			expect(ShadowNode.Get(live, { "a", "b" })).is(1)
+			expect(ShadowNode.Get(live, { "a", "c" })).is(2)
 		end)
 
 		test("a newly-created intermediate node captures sibling keys never themselves materialized", function()
 			const live = { player = { health = 100, mana = 5 } }
-			const shadow = newShadow(live)
 			-- Only "health" is ever individually materialized; "mana" is a
 			-- sibling under the same new intermediate node ("player").
-			shadow:Materialize({ "player", "health" }, live)
+			ShadowNode.Materialize(live, { "player", "health" })
 			-- The intermediate "player" node must carry "mana" too, even though
 			-- nothing ever materialized {"player", "mana"} directly - otherwise a
 			-- later wholesale replacement of "player" couldn't detect its removal.
-			expect(shadow:Get({ "player", "mana" })).is(5)
+			expect(ShadowNode.Get(live, { "player", "mana" })).is(5)
 		end)
 
-		test("two managers sharing a live table share the SAME baseline node", function()
+		test("two roots sharing a live table share the SAME baseline node", function()
 			const shared = { health = 100 }
-			const shadowA, managerA = newShadow({ stats = shared })
-			const shadowB, managerB = newShadow({ stats = shared })
-			shadowA:Materialize({ "stats", "health" }, managerA.Raw)
-			-- `shadowB` never materialized anything itself, but its root's
-			-- "stats" slot resolves to the SAME identity-keyed node `shadowA`
-			-- just populated, since both mirror the same live `shared` table.
-			shadowB:Materialize({ "stats", "health" }, managerB.Raw)
-			expect(shadowB:Get({ "stats", "health" })).is(100)
+			const rawA = { stats = shared }
+			const rawB = { stats = shared }
+			ShadowNode.Materialize(rawA, { "stats", "health" })
+			-- `rawB` never materialized anything itself, but its "stats" slot
+			-- resolves to the SAME identity-keyed node `rawA` just populated,
+			-- since both mirror the same live `shared` table.
+			ShadowNode.Materialize(rawB, { "stats", "health" })
+			expect(ShadowNode.Get(rawB, { "stats", "health" })).is(100)
 			shared.health = 50
-			shadowA:Reconcile({ "stats", "health" }, managerA.Raw)
-			expect(shadowB:Get({ "stats", "health" })).is(50)
+			ShadowNode.Reconcile(rawA, { "stats", "health" })
+			expect(ShadowNode.Get(rawB, { "stats", "health" })).is(50)
 		end)
 
 		test("RebindRoot re-keys the root node so Get survives a root identity swap", function()
 			const oldRoot = { a = 1 }
-			const shadow, fakeManager = newShadow(oldRoot)
-			shadow:Materialize({}, oldRoot)
-			expect(shadow:Get({ "a" })).is(1)
+			ShadowNode.Materialize(oldRoot, {})
+			expect(ShadowNode.Get(oldRoot, { "a" })).is(1)
 
 			-- Simulate a `Set({}, newRoot)`: the live root identity is swapped,
 			-- and the baseline must follow so `Get({})` still returns the seeded
 			-- pre-swap contents (the diff "old"), not nil.
 			const newRoot = { a = 2, b = 3 }
-			fakeManager.Raw = newRoot
-			shadow:RebindRoot(oldRoot, newRoot)
-			expect(shadow:Get({ "a" })).is(1) -- still the pre-swap baseline
-			expect(shadow:Get({ "b" })).never_exists()
+			ShadowNode.RebindRoot(oldRoot, newRoot)
+			expect(ShadowNode.Get(newRoot, { "a" })).is(1) -- still the pre-swap baseline
+			expect(ShadowNode.Get(newRoot, { "b" })).never_exists()
 
 			-- A subsequent root reconcile then refreshes it to the new contents.
-			shadow:Reconcile({}, newRoot)
-			expect(shadow:Get({ "a" })).is(2)
-			expect(shadow:Get({ "b" })).is(3)
+			ShadowNode.Reconcile(newRoot, {})
+			expect(ShadowNode.Get(newRoot, { "a" })).is(2)
+			expect(ShadowNode.Get(newRoot, { "b" })).is(3)
 		end)
 	end)
 
@@ -272,7 +256,7 @@ return function(t: tiniest)
 			manager:Set("z", 5)
 
 			expect(zOld).is(1)
-			expect((manager :: any)._shadow:Get({ "a" }).value).is(2)
+			expect(ShadowNode.Get((manager :: any).Raw, { "a" }).value).is(2)
 
 			manager:Destroy()
 		end)
@@ -289,7 +273,7 @@ return function(t: tiniest)
 			manager:ArrayInsert("items", "c")
 			manager:ArrayRemove("items", 1)
 
-			expect((manager :: any)._shadow:Get({ "items" })).is_shallow_equal { "b", "c" }
+			expect(ShadowNode.Get((manager :: any).Raw, { "items" })).is_shallow_equal { "b", "c" }
 
 			manager:Destroy()
 		end)
@@ -305,7 +289,7 @@ return function(t: tiniest)
 				manager:Set("x", 3)
 			end)
 
-			expect((manager :: any)._shadow:Get({ "x" })).is(3)
+			expect(ShadowNode.Get((manager :: any).Raw, { "x" })).is(3)
 
 			-- A subsequent immediate write must diff against the post-batch
 			-- value (3), not a stale pre-batch one (1).
@@ -356,7 +340,7 @@ return function(t: tiniest)
 			b:OnValueChange("health", function() end)
 			a:Set("health", 50)
 
-			expect((b :: any)._shadow:Get({ "health" })).is(50)
+			expect(ShadowNode.Get((b :: any).Raw, { "health" })).is(50)
 
 			-- A later write on `a` must diff against the now-current value (50)
 			-- from `b`'s perspective too, not the stale original (100).
@@ -439,7 +423,7 @@ return function(t: tiniest)
 			-- this mostly guards against Materialize accidentally accumulating
 			-- stale sibling entries on repeated calls.
 			local count = 0
-			for _ in (manager :: any)._shadow:Get({}) do
+			for _ in ShadowNode.Get((manager :: any).Raw, {}) do
 				count += 1
 			end
 			expect(count).is(1)

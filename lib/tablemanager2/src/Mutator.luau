@@ -399,7 +399,7 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 	-- going through the shadow at all.
 	const opaqueBypass = trackable and CoverageModule.PassesThroughOpaqueAncestor(self, parsedPath, ctx)
 	if trackable and not opaqueBypass then
-		BaselineModule.SeedIfNeeded(self, parsedPath, oldValue, ctx)
+		BaselineModule.SeedIfNeeded(self, parsedPath, oldValue)
 	end
 	parentTable[key] = newValue
 	if not self._suppressLinkFanOut then
@@ -463,7 +463,7 @@ function Mutator.applyRootSet<T>(self: TM_Internal<T>, newRoot: any)
 	if trackable then
 		-- rootPath is always {}, so this never builds an intermediate spine
 		-- (no opaque-ancestor risk; the root itself can never be opaque).
-		BaselineModule.SeedIfNeeded(self, rootPath, oldRoot, self._changeDetector:GetOpaqueCtx())
+		BaselineModule.SeedIfNeeded(self, rootPath, oldRoot)
 	end
 
 	-- Swap identity. `oldRoot` keeps its contents (we only repoint references and

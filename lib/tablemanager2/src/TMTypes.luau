@@ -10,7 +10,6 @@ const ArrayDiffModule = require("./ArrayDiff")
 const BatchUtilsModule = require("./BatchUtils")
 const OpaqueRegistryModule = require("./OpaqueRegistry")
 const IgnoreTrieModule = require("./IgnoreTrie")
-const ShadowNodeModule = require("./ShadowNode")
 const DiffModule = require("./Diff")
 const Signal = require("../Signal")
 const JanitorModule = require("../Janitor")
@@ -33,7 +32,6 @@ type SchemaCheck = SchemaNavigatorModule.Check
 type BatchState = BatchUtilsModule.BatchState
 type OpaqueRegistries = OpaqueRegistryModule.Registries
 type IgnoreTrieNode = IgnoreTrieModule.Node
-type ShadowNode = ShadowNodeModule.ShadowNode
 type DiffNode = DiffModule.DiffNode
 
 export type Proxy<T, S> = ProxyManagerModule.Proxy<T, S>
@@ -387,7 +385,6 @@ export type TM_Internal<T = { [any]: any }> = TableManager<T> & {
 
 	_opaqueRegistries: OpaqueRegistries,
 	_ignoreTrie: IgnoreTrieNode,
-	_shadow: ShadowNode,
 
 	-- Re-fires listeners/signals for an op that has ALREADY been applied to the
 	-- shared raw, WITHOUT mutating or snapshot-diffing. Used only by cross-manager

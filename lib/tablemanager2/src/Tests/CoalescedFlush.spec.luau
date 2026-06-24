@@ -22,6 +22,7 @@
 
 return function(t: tiniest)
 	const TableManager = require("../TableManager")
+	const ShadowNode = require("../ShadowNode")
 
 	const test = t.test
 	const describe = t.describe
@@ -152,10 +153,10 @@ return function(t: tiniest)
 			manager:OnValueChange("x", function() end) -- make "x" trackable
 
 			manager:Set("x", 2)
-			expect((manager :: any)._shadow:Get({ "x" })).is(1)
+			expect(ShadowNode.Get((manager :: any).Raw, { "x" })).is(1)
 
 			manager:Set("x", 3)
-			expect((manager :: any)._shadow:Get({ "x" })).is(1) -- still frame-start, not 2
+			expect(ShadowNode.Get((manager :: any).Raw, { "x" })).is(1) -- still frame-start, not 2
 
 			local capturedOld: any
 			manager:OnValueChange("x", function(_newValue, oldValue)
@@ -165,7 +166,7 @@ return function(t: tiniest)
 			task.wait()
 
 			expect(capturedOld).is(1)
-			expect((manager :: any)._shadow:Get({ "x" })).is(3)
+			expect(ShadowNode.Get((manager :: any).Raw, { "x" })).is(3)
 
 			manager:Destroy()
 		end)

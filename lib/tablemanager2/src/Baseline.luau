@@ -4,11 +4,14 @@
 	@class Baseline
 
 	The seam between TableManager's flush/dispatch logic and the concrete
-	"last-emitted" baseline store (`ShadowNode`, the global identity-keyed node
-	registry). Every read, reconcile, pre-write seed, and post-op sync of the
-	baseline goes through here instead of touching `manager._shadow` directly,
-	and consolidates the `IsTrackable` + `PassesThroughOpaqueAncestor` gate that
-	the array-op / batch / linked-apply sync sites each open-coded.
+	"last-emitted" baseline store (`ShadowNode`, a stateless, global
+	identity-keyed node registry). Every read, reconcile, pre-write seed, and
+	post-op sync of the baseline goes through here, which supplies `ShadowNode`
+	with the two things it needs and never holds itself: `manager.Raw` (the
+	root to resolve against) and `Propagation.IsObserved` (the global
+	observership predicate that decides each slot's shape). Also consolidates
+	the `IsTrackable` + `PassesThroughOpaqueAncestor` gate that the array-op /
+	batch / linked-apply sync sites each open-coded.
 ]=]
 
 const PathHelpers = require("./PathHelpers")
@@ -23,35 +26,28 @@ type TableManagerLike = TMTypes.TableManagerLike
 
 const Baseline = {}
 
--- Creates the baseline store for a new manager (its `self._shadow`). The store
--- is handed the global `IsObserved` predicate so each table slot's shape
--- (content node vs. live ref) is keyed on global observership, independent of
--- this manager's own opacity — see `ShadowNode.copyForShadow`.
-function Baseline.NewStore(manager: TableManagerLike): any
-	return ShadowNodeModule.new(manager, PropagationModule.IsObserved)
-end
-
 --[[
 	Read: the last-emitted baseline value at `path` (the diff "old"). `nil` when
 	`path` was never materialized.
 ]]
 function Baseline.Get(manager: TableManagerLike, path: PathArray): any
-	return manager._shadow:Get(path)
+	return ShadowNodeModule.Get(manager.Raw, path)
 end
 
 --[[
 	Post-diff reconcile: bring the baseline at `path` up to the current live
-	value (the new "last emitted"). `ctx` is the manager's opacity oracle.
+	value (the new "last emitted"). Slot shape is decided by global
+	observership, not this manager's opacity.
 ]]
-function Baseline.Reconcile(manager: TableManagerLike, path: PathArray, ctx: any)
-	manager._shadow:Reconcile(path, manager.Raw, ctx)
+function Baseline.Reconcile(manager: TableManagerLike, path: PathArray)
+	ShadowNodeModule.Reconcile(manager.Raw, path, PropagationModule.IsObserved)
 end
 
 --[[
 	Post-op sync: materialize the baseline at `path` to the live value IF `path`
 	is trackable and does not pass through an opaque ancestor. This is the single
 	primitive the array-op, batch-resume, and linked-apply sync sites call instead
-	of re-deriving the same gate around `Shadow:Materialize`.
+	of re-deriving the same gate around `ShadowNode.Materialize`.
 ]]
 function Baseline.Materialize(manager: TableManagerLike, path: PathArray)
 	if not CoverageModule.IsTrackable(manager, path) then
@@ -61,7 +57,7 @@ function Baseline.Materialize(manager: TableManagerLike, path: PathArray)
 	if CoverageModule.PassesThroughOpaqueAncestor(manager, path, ctx) then
 		return
 	end
-	manager._shadow:Materialize(path, manager.Raw, ctx)
+	ShadowNodeModule.Materialize(manager.Raw, path, PropagationModule.IsObserved)
 end
 
 --[[
@@ -86,9 +82,10 @@ function Baseline.ApplyArrayOp(
 	if CoverageModule.PassesThroughOpaqueAncestor(manager, path, ctx) then
 		return
 	end
-	const applied = manager._shadow:ApplyArrayOp(path, manager.Raw, opKind, index, newValue, ctx)
+	const applied =
+		ShadowNodeModule.ApplyArrayOp(manager.Raw, path, opKind, index, newValue, PropagationModule.IsObserved)
 	if not applied then
-		manager._shadow:Materialize(path, manager.Raw, ctx)
+		ShadowNodeModule.Materialize(manager.Raw, path, PropagationModule.IsObserved)
 	end
 end
 
@@ -99,7 +96,7 @@ end
 	BEFORE the root flush. See `ShadowNode.RebindRoot`.
 ]]
 function Baseline.RebindRoot(manager: TableManagerLike, oldRoot: any, newRoot: any)
-	manager._shadow:RebindRoot(oldRoot, newRoot)
+	ShadowNodeModule.RebindRoot(oldRoot, newRoot)
 end
 
 --[[
@@ -111,14 +108,14 @@ end
 	for the trackable / opaque-ancestor gate (the previous `ensureShadowSeeded`
 	contract; see `Coverage.PassesThroughOpaqueAncestor`).
 ]]
-function Baseline.SeedIfNeeded(manager: TableManagerLike, path: PathArray, oldValue: any, ctx: any)
+function Baseline.SeedIfNeeded(manager: TableManagerLike, path: PathArray, oldValue: any)
 	if oldValue == nil then
 		return
 	end
-	if manager._shadow:Get(path) ~= nil then
+	if ShadowNodeModule.Get(manager.Raw, path) ~= nil then
 		return
 	end
-	manager._shadow:Materialize(path, manager.Raw, ctx)
+	ShadowNodeModule.Materialize(manager.Raw, path, PropagationModule.IsObserved)
 end
 
 return Baseline

@@ -244,10 +244,6 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	
 	self._opaqueRegistries = OpaqueRegistryModule.NewRegistries()
 	self._ignoreTrie = IgnoreTrieModule.new()
-	-- Persistent diff baseline for observed regions (see Baseline.luau / Flush).
-	-- ShadowNode is a global, identity-keyed registry: any two managers that
-	-- reach the same live table automatically share the same baseline node.
-	self._shadow = BaselineModule.NewStore(self)
 	if resolvedConfig.IgnoredPaths then
 		for _, ignoredPath in resolvedConfig.IgnoredPaths :: { PathHelpers.Path<any> } do
 			IgnoreTrieModule.SetPathIgnored(self._ignoreTrie, ignoredPath, true)
@@ -1048,11 +1044,10 @@ end
 	gate and batch-state check; this always runs.
 ]=]
 function TableManager._doFlush<T>(self: TM_Internal<T>, path: PathArray)
-	const ctx = self._changeDetector:GetOpaqueCtx()
 	const old = BaselineModule.Get(self, path)
 	const new_ = self:Get(path :: any, true)
 	self._changeDetector:CheckForChangesBetween(old, new_, path, self.Raw)
-	BaselineModule.Reconcile(self, path, ctx)
+	BaselineModule.Reconcile(self, path)
 end
 
 --[=[

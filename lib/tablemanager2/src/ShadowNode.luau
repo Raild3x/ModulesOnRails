@@ -9,10 +9,9 @@
 	node — sharing a table identity means sharing a baseline, with no separate
 	registration step and no per-manager private copy.
 
-	A manager's own handle (`Baseline.NewStore(manager)`) just remembers the
-	manager so `Get` can find its root node (`REGISTRY[manager.Raw]`); every
-	other operation is handed `live` directly by `Baseline.*` and resolves
-	through the registry from there.
+	This module is stateless: every function takes the live root/table directly
+	(usually `manager.Raw`, supplied by `Baseline.*` — the only per-manager seam)
+	and resolves through the registry from there. There is no per-manager handle.
 
 	Each table slot's shape — a deep content node vs. the live ref — is chosen by
 	GLOBAL observership (the injected `isObserved` predicate), NOT by the
@@ -26,38 +25,13 @@
 ]=]
 
 const PathHelpers = require("./PathHelpers")
-const Diff = require("./Diff")
 
 --// Types //--
 type PathArray = PathHelpers.PathArray<string>
 type table = { [any]: any }
-
-export type ShadowNode = {
-	_manager: any,
-	-- Injected at construction (see `new`): the global "is anyone observing this
-	-- table transparently?" predicate. Decides each table slot's shape — content
-	-- node vs. live ref — independently of any one manager's opacity.
-	_isObserved: (child: any) -> boolean,
-	Get: (self: ShadowNode, path: PathArray) -> any,
-	Reconcile: (self: ShadowNode, path: PathArray, live: any, ctx: Diff.Ctx?) -> (),
-	Materialize: (self: ShadowNode, path: PathArray, live: any, ctx: Diff.Ctx?) -> (),
-	-- See the original `Shadow.ApplyArrayOp`: applies a known array op directly
-	-- to the existing mirror array instead of re-copying it. Returns `false`
-	-- when `path` is not yet materialized (caller falls back to `Materialize`).
-	ApplyArrayOp: (
-		self: ShadowNode,
-		path: PathArray,
-		live: any,
-		opKind: "ArrayInserted" | "ArrayRemoved" | "ArraySet",
-		index: number,
-		newValue: any,
-		ctx: Diff.Ctx?
-	) -> boolean,
-	RebindRoot: (self: ShadowNode, oldRoot: any, newRoot: any) -> (),
-}
+type IsObserved = (child: any) -> boolean
 
 const ShadowNode = {}
-const ShadowNode_MT = { __index = ShadowNode }
 
 -- ---------------------------------------------------------------------------
 -- The global identity -> node registry
@@ -76,10 +50,10 @@ const REGISTRY: { [table]: table } = (setmetatable({}, { __mode = "k" }) :: any)
 -- compare against live, instead of comparing the (always-unequal) copy.
 const IDENTITY_OF: { [table]: any } = (setmetatable({}, { __mode = "kv" }) :: any) :: { [table]: any }
 
--- Default observership predicate for stores constructed without an injected one
--- (e.g. the isolated `ShadowNode` unit tests, which never register observership):
--- treat every table as observed, reproducing the pre-fix "always build a content
--- node" behavior so those tests stay byte-identical.
+-- Default observership predicate for calls made without an injected one (e.g.
+-- the isolated `ShadowNode` unit tests, which never register observership):
+-- treat every table as observed, reproducing the pre-fix "always build a
+-- content node" behavior so those tests stay byte-identical.
 const function DEFAULT_IS_OBSERVED(_child: any): boolean
 	return true
 end
@@ -96,7 +70,7 @@ end
 -- everyone / unobserved — never copied, never walked). Because the gate is
 -- global, every manager reconciles the same slot to the same shape, so two
 -- co-observers with different opacity can no longer corrupt each other.
-const function copyForShadow(value: any, isObserved: (any) -> boolean): any
+const function copyForShadow(value: any, isObserved: IsObserved): any
 	if type(value) ~= "table" then
 		return value
 	end
@@ -119,7 +93,7 @@ end
 
 -- Walks `root` along `path`, returning the value found or nil if any
 -- intermediate segment is not a table.
-const function resolveAtPath(root: any, path: PathArray): any
+const function resolveAtPath(root: table, path: PathArray): table?
 	local current: any = root
 	for _, key in path do
 		if type(current) ~= "table" then
@@ -134,33 +108,22 @@ end
 -- Public API
 -- ---------------------------------------------------------------------------
 
-function ShadowNode.new(manager: any, isObserved: ((child: any) -> boolean)?): ShadowNode
-	const self = setmetatable({
-		_manager = manager,
-		_isObserved = isObserved or DEFAULT_IS_OBSERVED,
-	}, ShadowNode_MT)
-	return (self :: any) :: ShadowNode
-end
-
 --[=[
 	Returns the live identity that the baseline content `node` mirrors, or `nil`
 	if `node` is not a registered content node. Lets the diff's opaque branch
 	compare a content-node slot by the child's real identity (not the copy).
 ]=]
-function ShadowNode.IdentityOf(node: any): any
-	if type(node) ~= "table" then
-		return nil
-	end
+function ShadowNode.IdentityOf(node: any): table?
 	return IDENTITY_OF[node]
 end
 
 --[=[
 	Returns the last-flushed value at `path` (the diff baseline), read from
-	this manager's root node. `nil` when `path` (or an ancestor of it) was
-	never materialized.
+	`root`'s node. `nil` when `path` (or an ancestor of it) was never
+	materialized.
 ]=]
-function ShadowNode.Get(self: ShadowNode, path: PathArray): any
-	return resolveAtPath(REGISTRY[self._manager.Raw], path)
+function ShadowNode.Get(root: table, path: PathArray): table
+	return resolveAtPath(REGISTRY[root], path)
 end
 
 --[=[
@@ -168,9 +131,10 @@ end
 	value there. Requires `path`'s parent to already exist as a node; use
 	`Materialize` to seed a never-before-tracked path.
 ]=]
-function ShadowNode.Reconcile(self: ShadowNode, path: PathArray, live: any, ctx: Diff.Ctx?)
+function ShadowNode.Reconcile(live: table, path: PathArray, isObserved: IsObserved?)
+	const observed = isObserved or DEFAULT_IS_OBSERVED
 	const value = resolveAtPath(live, path)
-	const copy = copyForShadow(value, self._isObserved)
+	const copy = copyForShadow(value, observed)
 	if #path == 0 then
 		return
 	end
@@ -186,9 +150,10 @@ end
 	nodes) and then `Reconcile`s the leaf. Safe to call on an
 	already-materialized path.
 ]=]
-function ShadowNode.Materialize(self: ShadowNode, path: PathArray, live: any, ctx: Diff.Ctx?)
+function ShadowNode.Materialize(live: table, path: PathArray, isObserved: IsObserved?)
+	const observed = isObserved or DEFAULT_IS_OBSERVED
 	if #path == 0 then
-		self:Reconcile(path, live, ctx)
+		ShadowNode.Reconcile(live, path, observed)
 		return
 	end
 	if REGISTRY[live] == nil then
@@ -200,11 +165,11 @@ function ShadowNode.Materialize(self: ShadowNode, path: PathArray, live: any, ct
 		const segment = path[i]
 		table.insert(partialPath, segment)
 		if type(node[segment]) ~= "table" then
-			node[segment] = copyForShadow(resolveAtPath(live, partialPath), self._isObserved)
+			node[segment] = copyForShadow(resolveAtPath(live, partialPath), observed)
 		end
 		node = node[segment]
 	end
-	self:Reconcile(path, live, ctx)
+	ShadowNode.Reconcile(live, path, observed)
 end
 
 --[=[
@@ -214,14 +179,14 @@ end
 	(the caller should fall back to `Materialize`).
 ]=]
 function ShadowNode.ApplyArrayOp(
-	self: ShadowNode,
-	path: PathArray,
 	live: any,
+	path: PathArray,
 	opKind: "ArrayInserted" | "ArrayRemoved" | "ArraySet",
 	index: number,
 	newValue: any,
-	ctx: Diff.Ctx?
+	isObserved: IsObserved?
 ): boolean
+	const observed = isObserved or DEFAULT_IS_OBSERVED
 	const mirrorArray = resolveAtPath(REGISTRY[live], path)
 	if type(mirrorArray) ~= "table" then
 		return false
@@ -230,11 +195,11 @@ function ShadowNode.ApplyArrayOp(
 		return true -- stored by reference (opaque): already current by definition.
 	end
 	if opKind == "ArrayInserted" then
-		table.insert(mirrorArray, index, copyForShadow(newValue, self._isObserved))
+		table.insert(mirrorArray, index, copyForShadow(newValue, observed))
 	elseif opKind == "ArrayRemoved" then
 		table.remove(mirrorArray, index)
 	elseif opKind == "ArraySet" then
-		mirrorArray[index] = copyForShadow(newValue, self._isObserved)
+		mirrorArray[index] = copyForShadow(newValue, observed)
 	end
 	return true
 end
@@ -249,7 +214,7 @@ end
 	newly added. The node table itself is preserved (its old contents become the
 	diff "old"); the subsequent root `Reconcile` refreshes it to `newRoot`.
 ]=]
-function ShadowNode.RebindRoot(_self: ShadowNode, oldRoot: any, newRoot: any)
+function ShadowNode.RebindRoot(oldRoot: table, newRoot: table)
 	if oldRoot == newRoot then
 		return
 	end
