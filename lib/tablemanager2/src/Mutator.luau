@@ -479,10 +479,14 @@ function Mutator.applyRootSet<T>(self: TM_Internal<T>, newRoot: any)
 	-- Swap identity. `oldRoot` keeps its contents (we only repoint references and
 	-- never mutate the old object), so the diff below sees the true prior state.
 	self.Raw = newRoot
-	self.Raw = newRoot
 	if self._proxyManager ~= nil then
 		self._proxyManager:RetargetRoot(oldRoot, newRoot)
 	end
+	-- The baseline is a global identity-keyed pool; the root's identity just
+	-- changed, so re-key its node from `oldRoot` to `newRoot` (interior nodes
+	-- keep their identities). This must happen before the root flush below so
+	-- `Baseline.Get({})` still finds the seeded pre-swap baseline.
+	BaselineModule.RebindRoot(self, oldRoot, newRoot)
 
 	-- Reconcile link groups: anchors that no longer resolve to their shared
 	-- object are severed (the `{}` case of the ancestor-replacement handling).

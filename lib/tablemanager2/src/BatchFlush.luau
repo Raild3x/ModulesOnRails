@@ -219,7 +219,7 @@ const function flushTrackedArrays(self: TableManagerLike, batch: BatchState)
 end
 
 --[[
-	Brings the persistent shadow (see Shadow.luau / TableManager:Flush) up to
+	Brings the persistent shadow (see ShadowNode.luau / TableManager:Flush) up to
 	date for every branch/array touched by this batch, so the NEXT immediate
 	(non-batched) flush anywhere in this batch's touched regions diffs against
 	today's post-batch state instead of a stale pre-batch one. Only the two

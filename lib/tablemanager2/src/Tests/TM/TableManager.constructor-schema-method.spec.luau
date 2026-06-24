@@ -117,6 +117,30 @@ return function(t: tiniest)
 			manager:Destroy()
 		end)
 
+		test("default allow: removing one of two shared locations leaves the other intact", function()
+			-- Multi-location references are a supported feature under the default
+			-- ("allow"). After b and a share one table, removing a must leave that
+			-- table live at b with no corruption — the edge the old error-default
+			-- existed to forbid.
+			local manager = TableManager.new {
+				a = { value = 1 },
+				b = { value = 2 },
+			}
+
+			manager.Proxy.b = manager.Proxy.a
+			expect(manager.Raw.b).is(manager.Raw.a)
+
+			manager.Proxy.a = nil
+
+			expect(manager.Raw.a).is(nil)
+			expect(manager:Get({ "b", "value" })).is(1)
+			-- The surviving location is still writable and reads back correctly.
+			manager.Proxy.b.value = 7
+			expect(manager:Get({ "b", "value" })).is(7)
+
+			manager:Destroy()
+		end)
+
 		test("allows unschemed paths to remain permissive", function()
 			local failures = 0
 			local manager = TableManager.new({

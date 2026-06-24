@@ -85,8 +85,9 @@ Declaration matrix:
 - Prefer extra context over minimal logs so follow-up decisions can be made from one run.
 
 ## Planning
-- Plans should be broken up into phases that can be executed independently without breaking a system. Each phase should have a clear goal and a defined-ordered set of tasks.
-- Phases should note touched files and the expected impact on those files. This helps with code review and ensures that changes are intentional and well-understood.
+- Plans should be broken up into phases when there are logically distinct high level jobs that need to be performed. These phases should be broken up into ordered tasks that can be executed sequentially to achieve the phase goal. Phases should aim to have the file in a stable state at the end of each phase, minimizing incomplete changes and ensuring that the file can be used or reviewed without dependency on subsequent phases.
+- Avoid breaking up jobs that are logically connected/dependent into separate phases, as this can lead to overcomplicating and performing much more work than actually needed.
+- Phases should note touched files and the expected impact on those files. This helps with code review and ensures that changes are intentional and well-understood. Note any potential edge cases that may arise. Provide type defs for any new planned api and examples of usage for public facing ones.
 
 ## Reference Links
 - If creating a type function, view the following: https://luau.org/types-library/

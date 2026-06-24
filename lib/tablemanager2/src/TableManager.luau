@@ -247,15 +247,9 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	self._opaqueRegistries = OpaqueRegistryModule.NewRegistries()
 	self._ignoreTrie = IgnoreTrieModule.new()
 	-- Persistent diff baseline for observed regions (see Baseline.luau / Flush).
-	-- The concrete store (Shadow or the identity-keyed ShadowNode) is chosen by
-	-- the baseline seam; every access goes through `Baseline.*` or the resolver.
-	self._shadow = BaselineModule.NewStore()
-	-- Phase C: route shadow access for shared link regions to a group-owned
-	-- shadow when sharing is active (no-op until this manager joins a link
-	-- group; `_linkGroups` is nil here, so the resolver returns nil).
-	self._shadow:SetResolver(function(path)
-		return LinkGroupModule.ResolveSharedShadow(self, path)
-	end)
+	-- ShadowNode is a global, identity-keyed registry: any two managers that
+	-- reach the same live table automatically share the same baseline node.
+	self._shadow = BaselineModule.NewStore(self)
 	if resolvedConfig.IgnoredPaths then
 		for _, ignoredPath in resolvedConfig.IgnoredPaths :: { PathHelpers.Path<any> } do
 			IgnoreTrieModule.SetPathIgnored(self._ignoreTrie, ignoredPath, true)
@@ -830,13 +824,7 @@ function TableManager.Set<T, S>(
 	debug.profilebegin("TM.Set")
 	local parsedPath = PathHelpers.ParsePath(path)
 	local unwrappedValue = ProxyManagerModule.Unwrap(value)
-	const opaqueCountBefore = self._opaqueRegistries.Count
 	unwrappedValue = OpaqueRegistryModule.UnwrapAndRegister(self._opaqueRegistries, unwrappedValue)
-	if self._opaqueRegistries.Count ~= opaqueCountBefore then
-		-- A new per-manager opaque mark may flip a link group out of shadow
-		-- sharing (Phase C); re-evaluate this manager's groups.
-		LinkGroupModule.RecomputeSharingForManager(self)
-	end
 
 	-- Empty path replaces the entire root table (identity swap + full diff).
 	if #parsedPath == 0 then
@@ -888,11 +876,7 @@ function TableManager.ArrayInsert<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 	end
 
 	local unwrappedValue = ProxyManagerModule.Unwrap(newValue)
-	const opaqueCountBefore = self._opaqueRegistries.Count
 	unwrappedValue = OpaqueRegistryModule.UnwrapAndRegister(self._opaqueRegistries, unwrappedValue)
-	if self._opaqueRegistries.Count ~= opaqueCountBefore then
-		LinkGroupModule.RecomputeSharingForManager(self)
-	end
 
 	if not MutatorModule.validateArrayInsert(self, parsedPath, unwrappedValue) then return end
 

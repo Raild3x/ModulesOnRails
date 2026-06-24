@@ -17,12 +17,10 @@ local PathHelpers = require("./PathHelpers")
 local Signal = require("../Signal")
 local TMTypes = require("./TMTypes")
 local Diff = require("./Diff")
-local ShadowModule = require("./Shadow")
 
 type PathArray<S = string> = PathHelpers.PathArray<S>
 type Path<S> = PathHelpers.Path<S>
 type DiffNode = Diff.DiffNode
-type Shadow = ShadowModule.Shadow
 type Signal<Fn, Args...> = Signal.Signal<Fn, Args...>
 
 --// Types //--
@@ -64,61 +62,6 @@ local function resolveAnchorPath(path: Path<any>?): PathArray
 	return PathHelpers.ParsePath(path)
 end
 
--- ---------------------------------------------------------------------------
--- Shadow sharing (Phase C)
---
--- When sharing is active, every member routes shadow access for its shared
--- region to a single group-owned shadow (`ResolveSharedShadow`), so the region
--- has ONE baseline instead of a private copy per member.
--- ---------------------------------------------------------------------------
-
--- A single shared shadow can serve the whole group only when no member has
--- PER-MANAGER opaque marks (those make `copyForShadow`'s shape differ per
--- member). Global opacity is shared by every manager, so it shapes the baseline
--- identically and is fine — hence the per-manager registry count check.
-local function allMembersOpacityFree(self: LinkGroup): boolean
-	for _, member in self._members do
-		if (member.Manager :: TableManagerLike)._opaqueRegistries.Count > 0 then
-			return false
-		end
-	end
-	return true
-end
-
--- Drops `manager`'s PRIVATE shadow content for its shared region (the subtree at
--- its live anchor) via `ReleaseLocal` (never routes). Called when the region
--- becomes group-shared, so a later fall back to the private shadow (sharing
--- deactivating, or the group dissolving) re-seeds cleanly from live instead of
--- reading stale pre-share content.
-local function clearPrivateRegion(self: LinkGroup, manager: TableManagerLike)
-	local anchor = self:GetAnchorPath(manager)
-	if anchor ~= nil then
-		manager._shadow:ReleaseLocal(anchor)
-	end
-end
-
--- Recomputes `_shadowSharingActive` and handles the transition:
---  * OFF->ON: clear every member's private region (so a later fall back re-seeds
---    cleanly rather than reading stale pre-share content).
---  * ON->OFF: abandon the shared shadow. Members fall back to their (empty)
---    private shadows and re-seed from live on their next write; dropping the
---    shared shadow means a future reactivation also starts from a fresh,
---    correctly-seeded baseline instead of reusing stale data.
-local function recomputeSharing(self: LinkGroup)
-	local active = #self._members >= 2 and allMembersOpacityFree(self)
-	if active == self._shadowSharingActive then
-		return
-	end
-	if active then
-		for _, member in self._members do
-			clearPrivateRegion(self, member.Manager)
-		end
-	else
-		self._sharedShadow = nil
-	end
-	self._shadowSharingActive = active
-end
-
 --[=[
 	@within LinkGroup
 
@@ -154,10 +97,6 @@ local function removeMember(self: LinkGroup, manager: TableManagerLike): boolean
 	-- A group of fewer than 2 members has nothing left to fan out to.
 	if #self._members < 2 then
 		self:Destroy()
-	else
-		-- Membership shrank but the group survives: re-evaluate shadow sharing
-		-- (e.g. the removed member was the only opacity holder).
-		recomputeSharing(self)
 	end
 
 	return true
@@ -203,15 +142,6 @@ function LinkGroup.Add(self: LinkGroup, manager: TableManagerLike, path: Path<an
 		manager._linkGroups = groups
 	end
 	table.insert(groups :: { LinkGroup }, self)
-
-	-- Phase C: re-evaluate shadow sharing now membership changed.
-	local wasActive = self._shadowSharingActive
-	recomputeSharing(self)
-	if self._shadowSharingActive and wasActive then
-		-- Joined an already-active group: `recomputeSharing` is a no-op (no
-		-- transition), so clear just THIS member's stale private region here.
-		clearPrivateRegion(self, manager)
-	end
 end
 
 --[=[
@@ -342,9 +272,6 @@ function LinkGroup.Destroy(self: LinkGroup)
 		end
 	end
 	table.clear(self._members)
-	-- Phase C: sharing is off once there are no members; drop the shared shadow.
-	self._shadowSharingActive = false
-	self._sharedShadow = nil
 
 	-- Drop the canonical registration so a future Link on this object starts fresh.
 	OBJECT_TO_GROUP[self._object] = nil
@@ -352,51 +279,6 @@ function LinkGroup.Destroy(self: LinkGroup)
 	self.Dissolved:Fire()
 	self.MemberRemoved:Destroy()
 	self.Dissolved:Destroy()
-end
-
--- ---------------------------------------------------------------------------
--- Shadow sharing: resolver + opacity recompute (called from TableManager)
--- ---------------------------------------------------------------------------
-
--- Routing hook installed on each member's `Shadow` (see `Shadow.SetResolver`).
--- For `path` in `manager`'s coordinates, returns the group-owned shared shadow,
--- the anchor-relative path within it, and the shared object (live root) when
--- `path` falls in a sharing-active region; otherwise nil so the op runs on the
--- manager's own mirror.
-local function resolveSharedShadow(manager: TableManagerLike, path: PathArray): (Shadow?, PathArray?, any?)
-	local groups = manager._linkGroups
-	if groups == nil then
-		return nil
-	end
-	for _, group in groups :: { LinkGroup } do
-		if group._shadowSharingActive then
-			local anchorPath = group:GetAnchorPath(manager)
-			if anchorPath ~= nil and PathHelpers.IsPrefixPath(anchorPath, path) then
-				if group._sharedShadow == nil then
-					group._sharedShadow = ShadowModule.new()
-				end
-				local rel: PathArray = {}
-				for i = #anchorPath + 1, #path do
-					rel[#rel + 1] = path[i]
-				end
-				return group._sharedShadow, rel, group._object
-			end
-		end
-	end
-	return nil
-end
-
--- Re-evaluates shadow sharing for every group `manager` belongs to. Called by
--- TableManager after `manager` registers a per-manager opaque mark (which can
--- flip a group from opacity-free to not).
-local function recomputeSharingForManager(manager: TableManagerLike)
-	local groups = manager._linkGroups
-	if groups == nil then
-		return
-	end
-	for _, group in table.clone(groups) :: { LinkGroup } do
-		recomputeSharing(group)
-	end
 end
 
 --------------------------------------------------------------------------------
@@ -410,8 +292,6 @@ local function newGroup(object: any): LinkGroup
 	self._object = object
 	self._members = {}
 	self._destroyed = false
-	self._sharedShadow = nil
-	self._shadowSharingActive = false
 	self.MemberRemoved = Signal.new() :: any
 	self.Dissolved = Signal.new() :: any
 	return self
@@ -854,7 +734,11 @@ end
 -- is never registered and never propagates — see `registerSubtree`.
 --------------------------------------------------------------------------------
 
-local IMPLICIT_SHARING = false
+-- Default ON: sharing a table identity across managers auto-links them, so a
+-- change via one propagates to the others (the confirmed "sharing = linking"
+-- model). `SetImplicitSharing(false)` is a global escape hatch. Opacity is the
+-- per-region opt-out (an opaque value is never registered; see `registerSubtree`).
+local IMPLICIT_SHARING = true
 
 -- Identity -> set of managers that currently contain that table. Both levels are
 -- weak-keyed so a collected table or manager drops out automatically (the index
@@ -948,8 +832,6 @@ return {
 	FindChildLinks = findChildLinks,
 	CheckAutoLink = checkAutoLink,
 	FindPathOf = findPathOf,
-	ResolveSharedShadow = resolveSharedShadow,
-	RecomputeSharingForManager = recomputeSharingForManager,
 	-- Implicit sharing (Phase 3)
 	RegisterSubtree = registerSubtree,
 	SetImplicitSharing = function(enabled: boolean)

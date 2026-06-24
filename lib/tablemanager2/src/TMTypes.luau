@@ -10,7 +10,7 @@ const ArrayDiffModule = require("./ArrayDiff")
 const BatchUtilsModule = require("./BatchUtils")
 const OpaqueRegistryModule = require("./OpaqueRegistry")
 const IgnoreTrieModule = require("./IgnoreTrie")
-const ShadowModule = require("./Shadow")
+const ShadowNodeModule = require("./ShadowNode")
 const DiffModule = require("./Diff")
 const Signal = require("../Signal")
 const JanitorModule = require("../Janitor")
@@ -33,7 +33,7 @@ type SchemaCheck = SchemaNavigatorModule.Check
 type BatchState = BatchUtilsModule.BatchState
 type OpaqueRegistries = OpaqueRegistryModule.Registries
 type IgnoreTrieNode = IgnoreTrieModule.Node
-type Shadow = ShadowModule.Shadow
+type ShadowNode = ShadowNodeModule.ShadowNode
 type DiffNode = DiffModule.DiffNode
 
 export type Proxy<T, S> = ProxyManagerModule.Proxy<T, S>
@@ -126,12 +126,6 @@ export type LinkGroup = {
 	_object: any,
 	_members: { any },
 	_destroyed: boolean,
-	-- Phase C: one shadow baseline shared by all members for the shared region,
-	-- created lazily when sharing is active. nil while sharing is inactive.
-	_sharedShadow: Shadow?,
-	-- True iff the group has >= 2 members and none has per-manager opaque marks,
-	-- so a single shared shadow can serve every member (see `ResolveSharedShadow`).
-	_shadowSharingActive: boolean,
 	MemberRemoved: Signal<(manager: any) -> (), any>,
 	Dissolved: Signal<() -> ()>,
 	Add: (self: LinkGroup, manager: any, path: Path<any>?) -> (),
@@ -431,7 +425,7 @@ export type TM_Internal<T = { [any]: any }> = TableManager<T> & {
 
 	_opaqueRegistries: OpaqueRegistries,
 	_ignoreTrie: IgnoreTrieNode,
-	_shadow: Shadow,
+	_shadow: ShadowNode,
 	
 	-- Re-fires listeners/signals for an op that has ALREADY been applied to the
 	-- shared raw, WITHOUT mutating or snapshot-diffing. Used only by LinkGroup

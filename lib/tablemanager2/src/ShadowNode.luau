@@ -3,26 +3,20 @@
 	@ignore
 	@class ShadowNode
 
-	Identity-keyed variant of the `Shadow` baseline store (selected via
-	`Baseline.NewStore()` when `Baseline.USE_SHADOW_NODE` is set).
+	The diff baseline store: a global, identity-keyed pool of mirror nodes. Two
+	managers that both reach the same live table (root or interior, e.g.
+	`Player.Stats` and `Tycoon.Stats`) automatically read and reconcile the SAME
+	node — sharing a table identity means sharing a baseline, with no separate
+	registration step and no per-manager private copy.
 
-	For a single manager it behaves EXACTLY like `Shadow` — same
-	`Get`/`Reconcile`/`Materialize`/`Release` results and the same per-viewer
-	opacity handling (opaque values/children kept by reference, never copied or
-	walked). The one addition is `_nodes`: a weak-keyed index from each live
-	table's identity to the baseline copy that mirrors it.
+	A manager's own handle (`Baseline.NewStore(manager)`) just remembers the
+	manager so `Get` can find its root node (`REGISTRY[manager.Raw]`); every
+	other operation is handed `live` directly by `Baseline.*` and resolves
+	through the registry from there.
 
-	That index is the foundation for the later phases:
-	- Phase 3 (sharing = linking): two managers/paths that reference the same live
-	  table resolve to the SAME baseline node, so a shared region has one baseline
-	  and one set of observers.
-	- Phase 4 (lazy slots): populate a child node only when a transparent observer
-	  covers it (opaque branches already cost just a by-reference entry here).
-
-	`_nodes` is populated but NOT yet consulted by `Get` (which still walks the
-	`_mirror` tree), so single-manager behavior is byte-for-byte `Shadow`'s. The
-	index uses weak keys (`__mode = "k"`) so it never pins live data alive — a
-	live table that is collected drops its index entry automatically.
+	Opaque values/children are kept BY REFERENCE (never copied, never
+	registered) — identity comparison against them still works, exactly as in
+	the pre-unification `Shadow`.
 ]=]
 
 const PathHelpers = require("./PathHelpers")
@@ -32,21 +26,14 @@ const Diff = require("./Diff")
 type PathArray<S = string> = PathHelpers.PathArray<S>
 type table = { [any]: any }
 
--- The resolver may route to EITHER a `ShadowNode` or a `Shadow` (the group-owned
--- shared baseline is a `Shadow`), so the target is typed loosely; both conform
--- to the same Get/Reconcile/Materialize/Release surface.
-export type Resolver = (path: PathArray) -> (any, PathArray?, any?)
-
 export type ShadowNode = {
-	_mirror: any,
-	_nodes: { [table]: table },
-	_resolver: Resolver?,
+	_manager: any,
 	Get: (self: ShadowNode, path: PathArray) -> any,
 	Reconcile: (self: ShadowNode, path: PathArray, live: any, ctx: Diff.Ctx?) -> (),
 	Materialize: (self: ShadowNode, path: PathArray, live: any, ctx: Diff.Ctx?) -> (),
-	-- See `Shadow.ApplyArrayOp`: applies a known array op directly to the
-	-- existing mirror array instead of re-copying it. Returns `false` when
-	-- `path` is not yet materialized (caller falls back to `Materialize`).
+	-- See the original `Shadow.ApplyArrayOp`: applies a known array op directly
+	-- to the existing mirror array instead of re-copying it. Returns `false`
+	-- when `path` is not yet materialized (caller falls back to `Materialize`).
 	ApplyArrayOp: (
 		self: ShadowNode,
 		path: PathArray,
@@ -56,39 +43,47 @@ export type ShadowNode = {
 		newValue: any,
 		ctx: Diff.Ctx?
 	) -> boolean,
-	Release: (self: ShadowNode, path: PathArray) -> (),
-	ReleaseLocal: (self: ShadowNode, path: PathArray) -> (),
-	SetResolver: (self: ShadowNode, resolver: Resolver?) -> (),
+	RebindRoot: (self: ShadowNode, oldRoot: any, newRoot: any) -> (),
 }
 
 const ShadowNode = {}
 const ShadowNode_MT = { __index = ShadowNode }
 
 -- ---------------------------------------------------------------------------
--- Internal helpers
+-- The global identity -> node registry
 -- ---------------------------------------------------------------------------
 
--- Identical shape decisions to `Shadow.copyForShadow` (plain unfrozen table;
--- opaque values/children kept BY REFERENCE), with the added side effect of
--- indexing each produced baseline copy by the identity of the live table it
--- mirrors. Opaque tables are kept by reference and are deliberately NOT indexed:
--- they have no baseline node (they cost just the by-reference entry in their
--- parent), matching the "opaque branch = one ref, no node" design.
-const function copyForShadow(self: ShadowNode, value: any, ctx: Diff.Ctx?): any
+-- Weak keys: a live table that is collected (or stops being referenced from
+-- any manager's tree) drops its node automatically, so the registry never
+-- pins live data alive.
+const REGISTRY: { [table]: table } = (setmetatable({}, { __mode = "k" }) :: any) :: { [table]: table }
+
+-- Refreshes (or creates) `REGISTRY[value]` to mirror `value`'s CURRENT
+-- content, recursing into transparent children. Reuses the SAME node table on
+-- every call so every other slot already holding a reference to it (from a
+-- different manager, or a different path in this one) sees the refresh
+-- without needing to re-fetch it. Opaque values/children are kept BY
+-- REFERENCE and are deliberately never registered.
+const function copyForShadow(value: any, ctx: Diff.Ctx?): any
 	if type(value) ~= "table" then
 		return value
 	end
 	if ctx ~= nil and ctx.isOpaque(value) then
 		return value
 	end
+	local out = REGISTRY[value]
+	if out == nil then
+		out = {}
+		REGISTRY[value] = out
+	else
+		table.clear(out)
+	end
 	const childrenOpaque = ctx ~= nil and ctx.hasOpaqueChildren(value)
-	const out = {}
-	self._nodes[value] = out
 	for k, v in value do
 		if childrenOpaque and type(v) == "table" then
 			out[k] = v
 		else
-			out[k] = copyForShadow(self, v, ctx)
+			out[k] = copyForShadow(v, ctx)
 		end
 	end
 	return out
@@ -107,95 +102,74 @@ const function resolveAtPath(root: any, path: PathArray): any
 	return current
 end
 
--- Routes `path` through the optional resolver (see `Shadow.route`). Returns
--- `(target, routedPath, liveRoot)`; `target == self` when the path is not in a
--- sharing-active region.
-const function route(self: ShadowNode, path: PathArray): (any, PathArray, any)
-	const resolver = self._resolver
-	if resolver ~= nil then
-		const target, routedPath, liveRoot = resolver(path)
-		if target ~= nil then
-			return target, routedPath :: PathArray<any>, liveRoot
-		end
-	end
-	return self, path, nil
-end
-
 -- ---------------------------------------------------------------------------
 -- Public API
 -- ---------------------------------------------------------------------------
 
-function ShadowNode.new(): ShadowNode
-	const self = setmetatable({
-		_mirror = nil,
-		-- Weak keys: a live table that is collected drops its index entry, so the
-		-- index never pins live data alive.
-		_nodes = (setmetatable({}, { __mode = "k" }) :: any) :: { [table]: table },
-		_resolver = nil,
-	}, ShadowNode_MT)
+function ShadowNode.new(manager: any): ShadowNode
+	const self = setmetatable({ _manager = manager }, ShadowNode_MT)
 	return (self :: any) :: ShadowNode
 end
 
-function ShadowNode.SetResolver(self: ShadowNode, resolver: Resolver?)
-	self._resolver = resolver
-end
-
+--[=[
+	Returns the last-flushed value at `path` (the diff baseline), read from
+	this manager's root node. `nil` when `path` (or an ancestor of it) was
+	never materialized.
+]=]
 function ShadowNode.Get(self: ShadowNode, path: PathArray<any>): any
-	const target, routedPath = route(self, path)
-	if target ~= self then
-		return target:Get(routedPath)
-	end
-	return resolveAtPath(self._mirror, path)
+	return resolveAtPath(REGISTRY[self._manager.Raw], path)
 end
 
+--[=[
+	Sets the node at `path` to a fresh (or shared) mirror of `live`'s current
+	value there. Requires `path`'s parent to already exist as a node; use
+	`Materialize` to seed a never-before-tracked path.
+]=]
 function ShadowNode.Reconcile(self: ShadowNode, path: PathArray, live: any, ctx: Diff.Ctx?)
-	const target, routedPath, liveRoot = route(self, path)
-	if target ~= self then
-		target:Reconcile(routedPath, liveRoot, ctx)
-		return
-	end
 	const value = resolveAtPath(live, path)
-	const copy = copyForShadow(self, value, ctx)
+	const copy = copyForShadow(value, ctx)
 	if #path == 0 then
-		self._mirror = copy
 		return
 	end
 	const parentPath, key = PathHelpers.GetPathParentAndKey(path)
-	const parent = resolveAtPath(self._mirror, parentPath)
-	if type(parent) == "table" then
-		parent[key] = copy
+	const parentNode = if #parentPath == 0 then REGISTRY[live] else REGISTRY[resolveAtPath(live, parentPath)]
+	if type(parentNode) == "table" then
+		parentNode[key] = copy
 	end
 end
 
+--[=[
+	Seeds the node spine down to `path` (creating any missing intermediate
+	nodes) and then `Reconcile`s the leaf. Safe to call on an
+	already-materialized path.
+]=]
 function ShadowNode.Materialize(self: ShadowNode, path: PathArray, live: any, ctx: Diff.Ctx?)
-	const target, routedPath, liveRoot = route(self, path)
-	if target ~= self then
-		target:Materialize(routedPath, liveRoot, ctx)
-		return
-	end
 	if #path == 0 then
 		self:Reconcile(path, live, ctx)
 		return
 	end
-	if self._mirror == nil then
-		self._mirror = {}
+	if REGISTRY[live] == nil then
+		REGISTRY[live] = {}
 	end
-	local node = self._mirror
+	local node = REGISTRY[live]
 	const partialPath: { any } = {}
 	for i = 1, #path - 1 do
 		const segment = path[i]
 		table.insert(partialPath, segment)
 		if type(node[segment]) ~= "table" then
-			node[segment] = copyForShadow(self, resolveAtPath(live, partialPath), ctx)
+			node[segment] = copyForShadow(resolveAtPath(live, partialPath), ctx)
 		end
 		node = node[segment]
 	end
 	self:Reconcile(path, live, ctx)
 end
 
--- See `Shadow.ApplyArrayOp`. Uses this module's own `copyForShadow` so a newly
--- inserted/set table value is indexed into `_nodes` exactly like a full
--- Materialize would have indexed it.
+--[=[
+	Applies a known array op (insert/remove/set, already applied to `live`)
+	directly to the EXISTING node array at `path`, instead of re-copying the
+	whole array. Returns `false` when `path` has no materialized node array yet
+	(the caller should fall back to `Materialize`).
+]=]
 function ShadowNode.ApplyArrayOp(
 	self: ShadowNode,
 	path: PathArray,
@@ -205,11 +179,7 @@ function ShadowNode.ApplyArrayOp(
 	newValue: any,
 	ctx: Diff.Ctx?
 ): boolean
-	const target, routedPath, liveRoot = route(self, path)
-	if target ~= self then
-		return target:ApplyArrayOp(routedPath, liveRoot, opKind, index, newValue, ctx)
-	end
-	const mirrorArray = resolveAtPath(self._mirror, path)
+	const mirrorArray = resolveAtPath(REGISTRY[live], path)
 	if type(mirrorArray) ~= "table" then
 		return false
 	end
@@ -217,33 +187,33 @@ function ShadowNode.ApplyArrayOp(
 		return true -- stored by reference (opaque): already current by definition.
 	end
 	if opKind == "ArrayInserted" then
-		table.insert(mirrorArray, index, copyForShadow(self, newValue, ctx))
+		table.insert(mirrorArray, index, copyForShadow(newValue, ctx))
 	elseif opKind == "ArrayRemoved" then
 		table.remove(mirrorArray, index)
 	elseif opKind == "ArraySet" then
-		mirrorArray[index] = copyForShadow(self, newValue, ctx)
+		mirrorArray[index] = copyForShadow(newValue, ctx)
 	end
 	return true
 end
 
-function ShadowNode.Release(self: ShadowNode, path: PathArray)
-	const target, routedPath = route(self, path)
-	if target ~= self then
-		target:Release(routedPath)
+--[=[
+	Re-keys the root node from `oldRoot` to `newRoot` after a root-identity swap
+	(`Set({}, newRoot)`). Every node is keyed by its live table's identity, and
+	the root's identity is the ONE that can change wholesale; interior tables are
+	retargeted by reference, so their nodes stay correctly keyed. Without this,
+	`Get({})` (which keys on the now-swapped `manager.Raw`) would no longer find
+	the seeded pre-swap baseline, and the root diff would misreport every key as
+	newly added. The node table itself is preserved (its old contents become the
+	diff "old"); the subsequent root `Reconcile` refreshes it to `newRoot`.
+]=]
+function ShadowNode.RebindRoot(_self: ShadowNode, oldRoot: any, newRoot: any)
+	if oldRoot == newRoot then
 		return
 	end
-	self:ReleaseLocal(path)
-end
-
-function ShadowNode.ReleaseLocal(self: ShadowNode, path: PathArray)
-	if #path == 0 then
-		self._mirror = nil
-		return
-	end
-	const parentPath, key = PathHelpers.GetPathParentAndKey(path)
-	const parent = resolveAtPath(self._mirror, parentPath)
-	if type(parent) == "table" then
-		parent[key] = nil
+	const node = REGISTRY[oldRoot]
+	REGISTRY[oldRoot] = nil
+	if node ~= nil then
+		REGISTRY[newRoot] = node
 	end
 end
 

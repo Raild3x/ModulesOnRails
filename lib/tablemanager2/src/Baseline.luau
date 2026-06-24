@@ -4,22 +4,16 @@
 	@class Baseline
 
 	The seam between TableManager's flush/dispatch logic and the concrete
-	"last-emitted" baseline store. Every read, reconcile, pre-write seed, and
-	post-op sync of the baseline goes through here instead of touching
-	`manager._shadow` directly — so the underlying representation can be swapped
-	(e.g. the identity-keyed ShadowNode store in Phase 2) without changing any
-	call site.
-
-	Phase 1: delegates to the manager's existing `Shadow` (`manager._shadow`) and
-	consolidates the `IsTrackable` + `PassesThroughOpaqueAncestor` gate that the
-	array-op / batch / linked-apply sync sites each open-coded. Behavior is
-	unchanged — this is purely a routing/consolidation layer.
+	"last-emitted" baseline store (`ShadowNode`, the global identity-keyed node
+	registry). Every read, reconcile, pre-write seed, and post-op sync of the
+	baseline goes through here instead of touching `manager._shadow` directly,
+	and consolidates the `IsTrackable` + `PassesThroughOpaqueAncestor` gate that
+	the array-op / batch / linked-apply sync sites each open-coded.
 ]=]
 
 const PathHelpers = require("./PathHelpers")
 const CoverageModule = require("./Coverage")
 const TMTypes = require("./TMTypes")
-const ShadowModule = require("./Shadow")
 const ShadowNodeModule = require("./ShadowNode")
 
 --// Types //--
@@ -28,23 +22,9 @@ type TableManagerLike = TMTypes.TableManagerLike
 
 const Baseline = {}
 
--- Selects the concrete baseline store created for each new manager. `false`
--- (default) keeps the original `Shadow`; flip to `true` to validate the
--- identity-keyed `ShadowNode` across the whole suite (Phase 2 gate). This is the
--- single switch the rest of the system swaps implementations behind.
-Baseline.USE_SHADOW_NODE = false
-
---[[
-	Creates the baseline store for a new manager (its `self._shadow`). Both
-	implementations conform to the same Get/Reconcile/Materialize/Release/
-	SetResolver surface, so every call site — the `Baseline.*` helpers below and
-	the (Phase-3-bound) LinkGroup resolver wiring — is agnostic to the choice.
-]]
-function Baseline.NewStore(): any
-	if Baseline.USE_SHADOW_NODE then
-		return ShadowNodeModule.new()
-	end
-	return ShadowModule.new()
+-- Creates the baseline store for a new manager (its `self._shadow`).
+function Baseline.NewStore(manager: TableManagerLike): any
+	return ShadowNodeModule.new(manager)
 end
 
 --[[
@@ -106,6 +86,16 @@ function Baseline.ApplyArrayOp(
 	if not applied then
 		manager._shadow:Materialize(path, manager.Raw, ctx)
 	end
+end
+
+--[[
+	Root-identity swap (`Set({}, newRoot)`): re-key the root baseline node from
+	`oldRoot` to `newRoot` so the post-swap root diff still reads the seeded
+	pre-swap baseline. Must be called AFTER `manager.Raw` becomes `newRoot` and
+	BEFORE the root flush. See `ShadowNode.RebindRoot`.
+]]
+function Baseline.RebindRoot(manager: TableManagerLike, oldRoot: any, newRoot: any)
+	manager._shadow:RebindRoot(oldRoot, newRoot)
 end
 
 --[[

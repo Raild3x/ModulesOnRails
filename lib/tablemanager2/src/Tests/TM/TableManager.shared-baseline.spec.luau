@@ -139,60 +139,61 @@ return function(t: tiniest)
 		end)
 	end)
 
-	-- Runs `body` with implicit sharing enabled, restoring the flag afterward even
-	-- if an assertion throws (the flag is module-global, so leaking it on would
+	-- Runs `body` with implicit sharing DISABLED, restoring the default (on) even
+	-- if an assertion throws (the flag is module-global, so leaking it would
 	-- affect other specs).
-	local function withImplicitSharing(body: () -> ())
-		LinkGroup.SetImplicitSharing(true)
-		local ok, err = pcall(body)
+	local function withImplicitSharingDisabled(body: () -> ())
 		LinkGroup.SetImplicitSharing(false)
+		local ok, err = pcall(body)
+		LinkGroup.SetImplicitSharing(true)
 		if not ok then
 			error(err, 0)
 		end
 	end
 
-	describe("Shared interior region — implicit (no explicit Link)", function()
+	describe("Shared interior region — implicit (default; no explicit Link)", function()
 		test("two managers sharing a table propagate to each other WITHOUT an explicit Link", function()
-			withImplicitSharing(function()
-				local _stats, playerTM, tycoonTM = makeSharedScenario()
-				-- NOTE: no TableManager.Link call — sharing the identity is enough.
-
-				local stream: { any } = {}
-				local recP = ReplicationHarness.RecordEvents(playerTM, "player", stream)
-				local recT = ReplicationHarness.RecordEvents(tycoonTM, "tycoon", stream)
-
-				playerTM:Set({ "Stats", "health" }, 50)
-
-				expect(#entriesFor(stream, "player", "ValueChanged")).is(1)
-				expect(#entriesFor(stream, "tycoon", "ValueChanged")).is(1)
-				expect(tycoonTM.Raw.Stats.health).is(50)
-
-				recP.Disconnect()
-				recT.Disconnect()
-				playerTM:Destroy()
-				tycoonTM:Destroy()
-			end)
-		end)
-	end)
-
-	describe("Shared interior region — implicit OFF (default)", function()
-		test("with implicit sharing disabled, an unlinked shared region does NOT propagate events", function()
-			-- Default behavior: a shared reference mutates BOTH raw tables (pass by
-			-- reference) but fires events only on the writing manager.
+			-- Implicit sharing is ON by default — sharing the `stats` identity is
+			-- enough; no TableManager.Link call.
 			local _stats, playerTM, tycoonTM = makeSharedScenario()
 
-			local tycoonFires = 0
-			tycoonTM:OnChange({ "Stats" }, function()
-				tycoonFires += 1
-			end)
+			local stream: { any } = {}
+			local recP = ReplicationHarness.RecordEvents(playerTM, "player", stream)
+			local recT = ReplicationHarness.RecordEvents(tycoonTM, "tycoon", stream)
 
 			playerTM:Set({ "Stats", "health" }, 50)
 
-			expect(tycoonFires).is(0)
+			expect(#entriesFor(stream, "player", "ValueChanged")).is(1)
+			expect(#entriesFor(stream, "tycoon", "ValueChanged")).is(1)
 			expect(tycoonTM.Raw.Stats.health).is(50)
 
+			recP.Disconnect()
+			recT.Disconnect()
 			playerTM:Destroy()
 			tycoonTM:Destroy()
+		end)
+	end)
+
+	describe("Shared interior region — implicit escape hatch (disabled)", function()
+		test("with implicit sharing disabled, an unlinked shared region does NOT propagate events", function()
+			withImplicitSharingDisabled(function()
+				-- With the escape hatch off, a shared reference still mutates BOTH raw
+				-- tables (pass by reference) but fires events only on the writing manager.
+				local _stats, playerTM, tycoonTM = makeSharedScenario()
+
+				local tycoonFires = 0
+				tycoonTM:OnChange({ "Stats" }, function()
+					tycoonFires += 1
+				end)
+
+				playerTM:Set({ "Stats", "health" }, 50)
+
+				expect(tycoonFires).is(0)
+				expect(tycoonTM.Raw.Stats.health).is(50)
+
+				playerTM:Destroy()
+				tycoonTM:Destroy()
+			end)
 		end)
 	end)
 end
