@@ -410,7 +410,8 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 	end
 	Mutator.pruneDetachedValue(self, oldValue, newValue)
 	if opaqueBypass then
-		self._changeDetector:CheckForChangesBetween(oldValue, newValue, parsedPath, self.Raw)
+		const oldSnapshot = BatchUtilsModule.BuildOldSnapshot(self, parsedPath, oldValue)
+		self._changeDetector:CheckForChangesBetween(oldValue, newValue, parsedPath, self.Raw, nil, oldSnapshot)
 	elseif trackable then
 		CoalescedFlushModule.Request(self, parsedPath)
 	end

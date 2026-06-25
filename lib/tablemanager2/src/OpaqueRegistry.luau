@@ -31,7 +31,7 @@ const GLOBAL_OPAQUE_CHILDREN = "GOC"
 
 const OPAQUE_KIND_KEY = "__opaque_kind"
 type WrapperKind = "O" | "GO" | "OC" | "GOC"
-export type Wrapper = { inner: { [any]: any }, __opaque_kind: WrapperKind }
+export type Wrapper<T> = { inner: T, __opaque_kind: WrapperKind }
 
 --// Module-global registries (shared across every TableManager) //--
 local globalOpaque: { [any]: true } = setmetatable({}, { __mode = "k" }) :: any
@@ -59,23 +59,23 @@ function OpaqueRegistry.NewRegistries(): Registries
 end
 
 --// Wrapper constructors //--
-local function OpaqueWrapperGenerator(value: any, opaque_kind: WrapperKind): Wrapper
-	return table.freeze({ inner = value, [OPAQUE_KIND_KEY] = opaque_kind } :: any) :: Wrapper
+local function OpaqueWrapperGenerator<T>(value: T, opaque_kind: WrapperKind): Wrapper<T>
+	return table.freeze({ inner = value, [OPAQUE_KIND_KEY] = opaque_kind } :: any) :: Wrapper<T>
 end
 
-function OpaqueRegistry.Opaque(value: any): Wrapper
+function OpaqueRegistry.Opaque<T>(value: T): Wrapper<T>
 	return OpaqueWrapperGenerator(value, OPAQUE)
 end
 
-function OpaqueRegistry.GlobalOpaque(value: any): Wrapper
+function OpaqueRegistry.GlobalOpaque<T>(value: T): Wrapper<T>
 	return OpaqueWrapperGenerator(value, GLOBAL_OPAQUE)
 end
 
-function OpaqueRegistry.OpaqueChildren(value: any): Wrapper
+function OpaqueRegistry.OpaqueChildren<T>(value: T): Wrapper<T>
 	return OpaqueWrapperGenerator(value, OPAQUE_CHILDREN)
 end
 
-function OpaqueRegistry.GlobalOpaqueChildren(value: any): Wrapper
+function OpaqueRegistry.GlobalOpaqueChildren<T>(value: T): Wrapper<T>
 	return OpaqueWrapperGenerator(value, GLOBAL_OPAQUE_CHILDREN)
 end
 
@@ -96,13 +96,13 @@ end
 	avoid cloning/walking) — wrapping a scalar unwraps it but does not
 	register it, and warns.
 ]=]
-function OpaqueRegistry.UnwrapAndRegister(registries: Registries, value: any): any
+function OpaqueRegistry.UnwrapAndRegister<T>(registries: Registries, value: T | Wrapper<T>): T
 	local kind = wrapperKind(value)
 	if kind == nil then
 		return value
 	end
 
-	local inner = (value :: Wrapper).inner
+	local inner = (value :: Wrapper<T>).inner
 	if type(inner) ~= "table" then
 		warn("Opaque/OpaqueChildren wrappers have no effect on non-table values; unwrapping without marking.")
 		return inner

@@ -31,6 +31,42 @@ const createAncestorSnapshot = BatchUtilsModule.CreateAncestorSnapshot
 const Emitter = {}
 
 -- ---------------------------------------------------------------------------
+-- SnapshotOldValues slicing
+-- ---------------------------------------------------------------------------
+
+--[[
+	Slices `metadata.Snapshot.OldSnapshot` (see `ChangeDetector.AncestorSnapshot`)
+	down to the old value at `absPath`, or `nil` when no snapshot was built for
+	this change (no opted-in listener covers it). `absPath` is always at or
+	below `OldSnapshot.RootPath` -- guaranteed by `ListenerRegistry.SnapshotRootFor`,
+	which only descends into branches that still cover an opted-in listener -- so
+	the suffix walk below never has to handle `absPath` being shallower than
+	`RootPath`.
+]]
+const function sliceOldSnapshot(metadata: ChangeMetadata?, absPath: PathArray): any?
+	const oldSnapshot = if metadata then metadata.Snapshot and metadata.Snapshot.OldSnapshot else nil
+	if oldSnapshot == nil then
+		return nil
+	end
+	const rootPath = oldSnapshot.RootPath
+	-- An ancestor notification's path is shorter than RootPath (RootPath is
+	-- always at or below the change's basePath) -- not covered by this
+	-- snapshot. Its old value is the synthetic `old == new == currentValue`
+	-- anyway, so there's nothing useful to slice.
+	if #absPath < #rootPath then
+		return nil
+	end
+	local value: any = oldSnapshot.Value
+	for i = #rootPath + 1, #absPath do
+		if type(value) ~= "table" then
+			return nil
+		end
+		value = value[absPath[i]]
+	end
+	return value
+end
+
+-- ---------------------------------------------------------------------------
 -- SignalFireMode dispatch
 -- ---------------------------------------------------------------------------
 
@@ -125,13 +161,16 @@ const function createSyntheticMetadata(
 	kind: "added" | "removed" | "changed",
 	key: any,
 	newValue: any,
-	oldValue: any
+	oldValue: any,
+	oldSnapshot: { Value: any, RootPath: PathArray }?
 ): ChangeMetadata
+	const snapshot = createAncestorSnapshot(rootTable)
+	snapshot.OldSnapshot = oldSnapshot
 	return {
 		Diff = createSyntheticDiffNode(kind, key, newValue, oldValue),
 		OriginPath = leafPath,
 		OriginDiff = createSyntheticDiffNode(kind, key, newValue, oldValue),
-		Snapshot = createAncestorSnapshot(rootTable),
+		Snapshot = snapshot,
 	}
 end
 
@@ -200,6 +239,13 @@ function Emitter.fireArrayOperation(
 	-- (OriginDiff via root OnChange listeners).
 	payload.Metadata.ArrayOp = { Kind = eventName, Index = payload.Index }
 
+	-- ArrayInserted has no old value to slice; ArrayRemoved/ArraySet's shared
+	-- `payload` is reused for both the element-path and array-path fires below,
+	-- so the slice only needs to be computed once.
+	if eventName ~= "ArrayInserted" then
+		payload.OldValueSnapshot = sliceOldSnapshot(payload.Metadata, leafPath)
+	end
+
 	-- Fire at element path first (element-level listeners), then at array
 	-- path (array-level listeners), then ancestors (ValueChanged).
 	manager._listenerRegistry:FireListenersExact(eventName, leafPath, payload)
@@ -242,7 +288,15 @@ function Emitter.makeEmit(manager: TableManagerLike, path: PathArray)
 	return {
 		removed = function(index: number, oldValue: any, move: MoveMetadata?)
 			const removedPath: PathArray = PathHelpers.Append(path, index)
-			const metadata = createSyntheticMetadata(manager.Raw, removedPath, "removed", index, nil, oldValue)
+			-- Array element old values are never a slice of some larger captured
+			-- container (unlike the dict path's diff `old`, each direct array op
+			-- only ever hands us the one element that changed) -- so the snapshot
+			-- is anchored directly at `removedPath` itself, not `path`. Gated
+			-- against `path` (the array's own registry node) so an array-level
+			-- listener's `SnapshotOldValues` still covers per-element fires.
+			const oldSnapshot = BatchUtilsModule.BuildOldSnapshotForLeaf(manager, path, removedPath, oldValue)
+			const metadata =
+				createSyntheticMetadata(manager.Raw, removedPath, "removed", index, nil, oldValue, oldSnapshot)
 			metadata.Move = move
 			Emitter.fireArrayOperation(manager, "ArrayRemoved", path, removedPath, {
 				Index = index,
@@ -252,7 +306,7 @@ function Emitter.makeEmit(manager: TableManagerLike, path: PathArray)
 		end,
 		inserted = function(index: number, newValue: any, move: MoveMetadata?)
 			const insertedPath = PathHelpers.Append(path, index)
-			const metadata = createSyntheticMetadata(manager.Raw, insertedPath, "added", index, newValue, nil)
+			const metadata = createSyntheticMetadata(manager.Raw, insertedPath, "added", index, newValue, nil, nil)
 			metadata.Move = move
 			Emitter.fireArrayOperation(manager, "ArrayInserted", path, insertedPath, {
 				Index = index,
@@ -262,7 +316,9 @@ function Emitter.makeEmit(manager: TableManagerLike, path: PathArray)
 		end,
 		set = function(index: number, newValue: any, oldValue: any, move: MoveMetadata?)
 			const setPath = PathHelpers.Append(path, index)
-			const metadata = createSyntheticMetadata(manager.Raw, setPath, "changed", index, newValue, oldValue)
+			const oldSnapshot = BatchUtilsModule.BuildOldSnapshotForLeaf(manager, path, setPath, oldValue)
+			const metadata =
+				createSyntheticMetadata(manager.Raw, setPath, "changed", index, newValue, oldValue, oldSnapshot)
 			metadata.Move = move
 			Emitter.fireArrayOperation(manager, "ArraySet", path, setPath, {
 				Index = index,
@@ -286,7 +342,7 @@ function Emitter.makeSyntheticMetadata(
 	newValue: any,
 	oldValue: any
 ): ChangeMetadata
-	return createSyntheticMetadata(rootTable, leafPath, kind, key, newValue, oldValue)
+	return createSyntheticMetadata(rootTable, leafPath, kind, key, newValue, oldValue, nil)
 end
 
 -- ---------------------------------------------------------------------------
@@ -321,6 +377,7 @@ function Emitter.makeChangeDetectorCallbacks(manager: TableManagerLike)
 			end
 			manager._listenerRegistry:FireListenersExact("KeyRemoved", path, {
 				OldValue = oldValue,
+				OldValueSnapshot = sliceOldSnapshot(metadata, PathHelpers.Append(path, key)),
 				Key = key,
 				Metadata = metadata,
 			})
@@ -333,6 +390,7 @@ function Emitter.makeChangeDetectorCallbacks(manager: TableManagerLike)
 			manager._listenerRegistry:FireListenersExact("KeyChanged", path, {
 				NewValue = newValue,
 				OldValue = oldValue,
+				OldValueSnapshot = sliceOldSnapshot(metadata, PathHelpers.Append(path, key)),
 				Key = key,
 				Metadata = metadata,
 			})
@@ -346,6 +404,7 @@ function Emitter.makeChangeDetectorCallbacks(manager: TableManagerLike)
 			manager._listenerRegistry:FireListenersExact("ValueChanged", path, {
 				NewValue = newValue,
 				OldValue = oldValue,
+				OldValueSnapshot = sliceOldSnapshot(metadata, path),
 				Metadata = metadata,
 			})
 			-- Cross-manager fan-out: only for leaf changes, never while replaying

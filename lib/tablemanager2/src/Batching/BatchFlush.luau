@@ -86,7 +86,15 @@ const function flushBranches(
 			then (rootSnapshotData.children :: any)[branchKey] and (rootSnapshotData.children :: any)[branchKey].value or nil
 			else nil
 
-		self._changeDetector:CheckForChangesBetween(oldBranchValue, (self.Raw :: any)[branchKey], { branchKey }, self.Raw, arraySink)
+		const oldSnapshot = BatchUtilsModule.BuildOldSnapshot(self, { branchKey }, oldBranchValue, true)
+		self._changeDetector:CheckForChangesBetween(
+			oldBranchValue,
+			(self.Raw :: any)[branchKey],
+			{ branchKey },
+			self.Raw,
+			arraySink,
+			oldSnapshot
+		)
 	end
 
 	return arraySink

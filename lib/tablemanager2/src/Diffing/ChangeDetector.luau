@@ -65,6 +65,13 @@ export type Snapshot<T = { [any]: any }, S = string> = {
 ]=]
 export type AncestorSnapshot<T = { [any]: any }> = {
 	RootTable: T,
+	-- Set only when `ListenerRegistry.SnapshotRootFor` found some opted-in
+	-- (`SnapshotOldValues`) listener covering this change: a frozen,
+	-- opacity-aware deep copy (`Diff.snapshot(...).value`) of the OLD value at
+	-- the absolute path `RootPath`, captured before the change was applied.
+	-- `Emitter` slices into `Value` (using the suffix of each event's absolute
+	-- old-value path past `RootPath`) to build `EventData.OldValueSnapshot`.
+	OldSnapshot: { Value: any, RootPath: PathArray }?,
 }
 
 export type ChangeDetector = {
@@ -78,7 +85,10 @@ export type ChangeDetector = {
 		-- Array-aware mode (batch flush): when provided, array-like nodes are
 		-- collected here (absolute paths) and excluded from the dict diff/OriginDiff
 		-- for the caller to LCS-re-diff into Array* events. nil = positional behavior.
-		arraySink: { Diff.ArraySinkEntry }?
+		arraySink: { Diff.ArraySinkEntry }?,
+		-- See `AncestorSnapshot.OldSnapshot`. Caller-computed; nil when no
+		-- opted-in listener covers this change.
+		oldSnapshot: { Value: any, RootPath: PathArray }?
 	) -> (),
 	--- Dispatches an ALREADY-BUILT root diff node at `basePath` (fires the same
 	--- leaf + ancestor callbacks as `CheckForChangesBetween`) WITHOUT running
@@ -88,7 +98,8 @@ export type ChangeDetector = {
 		self: ChangeDetector,
 		node: Diff.DiffNode,
 		basePath: PathArray<S>,
-		rootTable: T
+		rootTable: T,
+		oldSnapshot: { Value: any, RootPath: PathArray }?
 	) -> (),
 	--- Suspends change detection. While suspended, `CaptureSnapshot` is a
 	--- cheap O(1) no-op. Used by `TableManager:Batch()`.
@@ -331,7 +342,8 @@ function ChangeDetector:CheckForChangesBetween(
 	newValue: any,
 	basePath: PathArray,
 	rootTable: { [any]: any }?,
-	arraySink: { Diff.ArraySinkEntry }?
+	arraySink: { Diff.ArraySinkEntry }?,
+	oldSnapshot: { Value: any, RootPath: PathArray }?
 )
 	if self._debugMode then
 		print("CheckForChangesBetween called:")
@@ -368,6 +380,7 @@ function ChangeDetector:CheckForChangesBetween(
 	-- from this object is RootTable for their own ancestor navigation.
 	local ancestorSnapshot: AncestorSnapshot = {
 		RootTable = tempRootTable,
+		OldSnapshot = oldSnapshot,
 	}
 
 	-- Array-aware mode (batch flush): when `arraySink` is provided, array-like
@@ -407,9 +420,15 @@ end
 	Used by linked fan-out (`TableManager._NotifyApplied`) to replay the ORIGIN's
 	diff node on a recipient instead of recomputing the identical diff.
 ]=]
-function ChangeDetector:DispatchDiffNode(node: Diff.DiffNode, basePath: PathArray, rootTable: { [any]: any })
+function ChangeDetector:DispatchDiffNode(
+	node: Diff.DiffNode,
+	basePath: PathArray,
+	rootTable: { [any]: any },
+	oldSnapshot: { Value: any, RootPath: PathArray }?
+)
 	local ancestorSnapshot: AncestorSnapshot = {
 		RootTable = rootTable,
+		OldSnapshot = oldSnapshot,
 	}
 	self:_dispatch(function()
 		self:_emitRootNode(node, basePath, ancestorSnapshot)

@@ -66,6 +66,27 @@ return function(t: tiniest)
 			manager:Destroy()
 		end)
 
+		test("Set with buildTablesDynamically still fires change events without proxies", function()
+			-- Without proxies the write goes straight at `self.Raw`, but the
+			-- missing path must still be built through `applyWrite` (a single
+			-- nested-subtree write) rather than raw, untracked writes -- so the
+			-- newly created tables are reported just like with proxies enabled.
+			local manager = TableManager.new({}, { EnableProxies = false })
+
+			local addedCount = 0
+			local conn = manager.KeyAdded:Connect(function()
+				addedCount += 1
+			end)
+
+			manager:Set({ "a", "b", "c" }, 5, true)
+
+			expect(manager:Get { "a", "b", "c" }).is(5)
+			expect(addedCount).is(2)
+
+			conn:Disconnect()
+			manager:Destroy()
+		end)
+
 		test("Set with a nil value on a missing path is a silent no-op", function()
 			local manager = TableManager.new({}, { EnableProxies = false })
 

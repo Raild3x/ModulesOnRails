@@ -173,6 +173,13 @@ export type ChangeMetadata = {
 export type EventData = {
 	NewValue: any?,
 	OldValue: any?,
+	-- Frozen, opacity-aware copy of the old value at this event's old-value path,
+	-- present only when some listener on the firing node opted into
+	-- `SnapshotOldValues` AND the caller computed a snapshot for this change (see
+	-- `ListenerRegistry.SnapshotRootFor`). `fireListenersOnNode` swaps this in for
+	-- `OldValue` only for the listeners that asked for it; non-opted listeners on
+	-- the same node still receive the raw `OldValue` above.
+	OldValueSnapshot: any?,
 	Key: any?,
 	Index: number?,
 	Metadata: ChangeMetadata?,
@@ -190,6 +197,13 @@ export type ListenerOptions = {
 	ListenDepthStyle: ("<=" | "==")?,
 	--- When true, the listener automatically disconnects after firing once.
 	Once: boolean?,
+	--- When true, a table `oldValue` delivered to this listener is a frozen,
+	--- opacity-aware deep copy captured BEFORE the change is applied, instead of
+	--- the raw (and, outside batches, baseline-backed/mutable) reference. Has no
+	--- effect on scalar old values. Does not affect `metadata.Diff.old`, which is
+	--- always the raw diff-tree value regardless of this option. Costs an extra
+	--- copy only when at least one listener on the affected path opts in.
+	SnapshotOldValues: boolean?,
 }
 
 export type Connection = {
@@ -215,6 +229,7 @@ type Listener = {
 	Depth: number?,
 	DepthStyle: "<=" | "==",
 	Once: boolean,
+	SnapshotOldValues: boolean,
 	PathLength: number,
 	Connection: Connection,
 	-- "coalesced" fire-mode pending state; see `flushCoalescedListener`.
@@ -236,6 +251,13 @@ type ListenerNode = {
 	Count: number,
 	-- Total listeners at or below this node (Count + every descendant's Subtree).
 	Subtree: number,
+	-- Listeners (any event type) registered at this exact node with
+	-- `SnapshotOldValues = true`. Subset of Count.
+	SnapshotCount: number,
+	-- SnapshotCount at or below this node (mirrors Subtree, but counting only
+	-- opted-in listeners). Used by `SnapshotRootFor` to find the shallowest path
+	-- that needs a snapshot built for a given change, without visiting listeners.
+	SnapshotSubtree: number,
 	-- Child nodes keyed by path segment.
 	Children: { [any]: ListenerNode },
 	-- Back-pointer and this node's key within Parent.Children, used to prune
@@ -259,6 +281,13 @@ export type ListenerRegistry = {
 	-- restructures the subtree a descendant listener watches). Never under-
 	-- reports, so callers can safely skip diff work whenever this is false.
 	CoversChangesAt: (self: ListenerRegistry, path: PathArray) -> boolean,
+	-- Returns the absolute path a caller should snapshot the old value at for a
+	-- change at `path`, or `nil` if no opted-in (`SnapshotOldValues`) listener
+	-- would receive a real old value for this change. The returned path is the
+	-- shallowest point that covers every opted-in listener in `path`'s subtree
+	-- (their lowest common ancestor), so callers copy the smallest value that
+	-- still lets every opted-in listener slice out its own old value.
+	SnapshotRootFor: (self: ListenerRegistry, path: PathArray) -> PathArray?,
 	Destroy: (self: ListenerRegistry) -> (),
 
 	_root: ListenerNode,
@@ -267,6 +296,10 @@ export type ListenerRegistry = {
 	_fireMode: "immediate" | "deferred" | "coalesced",
 	_destroyed: boolean,
 	_hasWildcards: boolean,
+	-- One-way latch: true once any SnapshotOldValues listener is registered at a
+	-- wildcard path. SnapshotRootFor degrades to "snapshot the whole subtree" in
+	-- that case rather than walking wildcard branches.
+	_hasSnapshotWildcards: boolean,
 }
 
 --------------------------------------------------------------------------------
@@ -351,6 +384,8 @@ const function createNode(parent: ListenerNode?, key: any?): ListenerNode
 		Listeners = {},
 		Count = 0,
 		Subtree = 0,
+		SnapshotCount = 0,
+		SnapshotSubtree = 0,
 		Children = {},
 		Parent = parent,
 		Key = key,
@@ -443,6 +478,21 @@ const function decrementAndPrune(node: ListenerNode, amount: number)
 	end
 end
 
+-- Adjusts `node`'s SnapshotSubtree (and every ancestor's, up to and including
+-- the root) by `delta`. Walked via Parent pointers (not the registered path),
+-- so it works equally for registration (delta = +1) and disconnect/Once
+-- cleanup (delta = -1) regardless of wildcard segments. No pruning here:
+-- node removal is already driven by Count/Subtree in `decrementAndPrune`, and
+-- every opted-in listener is also a regular listener, so SnapshotSubtree is
+-- always 0 by the time a node is pruned.
+const function adjustSnapshotSubtree(node: ListenerNode, delta: number)
+	local current: ListenerNode? = node
+	while current ~= nil do
+		current.SnapshotSubtree += delta
+		current = current.Parent
+	end
+end
+
 -- Non-creating node lookup: returns the node at `path` or nil if any segment is absent.
 const function getNode(root: ListenerNode, path: PathArray): ListenerNode?
 	local current = root
@@ -485,6 +535,10 @@ const function fireListenersOnNode(
 	if listeners == nil then
 		return
 	end
+	-- Lazily built once per node/event, shared by every opted-in listener here:
+	-- only built when some listener actually opted in AND the caller computed a
+	-- snapshot for this change (`fireEventData.OldValueSnapshot ~= nil`).
+	local snapshotEventData: EventData? = nil
 	local hasOnceFired = false
 	for _, listener in listeners do
 		if not listener.Connection.Connected then
@@ -493,18 +547,26 @@ const function fireListenersOnNode(
 		if not shouldFireListener(listener, baseRelativeDepth) then
 			continue
 		end
+		local eventDataToUse = fireEventData
+		if listener.SnapshotOldValues and fireEventData.OldValueSnapshot ~= nil then
+			if snapshotEventData == nil then
+				snapshotEventData = table.clone(fireEventData)
+				snapshotEventData.OldValue = fireEventData.OldValueSnapshot
+			end
+			eventDataToUse = snapshotEventData
+		end
 		if listener.Once then
 			listener.Connection.Connected = false
 			hasOnceFired = true
 		end
 		if fireMode == "deferred" then
-			task.defer(executeListenerCallback, listener.Callback, eventType, fireEventData, debugMode)
+			task.defer(executeListenerCallback, listener.Callback, eventType, eventDataToUse, debugMode)
 		elseif fireMode == "coalesced" then
 			if listener._coalescePending then
-				listener._coalesceEventData = fireEventData
+				listener._coalesceEventData = eventDataToUse
 			else
 				listener._coalescePending = true
-				listener._coalesceEventData = fireEventData
+				listener._coalesceEventData = eventDataToUse
 				task.defer(flushCoalescedListener, listener, eventType, debugMode)
 			end
 		else
@@ -512,13 +574,17 @@ const function fireListenersOnNode(
 				freeRunnerThread = coroutine.create(runListenerCallbackInFreeThread)
 				coroutine.resume(freeRunnerThread :: thread)
 			end
-			task.spawn(freeRunnerThread :: thread, listener.Callback, eventType, fireEventData, debugMode)
+			task.spawn(freeRunnerThread :: thread, listener.Callback, eventType, eventDataToUse, debugMode)
 		end
 	end
 	if hasOnceFired then
 		local removed = 0
 		for i = #listeners, 1, -1 do
 			if listeners[i].Once and not listeners[i].Connection.Connected then
+				if listeners[i].SnapshotOldValues then
+					node.SnapshotCount -= 1
+					adjustSnapshotSubtree(node, -1)
+				end
 				table.remove(listeners, i)
 				removed += 1
 			end
@@ -557,6 +623,7 @@ function ListenerRegistry.new(config: ListenerRegistryConfig?): ListenerRegistry
 	self._fireMode = resolveFireMode(resolvedConfig.FireMode or "bindable")
 	self._destroyed = false
 	self._hasWildcards = false
+	self._hasSnapshotWildcards = false
 
 	return self
 end
@@ -579,6 +646,7 @@ function ListenerRegistry:RegisterListener(
 	local depth: number? = if options then options.ListenDepth else nil
 	local depthStyle: "<=" | "==" = if options and options.ListenDepthStyle then options.ListenDepthStyle else "<="
 	local once: boolean = if options and options.Once == true then true else false
+	local snapshotOldValues: boolean = if options and options.SnapshotOldValues == true then true else false
 
 	-- One-way latch: once any wildcard listener is registered the fast path in
 	-- FireListenersExact is permanently bypassed for this registry.
@@ -586,6 +654,14 @@ function ListenerRegistry:RegisterListener(
 		for _, segment in path do
 			if segment == WILDCARD then
 				self._hasWildcards = true
+				break
+			end
+		end
+	end
+	if snapshotOldValues and not self._hasSnapshotWildcards then
+		for _, segment in path do
+			if segment == WILDCARD then
+				self._hasSnapshotWildcards = true
 				break
 			end
 		end
@@ -601,6 +677,7 @@ function ListenerRegistry:RegisterListener(
 		Depth = depth,
 		DepthStyle = depthStyle,
 		Once = once,
+		SnapshotOldValues = snapshotOldValues,
 		PathLength = #path,
 		Connection = nil :: any, -- Will be set below
 	}
@@ -626,6 +703,12 @@ function ListenerRegistry:RegisterListener(
 					node.Listeners[eventType] = nil
 				end
 			end
+			-- Decrement snapshot coverage counts (must happen before/independently
+			-- of pruning below; node removal never depends on these fields).
+			if listener.SnapshotOldValues then
+				node.SnapshotCount -= 1
+				adjustSnapshotSubtree(node, -1)
+			end
 			-- Decrement coverage counts and prune now-empty nodes
 			node.Count -= 1
 			decrementAndPrune(node, 1)
@@ -643,6 +726,10 @@ function ListenerRegistry:RegisterListener(
 	end
 	table.insert(bucket, listener)
 	node.Count += 1
+	if snapshotOldValues then
+		node.SnapshotCount += 1
+		adjustSnapshotSubtree(node, 1)
+	end
 
 	return connection
 end
@@ -750,6 +837,84 @@ function ListenerRegistry:CoversChangesAt(path: PathArray): boolean
 	return node.Subtree > 0 -- listener at `path` or somewhere in its subtree
 end
 
+--[=[
+	Returns the absolute path a caller should snapshot the OLD value at for a
+	change landing at `path`, or `nil` if no `SnapshotOldValues` listener would
+	receive a real old value for this change.
+
+	Two kinds of listener can receive a genuine (non-synthetic) old value for
+	this change:
+	- One at or below `path` itself (`OnChange`/`OnValueChange` at `path` or a
+	  descendant within the diff tree this change produces).
+	- One at `path`'s DIRECT PARENT for the "KeyChanged"/"KeyRemoved" delivery
+	  `_processDiffNode` fires one level up from EVERY node in the diff tree
+	  (including `path` itself, the write's own root) — the one ancestor level
+	  that carries the real diff, as opposed to the synthetic
+	  `old == new == currentValue` notifications further up. A listener there
+	  needs `path`'s value specifically, so when present this pins the result
+	  to `path` itself (never deeper) regardless of what else qualifies below.
+
+	Below `path`, the result is the shallowest point that still covers every
+	opted-in listener in its subtree: starting at `path`, it descends while
+	exactly one child branch carries opted-in listeners (`SnapshotSubtree > 0`)
+	and the current node itself has none directly registered
+	(`SnapshotCount == 0`). The moment two branches diverge — or a node has its
+	own opted-in listener — that node is the answer, since deeper opted-in
+	listeners only need to slice the resulting snapshot, never re-copy it.
+
+	Conservative on wildcards (returns `path` itself, i.e. "snapshot everything
+	at the change root") since matching wildcard branches against a concrete
+	path here would duplicate `collectMatchingNodes`' job for a rare option.
+	Likewise conservative about WHICH event type sits at the parent node above
+	(`SnapshotCount` doesn't distinguish "KeyChanged" from "ValueChanged"): an
+	opted-in `OnChange` at the parent — which would only ever see this change as
+	a synthetic ancestor notification — still pins the result to `path`, same as
+	a genuine `OnKeyChange` would. Over-copying in that narrow case is cheaper
+	than threading event-type filtering through the aggregate counts.
+]=]
+function ListenerRegistry:SnapshotRootFor(path: PathArray): PathArray?
+	if self._hasSnapshotWildcards then
+		return path
+	end
+
+	if #path > 0 then
+		local parentPath, _key = PathHelpers.GetPathParentAndKey(path)
+		local parentNode = getNode(self._root, parentPath)
+		if parentNode and parentNode.SnapshotCount > 0 then
+			return table.clone(path)
+		end
+	end
+
+	local node = getNode(self._root, path)
+	if node == nil or node.SnapshotSubtree == 0 then
+		return nil
+	end
+
+	local resultPath = table.clone(path)
+	local current = node
+	while current.SnapshotCount == 0 do
+		local chosenKey: any = nil
+		local chosenChild: ListenerNode? = nil
+		local branches = 0
+		for key, child in current.Children do
+			if child.SnapshotSubtree > 0 then
+				branches += 1
+				if branches > 1 then
+					break
+				end
+				chosenKey = key
+				chosenChild = child
+			end
+		end
+		if branches ~= 1 or chosenChild == nil then
+			break
+		end
+		table.insert(resultPath, chosenKey)
+		current = chosenChild
+	end
+	return resultPath
+end
+
 function ListenerRegistry.Destroy(self: ListenerRegistry)
 	if self._destroyed then
 		return
@@ -769,6 +934,8 @@ function ListenerRegistry.Destroy(self: ListenerRegistry)
 		table.clear(node.Listeners)
 		node.Count = 0
 		node.Subtree = 0
+		node.SnapshotCount = 0
+		node.SnapshotSubtree = 0
 
 		for _, child in node.Children do
 			destroyNode(child)

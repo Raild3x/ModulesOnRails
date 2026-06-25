@@ -127,7 +127,6 @@ return function(t: tiniest)
 			-- The held proxy resolves to the new location; writes land there.
 			heldProxy.v = 2
 			expect(tm:Get("b").v).is(2)
-
 			tm:Destroy()
 		end)
 
@@ -193,7 +192,8 @@ return function(t: tiniest)
 
 			connA:Disconnect()
 			connB:Disconnect()
-			expect(next(registry._root.Children)).never_exists()
+
+			expect(next(registry._root.Children) :: any).never_exists()
 
 			local fired = 0
 			registry:RegisterListener("KeyAdded", { "deep", "path" }, function()
@@ -201,7 +201,7 @@ return function(t: tiniest)
 			end, { Once = true })
 			registry:FireListenersExact("KeyAdded", { "deep", "path" }, { Key = "k", NewValue = 1 })
 			expect(fired).is(1)
-			expect(next(registry._root.Children)).never_exists()
+			expect(next(registry._root.Children) :: any).never_exists()
 
 			registry:Destroy()
 		end)
@@ -215,14 +215,14 @@ return function(t: tiniest)
 			expect(function()
 				connection:Disconnect()
 			end).never_fails()
-			expect(next(registry._root.Children)).never_exists()
+			expect(next(registry._root.Children) :: any).never_exists()
 			expect(registry._root.Count).is(0)
 		end)
 	end)
 
 	describe("TableManager lifecycle", function()
 		test("Destroy mid-batch releases batch state", function()
-			local tm = TableManager.new({ a = 1 }) :: any
+			local tm = TableManager.new { a = 1 } :: any
 			tm:Suspend()
 			tm:Set("a", 2)
 			expect(tm._batch).exists()
@@ -233,7 +233,7 @@ return function(t: tiniest)
 		end)
 
 		test("re-entrant writes drain the ChangeDetector dispatch queue", function()
-			local tm = TableManager.new({ v = 1, w = 1 }) :: any
+			local tm = TableManager.new { v = 1, w = 1 } :: any
 			tm:OnValueChange("v", function(newValue)
 				if newValue < 10 then
 					tm:Set("w", newValue * 2)
@@ -248,12 +248,12 @@ return function(t: tiniest)
 		end)
 
 		test("registering on a destroyed TableManager returns a dead connection", function()
-			local tm = TableManager.new({ a = 1 }) :: any
+			local tm = TableManager.new { a = 1 } :: any
 			tm:Destroy()
 
 			local connection = tm:OnChange("a", function() end)
 			expect(connection.Connected).never_is_true()
-			expect(next(tm._listenerRegistry._root.Children)).never_exists()
+			expect(next(tm._listenerRegistry._root.Children) :: any).never_exists()
 			expect(tm._listenerRegistry._root.Count).is(0)
 		end)
 
@@ -263,8 +263,8 @@ return function(t: tiniest)
 		-- view (weak observer keys + `_Destroyed` skip).
 		test("destroying a co-observer leaves no dangling reference on the survivor", function()
 			local shared = { hp = 100 }
-			local a = TableManager.new({ Stats = shared }) :: any
-			local b = TableManager.new({ Stats = shared }) :: any
+			local a = TableManager.new { Stats = shared } :: any
+			local b = TableManager.new { Stats = shared } :: any
 			-- Implicit sharing: both observe `shared` at "Stats" (no explicit link).
 			expect(b:IsLinkedWith(a)).is_true()
 
@@ -282,14 +282,14 @@ return function(t: tiniest)
 		-- Fires one small unrelated event so the shared listener runner thread's
 		-- stack slots cannot pin payloads from a previous fire.
 		local function recycleRunnerThread()
-			local recycler = TableManager.new({ x = 0 })
+			local recycler = TableManager.new { x = 0 }
 			recycler:OnValueChange("x", function() end)
 			recycler:Set("x", 1)
 			recycler:Destroy()
 		end
 
 		test("a removed subtree becomes garbage collectable", function()
-			local tm = TableManager.new({ a = { b = { payload = 1 } } }) :: any
+			local tm = TableManager.new { a = { b = { payload = 1 } } } :: any
 
 			local isAlive = (function()
 				local _touch = tm.Proxy.a.b -- force proxy creation
@@ -304,7 +304,7 @@ return function(t: tiniest)
 
 		test("a destroyed TableManager becomes garbage collectable", function()
 			local isAlive = (function()
-				local tm = TableManager.new({ a = { b = 1 } }) :: any
+				local tm = TableManager.new { a = { b = 1 } } :: any
 				tm:OnChange("a", function() end)
 				local _touch = tm.Proxy.a
 				tm:Set("a.b", 2)
@@ -319,7 +319,7 @@ return function(t: tiniest)
 
 		test("the listener runner thread does not pin event payloads", function()
 			local isAlive = (function()
-				local tm = TableManager.new({ v = 0 :: any }) :: any
+				local tm = TableManager.new { v = 0 :: any } :: any
 				tm:OnValueChange("v", function(_newValue) end)
 
 				local payload = table.create(64, "payload")
@@ -340,8 +340,8 @@ return function(t: tiniest)
 		test("a shared region is collectable once all co-observers are gone", function()
 			local isAlive = (function()
 				local shared = { hp = 100 }
-				local a = TableManager.new({ Stats = shared }) :: any
-				local b = TableManager.new({ Stats = shared }) :: any
+				local a = TableManager.new { Stats = shared } :: any
+				local b = TableManager.new { Stats = shared } :: any
 				-- Implicit sharing: both observe `shared` at "Stats".
 				a:Set("Stats.hp", 50) -- exercise the shared baseline before teardown
 				local probe = GcHelpers.WeakProbe(shared)

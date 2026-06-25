@@ -264,5 +264,110 @@ return function(t: tiniest)
 
 			manager:Destroy()
 		end)
+
+		test("errors for a missing intermediate segment without buildTablesDynamically", function()
+			local manager = TableManager.new {
+				existing = 1,
+			}
+
+			expect(function()
+				manager:Set({ "a", "b", "c" }, 5)
+			end).fails_with("Path segment a is not a table")
+
+			manager:Destroy()
+		end)
+
+		test("buildTablesDynamically reports the whole missing subtree, not just the leaf", function()
+			-- Regression test: the missing path used to be built with raw,
+			-- level-by-level writes that bypassed change detection entirely, so
+			-- only the leaf ("c") was ever reported. The fix builds the missing
+			-- remainder as ONE subtree through `applyWrite`, so the diff against
+			-- the (nil) shadow baseline surfaces every newly created level.
+			local manager = TableManager.new {
+				existing = 1,
+			}
+
+			local keyAddedEvents = {}
+			local keyChangedEvents = {}
+			local valueChangedEvents = {}
+			local kaConn = manager.KeyAdded:Connect(function(path, key, newValue)
+				table.insert(keyAddedEvents, { Path = path, Key = key, New = newValue })
+			end)
+			local kcConn = manager.KeyChanged:Connect(function(path, key, newValue, oldValue)
+				table.insert(keyChangedEvents, { Path = path, Key = key, New = newValue, Old = oldValue })
+			end)
+			local vcConn = manager.ValueChanged:Connect(function(path, newValue, oldValue)
+				table.insert(valueChangedEvents, { Path = path, New = newValue, Old = oldValue })
+			end)
+
+			-- Separately, the registry-based OnKeyChange/OnValueChange listeners
+			-- (unlike the public Signals) ARE told about the new container itself
+			-- ("a" going from nil to a table) -- this is the literal "new tables
+			-- were added in" notification the bug report asked for.
+			local rootKey, rootNew, rootOld
+			manager:OnKeyChange({}, function(key, newValue, oldValue)
+				rootKey, rootNew, rootOld = key, newValue, oldValue
+			end)
+
+			manager:Set({ "a", "b", "c" }, 5, true)
+
+			expect(manager:Get { "a", "b", "c" }).is(5)
+			expect(manager.Proxy.a.b.c).is(5)
+
+			-- The deepest-first (post-order) firing order: "c" under "a.b" is
+			-- reported before "b" under "a".
+			expect(#keyAddedEvents).is(2)
+			expect(keyAddedEvents[1].Path).is_shallow_equal { "a", "b" }
+			expect(keyAddedEvents[1].Key).is("c")
+			expect(keyAddedEvents[1].New).is(5)
+			expect(keyAddedEvents[2].Path).is_shallow_equal { "a" }
+			expect(keyAddedEvents[2].Key).is("b")
+			expect(keyAddedEvents[2].New.c).is(5)
+
+			expect(#valueChangedEvents).is(2)
+			expect(valueChangedEvents[1].Path).is_shallow_equal { "a", "b", "c" }
+			expect(valueChangedEvents[2].Path).is_shallow_equal { "a", "b" }
+
+			-- The brand-new top container itself ("a") never collapses to a public
+			-- KeyChanged/KeyAdded Signal fire (consistent with a normal
+			-- `Set(path, newNonEmptyTable)` onto a previously-nil slot elsewhere
+			-- in this library) -- its descendants' adds are what drive consumers.
+			expect(#keyChangedEvents).is(0)
+
+			expect(rootKey).is("a")
+			expect(rootNew.b.c).is(5)
+			expect(rootOld).is(nil)
+
+			kaConn:Disconnect()
+			kcConn:Disconnect()
+			vcConn:Disconnect()
+			manager:Destroy()
+		end)
+
+		test("buildTablesDynamically only builds the missing remainder when part of the path already exists", function()
+			local manager = TableManager.new {
+				a = { existing = true },
+			}
+
+			local keyAddedEvents = {}
+			local conn = manager.KeyAdded:Connect(function(path, key, newValue)
+				table.insert(keyAddedEvents, { Path = path, Key = key, New = newValue })
+			end)
+
+			manager:Set({ "a", "b", "c" }, 5, true)
+
+			expect(manager:Get { "a", "b", "c" }).is(5)
+			-- The pre-existing sibling under "a" is untouched by the rebuild.
+			expect(manager:Get { "a", "existing" }).is(true)
+
+			-- Only "c" is a genuine addition; "b" (the new container) reports as
+			-- a KeyChanged on its parent "a", which already existed.
+			expect(#keyAddedEvents).is(1)
+			expect(keyAddedEvents[1].Path).is_shallow_equal { "a", "b" }
+			expect(keyAddedEvents[1].Key).is("c")
+
+			conn:Disconnect()
+			manager:Destroy()
+		end)
 	end)
 end

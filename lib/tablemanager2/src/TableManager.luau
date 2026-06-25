@@ -104,7 +104,7 @@ export type TableManagerConfig = Types.TableManagerConfig
 export type ForOptions = Types.ForOptions
 export type TableManager<T = { [any]: any }> = Types.TableManager<T>
 
-export type OpaqueWrapper = Types.OpaqueWrapper
+export type OpaqueWrapper<T> = Types.OpaqueWrapper<T>
 
 export type TM_Internal<T = { [any]: any }> = Types.TM_Internal<T>
 type ProxyManager<T> = ProxyManagerModule.ProxyManager<T>
@@ -151,9 +151,6 @@ const createAncestorSnapshot = BatchUtilsModule.CreateAncestorSnapshot
 --// Constructor //--
 -----------------------------------------------------------------------------------
 
--- Validates `self.Raw` against `self._schema` (set just before this
--- is called). Separated from the constructor's straight-line field setup
--- since it has its own branching/error-reporting logic.
 const function validateInitialSchema<T>(self: TM_Internal<T>)
 	if self._schema then
 		const ok, err = SchemaNavigatorModule.Validate(self._schema, {}, self.Raw)
@@ -167,42 +164,24 @@ const function validateInitialSchema<T>(self: TM_Internal<T>)
 	end
 end
 
--- Lowercases `Config.SignalFireMode` so it matches the lowercase literals
--- `Emitter.fireSignal` compares against (`ListenerRegistry.resolveFireMode`
--- already does the same for `ListenerFireMode`) -- without this, a
--- differently-cased value (e.g. "Coalesced") silently fails every comparison
--- in `fireSignal` and falls through to its immediate-fire `else` branch.
 const function normalizeSignalFireMode(mode: Types.SignalFireMode?): Types.SignalFireMode
-	if mode == nil then
-		return DEFAULT_SIGNAL_FIRE_MODE
-	end
-	return (mode :: any):lower() :: Types.SignalFireMode
+	return if mode == nil then DEFAULT_SIGNAL_FIRE_MODE else (mode :: any):lower() :: Types.SignalFireMode
 end
 
--- Resolves `Config.EnableProxies` and creates (or nils out) `self._proxyManager`/
--- `self.Proxy` accordingly, warning on the misconfigured EnableProxies=false +
--- DuplicateReferenceMode combo.
 const function initProxyManager<T>(self: TM_Internal<T>, resolvedConfig: TableManagerConfig): ProxyManager<T>?
 	const enableProxies = resolvedConfig.EnableProxies ~= false
 	if not enableProxies and resolvedConfig.DuplicateReferenceMode ~= nil then
 		warn("DuplicateReferenceMode has no effect when Config.EnableProxies = false")
 	end
-
 	return if enableProxies then ProxyManagerModule.new(self.Raw) else nil
 end
 
--- Wires the proxy-free write core into `self._proxyManager` (if proxies are
--- enabled) and creates the root proxy. No-op when `EnableProxies = false`.
 const function wireProxyWriteHandler<T>(self: TM_Internal<T>): Proxy<T, "">?
 	const proxyManager = self._proxyManager
 	if not proxyManager then return end
-	-- Single write-integration point: every proxy write resolves its live path
-	-- and unwrapped value, then flows through the proxy-free write core.
 	proxyManager:SetWriteHandler(function(path: PathArray, value: any)
 		applyWrite(self, path, value)
 	end)
-
-	-- Create root proxy (no parent, no key)
 	return proxyManager:CreateProxy(self.Raw, nil, nil)
 end
 
@@ -236,15 +215,13 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	self._batchDepth = 0
 	self._batch = nil
 	
-	-- Lazily created on first use by a `Map*` helper (see `attachOwnedCleanup`).
+
 	self._janitor = Janitor.new()
 	
 	self._opaqueRegistries = OpaqueRegistryModule.NewRegistries()
 	self._ignoreTrie = IgnoreTrieModule.new()
-	if resolvedConfig.IgnoredPaths then
-		for _, ignoredPath in resolvedConfig.IgnoredPaths :: { PathHelpers.Path<any> } do
-			IgnoreTrieModule.SetPathIgnored(self._ignoreTrie, ignoredPath, true)
-		end
+	for _, ignoredPath in resolvedConfig.IgnoredPaths or {} do
+		IgnoreTrieModule.SetPathIgnored(self._ignoreTrie, ignoredPath, true)
 	end
 	
 	-- Initialize subsystems
@@ -268,9 +245,6 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	self.ArrayRemoved = Signal.new() :: any
 	self.ArraySet = Signal.new() :: any
 	
-	-- Initialize ChangeDetector with callbacks (signal+listener dual-fire in Emitter).
-	-- `:: any` bypasses the generic-vs-non-generic callback signature mismatch
-	-- (same pattern the original inline closures used to avoid).
 	self._changeDetector = ChangeDetectorModule.new(
 		EmitterModule.makeChangeDetectorCallbacks(self :: any) :: any,
 		nil,
@@ -278,10 +252,6 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 		self._ignoreTrie
 	)
 
-	-- Implicit sharing: register every table in the initial tree by identity, so
-	-- any table also reachable in another manager is observed by both and writes
-	-- propagate between them (sharing a table identity = being linked). Opacity is
-	-- the boundary (opaque regions are not registered). See `Propagation`.
 	PropagationModule.RegisterSubtree(self, self.Raw)
 
 	debug.profileend()
@@ -308,24 +278,20 @@ function TableManager._NotifyApplied<T>(self: TM_Internal<T>, op: AppliedOp)
 	const ok, err = pcall(function()
 		if op.Kind == "Set" then
 			pruneDetachedValue(self, op.OldValue, op.NewValue)
-			-- Phase A: only dispatch if THIS manager observes the path. When it
-			-- doesn't, no listener/signal of its own would fire, so the diff is
-			-- pure waste — skip it. (The shadow is still synced below: this
-			-- manager can later ORIGINATE a write whose fan-out oldValue reads
-			-- from its shadow, so the baseline must stay current regardless.)
+
 			if CoverageModule.IsLocallyObserved(self, op.Path) then
-				-- Phase B: reuse the origin's already-computed diff node instead
-				-- of re-diffing the identical old/new, but only when neither the
-				-- origin (op.OriginHasNoOpacity) nor this manager has any
-				-- PER-MANAGER opaque marks. Global opacity is shared, so it shapes
-				-- both diffs identically and is safe to reuse across; only
-				-- per-manager marks can diverge the trees. (Checking the registry
-				-- count, not `ctx == nil`, also keeps reuse alive when some
-				-- unrelated manager elsewhere has used GlobalOpaque this session.)
+				const oldSnapshot = BatchUtilsModule.BuildOldSnapshot(self, op.Path, op.OldValue)
 				if op.Diff ~= nil and op.OriginHasNoOpacity and self._opaqueRegistries.Count == 0 then
-					self._changeDetector:DispatchDiffNode(op.Diff, op.Path, self.Raw)
+					self._changeDetector:DispatchDiffNode(op.Diff, op.Path, self.Raw, oldSnapshot)
 				else
-					self._changeDetector:CheckForChangesBetween(op.OldValue, op.NewValue, op.Path, self.Raw)
+					self._changeDetector:CheckForChangesBetween(
+						op.OldValue,
+						op.NewValue,
+						op.Path,
+						self.Raw,
+						nil,
+						oldSnapshot
+					)
 				end
 			end
 			-- This bypasses applyWrite entirely (the write already landed via the
@@ -412,7 +378,7 @@ end
 	Returns the other managers currently sharing (co-observing) at least one
 	live table identity with this one — de-duplicated, excluding self.
 ]=]
-function TableManager.GetLinkedManagers<T>(self: TM_Internal<T>): { any }
+function TableManager.GetLinkedManagers<T>(self: TM_Internal<T>): { TableManager<any> }
 	return PropagationModule.GetCoObservers(self)
 end
 
@@ -420,7 +386,7 @@ end
 	@within TableManager
 	Returns true if this manager currently shares a live table identity with `other`.
 ]=]
-function TableManager.IsLinkedWith<T>(self: TM_Internal<T>, other: any): boolean
+function TableManager.IsLinkedWith<T>(self: TM_Internal<T>, other: TableManager<any>): boolean
 	return PropagationModule.IsLinkedWith(self, other)
 end
 
@@ -547,11 +513,6 @@ end
 --------------------------------------------------------------------------------
 --// For / Map //--
 --------------------------------------------------------------------------------
--- Thin orchestration methods. The shared identity-based reconcile drivers
--- (`makeKeyedReconciler`/`makeValueReconciler`/`attachOwnedCleanup`) live in
--- ForMap.luau and are aliased above; `MapKeys`/`MapValues`/`MapPairs` stay
--- here because they call `TableManager.new` directly to create the derived
--- manager, which ForMap.luau cannot do without a circular require.
 
 --[=[
 	Reconciles the items found at `path` by KEY: `handler` runs once per key
@@ -611,6 +572,8 @@ function TableManager.ForPairs<T, S>(
 end
 
 --[=[
+	@within TableManager
+	@unreleased
 	Returns a live `TableManager` keyed by `transform(entryJanitor, key, value)`,
 	with values passed through unchanged. `transform` re-runs only when the
 	source key is added/removed; a value change at an existing key refreshes
@@ -637,6 +600,8 @@ function TableManager.MapKeys<T, S>(
 end
 
 --[=[
+	@within TableManager
+	@unreleased
 	Returns a live `TableManager` keyed by the SOURCE key, with each entry
 	recomputed via `transform(entryJanitor, value, key)` whenever its value
 	changes. Same ownership/lifecycle rules as `MapKeys`.
@@ -669,6 +634,8 @@ function TableManager.MapValues<T, S>(
 end
 
 --[=[
+	@within TableManager
+	@unreleased
 	Returns a live `TableManager` keyed by `transform(entryJanitor, key, value)`'s
 	first return value (the second is the output value); the entry is
 	recomputed whenever the source key or value changes. On an output-key
@@ -703,6 +670,7 @@ function TableManager.Get<T, S>(self: TM_Internal<T>, path: Path<S>, suppressNil
 	local current = self.Raw :: T & table
 	for _, key in parsedPath do
 		if type(current) ~= "table" then
+			debug.profileend()
 			if suppressNilPartialPaths then
 				return nil
 			else
@@ -734,6 +702,7 @@ function TableManager.GetProxy<T, S>(
 	local previousKey: any = nil
 	for _, key in parsedPath do
 		if not proxyManager:IsProxy(current) then
+			debug.profileend()
 			if suppressNilPartialPaths then
 				return nil
 			else
@@ -759,7 +728,7 @@ end
 function TableManager.Set<T, S>(
 	self: TM_Internal<T>,
 	path: Path<S>,
-	value: ValueAtPath<T, S> | Types.OpaqueWrapper,
+	value: ValueAtPath<T, S> | Types.OpaqueWrapper<ValueAtPath<T, S>>,
 	buildTablesDynamically: boolean?
 )
 	debug.profilebegin("TM.Set")
@@ -779,16 +748,25 @@ function TableManager.Set<T, S>(
 
 	local parent: any = self.Raw
 	for i = 1, #parsedPath - 1 do
-		local nextValue = parent[parsedPath[i]]
+		const nextValue = parent[parsedPath[i]]
 		if type(nextValue) ~= "table" then
 			if not shouldBuild then
+				debug.profileend()
 				if unwrappedValue == nil then
 					return -- Silently return if we are setting a non existent path to nil since it is already nil.
 				end
 				error(`Path segment {parsedPath[i]} is not a table`)
 			end
-			nextValue = {}
-			parent[parsedPath[i]] = nextValue
+
+			-- Build intermediate tables for the remainder of the path, then apply the write.
+			local nested: any = unwrappedValue
+			for j = #parsedPath, i + 1, -1 do
+				nested = { [parsedPath[j]] = nested }
+			end
+			const subPath = table.move(parsedPath, 1, i, 1, table.create(i))
+			applyWrite(self, subPath, nested)
+			debug.profileend()
+			return
 		end
 		parent = nextValue
 	end
@@ -858,11 +836,14 @@ function TableManager.ArrayRemove<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 	shiftArrayKeys(self._proxyManager, array, index + 1, -1)
 	pruneDetachedValue(self, oldValue, nil)
 
-	if inBatch then return oldValue end
+	if inBatch then 
+		debug.profileend()
+		return oldValue 
+	end
 
 	-- Fire listeners EXACTLY at remove path (we handle ancestors separately)
 	makeEmit(self, parsedPath).removed(index, oldValue)
-
+	debug.profileend()
 	return oldValue
 end
 TableManager.Remove = TableManager.ArrayRemove
@@ -1009,7 +990,8 @@ end
 function TableManager._doFlush<T>(self: TM_Internal<T>, path: PathArray)
 	const old = BaselineModule.Get(self, path)
 	const new_ = self:Get(path :: any, true)
-	self._changeDetector:CheckForChangesBetween(old, new_, path, self.Raw)
+	const oldSnapshot = BatchUtilsModule.BuildOldSnapshot(self, path, old)
+	self._changeDetector:CheckForChangesBetween(old, new_, path, self.Raw, nil, oldSnapshot)
 	BaselineModule.Reconcile(self, path)
 end
 
@@ -1039,10 +1021,6 @@ function TableManager.Flush<T, S>(self: TM_Internal<T>, path: Path<S>?)
 		end
 		return
 	end
-	-- An explicit Flush is always synchronous regardless of FlushMode (same
-	-- manual-control contract as Suspend/Resume). Drain any outstanding
-	-- coalesced flush first so this synchronous diff reads an authoritative
-	-- shadow baseline instead of racing the deferred one.
 	CoalescedFlushModule.FlushPending(self)
 	self:_doFlush(parsedPath)
 end
@@ -1266,7 +1244,6 @@ function TableManager.Destroy<T>(self: TM_Internal<T>)
 	-- the propagation registry automatically once it is unreferenced; dispatch
 	-- also skips `_Destroyed` managers immediately (see `Propagation`).
 
-	-- If destroyed mid-batch (Suspend without Resume), release the batch state.
 	const batch = self._batch
 	if batch then
 		self._batch = nil
@@ -1287,6 +1264,12 @@ function TableManager.Destroy<T>(self: TM_Internal<T>)
 	self.ArrayInserted:Destroy()
 	self.ArrayRemoved:Destroy()
 	self.ArraySet:Destroy()
+
+	setmetatable(self, nil)
+
+	-- Setup No-op Destroy to avoid double-destroying errors
+	const tm = self :: any
+	tm.Destroy = function() end
 end
 
 -- Opacity wrapper constructors (see OpaqueRegistry): mark a value (or a

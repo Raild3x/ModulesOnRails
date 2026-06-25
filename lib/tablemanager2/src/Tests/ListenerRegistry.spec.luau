@@ -25,7 +25,7 @@ return function(t: tiniest)
 
 	describe("Listener Registration", function()
 		test("should register a listener and return a connection", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 
 			local connection = registry:RegisterListener("ValueChanged", { "player", "health" }, function() end)
 
@@ -36,7 +36,7 @@ return function(t: tiniest)
 		end)
 
 		test("should allow disconnecting a listener", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 
 			local connection = registry:RegisterListener("ValueChanged", { "player", "health" }, function() end)
 			connection:Disconnect()
@@ -47,7 +47,7 @@ return function(t: tiniest)
 		end)
 
 		test("should not fire disconnected listeners", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 
 			local fireCount = 0
 			local connection = registry:RegisterListener("ValueChanged", { "player", "health" }, function()
@@ -74,7 +74,7 @@ return function(t: tiniest)
 
 	describe("FireListenersExact", function()
 		test("should fire listener at exact matching path", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 
 			local fired = false
 			registry:RegisterListener("ValueChanged", { "player", "health" }, function()
@@ -97,7 +97,7 @@ return function(t: tiniest)
 		end)
 
 		test("should NOT fire listener at parent path", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 
 			local fired = false
 			registry:RegisterListener("ValueChanged", { "player" }, function()
@@ -121,7 +121,7 @@ return function(t: tiniest)
 		end)
 
 		test("should NOT fire listener at child path", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 
 			local fired = false
 			registry:RegisterListener("ValueChanged", { "player", "health" }, function()
@@ -145,7 +145,7 @@ return function(t: tiniest)
 		end)
 
 		test("should fire multiple listeners on same path", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 
 			local count1 = 0
 			local count2 = 0
@@ -177,7 +177,7 @@ return function(t: tiniest)
 
 	describe("ListenDepth Filtering", function()
 		test("nil depth (default) fires for ancestor notifications at any depth", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 
 			local fired = false
 			registry:RegisterListener("ValueChanged", { "player" }, function()
@@ -201,7 +201,7 @@ return function(t: tiniest)
 		end)
 
 		test("depth=0 does NOT fire for ancestor notifications", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 
 			local fired = false
 			registry:RegisterListener("ValueChanged", { "player" }, function()
@@ -225,7 +225,7 @@ return function(t: tiniest)
 		end)
 
 		test("depth=0 DOES fire for direct changes (relativeDepth=0)", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 
 			local fired = false
 			registry:RegisterListener("ValueChanged", { "player" }, function()
@@ -249,7 +249,7 @@ return function(t: tiniest)
 		end)
 
 		test("depth=1 style='<=' fires for depth-1 ancestor, not depth-2", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 
 			local fired = false
 			registry:RegisterListener("ValueChanged", { "player" }, function()
@@ -288,7 +288,7 @@ return function(t: tiniest)
 		end)
 
 		test("depth=1 style='==' fires at exactly depth 1, not depth 0", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 
 			local fired = false
 			registry:RegisterListener("ValueChanged", { "player" }, function()
@@ -327,7 +327,7 @@ return function(t: tiniest)
 
 	describe("Once Option", function()
 		test("fires exactly once then auto-disconnects", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 
 			local fireCount = 0
 			local conn = registry:RegisterListener("ValueChanged", { "player", "health" }, function()
@@ -354,7 +354,7 @@ return function(t: tiniest)
 		end)
 
 		test("Connected is false immediately after the first fire", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 
 			local connAfterFire: any = nil
 			local conn: any
@@ -380,7 +380,7 @@ return function(t: tiniest)
 		end)
 
 		test("re-entrant fire does not double-fire a Once listener", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 
 			local fireCount = 0
 			local eventData: any = {
@@ -409,7 +409,7 @@ return function(t: tiniest)
 
 	describe("Event Data Handling", function()
 		test("should pass correct arguments for ValueChanged", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 
 			local capturedNew = nil
 			local capturedOld = nil
@@ -441,7 +441,7 @@ return function(t: tiniest)
 		end)
 
 		test("should pass correct arguments for KeyAdded", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 
 			local capturedValue = nil
 			local capturedMetadata = nil
@@ -470,7 +470,7 @@ return function(t: tiniest)
 		end)
 
 		test("should pass correct arguments for ArrayInserted", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 
 			local capturedIndex = nil
 			local capturedValue = nil
@@ -504,7 +504,7 @@ return function(t: tiniest)
 
 	describe("Edge Cases", function()
 		test("should handle root path (empty array)", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 
 			local fired = false
 			registry:RegisterListener("ValueChanged", {}, function()
@@ -527,7 +527,7 @@ return function(t: tiniest)
 		end)
 
 		test("should handle multiple disconnections safely", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 
 			local connection = registry:RegisterListener("ValueChanged", { "player" }, function() end)
 
@@ -540,7 +540,7 @@ return function(t: tiniest)
 		end)
 
 		test("should clean up all listeners on Destroy", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 
 			local conn1 = registry:RegisterListener("ValueChanged", { "player" }, function() end)
 			local conn2 = registry:RegisterListener("KeyAdded", { "player" }, function() end)
@@ -554,7 +554,7 @@ return function(t: tiniest)
 
 	describe("Wildcard Listeners", function()
 		test("should fire a wildcard listener for a matching literal segment", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 
 			local matches: { any }? = nil
 			registry:RegisterListener("ValueChanged", { "Players", "*", "Health" }, function(_, _, metadata)
@@ -578,7 +578,7 @@ return function(t: tiniest)
 		end)
 
 		test("should fire both a literal listener and a wildcard listener for the same change", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 
 			local literalFired, wildcardFired = false, false
 			registry:RegisterListener("ValueChanged", { "Players", "p123", "Health" }, function()
@@ -605,7 +605,7 @@ return function(t: tiniest)
 		end)
 
 		test("should not fire a wildcard listener for a non-matching path", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 
 			local fired = false
 			registry:RegisterListener("ValueChanged", { "Players", "*", "Health" }, function()
@@ -628,7 +628,7 @@ return function(t: tiniest)
 		end)
 
 		test("should accumulate matches left-to-right for multiple wildcard segments", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 
 			local matches: { any }? = nil
 			registry:RegisterListener("ValueChanged", { "Players", "*", "Inventory", "*" }, function(_, _, metadata)
@@ -654,7 +654,7 @@ return function(t: tiniest)
 		end)
 
 		test("should fire a wildcard ancestor listener when a descendant changes", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 
 			local matches: { any }? = nil
 			registry:RegisterListener("ValueChanged", { "Players", "*" }, function(_, _, metadata)
@@ -679,7 +679,7 @@ return function(t: tiniest)
 		end)
 
 		test("Once on a wildcard listener fires once total, not once per matching key", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 
 			local fireCount = 0
 			registry:RegisterListener("ValueChanged", { "Players", "*", "Health" }, function()
@@ -743,7 +743,7 @@ return function(t: tiniest)
 		end)
 
 		test("fires deferred when FireMode=Deferred", function()
-			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "Deferred" }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "deferred" }
 			local callOrder = {}
 
 			registry:RegisterListener("ValueChanged", { "player", "health" }, function()
@@ -772,7 +772,7 @@ return function(t: tiniest)
 		end)
 
 		test("collapses repeated fires into one call when FireMode=Coalesced", function()
-			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "Coalesced" }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "coalesced" }
 			local fireCount = 0
 			local lastNewValue: number? = nil
 
@@ -809,7 +809,7 @@ return function(t: tiniest)
 		end)
 
 		test("resolves Bindable to either Immediate or Deferred ordering", function()
-			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "Bindable" }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "bindable" }
 			local callOrder = {}
 
 			registry:RegisterListener("ValueChanged", { "player", "health" }, function()
@@ -842,7 +842,7 @@ return function(t: tiniest)
 
 	describe("Thread Safety", function()
 		test("listeners that yield do not prevent all callbacks from completing", function()
-			local registry = ListenerRegistry.new { DebugMode = false }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
 			local completions = {}
 
 			registry:RegisterListener("ValueChanged", { "player", "health" }, function()
@@ -871,7 +871,7 @@ return function(t: tiniest)
 		end)
 
 		test("destroy disconnects consumed once connections", function()
-			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "Deferred" }
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "deferred" }
 			local onceConnection = registry:RegisterListener("ValueChanged", { "player", "health" }, function() end, {
 				Once = true,
 			})
@@ -888,6 +888,235 @@ return function(t: tiniest)
 
 			registry:Destroy()
 			expect(onceConnection.Connected).never_is_true()
+		end)
+	end)
+
+	describe("SnapshotOldValues / SnapshotRootFor", function()
+		test("SnapshotRootFor returns nil when no listener is registered", function()
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
+
+			expect(registry:SnapshotRootFor { "player", "health" }).never_exists()
+
+			registry:Destroy()
+		end)
+
+		test("SnapshotRootFor returns nil when listeners exist but none opted in", function()
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
+
+			registry:RegisterListener("ValueChanged", { "player", "health" }, function() end)
+
+			expect(registry:SnapshotRootFor { "player", "health" }).never_exists()
+
+			registry:Destroy()
+		end)
+
+		test(
+			"SnapshotRootFor returns the change path (not nil, not deeper) when an opted-in KeyChanged listener sits at the PARENT",
+			function()
+				local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
+
+				-- A KeyChanged listener registered at {"player"} receives a genuine
+				-- (non-synthetic) old value for a change exactly at
+				-- {"player", "stats"} -- one level below its own registration path.
+				registry:RegisterListener("KeyChanged", { "player" }, function() end, {
+					SnapshotOldValues = true,
+				})
+
+				local result = registry:SnapshotRootFor { "player", "stats" }
+				expect(result).exists()
+				local r = result :: { any }
+				expect(#r).is(2)
+				expect(r[1]).is("player")
+				expect(r[2]).is("stats")
+
+				registry:Destroy()
+			end
+		)
+
+		test("SnapshotRootFor returns the change path when an opted-in listener sits exactly there", function()
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
+
+			registry:RegisterListener("ValueChanged", { "player", "health" }, function() end, {
+				SnapshotOldValues = true,
+			})
+
+			local result = registry:SnapshotRootFor { "player", "health" }
+			expect(result).exists()
+			expect(#(result :: { any })).is(2)
+			expect((result :: { any })[1]).is("player")
+			expect((result :: { any })[2]).is("health")
+
+			registry:Destroy()
+		end)
+
+		test("SnapshotRootFor descends through a single covering branch to the opted-in listener", function()
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
+
+			-- Only one branch under {"player"} carries an opted-in listener, so the
+			-- shallowest covering path should descend all the way to it instead of
+			-- stopping at {"player"}.
+			registry:RegisterListener("ValueChanged", { "player", "stats", "health" }, function() end, {
+				SnapshotOldValues = true,
+			})
+
+			local result = registry:SnapshotRootFor { "player" }
+			expect(result).exists()
+			local r = result :: { any }
+			expect(#r).is(3)
+			expect(r[1]).is("player")
+			expect(r[2]).is("stats")
+			expect(r[3]).is("health")
+
+			registry:Destroy()
+		end)
+
+		test("SnapshotRootFor stops at the lowest common ancestor of two diverging opted-in listeners", function()
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
+
+			registry:RegisterListener("ValueChanged", { "player", "stats", "health" }, function() end, {
+				SnapshotOldValues = true,
+			})
+			registry:RegisterListener("ValueChanged", { "player", "stats", "mana" }, function() end, {
+				SnapshotOldValues = true,
+			})
+
+			local result = registry:SnapshotRootFor { "player" }
+			expect(result).exists()
+			local r = result :: { any }
+			expect(#r).is(2)
+			expect(r[1]).is("player")
+			expect(r[2]).is("stats")
+
+			registry:Destroy()
+		end)
+
+		test(
+			"SnapshotRootFor stops at a node that itself has an opted-in listener even with a deeper one below",
+			function()
+				local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
+
+				registry:RegisterListener("ValueChanged", { "player", "stats" }, function() end, {
+					SnapshotOldValues = true,
+				})
+				registry:RegisterListener("ValueChanged", { "player", "stats", "health" }, function() end, {
+					SnapshotOldValues = true,
+				})
+
+				local result = registry:SnapshotRootFor { "player" }
+				expect(result).exists()
+				local r = result :: { any }
+				expect(#r).is(2)
+				expect(r[1]).is("player")
+				expect(r[2]).is("stats")
+
+				registry:Destroy()
+			end
+		)
+
+		test("SnapshotRootFor becomes nil again after the only opted-in listener disconnects", function()
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
+
+			local conn = registry:RegisterListener("ValueChanged", { "player", "health" }, function() end, {
+				SnapshotOldValues = true,
+			})
+
+			expect(registry:SnapshotRootFor { "player", "health" }).exists()
+
+			conn:Disconnect()
+
+			expect(registry:SnapshotRootFor { "player", "health" }).never_exists()
+
+			registry:Destroy()
+		end)
+
+		test("SnapshotRootFor becomes nil after a Once opted-in listener auto-disconnects", function()
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
+
+			registry:RegisterListener("ValueChanged", { "player", "health" }, function() end, {
+				SnapshotOldValues = true,
+				Once = true,
+			})
+
+			expect(registry:SnapshotRootFor { "player", "health" }).exists()
+
+			fireAndFlush(registry, "ValueChanged", { "player", "health" }, {
+				NewValue = 50,
+				OldValue = 100,
+				Metadata = {
+					Diff = { type = "changed" },
+					OriginPath = { "player", "health" },
+					OriginDiff = { type = "changed" },
+				},
+			})
+
+			expect(registry:SnapshotRootFor { "player", "health" }).never_exists()
+
+			registry:Destroy()
+		end)
+
+		test(
+			"an opted-in listener receives OldValueSnapshot in place of OldValue; a non-opted listener on the same node still gets the raw OldValue",
+			function()
+				local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
+
+				local rawOld: any = { health = 100 }
+				local snapshotOld: any = { health = 100 } -- a distinct table standing in for the frozen copy
+
+				local optedInReceived: any = nil
+				local plainReceived: any = nil
+
+				registry:RegisterListener("ValueChanged", { "player" }, function(_, oldValue)
+					optedInReceived = oldValue
+				end, { SnapshotOldValues = true })
+
+				registry:RegisterListener("ValueChanged", { "player" }, function(_, oldValue)
+					plainReceived = oldValue
+				end)
+
+				fireAndFlush(registry, "ValueChanged", { "player" }, {
+					NewValue = { health = 50 },
+					OldValue = rawOld,
+					OldValueSnapshot = snapshotOld,
+					Metadata = {
+						Diff = { type = "changed" },
+						OriginPath = { "player" },
+						OriginDiff = { type = "changed" },
+					},
+				})
+
+				expect(optedInReceived).is(snapshotOld)
+				expect(plainReceived).is(rawOld)
+
+				registry:Destroy()
+			end
+		)
+
+		test("an opted-in listener falls back to OldValue when the caller built no snapshot for this change", function()
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
+
+			local rawOld: any = { health = 100 }
+			local received: any = nil
+
+			registry:RegisterListener("ValueChanged", { "player" }, function(_, oldValue)
+				received = oldValue
+			end, { SnapshotOldValues = true })
+
+			-- No OldValueSnapshot on the eventData (e.g. SnapshotRootFor returned nil
+			-- for this change): the opted-in listener must still receive a usable
+			-- old value rather than nil.
+			fireAndFlush(registry, "ValueChanged", { "player" }, {
+				NewValue = { health = 50 },
+				OldValue = rawOld,
+				Metadata = {
+					Diff = { type = "changed" },
+					OriginPath = { "player" },
+					OriginDiff = { type = "changed" },
+				},
+			})
+
+			expect(received).is(rawOld)
+
+			registry:Destroy()
 		end)
 	end)
 end

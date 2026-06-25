@@ -39,7 +39,7 @@ export type Proxy<T, S> = ProxyManagerModule.Proxy<T, S>
 -- The value returned by `Opaque`/`GlobalOpaque`/`OpaqueChildren`/
 -- `GlobalOpaqueChildren` (see `OpaqueRegistry`). `Set`/`ArrayInsert` unwrap it
 -- at write time; the literal value stored at the path is always the bare inner.
-export type OpaqueWrapper = OpaqueRegistryModule.Wrapper
+export type OpaqueWrapper<T> = OpaqueRegistryModule.Wrapper<T>
 
 -- "allow" (default): a table written to a second location is a SUPPORTED
 -- multi-location reference, not an error — both paths share identity, and the
