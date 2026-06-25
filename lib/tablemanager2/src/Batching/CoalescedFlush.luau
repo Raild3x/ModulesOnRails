@@ -17,8 +17,8 @@
 	for that gate, exactly as they are for `_doFlush` itself.
 ]=]
 
-const PathHelpers = require("./PathHelpers")
-const TMTypes = require("./TMTypes")
+const PathHelpers = require("../PathHelpers")
+const TMTypes = require("../TMTypes")
 
 --// Types //--
 type PathArray<S = string> = PathHelpers.PathArray<S>

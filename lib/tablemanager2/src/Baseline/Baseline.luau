@@ -14,11 +14,11 @@
 	batch / linked-apply sync sites each open-coded.
 ]=]
 
-const PathHelpers = require("./PathHelpers")
-const CoverageModule = require("./Coverage")
-const TMTypes = require("./TMTypes")
+const PathHelpers = require("../PathHelpers")
+const CoverageModule = require("../Diffing/Coverage")
+const TMTypes = require("../TMTypes")
 const ShadowNodeModule = require("./ShadowNode")
-const PropagationModule = require("./Propagation")
+const PropagationModule = require("../Propagation")
 
 --// Types //--
 type PathArray = PathHelpers.PathArray

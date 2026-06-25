@@ -4,7 +4,7 @@
 ]]
 
 return function(t: tiniest)
-	local Diff = require("../Diff")
+	local Diff = require("../Diffing/Diff")
 
 	local test = t.test
 	local describe = t.describe

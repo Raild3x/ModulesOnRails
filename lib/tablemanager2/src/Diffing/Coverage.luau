@@ -22,8 +22,8 @@
 	False means a write at `path` is provably unobservable right now.
 ]=]
 
-const PathHelpers = require("./PathHelpers")
-const TMTypes = require("./TMTypes")
+const PathHelpers = require("../PathHelpers")
+const TMTypes = require("../TMTypes")
 const Diff = require("./Diff")
 
 --// Types //--

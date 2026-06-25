@@ -24,7 +24,7 @@
 	identity comparison keeps working exactly as before.
 ]=]
 
-const PathHelpers = require("./PathHelpers")
+const PathHelpers = require("../PathHelpers")
 
 --// Types //--
 type PathArray = PathHelpers.PathArray<string>

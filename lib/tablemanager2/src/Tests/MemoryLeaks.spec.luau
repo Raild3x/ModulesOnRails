@@ -12,7 +12,7 @@
 
 return function(t: tiniest)
 	local TableManager = require("../TableManager")
-	local ListenerRegistry = require("../ListenerRegistry")
+	local ListenerRegistry = require("../Listening/ListenerRegistry")
 	local GcHelpers = require("./Helpers/GcHelpers")
 
 	local test = t.test

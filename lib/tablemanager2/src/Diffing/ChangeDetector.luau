@@ -25,11 +25,11 @@
 ]=]
 
 local Diff = require("./Diff")
-local PathHelpers = require("./PathHelpers")
+local PathHelpers = require("../PathHelpers")
 local ArrayDiffModule = require("./ArrayDiff")
-local OpaqueRegistry = require("./OpaqueRegistry")
-local IgnoreTrieModule = require("./IgnoreTrie")
-local ShadowNode = require("./ShadowNode")
+local OpaqueRegistry = require("../OpaqueRegistry")
+local IgnoreTrieModule = require("../IgnoreTrie")
+local ShadowNode = require("../Baseline/ShadowNode")
 
 --// Types //--
 type Path<S = string> = PathHelpers.Path<S>

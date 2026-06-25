@@ -29,7 +29,7 @@
 
 const PathHelpers = require("./PathHelpers")
 const TMTypes = require("./TMTypes")
-const Diff = require("./Diff")
+const Diff = require("./Diffing/Diff")
 
 type PathArray<S = string> = PathHelpers.PathArray<S>
 type DiffNode = Diff.DiffNode

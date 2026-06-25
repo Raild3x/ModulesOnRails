@@ -11,15 +11,15 @@
 
 --// Imports //--
 const PathHelpers = require("./PathHelpers")
-const BatchUtilsModule = require("./BatchUtils")
+const BatchUtilsModule = require("./Batching/BatchUtils")
 const ProxyManagerModule = require("./ProxyManager")
 const SchemaNavigatorModule = require("./SchemaNavigator")
 const PropagationModule = require("./Propagation")
-const EmitterModule = require("./Emitter")
+const EmitterModule = require("./Listening/Emitter")
 const IgnoreTrieModule = require("./IgnoreTrie")
-const CoverageModule = require("./Coverage")
-const CoalescedFlushModule = require("./CoalescedFlush")
-const BaselineModule = require("./Baseline")
+const CoverageModule = require("./Diffing/Coverage")
+const CoalescedFlushModule = require("./Batching/CoalescedFlush")
+const BaselineModule = require("./Baseline/Baseline")
 const T = require("../T")
 const TMTypes = require("./TMTypes")
 

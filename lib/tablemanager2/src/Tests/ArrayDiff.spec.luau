@@ -5,7 +5,7 @@
 ]]
 
 return function(t: tiniest)
-	local ArrayDiff = require("../ArrayDiff")
+	local ArrayDiff = require("../Diffing/ArrayDiff")
 
 	local test = t.test
 	local describe = t.describe

@@ -1,4 +1,4 @@
-local PathHelpers = require("./PathHelpers")
+local PathHelpers = require("../PathHelpers")
 
 -- ─── Types ───────────────────────────────────────────────────────────────────
 

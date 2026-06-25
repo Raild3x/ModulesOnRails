@@ -11,8 +11,8 @@
 --// Imports //--
 const PathHelpers = require("./PathHelpers")
 const JanitorModule = require("../Janitor")
-const ChangeDetectorModule = require("./ChangeDetector")
-const ListenerRegistryModule = require("./ListenerRegistry")
+const ChangeDetectorModule = require("./Diffing/ChangeDetector")
+const ListenerRegistryModule = require("./Listening/ListenerRegistry")
 const TMTypes = require("./TMTypes")
 
 --// Types //--

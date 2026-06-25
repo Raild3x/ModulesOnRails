@@ -13,13 +13,13 @@
 ]=]
 
 --// Imports //--
-const ArrayDiffModule = require("./ArrayDiff")
-const BaselineModule = require("./Baseline")
+const ArrayDiffModule = require("../Diffing/ArrayDiff")
+const BaselineModule = require("../Baseline/Baseline")
 const CoalescedFlushModule = require("./CoalescedFlush")
-const DiffModule = require("./Diff")
+const DiffModule = require("../Diffing/Diff")
 const BatchUtilsModule = require("./BatchUtils")
-const PathHelpers = require("./PathHelpers")
-const TMTypes = require("./TMTypes")
+const PathHelpers = require("../PathHelpers")
+const TMTypes = require("../TMTypes")
 
 --// Types //--
 type PathArray = PathHelpers.PathArray
@@ -106,7 +106,7 @@ const function flushCollectedArrays(self: TableManagerLike, arraySink: { DiffMod
 		return
 	end
 	const makeEmit =
-		require("./Emitter").makeEmit :: (self: TableManagerLike, path: PathArray) -> ArrayDiffModule.Emit
+		require("../Listening/Emitter").makeEmit :: (self: TableManagerLike, path: PathArray) -> ArrayDiffModule.Emit
 	for _, entry in arraySink do
 		const currentArray = self:Get(entry.path :: any)
 		if type(currentArray) ~= "table" then

@@ -10,8 +10,8 @@
 ]]
 
 return function(t: tiniest)
-	local ListenerRegistry = require("../ListenerRegistry")
-	local IsDeferred = require("../IsDeferred")
+	local ListenerRegistry = require("../Listening/ListenerRegistry")
+	local IsDeferred = require("../Listening/IsDeferred")
 	assert(IsDeferred() == false, "Tests assume deferred event dispatch is disabled")
 
 	local test = t.test

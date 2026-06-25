@@ -15,8 +15,8 @@
 
 return function(t: tiniest)
 	const TableManager = require("../TableManager")
-	const ShadowNode = require("../ShadowNode")
-	const Coverage = require("../Coverage")
+	const ShadowNode = require("../Baseline/ShadowNode")
+	const Coverage = require("../Diffing/Coverage")
 
 	const test = t.test
 	const describe = t.describe

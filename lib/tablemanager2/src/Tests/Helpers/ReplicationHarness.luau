@@ -22,7 +22,7 @@
 ]]
 
 local TableManager = require("../../TableManager")
-local Diff = require("../../Diff")
+local Diff = require("../../Diffing/Diff")
 
 export type FeedMode = "signals" | "diff"
 

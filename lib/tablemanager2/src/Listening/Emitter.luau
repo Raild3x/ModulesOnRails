@@ -10,14 +10,14 @@
 ]=]
 
 --// Imports //--
-const PathHelpers = require("./PathHelpers")
-const BatchUtilsModule = require("./BatchUtils")
-const ArrayDiffModule = require("./ArrayDiff")
-const ChangeDetectorModule = require("./ChangeDetector")
-const PropagationModule = require("./Propagation")
-const BaselineModule = require("./Baseline")
-const Diff = require("./Diff")
-const TMTypes = require("./TMTypes")
+const PathHelpers = require("../PathHelpers")
+const BatchUtilsModule = require("../Batching/BatchUtils")
+const ArrayDiffModule = require("../Diffing/ArrayDiff")
+const ChangeDetectorModule = require("../Diffing/ChangeDetector")
+const PropagationModule = require("../Propagation")
+const BaselineModule = require("../Baseline/Baseline")
+const Diff = require("../Diffing/Diff")
+const TMTypes = require("../TMTypes")
 
 --// Types //--
 type PathArray<S = string> = PathHelpers.PathArray<S>

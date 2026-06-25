@@ -139,8 +139,8 @@
 	```
 ]=]
 
-const PathHelpers = require("./PathHelpers")
-const ArrayDiffModule = require("./ArrayDiff")
+const PathHelpers = require("../PathHelpers")
+const ArrayDiffModule = require("../Diffing/ArrayDiff")
 const IsDeferred = require("./IsDeferred")
 
 --// Types //--
