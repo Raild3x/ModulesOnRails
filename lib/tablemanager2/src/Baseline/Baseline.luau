@@ -24,6 +24,12 @@ const PropagationModule = require("../Propagation")
 type PathArray = PathHelpers.PathArray
 type TableManagerLike = TMTypes.TableManagerLike
 
+const shadowGet = ShadowNodeModule.Get
+const shadowReconcile = ShadowNodeModule.Reconcile
+const shadowMaterialize = ShadowNodeModule.Materialize
+const isObserved = PropagationModule.IsObserved
+const isTrackable = CoverageModule.IsTrackable
+
 const Baseline = {}
 
 --[[
@@ -31,7 +37,7 @@ const Baseline = {}
 	`path` was never materialized.
 ]]
 function Baseline.Get(manager: TableManagerLike, path: PathArray): any
-	return ShadowNodeModule.Get(manager.Raw, path)
+	return shadowGet(manager.Raw, path)
 end
 
 --[[
@@ -40,7 +46,7 @@ end
 	observership, not this manager's opacity.
 ]]
 function Baseline.Reconcile(manager: TableManagerLike, path: PathArray)
-	ShadowNodeModule.Reconcile(manager.Raw, path, PropagationModule.IsObserved)
+	shadowReconcile(manager.Raw, path, isObserved)
 end
 
 --[[
@@ -50,14 +56,14 @@ end
 	of re-deriving the same gate around `ShadowNode.Materialize`.
 ]]
 function Baseline.Materialize(manager: TableManagerLike, path: PathArray)
-	if not CoverageModule.IsTrackable(manager, path) then
+	if not isTrackable(manager, path) then
 		return
 	end
 	const ctx = manager._changeDetector:GetOpaqueCtx()
 	if CoverageModule.PassesThroughOpaqueAncestor(manager, path, ctx) then
 		return
 	end
-	ShadowNodeModule.Materialize(manager.Raw, path, PropagationModule.IsObserved)
+	shadowMaterialize(manager.Raw, path, isObserved)
 end
 
 --[[
@@ -75,7 +81,7 @@ function Baseline.ApplyArrayOp(
 	index: number,
 	newValue: any
 )
-	if not CoverageModule.IsTrackable(manager, path) then
+	if not isTrackable(manager, path) then
 		return
 	end
 	const ctx = manager._changeDetector:GetOpaqueCtx()
@@ -83,9 +89,9 @@ function Baseline.ApplyArrayOp(
 		return
 	end
 	const applied =
-		ShadowNodeModule.ApplyArrayOp(manager.Raw, path, opKind, index, newValue, PropagationModule.IsObserved)
+		ShadowNodeModule.ApplyArrayOp(manager.Raw, path, opKind, index, newValue, isObserved)
 	if not applied then
-		ShadowNodeModule.Materialize(manager.Raw, path, PropagationModule.IsObserved)
+		shadowMaterialize(manager.Raw, path, isObserved)
 	end
 end
 
@@ -109,13 +115,10 @@ end
 	contract; see `Coverage.PassesThroughOpaqueAncestor`).
 ]]
 function Baseline.SeedIfNeeded(manager: TableManagerLike, path: PathArray, oldValue: any)
-	if oldValue == nil then
+	if oldValue == nil or shadowGet(manager.Raw, path) ~= nil then
 		return
 	end
-	if ShadowNodeModule.Get(manager.Raw, path) ~= nil then
-		return
-	end
-	ShadowNodeModule.Materialize(manager.Raw, path, PropagationModule.IsObserved)
+	shadowMaterialize(manager.Raw, path, isObserved)
 end
 
 return Baseline

@@ -1,4 +1,6 @@
 --!strict
+--!native
+--!optimize 2
 --[=[
 	@ignore
 	@class Propagation
@@ -30,6 +32,7 @@
 const PathHelpers = require("./PathHelpers")
 const TMTypes = require("./TMTypes")
 const Diff = require("./Diffing/Diff")
+const OpaqueRegistryModule = require("./OpaqueRegistry")
 
 type PathArray<S = string> = PathHelpers.PathArray<S>
 type DiffNode = Diff.DiffNode
@@ -144,13 +147,30 @@ const function registerSubtree(manager: TableManagerLike, value: any)
 	if type(value) ~= "table" then
 		return
 	end
+	debug.profilebegin("registerSubtree")
 	const ctx = manager._changeDetector:GetOpaqueCtx()
+	const isOpaque = ctx ~= nil and ctx.isOpaque
+	const registries = manager._opaqueRegistries
 	const seen: { [any]: true } = {}
+	const registerIfFrozenOpaque = OpaqueRegistryModule.RegisterIfFrozenOpaque
+	
 	const function recurse(node: any)
 		if type(node) ~= "table" or seen[node] then
 			return
 		end
-		if ctx ~= nil and ctx.isOpaque(node) then
+		if isOpaque and isOpaque(node) then
+			return
+		end
+		-- A frozen table (shallowly, if `FrozenTablesAreOpaque`; always, if
+		-- deep) is opaque independent of whether `ctx` is even active yet (it
+		-- may not be — this is the one unconditional touchpoint that discovers
+		-- a manager's first frozen table and marks it into `registries.Opaque`,
+		-- opening `ChangeDetector`'s ctx gate via `Count` from here on). Safe to
+		-- call here specifically because `node` is a value actually entering the
+		-- tree, never an internal snapshot/copy artifact — see the warning on
+		-- `OpaqueRegistry`'s `deepFrozenMemo`. `table.isfrozen` is O(1) and fails
+		-- fast for the overwhelming common case of an ordinary mutable table.
+		if registerIfFrozenOpaque(node, registries) then
 			return
 		end
 		seen[node] = true
@@ -166,6 +186,7 @@ const function registerSubtree(manager: TableManagerLike, value: any)
 		end
 	end
 	recurse(value)
+	debug.profileend()
 end
 
 --------------------------------------------------------------------------------
@@ -177,7 +198,7 @@ end
 const function deliver(recipient: TableManagerLike, appliedOp: AppliedOp)
 	const ok, err = pcall(recipient._NotifyApplied, recipient, appliedOp)
 	if not ok then
-		task.spawn(error, err, 0)
+		task.spawn(error, err :: any, 0)
 	end
 end
 

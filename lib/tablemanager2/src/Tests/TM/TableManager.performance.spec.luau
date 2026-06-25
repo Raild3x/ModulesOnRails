@@ -27,7 +27,7 @@ return function(t: tiniest)
 	local test = t.test
 	local describe = t.describe
 
-	local ITERATIONS = 10000
+	local ITERATIONS = 5000
 	local WARMUP = 100
 	local PRINT_PER_OP_AVERAGES = true
 
@@ -54,18 +54,29 @@ return function(t: tiniest)
 			action(i, ctx)
 		end
 
-		local start = os.clock()
+        const times: {number} = {}
 		for i = 1, n do
+            const start = os.clock()
 			action(i, ctx)
+            const elapsed = os.clock() - start
+            table.insert(times, elapsed)
 		end
-		local elapsed = os.clock() - start
+		table.sort(times)
+        -- prune top and bottom 5% of samples to reduce noise
+        const pruneCount = math.floor(n * 0.05)
+        const prunedTimes = table.move(times, pruneCount + 1, n - pruneCount, 1, {}) :: {number}
+        local total = 0
+        for _, t in prunedTimes do
+            total += t
+        end
+        local avg = total / #prunedTimes
 
 		if opts.teardown then
 			opts.teardown(ctx)
 		end
 
 		if PRINT_PER_OP_AVERAGES then
-			print(string.format("%s -> %.3f µs/op  (n=%d)", opts.title or "<no title>", elapsed / n * 1e6, n))
+			print(string.format("%s -> %.4f ms/op  (n=%d)", opts.title or "<no title>", avg * 1e3, n))
 		end
 	end
 
@@ -73,19 +84,53 @@ return function(t: tiniest)
 	-- `title` through for the printed µs/op line. This is the single entry
 	-- point every benchmark below goes through, so adding a new perf case
 	-- never requires re-deriving the test/bench wiring.
-	local function perfTest(title: string, opts: BenchOpts)
-		opts.title = title
-		test(title, function()
-			task.wait() -- yield so the microprofiler doesnt overflow
-			bench(opts)
-		end)
-	end
+    const function perfDescribe(describeTitle: string, fn: (perfTest: (title: string, opts: BenchOpts) -> ()) -> ())
+        describe(describeTitle, function()
+            const function perfTest(title: string, opts: BenchOpts)
+                opts.title = describeTitle .. " - " .. title
+                test(title, function()
+                    task.wait() -- yield so the microprofiler doesnt overflow
+                    bench(opts)
+                end)
+            end
+            fn(perfTest)
+        end)
+    end
 
 	local function destroyManager(manager: any)
 		manager:Destroy()
 	end
 
 	local noop = function() end
+
+	-- Registers a paired "(unobserved)" / "(observed)" test under `titleBase`
+	-- so the two scenarios sit side by side in the output. Both run the same
+	-- `action` against a fresh `buildData()` table; the observed variant adds
+	-- a root `OnChange` listener first, forcing the write through the tracked
+	-- path (shadow-seed + diff/dispatch) instead of short-circuiting at
+	-- `shouldTrackChangesAt` -- see the note on `newObservedManager` above.
+	local function comparePerfTest(
+		perfTest: (title: string, opts: BenchOpts) -> (),
+		titleBase: string,
+		buildData: () -> any,
+		action: (i: number, manager: any) -> (),
+		iters: number?
+	)
+		for _, observed in { false, true } do
+			perfTest(`{titleBase} ({if observed then "observed" else "unobserved"})`, {
+				setup = function()
+					local manager = TableManager.new(buildData())
+					if observed then
+						manager:OnChange({}, noop)
+					end
+					return manager
+				end,
+				action = action,
+				teardown = destroyManager,
+				iters = iters,
+			})
+		end
+	end
 
 	--------------------------------------------------------------------------------
 	--// Data builders //--
@@ -132,7 +177,7 @@ return function(t: tiniest)
 	--// Constructor //--
 	--------------------------------------------------------------------------------
 
-	describe("Method: new", function()
+	perfDescribe("Method: new", function(perfTest)
 		local flatData = buildWide(100)
 		perfTest("flat table (100 keys)", {
 			action = function()
@@ -165,7 +210,7 @@ return function(t: tiniest)
 	--// Reads //--
 	--------------------------------------------------------------------------------
 
-	describe("Method: Get", function()
+	perfDescribe("Method: Get", function(perfTest)
 		local function getDepthTest(title: string, depth: number)
 			local path = deepPath(depth)
 			perfTest(title, {
@@ -195,7 +240,7 @@ return function(t: tiniest)
 		})
 	end)
 
-	describe("Method: GetProxy", function()
+	perfDescribe("Method: GetProxy", function(perfTest)
 		local function getProxyDepthTest(title: string, depth: number)
 			local path = deepPath(depth)
 			perfTest(title, {
@@ -218,12 +263,24 @@ return function(t: tiniest)
 	--// Writes //--
 	--------------------------------------------------------------------------------
 
-	describe("Method: Set", function()
+	perfDescribe("Method: Set", function(perfTest)
+		-- A root-level OnChange listener forces every write below into the
+		-- tracked path (CoversChangesAt: "a root listener is an ancestor of
+		-- every path"). Without it, applyWrite's `shouldTrackChangesAt` gate
+		-- sees nothing observing and skips shadow-seed + diff/dispatch
+		-- entirely, so an unlistened Set is NOT representative of the cost
+		-- most callers actually pay.
+		local function newObservedManager(data: any): any
+			local manager = TableManager.new(data)
+			manager:OnChange({}, noop)
+			return manager
+		end
+
 		local function setDepthTest(title: string, depth: number)
 			local path = deepPath(depth)
 			perfTest(title, {
 				setup = function()
-					return TableManager.new(buildDeep(depth))
+					return newObservedManager(buildDeep(depth))
 				end,
 				action = function(i, manager)
 					manager:Set(path, i % 2)
@@ -239,7 +296,7 @@ return function(t: tiniest)
 		local noOpPath = deepPath(5)
 		perfTest("no-op Set (same value every call)", {
 			setup = function()
-				return TableManager.new(buildDeep(5))
+				return newObservedManager(buildDeep(5))
 			end,
 			action = function(_i, manager)
 				manager:Set(noOpPath, 1)
@@ -250,7 +307,7 @@ return function(t: tiniest)
 		local replacePath = { "l1" }
 		perfTest("replace a nested table", {
 			setup = function()
-				return TableManager.new(buildDeep(3))
+				return newObservedManager(buildDeep(3))
 			end,
 			action = function(i, manager)
 				manager:Set(replacePath, { l2 = { l3 = { value = i } } })
@@ -260,7 +317,7 @@ return function(t: tiniest)
 
 		perfTest("replace the root table", {
 			setup = function()
-				return TableManager.new { value = 1 }
+				return newObservedManager { value = 1 }
 			end,
 			action = function(i, manager)
 				manager:Set({}, { value = i })
@@ -273,7 +330,7 @@ return function(t: tiniest)
 		local dynamicParentPath = { "a" }
 		perfTest("build intermediate tables dynamically, then clear them", {
 			setup = function()
-				return TableManager.new {}
+				return newObservedManager {}
 			end,
 			action = function(i, manager)
 				manager:Set(dynamicPath, i, true)
@@ -284,105 +341,77 @@ return function(t: tiniest)
 		})
 	end)
 
-	describe("Method: ArrayInsert", function()
-		perfTest("append to the end (growing array)", {
-			setup = function()
-				return TableManager.new { items = {} }
-			end,
-			action = function(i, manager)
-				manager:ArrayInsert("items", i)
-			end,
-			teardown = destroyManager,
-		})
+	perfDescribe("Method: ArrayInsert", function(perfTest)
+		comparePerfTest(perfTest, "append to the end (growing array)", function()
+			return { items = {} }
+		end, function(i, manager)
+			manager:ArrayInsert("items", i)
+		end)
 
-		perfTest("insert at the front of a 200-element array (forces a full shift)", {
-			setup = function()
-				return TableManager.new { items = buildArray(200) }
-			end,
-			action = function(i, manager)
-				manager:ArrayInsert("items", 1, i)
-				local items = manager:Get("items") :: { any }
-				manager:ArrayRemove("items", #items) -- trim the tail so size stays steady
-			end,
-			teardown = destroyManager,
-		})
+		comparePerfTest(perfTest, "insert at the front of a 200-element array (forces a full shift)", function()
+			return { items = buildArray(200) }
+		end, function(i, manager)
+			manager:ArrayInsert("items", 1, i)
+			local items = manager:Get("items") :: { any }
+			manager:ArrayRemove("items", #items) -- trim the tail so size stays steady
+		end)
 	end)
 
-	describe("Method: ArrayRemove", function()
-		perfTest("remove from the end of a 200-element array (no shift)", {
-			setup = function()
-				return TableManager.new { items = buildArray(201) }
-			end,
-			action = function(i, manager)
-				local items = manager:Get("items") :: { any }
-				manager:ArrayRemove("items", #items)
-				manager:ArrayInsert("items", i) -- refill at the end so size stays steady
-			end,
-			teardown = destroyManager,
-		})
+	perfDescribe("Method: ArrayRemove", function(perfTest)
+		comparePerfTest(perfTest, "remove from the end of a 200-element array (no shift)", function()
+			return { items = buildArray(201) }
+		end, function(i, manager)
+			local items = manager:Get("items") :: { any }
+			manager:ArrayRemove("items", #items)
+			manager:ArrayInsert("items", i) -- refill at the end so size stays steady
+		end)
 
-		perfTest("remove from the front of a 200-element array (forces a full shift)", {
-			setup = function()
-				return TableManager.new { items = buildArray(201) }
-			end,
-			action = function(i, manager)
-				manager:ArrayRemove("items", 1)
-				manager:ArrayInsert("items", i) -- refill at the end so size stays steady
-			end,
-			teardown = destroyManager,
-		})
+		comparePerfTest(perfTest, "remove from the front of a 200-element array (forces a full shift)", function()
+			return { items = buildArray(201) }
+		end, function(i, manager)
+			manager:ArrayRemove("items", 1)
+			manager:ArrayInsert("items", i) -- refill at the end so size stays steady
+		end)
 	end)
 
-	describe("Method: ArrayRemoveFirstValue", function()
-		perfTest("find (middle of 200) + shift-remove", {
-			setup = function()
-				return TableManager.new { items = buildArray(200) }
-			end,
-			action = function(_i, manager)
-				local items = manager:Get("items") :: { any }
-				local mid = math.floor(#items / 2)
-				local target = items[mid]
-				manager:ArrayRemoveFirstValue("items", target)
-				manager:ArrayInsert("items", mid, { id = -1 }) -- reinsert at the same slot
-			end,
-			teardown = destroyManager,
-		})
+	perfDescribe("Method: ArrayRemoveFirstValue", function(perfTest)
+		comparePerfTest(perfTest, "find (middle of 200) + shift-remove", function()
+			return { items = buildArray(200) }
+		end, function(_i, manager)
+			local items = manager:Get("items") :: { any }
+			local mid = math.floor(#items / 2)
+			local target = items[mid]
+			manager:ArrayRemoveFirstValue("items", target)
+			manager:ArrayInsert("items", mid, { id = -1 }) -- reinsert at the same slot
+		end)
 	end)
 
-	describe("Method: ArraySwapRemove", function()
-		perfTest("O(1) remove from the front of a 200-element array", {
-			setup = function()
-				return TableManager.new { items = buildArray(201) }
-			end,
-			action = function(_i, manager)
-				manager:ArraySwapRemove("items", 1)
-				manager:ArrayInsert("items", { id = -1 })
-			end,
-			teardown = destroyManager,
-		})
+	perfDescribe("Method: ArraySwapRemove", function(perfTest)
+		comparePerfTest(perfTest, "O(1) remove from the front of a 200-element array", function()
+			return { items = buildArray(201) }
+		end, function(_i, manager)
+			manager:ArraySwapRemove("items", 1)
+			manager:ArrayInsert("items", { id = -1 })
+		end)
 	end)
 
-	describe("Method: ArraySwapRemoveFirstValue", function()
-		perfTest("find (middle of 200) + O(1) swap-remove", {
-			setup = function()
-				return TableManager.new { items = buildArray(200) }
-			end,
-			action = function(_i, manager)
-				local items = manager:Get("items") :: { any }
-				local mid = math.floor(#items / 2)
-				local target = items[mid]
-				manager:ArraySwapRemoveFirstValue("items", target)
-				manager:ArrayInsert("items", mid, { id = -1 }) -- reinsert at the same slot
-			end,
-			teardown = destroyManager,
-		})
+	perfDescribe("Method: ArraySwapRemoveFirstValue", function(perfTest)
+		comparePerfTest(perfTest, "find (middle of 200) + O(1) swap-remove", function()
+			return { items = buildArray(200) }
+		end, function(_i, manager)
+			local items = manager:Get("items") :: { any }
+			local mid = math.floor(#items / 2)
+			local target = items[mid]
+			manager:ArraySwapRemoveFirstValue("items", target)
+			manager:ArrayInsert("items", mid, { id = -1 }) -- reinsert at the same slot
+		end)
 	end)
 
 	--------------------------------------------------------------------------------
 	--// Listeners //--
 	--------------------------------------------------------------------------------
 
-	describe("Listener registration", function()
+	perfDescribe("Listener registration", function(perfTest)
 		-- All nine registration methods share the same cost shape (walk/create a
 		-- registry trie node, store the entry, disconnect). One generator, fed
 		-- with each method's own registration call, replaces nine near-identical
@@ -429,7 +458,7 @@ return function(t: tiniest)
 		end)
 	end)
 
-	describe("Listener dispatch (fan-out)", function()
+	perfDescribe("Listener dispatch (fan-out)", function(perfTest)
 		local function dispatchTest(title: string, listenerCount: number, iters: number?)
 			perfTest(title, {
 				setup = function()
@@ -457,7 +486,7 @@ return function(t: tiniest)
 	--// For / Map //--
 	--------------------------------------------------------------------------------
 
-	describe("Method: ForKeys", function()
+	perfDescribe("Method: ForKeys", function(perfTest)
 		local forKeysData = buildWide(100)
 		perfTest("initial subscribe over 100 keys", {
 			action = function()
@@ -484,7 +513,7 @@ return function(t: tiniest)
 		})
 	end)
 
-	describe("Method: ForValues", function()
+	perfDescribe("Method: ForValues", function(perfTest)
 		local forValuesData = buildArray(100)
 		perfTest("initial subscribe over 100 values", {
 			action = function()
@@ -511,7 +540,7 @@ return function(t: tiniest)
 		})
 	end)
 
-	describe("Method: ForPairs", function()
+	perfDescribe("Method: ForPairs", function(perfTest)
 		local forPairsData = buildWide(100)
 		perfTest("initial subscribe over 100 entries", {
 			action = function()
@@ -540,7 +569,7 @@ return function(t: tiniest)
 	-- transform's signature; one generator drives all three with the "initial
 	-- build" + "incremental propagation" pair shared across them.
 	local function mapMethodTests(methodName: string, callMap: (source: any, transformFn: any) -> any, transformFn: any)
-		describe(`Method: {methodName}`, function()
+		perfDescribe(`Method: {methodName}`, function(perfTest)
 			local data = buildWide(100)
 			perfTest("initial build over 100 keys", {
 				action = function()
@@ -601,7 +630,7 @@ return function(t: tiniest)
 		return manager
 	end
 
-	describe("Method: Batch", function()
+	perfDescribe("Method: Batch", function(perfTest)
 		perfTest("20 writes per Batch call (dispatch coalesced into one flush)", {
 			setup = setupBatchManager,
 			action = function(i, manager)
@@ -627,7 +656,7 @@ return function(t: tiniest)
 		})
 	end)
 
-	describe("Method: Suspend / Resume", function()
+	perfDescribe("Method: Suspend / Resume", function(perfTest)
 		perfTest("explicit Suspend/Resume around 20 dirty branches", {
 			setup = setupBatchManager,
 			action = function(i, manager)
@@ -642,7 +671,7 @@ return function(t: tiniest)
 		})
 	end)
 
-	describe("Method: Flush", function()
+	perfDescribe("Method: Flush", function(perfTest)
 		perfTest("explicit Flush after a direct Raw mutation (bypass path)", {
 			setup = function()
 				local manager = TableManager.new { value = 1 }
@@ -657,7 +686,7 @@ return function(t: tiniest)
 		})
 	end)
 
-	describe("Method: ForceNotify", function()
+	perfDescribe("Method: ForceNotify", function(perfTest)
 		perfTest("synthetic same-value notification", {
 			setup = function()
 				local manager = TableManager.new { value = 1 }
@@ -675,51 +704,39 @@ return function(t: tiniest)
 	--// Movement //--
 	--------------------------------------------------------------------------------
 
-	describe("Method: MoveTo", function()
-		perfTest("move a small table back and forth between two slots", {
-			setup = function()
-				return TableManager.new { a = { value = 1 } }
-			end,
-			action = function(i, manager)
-				if i % 2 == 1 then
-					manager:MoveTo("a", "b")
-				else
-					manager:MoveTo("b", "a")
-				end
-			end,
-			teardown = destroyManager,
-		})
+	perfDescribe("Method: MoveTo", function(perfTest)
+		comparePerfTest(perfTest, "move a small table back and forth between two slots", function()
+			return { a = { value = 1 } }
+		end, function(i, manager)
+			if i % 2 == 1 then
+				manager:MoveTo("a", "b")
+			else
+				manager:MoveTo("b", "a")
+			end
+		end)
 	end)
 
-	describe("Method: CopyTo", function()
-		perfTest("deep-copy a small table into another slot", {
-			setup = function()
-				return TableManager.new { a = { value = 1, nested = { x = 1 } }, b = {} }
-			end,
-			action = function(_i, manager)
-				manager:CopyTo("a", "b")
-			end,
-			teardown = destroyManager,
-		})
+	perfDescribe("Method: CopyTo", function(perfTest)
+		comparePerfTest(perfTest, "deep-copy a small table into another slot", function()
+			return { a = { value = 1, nested = { x = 1 } }, b = {} }
+		end, function(_i, manager)
+			manager:CopyTo("a", "b")
+		end)
 	end)
 
-	describe("Method: Swap", function()
-		perfTest("swap two small tables back and forth", {
-			setup = function()
-				return TableManager.new { a = { id = "a" }, b = { id = "b" } }
-			end,
-			action = function(_i, manager)
-				manager:Swap("a", "b")
-			end,
-			teardown = destroyManager,
-		})
+	perfDescribe("Method: Swap", function(perfTest)
+		comparePerfTest(perfTest, "swap two small tables back and forth", function()
+			return { a = { id = "a" }, b = { id = "b" } }
+		end, function(_i, manager)
+			manager:Swap("a", "b")
+		end)
 	end)
 
 	--------------------------------------------------------------------------------
 	--// Ignored Paths //--
 	--------------------------------------------------------------------------------
 
-	describe("Method: SetPathIgnored", function()
+	perfDescribe("Method: SetPathIgnored", function(perfTest)
 		perfTest("Set into an ignored subtree (diff/snapshot skipped)", {
 			setup = function()
 				local manager = TableManager.new { ignored = { value = 1 } }
@@ -750,7 +767,7 @@ return function(t: tiniest)
 	--// Linking / Extend //--
 	--------------------------------------------------------------------------------
 
-	describe("Method: Extend", function()
+	perfDescribe("Method: Extend", function(perfTest)
 		perfTest("extend a nested table into its own manager", {
 			setup = function()
 				return TableManager.new { child = { value = 1 } }
@@ -764,7 +781,7 @@ return function(t: tiniest)
 		})
 	end)
 
-	describe("Method: GetLinkedManagers / IsLinkedWith", function()
+	perfDescribe("Method: GetLinkedManagers / IsLinkedWith", function(perfTest)
 		perfTest("lookup cost with 10 co-observing managers", {
 			setup = function()
 				local shared = { value = 1 }
@@ -788,7 +805,7 @@ return function(t: tiniest)
 		})
 	end)
 
-	describe("Linked managers: write fan-out", function()
+	perfDescribe("Linked managers: write fan-out", function(perfTest)
 		perfTest("Set on one manager propagates to a co-observing linked manager", {
 			setup = function()
 				local shared = { value = 1 }
@@ -810,18 +827,13 @@ return function(t: tiniest)
 	--// Opacity wrappers //--
 	--------------------------------------------------------------------------------
 
-	describe("Opacity wrappers", function()
+	perfDescribe("Opacity wrappers", function(perfTest)
 		local function opacityTest(title: string, wrap: (value: any) -> any)
-			perfTest(title, {
-				setup = function()
-					return TableManager.new {}
-				end,
-				action = function(_i, manager)
-					manager:Set("blob", wrap(buildWide(50)))
-				end,
-				teardown = destroyManager,
-				iters = 2000,
-			})
+			comparePerfTest(perfTest, title, function()
+				return {}
+			end, function(_i, manager)
+				manager:Set("blob", wrap(buildWide(50)))
+			end, 2000)
 		end
 
 		opacityTest("Set a large nested value, transparent (full diff/clone)", function(value)
@@ -835,7 +847,7 @@ return function(t: tiniest)
 	--// Lifecycle //--
 	--------------------------------------------------------------------------------
 
-	describe("Method: Destroy", function()
+	perfDescribe("Method: Destroy", function(perfTest)
 		local function destroyTest(title: string, listenerCount: number)
 			perfTest(title, {
 				action = function()

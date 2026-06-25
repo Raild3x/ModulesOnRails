@@ -415,7 +415,7 @@ end
 
 -- ─── Flatten ─────────────────────────────────────────────────────────────────
 
-local function flatten_node(node: DiffNode, path: Path, result: { DiffEntry })
+const function flatten_node(node: DiffNode, path: Path, result: { DiffEntry })
 	-- Add this node if it's not descendantChanged
 	if node.type ~= "descendantChanged" then
 		table.insert(result, {
@@ -435,9 +435,9 @@ local function flatten_node(node: DiffNode, path: Path, result: { DiffEntry })
 	end
 end
 
-local function flatten(root: DiffNode?, path: Path?): { DiffEntry }
-	local finalPath: Path = path or {}
-	local result: { DiffEntry } = {}
+const function flatten(root: DiffNode?, path: Path?): { DiffEntry }
+	const finalPath: Path = path or {}
+	const result: { DiffEntry } = {}
 
 	if root then
 		flatten_node(root, finalPath, result)

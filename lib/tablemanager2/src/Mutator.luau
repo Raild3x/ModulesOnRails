@@ -1,4 +1,6 @@
 --!strict
+--!native
+--!optimize 2
 --[=[
 	@ignore
 	@class Mutator
@@ -315,20 +317,24 @@ end
 ]]
 function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>, newValue: any)
 	debug.profilebegin("applyWrite")
-	const parentPath, key = PathHelpers.GetPathParentAndKey(parsedPath)
+	const lastIdx = #parsedPath
+	const key = parsedPath[lastIdx]
 
-	-- Navigate to the parent table of the write.
-	local current: any = self.Raw
-	for _, segment in parentPath do
-		if type(current) ~= "table" then
+	-- Navigate to the parent table of the write in a single pass (no
+	-- intermediate `parentPath` allocation — built lazily below only by the
+	-- two branches that actually consume it). Each segment p[i] (1..lastIdx-1)
+	-- is validated as a table immediately after being read, naming p[i] itself
+	-- on failure — matching `TableManager.Set`'s own pre-walk convention (see
+	-- the path-helper-methods error-message tests), now that `Set` short-
+	-- circuits straight into this walk instead of doing its own first.
+	local parentTable: any = self.Raw
+	for i = 1, lastIdx - 1 do
+		const segment = parsedPath[i]
+		parentTable = parentTable[segment]
+		if type(parentTable) ~= "table" then
 			error(`Path segment {segment} is not a table`)
 		end
-		current = current[segment]
 	end
-	if type(current) ~= "table" then
-		error(`Path segment {key} is not a table`)
-	end
-	const parentTable: { [any]: any } = current
 
 	-- If the value is a table already live at a different path, the duplicate-
 	-- reference policy resolves what to actually write (itself, by default, or
@@ -362,6 +368,7 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 	if isArray and key == arrayLength + 1 then
 		parentTable[key] = newValue
 		if not ignored then
+			const parentPath: PathArray<S> = table.move(parsedPath, 1, lastIdx - 1, 1, table.create(lastIdx - 1)) :: any
 			onArrayAppended(self, parentPath, key, newValue)
 		end
 		if not self._suppressLinkFanOut then
@@ -372,7 +379,9 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 	end
 
 	if self._batchDepth > 0 then
+		debug.profilebegin("applyWrite (batched)")
 		const batch = self._batch
+		const parentPath: PathArray<S> = table.move(parsedPath, 1, lastIdx - 1, 1, table.create(lastIdx - 1)) :: any
 		if isArray and batch then
 			ensureBatchPathTracking(batch, parentPath)
 		end
@@ -387,9 +396,11 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 		end
 		Mutator.pruneDetachedValue(self, oldValue, newValue)
 		debug.profileend()
+		debug.profileend()
 		return
 	end
 
+	debug.profilebegin("applyWrite (immediate)")
 	const oldValue = parentTable[key]
 	const trackable = not ignored and shouldTrackChangesAt(self, parsedPath)
 	const ctx = if trackable then self._changeDetector:GetOpaqueCtx() else nil
@@ -415,6 +426,7 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 	elseif trackable then
 		CoalescedFlushModule.Request(self, parsedPath)
 	end
+	debug.profileend()
 	debug.profileend()
 end
 

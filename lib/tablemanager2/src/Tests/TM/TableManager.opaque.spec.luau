@@ -257,6 +257,117 @@ return function(t: tiniest)
 		end)
 	end)
 
+	describe("FrozenTablesAreOpaque", function()
+		test("a DEEPLY frozen value is opaque even with the flag off (default config)", function()
+			local manager = TableManager.new { player = {} }
+			local frozen = table.freeze({ hp = 100, stats = table.freeze({ str = 1, dex = 2 }) })
+
+			manager:Set("player", frozen)
+
+			local fired = 0
+			manager.ValueChanged:Connect(function()
+				fired += 1
+			end)
+
+			-- Replacing the whole frozen object is a single identity-compared leaf,
+			-- not a deep descendant diff (mirrors "replacing the object fires
+			-- exactly one signal" above for explicit Opaque).
+			manager:Set("player", { hp = 1, stats = { str = 9, dex = 9, luck = 9 } })
+
+			expect(fired).is(1)
+
+			manager:Destroy()
+		end)
+
+		test("a SHALLOWLY frozen value is NOT opaque when the flag is off (default config)", function()
+			local manager = TableManager.new { player = {} }
+			-- Top-level frozen, but `stats` itself is an ordinary mutable table --
+			-- not deep-frozen, so it must not be short-circuited without opting in.
+			local shallow = table.freeze({ hp = 100, stats = { str = 1, dex = 2 } })
+
+			manager:Set("player", shallow)
+
+			local fired = 0
+			manager.ValueChanged:Connect(function()
+				fired += 1
+			end)
+
+			manager:Set("player", { hp = 1, stats = { str = 9, dex = 9, luck = 9 } })
+
+			expect(fired > 1).is_true()
+
+			manager:Destroy()
+		end)
+
+		test("a SHALLOWLY frozen value IS opaque once FrozenTablesAreOpaque is enabled", function()
+			local manager = TableManager.new({ player = {} }, { FrozenTablesAreOpaque = true })
+			local shallow = table.freeze({ hp = 100, stats = { str = 1, dex = 2 } })
+
+			manager:Set("player", shallow)
+
+			local fired = 0
+			manager.ValueChanged:Connect(function()
+				fired += 1
+			end)
+
+			manager:Set("player", { hp = 1, stats = { str = 9, dex = 9, luck = 9 } })
+
+			expect(fired).is(1)
+
+			manager:Destroy()
+		end)
+
+		test("a direct write to a descendant path of a deep-frozen object's REPLACEMENT still fires normally", function()
+			-- Once `player` is replaced by a fresh (non-frozen) table, that table is
+			-- not opaque -- the deep-frozen mark is per-identity, not sticky to the path.
+			local manager = TableManager.new { player = {} }
+			manager:Set("player", table.freeze({ hp = 100 }))
+			manager:Set("player", { hp = 100 })
+
+			local newHp
+			manager:OnValueChange({ "player", "hp" }, function(value)
+				newHp = value
+			end)
+
+			manager:Set({ "player", "hp" }, 50)
+
+			expect(newHp).is(50)
+			expect(manager:Get { "player", "hp" }).is(50)
+
+			manager:Destroy()
+		end)
+
+		test("a shallow-frozen table with a mutable descendant still reports a DIRECT write to that descendant", function()
+			-- Regression guard for the shallow-freeze foot-gun: even with the flag
+			-- ON (so the frozen ancestor is genuinely treated as opaque -- this
+			-- exercises `Coverage.PassesThroughOpaqueAncestor`'s one-off-diff
+			-- bypass, not just an inactive ctx), a direct write to the mutable
+			-- descendant itself must still fire -- only ANCESTOR-level diffs of
+			-- the frozen container are short-circuited.
+			local mutableStats = { str = 1 }
+			local shallow = table.freeze({ stats = mutableStats })
+			local manager = TableManager.new({ player = shallow }, { FrozenTablesAreOpaque = true })
+
+			local newStr
+			manager:OnValueChange({ "player", "stats", "str" }, function(value)
+				newStr = value
+			end)
+
+			manager:Set({ "player", "stats", "str" }, 9)
+
+			expect(newStr).is(9)
+			expect(manager:Get { "player", "stats", "str" }).is(9)
+
+			manager:Destroy()
+		end)
+
+		test("defaults to false: an existing manager's behavior is unchanged without the flag", function()
+			local manager = TableManager.new { value = table.freeze({ a = 1 }) }
+			expect((manager :: any)._opaqueRegistries.FrozenTablesAreOpaque).is(false)
+			manager:Destroy()
+		end)
+	end)
+
 	describe("OpaqueChildren", function()
 		test("ArrayInsert/ArrayRemove fire normally; an inserted element's internal mutation in a Batch is suppressed", function()
 			local manager = TableManager.new { items = {} }

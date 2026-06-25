@@ -116,10 +116,18 @@ export type ElementAtPath<T, S> = any --ElementAtPathFn<T, S>
 
 local PathHelpers = {}
 
+-- Memoizes `string.split(s, ".")` results: callers pass the same handful of
+-- string-literal paths over and over (every Get/Set call site), so caching
+-- the frozen array avoids re-splitting + re-allocating on every call. Safe to
+-- share one instance across callers because the result is frozen and every
+-- mutation site (`Append`, `GetPathParentAndKey`, etc.) clones before
+-- mutating rather than touching a caller-supplied path array in place.
+const StringPathCache: { [string]: PathArray<any> } = {}
+
 --[=[
 	Parses a path string into a Path array.
 	If the input is already a table, it returns it directly.
-	
+
 	@param pathString The path as a string (e.g., "player.level") or an array of keys
 	@return The parsed Path array
 ]=]
@@ -127,7 +135,13 @@ function PathHelpers.ParsePath<S>(pathString: Path<S>): PathArray<S>
 	if typeof(pathString) == "table" then
 		return pathString :: PathArray<S>
 	end
-	return table.freeze(string.split(pathString, ".")) :: PathArray<S>
+	const cached = StringPathCache[pathString :: any]
+	if cached ~= nil then
+		return cached :: PathArray<S>
+	end
+	const parsed = table.freeze(string.split(pathString :: any, "."))
+	StringPathCache[pathString :: any] = parsed
+	return parsed :: PathArray<S>
 end
 
 function PathHelpers.ArePathsEqual(a: Path, b: Path): boolean

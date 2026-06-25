@@ -19,6 +19,14 @@
 	Wrapper constructors are pure (no registration side effect until a value
 	is written through `TableManager.Set`/`ArrayInsert`, which calls
 	`UnwrapAndRegister`).
+
+	A FROZEN table is also opaque, with no wrapper needed: deeply frozen
+	(every table-typed descendant also frozen) unconditionally, per
+	`Config.FrozenTablesAreOpaque` (shallow trust) when opted in. Discovery
+	happens once, at `Propagation.registerSubtree` (`RegisterIfFrozenOpaque`),
+	and is recorded into the SAME per-manager `Opaque` registry an explicit
+	`Opaque()` wrapper uses — see the warning on `deepFrozenMemo` for why this
+	must never be probed lazily from the `isOpaque` oracle itself.
 ]=]
 
 const OpaqueRegistry = {}
@@ -44,18 +52,101 @@ local globalOpaqueChildren: { [any]: true? } = setmetatable({}, { __mode = "k" }
 -- strictly necessary after the last global mark is collected.
 local globalCount = 0
 
+-- Module-global, identity-keyed memo of tables already PROVEN deep-frozen
+-- (`table.isfrozen` AND every table-typed descendant likewise). Frozen-ness
+-- is permanent in Luau (a frozen table can neither gain children nor have an
+-- existing one unfrozen), so this is a write-once fact shared safely across
+-- every manager: the first full walk that proves it pays the O(n) cost, every
+-- later `IsDeepFrozen` call on that identity is an O(1) hit. Weak-keyed so a
+-- detached frozen subtree can still be collected.
+--
+-- IMPORTANT: only ever populated by `Propagation.registerSubtree`'s walk over
+-- a value actually being written into a manager's tree (via `RegisterIfFrozenOpaque`
+-- below) — NEVER from `MakeCtx`'s `isOpaque` closure. `Diff.snapshot` and other
+-- internal machinery build their OWN frozen copy/artifact tables (e.g. the
+-- batch pre-snapshot); those are frozen by construction but are not user data,
+-- and checking `table.isfrozen` on an arbitrary value handed to `isOpaque`
+-- mid-diff would misclassify them as opaque, corrupting that diff. Restricting
+-- discovery to `registerSubtree` (which only ever sees values actually
+-- entering a tree) keeps `isOpaque` a pure, side-effect-free memo lookup.
+local deepFrozenMemo: { [any]: true? } = setmetatable({}, { __mode = "k" }) :: any
+
 export type Registries = {
 	Opaque: { [any]: true },
 	OpaqueChildren: { [any]: true },
 	Count: number,
+	-- Config.FrozenTablesAreOpaque (default false): when true, a SHALLOWLY
+	-- frozen table (`table.isfrozen(t)` true, descendants untested) is also
+	-- treated as opaque, trusting the flag as the caller's own immutability
+	-- assertion (same trust model as `Opaque`). Deep-frozen tables are always
+	-- opaque regardless of this flag — see `IsDeepFrozen`.
+	FrozenTablesAreOpaque: boolean,
 }
 
-function OpaqueRegistry.NewRegistries(): Registries
+function OpaqueRegistry.NewRegistries(frozenTablesAreOpaque: boolean?): Registries
 	return {
 		Opaque = setmetatable({}, { __mode = "k" }) :: any,
 		OpaqueChildren = setmetatable({}, { __mode = "k" }) :: any,
 		Count = 0,
+		FrozenTablesAreOpaque = frozenTablesAreOpaque == true,
 	}
+end
+
+--[=[
+	True if `t` is provably deep-frozen: `table.isfrozen(t)` and every
+	table-typed value reachable from it is also frozen. Memoized by identity
+	(see `deepFrozenMemo`) — only a COMPLETE walk may write a `true` result;
+	a walk that bails early on a not-yet-frozen descendant returns `false`
+	without memoizing anything (that descendant may be frozen later).
+
+	A pure, manager-independent oracle — see the warning on `deepFrozenMemo`
+	about where this may safely be called from.
+]=]
+function OpaqueRegistry.IsDeepFrozen(t: any): boolean
+	if type(t) ~= "table" then
+		return false
+	end
+	if deepFrozenMemo[t] then
+		return true
+	end
+	if not table.isfrozen(t) then
+		return false
+	end
+	for _, v in t do
+		if type(v) == "table" and not OpaqueRegistry.IsDeepFrozen(v) then
+			return false
+		end
+	end
+	deepFrozenMemo[t] = true
+	return true
+end
+
+--[=[
+	If `t` qualifies as opaque purely by virtue of being frozen — shallowly,
+	when `registries.FrozenTablesAreOpaque` is set (trusting the flag, O(1)),
+	or deeply regardless of the flag (provably safe, via `IsDeepFrozen`) —
+	marks it into `registries.Opaque` (same registry an explicit `Opaque()`
+	wrapper uses, so `Count`/`isOpaque` need no separate frozen-aware logic)
+	and returns true. Returns false (no mark) otherwise.
+
+	Called ONLY from `Propagation.registerSubtree`, the single point that
+	walks a value actually being written into a manager's tree — see the
+	warning on `deepFrozenMemo` for why this must not be called from
+	anywhere that might see an internal snapshot/copy artifact instead.
+]=]
+function OpaqueRegistry.RegisterIfFrozenOpaque(t: any, registries: Registries): boolean
+	if type(t) ~= "table" then
+		return false
+	end
+	if registries.Opaque[t] == true then
+		return true
+	end
+	if not ((registries.FrozenTablesAreOpaque and table.isfrozen(t)) or OpaqueRegistry.IsDeepFrozen(t)) then
+		return false
+	end
+	registries.Opaque[t] = true
+	registries.Count += 1
+	return true
 end
 
 --// Wrapper constructors //--
@@ -152,6 +243,15 @@ export type Ctx = {
 	Callers should gate USE of the returned ctx behind `registries.Count > 0
 	or OpaqueRegistry.GlobalCount() > 0` (see `ChangeDetector`) rather than
 	rebuilding it, so an unused oracle costs nothing per write.
+
+	Deliberately does NOT special-case frozen tables here: `isOpaque` must stay
+	a pure memo lookup, since it is called mid-diff on values that may be
+	internal snapshot/copy artifacts (always frozen by construction, but not
+	user data) rather than live tree data — see the warning on `deepFrozenMemo`.
+	Frozen-table opacity is decided once, at `Propagation.registerSubtree`
+	(`RegisterIfFrozenOpaque`), and recorded into the same `Opaque` registry an
+	explicit `Opaque()` wrapper uses, so it is already covered by the first
+	check below with no extra logic.
 ]=]
 function OpaqueRegistry.MakeCtx(registries: Registries): Ctx
 	local managerOpaque = registries.Opaque

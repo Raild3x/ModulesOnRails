@@ -115,6 +115,7 @@ export type ArrayOpPayload = {
 	.DuplicateReferenceMode DuplicateReferenceMode? -- Defaults to "allow" (multi-location references are supported). See `DuplicateReferenceMode`.
 	.EnableProxies boolean? -- Defaults to true. When false, `Proxy`/`GetProxy` are unavailable.
 	.IgnoredPaths { Path }? -- Paths (and their descendants) that skip diff/snapshot/event work entirely; see `SetPathIgnored`.
+	.FrozenTablesAreOpaque boolean? -- Defaults to false. When true, a SHALLOWLY frozen table (`table.isfrozen` true, descendants untested) is also treated as opaque (no clone/walk, identity-compared only), trusting the freeze as an immutability assertion the same way `Opaque` is opt-in trust. A DEEPLY frozen table (every table-typed descendant also frozen) is always treated as opaque, regardless of this flag — that case is provably safe and needs no opt-in.
 
 	:::note Implicit sharing
 	Linking is automatic: any table reachable (transparently) in two or more
@@ -131,6 +132,7 @@ export type TableManagerConfig = {
 	DuplicateReferenceMode: DuplicateReferenceMode?,
 	EnableProxies: boolean?,
 	IgnoredPaths: { Path<any> }?,
+	FrozenTablesAreOpaque: boolean?,
 }
 
 --[=[

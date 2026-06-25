@@ -210,6 +210,9 @@ end
 	Returns the opacity oracle when anything is marked opaque (per-manager or
 	global), or `nil` otherwise. `nil` means callers should pass `ctx = nil`
 	through to `Diff`, hitting the exact original (no per-node probe) path.
+	A frozen-table opacity mark (see `OpaqueRegistry.RegisterIfFrozenOpaque`)
+	is recorded directly into `registries.Count`, so it activates this gate
+	the same way an explicit `Opaque()` mark does — no separate check needed.
 ]]
 function ChangeDetector:_oracle(): Diff.Ctx?
 	local registries = self._registries
@@ -460,6 +463,18 @@ end
 --// Private Methods //--
 --------------------------------------------------------------------------------
 
+-- Runs `job` then drains `self._dispatchQueue`. A single module-level function
+-- (rather than a closure literal built fresh inside `_dispatch` on every call)
+-- so `pcall` below can call it by reference + args instead of allocating a new
+-- closure per dispatch — `job` and `self` are passed through as `pcall` args.
+const function runDispatchJob(self: ChangeDetector, job: () -> ())
+	job()
+	while #self._dispatchQueue > 0 do
+		local queued = table.remove(self._dispatchQueue, 1) :: () -> ()
+		queued()
+	end
+end
+
 --[[
 	Runs `job` now, or queues it when a check is already dispatching callbacks
 	(a re-entrant check triggered by a write from inside a listener). Queued
@@ -480,13 +495,7 @@ function ChangeDetector:_dispatch(job: () -> ())
 	end
 
 	self._dispatching = true
-	local ok, err = pcall(function()
-		job()
-		while #self._dispatchQueue > 0 do
-			local queued = table.remove(self._dispatchQueue, 1) :: () -> ()
-			queued()
-		end
-	end)
+	local ok, err = pcall(runDispatchJob, self, job)
 	self._dispatching = false
 	if not ok then
 		table.clear(self._dispatchQueue)

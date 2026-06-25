@@ -218,7 +218,7 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 
 	self._janitor = Janitor.new()
 	
-	self._opaqueRegistries = OpaqueRegistryModule.NewRegistries()
+	self._opaqueRegistries = OpaqueRegistryModule.NewRegistries(resolvedConfig.FrozenTablesAreOpaque)
 	self._ignoreTrie = IgnoreTrieModule.new()
 	for _, ignoredPath in resolvedConfig.IgnoredPaths or {} do
 		IgnoreTrieModule.SetPathIgnored(self._ignoreTrie, ignoredPath, true)
@@ -745,6 +745,17 @@ function TableManager.Set<T, S>(
 
 	-- Only build intermediate tables when setting non-nil values; removing (nil) doesn't need them
 	const shouldBuild = buildTablesDynamically and unwrappedValue ~= nil
+
+	-- Fast path: a non-nil write with no dynamic-build request has no behavior
+	-- left in the loop below beyond what `applyWrite`'s own parent-chain walk
+	-- already performs (including reporting the identical "Path segment X is
+	-- not a table" error) — so skip straight to the single walk instead of
+	-- walking the parent chain twice.
+	if unwrappedValue ~= nil and not buildTablesDynamically then
+		applyWrite(self, parsedPath, unwrappedValue)
+		debug.profileend()
+		return
+	end
 
 	local parent: any = self.Raw
 	for i = 1, #parsedPath - 1 do
