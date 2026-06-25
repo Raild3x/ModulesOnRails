@@ -50,19 +50,6 @@ type opKind = "Set" | "ArrayInsert" | "ArrayRemove" | "ArraySet"
 -- `pathOfTableIn` and skips any observer whose live path no longer resolves.
 const OBSERVERS: { [any]: { [any]: true } } = setmetatable({}, { __mode = "k" }) :: any
 
--- Walks `root` along `path`, returning the value found or nil if any
--- intermediate segment is not a table.
-const function resolveAtPath(root: any, path: PathArray): any
-	local current: any = root
-	for _, key in path do
-		if type(current) ~= "table" then
-			return nil
-		end
-		current = current[key]
-	end
-	return current
-end
-
 -- Returns the path from `root` to the first node whose identity is `target`,
 -- or nil if `target` is not reachable. `{}` when `root == target`.
 const function findPathOf(root: any, target: any): PathArray?
@@ -295,7 +282,7 @@ const function fanOutArrayOp(
 end
 
 --------------------------------------------------------------------------------
---// Introspection (Linker facade) //--
+--// Introspection (TableManager:GetLinkedManagers / :IsLinkedWith) //--
 --------------------------------------------------------------------------------
 
 -- Returns the OTHER managers currently co-observing at least one live table

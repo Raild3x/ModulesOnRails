@@ -70,7 +70,7 @@ export type SignalFireMode = "immediate" | "deferred" | "bindable" | "coalesced"
 export type FlushMode = "immediate" | "coalesced"
 
 --------------------------------------------------------------------------------
---// Cross-manager fan-out type shapes (see Propagation.luau / Linker.luau) //--
+--// Cross-manager fan-out type shapes (see Propagation.luau) //--
 --------------------------------------------------------------------------------
 
 type opKind = "Set" | "ArrayInsert" | "ArrayRemove" | "ArraySet"
@@ -98,14 +98,6 @@ export type ArrayOpPayload = {
 	NewValue: any?,
 	OldValue: any?,
 	Index: number?,
-}
-
--- Slim introspection facade over the implicit-sharing model (`tm.Linker`).
--- "Linked" = co-observing at least one live table identity; there is no manual
--- link/unlink (sharing a table identity IS the link — see `Propagation`).
-export type Linker = {
-	GetManagers: (self: Linker) -> { any },
-	IsLinkedWith: (self: Linker, other: any) -> boolean,
 }
 
 --------------------------------------------------------------------------------
@@ -155,8 +147,7 @@ export type ForOptions = {
 export type TableManager<T = { [any]: any }> = {
 	Raw: T,
 	Proxy: Proxy<T, "">?,
-	Linker: Linker,
-	
+
 	-- Signals (fire once per change)
 	ValueChanged: Signal<(path: PathArray, newValue: any, oldValue: any) -> (), PathArray, any, any>,
 	KeyAdded: Signal<(path: PathArray, key: any, newValue: any) -> (), PathArray, any, any>,
@@ -337,16 +328,15 @@ export type TableManager<T = { [any]: any }> = {
 	--- Returns a PLAIN TableManager rooted at the shared table found at `target`
 	--- (a proxy, a path, or a raw value already in this manager's tree), linked
 	--- to this manager via `Link` so writes on either side fan out to the other.
-	Extend: <S>(self: TableManager<T>, target: Proxy<T, S> | Path<S>, config: ExtendConfig?) -> TableManager<ValueAtPath<T, S>>,
+	Extend: <S>(self: TableManager<T>, target: Proxy<T, S> | Path<S>) -> TableManager<ValueAtPath<T, S>>,
+
+	--- Returns the other managers currently sharing (co-observing) at least one
+	--- live table identity with this one — de-duplicated, excluding self.
+	GetLinkedManagers: (self: TableManager<T>) -> { any },
+	--- Returns true if this manager currently shares a live table identity with `other`.
+	IsLinkedWith: (self: TableManager<T>, other: any) -> boolean,
 
 	Destroy: (self: TableManager<T>) -> (),
-}
-
-export type ExtendConfig = {
-	-- Called when the extended manager's anchor diverges (the shared object is
-	-- removed/replaced in this manager's tree) and it leaves the link group.
-	-- Equivalent to listening on the group's `MemberRemoved` for the extended manager.
-	OnDetached: (() -> ())?,
 }
 
 export type TM_Internal<T = { [any]: any }> = TableManager<T> & {

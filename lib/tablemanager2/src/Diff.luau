@@ -60,21 +60,10 @@ export type ArraySinkEntry = { path: Path, old: any, new: any }
 -- True if `t` is a Lua sequence (array-like): empty, or keys are exactly the
 -- contiguous integers 1..#t. Used only in array-aware diff mode (`arraySink`
 -- present) to decide whether a both-tables node is an array to LCS-diff rather
--- than dict-diff positionally.
+-- than dict-diff positionally. See `PathHelpers.ClassifyArray`.
 local function isSequence(t: { [any]: any }): boolean
-	local n = 0
-	for k in t do
-		n += 1
-		if type(k) ~= "number" or k % 1 ~= 0 or k < 1 then
-			return false
-		end
-	end
-	for i = 1, n do
-		if t[i] == nil then
-			return false
-		end
-	end
-	return true
+	local isArray = PathHelpers.ClassifyArray(t)
+	return isArray
 end
 
 -- ─── Opacity helpers ─────────────────────────────────────────────────────────

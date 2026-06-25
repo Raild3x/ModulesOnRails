@@ -209,8 +209,8 @@ For a single change, observed order is:
 - `Extend(target)` returns a plain `TableManager` rooted at the shared table at `target`; because it
   shares that identity, it is automatically a co-observer (writes propagate both ways) until either side
   replaces the reference.
-- `tm.Linker` is a slim introspection facade: `GetManagers()` (current co-observers) and
-  `IsLinkedWith(other)`. There is no manual link/unlink.
+- `GetLinkedManagers()` (current co-observers) and `IsLinkedWith(other)` are plain `TableManager`
+  methods. There is no manual link/unlink.
 - Cross-manager delivery order: the *originating* manager's listeners fire before propagated observers'
   (see `Tests/TM/TableManager.shared-baseline.spec`).
 

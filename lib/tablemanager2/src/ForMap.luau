@@ -221,4 +221,66 @@ function ForMap.makeValueReconciler(
 	return ForMap.wireReconcileConnection(self, parsedPath, reconcile, teardownAll, options, nil)
 end
 
+--[=[
+	Wires `connection`'s lifecycle to `derived` (disconnect-on-destroy). Every
+	`Map*` method's derived manager needs this exact line — shared here so
+	`MapKeys`/`MapValues`/`MapPairs` don't each repeat it.
+]=]
+function ForMap.attachDerivedLifecycle(derived: TM_Internal<any>, connection: Connection)
+	derived._janitor:Add(connection, "Disconnect")
+end
+
+--[=[
+	Batches a `Map*` method's initial reconcile pass into one flush — the
+	shared `wrapInitialFire` shape every `makeKeyedReconciler` call below
+	passes through.
+]=]
+function ForMap.batchedInitialFire(derived: TM_Internal<any>): (fire: () -> ()) -> ()
+	return function(fire: () -> ())
+		derived:Batch(fire)
+	end
+end
+
+--[=[
+	Shared "remap source key -> derived output key" `onAdd`/`onRemove`/
+	`onRefresh` trio used by `MapKeys`/`MapPairs`: `computeOutKey` returns
+	`(outKey, outValue)`; `onRemove`/`onRefresh` look up the recorded `outKey`
+	(the source key may already be gone by `onRemove` time) to clear or update
+	that derived slot. `MapPairs` (which recreates on value change) never
+	invokes the returned `onRefresh` — only `MapKeys` wires it up.
+]=]
+function ForMap.makeKeyRemapHandlers(
+	derived: TM_Internal<any>,
+	computeOutKey: (itemJanitor: Janitor, key: any, value: any) -> (any, any)
+): (
+	(itemJanitor: Janitor, key: any, value: any) -> (),
+	(item: any, key: any) -> (),
+	(item: any, key: any, newValue: any) -> ()
+)
+	const outKeys: { [any]: any } = {}
+
+	const function onAdd(itemJanitor: Janitor, key: any, value: any)
+		const outKey, outValue = computeOutKey(itemJanitor, key, value)
+		outKeys[key] = outKey
+		derived:Set(outKey, outValue)
+	end
+
+	const function onRemove(_item: any, key: any)
+		const outKey = outKeys[key]
+		outKeys[key] = nil
+		if outKey ~= nil then
+			derived:Set(outKey, nil)
+		end
+	end
+
+	const function onRefresh(_item: any, key: any, newValue: any)
+		const outKey = outKeys[key]
+		if outKey ~= nil then
+			derived:Set(outKey, newValue)
+		end
+	end
+
+	return onAdd, onRemove, onRefresh
+end
+
 return ForMap

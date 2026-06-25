@@ -140,8 +140,8 @@ return function(t: tiniest)
 			local playerTM = TableManager.new { Owner = "Bob" }
 			playerTM:Set("Stats", TableManager.Opaque(stats))
 
-			expect(playerTM.Linker:IsLinkedWith(tycoonTM)).never_is_true()
-			expect(tycoonTM.Linker:IsLinkedWith(playerTM)).never_is_true()
+			expect(playerTM:IsLinkedWith(tycoonTM)).never_is_true()
+			expect(tycoonTM:IsLinkedWith(playerTM)).never_is_true()
 
 			local playerFires = 0
 			playerTM:OnChange({ "Stats" }, function()

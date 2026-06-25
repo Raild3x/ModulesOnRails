@@ -80,10 +80,10 @@ if tm.Proxy == original then -- Won't work! Different metatables
 end
 ```
 
-**Solution:** Use the ProxyManager's `Equals` method:
+**Solution:** Unwrap the proxy first via the ProxyManager's `GetOriginal`:
 ```lua
 -- ✅ DO THIS
-if tm._proxyManager:Equals(tm.Proxy, original) then
+if tm._proxyManager:GetOriginal(tm.Proxy) == original then
     -- This works!
 end
 ```
@@ -167,14 +167,9 @@ end
 
 ### 4. For Equality Checks with Originals, Use ProxyManager
 ```lua
--- ✅ Correct way to compare proxy with original
-if tm._proxyManager:Equals(tm.Proxy.something, originalTable) then
-    -- This works
-end
-
--- Or unwrap first
+-- ✅ Correct way to compare proxy with original: unwrap first
 if tm._proxyManager:GetOriginal(tm.Proxy.something) == originalTable then
-    -- This also works
+    -- This works
 end
 ```
 
@@ -188,6 +183,6 @@ The userdata proxy implementation provides transparent table-like behavior throu
 - ❌ `pairs(proxy)` doesn't work (use generic for: `for k, v in proxy do`)
 - ❌ `ipairs(proxy)` doesn't work (use generic for: `for i, v in proxy do`)
 - ❌ `table.*` functions don't work (use TableManager methods)
-- ❌ `proxy == original` doesn't work (use ProxyManager:Equals)
+- ❌ `proxy == original` doesn't work (use `ProxyManager:GetOriginal(proxy) == original`)
 
 When in doubt, use the TableManager's built-in methods for modifications, and the ProxyManager's helper methods for comparisons.

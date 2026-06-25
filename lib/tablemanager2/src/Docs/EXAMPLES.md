@@ -704,7 +704,7 @@ table.remove(manager.Proxy.items) -- ❌ Won't work!
 
 -- Don't compare proxy == original directly
 if manager.Proxy == originalTable then end -- ❌ Won't work!
--- Use: manager._proxyManager:Equals(manager.Proxy, originalTable)
+-- Use: manager._proxyManager:GetOriginal(manager.Proxy) == originalTable
 
 -- Don't set root directly
 manager:Set({}, newTable) -- ❌ Errors!

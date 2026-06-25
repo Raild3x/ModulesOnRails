@@ -91,19 +91,6 @@ const function copyForShadow(value: any, isObserved: IsObserved): any
 	return out
 end
 
--- Walks `root` along `path`, returning the value found or nil if any
--- intermediate segment is not a table.
-const function resolveAtPath(root: table, path: PathArray): table?
-	local current: any = root
-	for _, key in path do
-		if type(current) ~= "table" then
-			return nil
-		end
-		current = current[key]
-	end
-	return current
-end
-
 -- ---------------------------------------------------------------------------
 -- Public API
 -- ---------------------------------------------------------------------------
@@ -123,7 +110,7 @@ end
 	materialized.
 ]=]
 function ShadowNode.Get(root: table, path: PathArray): table
-	return resolveAtPath(REGISTRY[root], path)
+	return PathHelpers.ResolveAtPath(REGISTRY[root], path)
 end
 
 --[=[
@@ -133,13 +120,13 @@ end
 ]=]
 function ShadowNode.Reconcile(live: table, path: PathArray, isObserved: IsObserved?)
 	const observed = isObserved or DEFAULT_IS_OBSERVED
-	const value = resolveAtPath(live, path)
+	const value = PathHelpers.ResolveAtPath(live, path)
 	const copy = copyForShadow(value, observed)
 	if #path == 0 then
 		return
 	end
 	const parentPath, key = PathHelpers.GetPathParentAndKey(path)
-	const parentNode = if #parentPath == 0 then REGISTRY[live] else REGISTRY[resolveAtPath(live, parentPath)]
+	const parentNode = if #parentPath == 0 then REGISTRY[live] else REGISTRY[PathHelpers.ResolveAtPath(live, parentPath)]
 	if type(parentNode) == "table" then
 		parentNode[key] = copy
 	end
@@ -165,7 +152,7 @@ function ShadowNode.Materialize(live: table, path: PathArray, isObserved: IsObse
 		const segment = path[i]
 		table.insert(partialPath, segment)
 		if type(node[segment]) ~= "table" then
-			node[segment] = copyForShadow(resolveAtPath(live, partialPath), observed)
+			node[segment] = copyForShadow(PathHelpers.ResolveAtPath(live, partialPath), observed)
 		end
 		node = node[segment]
 	end
@@ -187,11 +174,11 @@ function ShadowNode.ApplyArrayOp(
 	isObserved: IsObserved?
 ): boolean
 	const observed = isObserved or DEFAULT_IS_OBSERVED
-	const mirrorArray = resolveAtPath(REGISTRY[live], path)
+	const mirrorArray = PathHelpers.ResolveAtPath(REGISTRY[live], path)
 	if type(mirrorArray) ~= "table" then
 		return false
 	end
-	if mirrorArray == resolveAtPath(live, path) then
+	if mirrorArray == PathHelpers.ResolveAtPath(live, path) then
 		return true -- stored by reference (opaque): already current by definition.
 	end
 	if opKind == "ArrayInserted" then

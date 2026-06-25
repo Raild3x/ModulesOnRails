@@ -476,7 +476,7 @@ function Mutator.applyRootSet<T>(self: TM_Internal<T>, newRoot: any)
 	-- changed, so re-key its node from `oldRoot` to `newRoot` (interior nodes
 	-- keep their identities). This must happen before the root flush below so
 	-- `Baseline.Get({})` still finds the seeded pre-swap baseline.
-	BaselineModule.RebindRoot(self, oldRoot, newRoot)
+	BaselineModule.RebindRoot(oldRoot, newRoot)
 
 	-- Re-register the new root tree by identity. Observers of the OLD root that
 	-- no longer resolve to it are skipped lazily at dispatch (see Propagation);

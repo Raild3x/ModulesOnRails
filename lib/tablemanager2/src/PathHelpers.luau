@@ -216,4 +216,54 @@ function PathHelpers.Append(path: PathArray, key: any): PathArray
 	return result
 end
 
+--[=[
+	Walks `root` along `path`, returning the value found there, or `nil` if any
+	intermediate segment is not a table.
+
+	@param root The table to walk from
+	@param path The path to walk
+	@return The value at `path`, or nil if `path` does not resolve
+]=]
+function PathHelpers.ResolveAtPath(root: any, path: PathArray): any
+	local current: any = root
+	for _, key in path do
+		if type(current) ~= "table" then
+			return nil
+		end
+		current = current[key]
+	end
+	return current
+end
+
+--[=[
+	Classifies table shape in one pass: a table is a dense array iff every key
+	is a positive integer and the set of keys is exactly `{1, .., maxIndex}`
+	(so `{}` is a length-0 array).
+
+	@param t The table to classify
+	@return isArray, and (when true) its length
+]=]
+function PathHelpers.ClassifyArray(t: { [any]: any }): (boolean, number)
+	if type(t) ~= "table" then
+		return false, 0
+	end
+
+	local count = 0
+	local maxIndex = 0
+
+	for key, _ in t do
+		if type(key) ~= "number" or key < 1 or key % 1 ~= 0 then
+			return false, 0
+		end
+		count += 1
+		maxIndex = math.max(maxIndex, key)
+	end
+
+	if count == maxIndex then
+		return true, maxIndex
+	end
+
+	return false, 0
+end
+
 return PathHelpers

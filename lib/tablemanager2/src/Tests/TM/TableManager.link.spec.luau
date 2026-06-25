@@ -40,8 +40,8 @@ return function(t: tiniest)
 			expect(a.Raw.health).is(25)
 			expect(aNew).is(25)
 
-			expect(a.Linker:IsLinkedWith(b)).is_true()
-			expect(b.Linker:IsLinkedWith(a)).is_true()
+			expect(a:IsLinkedWith(b)).is_true()
+			expect(b:IsLinkedWith(a)).is_true()
 
 			a:Destroy()
 			b:Destroy()
@@ -212,12 +212,12 @@ return function(t: tiniest)
 			local sharedNode = { x = 1 }
 			local a = TableManager.new({ B = sharedNode })
 			local b = TableManager.new({ B = sharedNode })
-			expect(a.Linker:IsLinkedWith(b)).is_true()
+			expect(a:IsLinkedWith(b)).is_true()
 
 			-- Replace `B` on a's side entirely; a no longer holds `sharedNode`.
 			a:Set("B", { x = 99 })
 
-			expect(a.Linker:IsLinkedWith(b)).never_is_true()
+			expect(a:IsLinkedWith(b)).never_is_true()
 			-- b's data is untouched by the divergent write.
 			expect(b.Raw.B.x).is(1)
 
@@ -238,12 +238,12 @@ return function(t: tiniest)
 			local shared = { health = 100 }
 			local a = TableManager.new(shared)
 			local b = TableManager.new(shared)
-			expect(a.Linker:IsLinkedWith(b)).is_true()
+			expect(a:IsLinkedWith(b)).is_true()
 
 			-- Re-root `a` onto a brand-new table; it no longer holds `shared`.
 			a:Set({}, { health = 5 })
 
-			expect(a.Linker:IsLinkedWith(b)).never_is_true()
+			expect(a:IsLinkedWith(b)).never_is_true()
 			-- b keeps the original shared object, untouched by a's re-root.
 			expect(b.Raw.health).is(100)
 			expect(a.Raw.health).is(5)
@@ -260,8 +260,8 @@ return function(t: tiniest)
 
 			b:Destroy()
 
-			expect(a.Linker:IsLinkedWith(c)).is_true()
-			expect(a.Linker:IsLinkedWith(b)).never_is_true()
+			expect(a:IsLinkedWith(c)).is_true()
+			expect(a:IsLinkedWith(b)).never_is_true()
 
 			local cSeen
 			c:OnValueChange("value", function(newValue)
@@ -278,17 +278,17 @@ return function(t: tiniest)
 		end)
 	end)
 
-	describe("Linker facade (introspection)", function()
-		test("IsLinkedWith and GetManagers report co-observing managers", function()
+	describe("Linked-manager introspection (GetLinkedManagers / IsLinkedWith)", function()
+		test("IsLinkedWith and GetLinkedManagers report co-observing managers", function()
 			local shared = { value = 1 }
 			local a = TableManager.new(shared)
 			local b = TableManager.new(shared)
 			local c = TableManager.new(shared)
 
-			expect(a.Linker:IsLinkedWith(b)).is_true()
-			expect(a.Linker:IsLinkedWith(c)).is_true()
+			expect(a:IsLinkedWith(b)).is_true()
+			expect(a:IsLinkedWith(c)).is_true()
 
-			local managers = a.Linker:GetManagers()
+			local managers = a:GetLinkedManagers()
 			expect(#managers).is(2)
 			-- excludes self
 			local containsSelf = false
@@ -302,12 +302,6 @@ return function(t: tiniest)
 			a:Destroy()
 			b:Destroy()
 			c:Destroy()
-		end)
-
-		test("tm.Linker is the same object across accesses", function()
-			local a = TableManager.new({ value = 1 })
-			expect(a.Linker).is(a.Linker)
-			a:Destroy()
 		end)
 	end)
 
@@ -388,7 +382,7 @@ return function(t: tiniest)
 			-- sword is nested one level inside the assigned composite value; the
 			-- whole subtree is registered, so sharing is immediate (no Ensure step).
 			PlayerTM:Set("bag", { sword })
-			expect(PlayerTM.Linker:IsLinkedWith(SwordTM)).is_true()
+			expect(PlayerTM:IsLinkedWith(SwordTM)).is_true()
 
 			local seen
 			PlayerTM:OnValueChange({ "bag", 1, "Name" }, function(newValue)
@@ -406,10 +400,10 @@ return function(t: tiniest)
 			local PlayerTM = TableManager.new(Data)
 			local SwordTM = TableManager.new(Data.Inventory[1])
 
-			expect(PlayerTM.Linker:IsLinkedWith(SwordTM)).is_true()
+			expect(PlayerTM:IsLinkedWith(SwordTM)).is_true()
 
 			PlayerTM:ArrayRemove("Inventory", 1)
-			expect(PlayerTM.Linker:IsLinkedWith(SwordTM)).never_is_true()
+			expect(PlayerTM:IsLinkedWith(SwordTM)).never_is_true()
 
 			PlayerTM:Destroy()
 			SwordTM:Destroy()

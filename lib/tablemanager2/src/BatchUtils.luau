@@ -48,9 +48,10 @@ function BatchUtils.SerializeBatchPath(path: { any }): string
 	return table.concat(parts, "\0")
 end
 
--- Navigates a ChangeDetector Snapshot's Diff.Snapshot children and returns
--- the deep-copied value stored at `path` (i.e., the pre-batch state).
-function BatchUtils.GetSnapshotValue(snapshot: ChangeDetector.Snapshot, path: { any }): any?
+-- Navigates a ChangeDetector Snapshot's Diff.Snapshot children down to
+-- `path`, returning the node found there (or nil if `path` doesn't resolve).
+-- Shared by GetSnapshotValue/GetSnapshotRef below.
+local function navigateSnapshot(snapshot: ChangeDetector.Snapshot, path: { any }): any?
 	local snap: any = snapshot.Data
 	for _, key in path do
 		if not snap or not snap.children then
@@ -58,19 +59,19 @@ function BatchUtils.GetSnapshotValue(snapshot: ChangeDetector.Snapshot, path: { 
 		end
 		snap = (snap.children :: any)[key]
 	end
+	return snap
+end
+
+-- Returns the deep-copied value stored at `path` (i.e., the pre-batch state).
+function BatchUtils.GetSnapshotValue(snapshot: ChangeDetector.Snapshot, path: { any }): any?
+	local snap = navigateSnapshot(snapshot, path)
 	return snap and snap.value or nil
 end
 
 -- Like GetSnapshotValue but returns the ORIGINAL table reference captured at
 -- `path` pre-batch (Diff.Snapshot.ref), not the frozen copy.
 function BatchUtils.GetSnapshotRef(snapshot: ChangeDetector.Snapshot, path: { any }): any?
-	local snap: any = snapshot.Data
-	for _, key in path do
-		if not snap or not snap.children then
-			return nil
-		end
-		snap = (snap.children :: any)[key]
-	end
+	local snap = navigateSnapshot(snapshot, path)
 	return snap and snap.ref or nil
 end
 

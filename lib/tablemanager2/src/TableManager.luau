@@ -68,7 +68,6 @@ const ListenerRegistryModule = require("./ListenerRegistry")
 const ChangeDetectorModule = require("./ChangeDetector")
 const SchemaNavigatorModule = require("./SchemaNavigator")
 const PropagationModule = require("./Propagation")
-const LinkerModule = require("./Linker")
 const Types = require("./TMTypes")
 const EmitterModule = require("./Emitter")
 const MutatorModule = require("./Mutator")
@@ -104,9 +103,7 @@ export type DuplicateReferenceMode = Types.DuplicateReferenceMode
 export type TableManagerConfig = Types.TableManagerConfig
 export type ForOptions = Types.ForOptions
 export type TableManager<T = { [any]: any }> = Types.TableManager<T>
-export type Linker = Types.Linker
 
-export type ExtendConfig = Types.ExtendConfig
 export type OpaqueWrapper = Types.OpaqueWrapper
 
 export type TM_Internal<T = { [any]: any }> = Types.TM_Internal<T>
@@ -280,10 +277,6 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 		self._opaqueRegistries,
 		self._ignoreTrie
 	)
-	
-	
-	-- Lightweight linking-introspection facade (`tm.Linker`).
-	self.Linker = LinkerModule.new(self)
 
 	-- Implicit sharing: register every table in the initial tree by identity, so
 	-- any table also reachable in another manager is observed by both and writes
@@ -412,6 +405,23 @@ function TableManager.Extend<T, S>(
 	const extended = TableManager.new(object)
 
 	return extended
+end
+
+--[=[
+	@within TableManager
+	Returns the other managers currently sharing (co-observing) at least one
+	live table identity with this one — de-duplicated, excluding self.
+]=]
+function TableManager.GetLinkedManagers<T>(self: TM_Internal<T>): { any }
+	return PropagationModule.GetCoObservers(self)
+end
+
+--[=[
+	@within TableManager
+	Returns true if this manager currently shares a live table identity with `other`.
+]=]
+function TableManager.IsLinkedWith<T>(self: TM_Internal<T>, other: any): boolean
+	return PropagationModule.IsLinkedWith(self, other)
 end
 
 --------------------------------------------------------------------------------
@@ -616,36 +626,12 @@ function TableManager.MapKeys<T, S>(
 ): TableManager<any>
 	const parsedPath = PathHelpers.ParsePath(path)
 	const derived: TM_Internal<any> = TableManager.new({}) :: any
-	const outKeys: { [any]: any } = {}
-
-	const connection = makeKeyedReconciler(
-		self,
-		parsedPath,
-		false,
-		function(itemJanitor, key, value)
-			const outKey = transform(itemJanitor, key, value)
-			outKeys[key] = outKey
-			derived:Set(outKey, value)
-		end,
-		function(_item, key)
-			const outKey = outKeys[key]
-			outKeys[key] = nil
-			if outKey ~= nil then
-				derived:Set(outKey, nil)
-			end
-		end,
-		function(_item, key, newValue)
-			const outKey = outKeys[key]
-			if outKey ~= nil then
-				derived:Set(outKey, newValue)
-			end
-		end,
-		nil,
-		function(fire)
-			derived:Batch(fire)
-		end
-	)
-	derived._janitor:Add(connection, "Disconnect")
+	const onAdd, onRemove, onRefresh = ForMapModule.makeKeyRemapHandlers(derived, function(itemJanitor, key, value)
+		return transform(itemJanitor, key, value), value
+	end)
+	const connection =
+		makeKeyedReconciler(self, parsedPath, false, onAdd, onRemove, onRefresh, nil, ForMapModule.batchedInitialFire(derived))
+	ForMapModule.attachDerivedLifecycle(derived, connection)
 
 	return derived :: any
 end
@@ -675,11 +661,9 @@ function TableManager.MapValues<T, S>(
 		end,
 		nil,
 		nil,
-		function(fire)
-			derived:Batch(fire)
-		end
+		ForMapModule.batchedInitialFire(derived)
 	)
-	derived._janitor:Add(connection, "Disconnect")
+	ForMapModule.attachDerivedLifecycle(derived, connection)
 
 	return derived :: any
 end
@@ -698,31 +682,10 @@ function TableManager.MapPairs<T, S>(
 ): TableManager<any>
 	const parsedPath = PathHelpers.ParsePath(path)
 	const derived: TM_Internal<any> = TableManager.new({}) :: any
-	const outKeys: { [any]: any } = {}
-
-	const connection = makeKeyedReconciler(
-		self,
-		parsedPath,
-		true,
-		function(itemJanitor, key, value)
-			const outKey, outValue = transform(itemJanitor, key, value)
-			outKeys[key] = outKey
-			derived:Set(outKey, outValue)
-		end,
-		function(_item, key)
-			const outKey = outKeys[key]
-			outKeys[key] = nil
-			if outKey ~= nil then
-				derived:Set(outKey, nil)
-			end
-		end,
-		nil,
-		nil,
-		function(fire)
-			derived:Batch(fire)
-		end
-	)
-	derived._janitor:Add(connection, "Disconnect")
+	const onAdd, onRemove = ForMapModule.makeKeyRemapHandlers(derived, transform)
+	const connection =
+		makeKeyedReconciler(self, parsedPath, true, onAdd, onRemove, nil, nil, ForMapModule.batchedInitialFire(derived))
+	ForMapModule.attachDerivedLifecycle(derived, connection)
 
 	return derived :: any
 end

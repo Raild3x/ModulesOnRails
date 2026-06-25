@@ -266,13 +266,13 @@ return function(t: tiniest)
 			local a = TableManager.new({ Stats = shared }) :: any
 			local b = TableManager.new({ Stats = shared }) :: any
 			-- Implicit sharing: both observe `shared` at "Stats" (no explicit link).
-			expect(b.Linker:IsLinkedWith(a)).is_true()
+			expect(b:IsLinkedWith(a)).is_true()
 
 			a:Destroy()
 
 			-- The survivor no longer reports the destroyed manager as a co-observer.
-			expect(b.Linker:IsLinkedWith(a)).never_is_true()
-			expect(#b.Linker:GetManagers()).is(0)
+			expect(b:IsLinkedWith(a)).never_is_true()
+			expect(#b:GetLinkedManagers()).is(0)
 
 			b:Destroy()
 		end)

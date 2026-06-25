@@ -95,7 +95,7 @@ end
 	pre-swap baseline. Must be called AFTER `manager.Raw` becomes `newRoot` and
 	BEFORE the root flush. See `ShadowNode.RebindRoot`.
 ]]
-function Baseline.RebindRoot(manager: TableManagerLike, oldRoot: any, newRoot: any)
+function Baseline.RebindRoot(oldRoot: any, newRoot: any)
 	ShadowNodeModule.RebindRoot(oldRoot, newRoot)
 end
 

@@ -15,7 +15,7 @@ return function(t: tiniest)
 			local statsTM = playerTM:Extend(playerTM:GetProxy("Stats"))
 
 			expect(statsTM.Raw).is(data.Stats)
-			expect(playerTM.Linker:IsLinkedWith(statsTM)).is_true()
+			expect(playerTM:IsLinkedWith(statsTM)).is_true()
 
 			local seen
 			playerTM:OnValueChange("Stats.Health", function(newValue)
@@ -102,7 +102,7 @@ return function(t: tiniest)
 
 			playerTM:Set("Stats", { Health = 999 })
 
-			expect(playerTM.Linker:IsLinkedWith(statsTM)).never_is_true()
+			expect(playerTM:IsLinkedWith(statsTM)).never_is_true()
 
 			-- statsTM keeps operating on the orphaned object, independent of
 			-- playerTM's new "Stats" table.
