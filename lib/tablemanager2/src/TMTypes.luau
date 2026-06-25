@@ -295,7 +295,7 @@ export type TableManager<T = { [any]: any }> = {
 	-- Helper methods
 	Get: <S>(self: TableManager<T>, path: Path<S>, suppressNilPartialPaths: boolean?) -> ValueAtPath<T, S>,
 	GetProxy: <S>(self: TableManager<T>, path: Path<S>, suppressNilPartialPaths: boolean?) -> Proxy<T, S>,
-	Set: <S>(self: TableManager<T>, path: Path<S>, value: ValueAtPath<T, S> | OpaqueWrapper) -> (),
+	Set: <S>(self: TableManager<T>, path: Path<S>, value: ValueAtPath<T, S> | OpaqueWrapper<ValueAtPath<T, S>>, buildTablesDynamically: boolean?) -> (),
 	ArrayInsert: <S>(self: TableManager<T>, arrPath: Path<S> | Proxy<T, S>, newValue: any) -> ()
 		& <S>(self: TableManager<T>, arrPath: Path<S> | Proxy<T, S>, index: number, newValue: any) -> (),
 	ArrayRemove: <S>(self: TableManager<T>, arrPath: Path<S> | Proxy<T, S>, index: number) -> any?,

@@ -34,8 +34,8 @@ type WrapperKind = "O" | "GO" | "OC" | "GOC"
 export type Wrapper<T> = { inner: T, __opaque_kind: WrapperKind }
 
 --// Module-global registries (shared across every TableManager) //--
-local globalOpaque: { [any]: true } = setmetatable({}, { __mode = "k" }) :: any
-local globalOpaqueChildren: { [any]: true } = setmetatable({}, { __mode = "k" }) :: any
+local globalOpaque: { [any]: true? } = setmetatable({}, { __mode = "k" }) :: any
+local globalOpaqueChildren: { [any]: true? } = setmetatable({}, { __mode = "k" }) :: any
 
 -- Incremented when a value is newly registered into either global registry;
 -- never decremented (entries are GC'd via the weak table, but re-checking

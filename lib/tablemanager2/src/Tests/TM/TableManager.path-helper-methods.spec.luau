@@ -334,6 +334,7 @@ return function(t: tiniest)
 			-- in this library) -- its descendants' adds are what drive consumers.
 			expect(#keyChangedEvents).is(0)
 
+			assert(rootNew, "rootNew should be set by OnKeyChange")
 			expect(rootKey).is("a")
 			expect(rootNew.b.c).is(5)
 			expect(rootOld).is(nil)

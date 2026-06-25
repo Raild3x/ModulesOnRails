@@ -247,14 +247,13 @@ return function(t: tiniest)
 			tm:Destroy()
 		end)
 
-		test("registering on a destroyed TableManager returns a dead connection", function()
+		test("Calling methods after destroy errors", function()
 			local tm = TableManager.new { a = 1 } :: any
 			tm:Destroy()
 
-			local connection = tm:OnChange("a", function() end)
-			expect(connection.Connected).never_is_true()
-			expect(next(tm._listenerRegistry._root.Children) :: any).never_exists()
-			expect(tm._listenerRegistry._root.Count).is(0)
+			expect(function()
+				tm:Set("a", 2)
+			end).fails()
 		end)
 
 		-- Phase 0 golden (Docs/CONTRACT.md §8): severing a shared region must leave
