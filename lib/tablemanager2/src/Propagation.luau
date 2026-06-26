@@ -51,7 +51,15 @@ type opKind = "Set" | "ArrayInsert" | "ArrayRemove" | "ArraySet"
 -- automatically; the registry never pins anything alive. Stale entries (a
 -- manager that no longer holds the table) are harmless: dispatch path-checks via
 -- `pathOfTableIn` and skips any observer whose live path no longer resolves.
-const OBSERVERS: { [any]: { [any]: true } } = setmetatable({}, { __mode = "k" }) :: any
+--
+-- Shared by every weak-keyed table this module allocates (the top-level
+-- registry and each per-identity observer set): nothing here depends on a
+-- table having its OWN distinct metatable identity, so one constant options
+-- table avoids re-allocating `{ __mode = "k" }` on every `registerOwner` call
+-- (one of the two allocations `registerSubtree`'s per-node walk used to pay).
+const WEAK_KEYS: { __mode: string } = { __mode = "k" }
+
+const OBSERVERS: { [any]: { [any]: true } } = setmetatable({}, WEAK_KEYS) :: any
 
 -- Returns the path from `root` to the first node whose identity is `target`,
 -- or nil if `target` is not reachable. `{}` when `root == target`.
@@ -118,7 +126,7 @@ end
 const function registerOwner(manager: TableManagerLike, t: any)
 	local observers = OBSERVERS[t]
 	if observers == nil then
-		observers = setmetatable({}, { __mode = "k" }) :: any
+		observers = setmetatable({}, WEAK_KEYS) :: any
 		OBSERVERS[t] = observers
 	end
 	if observers[manager] then
@@ -168,9 +176,20 @@ const function registerSubtree(manager: TableManagerLike, value: any)
 		-- opening `ChangeDetector`'s ctx gate via `Count` from here on). Safe to
 		-- call here specifically because `node` is a value actually entering the
 		-- tree, never an internal snapshot/copy artifact — see the warning on
-		-- `OpaqueRegistry`'s `deepFrozenMemo`. `table.isfrozen` is O(1) and fails
-		-- fast for the overwhelming common case of an ordinary mutable table.
-		if registerIfFrozenOpaque(node, registries) then
+		-- `OpaqueRegistry`'s `deepFrozenMemo`.
+		--
+		-- `RegisterIfFrozenOpaque` can only return true when `node` itself is
+		-- already frozen (both its shallow-flag and `IsDeepFrozen` branches
+		-- require `table.isfrozen(node)` as a precondition), and its own
+		-- already-marked check (`registries.Opaque[node]`) is unreachable from
+		-- here: any previously-marked node was already caught by `isOpaque`
+		-- above when `ctx` exists, and `ctx` is nil only when `registries.Opaque`
+		-- is provably empty. So gating on the raw `table.isfrozen` call first —
+		-- a single native check, no weak-table lookups — skips two dict probes
+		-- and a function call for the overwhelmingly common ordinary
+		-- (non-frozen) table, falling through to the full check only when the
+		-- node is actually frozen.
+		if table.isfrozen(node) and registerIfFrozenOpaque(node, registries) then
 			return
 		end
 		seen[node] = true
