@@ -139,7 +139,9 @@ const trackArrayMutation = MutatorModule.trackArrayMutation
 
 -- Emit/notify core lives in Emitter.luau; local aliases keep call sites unchanged.
 const fireAncestorValueChangedNotifications = EmitterModule.fireAncestorValueChangedNotifications
-const makeEmit = EmitterModule.makeEmit
+const emitInserted = EmitterModule.emitInserted
+const emitRemoved = EmitterModule.emitRemoved
+const emitSet = EmitterModule.emitSet
 
 -- Shared For/Map reconcile drivers live in ForMap.luau; local aliases keep call sites unchanged.
 const makeKeyedReconciler = ForMapModule.makeKeyedReconciler
@@ -304,14 +306,14 @@ function TableManager._NotifyApplied<T>(self: TM_Internal<T>, op: AppliedOp)
 		elseif op.Kind == "ArrayInsert" then
 			const index = op.Index :: number
 			shiftArrayKeys(self._proxyManager, self:Get(op.Path, true), index, 1)
-			makeEmit(self, op.Path).inserted(index, op.NewValue)
+			emitInserted(self, op.Path, index, op.NewValue)
 		elseif op.Kind == "ArrayRemove" then
 			const index = op.Index :: number
 			shiftArrayKeys(self._proxyManager, self:Get(op.Path, true), index + 1, -1)
 			pruneDetachedValue(self, op.OldValue, nil)
-			makeEmit(self, op.Path).removed(index, op.OldValue)
+			emitRemoved(self, op.Path, index, op.OldValue)
 		elseif op.Kind == "ArraySet" then
-			makeEmit(self, op.Path).set(op.Index :: number, op.NewValue, op.OldValue)
+			emitSet(self, op.Path, op.Index :: number, op.NewValue, op.OldValue)
 		end
 	end)
 	self._suppressLinkFanOut = false
@@ -822,9 +824,9 @@ function TableManager.ArrayInsert<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 		PropagationModule.RegisterSubtree(self :: any, unwrappedValue)
 	end
 
-	if not inBatch then 
+	if not inBatch then
 		-- Fire element-level and array-level listeners, ancestor callbacks, and signal.
-		makeEmit(self, parsedPath).inserted(pos, unwrappedValue)
+		emitInserted(self, parsedPath, pos, unwrappedValue)
 	end
 	debug.profileend()
 end
@@ -853,7 +855,7 @@ function TableManager.ArrayRemove<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 	end
 
 	-- Fire listeners EXACTLY at remove path (we handle ancestors separately)
-	makeEmit(self, parsedPath).removed(index, oldValue)
+	emitRemoved(self, parsedPath, index, oldValue)
 	debug.profileend()
 	return oldValue
 end
@@ -901,19 +903,20 @@ function TableManager.ArraySwapRemove<T, S>(self: TM_Internal<T>, pathOrProxy: P
 
 	if inBatch then return oldValue end
 
+	-- moveId is typed as `string` (ArrayDiff.MoveMetadata) for downstream
+	-- consumers that may key off it; kept as an interpolated string rather than
+	-- widening that public type for this single call site.
 	const moveInfo = if index ~= lastIndex
 		then { moveId = `swapremove_{index}_{lastIndex}`, fromIndex = lastIndex, toIndex = index }
 		else nil
 
-	const emit = makeEmit(self, parsedPath)
-
 	-- 1. Emit ArraySet for the backfill: array[index] = movedValue (no-op if index == lastIndex)
 	if index ~= lastIndex then
-		emit.set(index, movedValue, oldValue, moveInfo)
+		emitSet(self, parsedPath, index, movedValue, oldValue, moveInfo)
 	end
 
 	-- 2. Emit ArrayRemoved for the shrink: array[lastIndex] = nil (the actual removal)
-	emit.removed(lastIndex, movedValue, moveInfo)
+	emitRemoved(self, parsedPath, lastIndex, movedValue, moveInfo)
 
 	return oldValue
 end

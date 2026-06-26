@@ -112,6 +112,23 @@ export type ChangeDetector = {
 	GetOpaqueCtx: (self: ChangeDetector) -> Diff.Ctx?,
 }
 
+type CD_Internal = {
+	_callbacks: any,
+	_debugMode: boolean,
+	_suspended: boolean,
+	_sentinelSnapshot: any,
+	_dispatching: boolean,
+	_dispatchQueue: { () -> () },
+	_registries: OpaqueRegistry.Registries?,
+	_opaqueCtx: Diff.Ctx?,
+	_ignoreTrie: IgnoreTrieModule.Node?,
+
+	_dispatch: (self: CD_Internal, job: () -> ()) -> (),
+	_emitRootNode: (self: CD_Internal, node: Diff.DiffNode?, basePath: PathArray, ancestorSnapshot: AncestorSnapshot) -> (),
+	_processDiffNode: (self: CD_Internal, node: Diff.DiffNode, nodePath: PathArray, parentPath: PathArray, nodeKey: any?, originPath: PathArray, originDiff: Diff.DiffNode, snapshot: AncestorSnapshot) -> (),
+	_fireAncestorCallbacks: (self: CD_Internal, capturedPath: PathArray, rootDiff: Diff.DiffNode, snapshot: AncestorSnapshot) -> (),
+} & ChangeDetector
+
 --[=[
 	@within TableManager
 	@interface ChangeMetadata
@@ -191,10 +208,10 @@ function ChangeDetector.new(
 		_dispatching = false,
 		_dispatchQueue = {} :: { () -> () },
 		-- Opacity: registries is nil for managers built before this existed in
-		-- tests that construct ChangeDetector directly; `_oracle` treats that
+		-- tests that construct ChangeDetector directly; `GetOpaqueCtx` treats that
 		-- the same as "nothing marked" (ctx == nil, zero-cost original path).
 		_registries = registries,
-		-- Lazily-built once activated (see `_oracle`); never rebuilt afterwards
+		-- Lazily-built once activated (see `GetOpaqueCtx`); never rebuilt afterwards
 		-- since the closures close over the (mutable) registry tables.
 		_opaqueCtx = nil :: Diff.Ctx?,
 		-- Ignored-path pruning: the root trie node (a mutable table), so later
@@ -214,7 +231,7 @@ end
 	is recorded directly into `registries.Count`, so it activates this gate
 	the same way an explicit `Opaque()` mark does — no separate check needed.
 ]]
-function ChangeDetector:_oracle(): Diff.Ctx?
+function ChangeDetector:GetOpaqueCtx(): Diff.Ctx?
 	local registries = self._registries
 	if registries == nil then
 		return nil
@@ -224,18 +241,14 @@ function ChangeDetector:_oracle(): Diff.Ctx?
 	end
 	if self._opaqueCtx == nil then
 		-- Wire the baseline's node -> identity resolver onto the ctx at its single
-		-- construction site (every consumer reads this cached object via `_oracle`/
+		-- construction site (every consumer reads this cached object via `GetOpaqueCtx`/
 		-- `GetOpaqueCtx`), so the opaque diff branch can compare a content-node slot
 		-- by the child's real identity instead of the always-unequal copy.
-		local ctx: Diff.Ctx = OpaqueRegistry.MakeCtx(registries)
+		local ctx = OpaqueRegistry.MakeCtx(registries) :: Diff.Ctx
 		ctx.identityOf = ShadowNode.IdentityOf
 		self._opaqueCtx = ctx
 	end
 	return self._opaqueCtx
-end
-
-function ChangeDetector:GetOpaqueCtx(): Diff.Ctx?
-	return self:_oracle()
 end
 
 --------------------------------------------------------------------------------
@@ -259,7 +272,7 @@ end
 	detector:CheckForChangesBetween(oldPlayer, gameState.player, {"player"}, gameState)
 	```
 ]=]
-function ChangeDetector:CaptureSnapshot(rootTable: { [any]: any }, path: PathArray): Snapshot
+function ChangeDetector.CaptureSnapshot(self: CD_Internal, rootTable: { [any]: any }, path: PathArray): Snapshot
 	-- While suspended, skip all snapshot work and return the sentinel.
 	if self._suspended then
 		return self._sentinelSnapshot
@@ -274,6 +287,7 @@ function ChangeDetector:CaptureSnapshot(rootTable: { [any]: any }, path: PathArr
 		print("  path:", table.concat(path, "."))
 		print("  rootTable type:", type(rootTable))
 	end
+	debug.profilebegin("CD:CaptureSnapshot")
 
 	-- Navigate to the value at the path
 	local valueAtPath = rootTable
@@ -288,10 +302,11 @@ function ChangeDetector:CaptureSnapshot(rootTable: { [any]: any }, path: PathArr
 	local snapshot: Snapshot = {
 		RootTable = rootTable, -- Keep reference to root (not copied)
 		Path = table.clone(path), -- Clone the path array
-		Data = Diff.snapshot(valueAtPath, self:_oracle()), -- Diff.Snapshot with ref tracking
+		Data = Diff.snapshot(valueAtPath, self:GetOpaqueCtx()), -- Diff.Snapshot with ref tracking
 		Timestamp = os.clock(),
 	}
 
+	debug.profileend()
 	return snapshot
 end
 
@@ -340,7 +355,8 @@ end
 	--   Value: true
 	```
 ]=]
-function ChangeDetector:CheckForChangesBetween(
+function ChangeDetector.CheckForChangesBetween(
+	self: CD_Internal,
 	oldValue: any,
 	newValue: any,
 	basePath: PathArray,
@@ -354,7 +370,7 @@ function ChangeDetector:CheckForChangesBetween(
 		print("  oldValue type:", type(oldValue))
 		print("  newValue type:", type(newValue))
 	end
-
+	debug.profilebegin("CD:CheckForChangesBetween")
 	-- If no real root table is provided, synthesize one so ancestor callbacks
 	-- can still navigate to values at `basePath`.
 	local tempRootTable: { [any]: any }
@@ -377,7 +393,7 @@ function ChangeDetector:CheckForChangesBetween(
 			cursor[basePath[#basePath]] = newValue
 		end
 	end
-	local ctx = self:_oracle()
+	local ctx = self:GetOpaqueCtx()
 	-- No deep snapshot of oldValue here: Diff.diff below compares oldValue/
 	-- newValue directly (snap1/snap2 = nil), so the only thing callbacks need
 	-- from this object is RootTable for their own ancestor navigation.
@@ -398,8 +414,10 @@ function ChangeDetector:CheckForChangesBetween(
 	-- by _dispatch diffs against state at DRAIN time (see _dispatch's note on
 	-- collapsing chained re-entrant writes).
 	self:_dispatch(function()
+		debug.profilebegin("Dispatch")
 		local rootDiffNode = Diff.diff(oldValue, newValue, nil, nil, ctx, localArrays)
 		self:_emitRootNode(rootDiffNode, basePath, ancestorSnapshot)
+		debug.profileend()
 	end)
 
 	if arraySink ~= nil and localArrays ~= nil then
@@ -411,6 +429,7 @@ function ChangeDetector:CheckForChangesBetween(
 			table.insert(arraySink, { path = absPath, old = entry.old, new = entry.new })
 		end
 	end
+	debug.profileend()
 end
 
 --[=[
@@ -423,7 +442,8 @@ end
 	Used by linked fan-out (`TableManager._NotifyApplied`) to replay the ORIGIN's
 	diff node on a recipient instead of recomputing the identical diff.
 ]=]
-function ChangeDetector:DispatchDiffNode(
+function ChangeDetector.DispatchDiffNode(
+	self: CD_Internal,
 	node: Diff.DiffNode,
 	basePath: PathArray,
 	rootTable: { [any]: any },
@@ -448,14 +468,14 @@ end
 	Used by `TableManager:Suspend()` / `TableManager:Batch()`. Always pair with
 	a matching `Resume()` call.
 ]=]
-function ChangeDetector:Suspend()
+function ChangeDetector.Suspend(self: CD_Internal)
 	self._suspended = true
 end
 
 --[=[
 	Resumes change detection after a `Suspend` call.
 ]=]
-function ChangeDetector:Resume()
+function ChangeDetector.Resume(self: CD_Internal)
 	self._suspended = false
 end
 
@@ -467,7 +487,7 @@ end
 -- (rather than a closure literal built fresh inside `_dispatch` on every call)
 -- so `pcall` below can call it by reference + args instead of allocating a new
 -- closure per dispatch — `job` and `self` are passed through as `pcall` args.
-const function runDispatchJob(self: ChangeDetector, job: () -> ())
+const function runDispatchJob(self: CD_Internal, job: () -> ())
 	job()
 	while #self._dispatchQueue > 0 do
 		local queued = table.remove(self._dispatchQueue, 1) :: () -> ()
@@ -488,7 +508,7 @@ end
 	re-entrant writes may collapse into fewer events; the net result is
 	unchanged.
 ]]
-function ChangeDetector:_dispatch(job: () -> ())
+function ChangeDetector._dispatch(self: CD_Internal, job: () -> ())
 	if self._dispatching then
 		table.insert(self._dispatchQueue, job)
 		return
@@ -547,12 +567,13 @@ end
 	and the base-level ancestor callbacks. No-op when `node` is nil (no changes).
 	Must be called inside a `_dispatch` closure.
 ]]
-function ChangeDetector:_emitRootNode(node: Diff.DiffNode?, basePath: PathArray, ancestorSnapshot: AncestorSnapshot)
+function ChangeDetector._emitRootNode(self: CD_Internal, node: Diff.DiffNode?, basePath: PathArray, ancestorSnapshot: AncestorSnapshot)
 	if not node then
 		return
 	end
+	debug.profilebegin("emitRootNode")
 
-	local rootParentPath: Path = {}
+	local rootParentPath: PathArray = {}
 	local rootKey: any? = nil
 	if #basePath > 0 then
 		rootParentPath = table.create(#basePath - 1)
@@ -564,13 +585,15 @@ function ChangeDetector:_emitRootNode(node: Diff.DiffNode?, basePath: PathArray,
 	-- the origin. Fire ancestor callbacks for the base level afterward.
 	self:_processDiffNode(node, basePath, rootParentPath, rootKey, basePath, node, ancestorSnapshot)
 	self:_fireAncestorCallbacks(basePath, node, ancestorSnapshot)
+	debug.profileend()
 end
 
 --[=[
 	DFS traversal for diff nodes.
 	Fires callbacks for each node with origin metadata from the root assignment.
 ]=]
-function ChangeDetector:_processDiffNode(
+function ChangeDetector._processDiffNode(
+	self: CD_Internal,
 	node: Diff.DiffNode,
 	nodePath: PathArray,
 	parentPath: PathArray,
@@ -688,6 +711,7 @@ function ChangeDetector.EmitAncestorNotifications(
 		metadata: ChangeMetadata
 	) -> ()
 )
+	debug.profilebegin("CD:EmitAncestorNotifications")
 	-- Pre-navigate rootTable once, caching the value at each depth 0..fromDepth.
 	-- The original code re-navigated from the root at every ancestor level
 	-- (O(0+1+…+depth) = O(depth²) hash lookups); this reduces it to one O(depth) pass.
@@ -706,19 +730,22 @@ function ChangeDetector.EmitAncestorNotifications(
 		end
 	end
 
+	-- Build the deepest prefix once; every level's path is a bounded slice of
+	-- it. Each fired path must still be its own fresh table (Signal:Fire leaks
+	-- the reference), so a `table.move` bulk copy replaces the previous
+	-- per-element Lua loop at each level — same O(i) elements copied, but as a
+	-- single native bulk-copy call instead of an interpreted loop.
+	local prefix: PathArray = table.create(fromDepth)
+	for j = 1, fromDepth do
+		prefix[j] = basePath[j]
+	end
+
 	for i = fromDepth, 0, -1 do
 		local currentValue: any = if cachedValues then cachedValues[i + 1] else nil
 
 		if keyChangedMode == "parent" and i >= 1 then
-			-- Build parentPath (i-1 elements) with a manual loop, then derive
-			-- currentPath via table.clone + one append — avoids copying basePath twice.
-			-- Each path is a fresh unique table because Signal:Fire leaks the reference.
-			local parentPath: PathArray = table.create(i - 1)
-			for j = 1, i - 1 do
-				parentPath[j] = basePath[j]
-			end
-			local currentPath: PathArray = table.clone(parentPath)
-			currentPath[i] = basePath[i]
+			local currentPath: PathArray = table.move(prefix, 1, i, 1, table.create(i))
+			local parentPath: PathArray = table.move(prefix, 1, i - 1, 1, table.create(i - 1))
 
 			local key = basePath[i]
 			local keyValue = nil
@@ -728,10 +755,7 @@ function ChangeDetector.EmitAncestorNotifications(
 			emitKeyChanged(parentPath, key, keyValue, nil, metadata)
 			emitValueChanged(currentPath, currentValue, currentValue, metadata)
 		else
-			local currentPath: PathArray = table.create(i)
-			for j = 1, i do
-				currentPath[j] = basePath[j]
-			end
+			local currentPath: PathArray = table.move(prefix, 1, i, 1, table.create(i))
 			emitValueChanged(currentPath, currentValue, currentValue, metadata)
 
 			if keyChangedMode == "child" and i < #basePath then
@@ -740,13 +764,15 @@ function ChangeDetector.EmitAncestorNotifications(
 			end
 		end
 	end
+	debug.profileend()
 end
 
 --[=[
 	Notifies parent levels above the captured path once per assignment operation.
 	Ancestor callbacks receive Diff=nil and share OriginPath/OriginDiff metadata.
 ]=]
-function ChangeDetector:_fireAncestorCallbacks(
+function ChangeDetector._fireAncestorCallbacks(
+	self: CD_Internal,
 	capturedPath: PathArray,
 	rootDiff: Diff.DiffNode,
 	snapshot: AncestorSnapshot

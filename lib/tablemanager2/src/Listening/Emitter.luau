@@ -189,6 +189,7 @@ function Emitter.fireAncestorValueChangedNotifications(
 	metadata: ChangeMetadata,
 	includeKeyChanged: boolean?
 )
+	debug.profilebegin("fireAncestorValueChangedNotifications")
 	const ancestorMetadata: ChangeMetadata = {
 		Diff = nil,
 		OriginPath = metadata.OriginPath,
@@ -221,6 +222,7 @@ function Emitter.fireAncestorValueChangedNotifications(
 			})
 		end
 	)
+	debug.profileend()
 end
 
 --[[
@@ -277,9 +279,74 @@ function Emitter.fireArrayOperation(
 end
 
 --[[
+	The three array-op emit primitives, callable directly by single-op mutators
+	(ArrayInsert/ArrayRemove/ArraySwapRemove etc.) without allocating a `makeEmit`
+	closure table just to invoke one of them once. `makeEmit` below wraps these
+	for callers (ArrayDiff's batch LCS re-diff) that genuinely need all three as
+	a value passed around.
+]]
+function Emitter.emitRemoved(manager: TableManagerLike, path: PathArray, index: number, oldValue: any, move: MoveMetadata?)
+	debug.profilebegin("emitRemoved")
+	const removedPath: PathArray = PathHelpers.Append(path, index)
+	-- Array element old values are never a slice of some larger captured
+	-- container (unlike the dict path's diff `old`, each direct array op
+	-- only ever hands us the one element that changed) -- so the snapshot
+	-- is anchored directly at `removedPath` itself, not `path`. Gated
+	-- against `path` (the array's own registry node) so an array-level
+	-- listener's `SnapshotOldValues` still covers per-element fires.
+	const oldSnapshot = BatchUtilsModule.BuildOldSnapshotForLeaf(manager, path, removedPath, oldValue)
+	const metadata = createSyntheticMetadata(manager.Raw, removedPath, "removed", index, nil, oldValue, oldSnapshot)
+	metadata.Move = move
+	Emitter.fireArrayOperation(manager, "ArrayRemoved", path, removedPath, {
+		Index = index,
+		OldValue = oldValue,
+		Metadata = metadata,
+	})
+	debug.profileend()
+end
+
+function Emitter.emitInserted(manager: TableManagerLike, path: PathArray, index: number, newValue: any, move: MoveMetadata?)
+	debug.profilebegin("emitInserted")
+	const insertedPath = PathHelpers.Append(path, index)
+	const metadata = createSyntheticMetadata(manager.Raw, insertedPath, "added", index, newValue, nil, nil)
+	metadata.Move = move
+	Emitter.fireArrayOperation(manager, "ArrayInserted", path, insertedPath, {
+		Index = index,
+		NewValue = newValue,
+		Metadata = metadata,
+	})
+	debug.profileend()
+end
+
+function Emitter.emitSet(
+	manager: TableManagerLike,
+	path: PathArray,
+	index: number,
+	newValue: any,
+	oldValue: any,
+	move: MoveMetadata?
+)
+	debug.profilebegin("emitSet")
+	const setPath = PathHelpers.Append(path, index)
+	const oldSnapshot = BatchUtilsModule.BuildOldSnapshotForLeaf(manager, path, setPath, oldValue)
+	const metadata = createSyntheticMetadata(manager.Raw, setPath, "changed", index, newValue, oldValue, oldSnapshot)
+	metadata.Move = move
+	Emitter.fireArrayOperation(manager, "ArraySet", path, setPath, {
+		Index = index,
+		NewValue = newValue,
+		OldValue = oldValue,
+		Metadata = metadata,
+	})
+	debug.profileend()
+end
+
+--[[
 	Builds the `Emit` interface for a single array path, wiring the three
 	callbacks to fire `ArrayRemoved`/`ArrayInserted`/`ArraySet` signals,
-	exact-path listeners, and ancestor callbacks in the correct order.
+	exact-path listeners, and ancestor callbacks in the correct order. Thin
+	wrapper over `emitRemoved`/`emitInserted`/`emitSet` for callers (ArrayDiff's
+	batch LCS re-diff) that need the three bundled as one value; single-op
+	mutators should call the named functions directly instead.
 ]]
 -- Return type is intentionally unannotated: the `set` callback accepts an
 -- optional 4th `move` arg (used by ArraySwapRemove) beyond what
@@ -287,45 +354,13 @@ end
 function Emitter.makeEmit(manager: TableManagerLike, path: PathArray)
 	return {
 		removed = function(index: number, oldValue: any, move: MoveMetadata?)
-			const removedPath: PathArray = PathHelpers.Append(path, index)
-			-- Array element old values are never a slice of some larger captured
-			-- container (unlike the dict path's diff `old`, each direct array op
-			-- only ever hands us the one element that changed) -- so the snapshot
-			-- is anchored directly at `removedPath` itself, not `path`. Gated
-			-- against `path` (the array's own registry node) so an array-level
-			-- listener's `SnapshotOldValues` still covers per-element fires.
-			const oldSnapshot = BatchUtilsModule.BuildOldSnapshotForLeaf(manager, path, removedPath, oldValue)
-			const metadata =
-				createSyntheticMetadata(manager.Raw, removedPath, "removed", index, nil, oldValue, oldSnapshot)
-			metadata.Move = move
-			Emitter.fireArrayOperation(manager, "ArrayRemoved", path, removedPath, {
-				Index = index,
-				OldValue = oldValue,
-				Metadata = metadata,
-			})
+			Emitter.emitRemoved(manager, path, index, oldValue, move)
 		end,
 		inserted = function(index: number, newValue: any, move: MoveMetadata?)
-			const insertedPath = PathHelpers.Append(path, index)
-			const metadata = createSyntheticMetadata(manager.Raw, insertedPath, "added", index, newValue, nil, nil)
-			metadata.Move = move
-			Emitter.fireArrayOperation(manager, "ArrayInserted", path, insertedPath, {
-				Index = index,
-				NewValue = newValue,
-				Metadata = metadata,
-			})
+			Emitter.emitInserted(manager, path, index, newValue, move)
 		end,
 		set = function(index: number, newValue: any, oldValue: any, move: MoveMetadata?)
-			const setPath = PathHelpers.Append(path, index)
-			const oldSnapshot = BatchUtilsModule.BuildOldSnapshotForLeaf(manager, path, setPath, oldValue)
-			const metadata =
-				createSyntheticMetadata(manager.Raw, setPath, "changed", index, newValue, oldValue, oldSnapshot)
-			metadata.Move = move
-			Emitter.fireArrayOperation(manager, "ArraySet", path, setPath, {
-				Index = index,
-				NewValue = newValue,
-				OldValue = oldValue,
-				Metadata = metadata,
-			})
+			Emitter.emitSet(manager, path, index, newValue, oldValue, move)
 		end,
 	}
 end

@@ -316,7 +316,6 @@ end
 	shadow-seed/write/flush (immediate).
 ]]
 function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>, newValue: any)
-	debug.profilebegin("applyWrite")
 	const lastIdx = #parsedPath
 	const key = parsedPath[lastIdx]
 
@@ -359,13 +358,14 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 	const ignored = IgnoreTrieModule.IsPathIgnored(self._ignoreTrie, parsedPath)
 
 	-- Array-append fast path (key == length + 1): apply immediately and report.
-	-- Only classify the parent table when the key is numeric; classification is O(n)
-	-- and its result is never used for string/non-numeric keys.
-	local isArray, arrayLength = false, 0
+	-- "Is this an append" is fully decided by the nil guard + length check below
+	-- (`#parentTable` is O(log n)) — no need to classify/enumerate the whole
+	-- table just to detect this one shape.
+	local isAppend = false
 	if type(key) == "number" then
-		isArray, arrayLength = ProxyManagerModule.ClassifyTable(parentTable)
+		isAppend = parentTable[key] == nil and key == #parentTable + 1
 	end
-	if isArray and key == arrayLength + 1 then
+	if isAppend then
 		parentTable[key] = newValue
 		if not ignored then
 			const parentPath: PathArray<S> = table.move(parsedPath, 1, lastIdx - 1, 1, table.create(lastIdx - 1)) :: any
@@ -382,8 +382,15 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 		debug.profilebegin("applyWrite (batched)")
 		const batch = self._batch
 		const parentPath: PathArray<S> = table.move(parsedPath, 1, lastIdx - 1, 1, table.create(lastIdx - 1)) :: any
-		if isArray and batch then
-			ensureBatchPathTracking(batch, parentPath)
+		-- Only the batched path needs the full O(n) classification: it gates
+		-- whether `parentPath` is tracked for Resume's LCS array-diff, which
+		-- requires knowing the table is actually array-shaped (not just
+		-- numeric-keyed) to avoid misdiffing sparse/dict tables as arrays.
+		if type(key) == "number" and batch then
+			const isArray = ProxyManagerModule.ClassifyTable(parentTable)
+			if isArray then
+				ensureBatchPathTracking(batch, parentPath)
+			end
 		end
 		markBatchBranchDirty(batch, parentPath)
 
@@ -395,7 +402,6 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 			PropagationModule.RegisterSubtree(self, newValue)
 		end
 		Mutator.pruneDetachedValue(self, oldValue, newValue)
-		debug.profileend()
 		debug.profileend()
 		return
 	end
@@ -426,7 +432,6 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 	elseif trackable then
 		CoalescedFlushModule.Request(self, parsedPath)
 	end
-	debug.profileend()
 	debug.profileend()
 end
 
