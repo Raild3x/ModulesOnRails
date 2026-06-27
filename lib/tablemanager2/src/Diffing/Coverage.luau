@@ -41,19 +41,60 @@ const Coverage = {}
 	link group does NOT make this true: it answers "does this manager itself
 	observe `path`", independent of fan-out obligations.
 ]=]
-function Coverage.IsLocallyObserved(self: TableManagerLike, path: PathArray): boolean
-	if
-		self.ValueChanged:IsConnectedTo()
+-- True if ANY of the manager's 7 public per-change Signals has a connection.
+-- Each Signal fires for ANY path, and the dict diff drives one fire per changed
+-- leaf, so a single connection both forces tracking AND makes the full diff depth
+-- observable (see `ResolveDiffMaxDepth`).
+const function hasConnectedSignal(self: TableManagerLike): boolean
+	return self.ValueChanged:IsConnectedTo()
 		or self.KeyAdded:IsConnectedTo()
 		or self.KeyRemoved:IsConnectedTo()
 		or self.KeyChanged:IsConnectedTo()
 		or self.ArrayInserted:IsConnectedTo()
 		or self.ArrayRemoved:IsConnectedTo()
 		or self.ArraySet:IsConnectedTo()
-	then
+end
+
+function Coverage.IsLocallyObserved(self: TableManagerLike, path: PathArray): boolean
+	if hasConnectedSignal(self) then
 		return true
 	end
 	return self._listenerRegistry:CoversChangesAt(path)
+end
+
+--[=[
+	Resolves the diff depth bound for a write at `path`: `nil` (unbounded / full
+	depth) when any forcing condition holds, else the deepest registered listener
+	reach strictly below `path` (`ListenerRegistry.MaxObservedDepth`). Each forcing
+	condition makes the full subtree depth observable, so the bound must not apply:
+	- a connected global Signal (one fire per changed leaf);
+	- a link group (`_sharesObservers`; fan-out replays `metadata.Diff`);
+	- any wildcard listener (depth not cheaply knowable);
+	- any covering `ProvideDiff` listener (explicitly wants the subtree).
+
+	Returning `0` means "no descendant listener" — diff only the `path` node itself.
+	Only consulted on the immediate (non-`arraySink`) diff path for now; the batch
+	flush stays full-depth.
+]=]
+function Coverage.ResolveDiffMaxDepth(self: TableManagerLike, path: PathArray): number?
+	if hasConnectedSignal(self) then
+		return nil
+	end
+	if self._sharesObservers then
+		return nil
+	end
+	const registry = self._listenerRegistry
+	if registry._hasWildcards then
+		return nil
+	end
+	if registry:WantsFullDiff(path) then
+		return nil
+	end
+	const depth = registry:MaxObservedDepth(path)
+	if depth == math.huge then
+		return nil
+	end
+	return depth
 end
 
 function Coverage.IsTrackable(self: TableManagerLike, path: PathArray): boolean

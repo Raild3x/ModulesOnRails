@@ -1005,7 +1005,10 @@ function TableManager._doFlush<T>(self: TM_Internal<T>, path: PathArray)
 	const old = BaselineModule.Get(self, path)
 	const new_ = self:Get(path :: any, true)
 	const oldSnapshot = BatchUtilsModule.BuildOldSnapshot(self, path, old)
-	self._changeDetector:CheckForChangesBetween(old, new_, path, self.Raw, nil, oldSnapshot)
+	-- Transparent depth bound: don't diff below the deepest listener that observes
+	-- `path` (nil = unbounded when a signal/link/wildcard/ProvideDiff forces it).
+	const maxDepth = CoverageModule.ResolveDiffMaxDepth(self, path)
+	self._changeDetector:CheckForChangesBetween(old, new_, path, self.Raw, nil, oldSnapshot, maxDepth)
 	BaselineModule.Reconcile(self, path)
 end
 

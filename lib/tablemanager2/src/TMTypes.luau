@@ -148,7 +148,7 @@ export type ForOptions = {
 
 export type TableManager<T = { [any]: any }> = {
 	Raw: T,
-	Proxy: Proxy<T, "">?,
+	Proxy: T,--Proxy<T, "">?, -- Temporarily commented out until Luau fixes type functions with generic inference
 
 	-- Signals (fire once per change)
 	ValueChanged: Signal<(path: PathArray, newValue: any, oldValue: any) -> (), PathArray, any, any>,

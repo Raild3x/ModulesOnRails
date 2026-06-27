@@ -204,6 +204,15 @@ export type ListenerOptions = {
 	--- always the raw diff-tree value regardless of this option. Costs an extra
 	--- copy only when at least one listener on the affected path opts in.
 	SnapshotOldValues: boolean?,
+	--- When true, this listener is guaranteed the full granular diff subtree in
+	--- `metadata.Diff` / `metadata.OriginDiff`, even when the transparent depth
+	--- bound would otherwise elide the subtree below it (see
+	--- `Coverage.ResolveDiffMaxDepth`). Set this if the callback walks
+	--- `metadata.Diff.children` / `OriginDiff` beyond its own `ListenDepth` reach.
+	--- Forces a full-depth diff for any change it covers — the deliberate, opt-in
+	--- cost. Has no effect on the values delivered (`newValue`/`oldValue`), which
+	--- are always exact.
+	ProvideDiff: boolean?,
 }
 
 export type Connection = {
@@ -230,6 +239,7 @@ type Listener = {
 	DepthStyle: "<=" | "==",
 	Once: boolean,
 	SnapshotOldValues: boolean,
+	ProvideDiff: boolean,
 	PathLength: number,
 	Connection: Connection,
 	-- "coalesced" fire-mode pending state; see `flushCoalescedListener`.
@@ -258,6 +268,13 @@ type ListenerNode = {
 	-- opted-in listeners). Used by `SnapshotRootFor` to find the shallowest path
 	-- that needs a snapshot built for a given change, without visiting listeners.
 	SnapshotSubtree: number,
+	-- Listeners (any event type) registered at this exact node with
+	-- `ProvideDiff = true`. Subset of Count.
+	ProvideDiffCount: number,
+	-- ProvideDiffCount at or below this node (mirrors SnapshotSubtree). Used by
+	-- `WantsFullDiff` to answer "does any opted-in listener cover this change?"
+	-- without visiting listeners.
+	ProvideDiffSubtree: number,
 	-- Child nodes keyed by path segment.
 	Children: { [any]: ListenerNode },
 	-- Back-pointer and this node's key within Parent.Children, used to prune
@@ -288,6 +305,17 @@ export type ListenerRegistry = {
 	-- (their lowest common ancestor), so callers copy the smallest value that
 	-- still lets every opted-in listener slice out its own old value.
 	SnapshotRootFor: (self: ListenerRegistry, path: PathArray) -> PathArray?,
+	-- Deepest reach (`relativeDepth + ListenDepth`) of any listener registered
+	-- STRICTLY BELOW `path`; `math.huge` if any such listener is unbounded
+	-- (`ListenDepth == nil`), `0` if none. The diff at `path` must be built this
+	-- many levels deep for every covering descendant listener to fire correctly —
+	-- drives the transparent depth bound. Listeners AT or ABOVE `path` are not
+	-- counted (they fire from the root node / ancestor walk, not the subtree).
+	MaxObservedDepth: (self: ListenerRegistry, path: PathArray) -> number,
+	-- True if any listener that would fire for a change at `path` opted into
+	-- `ProvideDiff` — an opted-in ancestor of `path` (receives `OriginDiff`) or one
+	-- at/below `path`. When true the caller must diff at full depth.
+	WantsFullDiff: (self: ListenerRegistry, path: PathArray) -> boolean,
 	Destroy: (self: ListenerRegistry) -> (),
 
 	_root: ListenerNode,
@@ -386,6 +414,8 @@ const function createNode(parent: ListenerNode?, key: any?): ListenerNode
 		Subtree = 0,
 		SnapshotCount = 0,
 		SnapshotSubtree = 0,
+		ProvideDiffCount = 0,
+		ProvideDiffSubtree = 0,
 		Children = {},
 		Parent = parent,
 		Key = key,
@@ -493,6 +523,16 @@ const function adjustSnapshotSubtree(node: ListenerNode, delta: number)
 	end
 end
 
+-- Parallel to `adjustSnapshotSubtree` for `ProvideDiff` listeners; see
+-- `WantsFullDiff`. No pruning here for the same reason.
+const function adjustProvideDiffSubtree(node: ListenerNode, delta: number)
+	local current: ListenerNode? = node
+	while current ~= nil do
+		current.ProvideDiffSubtree += delta
+		current = current.Parent
+	end
+end
+
 -- Non-creating node lookup: returns the node at `path` or nil if any segment is absent.
 const function getNode(root: ListenerNode, path: PathArray): ListenerNode?
 	local current = root
@@ -585,6 +625,10 @@ const function fireListenersOnNode(
 					node.SnapshotCount -= 1
 					adjustSnapshotSubtree(node, -1)
 				end
+				if listeners[i].ProvideDiff then
+					node.ProvideDiffCount -= 1
+					adjustProvideDiffSubtree(node, -1)
+				end
 				table.remove(listeners, i)
 				removed += 1
 			end
@@ -647,6 +691,7 @@ function ListenerRegistry:RegisterListener(
 	local depthStyle: "<=" | "==" = if options and options.ListenDepthStyle then options.ListenDepthStyle else "<="
 	local once: boolean = if options and options.Once == true then true else false
 	local snapshotOldValues: boolean = if options and options.SnapshotOldValues == true then true else false
+	local provideDiff: boolean = if options and options.ProvideDiff == true then true else false
 
 	-- One-way latch: once any wildcard listener is registered the fast path in
 	-- FireListenersExact is permanently bypassed for this registry.
@@ -678,6 +723,7 @@ function ListenerRegistry:RegisterListener(
 		DepthStyle = depthStyle,
 		Once = once,
 		SnapshotOldValues = snapshotOldValues,
+		ProvideDiff = provideDiff,
 		PathLength = #path,
 		Connection = nil :: any, -- Will be set below
 	}
@@ -709,6 +755,10 @@ function ListenerRegistry:RegisterListener(
 				node.SnapshotCount -= 1
 				adjustSnapshotSubtree(node, -1)
 			end
+			if listener.ProvideDiff then
+				node.ProvideDiffCount -= 1
+				adjustProvideDiffSubtree(node, -1)
+			end
 			-- Decrement coverage counts and prune now-empty nodes
 			node.Count -= 1
 			decrementAndPrune(node, 1)
@@ -729,6 +779,10 @@ function ListenerRegistry:RegisterListener(
 	if snapshotOldValues then
 		node.SnapshotCount += 1
 		adjustSnapshotSubtree(node, 1)
+	end
+	if provideDiff then
+		node.ProvideDiffCount += 1
+		adjustProvideDiffSubtree(node, 1)
 	end
 
 	return connection
@@ -837,6 +891,115 @@ function ListenerRegistry:CoversChangesAt(path: PathArray): boolean
 	return node.Subtree > 0 -- listener at `path` or somewhere in its subtree
 end
 
+-- KeyAdded/KeyRemoved/KeyChanged listeners are dispatched by ChangeDetector
+-- inspecting the diff node's own CHILDREN (one level below the listener's
+-- registration path) — unlike ValueChanged, which fires from the node's own
+-- value with no children needed. So each such listener needs the diff to reach
+-- at least 1 level below ITS OWN registration node, regardless of its own
+-- ListenDepth (direct Key* dispatch ignores it; `FireListenersExact` uses
+-- relativeDepth = 0 for these non-ancestor fires either way — see
+-- `shouldFireListener`). KeyChanged additionally participates in the ancestor
+-- walk like ValueChanged, so its own ListenDepth still matters there; this floor
+-- only raises it when ListenDepth would otherwise be too shallow (< 1).
+const KEY_EVENT_NEEDS_CHILD_DEPTH = {
+	KeyAdded = true,
+	KeyRemoved = true,
+	KeyChanged = true,
+}
+
+-- Max reach (`relDepth + ListenDepth`) among listeners at or below `node`, where
+-- `relDepth` is `node`'s depth below the query path. Returns `math.huge` as soon
+-- as an unbounded (`ListenDepth == nil`) listener is found. Walks only the sparse
+-- registry tree (listener-bearing nodes + spine), pruning empty branches via
+-- `Subtree`, so it is O(observed nodes), not O(data).
+const function maxReachAtOrBelow(node: ListenerNode, relDepth: number): number
+	local best = 0
+	if node.Count > 0 then
+		for eventType, bucket in node.Listeners do
+			const needsChildDepth = KEY_EVENT_NEEDS_CHILD_DEPTH[eventType]
+			for _, listener in bucket do
+				const d = listener.Depth
+				if d == nil then
+					return math.huge
+				end
+				const effectiveD = if needsChildDepth and d < 1 then 1 else d
+				const reach = relDepth + effectiveD
+				if reach > best then
+					best = reach
+				end
+			end
+		end
+	end
+	for _, child in node.Children do
+		if child.Subtree > 0 then
+			const childBest = maxReachAtOrBelow(child, relDepth + 1)
+			if childBest > best then
+				best = childBest
+			end
+		end
+	end
+	return best
+end
+
+--[=[
+	Deepest reach (`relativeDepth + ListenDepth`) of any listener registered
+	STRICTLY BELOW `path`, PLUS at least 1 if a KeyAdded/KeyRemoved/KeyChanged
+	listener is registered exactly AT `path` (see `KEY_EVENT_NEEDS_CHILD_DEPTH` —
+	those fire from `path`'s own children, even though registered at `path`
+	itself, so they are not purely "above" the depth this query bounds).
+	`math.huge` if any covered listener is unbounded, `0` if none.
+]=]
+function ListenerRegistry:MaxObservedDepth(path: PathArray): number
+	const node = getNode(self._root, path)
+	if node == nil then
+		return 0
+	end
+	local best = 0
+	for eventType in node.Listeners do
+		if KEY_EVENT_NEEDS_CHILD_DEPTH[eventType] then
+			best = 1
+			break
+		end
+	end
+	-- `Subtree == Count` ⇒ no descendant of `node` carries a listener.
+	if node.Subtree == node.Count then
+		return best
+	end
+	for _, child in node.Children do
+		if child.Subtree > 0 then
+			const childBest = maxReachAtOrBelow(child, 1) -- child is one level below `path`
+			if childBest > best then
+				best = childBest
+			end
+		end
+	end
+	return best
+end
+
+--[=[
+	True if any listener that would fire for a change at `path` opted into
+	`ProvideDiff` — an opted-in ancestor of `path` (root included; ancestors
+	receive `OriginDiff`), one at `path`, or one in `path`'s subtree. When true the
+	caller must diff at full depth. Mirrors `CoversChangesAt`'s walk.
+]=]
+function ListenerRegistry:WantsFullDiff(path: PathArray): boolean
+	local node = self._root
+	if node.ProvideDiffCount > 0 then
+		return true -- a root opted-in listener is an ancestor of every path
+	end
+	for _, segment in path do
+		const child = node.Children[segment]
+		if child == nil then
+			return false -- no node at this prefix, nor anywhere at/below `path`
+		end
+		node = child
+		if node.ProvideDiffCount > 0 then
+			return true -- opted-in listener at an ancestor of, or at, `path`
+		end
+	end
+	return node.ProvideDiffSubtree > 0 -- opted-in listener at or below `path`
+end
+
 --[=[
 	Returns the absolute path a caller should snapshot the OLD value at for a
 	change landing at `path`, or `nil` if no `SnapshotOldValues` listener would
@@ -936,6 +1099,8 @@ function ListenerRegistry.Destroy(self: ListenerRegistry)
 		node.Subtree = 0
 		node.SnapshotCount = 0
 		node.SnapshotSubtree = 0
+		node.ProvideDiffCount = 0
+		node.ProvideDiffSubtree = 0
 
 		for _, child in node.Children do
 			destroyNode(child)

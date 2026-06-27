@@ -209,8 +209,54 @@ local function make_opaque_leaf(v1: any, v2: any): DiffNode?
 	return nil
 end
 
+-- Pure boolean form of the diff, used ONLY at a depth cutoff to decide whether a
+-- subtree actually differs, without allocating any diff-tree nodes (short-
+-- circuits on the first found difference instead of recording every one).
+--
+-- A cutoff cannot soundly use container identity (`v1 ~= v2`) as a "did this
+-- change" proxy: `old` typically comes from the persistent baseline/shadow
+-- (`Baseline.Get`/`ShadowNode.Get`), which mirrors every OBSERVED table via a
+-- deep copy (`copyForShadow`) — a freshly-allocated table that is NEVER the
+-- same object as the live `new` value, even when content is byte-identical
+-- (e.g. a same-table self-assignment). Mirrors `diff`/`diff_tables`'s own
+-- opacity/branching rules exactly, so the cutoff's notion of "changed" matches
+-- what the unbounded recursive walk would have found.
+local function valuesEqual(v1: any, v2: any, ctx: Ctx?, parentChildrenOpaque: boolean): boolean
+	if isOpaqueValue(v1, nil, ctx, parentChildrenOpaque) or isOpaqueValue(v2, nil, ctx, parentChildrenOpaque) then
+		return liveValue(v1, nil, ctx) == liveValue(v2, nil, ctx)
+	end
+	if v1 == v2 then
+		return true
+	end
+	if type(v1) ~= "table" or type(v2) ~= "table" then
+		return false
+	end
+	local childrenOpaque = ctx ~= nil and (ctx.hasOpaqueChildren(v1) or ctx.hasOpaqueChildren(v2))
+	for k, a in pairs(v1) do
+		local b = v2[k]
+		if b == nil then
+			return false
+		end
+		if not valuesEqual(a, b, ctx, childrenOpaque) then
+			return false
+		end
+	end
+	for k in pairs(v2) do
+		if v1[k] == nil then
+			return false
+		end
+	end
+	return true
+end
+
 -- ─── Core diff ───────────────────────────────────────────────────────────────
 
+-- `depth` is the diff-depth of the t1/t2 CONTAINER relative to the diff root
+-- (root container = 0); its children sit at `depth + 1`. `maxDepth` (nil =
+-- unbounded) bounds recursion: a both-tables child AT or below `maxDepth` is not
+-- descended — it is emitted as a childless `changed` node when its identity
+-- differs, and otherwise skipped. The bound is only ever set on the immediate
+-- (non-`arraySink`) path; see `ChangeDetector.CheckForChangesBetween`.
 local function diff_tables(
 	t1: { [any]: any },
 	t2: { [any]: any },
@@ -218,10 +264,14 @@ local function diff_tables(
 	snap2: Snapshot?,
 	ctx: Ctx?,
 	path: Path?,
-	arraySink: { ArraySinkEntry }?
+	arraySink: { ArraySinkEntry }?,
+	depth: number?,
+	maxDepth: number?
 ): DiffTree?
 	local tree: DiffTree = {}
 	local visited = {}
+	local containerDepth = depth or 0
+	local childDepth = containerDepth + 1
 
 	-- Hoisted once per container (not per key): whether t1/t2's DIRECT
 	-- children should be treated as opaque leaves regardless of individual
@@ -257,16 +307,27 @@ local function diff_tables(
 		if v2 == nil then
 			tree[k] = make_removal_tree(v1, ctx)
 		elseif is_v1_table and is_v2_table then
+			if maxDepth ~= nil and childDepth >= maxDepth then
+				-- Depth cutoff: no listener observes deeper than this child, so stop.
+				-- Emit a childless `changed` node when the subtrees actually differ (the
+				-- same node the `ref_changed and child_tree == nil` case below produces,
+				-- which a covering listener still fires on); container identity alone
+				-- can't decide this (see `valuesEqual`), so check content instead.
+				-- v1/v2 are already confirmed non-opaque themselves (the opacity check
+				-- above would have `continue`d otherwise); only their own children might be.
+				if not valuesEqual(v1, v2, ctx, false) then
+					tree[k] = { type = "changed", old = v1, new = v2, children = nil }
+				end
 			-- Array-aware mode: a both-tables node that is array-like on BOTH sides
 			-- is collected for LCS re-diffing and excluded from the dict tree (so it
 			-- never appears as positional changes in the OriginDiff). Creation/removal
 			-- (one side not a table) still flows through the dict add/remove paths.
-			if arraySink ~= nil and isSequence(v1) and isSequence(v2) then
+			elseif arraySink ~= nil and isSequence(v1) and isSequence(v2) then
 				table.insert(arraySink, { path = PathHelpers.Append(path :: Path, k), old = v1, new = v2 })
 			else
 				local ref_changed = ref1 ~= nil and ref2 ~= nil and ref1 ~= ref2
 				local childPath: Path? = if arraySink ~= nil then PathHelpers.Append(path :: Path, k) else nil
-				local child_tree = diff_tables(v1, v2, child_snap1, child_snap2, ctx, childPath, arraySink)
+				local child_tree = diff_tables(v1, v2, child_snap1, child_snap2, ctx, childPath, arraySink, childDepth, maxDepth)
 
 				if ref_changed and child_tree == nil then
 					tree[k] = { type = "changed", old = v1, new = v2, children = nil }
@@ -324,13 +385,19 @@ local function diff_tables(
 	return if next(tree) ~= nil then tree else nil
 end
 
+-- `maxDepth` (nil = unbounded) bounds how deep the diff tree is built below the
+-- root: a both-tables node AT or below `maxDepth` is not descended (emitted as a
+-- childless node). The root is depth 0. Callers compute the bound from registered
+-- listener depth; see `ChangeDetector.CheckForChangesBetween` /
+-- `Coverage.ResolveDiffMaxDepth`.
 local function diff(
 	v1: any,
 	v2: any,
 	snap1: Snapshot?,
 	snap2: Snapshot?,
 	ctx: Ctx?,
-	arraySink: { ArraySinkEntry }?
+	arraySink: { ArraySinkEntry }?,
+	maxDepth: number?
 ): DiffNode?
 	-- Opacity overrides the table/scalar branching entirely: an opaque value
 	-- (or nil) on either side is compared like a scalar, regardless of what
@@ -343,13 +410,24 @@ local function diff(
 	local is_v2_table = type(v2) == "table"
 
 	if is_v1_table and is_v2_table then
+		if maxDepth ~= nil and maxDepth <= 0 then
+			-- Bound is 0: nothing below the root is observed, so don't build the
+			-- subtree. A childless `changed` node still fires a listener AT the root
+			-- (basePath) with its full old/new. Container identity can't decide "no
+			-- change" here (see `valuesEqual`) — old may be a baseline shadow copy,
+			-- never reference-equal to a live new value even when content matches.
+			if not valuesEqual(v1, v2, ctx, false) then
+				return { type = "changed", old = v1, new = v2, children = nil }
+			end
+			return nil
+		end
 		-- Array-aware mode: the root itself being an array on both sides is
 		-- collected for LCS re-diffing and produces no dict tree.
 		if arraySink ~= nil and isSequence(v1) and isSequence(v2) then
 			table.insert(arraySink, { path = {}, old = v1, new = v2 })
 			return nil
 		end
-		local children = diff_tables(v1, v2, snap1, snap2, ctx, {}, arraySink)
+		local children = diff_tables(v1, v2, snap1, snap2, ctx, {}, arraySink, 0, maxDepth)
 		if children then
 			-- Wrap in a root node with descendantChanged type
 			return make_descendant_node(v1, v2, children)

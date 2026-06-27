@@ -88,7 +88,11 @@ export type ChangeDetector = {
 		arraySink: { Diff.ArraySinkEntry }?,
 		-- See `AncestorSnapshot.OldSnapshot`. Caller-computed; nil when no
 		-- opted-in listener covers this change.
-		oldSnapshot: { Value: any, RootPath: PathArray }?
+		oldSnapshot: { Value: any, RootPath: PathArray }?,
+		-- Transparent diff depth bound (nil = unbounded). Honoured only on the
+		-- non-`arraySink` (immediate) path; ignored when `arraySink` is present.
+		-- See `Coverage.ResolveDiffMaxDepth`.
+		maxDepth: number?
 	) -> (),
 	--- Dispatches an ALREADY-BUILT root diff node at `basePath` (fires the same
 	--- leaf + ancestor callbacks as `CheckForChangesBetween`) WITHOUT running
@@ -362,7 +366,8 @@ function ChangeDetector.CheckForChangesBetween(
 	basePath: PathArray,
 	rootTable: { [any]: any }?,
 	arraySink: { Diff.ArraySinkEntry }?,
-	oldSnapshot: { Value: any, RootPath: PathArray }?
+	oldSnapshot: { Value: any, RootPath: PathArray }?,
+	maxDepth: number?
 )
 	if self._debugMode then
 		print("CheckForChangesBetween called:")
@@ -410,12 +415,17 @@ function ChangeDetector.CheckForChangesBetween(
 	-- the per-call relative entries separate from the shared absolute sink.
 	const localArrays: { Diff.ArraySinkEntry }? = if arraySink ~= nil then {} else nil
 
+	-- The depth bound is only safe on the immediate (non-array-aware) path: the
+	-- batch flush's LCS re-diff relies on the full dict tree to locate array
+	-- nodes, so it stays unbounded for now (see plan's "Risk: batch / arraySink").
+	const boundedMaxDepth: number? = if arraySink == nil then maxDepth else nil
+
 	-- Diff.diff stays INSIDE the dispatch closure so a re-entrant check queued
 	-- by _dispatch diffs against state at DRAIN time (see _dispatch's note on
 	-- collapsing chained re-entrant writes).
 	self:_dispatch(function()
 		debug.profilebegin("Dispatch")
-		local rootDiffNode = Diff.diff(oldValue, newValue, nil, nil, ctx, localArrays)
+		local rootDiffNode = Diff.diff(oldValue, newValue, nil, nil, ctx, localArrays, boundedMaxDepth)
 		self:_emitRootNode(rootDiffNode, basePath, ancestorSnapshot)
 		debug.profileend()
 	end)
