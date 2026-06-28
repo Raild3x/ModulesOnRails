@@ -73,10 +73,13 @@ export type FlushMode = "immediate" | "coalesced"
 --// Cross-manager fan-out type shapes (see Propagation.luau) //--
 --------------------------------------------------------------------------------
 
-type opKind = "Set" | "ArrayInsert" | "ArrayRemove" | "ArraySet"
+type opKind = "Set" | "ArrayInsert" | "ArrayRemove" | "ArraySet" | "BatchBegin" | "BatchEnd"
 
 -- An operation that has ALREADY been applied to the shared raw, awaiting replay
--- via `_NotifyApplied`. `Path` is in the receiving manager's own coordinates.
+-- via `_NotifyApplied`, OR a replication op delivered to an `OnApplied`
+-- subscriber (see `Emitter.fireApplied`/`emitReplicationOp`). `Path` is in the
+-- receiving manager's own coordinates; meaningless (`{}`) for `BatchBegin`/
+-- `BatchEnd` markers, which carry no path.
 export type AppliedOp = {
 	Kind: opKind,
 	Path: PathArray,
@@ -158,8 +161,56 @@ export type TableManager<T = { [any]: any }> = {
 	ArrayInserted: Signal<(path: PathArray, index: number, newValue: any) -> (), PathArray, number, any>,
 	ArrayRemoved: Signal<(path: PathArray, index: number, oldValue: any) -> (), PathArray, number, any>,
 	ArraySet: Signal<(path: PathArray, index: number, newValue: any, oldValue: any) -> (), PathArray, number, any, any>,
+	
+	-- Helper methods
+	Get: <S>(self: TableManager<T>, path: Path<S>, suppressNilPartialPaths: boolean?) -> ValueAtPath<T, S>,
+	GetProxy: <S>(self: TableManager<T>, path: Path<S>, suppressNilPartialPaths: boolean?) -> Proxy<T, S>,
+	Set: <S>(self: TableManager<T>, path: Path<S>, value: ValueAtPath<T, S> | OpaqueWrapper<ValueAtPath<T, S>>, buildTablesDynamically: boolean?) -> (),
+	ArrayInsert: <S>(self: TableManager<T>, arrPath: Path<S> | Proxy<T, S>, newValue: any) -> ()
+		& <S>(self: TableManager<T>, arrPath: Path<S> | Proxy<T, S>, index: number, newValue: any) -> (),
+	ArrayRemove: <S>(self: TableManager<T>, arrPath: Path<S> | Proxy<T, S>, index: number) -> any?,
+	ArrayRemoveFirstValue: <S>(self: TableManager<T>, arrPath: Path<S> | Proxy<T, S>, valueToFind: any) -> number?,
+	ArraySwapRemove: <S>(self: TableManager<T>, arrPath: Path<S> | Proxy<T, S>, index: number) -> any?,
+	ArraySwapRemoveFirstValue: <S>(self: TableManager<T>, arrPath: Path<S> | Proxy<T, S>, valueToFind: any) -> number?,
+	MoveTo: <S1, S2>(self: TableManager<T>, currentPath: Path<S1>, newPath: Path<S2>) -> (),
+	CopyTo: <S1, S2>(self: TableManager<T>, currentPath: Path<S1>, newPath: Path<S2>) -> (),
+	Swap: <S1, S2>(self: TableManager<T>, a: Path<S1>, b: Path<S2>) -> (),
+	Update: <S>(self: TableManager<T>, path: Path<S>, updater: (oldValue: ValueAtPath<T, S>) -> ValueAtPath<T, S>) -> (),
 
-	-- Listener registration (fire for ancestors/descendants) --
+	Batch: (self: TableManager<T>, fn: () -> ()) -> (),
+	Suspend: (self: TableManager<T>) -> (),
+	Resume: (self: TableManager<T>) -> (),
+
+	--- Diffs the persistent shadow baseline against the live value at `path`
+	--- (the whole tree when omitted), fires any resulting events, then
+	--- reconciles the shadow to the current live value. A no-op when nothing
+	--- observes `path`. Outside a batch this runs immediately; inside one it
+	--- just marks the branch dirty for `Resume`'s flush, so an explicit
+	--- `Flush` can never break batch atomicity. Also the supported way to
+	--- surface a mutation made by external code that bypassed `Set`/`Proxy`.
+	Flush: <S>(self: TableManager<T>, path: Path<S>?) -> (),
+
+	--- Marks `path` (and every descendant of it) as ignored or not: an ignored
+	--- write still happens, but skips all diff/snapshot/event work. See
+	--- `TableManagerConfig.IgnoredPaths` for the config-time equivalent.
+	SetPathIgnored: <S>(self: TableManager<T>, path: Path<S>, ignored: boolean) -> (),
+
+
+	--- Returns a PLAIN TableManager rooted at the shared table found at `target`
+	--- (a proxy, a path, or a raw value already in this manager's tree), linked
+	--- to this manager via `Link` so writes on either side fan out to the other.
+	Extend: <S>(self: TableManager<T>, target: Proxy<T, S> | Path<S>) -> TableManager<ValueAtPath<T, S>>,
+
+	--- Returns the other managers currently sharing (co-observing) at least one
+	--- live table identity with this one — de-duplicated, excluding self.
+	GetLinkedManagers: (self: TableManager<T>) -> { any },
+	--- Returns true if this manager currently shares a live table identity with `other`.
+	IsLinkedWith: (self: TableManager<T>, other: any) -> boolean,
+
+	OnApplied: (self: TableManager<T>, callback: (op: AppliedOp) -> ()) -> ()->(),
+	OnDestroy: (self: TableManager<T>, callback: () -> ()) -> ()->(),
+
+	Destroy: (self: TableManager<T>) -> (),
 
 	-- Fires when this path is directly reassigned OR any descendant of it
 	OnChange: <S>(
@@ -225,6 +276,7 @@ export type TableManager<T = { [any]: any }> = {
 		callback: (index: number, newValue: any, oldValue: any, metadata: ChangeMetadata) -> (),
 		options: ListenerOptions?
 	) -> Connection,
+
 
 	-- For / Map: reconcile the items found at `path` (a dictionary OR an array)
 	-- by identity, running a handler/transform per item with automatic teardown
@@ -294,72 +346,31 @@ export type TableManager<T = { [any]: any }> = {
 		transform: (entryJanitor: Janitor, key: KeyAtPath<T, S>, value: ElementAtPath<T, S>) -> (any, any)
 	) -> TableManager<any>,
 
-	-- Helper methods
-	Get: <S>(self: TableManager<T>, path: Path<S>, suppressNilPartialPaths: boolean?) -> ValueAtPath<T, S>,
-	GetProxy: <S>(self: TableManager<T>, path: Path<S>, suppressNilPartialPaths: boolean?) -> Proxy<T, S>,
-	Set: <S>(self: TableManager<T>, path: Path<S>, value: ValueAtPath<T, S> | OpaqueWrapper<ValueAtPath<T, S>>, buildTablesDynamically: boolean?) -> (),
-	ArrayInsert: <S>(self: TableManager<T>, arrPath: Path<S> | Proxy<T, S>, newValue: any) -> ()
-		& <S>(self: TableManager<T>, arrPath: Path<S> | Proxy<T, S>, index: number, newValue: any) -> (),
-	ArrayRemove: <S>(self: TableManager<T>, arrPath: Path<S> | Proxy<T, S>, index: number) -> any?,
-	ArrayRemoveFirstValue: <S>(self: TableManager<T>, arrPath: Path<S> | Proxy<T, S>, valueToFind: any) -> number?,
-	ArraySwapRemove: <S>(self: TableManager<T>, arrPath: Path<S> | Proxy<T, S>, index: number) -> any?,
-	ArraySwapRemoveFirstValue: <S>(self: TableManager<T>, arrPath: Path<S> | Proxy<T, S>, valueToFind: any) -> number?,
-	MoveTo: <S1, S2>(self: TableManager<T>, currentPath: Path<S1>, newPath: Path<S2>) -> (),
-	CopyTo: <S1, S2>(self: TableManager<T>, currentPath: Path<S1>, newPath: Path<S2>) -> (),
-	Swap: <S1, S2>(self: TableManager<T>, a: Path<S1>, b: Path<S2>) -> (),
-	-- ForceNotify: <S>(self: TableManager<T>, path: Path<S> | Proxy<T, S>) -> (),
-	Batch: (self: TableManager<T>, fn: () -> ()) -> (),
-	Suspend: (self: TableManager<T>) -> (),
-	Resume: (self: TableManager<T>) -> (),
-
-	--- Diffs the persistent shadow baseline against the live value at `path`
-	--- (the whole tree when omitted), fires any resulting events, then
-	--- reconciles the shadow to the current live value. A no-op when nothing
-	--- observes `path`. Outside a batch this runs immediately; inside one it
-	--- just marks the branch dirty for `Resume`'s flush, so an explicit
-	--- `Flush` can never break batch atomicity. Also the supported way to
-	--- surface a mutation made by external code that bypassed `Set`/`Proxy`.
-	Flush: <S>(self: TableManager<T>, path: Path<S>?) -> (),
-
-	--- Marks `path` (and every descendant of it) as ignored or not: an ignored
-	--- write still happens, but skips all diff/snapshot/event work. See
-	--- `TableManagerConfig.IgnoredPaths` for the config-time equivalent.
-	SetPathIgnored: <S>(self: TableManager<T>, path: Path<S>, ignored: boolean) -> (),
-
-
-	--- Returns a PLAIN TableManager rooted at the shared table found at `target`
-	--- (a proxy, a path, or a raw value already in this manager's tree), linked
-	--- to this manager via `Link` so writes on either side fan out to the other.
-	Extend: <S>(self: TableManager<T>, target: Proxy<T, S> | Path<S>) -> TableManager<ValueAtPath<T, S>>,
-
-	--- Returns the other managers currently sharing (co-observing) at least one
-	--- live table identity with this one — de-duplicated, excluding self.
-	GetLinkedManagers: (self: TableManager<T>) -> { any },
-	--- Returns true if this manager currently shares a live table identity with `other`.
-	IsLinkedWith: (self: TableManager<T>, other: any) -> boolean,
-
-	Destroy: (self: TableManager<T>) -> (),
 }
 
 export type TM_Internal<T = { [any]: any }> = TableManager<T> & {
-	-- fields
+	-- cached Config values
+	_signalFireMode: SignalFireMode,
+	_flushMode: FlushMode,
+	_duplicateReferenceMode: DuplicateReferenceMode,
+	_schema: SchemaCheck?,
+	_onValidationFailed: ((path: PathArray, value: any, err: string) -> ())?,
+
+	-- internal helper objects
 	_proxyManager: ProxyManagerModule.ProxyManager<T>?,
 	_listenerRegistry: ListenerRegistry,
 	_changeDetector: ChangeDetector,
-	-- Set from `Config.SignalFireMode`; controls `Emitter.fireSignal` dispatch.
-	_signalFireMode: SignalFireMode,
+	_opaqueRegistries: OpaqueRegistries,
+	_ignoreTrie: IgnoreTrieNode,
+
 	-- Lazily created by `Emitter.fireSignalCoalesced` when `SignalFireMode == "Coalesced"`.
 	_signalCoalesceState: { [any]: { Args: { n: number, [number]: any } } }?,
-	_schema: SchemaCheck?,
-	_onValidationFailed: ((path: PathArray, value: any, err: string) -> ())?,
-	_duplicateReferenceMode: DuplicateReferenceMode,
-	_Destroyed: boolean?,
+
 	-- Batch state
 	_batchDepth: number,
 	_batch: BatchState?,
 
-	-- Set from `Config.FlushMode`; controls `CoalescedFlush.Request` routing.
-	_flushMode: FlushMode,
+
 	-- The running common-ancestor path of every flush requested since the last
 	-- coalesced flush drained, or nil when nothing is pending. See `CoalescedFlush`.
 	_pendingFlushRoot: PathArray?,
@@ -375,14 +386,19 @@ export type TM_Internal<T = { [any]: any }> = TableManager<T> & {
 	_sharesObservers: boolean?,
 	_janitor: Janitor,
 
-	_opaqueRegistries: OpaqueRegistries,
-	_ignoreTrie: IgnoreTrieNode,
+	_appliedListeners: { (op: AppliedOp) -> () },
+	_destroyListeners: { () -> () },
+
+	--// Internal Methods //--
 
 	-- Re-fires listeners/signals for an op that has ALREADY been applied to the
 	-- shared raw, WITHOUT mutating or snapshot-diffing. Used only by cross-manager
 	-- fan-out (see `Propagation`); `op.Path` is in this manager's own coordinates.
 	_NotifyApplied: (self: TM_Internal<T>, op: AppliedOp) -> (),
-	_doFlush: (self: TM_Internal<T>, path: PathArray) -> (),
+	-- `forceFullDepth` bypasses `Coverage.ResolveDiffMaxDepth` for this flush only
+	-- (used by `Flush` when synthesizing replication ops for an otherwise-untracked
+	-- path); it never affects the general write path's depth bound.
+	_doFlush: (self: TM_Internal<T>, path: PathArray, forceFullDepth: boolean?) -> (),
 }
 
 export type TableManagerLike = TM_Internal<{[any]:any}>

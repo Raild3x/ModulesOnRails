@@ -686,20 +686,6 @@ return function(t: tiniest)
 		})
 	end)
 
-	perfDescribe("Method: ForceNotify", function(perfTest)
-		perfTest("synthetic same-value notification", {
-			setup = function()
-				local manager = TableManager.new { value = 1 }
-				manager:OnChange("value", noop)
-				return manager
-			end,
-			action = function(_i, manager)
-				manager:ForceNotify("value")
-			end,
-			teardown = destroyManager,
-		})
-	end)
-
 	--------------------------------------------------------------------------------
 	--// Movement //--
 	--------------------------------------------------------------------------------

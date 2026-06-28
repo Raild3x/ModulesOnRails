@@ -3,7 +3,7 @@
 	Test helper for the replication-fidelity spec.
 
 	Wires a SOURCE TableManager to an independent REPLICA TableManager using
-	only one of two candidate "replication feeds":
+	only one of three candidate "replication feeds":
 
 	- "signals": the leaf-only public Signals (ValueChanged, ArrayInserted,
 	  ArrayRemoved, ArraySet). KeyAdded/KeyRemoved/KeyChanged are connected
@@ -14,6 +14,13 @@
 	  metadata.ArrayOp (explicit shift semantics); everything else is walked
 	  via Diff.flatten and applied as plain Sets with ancestor entries
 	  shadowing their descendants. See _connectDiffFeed for the full contract.
+	- "ops": the pre-diff `OnApplied` op stream. Each `Set`/`ArrayInsert`/
+	  `ArrayRemove`/`ArraySet` op is applied directly (no listener/diff needed
+	  on the source side); `BatchBegin`/`BatchEnd` markers frame the matching
+	  window in the replica's own `Suspend`/`Resume`, per the contract's
+	  hooking guide. Markers are NOT recorded into the op log (`OpCount`/
+	  diagnostics only count state-bearing ops, matching the other two feeds,
+	  which have no marker concept). See _connectOpsFeed for the full contract.
 
 	Every value crossing from Source to Replica is passed through `wireCopy`,
 	a deep copy with cycle detection that simulates a network boundary -
@@ -24,7 +31,7 @@
 local TableManager = require("../../TableManager")
 local Diff = require("../../Diffing/Diff")
 
-export type FeedMode = "signals" | "diff"
+export type FeedMode = "signals" | "diff" | "ops"
 
 export type OpLogEntry = {
 	Signal: string,
@@ -220,7 +227,11 @@ function ReplicationHarness._connectSignalFeed(self: ReplicationHarness)
 		table.insert(opLog, opLogEntry)
 
 		if #wirePath == 0 then
-			-- Only reachable via ForceNotify(root) where old == new; nothing to apply.
+			-- Defensive only: a connected ValueChanged forces unbounded diff depth
+			-- (see Coverage.hasConnectedSignal), so a table-vs-table root write
+			-- always wraps as a root "descendantChanged" node and is filtered before
+			-- reaching here. Nothing should ever construct a leaf-level ValueChanged
+			-- at the literal root path.
 			return
 		end
 
@@ -382,6 +393,81 @@ function ReplicationHarness._connectDiffFeed(self: ReplicationHarness)
 	table.insert(self._connections, conn)
 end
 
+--// Feed: ops //--
+
+--[[
+	Ops-feed consumer contract (mirrors the CONTRACT.md hooking guide for a
+	future TableReplicator):
+
+	1. `BatchBegin`/`BatchEnd` markers (empty `Path`) frame a `Suspend`/`Resume`
+	   window on the replica; every op between them is applied while the
+	   replica is itself suspended, so its own listeners see only the
+	   coalesced result of `Resume`'s flush -- matching the source. Markers
+	   carry no state, so they are NOT recorded into the op log (`OpCount`
+	   stays a state-bearing-op count, comparable across all three feeds).
+	2. `Set` ships either `NewValue` directly (no diff was in hand at apply
+	   time) or `Diff` (an in-flight diff node was reused for a minimal delta;
+	   `Diff.new` is the value, `nil` for a removal). Applied via `:Set`,
+	   exactly like the "signals" feed's `ValueChanged` handling.
+	3. `ArrayInsert`/`ArraySet` carry `NewValue` + `Index`; `ArrayRemove`
+	   carries only `Index`. Applied via the matching array method, never
+	   `:Set` at a shifting index (so shift semantics survive the wire).
+]]
+function ReplicationHarness._connectOpsFeed(self: ReplicationHarness)
+	const source = self.Source
+	const replica = self.Replica
+	const opLog = self._opLog
+
+	const conn = (source :: any):OnApplied(function(op: any)
+		if op.Kind == "BatchBegin" then
+			replica:Suspend()
+			return
+		elseif op.Kind == "BatchEnd" then
+			replica:Resume()
+			return
+		end
+
+		const wirePath = wireCopy(op.Path)
+
+		if op.Kind == "Set" then
+			const newValue = if op.Diff ~= nil then op.Diff.new else op.NewValue
+			table.insert(opLog, { Signal = "Applied:Set", Path = wirePath, New = newValue } :: OpLogEntry)
+			self:_apply(`Applied:Set {describePath(wirePath)}`, function()
+				if newValue == nil then
+					replica:Set(wirePath, nil, true)
+				else
+					replica:Set(wirePath, wireCopy(newValue), true)
+				end
+			end)
+		elseif op.Kind == "ArrayInsert" then
+			table.insert(
+				opLog,
+				{ Signal = "Applied:ArrayInsert", Path = wirePath, Index = op.Index, New = op.NewValue } :: OpLogEntry
+			)
+			self:_apply(`Applied:ArrayInsert {describePath(wirePath)}@{op.Index}`, function()
+				replica:ArrayInsert(wirePath, op.Index :: number, wireCopy(op.NewValue))
+			end)
+		elseif op.Kind == "ArrayRemove" then
+			table.insert(opLog, { Signal = "Applied:ArrayRemove", Path = wirePath, Index = op.Index } :: OpLogEntry)
+			self:_apply(`Applied:ArrayRemove {describePath(wirePath)}@{op.Index}`, function()
+				replica:ArrayRemove(wirePath, op.Index :: number)
+			end)
+		elseif op.Kind == "ArraySet" then
+			table.insert(
+				opLog,
+				{ Signal = "Applied:ArraySet", Path = wirePath, Index = op.Index, New = op.NewValue } :: OpLogEntry
+			)
+			self:_apply(`Applied:ArraySet {describePath(wirePath)}@{op.Index}`, function()
+				const elementPath = table.clone(wirePath)
+				table.insert(elementPath, op.Index)
+				replica:Set(elementPath, wireCopy(op.NewValue), true)
+			end)
+		end
+	end)
+
+	table.insert(self._connections, conn)
+end
+
 --// Public API //--
 
 function ReplicationHarness.Connect(self: ReplicationHarness)
@@ -389,6 +475,8 @@ function ReplicationHarness.Connect(self: ReplicationHarness)
 		self:_connectSignalFeed()
 	elseif self._feedMode == "diff" then
 		self:_connectDiffFeed()
+	elseif self._feedMode == "ops" then
+		self:_connectOpsFeed()
 	else
 		error(`ReplicationHarness: unknown feed mode "{self._feedMode}"`)
 	end

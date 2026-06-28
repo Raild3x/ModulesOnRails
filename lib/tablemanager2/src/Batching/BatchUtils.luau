@@ -35,9 +35,9 @@ export type BatchState = {
 
 const BatchUtils = {}
 
--- Creates the ChangeMetadata.Snapshot context for array operations and
--- ForceNotify, which bypass normal ChangeDetector flow. Only RootTable is
--- ever read (ancestor value navigation), so no deep copy is taken.
+-- Creates the ChangeMetadata.Snapshot context for array operations, which
+-- bypass normal ChangeDetector flow. Only RootTable is ever read (ancestor
+-- value navigation), so no deep copy is taken.
 function BatchUtils.CreateAncestorSnapshot<T>(rootTable: T): ChangeDetector.AncestorSnapshot<T>
 	return {
 		RootTable = rootTable,

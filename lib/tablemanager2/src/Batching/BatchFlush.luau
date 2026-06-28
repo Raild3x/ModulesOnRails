@@ -160,6 +160,9 @@ function BatchFlush.Suspend(self: TableManagerLike)
 	-- shadow authoritative again, so the snapshot below picks up cleanly from
 	-- it.
 	CoalescedFlushModule.FlushPending(self)
+	if self._appliedListeners[1] ~= nil then
+		require("../Listening/Emitter").fireApplied(self, { Kind = "BatchBegin", Path = {} })
+	end
 	-- Capture the pre-batch snapshot BEFORE suspending ChangeDetector so that
 	-- CheckForChangesBetween at flush time can diff old-vs-current correctly.
 	-- `CaptureSnapshot` inside `ChangeDetector` returns a sentinel (O(1)) so no
@@ -216,6 +219,10 @@ function BatchFlush.Resume(self: TableManagerLike)
 		for _, removedValue in batch.PendingPrunes do
 			self._proxyManager:PruneOriginal(removedValue)
 		end
+	end
+
+	if self._appliedListeners[1] ~= nil then
+		require("../Listening/Emitter").fireApplied(self, { Kind = "BatchEnd", Path = {} })
 	end
 end
 

@@ -683,7 +683,7 @@ end
 	Walks ancestor levels of `basePath` from `fromDepth` down to 0 (inclusive),
 	firing `emitKeyChanged`/`emitValueChanged` for each level. Shared by
 	ChangeDetector's own ancestor notifications and TableManager's synthetic
-	(array-operation / ForceNotify) ancestor notifications, which differ in:
+	(array-operation) ancestor notifications, which differ in:
 
 	- Walk start: ChangeDetector skips the captured level itself
 	  (`fromDepth = #basePath - 1`, already processed by DFS); TableManager
@@ -698,8 +698,8 @@ end
 	  - "child": at level i < #basePath, fires ValueChanged(currentPath, ...)
 	    THEN KeyChanged(currentPath, basePath[i + 1], nil, nil, metadata).
 	    (TableManager.)
-	  - "none": only ValueChanged fires at each level (TableManager's
-	    ForceNotify with includeKeyChanged = false).
+	  - "none": only ValueChanged fires at each level (`includeKeyChanged =
+	    false` callers, e.g. `Emitter.fireAncestorValueChangedNotifications`).
 ]=]
 function ChangeDetector.EmitAncestorNotifications(
 	basePath: PathArray,

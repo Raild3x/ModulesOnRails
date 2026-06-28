@@ -175,6 +175,57 @@ const function createSyntheticMetadata(
 end
 
 -- ---------------------------------------------------------------------------
+-- Replication op-stream (OnApplied)
+-- ---------------------------------------------------------------------------
+
+--[[
+	Fires `op` to every `OnApplied` subscriber. A non-empty `_appliedListeners`
+	list IS the replication gate -- this is the only place that's checked, so
+	every other call site can fire-and-forget without its own guard.
+]]
+function Emitter.fireApplied(manager: TableManagerLike, op: TMTypes.AppliedOp)
+	const listeners = manager._appliedListeners
+	if listeners[1] == nil then
+		return
+	end
+	for _, cb in listeners do
+		cb(op)
+	end
+end
+
+const arrayOpKindByEventName = {
+	ArrayInserted = "ArrayInsert",
+	ArrayRemoved = "ArrayRemove",
+	ArraySet = "ArraySet",
+}
+
+--[[
+	Adaptive replication emit: when `diffNode` is already in hand (a diff ran
+	for some other reason -- a covering listener, a batch flush, a ProvideDiff
+	opt-in), ride it for a minimal per-leaf delta; otherwise ship `newValue`
+	directly (O(1), no diff). Either way this is one `AppliedOp` per real
+	changed leaf. No-ops when nothing subscribes to `OnApplied` -- this never
+	triggers diffing by itself.
+]]
+function Emitter.emitReplicationOp(
+	manager: TableManagerLike,
+	kind: "Set" | "ArrayInsert" | "ArrayRemove" | "ArraySet",
+	path: PathArray,
+	newValue: any,
+	index: number?,
+	diffNode: DiffNode?
+)
+	if manager._appliedListeners[1] == nil then
+		return
+	end
+	if diffNode ~= nil then
+		Emitter.fireApplied(manager, { Kind = kind, Path = path, Diff = diffNode, Index = index })
+	else
+		Emitter.fireApplied(manager, { Kind = kind, Path = path, NewValue = newValue, Index = index })
+	end
+end
+
+-- ---------------------------------------------------------------------------
 -- Core notification primitives
 -- ---------------------------------------------------------------------------
 
@@ -265,6 +316,20 @@ function Emitter.fireArrayOperation(
 	if not manager._suppressLinkFanOut then
 		PropagationModule.FanOutArrayOp(manager, eventName, basePath, payload)
 	end
+
+	-- Independent of fan-out (must still fire while replaying a propagated op,
+	-- since THIS manager may have its own OnApplied subscribers): ship a
+	-- replication op. Array ops never have a "no diff happening" case -- this
+	-- call site is unconditional, so the array-op replication hook needs no
+	-- separate apply-time fallback (unlike the dict-write Set path).
+	Emitter.emitReplicationOp(
+		manager,
+		arrayOpKindByEventName[eventName],
+		basePath,
+		if eventName == "ArrayRemoved" then nil else payload.NewValue,
+		payload.Index,
+		nil
+	)
 
 	-- Array ops are synthetic (never diffed against the shadow), but the
 	-- baseline still needs to end up reflecting the array's new contents so a
@@ -366,8 +431,8 @@ function Emitter.makeEmit(manager: TableManagerLike, path: PathArray)
 end
 
 --[[
-	Builds the synthetic-metadata struct used by `ForceNotify` and by the
-	`onArrayAppended` fast path (for externally-supplied roots/paths/values).
+	Builds the synthetic-metadata struct used by the `onArrayAppended` fast path
+	(for externally-supplied roots/paths/values).
 ]]
 function Emitter.makeSyntheticMetadata(
 	rootTable: any,
@@ -445,8 +510,14 @@ function Emitter.makeChangeDetectorCallbacks(manager: TableManagerLike)
 			-- Cross-manager fan-out: only for leaf changes, never while replaying
 			-- fan-out. Pass the already-built diff node so recipients can replay it
 			-- without re-diffing (see Propagation.FanOutSet / TableManager._NotifyApplied).
-			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" and not manager._suppressLinkFanOut then
-				PropagationModule.FanOutSet(manager, path, newValue, oldValue, metadata.Diff)
+			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
+				if not manager._suppressLinkFanOut then
+					PropagationModule.FanOutSet(manager, path, newValue, oldValue, metadata.Diff)
+				end
+				-- Independent of fan-out (must still fire while replaying a
+				-- propagated op, since THIS manager may have its own OnApplied
+				-- subscribers): ride the diff already in hand for a minimal delta.
+				Emitter.emitReplicationOp(manager, "Set", path, newValue, nil, metadata.Diff)
 			end
 		end,
 	}

@@ -57,9 +57,13 @@
 ]=]
 
 --// Imports //--
+-- External dependencies
 const T = require("../T")
 const Signal = require("../Signal")
 const Janitor = require("../Janitor")
+const Promise = require("../Promise")
+-- Internal dependencies
+const Types = require("./TMTypes")
 const PathHelpers = require("./PathHelpers")
 const BatchUtilsModule = require("./Batching/BatchUtils")
 const BatchFlushModule = require("./Batching/BatchFlush")
@@ -68,7 +72,6 @@ const ListenerRegistryModule = require("./Listening/ListenerRegistry")
 const ChangeDetectorModule = require("./Diffing/ChangeDetector")
 const SchemaNavigatorModule = require("./SchemaNavigator")
 const PropagationModule = require("./Propagation")
-const Types = require("./TMTypes")
 const EmitterModule = require("./Listening/Emitter")
 const MutatorModule = require("./Mutator")
 const OpaqueRegistryModule = require("./OpaqueRegistry")
@@ -89,10 +92,11 @@ type ChangeDetector = ChangeDetectorModule.ChangeDetector
 type ChangeMetadata = ChangeDetectorModule.ChangeMetadata
 type ListenerOptions = ListenerRegistryModule.ListenerOptions
 type Connection = ListenerRegistryModule.Connection
-type Signal<Fn, Args...> = Signal.Signal<Fn, Args...>
-type Janitor = Janitor.Janitor
 type SchemaCheck = SchemaNavigatorModule.Check
 type BatchState = BatchUtilsModule.BatchState
+type Promise<T...> = Promise.TypedPromise<T...>
+type Signal<Fn, Args...> = Signal.Signal<Fn, Args...>
+type Janitor = Janitor.Janitor
 type table = { [any]: any }
 
 export type Proxy<T, S> = Types.Proxy<T, S>
@@ -138,7 +142,6 @@ const deepCloneValue = MutatorModule.deepCloneValue
 const trackArrayMutation = MutatorModule.trackArrayMutation
 
 -- Emit/notify core lives in Emitter.luau; local aliases keep call sites unchanged.
-const fireAncestorValueChangedNotifications = EmitterModule.fireAncestorValueChangedNotifications
 const emitInserted = EmitterModule.emitInserted
 const emitRemoved = EmitterModule.emitRemoved
 const emitSet = EmitterModule.emitSet
@@ -146,8 +149,6 @@ const emitSet = EmitterModule.emitSet
 -- Shared For/Map reconcile drivers live in ForMap.luau; local aliases keep call sites unchanged.
 const makeKeyedReconciler = ForMapModule.makeKeyedReconciler
 const makeValueReconciler = ForMapModule.makeValueReconciler
-
-const createAncestorSnapshot = BatchUtilsModule.CreateAncestorSnapshot
 
 -----------------------------------------------------------------------------------
 --// Constructor //--
@@ -236,6 +237,7 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	self._flushMode = resolvedConfig.FlushMode or DEFAULT_FLUSH_MODE
 	self._pendingFlushRoot = nil
 	self._coalescedFlushScheduled = false
+	self._appliedListeners = {}
 	self.Proxy = wireProxyWriteHandler(self)
 	
 	-- Initialize signals (fire once per change)
@@ -261,406 +263,7 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 end
 
 --------------------------------------------------------------------------------
---// Linking //--
---------------------------------------------------------------------------------
-
---[=[
-	@private
-	Re-fires listeners/signals for an op that has ALREADY been applied to the
-	shared raw (by another manager observing the same table identity), without
-	mutating or snapshot-diffing. `op.Path` is in this manager's own coordinates.
-	Used only by cross-manager fan-out (see `Propagation`).
-]=]
-function TableManager._NotifyApplied<T>(self: TM_Internal<T>, op: AppliedOp)
-	if self._Destroyed then
-		return
-	end
-
-	self._suppressLinkFanOut = true
-	const ok, err = pcall(function()
-		if op.Kind == "Set" then
-			pruneDetachedValue(self, op.OldValue, op.NewValue)
-
-			if CoverageModule.IsLocallyObserved(self, op.Path) then
-				const oldSnapshot = BatchUtilsModule.BuildOldSnapshot(self, op.Path, op.OldValue)
-				if op.Diff ~= nil and op.OriginHasNoOpacity and self._opaqueRegistries.Count == 0 then
-					self._changeDetector:DispatchDiffNode(op.Diff, op.Path, self.Raw, oldSnapshot)
-				else
-					self._changeDetector:CheckForChangesBetween(
-						op.OldValue,
-						op.NewValue,
-						op.Path,
-						self.Raw,
-						nil,
-						oldSnapshot
-					)
-				end
-			end
-			-- This bypasses applyWrite entirely (the write already landed via the
-			-- ORIGIN manager), so the baseline needs its own sync here —
-			-- applyWrite's seed/_doFlush never run for this path. The trackable /
-			-- opaque-ancestor gate (Materialize can't safely persist through an
-			-- opaque ancestor) lives in `Baseline.Materialize`; the dispatch above
-			-- already fired correctly using op.OldValue/op.NewValue directly.
-			BaselineModule.Materialize(self, op.Path)
-		elseif op.Kind == "ArrayInsert" then
-			const index = op.Index :: number
-			shiftArrayKeys(self._proxyManager, self:Get(op.Path, true), index, 1)
-			emitInserted(self, op.Path, index, op.NewValue)
-		elseif op.Kind == "ArrayRemove" then
-			const index = op.Index :: number
-			shiftArrayKeys(self._proxyManager, self:Get(op.Path, true), index + 1, -1)
-			pruneDetachedValue(self, op.OldValue, nil)
-			emitRemoved(self, op.Path, index, op.OldValue)
-		elseif op.Kind == "ArraySet" then
-			emitSet(self, op.Path, op.Index :: number, op.NewValue, op.OldValue)
-		end
-	end)
-	self._suppressLinkFanOut = false
-
-	if not ok then
-		error(err, 0)
-	end
-end
-
---[=[
-	@within TableManager
-
-	Returns a plain `TableManager` rooted at the shared table found at `target`,
-	linked (via `Link`) to this manager so writes on either side fan out to the
-	other. `target` may be:
-	- a proxy obtained from this manager (preferred);
-	- a raw table value that is already part of this manager's tree; or
-	- a path (string or array) into this manager's tree.
-
-	The new TM is bound to the targeted table, not its path in the extending TM.
-]=]
-function TableManager.Extend<T, S>(
-	self: TM_Internal<T>,
-	target: Proxy<T, S> | Path<S>
-): TableManager<ValueAtPath<T, S>>
-	local anchorPath: PathArray<S>
-	if self._proxyManager and self._proxyManager:IsProxy(target) then
-		-- Preferred form: a proxy already names its live path.
-		const path = self._proxyManager:GetPath(target)
-		if path == nil then
-			error("Extend target proxy is not part of this manager's tree")
-		end
-		anchorPath = path
-	else
-		-- Raw value already in the tree: locate it by identity (it may not have
-		-- a proxy yet if it was never accessed via Get/GetProxy). Falls back to
-		-- treating `target` as a path (string or array) if not found.
-		const foundPath = if type(target) == "table" then PropagationModule.FindPathOf(self.Raw, target) else nil
-		if foundPath ~= nil then
-			anchorPath = foundPath
-		else
-			anchorPath = PathHelpers.ParsePath(target)
-		end
-	end
-
-	const object = self:Get(anchorPath)
-	if type(object) ~= "table" then
-		error("Extend target must resolve to a table")
-	end
-
-	-- The new manager is rooted at the SAME live `object`, so implicit sharing
-	-- registers both as observers of that identity (and its subtree) at
-	-- construction — writes on either side propagate to the other automatically,
-	-- with no explicit link. If `self` later replaces `object`, it stops resolving
-	-- to that identity and propagation between them lapses (the extended manager
-	-- keeps `object` as its root).
-	const extended = TableManager.new(object)
-
-	return extended
-end
-
---[=[
-	@within TableManager
-	Returns the other managers currently sharing (co-observing) at least one
-	live table identity with this one — de-duplicated, excluding self.
-]=]
-function TableManager.GetLinkedManagers<T>(self: TM_Internal<T>): { TableManager<any> }
-	return PropagationModule.GetCoObservers(self)
-end
-
---[=[
-	@within TableManager
-	Returns true if this manager currently shares a live table identity with `other`.
-]=]
-function TableManager.IsLinkedWith<T>(self: TM_Internal<T>, other: TableManager<any>): boolean
-	return PropagationModule.IsLinkedWith(self, other)
-end
-
---------------------------------------------------------------------------------
---// Listener Registration //--
---------------------------------------------------------------------------------
-
---[=[
-	Fires ONLY when this exact path is directly reassigned (not when a
-	descendant of it changes). Shorthand for `OnChange` with
-	`ListenDepth = 0, ListenDepthStyle = "=="`.
-]=]
-function TableManager.OnValueChange<T, S>(
-	self: TM_Internal<T>,
-	path: Path<S>,
-	callback: (newValue: any, oldValue: any?, metadata: ChangeMetadata) -> (),
-	options: ListenerOptions?
-): Connection
-	const mergedOptions: ListenerOptions = if options then table.clone(options :: any) else {}
-	mergedOptions.ListenDepth = 0
-	mergedOptions.ListenDepthStyle = "=="
-	return self._listenerRegistry:RegisterListener("ValueChanged", PathHelpers.ParsePath(path), callback, mergedOptions)
-end
-
---[=[
-	Fires when this path is directly reassigned OR any descendant of it
-	changes.
-]=]
-function TableManager.OnChange<T, S>(
-	self: TM_Internal<T>,
-	path: Path<S>,
-	callback: (newValue: any, oldValue: any?, metadata: ChangeMetadata) -> (),
-	options: ListenerOptions?
-): Connection
-	return self._listenerRegistry:RegisterListener("ValueChanged", PathHelpers.ParsePath(path), callback, options)
-end
-
---[=[
-	Immediately invokes `callback` with the current value at `path`
-	(`oldValue` and `metadata` both `nil`), then behaves like
-	`OnValueChange` for subsequent changes.
-]=]
-function TableManager.Observe<T, S>(
-	self: TM_Internal<T>,
-	path: Path<S>,
-	callback: (newValue: any, oldValue: any?, metadata: ChangeMetadata?) -> (),
-	options: ListenerOptions?
-): Connection
-	const parsedPath = PathHelpers.ParsePath(path)
-	const currentValue = self:Get(parsedPath, true)
-
-	const function fireInitial()
-		callback(currentValue, nil, nil)
-	end
-
-	if self._listenerRegistry._fireMode ~= "immediate" then
-		task.defer(fireInitial)
-	else
-		task.spawn(fireInitial)
-	end
-
-	return self._listenerRegistry:RegisterListener("ValueChanged", parsedPath, callback, options)
-end
-
-function TableManager.OnKeyAdd<T, S>(
-	self: TM_Internal<T>,
-	path: Path<S>,
-	callback: (newValue: any, metadata: ChangeMetadata) -> (),
-	options: ListenerOptions?
-): Connection
-	return self._listenerRegistry:RegisterListener("KeyAdded", PathHelpers.ParsePath(path), callback, options)
-end
-
-function TableManager.OnKeyRemove<T, S>(
-	self: TM_Internal<T>,
-	path: Path<S>,
-	callback: (oldValue: any, metadata: ChangeMetadata) -> (),
-	options: ListenerOptions?
-): Connection
-	return self._listenerRegistry:RegisterListener("KeyRemoved", PathHelpers.ParsePath(path), callback, options)
-end
-
-function TableManager.OnKeyChange<T, S>(
-	self: TM_Internal<T>,
-	path: Path<S>,
-	callback: (key: any, newValue: any, oldValue: any, metadata: ChangeMetadata) -> (),
-	options: ListenerOptions?
-): Connection
-	return self._listenerRegistry:RegisterListener("KeyChanged", PathHelpers.ParsePath(path), callback, options)
-end
-
-function TableManager.OnArrayInsert<T, S>(
-	self: TM_Internal<T>,
-	path: Path<S>,
-	callback: (index: number, newValue: any, metadata: ChangeMetadata) -> (),
-	options: ListenerOptions?
-): Connection
-	return self._listenerRegistry:RegisterListener("ArrayInserted", PathHelpers.ParsePath(path), callback, options)
-end
-
-function TableManager.OnArrayRemove<T, S>(
-	self: TM_Internal<T>,
-	path: Path<S>,
-	callback: (index: number, oldValue: any, metadata: ChangeMetadata) -> (),
-	options: ListenerOptions?
-): Connection
-	return self._listenerRegistry:RegisterListener("ArrayRemoved", PathHelpers.ParsePath(path), callback, options)
-end
-
-function TableManager.OnArraySet<T, S>(
-	self: TM_Internal<T>,
-	path: Path<S>,
-	callback: (
-		index: number,
-		newValue: any,
-		oldValue: any,
-		metadata: ChangeMetadata
-	) -> (),
-	options: ListenerOptions?
-): Connection
-	return self._listenerRegistry:RegisterListener("ArraySet", PathHelpers.ParsePath(path), callback, options)
-end
-
---------------------------------------------------------------------------------
---// For / Map //--
---------------------------------------------------------------------------------
-
---[=[
-	Reconciles the items found at `path` by KEY: `handler` runs once per key
-	(passed a per-item Janitor, the key, and change metadata — `nil` on the
-	initial fire), and is NOT re-run when the value at an existing key
-	changes. The Janitor is destroyed when that key is removed or the
-	connection disconnects.
-]=]
-function TableManager.ForKeys<T, S>(
-	self: TM_Internal<T>,
-	path: Path<S>,
-	handler: (itemJanitor: Janitor, key: KeyAtPath<T, S>, metadata: ChangeMetadata?) -> (),
-	options: ForOptions?
-): Connection
-	const parsedPath = PathHelpers.ParsePath(path)
-	return makeKeyedReconciler(self, parsedPath, false, function(itemJanitor, key, _value, metadata)
-		handler(itemJanitor, key, metadata)
-	end, nil, nil, options, nil)
-end
-
---[=[
-	Reconciles the items found at `path` by VALUE (as a multiset — duplicate
-	values are tracked as independent items): `handler` runs once per value
-	occurrence and is NOT re-run when that value moves between keys/indices
-	(e.g. an `ArraySwapRemove`). The Janitor is destroyed when that value
-	occurrence is no longer present or the connection disconnects.
-]=]
-function TableManager.ForValues<T, S>(
-	self: TM_Internal<T>,
-	path: Path<S>,
-	handler: (itemJanitor: Janitor, value: ElementAtPath<T, S>, metadata: ChangeMetadata?) -> (),
-	options: ForOptions?
-): Connection
-	const parsedPath = PathHelpers.ParsePath(path)
-	return makeValueReconciler(self, parsedPath, handler, options)
-end
-
---[=[
-	Reconciles the items found at `path` by KEY AND VALUE: `handler` re-runs
-	(tearing down the previous item's Janitor first) whenever EITHER the key
-	or the value changes — a value change at an existing key is treated as
-	that item leaving and a new one appearing.
-]=]
-function TableManager.ForPairs<T, S>(
-	self: TM_Internal<T>,
-	path: Path<S>,
-	handler: (
-		itemJanitor: Janitor,
-		key: KeyAtPath<T, S>,
-		value: ElementAtPath<T, S>,
-		metadata: ChangeMetadata?
-	) -> (),
-	options: ForOptions?
-): Connection
-	const parsedPath = PathHelpers.ParsePath(path)
-	return makeKeyedReconciler(self, parsedPath, true, handler, nil, nil, options, nil)
-end
-
---[=[
-	@within TableManager
-	@unreleased
-	Returns a live `TableManager` keyed by `transform(entryJanitor, key, value)`,
-	with values passed through unchanged. `transform` re-runs only when the
-	source key is added/removed; a value change at an existing key refreshes
-	the output value WITHOUT re-running `transform`. The output manager owns
-	the source subscription: destroying it disconnects from the source and
-	tears down every entry's Janitor. Destroying the SOURCE does not
-	cascade-destroy the returned manager (independent lifecycles).
-]=]
-function TableManager.MapKeys<T, S>(
-	self: TM_Internal<T>,
-	path: Path<S>,
-	transform: (entryJanitor: Janitor, key: KeyAtPath<T, S>, value: ElementAtPath<T, S>) -> any
-): TableManager<any>
-	const parsedPath = PathHelpers.ParsePath(path)
-	const derived: TM_Internal<any> = TableManager.new({}) :: any
-	const onAdd, onRemove, onRefresh = ForMapModule.makeKeyRemapHandlers(derived, function(itemJanitor, key, value)
-		return transform(itemJanitor, key, value), value
-	end)
-	const connection =
-		makeKeyedReconciler(self, parsedPath, false, onAdd, onRemove, onRefresh, nil, ForMapModule.batchedInitialFire(derived))
-	ForMapModule.attachDerivedLifecycle(derived, connection)
-
-	return derived :: any
-end
-
---[=[
-	@within TableManager
-	@unreleased
-	Returns a live `TableManager` keyed by the SOURCE key, with each entry
-	recomputed via `transform(entryJanitor, value, key)` whenever its value
-	changes. Same ownership/lifecycle rules as `MapKeys`.
-]=]
-function TableManager.MapValues<T, S>(
-	self: TM_Internal<T>,
-	path: Path<S>,
-	transform: (entryJanitor: Janitor, value: ElementAtPath<T, S>, key: KeyAtPath<T, S>) -> any
-): TableManager<any>
-	const parsedPath = PathHelpers.ParsePath(path)
-	const derived: TM_Internal<any> = TableManager.new({}) :: any
-
-	const connection = makeKeyedReconciler(
-		self,
-		parsedPath,
-		true,
-		function(itemJanitor, key, value)
-			derived:Set(key, transform(itemJanitor, value, key))
-		end,
-		function(_item, key)
-			derived:Set(key, nil)
-		end,
-		nil,
-		nil,
-		ForMapModule.batchedInitialFire(derived)
-	)
-	ForMapModule.attachDerivedLifecycle(derived, connection)
-
-	return derived :: any
-end
-
---[=[
-	@within TableManager
-	@unreleased
-	Returns a live `TableManager` keyed by `transform(entryJanitor, key, value)`'s
-	first return value (the second is the output value); the entry is
-	recomputed whenever the source key or value changes. On an output-key
-	collision between two source entries, the last write wins. Same
-	ownership/lifecycle rules as `MapKeys`.
-]=]
-function TableManager.MapPairs<T, S>(
-	self: TM_Internal<T>,
-	path: Path<S>,
-	transform: (entryJanitor: Janitor, key: KeyAtPath<T, S>, value: ElementAtPath<T, S>) -> (any, any)
-): TableManager<any>
-	const parsedPath = PathHelpers.ParsePath(path)
-	const derived: TM_Internal<any> = TableManager.new({}) :: any
-	const onAdd, onRemove = ForMapModule.makeKeyRemapHandlers(derived, transform)
-	const connection =
-		makeKeyedReconciler(self, parsedPath, true, onAdd, onRemove, nil, nil, ForMapModule.batchedInitialFire(derived))
-	ForMapModule.attachDerivedLifecycle(derived, connection)
-
-	return derived :: any
-end
-
---------------------------------------------------------------------------------
---// Helper Methods //--
+--// Setter/Accessor Methods //--
 --------------------------------------------------------------------------------
 
 --[=[
@@ -786,6 +389,29 @@ function TableManager.Set<T, S>(
 
 	applyWrite(self, parsedPath, unwrappedValue)
 	debug.profileend()
+end
+
+--[=[
+	Update a value at a path using an updater function.
+	The updater function receives the old value and should return the new value.
+]=]
+function TableManager.Update<T, S>(self: TM_Internal<T>, path: Path<S>, updater: (oldValue: ValueAtPath<T, S>) -> ValueAtPath<T, S>): ValueAtPath<T, S>
+	-- TODO: update this to be more efficient at updating by reducing the need to traverse the path twice
+	const oldValue = self:Get(path)
+	const newValue = updater(oldValue)
+	self:Set(path, newValue)
+	return newValue
+end
+
+--[=[
+	Increment a value at a path by a delta.
+]=]
+function TableManager.Increment<T, S>(self: TM_Internal<T>, path: Path<S>, delta: any): any
+	-- TODO: update this to be more efficient at updating by reducing the need to traverse the path twice
+	const oldValue = self:Get(path)
+	const newValue = oldValue + delta
+	self:Set(path, newValue)
+	return newValue
 end
 
 --[=[
@@ -944,6 +570,35 @@ end
 TableManager.SwapRemoveFirstValue = TableManager.ArraySwapRemoveFirstValue
 
 --[=[
+	Update a value at a path using an updater function.
+	The updater function receives the old value and should return the new value.
+]=]
+function TableManager.UpdateKey<T, S>(self: TM_Internal<T>, path: Path<S>, key: any, updater: (oldValue: ElementAtPath<T, S>) -> ElementAtPath<T, S>): ElementAtPath<T, S>
+	-- TODO: update this to be more efficient at updating by reducing the need to traverse the path twice
+	const parsedPath = PathHelpers.ParsePath(path)
+	table.insert(parsedPath, key)
+	const oldValue = self:Get(parsedPath)
+	const newValue = updater(oldValue)
+	self:Set(parsedPath, newValue)
+	return newValue
+end
+TableManager.ArrayUpdate = TableManager.UpdateKey
+
+--[=[
+	Increment a value at a path by a delta.
+]=]
+function TableManager.IncrementKey<T, S>(self: TM_Internal<T>, path: Path<S>, key: any, delta: ElementAtPath<T, S>): ElementAtPath<T, S>
+	-- TODO: update this to be more efficient at updating by reducing the need to traverse the path twice
+	const parsedPath = PathHelpers.ParsePath(path)
+	table.insert(parsedPath, key)
+	const oldValue = self:Get(parsedPath)
+	const newValue = oldValue + delta
+	self:Set(parsedPath, newValue)
+	return newValue
+end
+TableManager.ArrayIncrement = TableManager.IncrementKey
+
+--[=[
 	Holds off firing signals for the duration of the callback, then fires needed signals at the end.
 	Useful for batch operations where you want to suppress intermediate signals and only fire final results.
 
@@ -1000,14 +655,20 @@ end
 	the shadow to live. Callers (the immediate write path, `Flush`,
 	`_NotifyApplied`, `BatchFlush.Resume`) are responsible for the coverage
 	gate and batch-state check; this always runs.
+
+	`forceFullDepth` bypasses the depth bound for this flush only -- used by
+	`Flush` when the only reason to flush is an `OnApplied` subscriber (no
+	local listener covers `path`, so there's no observed depth to bound to and
+	the op stream needs to discover the whole changed subtree). It never
+	affects the general write path's depth bound.
 ]=]
-function TableManager._doFlush<T>(self: TM_Internal<T>, path: PathArray)
+function TableManager._doFlush<T>(self: TM_Internal<T>, path: PathArray, forceFullDepth: boolean?)
 	const old = BaselineModule.Get(self, path)
 	const new_ = self:Get(path :: any, true)
 	const oldSnapshot = BatchUtilsModule.BuildOldSnapshot(self, path, old)
 	-- Transparent depth bound: don't diff below the deepest listener that observes
 	-- `path` (nil = unbounded when a signal/link/wildcard/ProvideDiff forces it).
-	const maxDepth = CoverageModule.ResolveDiffMaxDepth(self, path)
+	const maxDepth = if forceFullDepth then nil else CoverageModule.ResolveDiffMaxDepth(self, path)
 	self._changeDetector:CheckForChangesBetween(old, new_, path, self.Raw, nil, oldSnapshot, maxDepth)
 	BaselineModule.Reconcile(self, path)
 end
@@ -1028,7 +689,8 @@ end
 ]=]
 function TableManager.Flush<T, S>(self: TM_Internal<T>, path: Path<S>?)
 	const parsedPath: PathArray = if path ~= nil then PathHelpers.ParsePath(path) else {}
-	if not CoverageModule.IsTrackable(self, parsedPath) then
+	const isTrackable = CoverageModule.IsTrackable(self, parsedPath)
+	if not isTrackable and self._appliedListeners[1] == nil then
 		return
 	end
 	if self._batchDepth > 0 then
@@ -1039,18 +701,10 @@ function TableManager.Flush<T, S>(self: TM_Internal<T>, path: Path<S>?)
 		return
 	end
 	CoalescedFlushModule.FlushPending(self)
-	self:_doFlush(parsedPath)
-end
-
---[=[
-	Marks `path` (and every descendant of it) as ignored or not. An ignored
-	write still happens — `Get`/`Raw` reflect it immediately — but skips all
-	diff/snapshot/event work, so it never fires listeners/signals and is never
-	cloned for change detection. See `TableManagerConfig.IgnoredPaths` for the
-	config-time equivalent (seeded once at construction).
-]=]
-function TableManager.SetPathIgnored<T, S>(self: TM_Internal<T>, path: Path<S>, ignored: boolean)
-	IgnoreTrieModule.SetPathIgnored(self._ignoreTrie, path, ignored)
+	-- Not locally trackable: nothing observes a bound, and the op stream needs
+	-- to discover the whole changed subtree -- so this flush alone forces full
+	-- depth (see `_doFlush`'s `forceFullDepth`; never the general write path).
+	self:_doFlush(parsedPath, not isTrackable)
 end
 
 --[=[
@@ -1178,80 +832,490 @@ function TableManager.Swap<T, S1, S2>(self: TM_Internal<T>, a: Path<S1> | Proxy<
 end
 
 --------------------------------------------------------------------------------
---// Other Utility Methods //--
+--// Listener Registration //--
+--------------------------------------------------------------------------------
+
+--[=[
+	Fires ONLY when this exact path is directly reassigned (not when a
+	descendant of it changes). Shorthand for `OnChange` with
+	`ListenDepth = 0, ListenDepthStyle = "=="`.
+]=]
+function TableManager.OnValueChange<T, S>(
+	self: TM_Internal<T>,
+	path: Path<S>,
+	callback: (newValue: any, oldValue: any?, metadata: ChangeMetadata) -> (),
+	options: ListenerOptions?
+): Connection
+	const mergedOptions: ListenerOptions = if options then table.clone(options :: any) else {}
+	mergedOptions.ListenDepth = 0
+	mergedOptions.ListenDepthStyle = "=="
+	return self._listenerRegistry:RegisterListener("ValueChanged", PathHelpers.ParsePath(path), callback, mergedOptions)
+end
+
+--[=[
+	Fires when this path is directly reassigned OR any descendant of it
+	changes.
+]=]
+function TableManager.OnChange<T, S>(
+	self: TM_Internal<T>,
+	path: Path<S>,
+	callback: (newValue: any, oldValue: any?, metadata: ChangeMetadata) -> (),
+	options: ListenerOptions?
+): Connection
+	return self._listenerRegistry:RegisterListener("ValueChanged", PathHelpers.ParsePath(path), callback, options)
+end
+
+--[=[
+	Immediately invokes `callback` with the current value at `path`
+	(`oldValue` and `metadata` both `nil`), then behaves like
+	`OnValueChange` for subsequent changes.
+]=]
+function TableManager.Observe<T, S>(
+	self: TM_Internal<T>,
+	path: Path<S>,
+	callback: (newValue: any, oldValue: any?, metadata: ChangeMetadata?) -> (),
+	options: ListenerOptions?
+): Connection
+	const parsedPath = PathHelpers.ParsePath(path)
+	const currentValue = self:Get(parsedPath, true)
+
+	const function fireInitial()
+		callback(currentValue, nil, nil)
+	end
+
+	if self._listenerRegistry._fireMode ~= "immediate" then
+		task.defer(fireInitial)
+	else
+		task.spawn(fireInitial)
+	end
+
+	return self._listenerRegistry:RegisterListener("ValueChanged", parsedPath, callback, options)
+end
+
+function TableManager.OnKeyAdd<T, S>(
+	self: TM_Internal<T>,
+	path: Path<S>,
+	callback: (newValue: any, metadata: ChangeMetadata) -> (),
+	options: ListenerOptions?
+): Connection
+	return self._listenerRegistry:RegisterListener("KeyAdded", PathHelpers.ParsePath(path), callback, options)
+end
+
+function TableManager.OnKeyRemove<T, S>(
+	self: TM_Internal<T>,
+	path: Path<S>,
+	callback: (oldValue: any, metadata: ChangeMetadata) -> (),
+	options: ListenerOptions?
+): Connection
+	return self._listenerRegistry:RegisterListener("KeyRemoved", PathHelpers.ParsePath(path), callback, options)
+end
+
+function TableManager.OnKeyChange<T, S>(
+	self: TM_Internal<T>,
+	path: Path<S>,
+	callback: (key: any, newValue: any, oldValue: any, metadata: ChangeMetadata) -> (),
+	options: ListenerOptions?
+): Connection
+	return self._listenerRegistry:RegisterListener("KeyChanged", PathHelpers.ParsePath(path), callback, options)
+end
+
+function TableManager.OnArrayInsert<T, S>(
+	self: TM_Internal<T>,
+	path: Path<S>,
+	callback: (index: number, newValue: any, metadata: ChangeMetadata) -> (),
+	options: ListenerOptions?
+): Connection
+	return self._listenerRegistry:RegisterListener("ArrayInserted", PathHelpers.ParsePath(path), callback, options)
+end
+
+function TableManager.OnArrayRemove<T, S>(
+	self: TM_Internal<T>,
+	path: Path<S>,
+	callback: (index: number, oldValue: any, metadata: ChangeMetadata) -> (),
+	options: ListenerOptions?
+): Connection
+	return self._listenerRegistry:RegisterListener("ArrayRemoved", PathHelpers.ParsePath(path), callback, options)
+end
+
+function TableManager.OnArraySet<T, S>(
+	self: TM_Internal<T>,
+	path: Path<S>,
+	callback: (
+		index: number,
+		newValue: any,
+		oldValue: any,
+		metadata: ChangeMetadata
+	) -> (),
+	options: ListenerOptions?
+): Connection
+	return self._listenerRegistry:RegisterListener("ArraySet", PathHelpers.ParsePath(path), callback, options)
+end
+
+--------------------------------------------------------------------------------
+--// Linking //--
 --------------------------------------------------------------------------------
 
 --[=[
 	@private
-	@unreleased
-	Force notification for a specific path, even if the value hasn't changed.
-
-	This is useful for scenarios like:
-	- Re-assigning the same table (e.g., `Data.Stats = sameStats`)
-	- Forcing validation/refresh logic to run
-	- Implementing "force refresh" patterns
-
-	Example:
-	```lua
-	local sameStats = manager.Proxy.players.John.Stats
-	manager.Proxy.players.John.Stats = sameStats  -- Normally no listeners fire
-	manager:ForceNotify({"players", "John", "Stats"})  -- Force listeners to fire
-	```
-
-	Note: This creates a synthetic "changed" diff where old == new.
-	Your listeners can detect this by checking if `metadata.Diff.old == metadata.Diff.new`.
+	Re-fires listeners/signals for an op that has ALREADY been applied to the
+	shared raw (by another manager observing the same table identity), without
+	mutating or snapshot-diffing. `op.Path` is in this manager's own coordinates.
+	Used only by cross-manager fan-out (see `Propagation`).
 ]=]
-function TableManager.ForceNotify<T, S>(self: TM_Internal<T>, path: Path<S>)
-	if self._batchDepth > 0 then
-		return -- Suppress during batch; flush will re-emit all changes
+function TableManager._NotifyApplied<T>(self: TM_Internal<T>, op: AppliedOp)
+	self._suppressLinkFanOut = true
+	const ok, err = pcall(function()
+		if op.Kind == "Set" then
+			pruneDetachedValue(self, op.OldValue, op.NewValue)
+
+			if CoverageModule.IsLocallyObserved(self, op.Path) then
+				const oldSnapshot = BatchUtilsModule.BuildOldSnapshot(self, op.Path, op.OldValue)
+				if op.Diff ~= nil and op.OriginHasNoOpacity and self._opaqueRegistries.Count == 0 then
+					self._changeDetector:DispatchDiffNode(op.Diff, op.Path, self.Raw, oldSnapshot)
+				else
+					self._changeDetector:CheckForChangesBetween(
+						op.OldValue,
+						op.NewValue,
+						op.Path,
+						self.Raw,
+						nil,
+						oldSnapshot
+					)
+				end
+			elseif self._appliedListeners[1] ~= nil then
+				-- Not locally observed, so nothing above diffed this op -- but
+				-- THIS manager may itself have OnApplied subscribers (e.g. it is
+				-- also being replicated), so ship the op directly.
+				EmitterModule.emitReplicationOp(self, "Set", op.Path, op.NewValue, nil, op.Diff)
+			end
+			-- This bypasses applyWrite entirely (the write already landed via the
+			-- ORIGIN manager), so the baseline needs its own sync here —
+			-- applyWrite's seed/_doFlush never run for this path. The trackable /
+			-- opaque-ancestor gate (Materialize can't safely persist through an
+			-- opaque ancestor) lives in `Baseline.Materialize`; the dispatch above
+			-- already fired correctly using op.OldValue/op.NewValue directly.
+			BaselineModule.Materialize(self, op.Path)
+		elseif op.Kind == "ArrayInsert" then
+			const index = op.Index :: number
+			shiftArrayKeys(self._proxyManager, self:Get(op.Path, true), index, 1)
+			emitInserted(self, op.Path, index, op.NewValue)
+		elseif op.Kind == "ArrayRemove" then
+			const index = op.Index :: number
+			shiftArrayKeys(self._proxyManager, self:Get(op.Path, true), index + 1, -1)
+			pruneDetachedValue(self, op.OldValue, nil)
+			emitRemoved(self, op.Path, index, op.OldValue)
+		elseif op.Kind == "ArraySet" then
+			emitSet(self, op.Path, op.Index :: number, op.NewValue, op.OldValue)
+		end
+	end)
+	self._suppressLinkFanOut = false
+
+	if not ok then
+		error(err, 0)
 	end
+end
+
+--[=[
+	@within TableManager
+	@unreleased
+
+	Returns a plain `TableManager` rooted at the shared table found at `target`,
+	linked (via `Link`) to this manager so writes on either side fan out to the
+	other. `target` may be:
+	- a proxy obtained from this manager (preferred);
+	- a raw table value that is already part of this manager's tree; or
+	- a path (string or array) into this manager's tree.
+
+	The new TM is bound to the targeted table, not its path in the extending TM.
+]=]
+function TableManager.Extend<T, S>(
+	self: TM_Internal<T>,
+	target: Proxy<T, S> | Path<S>
+): TableManager<ValueAtPath<T, S>>
+	local anchorPath: PathArray<S>
+	if self._proxyManager and self._proxyManager:IsProxy(target) then
+		-- Preferred form: a proxy already names its live path.
+		const path = self._proxyManager:GetPath(target)
+		if path == nil then
+			error("Extend target proxy is not part of this manager's tree")
+		end
+		anchorPath = path
+	else
+		-- Raw value already in the tree: locate it by identity (it may not have
+		-- a proxy yet if it was never accessed via Get/GetProxy). Falls back to
+		-- treating `target` as a path (string or array) if not found.
+		const foundPath = if type(target) == "table" then PropagationModule.FindPathOf(self.Raw, target) else nil
+		if foundPath ~= nil then
+			anchorPath = foundPath
+		else
+			anchorPath = PathHelpers.ParsePath(target)
+		end
+	end
+
+	const object = self:Get(anchorPath)
+	if type(object) ~= "table" then
+		error("Extend target must resolve to a table")
+	end
+
+	-- The new manager is rooted at the SAME live `object`, so implicit sharing
+	-- registers both as observers of that identity (and its subtree) at
+	-- construction — writes on either side propagate to the other automatically,
+	-- with no explicit link. If `self` later replaces `object`, it stops resolving
+	-- to that identity and propagation between them lapses (the extended manager
+	-- keeps `object` as its root).
+	const extended = TableManager.new(object)
+
+	return extended
+end
+
+--[=[
+	@within TableManager
+	Returns the other managers currently sharing (co-observing) at least one
+	live table identity with this one — de-duplicated, excluding self.
+]=]
+function TableManager.GetLinkedManagers<T>(self: TM_Internal<T>): { TableManager<any> }
+	return PropagationModule.GetCoObservers(self)
+end
+
+--[=[
+	@within TableManager
+	Returns true if this manager currently shares a live table identity with `other`.
+]=]
+function TableManager.IsLinkedWith<T>(self: TM_Internal<T>, other: TableManager<any>): boolean
+	return PropagationModule.IsLinkedWith(self, other)
+end
+
+--------------------------------------------------------------------------------
+--// For / Map //--
+--------------------------------------------------------------------------------
+
+--[=[
+	Reconciles the items found at `path` by KEY: `handler` runs once per key
+	(passed a per-item Janitor, the key, and change metadata — `nil` on the
+	initial fire), and is NOT re-run when the value at an existing key
+	changes. The Janitor is destroyed when that key is removed or the
+	connection disconnects.
+]=]
+function TableManager.ForKeys<T, S>(
+	self: TM_Internal<T>,
+	path: Path<S>,
+	handler: (itemJanitor: Janitor, key: KeyAtPath<T, S>, metadata: ChangeMetadata?) -> (),
+	options: ForOptions?
+): Connection
 	const parsedPath = PathHelpers.ParsePath(path)
-	const currentValue = self:Get(parsedPath)
+	return makeKeyedReconciler(self, parsedPath, false, function(itemJanitor, key, _value, metadata)
+		handler(itemJanitor, key, metadata)
+	end, nil, nil, options, nil)
+end
 
-	-- Create synthetic metadata for a "changed" event where old == new
-	const metadata: ChangeMetadata = {
-		Diff = {
-			type = "changed",
-			old = currentValue,
-			new = currentValue,
-			children = nil,
-		},
-		OriginPath = parsedPath,
-		OriginDiff = {
-			type = "changed",
-			old = currentValue,
-			new = currentValue,
-			children = nil,
-		},
-		Snapshot = createAncestorSnapshot(self.Raw),
-	}
+--[=[
+	Reconciles the items found at `path` by VALUE (as a multiset — duplicate
+	values are tracked as independent items): `handler` runs once per value
+	occurrence and is NOT re-run when that value moves between keys/indices
+	(e.g. an `ArraySwapRemove`). The Janitor is destroyed when that value
+	occurrence is no longer present or the connection disconnects.
+]=]
+function TableManager.ForValues<T, S>(
+	self: TM_Internal<T>,
+	path: Path<S>,
+	handler: (itemJanitor: Janitor, value: ElementAtPath<T, S>, metadata: ChangeMetadata?) -> (),
+	options: ForOptions?
+): Connection
+	const parsedPath = PathHelpers.ParsePath(path)
+	return makeValueReconciler(self, parsedPath, handler, options)
+end
 
-	-- Fire ValueChanged at exact path
-	self._listenerRegistry:FireListenersExact("ValueChanged", parsedPath, {
-		NewValue = currentValue,
-		OldValue = currentValue,
-		Metadata = metadata,
-	})
+--[=[
+	Reconciles the items found at `path` by KEY AND VALUE: `handler` re-runs
+	(tearing down the previous item's Janitor first) whenever EITHER the key
+	or the value changes — a value change at an existing key is treated as
+	that item leaving and a new one appearing.
+]=]
+function TableManager.ForPairs<T, S>(
+	self: TM_Internal<T>,
+	path: Path<S>,
+	handler: (
+		itemJanitor: Janitor,
+		key: KeyAtPath<T, S>,
+		value: ElementAtPath<T, S>,
+		metadata: ChangeMetadata?
+	) -> (),
+	options: ForOptions?
+): Connection
+	const parsedPath = PathHelpers.ParsePath(path)
+	return makeKeyedReconciler(self, parsedPath, true, handler, nil, nil, options, nil)
+end
 
-	-- Fire signal
-	self.ValueChanged:Fire(parsedPath, currentValue, currentValue)
+--[=[
+	@within TableManager
+	@unreleased
+	Returns a live `TableManager` keyed by `transform(entryJanitor, key, value)`,
+	with values passed through unchanged. `transform` re-runs only when the
+	source key is added/removed; a value change at an existing key refreshes
+	the output value WITHOUT re-running `transform`. The output manager owns
+	the source subscription: destroying it disconnects from the source and
+	tears down every entry's Janitor. Destroying the SOURCE does not
+	cascade-destroy the returned manager (independent lifecycles).
+]=]
+function TableManager.MapKeys<T, S>(
+	self: TM_Internal<T>,
+	path: Path<S>,
+	transform: (entryJanitor: Janitor, key: KeyAtPath<T, S>, value: ElementAtPath<T, S>) -> any
+): TableManager<any>
+	const parsedPath = PathHelpers.ParsePath(path)
+	const derived: TM_Internal<any> = TableManager.new({}) :: any
+	const onAdd, onRemove, onRefresh = ForMapModule.makeKeyRemapHandlers(derived, function(itemJanitor, key, value)
+		return transform(itemJanitor, key, value), value
+	end)
+	const connection =
+		makeKeyedReconciler(self, parsedPath, false, onAdd, onRemove, onRefresh, nil, ForMapModule.batchedInitialFire(derived))
+	ForMapModule.attachDerivedLifecycle(derived, connection)
 
-	-- Fire ancestor ValueChanged callbacks from parent path up to root.
-	if #parsedPath > 0 then
-		const parentPath = (PathHelpers.GetPathParentAndKey(parsedPath))
-		fireAncestorValueChangedNotifications(self, parentPath, metadata, false)
+	return derived :: any
+end
+
+--[=[
+	@within TableManager
+	@unreleased
+	Returns a live `TableManager` keyed by the SOURCE key, with each entry
+	recomputed via `transform(entryJanitor, value, key)` whenever its value
+	changes. Same ownership/lifecycle rules as `MapKeys`.
+]=]
+function TableManager.MapValues<T, S>(
+	self: TM_Internal<T>,
+	path: Path<S>,
+	transform: (entryJanitor: Janitor, value: ElementAtPath<T, S>, key: KeyAtPath<T, S>) -> any
+): TableManager<any>
+	const parsedPath = PathHelpers.ParsePath(path)
+	const derived: TM_Internal<any> = TableManager.new({}) :: any
+
+	const connection = makeKeyedReconciler(
+		self,
+		parsedPath,
+		true,
+		function(itemJanitor, key, value)
+			derived:Set(key, transform(itemJanitor, value, key))
+		end,
+		function(_item, key)
+			derived:Set(key, nil)
+		end,
+		nil,
+		nil,
+		ForMapModule.batchedInitialFire(derived)
+	)
+	ForMapModule.attachDerivedLifecycle(derived, connection)
+
+	return derived :: any
+end
+
+--[=[
+	@within TableManager
+	@unreleased
+	Returns a live `TableManager` keyed by `transform(entryJanitor, key, value)`'s
+	first return value (the second is the output value); the entry is
+	recomputed whenever the source key or value changes. On an output-key
+	collision between two source entries, the last write wins. Same
+	ownership/lifecycle rules as `MapKeys`.
+]=]
+function TableManager.MapPairs<T, S>(
+	self: TM_Internal<T>,
+	path: Path<S>,
+	transform: (entryJanitor: Janitor, key: KeyAtPath<T, S>, value: ElementAtPath<T, S>) -> (any, any)
+): TableManager<any>
+	const parsedPath = PathHelpers.ParsePath(path)
+	const derived: TM_Internal<any> = TableManager.new({}) :: any
+	const onAdd, onRemove = ForMapModule.makeKeyRemapHandlers(derived, transform)
+	const connection =
+		makeKeyedReconciler(self, parsedPath, true, onAdd, onRemove, nil, nil, ForMapModule.batchedInitialFire(derived))
+	ForMapModule.attachDerivedLifecycle(derived, connection)
+
+	return derived :: any
+end
+
+--------------------------------------------------------------------------------
+--// Other Utility Methods //--
+--------------------------------------------------------------------------------
+
+--[=[
+	@unreleased
+	Marks `path` (and every descendant of it) as ignored or not. An ignored
+	write still happens — `Get`/`Raw` reflect it immediately — but skips all
+	diff/snapshot/event work, so it never fires listeners/signals and is never
+	cloned for change detection. See `TableManagerConfig.IgnoredPaths` for the
+	config-time equivalent (seeded once at construction).
+]=]
+function TableManager.SetPathIgnored<T, S>(self: TM_Internal<T>, path: Path<S>, ignored: boolean)
+	IgnoreTrieModule.SetPathIgnored(self._ignoreTrie, path, ignored)
+end
+
+--[=[
+	@within TableManager
+	@unreleased
+	Returns a promise that resolves when the value at `path` satisfies `predicate`.
+	If no predicate is provided, resolves when the value at `path` first changes.
+]=]
+function TableManager.PromiseValue<T, S>(self: TM_Internal<T>, path: Path<S>, predicate: ((value: ValueAtPath<T, S>?) -> boolean)?): Promise<ValueAtPath<T, S>>
+	const parsedPath = PathHelpers.ParsePath(path)
+	const prom = Promise.new(function(resolve, reject, onCancel)
+		local connection: Connection
+		connection = self:Observe(parsedPath, function(newValue)
+			if predicate == nil or predicate(newValue) then
+				connection:Disconnect()
+				resolve(newValue)
+			end
+		end)
+
+		onCancel(function()
+			connection:Disconnect()
+		end)
+	end)
+
+	self._janitor:AddPromise(prom)
+	return prom
+end
+
+const addCallbackToList = function(list: { (any) -> () }, callback: (any) -> ()): () -> ()
+	table.insert(list, callback)
+	return function()
+		local i = table.find(list, callback)
+		if i then
+			table.remove(list, i)
+		end
 	end
+end
+
+--[=[
+	@within TableManager
+	@private
+	Only intended for power users.
+
+	Subscribes to the pre-diff replication op stream: one `AppliedOp` per
+	finalized change (a minimal per-leaf delta when a diff already ran for
+	some other reason, otherwise the raw new value), with `BatchBegin`/
+	`BatchEnd` markers framing a coalesced `Suspend`/`Resume` window.
+]=]
+function TableManager.OnApplied<T>(self: TM_Internal<T>, callback: (op: AppliedOp) -> ()): () -> ()
+	self._appliedListeners = self._appliedListeners or {}
+	return addCallbackToList(self._appliedListeners, callback)
+end
+
+--[=[
+	@within TableManager
+	Runs a callback when the TableManager is destroyed. 
+	Useful for cleaning up resources that are tied to the lifetime of the TableManager.
+]=]
+function TableManager.OnDestroy<T>(self: TM_Internal<T>, callback: () -> ()): () -> ()
+	self._destroyListeners = self._destroyListeners or {}
+	return addCallbackToList(self._destroyListeners, callback)
 end
 
 --[=[
 	Destroy the TableManager and clean up all resources.
 ]=]
 function TableManager.Destroy<T>(self: TM_Internal<T>)
-	if self._Destroyed then
-		return
+	for _, callback in self._destroyListeners or {} do
+		callback()
 	end
-	self._Destroyed = true
-
 	-- Tear down anything this manager owns (e.g. a `Map*` derived manager's
 	-- subscription to its source) BEFORE dismantling our own subsystems below,
 	-- since that teardown writes through `self:Set` to clear output entries.
@@ -1287,6 +1351,10 @@ function TableManager.Destroy<T>(self: TM_Internal<T>)
 	-- Setup No-op Destroy to avoid double-destroying errors
 	const tm = self :: any
 	tm.Destroy = function() end
+end
+
+function TableManager.IsDestroyed(self: TM_Internal): boolean
+	return getmetatable(self) == nil
 end
 
 -- Opacity wrapper constructors (see OpaqueRegistry): mark a value (or a

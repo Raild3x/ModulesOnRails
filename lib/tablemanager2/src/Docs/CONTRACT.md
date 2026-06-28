@@ -61,6 +61,20 @@ identity and never affect an earlier `oldValue`.)
 `path` accepts a string (`"player.health"`), a path array (`{"player","health"}`), or (for the array/
 write methods) a `Proxy` obtained from this manager. The empty path (`{}` / `""`) is the root.
 
+### 1.3 Replication op stream (`OnApplied`)
+- `OnApplied(cb): Connection` → `cb(op: AppliedOp)` — a pre-diff stream of one `AppliedOp` per finalized
+  change, where `AppliedOp = { Kind, Path, NewValue?, OldValue?, Index?, Diff?, OriginHasNoOpacity? }` and
+  `Kind` is `"Set" | "ArrayInsert" | "ArrayRemove" | "ArraySet" | "BatchBegin" | "BatchEnd"`.
+- A non-empty subscriber list **is its own gate**, separate from and cheaper than the diff/listener gate
+  used by the surfaces above: a manager with only an `OnApplied` subscriber (no local listeners, no
+  connected Signal) pays no diff cost for its writes.
+- The payload is adaptive: if nothing else is already diffing the change, the op carries the raw
+  `NewValue`; if a diff is already happening for some other reason (a covering listener, a batch flush),
+  the op rides that diff node (`Diff`) instead, carrying a minimal per-leaf delta at no extra cost.
+- `BatchBegin`/`BatchEnd` markers (`Path = {}`) frame a `Batch`/`Suspend`-`Resume` window.
+- `Flush(path?)`'s gate widens to "locally observed OR has an `OnApplied` subscriber", so a bypassed
+  write surfaced only via `Flush` still reaches replication even when nothing locally observes `path`.
+
 ---
 
 ## 2. Listener options
@@ -155,10 +169,9 @@ For a single change, observed order is:
 - `MoveTo(src, dst)`, `CopyTo(src, dst)`, `Swap(a, b)` are batched internally and fire the equivalent
   Set events; they preserve proxy references for moved tables. Cannot target the root; `MoveTo`/`Swap`
   reject ancestor/descendant pairs.
-- `ForceNotify(path)` fires a synthetic `ValueChanged` where `old == new` (plus ancestors). Suppressed
-  during a batch.
 - `Flush(path?)` surfaces changes made by code that bypassed `Set`/`Proxy` (raw mutation). No-op when
-  nothing observes `path`. Inside a batch it only marks the branch dirty.
+  nothing observes `path` AND no `OnApplied` subscriber exists (see §1.3). Inside a batch it only marks
+  the branch dirty.
 - `SetPathIgnored(path, ignored)`: an ignored write still updates `Raw`/`Get` but fires nothing and is
   excluded from diffing. `Config.IgnoredPaths` is the construction-time equivalent.
 

@@ -5,13 +5,12 @@
 	self-contained information to reconstruct an independent TableManager's
 	state via ReplicationHarness.
 
-	The full matrix runs once per feed mode ("signals" and "diff") to prove
-	each is independently sufficient.
+	The full matrix runs once per feed mode ("signals", "diff", and "ops") to
+	prove each is independently sufficient.
 
 	Out of scope (by design):
 	- NaN values: NaN ~= NaN breaks both change detection and deep equality,
 	  so NaN is not a replicable value and is intentionally untested.
-	- ForceNotify beyond the existing scalar-leaf smoke test.
 
 	History: tests marked `FIXME(replication) CONFIRMED` pinned real defects
 	(see Docs/REPLICATION-FIDELITY-FINDINGS.md). All confirmed defects have
@@ -29,7 +28,7 @@ return function(t: tiniest)
 	local describe = t.describe
 	local expect = t.expect
 
-	local feedModes: { ReplicationHarness.FeedMode } = { "signals", "diff" }
+	local feedModes: { ReplicationHarness.FeedMode } = { "signals", "diff", "ops" }
 
 	describe("wire boundary", function()
 		test("wireCopy returns a non-identical deep copy of nested tables", function()
@@ -115,7 +114,13 @@ return function(t: tiniest)
 
 					harness.Source.Proxy.player.health = 100
 
-					expect(harness:OpCount()).is(0)
+					if feedMode ~= "ops" then
+						-- "ops" has no local listener on Source, so this write is
+						-- untracked and ships verbatim via the diff-free replication
+						-- fast path (Mutator.applyWrite's untracked branch) instead
+						-- of being elided by a diff against the old value.
+						expect(harness:OpCount()).is(0)
+					end
 					expect(harness:IsConverged()).is_true()
 					harness:Destroy()
 				end)
@@ -846,13 +851,13 @@ return function(t: tiniest)
 				end)
 			end)
 
-			describe("ForceNotify", function()
-				test("does not corrupt the replica", function()
+			describe("Flush", function()
+				test("a bypassed write surfaced via Flush converges the replica", function()
 					local harness = ReplicationHarness.new({ player = { health = 100 } }, feedMode)
 					harness:Connect()
 
-					harness.Source.Proxy.player.health = 50
-					harness.Source:ForceNotify("player.health")
+					(harness.Source.Raw :: any).player.health = 50
+					harness.Source:Flush("player.health")
 
 					expect(harness:IsConverged()).is_true()
 					harness:Destroy()
@@ -954,6 +959,55 @@ return function(t: tiniest)
 			end)
 		end)
 	end
+
+	describe("feed: ops (diff-cost boundaries)", function()
+		-- These pin the cost model from the plan, not just convergence: an
+		-- AppliedOp's `Diff` field is non-nil iff a diff was already happening
+		-- for some other reason and the op rode it; nil means the value-
+		-- shipping fast path was used and nothing was diffed for this write.
+		local TableManager = require("../../TableManager")
+
+		test("a write with no local listeners ships the raw value -- no diff was produced", function()
+			local manager = TableManager.new({ player = { stats = { str = 5, dex = 3 } } })
+
+			local ops = {}
+			local appliedConn = manager:OnApplied(function(op)
+				table.insert(ops, op)
+			end)
+
+			manager.Proxy.player.stats.str = 9
+
+			expect(#ops).is(1)
+			expect(ops[1].Diff).is(nil)
+			expect(ops[1].NewValue).is(9)
+
+			appliedConn:Disconnect()
+			manager:Destroy()
+		end)
+
+		test("a ProvideDiff opt-in on one path rides a delta there while an unwatched sibling stays on the value-shipping fast path", function()
+			local manager = TableManager.new({ a = { x = 1 }, b = { y = 1 } })
+
+			local ops = {}
+			local appliedConn = manager:OnApplied(function(op)
+				table.insert(ops, op)
+			end)
+			local watchConn = manager:OnChange({ "a", "x" }, function() end, { ProvideDiff = true })
+
+			manager.Proxy.a.x = 2
+			manager.Proxy.b.y = 2
+
+			expect(#ops).is(2)
+			expect(ops[1].Diff).never_is(nil)
+			expect(ops[1].Diff.new).is(2)
+			expect(ops[2].Diff).is(nil)
+			expect(ops[2].NewValue).is(2)
+
+			watchConn:Disconnect()
+			appliedConn:Disconnect()
+			manager:Destroy()
+		end)
+	end)
 
 	describe("echo order (signals feed)", function()
 		--[[

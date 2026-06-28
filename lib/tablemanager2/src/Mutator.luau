@@ -250,6 +250,11 @@ local function onArrayAppended<T, S>(self: TM_Internal<T>, path: PathArray<S>, i
 		return
 	end
 	if not shouldTrackChangesAt(self, path) then
+		-- Nothing diffs this append, but an OnApplied subscriber still needs to
+		-- see it -- ship the value directly (no diff node in hand here).
+		if self._appliedListeners[1] ~= nil then
+			EmitterModule.emitReplicationOp(self, "ArrayInsert", path, newValue, index, nil)
+		end
 		return
 	end
 	const insertPath: { any } = PathHelpers.Append(path :: any, index)
@@ -431,6 +436,10 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 		self._changeDetector:CheckForChangesBetween(oldValue, newValue, parsedPath, self.Raw, nil, oldSnapshot)
 	elseif trackable then
 		CoalescedFlushModule.Request(self, parsedPath)
+	elseif self._appliedListeners[1] ~= nil then
+		-- Untracked, so nothing will diff this write -- but an OnApplied
+		-- subscriber still needs to see it -- ship the value directly.
+		EmitterModule.emitReplicationOp(self, "Set", parsedPath, newValue, nil, nil)
 	end
 	debug.profileend()
 end
@@ -507,6 +516,10 @@ function Mutator.applyRootSet<T>(self: TM_Internal<T>, newRoot: any)
 	-- newRoot), then reconcile the shadow to newRoot.
 	if trackable then
 		CoalescedFlushModule.Request(self, rootPath)
+	elseif self._appliedListeners[1] ~= nil then
+		-- Untracked, so nothing will diff this root replacement -- but an
+		-- OnApplied subscriber still needs to see it -- ship the value directly.
+		EmitterModule.emitReplicationOp(self, "Set", rootPath, newRoot, nil, nil)
 	end
 end
 

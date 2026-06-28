@@ -2,7 +2,7 @@
 --[[
 	Coverage for `Config.EnableProxies = false`: every explicit API surface
 	(Get/Set/array ops/MoveTo/CopyTo/Swap/Batch/Suspend/Resume/listeners/
-	ForceNotify) must work identically without a proxy graph, `Proxy`/`GetProxy`
+	OnApplied) must work identically without a proxy graph, `Proxy`/`GetProxy`
 	must be unavailable, and replication fidelity must hold.
 ]]
 
@@ -195,18 +195,34 @@ return function(t: tiniest)
 			manager:Destroy()
 		end)
 
-		test("OnChange/OnValueChange listeners and ForceNotify work without proxies", function()
+		test("OnChange/OnValueChange listeners work without proxies", function()
 			local manager = TableManager.new({ player = { health = 100 } }, { EnableProxies = false })
 
 			local changeCount = 0
 			local conn = manager:OnValueChange({ "player", "health" }, function(newValue, oldValue)
 				changeCount += 1
-				expect(newValue).is(100)
+				expect(newValue).is(50)
 				expect(oldValue).is(100)
 			end)
 
-			manager:ForceNotify { "player", "health" }
+			manager:Set({ "player", "health" }, 50)
 			expect(changeCount).is(1)
+
+			conn:Disconnect()
+			manager:Destroy()
+		end)
+
+		test("OnApplied works without proxies", function()
+			local manager = TableManager.new({ player = { health = 100 } }, { EnableProxies = false })
+
+			local ops = {}
+			local conn = manager:OnApplied(function(op)
+				table.insert(ops, op)
+			end)
+
+			manager:Set({ "player", "health" }, 50)
+			expect(#ops).is(1)
+			expect(ops[1].Kind).is("Set")
 
 			conn:Disconnect()
 			manager:Destroy()
