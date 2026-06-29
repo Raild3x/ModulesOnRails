@@ -6,7 +6,7 @@
 	Shared type definitions used across the Server, Client, and Shared modules.
 ]=]
 
-const TableManagerModule = require("../../TableManager")
+const TableManagerModule = require("../../../tablemanager2/src/TableManager")
 const Signal = require("../../Signal")
 const TokenCache = require("./TokenCache")
 
@@ -112,4 +112,7 @@ export type WireMessage = {
 	Refs: { [number]: any }?,
 }
 
-return {}
+return {
+	Signal = Signal,
+	TableManager = TableManagerModule,
+}

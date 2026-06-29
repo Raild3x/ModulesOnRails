@@ -24,9 +24,19 @@ type ReplicationToken = Types.ReplicationToken
 type SearchCondition = Types.SearchCondition
 
 --// Module-level (per-realm) registries //--
-const STORAGE: { [Id]: BaseReplicator } = {}
-const CREATION_LISTENERS: { [string]: { (replicator: BaseReplicator) -> () } } = {}
-const ReplicatorCreatedSignal = Signal.new()
+export type Realm = {
+	Storage: { [Id]: BaseReplicator },
+	CreationListeners: { [string]: { (replicator: BaseReplicator) -> () } },
+	ReplicatorCreated: Signal.Signal<(replicator: BaseReplicator) -> (), BaseReplicator>,
+}
+
+const function newRealm(): Realm
+	return {
+		Storage = {},
+		CreationListeners = {},
+		ReplicatorCreated = Signal.new() :: any,
+	}
+end
 
 --// Volatile State //--
 local nextId = 0
@@ -75,6 +85,15 @@ end
 local BaseReplicator = {}
 BaseReplicator.ClassName = "BaseReplicator"
 BaseReplicator.__index = BaseReplicator
+
+-- Test-only escape hatch: lets a spec swap in an independent realm (its own
+-- Storage/CreationListeners/ReplicatorCreated) to simulate a second,
+-- independent client in the same process -- see Tests/Helpers/
+-- FakeIntermediary.luau. Defaults to one shared realm, matching today's
+-- behavior exactly; production code never swaps this. Not part of the
+-- public API.
+BaseReplicator._Realm = newRealm()
+BaseReplicator._NewRealm = newRealm
 
 -- Written as a plain structural interface (every method/field listed
 -- explicitly) rather than `typeof(setmetatable(..., BaseReplicator))`: the
@@ -133,7 +152,7 @@ export type BaseReplicator = BR_Public<BaseReplicator>
 	Iterates every replicator currently in memory (`for _, replicator in BaseReplicator do`).
 ]=]
 BaseReplicator.__iter = function()
-	return next, STORAGE
+	return next, (BaseReplicator :: any)._Realm.Storage
 end
 
 --------------------------------------------------------------------------------
@@ -145,7 +164,7 @@ end
 	Returns the replicator with the given Id, if one currently exists.
 ]=]
 function BaseReplicator.GetFromId(id: Id): BaseReplicator?
-	return STORAGE[id]
+	return (BaseReplicator :: any)._Realm.Storage[id]
 end
 
 --[=[
@@ -166,7 +185,7 @@ end
 function BaseReplicator.GetAll(condition: SearchCondition?): { BaseReplicator }
 	const satisfies = reconcileCondition(condition)
 	const results = {}
-	for _, replicator in STORAGE do
+	for _, replicator in BaseReplicator._Realm.Storage do
 		if satisfies(replicator) then
 			table.insert(results, replicator)
 		end
@@ -182,13 +201,13 @@ end
 function BaseReplicator.ForEach(condition: SearchCondition?, fn: (replicator: BaseReplicator) -> ()): Signal.Connection
 	const satisfies = reconcileCondition(condition)
 
-	for _, replicator in STORAGE do
+	for _, replicator in BaseReplicator._Realm.Storage do
 		if satisfies(replicator) then
 			task.spawn(fn, replicator)
 		end
 	end
 
-	return ReplicatorCreatedSignal:Connect(function(replicator: BaseReplicator)
+	return BaseReplicator._Realm.ReplicatorCreated:Connect(function(replicator: BaseReplicator)
 		if satisfies(replicator) then
 			fn(replicator)
 		end
@@ -201,12 +220,12 @@ end
 ]=]
 function BaseReplicator.PromiseFirst(condition: SearchCondition?): Promise.TypedPromise<BaseReplicator>
 	const satisfies = reconcileCondition(condition)
-	for _, replicator in STORAGE do
+	for _, replicator in BaseReplicator._Realm.Storage do
 		if satisfies(replicator) then
 			return Promise.resolve(replicator)
 		end
 	end
-	return Promise.fromEvent(ReplicatorCreatedSignal, satisfies)
+	return Promise.fromEvent(BaseReplicator._Realm.ReplicatorCreated, satisfies)
 end
 
 --[=[
@@ -215,7 +234,7 @@ end
 ]=]
 function BaseReplicator.GetFirst(condition: SearchCondition?): BaseReplicator?
 	const satisfies = reconcileCondition(condition)
-	for _, replicator in STORAGE do
+	for _, replicator in BaseReplicator._Realm.Storage do
 		if satisfies(replicator) then
 			return replicator
 		end
@@ -229,21 +248,20 @@ end
 	a disconnect function.
 ]=]
 function BaseReplicator.OnNew(tokenName: string, fn: (replicator: BaseReplicator) -> ()): () -> ()
-	local listeners = CREATION_LISTENERS[tokenName]
+	const creationListeners = BaseReplicator._Realm.CreationListeners
+	local listeners = creationListeners[tokenName]
 	if listeners == nil then
 		listeners = {}
-		CREATION_LISTENERS[tokenName] = listeners
+		creationListeners[tokenName] = listeners
 	end
 	table.insert(listeners, fn)
 
 	return function()
-		local list = CREATION_LISTENERS[tokenName]
-		if list == nil then
-			return
-		end
-		local index = table.find(list, fn)
+		-- Removes from the exact list `fn` was inserted into above, regardless
+		-- of which realm is active by the time this disconnect runs.
+		local index = table.find(listeners, fn)
 		if index then
-			table.remove(list, index)
+			table.remove(listeners, index)
 		end
 	end
 end
@@ -279,7 +297,7 @@ function BaseReplicator.new(config: {
 		table.insert(self._Parent._Children, self)
 	end
 
-	STORAGE[self.Id] = self
+	BaseReplicator._Realm.Storage[self.Id] = self
 
 	return self
 end
@@ -297,13 +315,14 @@ function BaseReplicator._FireCreationListeners(self: BR_Internal)
 	assert(not self._CreationListenersFired, "Creation listeners already fired for this replicator")
 	self._CreationListenersFired = true
 
-	const listeners = CREATION_LISTENERS[self:GetTokenName()]
+	const realm = BaseReplicator._Realm
+	const listeners = realm.CreationListeners[self:GetTokenName()]
 	if listeners then
 		for _, listener in table.clone(listeners) do
 			task.spawn(listener, self)
 		end
 	end
-	ReplicatorCreatedSignal:Fire(self)
+	realm.ReplicatorCreated:Fire(self)
 end
 
 --[=[
@@ -354,7 +373,7 @@ function BaseReplicator.Destroy(self: BR_Internal)
 		parent.ChildRemoved:Fire(self)
 	end
 
-	STORAGE[self.Id] = nil
+	BaseReplicator._Realm.Storage[self.Id] = nil
 	self._Janitor:Destroy()
 end
 

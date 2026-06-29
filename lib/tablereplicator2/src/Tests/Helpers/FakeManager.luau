@@ -14,7 +14,7 @@
 local FakeManager = {}
 FakeManager.__index = FakeManager
 
-export type FakeManager = typeof(setmetatable({} :: { Raw: { [any]: any } }, FakeManager))
+export type FakeManager = any -- typeof(setmetatable({} :: { Raw: { [any]: any } }, FakeManager))
 
 function FakeManager.new(raw: { [any]: any }?): FakeManager
 	return setmetatable({ Raw = raw or {} }, FakeManager)
@@ -23,6 +23,10 @@ end
 function FakeManager.Set(_self: FakeManager, _path: any, _value: any) end
 
 function FakeManager.OnApplied(_self: FakeManager, _callback: (any) -> ()): () -> ()
+	return function() end
+end
+
+function FakeManager.OnDestroy(_self: FakeManager, _callback: () -> ()): () -> ()
 	return function() end
 end
 

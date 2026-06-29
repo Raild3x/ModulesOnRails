@@ -4,7 +4,7 @@
 	@server
 
 	Replicates a TableManager2 instance to a set of players. Inherits from
-	`BaseReplicator` (see there for `GetManager`, `GetTag(s)`, `GetParent`,
+	`BaseReplicator` (see there for the `Manager`/`Tags` fields, `GetParent`,
 	`GetChildren`, `FindFirstChild`, etc).
 
 	```lua
@@ -25,13 +25,15 @@ const Players = game:GetService("Players")
 
 const BaseReplicator = require("../Shared/BaseReplicator")
 const Types = require("../Shared/Types")
-const TableManagerModule = require("../../TableManager")
+const TableManagerModule = Types.TableManager
 const ReplicationScope = require("./ReplicationScope")
 const FrameCoordinator = require("./FrameCoordinator")
 const ServerTransportModule = require("../Shared/Transport/ServerTransport")
 const FlatCodec = require("../Shared/Serialization/FlatCodec")
 const RefCodec = require("../Shared/Serialization/RefCodec")
 const TokenCache = require("../Shared/TokenCache")
+
+const REPLICATE_TO_ALL = "all"
 
 type Id = Types.Id
 type Tags = Types.Tags
@@ -203,8 +205,12 @@ function ServerReplicator.new(config: {
 	end
 	assert(TokenCache.isToken(token), "Invalid Token")
 
+	local  targets = config.ReplicationTargets
+	if typeof(targets) == "string" then
+		targets = targets:lower()
+	end
+
 	const parent = config.Parent :: SR_Internal?
-	const targets = config.ReplicationTargets
 	if parent then
 		assert(targets == nil, "Cannot specify ReplicationTargets when creating a child replicator")
 	else
@@ -303,7 +309,7 @@ function ServerReplicator.SetTargets(self: SR_Internal, targets: ReplicationTarg
 	assert(self:IsTopLevel(), "Cannot set replication targets on a non-top-level replicator")
 	const scope = self._Scope
 
-	if targets == "All" then
+	if targets == REPLICATE_TO_ALL then
 		if scope:IsReplicatingToAll() then
 			return
 		end
@@ -515,7 +521,7 @@ local noneToken = ServerReplicator.Token("ServerReplicator.None")
 ServerReplicator.All = ServerReplicator.new {
 	Token = allToken,
 	Data = {},
-	ReplicationTargets = "all",
+	ReplicationTargets = REPLICATE_TO_ALL,
 }
 
 --[=[

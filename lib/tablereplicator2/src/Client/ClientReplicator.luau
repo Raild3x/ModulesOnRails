@@ -23,8 +23,8 @@
 ]=]
 
 const Promise = require("../../Promise")
-const TableManagerModule = require("../../TableManager")
 const Types = require("../Shared/Types")
+const TableManagerModule = Types.TableManager
 const BaseReplicator = require("../Shared/BaseReplicator")
 const ClientTransportModule = require("../Shared/Transport/ClientTransport")
 const FlatCodec = require("../Shared/Serialization/FlatCodec")
