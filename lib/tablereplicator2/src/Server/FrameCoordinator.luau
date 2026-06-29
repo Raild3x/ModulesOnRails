@@ -10,18 +10,6 @@
 	deferred flush per frame then replays them to each active player in that
 	exact global order.
 
-	This is what guarantees that ops across DIFFERENT replicators /
-	TableManagers re-apply on the client in the same order the server produced
-	them: per-scope flushing could not, because each scope drained
-	independently and so interleaved ordering between two scopes was lost.
-
-	Scope of this layer (Phase A): only **data ops** travel through here.
-	Structural items (Create/Destroy/SetParent) are still sent directly and
-	synchronously by `ServerReplicator`. The flush is deliberately split into
-	an "assemble per-player item lists" pass and a single "encode + send" seam
-	(`_SendFrame`) so a future byte codec / per-class batching layer can slot
-	in without touching ordering.
-
 	Audience is captured at enqueue time and intersected with the live active
 	set at flush:
 	  * a player added to a scope mid-frame is NOT in the captured audience of
@@ -31,6 +19,8 @@
 	    they never receive an op for a replicator they were already told to
 	    drop.
 ]=]
+
+const RunService = game:GetService("RunService")
 
 const FlatCodec = require("../Shared/Serialization/FlatCodec")
 const RefCodec = require("../Shared/Serialization/RefCodec")
@@ -69,6 +59,38 @@ type OpRun = {
 	Ops: { BufferedOp },
 }
 
+--------------------------------------------------------------------------------
+	--// Replication Scheduler //--
+--------------------------------------------------------------------------------
+
+local scheduleDirty = false
+const scheduledCoordinators: { [FrameCoordinator]: boolean? } = {}
+const function scheduleCoordinatorFlush(coordinator: FrameCoordinator)
+	scheduleDirty = true
+	scheduledCoordinators[coordinator] = true
+end
+
+do
+	const function reschedule()
+		if scheduleDirty then
+			scheduleDirty = false
+			task.defer(reschedule)
+			return 
+		end
+		for coordinator in scheduledCoordinators do
+			coordinator:Flush()
+		end
+		table.clear(scheduledCoordinators)
+	end
+
+	-- Hearbeat is the last thing to run before Replication, so we defer 
+	-- here to try and flush during it's following resumption point
+	RunService.Heartbeat:Connect(function()
+		task.defer(reschedule)
+	end)
+end
+
+
 const FrameCoordinator = {}
 FrameCoordinator.__index = FrameCoordinator
 
@@ -78,6 +100,7 @@ export type FrameCoordinator = typeof(setmetatable(
 		_entries: { Entry },
 		_audienceCache: { [Scope]: { version: number, players: { Player } } },
 		_flushScheduled: boolean,
+		_scheduledOps: number,
 	},
 	FrameCoordinator
 ))
@@ -88,6 +111,7 @@ function FrameCoordinator.new(transport: ServerTransport): FrameCoordinator
 		_entries = {},
 		_audienceCache = {},
 		_flushScheduled = false,
+		_scheduledOps = 0,
 	}, FrameCoordinator)
 end
 
@@ -98,7 +122,7 @@ end
 	targeting "era" (see `ReplicationScope.GetActiveVersion`) so a hot frame
 	allocates at most one player list per scope per era.
 ]=]
-function FrameCoordinator.QueueOp(self: FrameCoordinator, scope: Scope, id: Id, op: AppliedOp)
+function FrameCoordinator.QueueOp(self: FrameCoordinator, scope: Scope, replicatorId: Id, op: AppliedOp)
 	const version = scope:GetActiveVersion()
 	local cached = self._audienceCache[scope]
 	if cached == nil or cached.version ~= version then
@@ -109,11 +133,11 @@ function FrameCoordinator.QueueOp(self: FrameCoordinator, scope: Scope, id: Id, 
 	table.insert(self._entries, {
 		Scope = scope,
 		Audience = cached.players,
-		Id = id,
+		Id = replicatorId,
 		Op = OpBuffer.NormalizeAppliedOp(op),
 	})
 
-	self:_ScheduleFlush()
+	scheduleCoordinatorFlush(self)
 end
 
 --[=[
@@ -122,26 +146,15 @@ end
 	(synchronous) `Destroy` item and reference a replicator the client already
 	tore down.
 ]=]
-function FrameCoordinator.DropReplicator(self: FrameCoordinator, id: Id)
+function FrameCoordinator.DropReplicator(self: FrameCoordinator, replicatorId: Id)
 	const entries = self._entries
 	const kept: { Entry } = {}
 	for _, entry in entries do
-		if entry.Id ~= id then
+		if entry.Id ~= replicatorId then
 			table.insert(kept, entry)
 		end
 	end
 	self._entries = kept
-end
-
-function FrameCoordinator._ScheduleFlush(self: FrameCoordinator)
-	if self._flushScheduled then
-		return
-	end
-	self._flushScheduled = true
-	task.defer(function()
-		self._flushScheduled = false
-		self:Flush()
-	end)
 end
 
 --[=[
@@ -153,6 +166,7 @@ function FrameCoordinator.Flush(self: FrameCoordinator)
 	const entries = self._entries
 	self._entries = {}
 	table.clear(self._audienceCache)
+	self._scheduledOps = 0
 
 	if entries[1] == nil then
 		return
@@ -207,6 +221,7 @@ function FrameCoordinator._SendFrame(self: FrameCoordinator, player: Player, run
 		items[i] = FlatCodec.OpsItem(run.Id, run.Ops)
 	end
 	const encoded, refs = RefCodec.Encode(items)
+	print("MESSAGE", player, #runs, runs, #encoded, encoded)
 	self._transport:SendMessage(player, FlatCodec.BuildMessage(encoded, refs))
 end
 

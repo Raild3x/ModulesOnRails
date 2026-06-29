@@ -411,14 +411,14 @@ function ServerReplicator.SetParent(self: SR_Internal, newParent: SR_Internal)
 
 	if oldScope == newScope then
 		self:_SetParentRefs(newParent)
-		local message = buildMessage { FlatCodec.SetParentItem(self.Id, newParent.Id) }
+		const message = buildMessage { FlatCodec.SetParentItem(self.Id, newParent.Id) }
 		for _, player in oldScope:GetActivePlayers() do
 			oldScope:SendTo(player, message)
 		end
 		return
 	end
 
-	const subtree = {}
+	const subtree: { SR_Internal } = {}
 	collectSubtree(self, subtree)
 	for _, replicator in subtree do
 		replicator._Scope = newScope

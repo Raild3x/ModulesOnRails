@@ -51,7 +51,7 @@ local function normalizeAppliedOp(op: AppliedOp): BufferedOp
 		local value = if op.Diff ~= nil then (op.Diff :: any).new else op.NewValue
 		return { Kind = "Set", Path = op.Path, Value = value }
 	elseif op.Kind == "ArrayInsert" or op.Kind == "ArraySet" then
-		return { Kind = op.Kind, Path = op.Path, Value = op.NewValue, Index = op.Index }
+		return { Kind = op.Kind :: "ArrayInsert" | "ArraySet", Path = op.Path, Value = op.NewValue, Index = op.Index }
 	elseif op.Kind == "ArrayRemove" then
 		return { Kind = "ArrayRemove", Path = op.Path, Index = op.Index }
 	else -- BatchBegin / BatchEnd: markers carry no state.

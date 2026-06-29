@@ -74,11 +74,7 @@ const OpKindToKind = table.freeze {
 	BatchEnd = Kind.BatchEnd,
 } :: { [OpKind]: number }
 
---[=[
-	Wraps a list of items into a versioned message ready to hand to a transport.
-	`refs` is the optional Model V de-dup pool (see RefCodec); pass `nil` (the
-	default) for a message with no shared tables.
-]=]
+
 function FlatCodec.BuildMessage(items: { WireItem }, refs: { [number]: any }?): WireMessage
 	return { V = FlatCodec.Version, Items = items, Refs = refs }
 end

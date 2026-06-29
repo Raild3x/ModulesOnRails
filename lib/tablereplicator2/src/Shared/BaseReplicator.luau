@@ -196,9 +196,9 @@ end
 --[=[
 	@tag Static
 	Runs `fn` for every existing replicator matching `condition`, and again for
-	every future one. Returns a connection that stops future invocations.
+	every future one. Returns a disconnect function that stops future invocations.
 ]=]
-function BaseReplicator.ForEach(condition: SearchCondition?, fn: (replicator: BaseReplicator) -> ()): Signal.Connection
+function BaseReplicator.ForEach(condition: SearchCondition?, fn: (replicator: BaseReplicator) -> ()): () -> ()
 	const satisfies = reconcileCondition(condition)
 
 	for _, replicator in BaseReplicator._Realm.Storage do
@@ -207,11 +207,15 @@ function BaseReplicator.ForEach(condition: SearchCondition?, fn: (replicator: Ba
 		end
 	end
 
-	return BaseReplicator._Realm.ReplicatorCreated:Connect(function(replicator: BaseReplicator)
+	const connection = BaseReplicator._Realm.ReplicatorCreated:Connect(function(replicator: BaseReplicator)
 		if satisfies(replicator) then
 			fn(replicator)
 		end
 	end)
+
+	return function()
+		connection:Disconnect()
+	end
 end
 
 --[=[
@@ -362,6 +366,10 @@ end
 	Base teardown: detaches from the parent (if any) and releases the janitor
 	(signals, etc). Subclasses should call this via their parent metatable
 	(`getmetatable(Subclass).Destroy(self)`) AFTER their own teardown.
+
+	Does not cascade to children -- they remain discoverable and stay alive,
+	orphaned (their `_Parent` is cleared so a later `:Destroy()` on one of
+	them doesn't reach back into this now-torn-down replicator's signals).
 ]=]
 function BaseReplicator.Destroy(self: BR_Internal)
 	const parent = self._Parent
@@ -371,6 +379,10 @@ function BaseReplicator.Destroy(self: BR_Internal)
 			table.remove(parent._Children, index)
 		end
 		parent.ChildRemoved:Fire(self)
+	end
+
+	for _, child in self._Children do
+		child._Parent = nil
 	end
 
 	BaseReplicator._Realm.Storage[self.Id] = nil
