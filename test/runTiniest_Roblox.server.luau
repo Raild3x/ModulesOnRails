@@ -59,7 +59,12 @@
 	```
 ]=]
 
-local tiniest = require("./tiniest/tiniest_for_roblox").configure {}
+local tiniest = require("./tiniest/tiniest_for_roblox").configure {
+	pretty = {
+		format = "tree", -- "tree" or "flat"
+		trim_duplicate_trace = true, -- omit shared stack frames from multiple failing tests
+	},
+}
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local PACKAGE_TO_TEST = "delaunay" -- Change this to the name of the package you want to test
@@ -70,3 +75,6 @@ tiniest.run_tests(tests, {
 	timeout_diagnostics = "on_error",
 	safe_mode = true,
 })
+
+task.wait(1) -- wait a moment to make it easier to identify the run in the microprofiler
+tiniest.run_tests(tests, {})
