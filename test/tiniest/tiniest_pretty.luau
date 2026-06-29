@@ -8,6 +8,23 @@ type Test = tiniest.Test
 type TestRunResult = tiniest.TestRunResult
 type RunResult = tiniest.RunResult
 
+type PrettyResult = {
+	test: Test,
+	result: TestRunResult,
+	crumbs: string,
+	icon: string,
+	annotations: string,
+}
+
+type TreeNode = {
+	label: string,
+	children: { TreeNode },
+	children_by_label: { [string]: TreeNode },
+	pretty: PrettyResult?,
+	status: ("pass" | "fail")?,
+	duration: number?,
+}
+
 export type Options = {
 	plugins: nil | { tiniest_plugin.Plugin },
 	disable_emoji: boolean?,
@@ -16,6 +33,8 @@ export type Options = {
 	disable_output: nil | {
 		after_run: boolean?,
 	},
+	format: ("flat" | "tree")?,
+	trim_duplicate_trace: boolean?,
 }
 
 local tiniest_pretty = {}
@@ -24,6 +43,8 @@ function tiniest_pretty.configure(options: Options)
 	if options.disable_unicode then
 		options.disable_emoji = true
 	end
+
+	local format = options.format or "flat"
 
 	local plugins = tiniest_plugin.configure(options.plugins)
 
@@ -41,6 +62,8 @@ function tiniest_pretty.configure(options: Options)
 	local crumb_trail = if options.disable_unicode then " > " else " ▸ "
 	local divider = if options.disable_unicode then "=" else "═"
 	local margin_line = if options.disable_unicode then "|" else "│"
+	local tree_marker = if options.disable_unicode then "> " else "▸ "
+	local TREE_INDENT_UNIT = "  "
 
 	local paint = {}
 	do
@@ -114,7 +137,7 @@ function tiniest_pretty.configure(options: Options)
 		return paint.dim(divider_lhs) .. " " .. text .. " " .. paint.dim(divider_rhs)
 	end
 	local function syntax(snippet: string): string
-		return snippet
+		snippet = snippet
 			:gsub("0?[xXbB]?%d*%.?%d*[eE]?%-?%d+", paint.number)
 			:gsub('".-"', paint.string)
 			:gsub("'.-'", paint.string)
@@ -124,9 +147,146 @@ function tiniest_pretty.configure(options: Options)
 			:gsub("false", paint.keyword)
 			:gsub("nil", paint.keyword)
 			:gsub("%-%-.-\n", paint.dim)
+		return snippet
 	end
 	local function indent(passage: string, indentation: string): string
-		return passage:gsub("\n", "\n" .. indentation)
+		passage = passage:gsub("\n", "\n" .. indentation)
+		return passage
+	end
+
+	-- Duplicated from tiniest_time.luau's local format_duration: tiniest_time.luau already requires
+	-- this module (for the Options type), so requiring it back here would be a circular require.
+	-- Keep the thresholds/rounding in sync by hand if either one changes.
+	local function format_tree_duration(seconds: number): string
+		local SECOND = 1
+		local MILLISECOND = SECOND / 1000
+		local MICROSECOND = MILLISECOND / 1000
+		local micro_suffix = if options.disable_unicode then "u" else "µ"
+
+		if seconds < 100 * MICROSECOND then
+			return `{math.ceil(seconds / MICROSECOND * 100) / 100}{micro_suffix}s`
+		elseif seconds < 100 * MILLISECOND then
+			return `{math.ceil(seconds / MILLISECOND * 100) / 100}ms`
+		else
+			return `{math.ceil(seconds * 100) / 100}s`
+		end
+	end
+
+	local function build_tree(pretty_results: { PrettyResult }): TreeNode
+		local root: TreeNode = {
+			label = "",
+			children = {},
+			children_by_label = {},
+		}
+		for _, pretty in pretty_results do
+			local labels = pretty.test.labels
+			local node = root
+			for index = 1, #labels - 1 do
+				local label = labels[index]
+				local child = node.children_by_label[label]
+				if child == nil then
+					child = {
+						label = label,
+						children = {},
+						children_by_label = {},
+					} :: TreeNode
+					node.children_by_label[label] = child
+					table.insert(node.children, child)
+				end
+				node = child :: TreeNode
+			end
+			local leaf: TreeNode = {
+				label = labels[#labels],
+				children = {},
+				children_by_label = {},
+				pretty = pretty,
+			}
+			table.insert(node.children, leaf)
+		end
+		return root
+	end
+
+	-- Computes node.status/node.duration bottom-up. Group duration is the sum of every child's
+	-- duration, but only if ALL children have one - one timing-less leaf blanks the aggregate for
+	-- every ancestor, rather than showing a misleading partial sum.
+	local function aggregate_tree(node: TreeNode): ()
+		if node.pretty ~= nil then
+			node.status = node.pretty.result.status
+			local duration = (node.pretty.result :: any).duration
+			if typeof(duration) == "number" then
+				node.duration = duration
+			end
+			return
+		end
+
+		local status: "pass" | "fail" = "pass"
+		local duration_sum = 0
+		local has_all_durations = true
+		for _, child in node.children do
+			aggregate_tree(child)
+			if child.status == "fail" then
+				status = "fail"
+			end
+			if child.duration ~= nil then
+				duration_sum += child.duration
+			else
+				has_all_durations = false
+			end
+		end
+		node.status = status
+		if has_all_durations then
+			node.duration = duration_sum
+		end
+	end
+
+	local function render_tree(node: TreeNode, depth: number, lines: { string }): ()
+		local indent_str = string.rep(TREE_INDENT_UNIT, depth)
+		local status = node.status :: "pass" | "fail"
+
+		if node.pretty ~= nil then
+			-- Leaves don't get a tree_marker like group lines do, so without an extra indent unit
+			-- here they'd visually align with their parent group's label instead of nesting under it.
+			local leaf_indent = indent_str .. TREE_INDENT_UNIT
+			table.insert(lines, `{leaf_indent}{node.pretty.icon} {paint[status](node.label)}{node.pretty.annotations}`)
+			return
+		end
+
+		local annotation = ""
+		if node.duration ~= nil then
+			annotation = paint.dim(` - {format_tree_duration(node.duration)}`)
+		end
+		local marker = if depth > 0 then tree_marker else ""
+		table.insert(lines, `{indent_str}{marker}{status_icons[status]} {paint[status](node.label)}{annotation}`)
+		for _, child in node.children do
+			render_tree(child, depth + 1, lines)
+		end
+	end
+
+	-- Counts how many trailing lines are identical across every line array given (e.g. shared
+	-- framework frames that appear at the bottom of every failing test's stack trace). Returns 0
+	-- if there are fewer than two traces to compare, since "duplicate" requires something to be
+	-- duplicated against.
+	local function common_suffix_line_count(line_arrays: { { string } }): number
+		if #line_arrays < 2 then
+			return 0
+		end
+		local shortest = line_arrays[1]
+		for _, lines in line_arrays do
+			if #lines < #shortest then
+				shortest = lines
+			end
+		end
+		local count = 0
+		while count < #shortest do
+			local line = shortest[#shortest - count]
+			for _, lines in line_arrays do
+				if lines[#lines - count] ~= line then
+					return count
+				end
+			end
+			count += 1
+		end
+		return count
 	end
 
 	local self = {}
@@ -135,7 +295,7 @@ function tiniest_pretty.configure(options: Options)
 	function self.format_run(run_result: RunResult): string
 		local lines = {}
 
-		local pretty_results = {}
+		local pretty_results: { PrettyResult } = {}
 		for _, test in run_result.tests do
 			local result = run_result.individual[test]
 			local painted_labels = table.clone(test.labels)
@@ -151,16 +311,30 @@ function tiniest_pretty.configure(options: Options)
 			local pretty = {
 				test = test,
 				result = result,
-				crumbs = table.concat(painted_labels, paint[result.status .. "_dim"](crumb_trail)),
+				crumbs = table.concat(painted_labels, paint[(result.status .. "_dim") :: any](crumb_trail)),
 				icon = status_icons[result.status],
 				annotations = paint.dim(annotations),
-			}
+			} :: PrettyResult
 			table.insert(pretty_results, pretty)
 		end
 
 		if run_result.status_tally.fail > 0 then
 			table.insert(lines, title(`Errors from {run_result.status_tally.fail} test(s)`))
 			table.insert(lines, "")
+
+			local trace_lines_by_pretty: { [PrettyResult]: { string } } = {}
+			local all_trace_lines: { { string } } = {}
+			for _, pretty in pretty_results do
+				if pretty.result.status == "fail" then
+					local trace_lines = (pretty.result.error.trace:gsub("\n+$", "")):split("\n")
+					trace_lines_by_pretty[pretty] = trace_lines
+					table.insert(all_trace_lines, trace_lines)
+				end
+			end
+			local shared_suffix_count = if options.trim_duplicate_trace
+				then common_suffix_line_count(all_trace_lines)
+				else 0
+
 			for _, pretty in pretty_results do
 				if pretty.result.status == "pass" then
 					continue
@@ -195,8 +369,26 @@ function tiniest_pretty.configure(options: Options)
 					end
 					table.insert(lines, "")
 				end
-				local trace = pretty.result.error.trace:gsub("\n+$", "")
-				table.insert(lines, paint.trace_dim(trace))
+				local trace_lines = trace_lines_by_pretty[pretty]
+				local trim_count = math.min(shared_suffix_count, #trace_lines - 1)
+				local visible_lines = table.move(trace_lines, 1, #trace_lines - trim_count, 1, {})
+				table.insert(lines, paint.trace_dim(table.concat(visible_lines, "\n")))
+				table.insert(lines, "")
+			end
+
+			if shared_suffix_count > 0 then
+				local shared_lines = table.move(
+					all_trace_lines[1],
+					#all_trace_lines[1] - shared_suffix_count + 1,
+					#all_trace_lines[1],
+					1,
+					{}
+				)
+				table.insert(
+					lines,
+					paint.dim(`{shared_suffix_count} shared stack frame(s) omitted from each trace above:`)
+				)
+				table.insert(lines, paint.trace_dim(table.concat(shared_lines, "\n")))
 				table.insert(lines, "")
 			end
 		end
@@ -209,8 +401,17 @@ function tiniest_pretty.configure(options: Options)
 
 		table.insert(lines, title(`Status of {#pretty_results} test(s)`))
 		table.insert(lines, "")
-		for _, pretty in pretty_results do
-			table.insert(lines, `{pretty.icon} {pretty.crumbs}{pretty.annotations}`)
+
+		if format == "tree" then
+			local root = build_tree(pretty_results)
+			for _, top_level_node in root.children do
+				aggregate_tree(top_level_node)
+				render_tree(top_level_node, 0, lines)
+			end
+		else
+			for _, pretty in pretty_results do
+				table.insert(lines, `{pretty.icon} {pretty.crumbs}{pretty.annotations}`)
+			end
 		end
 		table.insert(lines, "")
 		table.insert(

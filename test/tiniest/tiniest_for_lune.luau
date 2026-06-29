@@ -22,6 +22,8 @@ export type Options = {
 		disable_output: nil | {
 			after_run: boolean?,
 		},
+		format: ("flat" | "tree")?,
+		trim_duplicate_trace: boolean?,
 	},
 }
 
@@ -94,6 +96,8 @@ function tiniest_for_lune.configure(options: Options)
 		disable_emoji = options.pretty and options.pretty.disable_emoji,
 		disable_unicode = options.pretty and options.pretty.disable_unicode,
 		disable_output = options.pretty and options.pretty.disable_output,
+		format = options.pretty and options.pretty.format,
+		trim_duplicate_trace = options.pretty and options.pretty.trim_duplicate_trace,
 		plugins = { tiniest_time :: any, tiniest_snapshot },
 	}
 	self.format_run = tiniest_pretty.format_run

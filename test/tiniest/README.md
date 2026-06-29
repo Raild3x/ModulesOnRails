@@ -56,10 +56,36 @@ local tiniest = require(path.to.tiniest_for_roblox).configure {
 		disable_unicode = false,     -- Use ASCII-only characters
 		disable_output = {
 			after_run = false,       -- Suppress automatic output
-		}
+		},
+		format = "flat",             -- "flat" (default) or "tree" (group by describe blocks)
+		trim_duplicate_trace = false, -- Omit stack frames shared by every failing test's trace
 	}
 }
 ```
+
+### Output Formats
+
+By default (`format = "flat"`), each result is printed on its own line with the full path:
+
+```
+✅ Player ▸ Health ▸ should start at 100 - 10.9µs
+```
+
+With `format = "tree"`, each path segment is printed once and nested under its parent, with
+group lines showing an aggregate pass/fail icon and a summed duration of their descendants:
+
+```
+✅ Player - 18.51µs
+  ▸ ✅ Health - 18.51µs
+    ✅ should start at 100 - 10.9µs
+```
+
+### Trimming Duplicate Trace Frames
+
+When several tests fail in the same run, their stack traces usually share an identical tail of
+framework-internal frames (the call chain through the test runner itself). With
+`trim_duplicate_trace = true`, that shared tail is omitted from each individual trace and printed
+once at the end of the "Errors" section instead, so only the test-relevant frames repeat per test.
 
 ### Test Structure
 

@@ -73,6 +73,8 @@ export type Options = {
 		disable_output: nil | {
 			after_run: boolean?,
 		},
+		format: ("flat" | "tree")?,
+		trim_duplicate_trace: boolean?,
 	},
 }
 
@@ -97,7 +99,11 @@ local tiniest_for_roblox = {}
 		- `disable_unicode: boolean?` -- Don't use unicode characters in output (defaults to false)
 		- `disable_output: table?` -- Control output behavior
 			- `after_run: boolean?` -- Don't automatically print after running tests
-	
+		- `format: "flat" | "tree"?` -- Render results as a flat crumb-trail list (default) or as
+		  an indented tree grouped by describe blocks
+		- `trim_duplicate_trace: boolean?` -- When multiple tests fail, omit the stack frames shared
+		  identically by all of their traces (printed once at the end instead) (defaults to false)
+
 	## Example
 	```lua
 	local tiniest = require(path.to.tiniest_for_roblox).configure {
@@ -125,6 +131,8 @@ function tiniest_for_roblox.configure(options: Options)
 		disable_emoji = options.pretty and options.pretty.disable_emoji,
 		disable_unicode = options.pretty and options.pretty.disable_unicode,
 		disable_output = options.pretty and options.pretty.disable_output,
+		format = options.pretty and options.pretty.format,
+		trim_duplicate_trace = options.pretty and options.pretty.trim_duplicate_trace,
 		plugins = { tiniest_time :: any },
 	}
 	self.format_run = tiniest_pretty.format_run
