@@ -15,6 +15,7 @@ const Janitor = require("../../../Janitor")
 const Promise = require("../../../Promise")
 const Protocol = require("./Protocol")
 const Types = require("../Types")
+const MessageCodec = require("../Serialization/MessageCodec")
 
 type WireMessage = Types.WireMessage
 
@@ -58,11 +59,11 @@ end
 function ClientTransport._connect(self: ClientTransport, remote: RemoteEvent)
 	self._remote = remote
 
-	self._janitor:Add(remote.OnClientEvent:Connect(function(payload: WireMessage | string)
+	self._janitor:Add(remote.OnClientEvent:Connect(function(payload: buffer | string, instances: { Instance }?)
 		if payload == Protocol.RequestDataComplete then
 			self._dataComplete:Fire()
 		else
-			self.MessageReceived:Fire(payload :: WireMessage)
+			self.MessageReceived:Fire(MessageCodec.Decode(payload :: buffer, instances))
 		end
 	end))
 

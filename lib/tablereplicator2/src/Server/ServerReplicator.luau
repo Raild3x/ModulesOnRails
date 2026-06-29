@@ -31,6 +31,7 @@ const FrameCoordinator = require("./FrameCoordinator")
 const ServerTransportModule = require("../Shared/Transport/ServerTransport")
 const FlatCodec = require("../Shared/Serialization/FlatCodec")
 const RefCodec = require("../Shared/Serialization/RefCodec")
+const MessageCodec = require("../Shared/Serialization/MessageCodec")
 const TokenCache = require("../Shared/TokenCache")
 
 const REPLICATE_TO_ALL = "all"
@@ -143,14 +144,15 @@ const function isTableManager(value: any): boolean
 end
 
 --[=[
-	Builds a wire message from `items`, running them through `RefCodec.Encode`
-	first so a table shared across the message (e.g. one inner table living at
-	two paths in a snapshot) is transmitted once. No-op fast path when nothing
-	is shared.
+	Builds an encoded wire message from `items`, running them through
+	`RefCodec.Encode` first so a table shared across the message (e.g. one
+	inner table living at two paths in a snapshot) is transmitted once, then
+	`MessageCodec.Encode` into a `buffer` (no-op fast path on the RefCodec side
+	when nothing is shared).
 ]=]
-const function buildMessage(items: { WireItem }): Types.WireMessage
+const function buildMessage(items: { WireItem }): (buffer, { Instance }?)
 	const encoded, refs = RefCodec.Encode(items)
-	return FlatCodec.BuildMessage(encoded, refs)
+	return MessageCodec.Encode(encoded, refs)
 end
 
 --------------------------------------------------------------------------------
@@ -253,9 +255,9 @@ function ServerReplicator.new(config: {
 
 	if parent then
 		parent.ChildAdded:Fire(self)
-		local message = buildMessage { buildCreateItem(self) }
+		const buf, instances = buildMessage { buildCreateItem(self) }
 		for _, player in self._Scope:GetActivePlayers() do
-			self._Scope:SendTo(player, message)
+			self._Scope:SendTo(player, buf, instances)
 		end
 	else
 		self:SetTargets(targets :: ReplicationTargets)
@@ -276,7 +278,8 @@ end
 function ServerReplicator._SendSnapshotTo(self: SR_Internal, player: Player)
 	const items = {}
 	buildSnapshotItems(self, items)
-	self._Scope:SendTo(player, buildMessage(items))
+	const buf, instances = buildMessage(items)
+	self._Scope:SendTo(player, buf, instances)
 end
 
 function ServerReplicator._AddTarget(self: SR_Internal, player: Player)
@@ -296,7 +299,8 @@ function ServerReplicator._RemoveTarget(self: SR_Internal, player: Player)
 	const scope = self._Scope
 	if scope:IsActive(player) then
 		scope:RemoveActive(player)
-		scope:SendTo(player, buildMessage { FlatCodec.DestroyItem(self.Id) })
+		const buf, instances = buildMessage { FlatCodec.DestroyItem(self.Id) }
+		scope:SendTo(player, buf, instances)
 	else
 		scope:RemovePending(player)
 	end
@@ -411,9 +415,9 @@ function ServerReplicator.SetParent(self: SR_Internal, newParent: SR_Internal)
 
 	if oldScope == newScope then
 		self:_SetParentRefs(newParent)
-		const message = buildMessage { FlatCodec.SetParentItem(self.Id, newParent.Id) }
+		const buf, instances = buildMessage { FlatCodec.SetParentItem(self.Id, newParent.Id) }
 		for _, player in oldScope:GetActivePlayers() do
-			oldScope:SendTo(player, message)
+			oldScope:SendTo(player, buf, instances)
 		end
 		return
 	end
@@ -434,9 +438,11 @@ function ServerReplicator.SetParent(self: SR_Internal, newParent: SR_Internal)
 
 	for _, player in oldActive do
 		if newScope:IsTargeting(player) then
-			newScope:SendTo(player, buildMessage { FlatCodec.SetParentItem(self.Id, newParent.Id) })
+			const buf, instances = buildMessage { FlatCodec.SetParentItem(self.Id, newParent.Id) }
+			newScope:SendTo(player, buf, instances)
 		else
-			newScope:SendTo(player, buildMessage { FlatCodec.DestroyItem(self.Id) })
+			const buf, instances = buildMessage { FlatCodec.DestroyItem(self.Id) }
+			newScope:SendTo(player, buf, instances)
 		end
 	end
 
@@ -444,7 +450,8 @@ function ServerReplicator.SetParent(self: SR_Internal, newParent: SR_Internal)
 		if newScope:IsActive(player) and not oldActiveSet[player] then
 			local items = {}
 			buildSnapshotItems(self, items)
-			newScope:SendTo(player, buildMessage(items))
+			const buf, instances = buildMessage(items)
+			newScope:SendTo(player, buf, instances)
 		end
 	end
 end
@@ -458,9 +465,9 @@ function ServerReplicator.Destroy(self: SR_Internal)
 	-- (synchronous) Destroy item below and reference a torn-down replicator.
 	frameCoordinator:DropReplicator(self.Id)
 
-	const message = buildMessage { FlatCodec.DestroyItem(self.Id) }
+	const buf, instances = buildMessage { FlatCodec.DestroyItem(self.Id) }
 	for _, player in self._Scope:GetActivePlayers() do
-		self._Scope:SendTo(player, message)
+		self._Scope:SendTo(player, buf, instances)
 	end
 
 	if self:IsTopLevel() then
@@ -492,7 +499,8 @@ transport.PlayerRequestedData:Connect(function(player: Player)
 	end
 
 	if #items > 0 then
-		transport:SendMessage(player, buildMessage(items))
+		const buf, instances = buildMessage(items)
+		transport:SendMessage(player, buf, instances)
 	end
 	transport:NotifyDataSent(player)
 end)

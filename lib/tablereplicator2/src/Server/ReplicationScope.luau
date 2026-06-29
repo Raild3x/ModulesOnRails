@@ -18,8 +18,6 @@
 
 local Players = game:GetService("Players")
 
-local Types = require("../Shared/Types")
-
 local ServerTransportModule = require("../Shared/Transport/ServerTransport")
 type ServerTransport = ServerTransportModule.ServerTransport
 
@@ -153,8 +151,8 @@ end
 	this direct send is for the synchronous structural items
 	(Create/Destroy/SetParent/snapshot) `ServerReplicator` ships immediately.
 ]=]
-function ReplicationScope.SendTo(self: ReplicationScope, player: Player, message: Types.WireMessage)
-	self._transport:SendMessage(player, message)
+function ReplicationScope.SendTo(self: ReplicationScope, player: Player, buf: buffer, instances: { Instance }?)
+	self._transport:SendMessage(player, buf, instances)
 end
 
 return ReplicationScope

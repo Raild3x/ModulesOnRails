@@ -20,6 +20,7 @@
 ]=]
 
 const ServerReplicator = require("../../Server/ServerReplicator")
+const MessageCodec = require("../../Shared/Serialization/MessageCodec")
 
 local SpecUtils = {}
 
@@ -38,12 +39,15 @@ local function noop() end
 	Reassigns `SendMessage` directly on the live transport instance,
 	shadowing the class method (see `ServerTransport.__index`) so calls are
 	recorded instead of hitting the real method. `restore()` puts back the
-	no-op baseline above, NOT the real method.
+	no-op baseline above, NOT the real method. The recorded `.Message` is
+	already decoded back into a `WireMessage` (via `MessageCodec.Decode`) so
+	existing assertions against `.Message.Items` keep working unchanged even
+	though the transport now sends a `buffer` instead of a plain table.
 ]=]
 function SpecUtils.spyOnTransport(): ({ { Player: any, Message: any } }, () -> ())
 	local calls = {}
-	(ServerReplicator._Transport :: any).SendMessage = function(_self, player, message)
-		table.insert(calls, { Player = player, Message = message })
+	(ServerReplicator._Transport :: any).SendMessage = function(_self, player, buf, instances)
+		table.insert(calls, { Player = player, Message = MessageCodec.Decode(buf, instances) })
 	end
 	return calls, function()
 		(ServerReplicator._Transport :: any).SendMessage = noop

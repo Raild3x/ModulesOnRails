@@ -15,9 +15,6 @@ local Players = game:GetService("Players")
 local Signal = require("../../../Signal")
 local Janitor = require("../../../Janitor")
 local Protocol = require("./Protocol")
-local Types = require("../Types")
-
-type WireMessage = Types.WireMessage
 
 local function findOrCreateRemote(container: Instance): RemoteEvent
 	local existing = container:FindFirstChild(Protocol.ReliableName)
@@ -65,10 +62,11 @@ function ServerTransport.new(): ServerTransport
 end
 
 --[=[
-	Sends a wire message to `player`.
+	Sends an encoded wire message (a `buffer` from `MessageCodec.Encode`, plus
+	its `Instance` side-list) to `player`.
 ]=]
-function ServerTransport.SendMessage(self: ServerTransport, player: Player, message: WireMessage)
-	self._remote:FireClient(player, message)
+function ServerTransport.SendMessage(self: ServerTransport, player: Player, buf: buffer, instances: { Instance }?)
+	self._remote:FireClient(player, buf, instances)
 end
 
 --[=[

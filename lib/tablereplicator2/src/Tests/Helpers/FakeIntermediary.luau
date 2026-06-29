@@ -33,28 +33,9 @@
 const ServerReplicator = require("../../Server/ServerReplicator")
 const ClientReplicator = require("../../Client/ClientReplicator")
 const BaseReplicator = require("../../Shared/BaseReplicator")
-const Types = require("../../Shared/Types")
+const MessageCodec = require("../../Shared/Serialization/MessageCodec")
 
-type SendMessage = (self: any, player: Player, message: Types.WireMessage) -> ()
-
---[=[
-	A real `RemoteEvent:FireClient` deep-copies its payload crossing the
-	network boundary, so the server's own `Tags`/`Manager.Raw` tables (passed
-	into wire items BY REFERENCE -- see `ServerReplicator.buildCreateItem`)
-	never alias the client's. Forwarding `message` as-is would skip that copy
-	entirely, aliasing server/client state and re-freezing an already-frozen
-	`Tags` table. This stands in for that copy.
-]=]
-const function deepCopyMessage(value: any): any
-	if type(value) ~= "table" then
-		return value
-	end
-	const copy = {}
-	for k, v in value do
-		copy[deepCopyMessage(k)] = deepCopyMessage(v)
-	end
-	return copy
-end
+type SendMessage = (self: any, player: Player, buf: buffer, instances: { Instance }?) -> ()
 
 --------------------------------------------------------------------------------
 --// FakeClient //--
@@ -135,16 +116,22 @@ function FakeIntermediary.new(): FakeIntermediary
 		_destroyed = false,
 	}, FakeIntermediary) :: FakeIntermediary
 
-	transport.SendMessage = function(transportSelf, sentTo, message)
+	transport.SendMessage = function(transportSelf, sentTo, buf, instances)
 		const client = self._clientsByPlayer[sentTo]
 		if client then
-			const delivered = deepCopyMessage(message)
+			-- `MessageCodec.Decode` reconstructs fresh tables from the encoded
+			-- bytes, so it already stands in for the deep copy a real
+			-- `RemoteEvent:FireClient` would do crossing the network boundary --
+			-- the server's `Tags`/`Manager.Raw` (passed into wire items BY
+			-- REFERENCE, see `ServerReplicator.buildCreateItem`) never alias
+			-- the client's.
+			const delivered = MessageCodec.Decode(buf, instances)
 			client:Use(function()
 				ClientReplicator._HandleMessage(delivered)
 				return nil
 			end)
 		end
-		self._previousSendMessage(transportSelf, sentTo, message)
+		self._previousSendMessage(transportSelf, sentTo, buf, instances)
 	end
 
 	return self
