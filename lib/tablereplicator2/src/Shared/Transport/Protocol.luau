@@ -27,4 +27,13 @@ Protocol.RequestDataComplete = "RequestDataComplete"
 -- Reference for where Remotes are parented.
 Protocol.RemoteContainer = script
 
+-- Custom-remote channels: a dedicated reliable RemoteEvent for reliable custom
+-- signals, an UnreliableRemoteEvent for unreliable custom signals, and a
+-- RemoteFunction for client->server function calls. These are kept separate
+-- from the data channel so arbitrary RPC args never intermingle with the
+-- binary MessageCodec stream.
+Protocol.SignalName = "Signal"
+Protocol.UnreliableSignalName = "UnreliableSignal"
+Protocol.FunctionName = "Function"
+
 return Protocol

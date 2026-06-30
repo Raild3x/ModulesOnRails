@@ -36,6 +36,7 @@ const ServerTransportModule = require("../Shared/Transport/ServerTransport")
 const FlatCodec = require("../Shared/Serialization/FlatCodec")
 const MessageCodec = require("../Shared/Serialization/MessageCodec")
 const TokenCache = require("../Shared/TokenCache")
+const ServerCustomRemote = require("./ServerCustomRemote")
 
 const REPLICATE_TO_ALL = "all"
 
@@ -158,9 +159,49 @@ ServerReplicator.TOKEN = setmetatable({
 table.freeze(ServerReplicator.TOKEN)
 ServerReplicator.Token = ServerReplicator.TOKEN
 
--- User configurable escape hatch: if true, `ServerReplicator.new` will not warn 
+-- User configurable escape hatch: if true, `ServerReplicator.new` will not warn
 -- when a raw string is passed as the `Token` argument instead of a proper `ReplicationToken`.
 ServerReplicator.SuppressTokenWarnings = false
+
+-- Unique sentinel values used inside a `config.Client` table to declare remotes.
+-- Checked by identity so they can't be confused with user data.
+local REMOTE_EVENT_SENTINEL = table.freeze({})
+local UNRELIABLE_REMOTE_EVENT_SENTINEL = table.freeze({})
+
+--[=[
+	@within ServerReplicator
+	@tag Static
+	@prop createRemoteEvent () -> sentinel
+	Returns a sentinel value for use in `config.Client` to declare a reliable
+	custom signal. The sentinel is detected by `ServerReplicator.new` and
+	replaced with a real `ServerCustomRemote`.
+
+	```lua
+	local r = ServerReplicator.new({
+		Token = token,
+		ReplicationTargets = player,
+		Client = {
+			Hit = ServerReplicator.createRemoteEvent(),
+			GetScore = function(self, player) return 42 end,
+		},
+	})
+	r.Client.Hit:FireAll()
+	```
+]=]
+ServerReplicator.createRemoteEvent = function(): any
+	return REMOTE_EVENT_SENTINEL
+end
+
+--[=[
+	@within ServerReplicator
+	@tag Static
+	@prop createUnreliableEvent () -> sentinel
+	Like `createRemoteEvent` but uses an `UnreliableRemoteEvent` so fire-and-forget
+	semantics apply (no ordering or delivery guarantee).
+]=]
+ServerReplicator.createUnreliableEvent = function(): any
+	return UNRELIABLE_REMOTE_EVENT_SENTINEL
+end
 
 --------------------------------------------------------------------------------
 --// Constructor //--
@@ -184,6 +225,7 @@ function ServerReplicator.new(config: {
 	Parent: ServerReplicator?,
 	Tags: Tags?,
 	Coalesced: boolean?,
+	Client: { [string]: any }?,
 }): ServerReplicator
 	local token = config.Token
 	if typeof(token) == "string" then
@@ -223,6 +265,34 @@ function ServerReplicator.new(config: {
 	}
 	const self = setmetatable(base, ServerReplicator) :: SR_Internal
 	self._Coalesced = config.Coalesced == true
+	self._RemoteSignals = {}
+	self._RemoteFunctions = {}
+
+	-- Build the Client proxy. __newindex routes sentinel/function assignments
+	-- to the appropriate Register* method; direct rawset values (e.g. the
+	-- registered ServerCustomRemote) are returned via normal __index.
+	local clientProxy = {}
+	setmetatable(clientProxy, {
+		__newindex = function(_t, k, v)
+			local val = v :: any
+			if val == REMOTE_EVENT_SENTINEL then
+				self:RegisterRemoteSignal(k)
+			elseif val == UNRELIABLE_REMOTE_EVENT_SENTINEL then
+				self:RegisterRemoteUnreliableSignal(k)
+			elseif type(val) == "function" then
+				self:RegisterRemoteFunction(k, val)
+			else
+				warn(`ServerReplicator.Client: invalid declaration for '{k}'. Use createRemoteEvent(), createUnreliableEvent(), or a function.`)
+			end
+		end,
+	})
+	self.Client = clientProxy :: any
+
+	-- Apply config.Client declarations up front so they're ready before any
+	-- _FireCreationListeners callbacks run.
+	for k, v in config.Client or {} do
+		self.Client[k] = v
+	end
 
 	if parent then
 		self._Scope = parent._Scope
@@ -490,6 +560,76 @@ function ServerReplicator.SetParent(self: SR_Internal, newParent: SR_Internal)
 end
 
 --------------------------------------------------------------------------------
+--// Custom Remotes //--
+--------------------------------------------------------------------------------
+
+--[=[
+	@within ServerReplicator
+	@method RegisterRemoteSignal
+	@param name string
+	@return ServerCustomRemote
+
+	Registers a reliable custom signal on this replicator. After registration,
+	`replicator.Client[name]` returns a `ServerCustomRemote` with `Fire`,
+	`FireAll`, `FireExcept`, `FirePredicate`, `Connect`, `Once`, and `Wait`.
+]=]
+function ServerReplicator.RegisterRemoteSignal(self: SR_Internal, name: string): any
+	assert(not self._RemoteSignals[name], `Remote signal '{name}' already registered`)
+	local remote = ServerCustomRemote.new(name, self, transport, false)
+	self._RemoteSignals[name] = remote
+	self._Janitor:Add(remote, "Destroy")
+	rawset(self.Client, name, remote)
+	return remote
+end
+
+--[=[
+	@within ServerReplicator
+	@method RegisterRemoteUnreliableSignal
+	@param name string
+	@return ServerCustomRemote
+
+	Like `RegisterRemoteSignal` but uses an `UnreliableRemoteEvent` for delivery.
+]=]
+function ServerReplicator.RegisterRemoteUnreliableSignal(self: SR_Internal, name: string): any
+	assert(not self._RemoteSignals[name], `Remote signal '{name}' already registered`)
+	local remote = ServerCustomRemote.new(name, self, transport, true)
+	self._RemoteSignals[name] = remote
+	self._Janitor:Add(remote, "Destroy")
+	rawset(self.Client, name, remote)
+	return remote
+end
+
+--[=[
+	@within ServerReplicator
+	@method RegisterRemoteFunction
+	@param name string
+	@param fn (self: ServerReplicator, player: Player, ...any) -> ...any
+
+	Registers a client→server function. Clients invoke it via
+	`replicator.Server[name](...)` which yields until the server returns.
+]=]
+function ServerReplicator.RegisterRemoteFunction(self: SR_Internal, name: string, fn: any): any
+	assert(not self._RemoteFunctions[name], `Remote function '{name}' already registered`)
+	self._RemoteFunctions[name] = fn
+	rawset(self.Client, name, fn)
+	return fn
+end
+
+--[=[
+	@within ServerReplicator
+	@method GetRemoteSignal
+	@param name string
+	@return ServerCustomRemote
+
+	Returns an already-registered custom signal by name.
+]=]
+function ServerReplicator.GetRemoteSignal(self: SR_Internal, name: string): any
+	local remote = self._RemoteSignals[name]
+	assert(remote ~= nil, `Remote signal '{name}' is not registered on this replicator`)
+	return remote
+end
+
+--------------------------------------------------------------------------------
 --// Lifecycle //--
 --------------------------------------------------------------------------------
 
@@ -560,6 +700,38 @@ transport.PlayerRemoving:Connect(function(player: Player)
 	for _, top in topLevelReplicators do
 		top._Scope:RemovePlayer(player)
 	end
+end)
+
+-- Route inbound custom signals (client → server) to the matching remote.
+local signalReceived = transport.SignalReceived :: any
+signalReceived:Connect(function(player: Player, id: number, name: string, ...: any)
+	if not hasBootstrapped[player] then
+		return
+	end
+	const replicator = BaseReplicator.GetFromId(id) :: SR_Internal?
+	if replicator == nil then
+		return
+	end
+	if not replicator._Scope:IsActive(player) then
+		return
+	end
+	const remote = replicator._RemoteSignals[name]
+	if remote then
+		remote:_FireServer(player, ...)
+	end
+end)
+
+-- Route client→server function invocations to the matching registered function.
+transport:SetFunctionHandler(function(player: Player, id: number, name: string, ...: any)
+	if not hasBootstrapped[player] then
+		return
+	end
+	const replicator = BaseReplicator.GetFromId(id) :: SR_Internal?
+	assert(replicator ~= nil, `RemoteFunction: unknown replicator id {id}`)
+	assert(replicator._Scope:IsActive(player), `RemoteFunction: player not active for replicator {id}`)
+	const fn = replicator._RemoteFunctions[name]
+	assert(fn ~= nil, `RemoteFunction: '{name}' not registered on replicator {id}`)
+	return fn(replicator, player, ...)
 end)
 
 --------------------------------------------------------------------------------

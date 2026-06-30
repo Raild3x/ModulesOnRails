@@ -24,6 +24,7 @@ export type Tags = { [string]: any }
 export type Janitor = Janitor.Janitor
 export type Promise<T...> = Promise.TypedPromise<T...>
 export type Signal<Fn, Args...> = Signal.Signal<Fn, Args...>
+export type Connection = Signal.Connection
 
 --[=[
 	@type TableReplicator.ReplicationToken { Name: string }
@@ -319,12 +320,21 @@ export type SR_Public<SR> = {
 	GetTargets: (self: SR) -> { Player },
 	IsReplicatingTo: (self: SR, player: Player) -> boolean,
 	SetParent: (self: SR, newParent: SR?) -> (),
+
+	-- Custom remotes
+	Client: { [string]: any },
+	RegisterRemoteSignal: (self: SR, name: string) -> any,
+	RegisterRemoteUnreliableSignal: (self: SR, name: string) -> any,
+	RegisterRemoteFunction: (self: SR, name: string, fn: (self: SR, player: Player, ...any) -> ...any) -> (self: SR, player: Player, ...any) -> ...any,
+	GetRemoteSignal: (self: SR, name: string) -> any,
 }
 
 export type SR_Internal = {
 	_Scope: ReplicationScope.ReplicationScope,
 	_Coalesced: boolean,
 	_Unreliable: boolean,
+	_RemoteSignals: { [string]: any },
+	_RemoteFunctions: { [string]: (self: SR_Internal, player: Player, ...any) -> ...any },
 
 	_SendSnapshotTo: (self: SR_Internal, player: Player) -> (),
 	_AddTarget: (self: SR_Internal, player: Player) -> (),
@@ -335,7 +345,9 @@ export type ServerReplicator = SR_Public<ServerReplicator> & BR_Public<ServerRep
 
 ---------------------------------------------------------------
 
-export type CR_Internal = BR_Internal<CR_Internal>
+export type CR_Internal = {
+	Server: { [string]: any },
+} & BR_Internal<CR_Internal>
 
 export type ClientReplicator = BR_Public<ClientReplicator>
 

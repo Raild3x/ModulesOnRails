@@ -592,7 +592,7 @@ return function(t: tiniest)
 			parent:Destroy()
 			expect(BaseReplicator.GetFromId(child.Id)).is(child)
 			expect(child:GetParent()).is(ServerReplicator.None)
-			expect(child:IsTopLevel()).is_false()
+			expect(child:IsTopLevel()).is(false)
 			child:Destroy()
 		end)
 

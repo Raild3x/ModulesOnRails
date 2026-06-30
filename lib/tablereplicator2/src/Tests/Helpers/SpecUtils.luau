@@ -32,6 +32,7 @@ local SpecUtils = {}
 local function noop() end
 ;(ServerReplicator._Transport :: any).SendMessage = noop
 ;(ServerReplicator._Transport :: any).NotifyDataSent = noop
+;(ServerReplicator._Transport :: any).FireSignal = noop
 
 --[=[
 	Reassigns `SendMessage` directly on the live transport instance,

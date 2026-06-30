@@ -641,4 +641,13 @@ function BaseReplicator.IsSubsetOfTags(self: BR_Internal, tags: Tags): boolean
 	return true
 end
 
+--------------------------------------------------------------------------------
+--// Deprecated //--
+--------------------------------------------------------------------------------
+
+function BaseReplicator.GetTokenName(self: BR_Internal): string
+	warn("BaseReplicator.GetToken is deprecated; use .Token instead")
+	return self.Token.__NAME__
+end
+
 return BaseReplicator

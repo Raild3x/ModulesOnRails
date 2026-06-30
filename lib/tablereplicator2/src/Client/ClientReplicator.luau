@@ -29,6 +29,7 @@ const ClientTransportModule = require("../Shared/Transport/ClientTransport")
 const FlatCodec = require("../Shared/Serialization/FlatCodec")
 const OpApplier = require("./OpApplier")
 const TokenCache = require("../Shared/TokenCache")
+const ClientCustomRemote = require("./ClientCustomRemote")
 
 type ReplicationToken = Types.ReplicationToken
 type WireMessage = Types.WireMessage
@@ -57,6 +58,12 @@ export type ClientReplicator = Types.ClientReplicator
 
 const getFromId = BaseReplicator.GetFromId :: (id: number) -> CR_Internal?
 
+-- Forward-declared so `buildFromCreateItem` can capture it in the Server proxy
+-- closure. Assigned in the Bootstrap section below; always set before any
+-- `ClientCustomRemote.Fire`/`InvokeFunction` call can reach it.
+local transport: ClientTransport? = nil
+local getTransport: () -> ClientTransport = nil :: any
+
 -- Builds a `ClientReplicator` from a decoded `Create` item. Its parent (if
 -- any) is asserted to already exist: every server-side path that emits a
 -- `Create` only does so after the referenced parent has already been sent
@@ -78,7 +85,25 @@ const function buildFromCreateItem(item: WireCreateItem): CR_Internal
 		Manager = manager,
 		Parent = parent,
 	})
-	return setmetatable(base, ClientReplicator) :: CR_Internal
+	const replicator = setmetatable(base, ClientReplicator) :: CR_Internal
+
+	-- Build the Server proxy. Accessing `replicator.Server.MySignal` lazily
+	-- creates a `ClientCustomRemote` for that name and caches it in the proxy
+	-- table so subsequent accesses return the same object.
+	local serverProxy = {}
+	setmetatable(serverProxy, {
+		__index = function(t, name)
+			local remote = ClientCustomRemote.new(name, replicator, getTransport)
+			rawset(t, name, remote)
+			return remote
+		end,
+		__newindex = function(_t, k, _v)
+			error(`ClientReplicator.Server: cannot set '{k}' -- Server proxy is read-only`)
+		end,
+	})
+	;(replicator :: any).Server = serverProxy
+
+	return replicator
 end
 
 -- Recursively tears down `self` and every descendant (mirrors the server
@@ -153,11 +178,23 @@ end
 --// Bootstrap //--
 --------------------------------------------------------------------------------
 
-local transport: ClientTransport? = nil
-const function getTransport(): ClientTransport
+getTransport = function(): ClientTransport
 	if transport == nil then
 		const created = ClientTransportModule.new()
 		created.MessageReceived:Connect(handleMessage)
+		-- Route server→client custom signal fires to the matching remote on
+		-- the receiving replicator's Server proxy.
+		local sigReceived = created.SignalReceived :: any
+		sigReceived:Connect(function(id: number, name: string, ...: any)
+			const replicator = getFromId(id)
+			if replicator == nil then return end
+			local serverProxy = (replicator :: any).Server
+			if serverProxy == nil then return end
+			local remote = rawget(serverProxy, name) :: any
+			if remote then
+				remote:_FireClient(...)
+			end
+		end)
 		transport = created
 	end
 	return transport :: ClientTransport
