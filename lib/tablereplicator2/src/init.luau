@@ -1,21 +1,24 @@
 --!strict
 --[=[
-	@class TableReplicator2
+	@class TableReplicator
 
-	Replicates TableManager2 instances from the server to clients.
+	Simple wrapper that replicates TableManager instances from the server to clients.
+
+	Entry point for the TableReplicator package. Use `TableReplicator.Server` or 
+	`TableReplicator.Client` to access the server-side or client-side API, respectively.
 
 	**[SERVER]**
 	```lua
-	const TableReplicator = require(Packages.TableReplicator).Server
-	const TableManager = require(Packages.TableManager)
-	const PlayerToken = TableReplicator.Token("PlayerData")
+	local TableReplicator = require(Packages.TableReplicator).Server
+	local TableManager = require(Packages.TableManager)
+	local PlayerToken = TableReplicator.TOKEN("PlayerData")
 
 	Players.PlayerAdded:Connect(function(player)
-		const manager = TableManager.new {
+		local manager = TableManager.new {
 			Coins = 0,
 		}
 
-		const replicator =TableReplicator.new({
+		local replicator = TableReplicator.new({
 			Token = PlayerToken,
 			Manager = manager,
 			ReplicationTargets = player,
@@ -38,7 +41,7 @@
 
 	**[CLIENT]**
 	```lua
-	local TableReplicator = require(Packages.TableReplicator2).Client
+	local TableReplicator = require(Packages.TableReplicator).Client
 
 	TableReplicator.ForEach("PlayerData", function(replicator)
 		replicator.Manager:Observe("Coins", function(coins)
@@ -48,6 +51,18 @@
 
 	TableReplicator.RequestData()
 	```
+
+	---
+	### Exported Types
+	- ServerReplicator
+	- ClientReplicator
+	- BaseReplicator
+	- Replicator
+	- ReplicationToken
+	- ReplicationTargets
+	- SearchCondition
+	- Tags
+
 ]=]
 
 const RunService = game:GetService("RunService")
@@ -76,16 +91,14 @@ const TableReplicator = {}
 if RunService:IsClient() then
 	--[=[
 		@client
-		@within TableReplicator
-		@prop Client ClientReplicator
+		@prop TableReplicator.Client ClientReplicator
 	]=]
 	TableReplicator.Client = require("@self/Client/ClientReplicator")
 	TableReplicator.Current = TableReplicator.Client :: any
 else
 	--[=[
 		@server
-		@within TableReplicator
-		@prop Server ServerReplicator
+		@prop TableReplicator.Server ServerReplicator
 	]=]
 	TableReplicator.Server = require("@self/Server/ServerReplicator")
 	TableReplicator.Current = TableReplicator.Server :: any

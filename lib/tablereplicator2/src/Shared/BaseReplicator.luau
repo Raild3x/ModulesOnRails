@@ -17,6 +17,7 @@ const Promise = Types.Promise
 const Janitor = Types.Janitor
 const TokenCache = require("./TokenCache")
 
+type Promise<T...> = Types.Promise<T...>
 type Id = Types.Id
 type Tags = Types.Tags
 type TableManager<T> = Types.TableManager<T>
@@ -60,18 +61,18 @@ const function reconcileCondition(condition: SearchCondition?): (replicator: Bas
 	elseif conditionType == "string" then
 		const tokenName = condition :: string
 		return function(replicator)
-			return replicator:GetTokenName() == tokenName
+			return replicator.Token.Name == tokenName
 		end
 	elseif conditionType == "table" then
 		const asToken = condition :: ReplicationToken
 		if TokenCache.isToken(asToken) then
 			return function(replicator)
-				return replicator:GetTokenName() == TokenCache.getTokenName(asToken)
+				return replicator.Token.Name == TokenCache.getTokenName(asToken)
 			end
 		end
 		const tags = condition :: Tags
 		return function(replicator)
-			return replicator:IsSupersetOfTags(tags)
+			return replicator:HasTags(tags)
 		end
 	end
 
@@ -95,17 +96,31 @@ BaseReplicator.__index = BaseReplicator
 BaseReplicator._Realm = newRealm()
 BaseReplicator._NewRealm = newRealm
 
+--[=[
+	@tag Static
+	@prop ServerReplicator.ReplicatorCreated Signal<ServerReplicator>
+	Signal that fires whenever a new replicator is created, regardless of token.
+]=]
+--[=[
+	@tag Static
+	@prop ClientReplicator.ReplicatorCreated Signal<ClientReplicator>
+	Signal that fires whenever a new replicator is created, regardless of token.
+]=]
+BaseReplicator.ReplicatorCreated = BaseReplicator._Realm.ReplicatorCreated -- re-export for convenience
+
 -- Re-export types from Types module for convenience
 export type BR_Public<BR> = Types.BR_Public<BR>
 export type BR_Internal<BR = BR_Internal> = Types.BR_Internal<BR>
 export type BaseReplicator = Types.BaseReplicator
 
 --[=[
+	@private
+	@within BaseReplicator
 	@tag Static
 	Iterates every replicator currently in memory (`for _, replicator in BaseReplicator do`).
 ]=]
 BaseReplicator.__iter = function()
-	return next, (BaseReplicator :: any)._Realm.Storage
+	return next, BaseReplicator._Realm.Storage
 end
 
 --------------------------------------------------------------------------------
@@ -114,16 +129,7 @@ end
 
 --[=[
 	@tag Static
-	Returns the replicator with the given Id, if one currently exists.
-]=]
-function BaseReplicator.GetFromId(id: Id): BaseReplicator?
-	return (BaseReplicator :: any)._Realm.Storage[id]
-end
-
---[=[
-	@tag Static
 	@private
-
 	Generates a fresh, process-unique replicator Id.
 ]=]
 function BaseReplicator.GenerateId(): Id
@@ -134,6 +140,67 @@ end
 
 --[=[
 	@tag Static
+	@within ServerReplicator
+	@function GetFromId
+	@param id Id
+	@return ServerReplicator?
+	Returns the replicator with the given Id, if one currently exists.
+]=]
+--[=[
+	@tag Static
+	@within ClientReplicator
+	@function GetFromId
+	@param id Id
+	@return ClientReplicator?
+	Returns the replicator with the given Id, if one currently exists.
+]=]
+function BaseReplicator.GetFromId(id: Id): BaseReplicator?
+	return BaseReplicator._Realm.Storage[id]
+end
+
+--[=[
+	@tag Static
+	@within ServerReplicator
+	@function PromiseFromId
+	@param id Id
+	@return Promise<ServerReplicator>
+	Returns a promise that resolves with the replicator with the given Id, if one currently exists or is created in the future.
+]=]
+--[=[
+	@tag Static
+	@within ClientReplicator
+	@function PromiseFromId
+	@param id Id
+	@return Promise<ClientReplicator>
+	Returns a promise that resolves with the replicator with the given Id, if one currently exists or is created in the future.
+]=]
+function BaseReplicator.PromiseFromId(id: Id): Promise<BaseReplicator>
+	const existing = BaseReplicator.GetFromId(id)
+	if existing then
+		return Promise.resolve(existing)
+	end
+	return Promise.fromEvent(BaseReplicator._Realm.ReplicatorCreated, function(replicator)
+		return replicator.Id == id
+	end)
+end
+
+
+--[=[
+	@tag Static
+	@within ServerReplicator
+	@function GetAll
+	@param condition SearchCondition?
+	@return { ServerReplicator }
+
+	Returns every currently-loaded replicator matching `condition` (no condition = all).
+]=]
+--[=[
+	@tag Static
+	@within ClientReplicator
+	@function GetAll
+	@param condition SearchCondition?
+	@return { ClientReplicator }
+
 	Returns every currently-loaded replicator matching `condition` (no condition = all).
 ]=]
 function BaseReplicator.GetAll(condition: SearchCondition?): { BaseReplicator }
@@ -149,6 +216,23 @@ end
 
 --[=[
 	@tag Static
+	@within ServerReplicator
+	@function ForEach
+	@param condition SearchCondition?
+	@param fn (replicator: ServerReplicator) -> ()
+	@return () -> ()
+
+	Runs `fn` for every existing replicator matching `condition`, and again for
+	every future one. Returns a disconnect function that stops future invocations.
+]=]
+--[=[
+	@tag Static
+	@within ClientReplicator
+	@function ForEach
+	@param condition SearchCondition?
+	@param fn (replicator: ClientReplicator) -> ()
+	@return () -> ()
+
 	Runs `fn` for every existing replicator matching `condition`, and again for
 	every future one. Returns a disconnect function that stops future invocations.
 ]=]
@@ -174,9 +258,21 @@ end
 
 --[=[
 	@tag Static
+	@within ServerReplicator
+	@function PromiseFirst
+	@param condition SearchCondition?
+	@return Promise<ServerReplicator>
 	Resolves with the first existing-or-future replicator matching `condition`.
 ]=]
-function BaseReplicator.PromiseFirst(condition: SearchCondition?): Promise.TypedPromise<BaseReplicator>
+--[=[
+	@tag Static
+	@within ClientReplicator
+	@function PromiseFirst
+	@param condition SearchCondition?
+	@return Promise<ClientReplicator>
+	Resolves with the first existing-or-future replicator matching `condition`.
+]=]
+function BaseReplicator.PromiseFirst(condition: SearchCondition?): Promise<BaseReplicator>
 	const satisfies = reconcileCondition(condition)
 	for _, replicator in BaseReplicator._Realm.Storage do
 		if satisfies(replicator) then
@@ -188,6 +284,18 @@ end
 
 --[=[
 	@tag Static
+	@within ServerReplicator
+	@function GetFirst
+	@param condition SearchCondition?
+	@return ServerReplicator?
+	Returns the first replicator matching `condition`, or nil if none exists.
+]=]
+--[=[
+	@tag Static
+	@within ClientReplicator
+	@function GetFirst
+	@param condition SearchCondition?
+	@return ClientReplicator?
 	Returns the first replicator matching `condition`, or nil if none exists.
 ]=]
 function BaseReplicator.GetFirst(condition: SearchCondition?): BaseReplicator?
@@ -202,8 +310,37 @@ end
 
 --[=[
 	@tag Static
+	@within ServerReplicator
+	@function OnNew
+	@param tokenName string
+	@param fn (replicator: ServerReplicator) -> ()
+	@return () -> ()
 	Listens for new replicators whose token name matches `tokenName`. Returns
 	a disconnect function.
+
+	:::caution Hooking after RequestData
+	Calling `OnNew` after `ClientReplicator.RequestData()` has already resolved
+	will miss any replicators that were created in the initial snapshot. ForEach is
+	the preferred way to listen for new replicators, since it also runs for any existing
+	replicators that match the condition.
+	:::
+]=]
+--[=[
+	@tag Static
+	@within ClientReplicator
+	@function OnNew
+	@param tokenName string
+	@param fn (replicator: ClientReplicator) -> ()
+	@return () -> ()
+	Listens for new replicators whose token name matches `tokenName`. Returns
+	a disconnect function.
+
+	:::caution Hooking after RequestData
+	Calling `OnNew` after `ClientReplicator.RequestData()` has already resolved
+	will miss any replicators that were created in the initial snapshot. ForEach is
+	the preferred way to listen for new replicators, since it also runs for any existing
+	replicators that match the condition.
+	:::
 ]=]
 function BaseReplicator.OnNew(tokenName: string, fn: (replicator: BaseReplicator) -> ()): () -> ()
 	const creationListeners = BaseReplicator._Realm.CreationListeners
@@ -241,7 +378,7 @@ function BaseReplicator.new(config: {
 	self.Id = config.Id
 	self.Tags = table.freeze(config.Tags or {})
 	self.Manager = config.Manager
-	self._Token = config.Token
+	self.Token = config.Token
 	self._Parent = config.Parent :: BR_Internal?
 	self._Children = {}
 	self._CreationListenersFired = false
@@ -265,6 +402,7 @@ end
 --------------------------------------------------------------------------------
 
 --[=[
+	@private
 	Fires every registered creation listener (and the global `ReplicatorCreated`
 	signal) for this replicator's token. Subclasses call this once, after their
 	own construction has fully finished.
@@ -274,7 +412,7 @@ function BaseReplicator._FireCreationListeners(self: BR_Internal)
 	self._CreationListenersFired = true
 
 	const realm = BaseReplicator._Realm
-	const listeners = realm.CreationListeners[self:GetTokenName()]
+	const listeners = realm.CreationListeners[self.Token.Name]
 	if listeners then
 		for _, listener in table.clone(listeners) do
 			task.spawn(listener, self)
@@ -284,6 +422,7 @@ function BaseReplicator._FireCreationListeners(self: BR_Internal)
 end
 
 --[=[
+	@private
 	Reparents `self` under `newParent` (or to no parent), updating both sides'
 	child lists and firing `ChildAdded`/`ChildRemoved`/`ParentChanged`. Pure
 	bookkeeping -- callers are responsible for any replication-specific work
@@ -321,9 +460,11 @@ end
 	(signals, etc). Subclasses should call this via their parent metatable
 	(`getmetatable(Subclass).Destroy(self)`) AFTER their own teardown.
 
-	Does not cascade to children -- they remain discoverable and stay alive,
-	orphaned (their `_Parent` is cleared so a later `:Destroy()` on one of
-	them doesn't reach back into this now-torn-down replicator's signals).
+	A replicator must never be destroyed while it still has children: a bare
+	`_Parent = nil` would leave them silently (and incorrectly) top-level.
+	Subclasses are responsible for reparenting or destroying their children
+	(e.g. `ServerReplicator.Destroy` reparents them to `ServerReplicator.None`)
+	before calling down into this.
 ]=]
 function BaseReplicator.Destroy(self: BR_Internal)
 	const parent = self._Parent
@@ -335,9 +476,7 @@ function BaseReplicator.Destroy(self: BR_Internal)
 		parent.ChildRemoved:Fire(self)
 	end
 
-	for _, child in self._Children do
-		child._Parent = nil
-	end
+	assert(#self._Children == 0, "Cannot destroy a replicator that still has children -- reparent or destroy them first")
 
 	BaseReplicator._Realm.Storage[self.Id] = nil
 	self._Janitor:Destroy()
@@ -347,11 +486,17 @@ end
 --// Identity Getters //--
 --------------------------------------------------------------------------------
 
-function BaseReplicator.GetTokenName(self: BR_Internal): string
-	return TokenCache.getTokenName(self._Token)
-end
-
 --[=[
+	@within ServerReplicator
+	@method IsTopLevel
+	@return boolean
+	A top-level replicator has no parent. Only top-level replicators can have
+	their replication targets set directly on the server.
+]=]
+--[=[
+	@within ClientReplicator
+	@method IsTopLevel
+	@return boolean
 	A top-level replicator has no parent. Only top-level replicators can have
 	their replication targets set directly on the server.
 ]=]
@@ -363,14 +508,44 @@ end
 --// Hierarchy //--
 --------------------------------------------------------------------------------
 
+--[=[
+	@within ServerReplicator
+	@method GetParent
+	@return ServerReplicator?
+	Gets the parent replicator, or nil if this is a top-level replicator.
+]=]
+--[=[
+	@within ClientReplicator
+	@method GetParent
+	@return ClientReplicator?
+	Gets the parent replicator, or nil if this is a top-level replicator.
+]=]
 function BaseReplicator.GetParent(self: BR_Internal): BR_Internal?
 	return self._Parent
 end
 
+--[=[
+	@within ServerReplicator
+	@method GetChildren
+	@return { ServerReplicator }
+	Gets the immediate children of this replicator.
+]=]
+--[=[
+	@within ClientReplicator
+	@method GetChildren
+	@return { ClientReplicator }
+	Gets the immediate children of this replicator.
+]=]
 function BaseReplicator.GetChildren(self: BR_Internal): { BR_Internal }
 	return table.clone(self._Children)
 end
 
+--[=[
+	@within ServerReplicator
+	@method GetDescendants
+	@return { ServerReplicator }
+	Gets all descendants of this replicator, recursively.
+]=]
 function BaseReplicator.GetDescendants(self: BR_Internal): { BR_Internal }
 	const descendants = {}
 	const function collect(parent: BR_Internal)
@@ -383,6 +558,22 @@ function BaseReplicator.GetDescendants(self: BR_Internal): { BR_Internal }
 	return descendants
 end
 
+--[=[
+	@within ServerReplicator
+	@method FindFirstChild
+	@param condition SearchCondition? -- optional predicate, token name, or tag set
+	@param recursive boolean? -- whether to search recursively (default false)
+	@return ServerReplicator?
+	Finds the first child of this replicator that matches `condition`, or nil if none.
+]=]
+--[=[
+	@within ClientReplicator
+	@method FindFirstChild
+	@param condition SearchCondition? -- optional predicate, token name, or tag set
+	@param recursive boolean? -- whether to search recursively (default false)
+	@return ClientReplicator?
+	Finds the first child of this replicator that matches `condition`, or nil if none.
+]=]
 function BaseReplicator.FindFirstChild(
 	self: BR_Internal,
 	condition: SearchCondition?,
@@ -411,7 +602,7 @@ end
 function BaseReplicator.PromiseFirstChild(
 	self: BR_Internal,
 	condition: SearchCondition?
-): Promise.TypedPromise<BR_Internal>
+): Promise<BR_Internal>
 	const existing = self:FindFirstChild(condition)
 	if existing then
 		return Promise.resolve(existing)
@@ -427,9 +618,8 @@ end
 
 --[=[
 	True if every key/value in `tags` is also present on this replicator
-	(ELI5: are all the given tags also on this replicator?).
 ]=]
-function BaseReplicator.IsSupersetOfTags(self: BR_Internal, tags: Tags): boolean
+function BaseReplicator.HasTags(self: BR_Internal, tags: Tags): boolean
 	for tag, value in tags do
 		if self.Tags[tag] ~= value then
 			return false
@@ -437,6 +627,7 @@ function BaseReplicator.IsSupersetOfTags(self: BR_Internal, tags: Tags): boolean
 	end
 	return true
 end
+BaseReplicator.IsSupersetOfTags = BaseReplicator.HasTags
 
 --[=[
 	True if every key/value on this replicator is also present in `tags`

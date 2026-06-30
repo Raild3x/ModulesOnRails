@@ -5,12 +5,10 @@
 	@class ServerReplicator
 	@server
 
-	Replicates a TableManager2 instance to a set of players. Inherits from
-	`BaseReplicator` (see there for the `Manager`/`Tags` fields, `GetParent`,
-	`GetChildren`, `FindFirstChild`, etc).
+	Replicates a TableManager instance to one or more clients.
 
 	```lua
-	local PlayerToken = ServerReplicator.Token("PlayerData")
+	local PlayerToken = ServerReplicator.TOKEN("PlayerData")
 
 	Players.PlayerAdded:Connect(function(player)
 		local replicator = ServerReplicator.new({
@@ -93,11 +91,9 @@ const topLevelReplicators: { SR_Internal } = {}
 -- every scope's snapshot a second time.
 const hasBootstrapped: { [Player]: true } = {}
 
---[=[
-	Depth-first collects `root` and every descendant into `out`, parents
-	always appearing before their children -- the order a client needs to
-	apply `Create` items in.
-]=]
+-- Depth-first collects `root` and every descendant into `out`, parents
+-- always appearing before their children -- the order a client needs to
+-- apply `Create` items in.
 const function collectSubtree(root: SR_Internal, out: { SR_Internal })
 	table.insert(out, root)
 	for _, child in root:GetChildren() do
@@ -110,16 +106,14 @@ const function buildCreateItem(replicator: SR_Internal): WireItem
 	return FlatCodec.CreateItem(
 		replicator.Id,
 		if parent then parent.Id else nil,
-		replicator:GetTokenName(),
+		replicator.Token.Name,
 		replicator.Tags,
 		replicator.Manager.Raw
 	)
 end
 
---[=[
-	Appends one `Create` item per replicator in `root`'s subtree (parent
-	before child) onto `out`.
-]=]
+-- Appends one `Create` item per replicator in `root`'s subtree (parent
+-- before child) onto `out`.
 const function buildSnapshotItems(root: SR_Internal, out: { WireItem })
 	const subtree = {}
 	collectSubtree(root, subtree)
@@ -132,10 +126,8 @@ const function isTableManager(value: any): boolean
 	return type(value) == "table" and (value :: any).Raw ~= nil and type((value :: any).Set) == "function"
 end
 
---[=[
-	Builds an encoded wire message from `items` via `MessageCodec.Encode`.
-	Shared tables are interned in-band by BufferCodec's identity tracking.
-]=]
+-- Builds an encoded wire message from `items` via `MessageCodec.Encode`.
+-- Shared tables are interned in-band by BufferCodec's identity tracking.
 const function buildMessage(items: { WireItem }): (buffer, { Instance }?)
 	return MessageCodec.Encode(items)
 end
@@ -145,8 +137,9 @@ end
 --------------------------------------------------------------------------------
 
 --[=[
+	@within ServerReplicator
 	@tag Static
-	@prop Token (name: string) -> ReplicationToken
+	@prop TOKEN (name: string) -> ReplicationToken
 	Creates a unique `ReplicationToken` identifying a replicator "class" to
 	the client. May only be called once per `tokenName`; store and reuse the
 	returned token rather than calling this again with the same name.
@@ -154,7 +147,7 @@ end
 	This is intended to help prevent accidental collisions between different
 	replicators in the same experience.
 ]=]
-ServerReplicator.Token = setmetatable({
+ServerReplicator.TOKEN = setmetatable({
 	new = TokenCache.registerNewToken,
 	get = TokenCache.getExistingToken,
 }, {
@@ -162,7 +155,8 @@ ServerReplicator.Token = setmetatable({
 		return TokenCache.registerNewToken(name)
 	end,
 })
-table.freeze(ServerReplicator.Token)
+table.freeze(ServerReplicator.TOKEN)
+ServerReplicator.Token = ServerReplicator.TOKEN
 
 --------------------------------------------------------------------------------
 --// Constructor //--
@@ -207,7 +201,7 @@ function ServerReplicator.new(config: {
 	end
 
 	local manager: TableManager<any>
-	const data = (config.Data or {}) :: unknown
+	const data = (config.Data or (config :: any).Manager or {}) :: unknown
 	if isTableManager(data) then
 		manager = data :: TableManager<any>
 	else
@@ -260,7 +254,7 @@ end
 --------------------------------------------------------------------------------
 
 --[=[
-	@private
+	@ignore
 	Sends `replicator`'s subtree to `player` and marks them active in `replicator`'s scope.
 ]=]
 function ServerReplicator._SendSnapshotTo(self: SR_Internal, player: Player)
@@ -270,6 +264,11 @@ function ServerReplicator._SendSnapshotTo(self: SR_Internal, player: Player)
 	self._Scope:SendTo(player, buf, instances)
 end
 
+--[=[
+	@ignore
+	Adds `player` to this replicator's scope, sending a snapshot if they have
+	already bootstrapped. Does nothing if the player is already targeted.
+]=]
 function ServerReplicator._AddTarget(self: SR_Internal, player: Player)
 	local scope = self._Scope
 	if scope:IsTargeting(player) then
@@ -283,6 +282,11 @@ function ServerReplicator._AddTarget(self: SR_Internal, player: Player)
 	end
 end
 
+--[=[
+	@ignore
+	Removes `player` from this replicator's scope, sending a `Destroy` if they
+	were active. Does nothing if the player is not targeted.
+]=]
 function ServerReplicator._RemoveTarget(self: SR_Internal, player: Player)
 	const scope = self._Scope
 	if scope:IsActive(player) then
@@ -295,6 +299,11 @@ function ServerReplicator._RemoveTarget(self: SR_Internal, player: Player)
 end
 
 --[=[
+	@within ServerReplicator
+	@method SetTargets
+	@param targets ReplicationTargets
+	@tag TopLevel
+
 	Overwrites this top-level replicator's replication targets.
 ]=]
 function ServerReplicator.SetTargets(self: SR_Internal, targets: ReplicationTargets)
@@ -335,6 +344,11 @@ function ServerReplicator.SetTargets(self: SR_Internal, targets: ReplicationTarg
 end
 
 --[=[
+	@within ServerReplicator
+	@method AddTarget
+	@param target Player | { Player }
+	@tag TopLevel
+
 	Adds a player (or list of players) to this top-level replicator's targets.
 ]=]
 function ServerReplicator.AddTarget(self: SR_Internal, target: Player | { Player })
@@ -349,6 +363,11 @@ function ServerReplicator.AddTarget(self: SR_Internal, target: Player | { Player
 end
 
 --[=[
+	@within ServerReplicator
+	@method RemoveTarget
+	@param target Player | { Player }
+	@tag TopLevel
+
 	Removes a player (or list of players) from this top-level replicator's targets.
 ]=]
 function ServerReplicator.RemoveTarget(self: SR_Internal, target: Player | { Player })
@@ -359,10 +378,25 @@ function ServerReplicator.RemoveTarget(self: SR_Internal, target: Player | { Pla
 	end
 end
 
+--[=[
+	@within ServerReplicator
+	@method GetTargets
+	@return { Player }
+
+	Returns a list of players this top-level replicator is currently replicating to.
+]=]
 function ServerReplicator.GetTargets(self: SR_Internal): { Player }
 	return self._Scope:GetTargetPlayers()
 end
 
+--[=[
+	@within ServerReplicator
+	@method IsReplicatingTo
+	@param player Player
+	@return boolean
+
+	Returns whether this replicator is currently replicating to the given player.
+]=]
 function ServerReplicator.IsReplicatingTo(self: SR_Internal, player: Player): boolean
 	return self._Scope:IsTargeting(player)
 end
@@ -372,6 +406,10 @@ end
 --------------------------------------------------------------------------------
 
 --[=[
+	@within ServerReplicator
+	@method SetParent
+	@param newParent ServerReplicator
+
 	Re-parents the replicator to another replicator. 
 	
 	If they share a top-level ancestor, every currently-active player just 
@@ -449,10 +487,27 @@ end
 --// Lifecycle //--
 --------------------------------------------------------------------------------
 
+--[=[
+	@within ServerReplicator
+	@method Destroy
+	Destroys the replicator and all its children. This is synchronous and
+	immediate; any queued ops for this replicator are dropped, and a `Destroy`
+	item is sent to every active player.
+]=]
 function ServerReplicator.Destroy(self: SR_Internal)
 	-- Drop any ops queued earlier this frame so they can't flush out after the
 	-- (synchronous) Destroy item below and reference a torn-down replicator.
 	frameCoordinator:DropReplicator(self.Id)
+
+	-- Children survive their parent's destruction (see BaseReplicator.Destroy),
+	-- but must never end up with a bare nil parent. Reparenting through
+	-- SetParent (rather than touching _Parent directly) reuses its existing
+	-- scope-move + wire notification so every client still sees a consistent
+	-- tree, and must happen before self's own Destroy item below so clients
+	-- detach the children first instead of cascading them away themselves.
+	for _, child in self:GetChildren() do
+		(child :: SR_Internal):SetParent(ServerReplicator.None :: SR_Internal)
+	end
 
 	const buf, instances = buildMessage { FlatCodec.DestroyItem(self.Id) }
 	for _, player in self._Scope:GetActivePlayers() do
@@ -509,8 +564,8 @@ local allToken = ServerReplicator.Token("ServerReplicator.All")
 local noneToken = ServerReplicator.Token("ServerReplicator.None")
 
 --[=[
-	@within ServerReplicator
-	@prop All ServerReplicator
+	@tag Static 
+	@prop ServerReplicator.All ServerReplicator
 	A top-level replicator that replicates to every current and future
 	player. Useful as a `Parent` for children that should always be visible
 	to everyone, but may be moved later. Do not modify it directly -- only parent to it.
@@ -522,8 +577,8 @@ ServerReplicator.All = ServerReplicator.new {
 }
 
 --[=[
-	@within ServerReplicator
-	@prop None ServerReplicator
+	@tag Static 
+	@prop ServerReplicator.None ServerReplicator
 	A top-level replicator that replicates to nobody. Useful as a `Parent`
 	for children that should not replicate yet and are waiting for a proper 
 	parent. Do not modify it directly -- only parent to it.

@@ -24,13 +24,11 @@ const MessageCodec = require("../../Shared/Serialization/MessageCodec")
 
 local SpecUtils = {}
 
---[=[
-	Permanent no-op baseline for `ServerReplicator._Transport.SendMessage`/
-	`NotifyDataSent`, covering every send that happens OUTSIDE a
-	`spyOnTransport()` window: replicator construction/`Destroy` during test
-	setup/cleanup, and `ServerReplicator.All`'s "all" scope eagerly
-	snapshotting any player that fires `PlayerRequestedData`.
-]=]
+-- Permanent no-op baseline for `ServerReplicator._Transport.SendMessage`/
+-- `NotifyDataSent`, covering every send that happens OUTSIDE a
+-- `spyOnTransport()` window: replicator construction/`Destroy` during test
+-- setup/cleanup, and `ServerReplicator.All`'s "all" scope eagerly
+-- snapshotting any player that fires `PlayerRequestedData`.
 local function noop() end
 ;(ServerReplicator._Transport :: any).SendMessage = noop
 ;(ServerReplicator._Transport :: any).NotifyDataSent = noop

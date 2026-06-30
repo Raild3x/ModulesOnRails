@@ -225,21 +225,23 @@ local function getF64(reader: Reader): number
 end
 
 --[=[
+	@within BufferCodec
+	@function newWriter
 	Creates a new writer used for encoding values into a binary buffer.
 
 	The writer maintains temporary state while encoding, including string
 	interning tables and deduplicated instance references.
 
-    ```lua
-    local writer = BufferCodec.newWriter()
+	```lua
+	local writer = BufferCodec.newWriter()
 
-    BufferCodec.writeValue(writer, {
-        Name = "Player",
-        Health = 100,
-    })
+	BufferCodec.writeValue(writer, {
+		Name = "Player",
+		Health = 100,
+	})
 
-    local buffer, instances = BufferCodec.export(writer)
-    ```
+	local buffer, instances = BufferCodec.export(writer)
+	```
 
 	@return Writer
 ]=]
@@ -267,17 +269,19 @@ const function resetWriter(writer: Writer)
 end
 
 --[=[
+	@within BufferCodec
+	@function export
 	Finalizes a writer.
 
 	Returns a tightly-sized buffer containing the encoded bytes and an
 	optional instance reference array which must accompany the buffer when
 	transmitting over a RemoteEvent.
 
-    ```lua
-    local buffer, instances = BufferCodec.export(writer)
+	```lua
+	local buffer, instances = BufferCodec.export(writer)
 
-    RemoteEvent:FireClient(player, buffer, instances)
-    ```
+	RemoteEvent:FireClient(player, buffer, instances)
+	```
 
 	@param writer Writer
 
@@ -291,16 +295,18 @@ const function export(writer: Writer): (buffer, { Instance }?)
 end
 
 --[=[
+	@within BufferCodec
+	@function newReader
 	Creates a reader for decoding values from an encoded buffer.
 
 	The supplied instance list should be the same list returned by
 	`export` on the writing side.
 
-    ```lua
-    local reader = BufferCodec.newReader(buffer, instances)
+	```lua
+	local reader = BufferCodec.newReader(buffer, instances)
 
-    local value = BufferCodec.readValue(reader)
-    ```
+	local value = BufferCodec.readValue(reader)
+	```
 
 	@param buffer buffer
 	@param instances {Instance}?
@@ -507,6 +513,8 @@ const function writeTable(writer: Writer, value: { [any]: any })
 end
 
 --[=[
+	@within BufferCodec
+	@function writeValue
 	Encodes any supported Luau value.
 
 	Supported types:
@@ -594,6 +602,8 @@ const function readMap(reader: Reader, count: number): { [any]: any }
 end
 
 --[=[
+	@within BufferCodec
+	@function readValue
 	Reads the next encoded value from the stream.
 
 	Returns the decoded Luau value.

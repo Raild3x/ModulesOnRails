@@ -1,7 +1,7 @@
 --!strict
 --[=[
 	@ignore
-	@class Types
+	@class TableReplicatorTypes
 
 	Shared type definitions used across the Server, Client, and Shared modules.
 ]=]
@@ -15,26 +15,34 @@ const ReplicationScope = require("../Server/ReplicationScope")
 
 export type TableManager<T = { [any]: any }> = TableManagerModule.TableManager<T>
 export type AppliedOp = TableManagerModule.AppliedOp
-export type ReplicationToken = TokenCache.ReplicationToken
 
 export type Id = number
 export type PathArray = { any }
 export type Path = string | PathArray
 export type Tags = { [string]: any }
 
+export type Janitor = Janitor.Janitor
+export type Promise<T...> = Promise.TypedPromise<T...>
 export type Signal<Fn, Args...> = Signal.Signal<Fn, Args...>
 
 --[=[
-	@within Types
-	@type ReplicationTargets "all" | Player | {Player}
+	@type TableReplicator.ReplicationToken { Name: string }
+	A special token that identifies a replicator. Tokens are used to find replicators
+	by name, and to ensure that the server and client agree on the type of a
+	replicator's data. You can create a new token with `ServerReplicator.TOKEN("MyToken")`.
+	Do not attempt to make one manually.
+]=]
+export type ReplicationToken = TokenCache.ReplicationToken
+
+--[=[
+	@type TableReplicator.ReplicationTargets "all" | Player | {Player}
 	The Player(s) that a top-level replicator should replicate to.
 	`"all"` replicates to all current and future players.
 ]=]
 export type ReplicationTargets = "all" | Player | { Player }
 
 --[=[
-	@within Types
-	@type SearchCondition string | ReplicationToken | Tags | (replicator: any) -> boolean
+	@type TableReplicator.SearchCondition string | ReplicationToken | Tags | (replicator: ServerReplicator | ClientReplicator) -> boolean
 	A condition used to filter replicators in `ForEach`/`OnNew`/`FindFirstChild`/etc.
 	- `string`: matches a replicator whose token name equals the string.
 	- `ReplicationToken`: matches a replicator using that exact token.
@@ -49,7 +57,7 @@ export type SearchCondition = string | ReplicationToken | Tags | (replicator: an
 export type OpKind = "Set" | "ArrayInsert" | "ArrayRemove" | "ArraySet" | "BatchBegin" | "BatchEnd"
 
 --[=[
-	@within Types
+	@within TableReplicatorTypes
 	@interface BufferedOp
 	.Kind OpKind
 	.Path PathArray
@@ -176,23 +184,104 @@ end
 --------------------------------------------------------------------------------
 	--// Replicator type definitions //--
 --------------------------------------------------------------------------------
+
+--[=[
+	@readonly
+	@prop ServerReplicator.Id number
+	The unique Id of this replicator.
+]=]
+--[=[
+	@readonly
+	@prop ClientReplicator.Id number
+	The unique Id of this replicator.
+]=]
+--[=[
+	@readonly
+	@prop ServerReplicator.Manager TableManager
+	The TableManager that this replicator is managing.
+]=]
+--[=[
+	@readonly
+	@prop ClientReplicator.Manager TableManager
+	The TableManager that this replicator is managing.
+]=]
+--[=[
+	@readonly
+	@prop ServerReplicator.Token ReplicationToken
+	The token of this replicator.
+]=]
+--[=[
+	@readonly
+	@prop ClientReplicator.Token ReplicationToken
+	The token of this replicator.
+]=]
+--[=[
+	@readonly
+	@prop ServerReplicator.Tags { [string]: any }
+	The tags of this replicator.
+]=]
+--[=[
+	@readonly
+	@prop ClientReplicator.Tags { [string]: any }
+	The tags of this replicator.
+]=]
+
+--[=[
+	@tag Event
+	@prop ServerReplicator.ChildAdded Signal<ServerReplicator>
+	Fired when a child replicator is added to this replicator.
+]=]
+--[=[
+	@tag Event
+	@prop ClientReplicator.ChildAdded Signal<ClientReplicator>
+	Fired when a child replicator is added to this replicator.
+]=]
+--[=[
+	@tag Event
+	@prop ServerReplicator.ChildRemoved Signal<ServerReplicator>
+	Fired when a child replicator is removed from this replicator.
+]=]
+--[=[
+	@tag Event
+	@prop ClientReplicator.ChildRemoved Signal<ClientReplicator>
+	Fired when a child replicator is removed from this replicator.
+]=]
+--[=[
+	@tag Event
+	@prop ServerReplicator.ParentChanged Signal<ServerReplicator, ServerReplicator>
+	Fired when this replicator's parent is changed.
+	Passed arguments are `(newParent, oldParent)`.
+]=]
+--[=[
+	@tag Event
+	@prop ClientReplicator.ParentChanged Signal<ClientReplicator, ClientReplicator>
+	Fired when this replicator's parent is changed.
+	Passed arguments are `(newParent, oldParent)`.
+]=]
+
 export type BR_Public<BR> = {
 	-- Signals
-	ChildAdded: Signal.Signal<(child: BR) -> (), BR>,
-	ChildRemoved: Signal.Signal<(child: BR) -> (), BR>,
-	ParentChanged: Signal.Signal<
+	ChildAdded: Signal<(child: BR) -> (), BR>,
+	ChildRemoved: Signal<(child: BR) -> (), BR>,
+
+	ParentChanged: Signal<
 		(newParent: BR?, oldParent: BR?) -> (),
 		BR?,
 		BR?
 	>,
 
-	-- Readable Fields
+	-- Read only Fields
 	Id: Id,
+
+
 	Tags: Tags,
+
+
 	Manager: TableManager<any>,
 
+	Token: ReplicationToken,
+
 	-- Methods
-	GetTokenName: (self: BR) -> string,
 	IsTopLevel: (self: BR) -> boolean,
 
 	GetParent: (self: BR) -> BR?,
@@ -201,7 +290,7 @@ export type BR_Public<BR> = {
 	FindFirstChild: (self: BR, condition: SearchCondition?, recursive: boolean?) -> BR?,
 	PromiseFirstChild: (self: BR, condition: SearchCondition?) -> Promise.TypedPromise<BR>,
 
-	IsSupersetOfTags: (self: BR, tags: Tags) -> boolean,
+	HasTags: (self: BR, tags: Tags) -> boolean, -- Alias for IsSupersetOfTags
 	IsSubsetOfTags: (self: BR, tags: Tags) -> boolean,
 
 	Destroy: (self: BR) -> (),
@@ -209,7 +298,6 @@ export type BR_Public<BR> = {
 
 
 export type BR_Internal<BR = BR_Internal> = {
-	_Token: ReplicationToken,
 	_Parent: BR?,
 	_Children: { BR },
 	_Janitor: Janitor.Janitor,
@@ -217,6 +305,7 @@ export type BR_Internal<BR = BR_Internal> = {
 
 	_FireCreationListeners: (self: BR) -> (),
 	_SetParentRefs: (self: BR, newParent: BR?) -> (),
+
 } & BR_Public<BR>
 
 
@@ -248,11 +337,6 @@ export type ServerReplicator = SR_Public<ServerReplicator> & BR_Public<ServerRep
 
 export type CR_Internal = BR_Internal<CR_Internal>
 
---[=[
-	@within Types
-	@type ClientReplicator
-	Client-side mirror of a ServerReplicator.
-]=]
 export type ClientReplicator = BR_Public<ClientReplicator>
 
 ---------------------------------------------------------------

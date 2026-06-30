@@ -1,11 +1,6 @@
---[=[
-	@within Types
-	@type ReplicationToken {Name: string}
-	A unique identifier for a replicator "class". Create one with
-	`ServerReplicator.Token`. Do not construct this table manually.
-]=]
 export type ReplicationToken = {
 	__NAME__: string,
+    Name: string,
 }
 
 const tokenMT = {
@@ -31,7 +26,10 @@ const function registerNewToken(name: string): ReplicationToken
     if UsedNames[name] then
         error(`ServerReplicator.Token: token name {name} is already in use`)
     end
-    local token = { __NAME__ = name } :: ReplicationToken
+    local token = { 
+        __NAME__ = name,
+        Name = name,
+    } :: ReplicationToken
     setmetatable(token, tokenMT)
     UsedNames[name] = token
     return token

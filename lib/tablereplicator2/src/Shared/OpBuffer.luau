@@ -45,12 +45,10 @@ function OpBuffer.new(): OpBuffer
 	}, OpBuffer)
 end
 
---[=[
-	Converts a TableManager2 `AppliedOp` into a `BufferedOp`. For a `Set`, the
-	op's `Diff` (when present) carries the exact same value as `NewValue` would
-	have -- riding it instead of re-sending `NewValue` is free, never a
-	flatten/decomposition step (see CONTRACT.md S1.3).
-]=]
+-- Converts a TableManager2 `AppliedOp` into a `BufferedOp`. For a `Set`, the
+-- op's `Diff` (when present) carries the exact same value as `NewValue` would
+-- have -- riding it instead of re-sending `NewValue` is free, never a
+-- flatten/decomposition step (see CONTRACT.md S1.3).
 local function normalizeAppliedOp(op: AppliedOp): BufferedOp
 	if op.Kind == "Set" then
 		local value = if op.Diff ~= nil then (op.Diff :: any).new else op.NewValue
@@ -76,14 +74,12 @@ local function canonicalPathKey(path: PathArray): string
 end
 OpBuffer.PathKey = canonicalPathKey
 
---[=[
-	Compares two paths element-wise. `"equal"` means identical length and
-	elements; `"aPrefixB"`/`"bPrefixA"` means one path is a strict prefix of
-	the other (i.e. one addresses an ancestor of what the other addresses);
-	otherwise `"disjoint"`. Used by `FrameCoordinator`'s coalescing to decide
-	subsumption (a later ancestor `Set` drops buffered descendant `Set`s) and
-	array-op barriers (an array op invalidates any overlapping pending `Set`).
-]=]
+-- Compares two paths element-wise. `"equal"` means identical length and
+-- elements; `"aPrefixB"`/`"bPrefixA"` means one path is a strict prefix of
+-- the other (i.e. one addresses an ancestor of what the other addresses);
+-- otherwise `"disjoint"`. Used by `FrameCoordinator`'s coalescing to decide
+-- subsumption (a later ancestor `Set` drops buffered descendant `Set`s) and
+-- array-op barriers (an array op invalidates any overlapping pending `Set`).
 local function pathRelation(a: PathArray, b: PathArray): PathRelation
 	local lenA, lenB = #a, #b
 	local minLen = math.min(lenA, lenB)

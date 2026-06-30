@@ -5,11 +5,11 @@
 
 	The client-side mirror of a `ServerReplicator`. Construction is entirely
 	server-driven -- use `ClientReplicator.RequestData()` to start
-	replication, then `BaseReplicator.OnNew`/`ForEach`/`PromiseFirst` (see
-	`BaseReplicator`) to find replicators as they arrive.
+	replication, then `BaseReplicator.OnNew`/`ForEach`/`PromiseFirst` to
+	find replicators as they arrive.
 
 	```lua
-	ClientReplicator.OnNew("PlayerData", function(replicator)
+	ClientReplicator.ForEach("PlayerData", function(replicator)
 		local manager = replicator:GetManager()
 		manager:Observe("Coins", function(coins)
 			print("Coins:", coins)
@@ -22,7 +22,6 @@
 	```
 ]=]
 
-const Promise = require("../../Promise")
 const Types = require("../Shared/Types")
 const TableManagerModule = Types.TableManager
 const BaseReplicator = require("../Shared/BaseReplicator")
@@ -38,7 +37,7 @@ type WireDestroyItem = Types.WireDestroyItem
 type WireSetParentItem = Types.WireSetParentItem
 type WireOpsItem = Types.WireOpsItem
 type ClientTransport = ClientTransportModule.ClientTransport
-type Promise = Promise.Promise
+type Promise = Types.Promise<()>
 
 --------------------------------------------------------------------------------
 --// Class //--
@@ -58,15 +57,12 @@ export type ClientReplicator = Types.ClientReplicator
 
 const getFromId = BaseReplicator.GetFromId :: (id: number) -> CR_Internal?
 
---[=[
-	@private
-	Builds a `ClientReplicator` from a decoded `Create` item. Its parent (if
-	any) is asserted to already exist: every server-side path that emits a
-	`Create` only does so after the referenced parent has already been sent
-	to the same player (see ServerReplicator's module docs), so a missing
-	parent here means the items arrived out of order -- a bug, not a race to
-	tolerate.
-]=]
+-- Builds a `ClientReplicator` from a decoded `Create` item. Its parent (if
+-- any) is asserted to already exist: every server-side path that emits a
+-- `Create` only does so after the referenced parent has already been sent
+-- to the same player (see ServerReplicator's module docs), so a missing
+-- parent here means the items arrived out of order -- a bug, not a race to
+-- tolerate.
 const function buildFromCreateItem(item: WireCreateItem): CR_Internal
 	const parent = if item.ParentId ~= FlatCodec.NoParent
 		then getFromId(item.ParentId)
@@ -85,11 +81,8 @@ const function buildFromCreateItem(item: WireCreateItem): CR_Internal
 	return setmetatable(base, ClientReplicator) :: CR_Internal
 end
 
---[=[
-	@private
-	Recursively tears down `self` and every descendant (mirrors the server
-	only ever sending one `Destroy` item for the root of a removed subtree).
-]=]
+-- Recursively tears down `self` and every descendant (mirrors the server
+-- only ever sending one `Destroy` item for the root of a removed subtree).
 const function destroyInternal(self: CR_Internal)
 	for _, child in self:GetChildren() do
 		destroyInternal(child)
@@ -97,13 +90,10 @@ const function destroyInternal(self: CR_Internal)
 	getmetatable(ClientReplicator).Destroy(self)
 end
 
---[=[
-	@private
-	Applies every item in one wire message, in order. `Create` items are
-	built first (silently -- no signals/listeners yet) so any later item in
-	the SAME message can already see a fully-formed hierarchy; `ChildAdded`
-	and creation listeners fire only after the whole message has been built.
-]=]
+-- Applies every item in one wire message, in order. `Create` items are
+-- built first (silently -- no signals/listeners yet) so any later item in
+-- the SAME message can already see a fully-formed hierarchy; `ChildAdded`
+-- and creation listeners fire only after the whole message has been built.
 const function handleMessage(message: WireMessage)
 	const created: { CR_Internal } = {}
 

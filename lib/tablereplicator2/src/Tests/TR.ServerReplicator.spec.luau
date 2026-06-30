@@ -585,5 +585,76 @@ return function(t: tiniest)
 
 			expect(#calls).is(0)
 		end)
+
+		test("destroying a parent reparents its children to ServerReplicator.None server-side", function()
+			local parent = ServerReplicator.new({ Token = uniqueToken("DestroyReparentsToNone"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local child = ServerReplicator.new({ Token = uniqueToken("DestroyReparentsToNoneChild"), Data = FakeManager.new(), Parent = parent })
+			parent:Destroy()
+			expect(BaseReplicator.GetFromId(child.Id)).is(child)
+			expect(child:GetParent()).is(ServerReplicator.None)
+			expect(child:IsTopLevel()).is_false()
+			child:Destroy()
+		end)
+
+		test("destroying a parent with an active-player child sends the child's Destroy before the parent's", function()
+			local player = { Name = "P" } :: any
+			local parent = ServerReplicator.new({ Token = uniqueToken("DestroyOrderParent"), Data = FakeManager.new(), ReplicationTargets = { player } })
+			;(parent :: any)._Scope:Activate(player)
+			local child = ServerReplicator.new({ Token = uniqueToken("DestroyOrderChild"), Data = FakeManager.new(), Parent = parent })
+			local parentId = parent.Id
+			local childId = child.Id
+
+			local calls, restore = spyOnTransport()
+			parent:Destroy()
+			restore()
+
+			local childMsgIdx: number? = nil
+			local parentMsgIdx: number? = nil
+			for i, call in calls do
+				local item = call.Message.Items[1] :: any
+				if item.Op == FlatCodec.Op.Destroy then
+					if item.Id == childId then
+						childMsgIdx = i
+					elseif item.Id == parentId then
+						parentMsgIdx = i
+					end
+				end
+			end
+
+			expect(childMsgIdx).never_is(nil)
+			expect(parentMsgIdx).never_is(nil)
+			expect((childMsgIdx :: number) < (parentMsgIdx :: number)).is_true()
+		end)
+
+		test("destroying a parent with multiple active-player children sends a Destroy for each child", function()
+			local player = { Name = "P" } :: any
+			local parent = ServerReplicator.new({ Token = uniqueToken("DestroyMultiChildParent"), Data = FakeManager.new(), ReplicationTargets = { player } })
+			;(parent :: any)._Scope:Activate(player)
+			local childA = ServerReplicator.new({ Token = uniqueToken("DestroyMultiChildA"), Data = FakeManager.new(), Parent = parent })
+			local childB = ServerReplicator.new({ Token = uniqueToken("DestroyMultiChildB"), Data = FakeManager.new(), Parent = parent })
+
+			local calls, restore = spyOnTransport()
+			parent:Destroy()
+			restore()
+
+			local destroyIds: { [number]: boolean } = {}
+			for _, call in calls do
+				local item = call.Message.Items[1] :: any
+				if item.Op == FlatCodec.Op.Destroy then
+					destroyIds[item.Id] = true
+				end
+			end
+
+			expect(destroyIds[childA.Id]).is_true()
+			expect(destroyIds[childB.Id]).is_true()
+			expect(destroyIds[parent.Id]).is_true()
+		end)
+
+		test("destroying a childless replicator still works (no-op children loop)", function()
+			local replicator = ServerReplicator.new({ Token = uniqueToken("DestroyNoChildrenNoop"), Data = FakeManager.new(), ReplicationTargets = {} })
+			expect(function()
+				replicator:Destroy()
+			end).never_fails()
+		end)
 	end)
 end

@@ -41,6 +41,11 @@ type SendMessage = (self: any, player: Player, buf: buffer, instances: { Instanc
 --// FakeClient //--
 --------------------------------------------------------------------------------
 
+--[=[
+	@ignore
+	@class FakeClient
+	A simulated Roblox client for use in specs. Created via `FakeIntermediary:Connect`.
+]=]
 local FakeClient = {}
 FakeClient.__index = FakeClient
 
@@ -60,6 +65,7 @@ function FakeClient.new(player: Player): FakeClient
 end
 
 --[=[
+	@within FakeClient
 	Runs `fn` with this client's realm active, restoring whatever realm was
 	active before -- even if `fn` throws -- so a failed assertion inside
 	`fn` can never leave a later test running against the wrong realm.
@@ -84,6 +90,7 @@ function FakeClient.GetFromId(self: FakeClient, id: number): any
 end
 
 --[=[
+	@within FakeClient
 	Simulates this client calling `ClientReplicator.RequestData()`:
 	synchronously fires the real handshake signal so any snapshot lands in
 	this client's realm before this returns.

@@ -275,6 +275,78 @@ return function(t: tiniest)
 			newTop:Destroy()
 			intermediary:Destroy()
 		end)
+
+		test("destroying a parent tears down parent and child on the client", function()
+			local token = uniqueToken("DestroyParentWithChildE2E")
+			local intermediary = FakeIntermediary.new()
+			local client = intermediary:Connect()
+
+			local parent = ServerReplicator.new({ Token = token, Data = {}, ReplicationTargets = { client.Player } })
+			client:RequestData()
+			local child = ServerReplicator.new({ Token = token, Data = { Hp = 10 }, Parent = parent })
+
+			expect(client:GetFromId(parent.Id)).never_is(nil)
+			expect(client:GetFromId(child.Id)).never_is(nil)
+
+			parent:Destroy()
+
+			expect(client:GetFromId(parent.Id)).is(nil)
+			expect(client:GetFromId(child.Id)).is(nil)
+
+			-- Children survive on the server even after the client loses them.
+			expect(BaseReplicator.GetFromId(child.Id)).is(child)
+
+			child:Destroy()
+			intermediary:Destroy()
+		end)
+
+		test("destroying a parent tears down all descendants on the client (multi-level subtree)", function()
+			local token = uniqueToken("DestroySubtreeE2E")
+			local intermediary = FakeIntermediary.new()
+			local client = intermediary:Connect()
+
+			local top = ServerReplicator.new({ Token = token, Data = {}, ReplicationTargets = { client.Player } })
+			client:RequestData()
+			local child = ServerReplicator.new({ Token = token, Data = {}, Parent = top })
+			local grandchild = ServerReplicator.new({ Token = token, Data = { X = 1 }, Parent = child })
+
+			expect(client:GetFromId(top.Id)).never_is(nil)
+			expect(client:GetFromId(child.Id)).never_is(nil)
+			expect(client:GetFromId(grandchild.Id)).never_is(nil)
+
+			top:Destroy()
+
+			expect(client:GetFromId(top.Id)).is(nil)
+			expect(client:GetFromId(child.Id)).is(nil)
+			expect(client:GetFromId(grandchild.Id)).is(nil)
+
+			grandchild:Destroy()
+			child:Destroy()
+			intermediary:Destroy()
+		end)
+
+		test("destroying a parent does not affect a sibling replicator on the client", function()
+			local token = uniqueToken("DestroyParentSiblingUnaffectedE2E")
+			local intermediary = FakeIntermediary.new()
+			local client = intermediary:Connect()
+
+			local topA = ServerReplicator.new({ Token = token, Data = {}, ReplicationTargets = { client.Player } })
+			local topB = ServerReplicator.new({ Token = token, Data = { Val = 7 }, ReplicationTargets = { client.Player } })
+			client:RequestData()
+			local childOfA = ServerReplicator.new({ Token = token, Data = {}, Parent = topA })
+
+			topA:Destroy()
+
+			expect(client:GetFromId(topA.Id)).is(nil)
+			expect(client:GetFromId(childOfA.Id)).is(nil)
+			local mirroredB = client:GetFromId(topB.Id) :: any
+			expect(mirroredB).never_is(nil)
+			expect(mirroredB.Manager.Raw.Val).is(7)
+
+			childOfA:Destroy()
+			topB:Destroy()
+			intermediary:Destroy()
+		end)
 	end)
 
 	--------------------------------------------------------------------------------
