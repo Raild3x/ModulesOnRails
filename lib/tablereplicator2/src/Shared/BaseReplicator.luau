@@ -114,7 +114,6 @@ export type BR_Internal<BR = BR_Internal> = Types.BR_Internal<BR>
 export type BaseReplicator = Types.BaseReplicator
 
 --[=[
-	@private
 	@within BaseReplicator
 	@tag Static
 	Iterates every replicator currently in memory (`for _, replicator in BaseReplicator do`).

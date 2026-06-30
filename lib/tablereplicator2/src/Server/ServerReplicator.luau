@@ -158,6 +158,10 @@ ServerReplicator.TOKEN = setmetatable({
 table.freeze(ServerReplicator.TOKEN)
 ServerReplicator.Token = ServerReplicator.TOKEN
 
+-- User configurable escape hatch: if true, `ServerReplicator.new` will not warn 
+-- when a raw string is passed as the `Token` argument instead of a proper `ReplicationToken`.
+ServerReplicator.SuppressTokenWarnings = false
+
 --------------------------------------------------------------------------------
 --// Constructor //--
 --------------------------------------------------------------------------------
@@ -183,7 +187,9 @@ function ServerReplicator.new(config: {
 }): ServerReplicator
 	local token = config.Token
 	if typeof(token) == "string" then
-		warn("Avoid using raw strings for tokens; use ServerReplicator.Token instead")
+		if not ServerReplicator.SuppressTokenWarnings then
+			warn("Avoid using raw strings for tokens; use ServerReplicator.Token instead")
+		end
 		token = TokenCache.getOrCreateToken(token)
 	end
 	assert(TokenCache.isToken(token), "Invalid Token")

@@ -1,3 +1,5 @@
+--!strict
+
 export type ReplicationToken = {
 	__NAME__: string,
     Name: string,
@@ -9,7 +11,7 @@ const tokenMT = {
     end,
 }
 
-const UsedNames: { [string]: ReplicationToken } = setmetatable({}, {__mode = "v"})
+const UsedNames: { [string]: ReplicationToken } = setmetatable({}, {__mode = "v"}) :: any
 
 const function getExistingToken(name: string): ReplicationToken?
     return UsedNames[name]
@@ -19,7 +21,7 @@ const function isTokenInUse(name: string | ReplicationToken): boolean
     if typeof(name) == "table" then
         name = name.__NAME__
     end
-    return UsedNames[name] ~= nil
+    return UsedNames[name :: string] ~= nil
 end
 
 const function registerNewToken(name: string): ReplicationToken

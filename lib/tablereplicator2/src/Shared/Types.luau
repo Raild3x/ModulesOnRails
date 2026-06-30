@@ -6,7 +6,7 @@
 	Shared type definitions used across the Server, Client, and Shared modules.
 ]=]
 
-const TableManagerModule = require("../../../tablemanager2/src/TableManager")
+const TableManagerModule = require("../../../tablemanager2/src/TableManager") -- TODO: remove this once TableManager2 is published
 const Signal = require("../../Signal")
 const Promise = require("../../Promise")
 const Janitor = require("../../Janitor")
@@ -28,8 +28,8 @@ export type Signal<Fn, Args...> = Signal.Signal<Fn, Args...>
 --[=[
 	@type TableReplicator.ReplicationToken { Name: string }
 	A special token that identifies a replicator. Tokens are used to find replicators
-	by name, and to ensure that the server and client agree on the type of a
-	replicator's data. You can create a new token with `ServerReplicator.TOKEN("MyToken")`.
+	by name. We use these to help prevent accidental namespace collisions by different
+	systems. You can create a new token with `ServerReplicator.TOKEN("MyToken")`.
 	Do not attempt to make one manually.
 ]=]
 export type ReplicationToken = TokenCache.ReplicationToken
