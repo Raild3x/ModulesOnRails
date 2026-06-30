@@ -440,4 +440,137 @@ return function(t: tiniest)
 			intermediary:Destroy()
 		end)
 	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("Coalescing (opt-in per-replicator)", function()
+		test("a coalesced replicator collapses repeated same-frame writes to a single op; client lands on the final value", function()
+			local token = uniqueToken("CoalesceE2ESamePath")
+			local intermediary = FakeIntermediary.new()
+			local client = intermediary:Connect()
+
+			local replicator = ServerReplicator.new({
+				Token = token,
+				Data = { Hp = 0 },
+				ReplicationTargets = { client.Player },
+				Coalesced = true,
+			})
+			client:RequestData()
+
+			local captured: { { Player: any, Message: any } } = {}
+			local prevSend = (ServerReplicator :: any)._Transport.SendMessage
+			;(ServerReplicator :: any)._Transport.SendMessage = function(self, player, buf, instances)
+				table.insert(captured, { Player = player, Message = MessageCodec.Decode(buf, instances) })
+				prevSend(self, player, buf, instances)
+			end
+
+			replicator.Manager:Set("Hp", 10)
+			replicator.Manager:Set("Hp", 20)
+			replicator.Manager:Set("Hp", 30)
+			;(ServerReplicator :: any)._FrameCoordinator:Flush()
+
+			;(ServerReplicator :: any)._Transport.SendMessage = prevSend
+
+			expect(#captured).is(1)
+			local items = captured[1].Message.Items
+			expect(#items).is(1)
+			local decoded = FlatCodec.DecodeOps(items[1] :: any)
+			expect(#decoded).is(1)
+			expect(decoded[1].Value).is(30)
+
+			local mirrored = client:GetFromId(replicator.Id) :: any
+			expect(mirrored.Manager.Raw.Hp).is(30)
+
+			replicator:Destroy()
+			intermediary:Destroy()
+		end)
+
+		test("a non-coalesced (default) replicator still delivers every intermediate write", function()
+			local token = uniqueToken("CoalesceE2EControl")
+			local intermediary = FakeIntermediary.new()
+			local client = intermediary:Connect()
+
+			local replicator = ServerReplicator.new({ Token = token, Data = { Hp = 0 }, ReplicationTargets = { client.Player } })
+			client:RequestData()
+
+			local captured: { { Player: any, Message: any } } = {}
+			local prevSend = (ServerReplicator :: any)._Transport.SendMessage
+			;(ServerReplicator :: any)._Transport.SendMessage = function(self, player, buf, instances)
+				table.insert(captured, { Player = player, Message = MessageCodec.Decode(buf, instances) })
+				prevSend(self, player, buf, instances)
+			end
+
+			replicator.Manager:Set("Hp", 10)
+			replicator.Manager:Set("Hp", 20)
+			replicator.Manager:Set("Hp", 30)
+			;(ServerReplicator :: any)._FrameCoordinator:Flush()
+
+			;(ServerReplicator :: any)._Transport.SendMessage = prevSend
+
+			local items = captured[1].Message.Items
+			local decoded = FlatCodec.DecodeOps(items[1] :: any)
+			expect(#decoded).is(3)
+
+			local mirrored = client:GetFromId(replicator.Id) :: any
+			expect(mirrored.Manager.Raw.Hp).is(30)
+
+			replicator:Destroy()
+			intermediary:Destroy()
+		end)
+
+		test("two replicators sharing one TableManager, one coalesced and one not: independent streams, identical final client state", function()
+			local token = uniqueToken("CoalesceE2ESharedTM")
+			local intermediary = FakeIntermediary.new()
+			local clientA = intermediary:Connect()
+			local clientB = intermediary:Connect()
+
+			-- Both replicators wrap the SAME TableManager instance; only `coalescedRep`
+			-- opts into coalescing. The two are independent op streams (own `Id`s),
+			-- so collapsing one must never affect the other.
+			local sharedTM = TableManagerModule.new({ Hp = 0 })
+			local coalescedRep = ServerReplicator.new({
+				Token = token,
+				Data = sharedTM,
+				ReplicationTargets = { clientA.Player },
+				Coalesced = true,
+			})
+			local plainRep = ServerReplicator.new({ Token = token, Data = sharedTM, ReplicationTargets = { clientB.Player } })
+
+			clientA:RequestData()
+			clientB:RequestData()
+
+			local captured: { { Player: any, Message: any } } = {}
+			local prevSend = (ServerReplicator :: any)._Transport.SendMessage
+			;(ServerReplicator :: any)._Transport.SendMessage = function(self, player, buf, instances)
+				table.insert(captured, { Player = player, Message = MessageCodec.Decode(buf, instances) })
+				prevSend(self, player, buf, instances)
+			end
+
+			sharedTM:Set("Hp", 10)
+			sharedTM:Set("Hp", 20)
+			sharedTM:Set("Hp", 30)
+			;(ServerReplicator :: any)._FrameCoordinator:Flush()
+
+			;(ServerReplicator :: any)._Transport.SendMessage = prevSend
+
+			local byPlayer: { [any]: any } = {}
+			for _, call in captured do
+				byPlayer[call.Player] = call.Message
+			end
+
+			local coalescedOps = FlatCodec.DecodeOps(byPlayer[clientA.Player].Items[1] :: any)
+			local plainOps = FlatCodec.DecodeOps(byPlayer[clientB.Player].Items[1] :: any)
+			expect(#coalescedOps).is(1)
+			expect(#plainOps).is(3)
+
+			local mirroredA = clientA:GetFromId(coalescedRep.Id) :: any
+			local mirroredB = clientB:GetFromId(plainRep.Id) :: any
+			expect(mirroredA.Manager.Raw.Hp).is(30)
+			expect(mirroredB.Manager.Raw.Hp).is(30)
+
+			coalescedRep:Destroy()
+			plainRep:Destroy()
+			intermediary:Destroy()
+		end)
+	end)
 end

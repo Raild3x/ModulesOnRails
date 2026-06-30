@@ -49,8 +49,8 @@ ClientReplicator.ClassName = "ClientReplicator"
 ClientReplicator.__index = ClientReplicator
 
 
-type CR_Internal = BaseReplicator.BR_Internal<CR_Internal>
-export type ClientReplicator = BaseReplicator.BR_Public<ClientReplicator>
+type CR_Internal = Types.CR_Internal
+export type ClientReplicator = Types.ClientReplicator
 
 --------------------------------------------------------------------------------
 --// Message handling //--

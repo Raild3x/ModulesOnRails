@@ -35,8 +35,7 @@ type WireItem = Types.WireItem
 const ServerTransportModule = require("../Shared/Transport/ServerTransport")
 type ServerTransport = ServerTransportModule.ServerTransport
 
--- Duck-typed view of `ReplicationScope` (only what the coordinator needs), so
--- there is no require dependency -- and therefore no cycle -- between them.
+-- Duck-typed view of `ReplicationScope` (only what the coordinator needs)
 type Scope = {
 	IsActive: (self: any, player: Player) -> boolean,
 	GetActivePlayers: (self: any) -> { Player },
@@ -45,11 +44,18 @@ type Scope = {
 
 -- One queued data op plus the scope and the audience captured when it was
 -- enqueued (see the module doc for why audience is captured, not resolved live).
+-- `Seq` is the enqueue order; a coalesced in-place update bumps it to "now" so
+-- the entry resorts to its last-write position at flush (see `Flush`). `Dead`
+-- marks an entry subsumed by a later ancestor `Set` on a coalesced replicator
+-- -- it stays in `_entries` (cheaper than a mid-array removal) and is filtered
+-- out at flush.
 type Entry = {
 	Scope: Scope,
 	Audience: { Player },
 	Id: Id,
 	Op: BufferedOp,
+	Seq: number,
+	Dead: boolean?,
 }
 
 -- One replicator's contiguous run of ops in a single player's frame; collapses
@@ -70,7 +76,7 @@ const function scheduleCoordinatorFlush(coordinator: FrameCoordinator)
 	scheduledCoordinators[coordinator] = true
 end
 
-do
+if RunService:IsRunning() then
 	const function reschedule()
 		if scheduleDirty then
 			scheduleDirty = false
@@ -94,13 +100,19 @@ end
 const FrameCoordinator = {}
 FrameCoordinator.__index = FrameCoordinator
 
+-- Per coalesced replicator, `pathKey -> live entry` (see `OpBuffer.PathKey`)
+-- so a repeat `Set` on the same path can be updated in place instead of
+-- appended. Only ever populated for `Id`s enqueued with `coalesced = true`.
+type CoalesceSlots = { [Id]: { [string]: Entry } }
+
 export type FrameCoordinator = typeof(setmetatable(
 	{} :: {
 		_transport: ServerTransport,
 		_entries: { Entry },
 		_audienceCache: { [Scope]: { version: number, players: { Player } } },
 		_flushScheduled: boolean,
-		_scheduledOps: number,
+		_seq: number,
+		_coalesceSlots: CoalesceSlots,
 	},
 	FrameCoordinator
 ))
@@ -111,7 +123,8 @@ function FrameCoordinator.new(transport: ServerTransport): FrameCoordinator
 		_entries = {},
 		_audienceCache = {},
 		_flushScheduled = false,
-		_scheduledOps = 0,
+		_seq = 0,
+		_coalesceSlots = {},
 	}, FrameCoordinator)
 end
 
@@ -121,8 +134,25 @@ end
 	instant; the capture is shared across every op enqueued in the same
 	targeting "era" (see `ReplicationScope.GetActiveVersion`) so a hot frame
 	allocates at most one player list per scope per era.
+
+	When `coalesced` is true (an opt-in per-replicator flag), a `Set` is
+	collapsed in place rather than appended:
+	  * an exact-path repeat overwrites the existing pending entry's value and
+	    bumps its `Seq` to "now", so it resorts to its last-write position at
+	    flush (preserving the server-wide ordering guarantee for everyone else);
+	  * a later ancestor `Set` tombstones (marks `Dead`) any already-buffered
+	    descendant `Set`, since the ancestor's value subsumes it;
+	  * array ops (`ArrayInsert`/`ArrayRemove`/`ArraySet`) are never collapsed --
+	    they're appended normally and act as a barrier, invalidating (not
+	    tombstoning) any pending `Set` on an overlapping path so a later `Set`
+	    on that path starts a fresh entry after the array op rather than
+	    merging across it;
+	  * `BatchBegin`/`BatchEnd` markers are dropped entirely -- safe because
+	    `OpApplier` already wraps one replicator's whole flush in a single
+	    outer `Batch`, making nested markers inert.
 ]=]
-function FrameCoordinator.QueueOp(self: FrameCoordinator, scope: Scope, replicatorId: Id, op: AppliedOp)
+function FrameCoordinator.QueueOp(self: FrameCoordinator, scope: Scope, replicatorId: Id, op: AppliedOp, coalesced: boolean?)
+	debug.profilebegin("TR.QueueOp")
 	const version = scope:GetActiveVersion()
 	local cached = self._audienceCache[scope]
 	if cached == nil or cached.version ~= version then
@@ -130,14 +160,88 @@ function FrameCoordinator.QueueOp(self: FrameCoordinator, scope: Scope, replicat
 		self._audienceCache[scope] = cached
 	end
 
-	table.insert(self._entries, {
+	self._seq += 1
+	const seq = self._seq
+
+	if not coalesced then
+		table.insert(self._entries, {
+			Scope = scope,
+			Audience = cached.players,
+			Id = replicatorId,
+			Op = OpBuffer.NormalizeAppliedOp(op),
+			Seq = seq,
+		})
+		scheduleCoordinatorFlush(self)
+		debug.profileend()
+		return
+	end
+
+	if op.Kind == "BatchBegin" or op.Kind == "BatchEnd" then
+		debug.profileend()
+		return
+	end
+
+	local slots = self._coalesceSlots[replicatorId]
+	if slots == nil then
+		slots = {}
+		self._coalesceSlots[replicatorId] = slots
+	end
+
+	if op.Kind == "Set" then
+		const path = op.Path
+		const key = OpBuffer.PathKey(path)
+
+		-- A later ancestor Set subsumes any already-buffered descendant Set.
+		for existingKey, slot in slots do
+			if existingKey ~= key and OpBuffer.PathRelation(path, slot.Op.Path) == "aPrefixB" then
+				slot.Dead = true
+				slots[existingKey] = nil
+			end
+		end
+
+		const value = if op.Diff ~= nil then (op.Diff :: any).new else op.NewValue
+		const existing = slots[key]
+		if existing ~= nil then
+			existing.Op = { Kind = "Set", Path = path, Value = value }
+			existing.Seq = seq
+			existing.Audience = cached.players
+		else
+			const entry: Entry = {
+				Scope = scope,
+				Audience = cached.players,
+				Id = replicatorId,
+				Op = { Kind = "Set", Path = path, Value = value },
+				Seq = seq,
+			}
+			table.insert(self._entries, entry)
+			slots[key] = entry
+		end
+
+		scheduleCoordinatorFlush(self)
+		debug.profileend()
+		return
+	end
+
+	-- Array ops are order-sensitive and never collapsed; they're a barrier
+	-- for any overlapping pending Set (equal, ancestor, or descendant path).
+	const entry: Entry = {
 		Scope = scope,
 		Audience = cached.players,
 		Id = replicatorId,
 		Op = OpBuffer.NormalizeAppliedOp(op),
-	})
+		Seq = seq,
+	}
+	table.insert(self._entries, entry)
+
+	const opPath = entry.Op.Path
+	for existingKey, slot in slots do
+		if OpBuffer.PathRelation(opPath, slot.Op.Path) ~= "disjoint" then
+			slots[existingKey] = nil
+		end
+	end
 
 	scheduleCoordinatorFlush(self)
+	debug.profileend()
 end
 
 --[=[
@@ -155,6 +259,7 @@ function FrameCoordinator.DropReplicator(self: FrameCoordinator, replicatorId: I
 		end
 	end
 	self._entries = kept
+	self._coalesceSlots[replicatorId] = nil
 end
 
 --[=[
@@ -166,11 +271,27 @@ function FrameCoordinator.Flush(self: FrameCoordinator)
 	const entries = self._entries
 	self._entries = {}
 	table.clear(self._audienceCache)
-	self._scheduledOps = 0
-
+	table.clear(self._coalesceSlots)
+	self._seq = 0
+	
 	if entries[1] == nil then
 		return
 	end
+	debug.profilebegin("TR.Flush")
+
+	-- Drop entries a later ancestor Set subsumed, then resort by Seq: a
+	-- coalesced in-place update bumps its entry's Seq without moving it in
+	-- `_entries`, so enqueue order no longer reflects last-write order once
+	-- any in-place update has happened this frame.
+	const live = table.create(#entries) :: { Entry }
+	for _, entry in entries do
+		if not entry.Dead then
+			table.insert(live, entry)
+		end
+	end
+	table.sort(live, function(a: Entry, b: Entry)
+		return a.Seq < b.Seq
+	end)
 
 	-- Assemble each active player's ordered run list, preserving global order.
 	-- Consecutive ops for the same replicator collapse into one run (per-player
@@ -179,7 +300,7 @@ function FrameCoordinator.Flush(self: FrameCoordinator)
 	-- identical for every player (see the plan's performance section).
 	const perPlayer: { [Player]: { OpRun } } = {}
 
-	for _, entry in entries do
+	for _, entry in live do
 		const scope = entry.Scope
 		for _, player in entry.Audience do
 			if not scope:IsActive(player) then
@@ -204,15 +325,9 @@ function FrameCoordinator.Flush(self: FrameCoordinator)
 	for player, runs in perPlayer do
 		self:_SendFrame(player, runs)
 	end
+	debug.profileend()
 end
 
---[=[
-	@private
-	The single encode-and-send seam: turns one player's ordered run list into a
-	wire message and hands it to the transport. Shared tables are interned
-	in-band by BufferCodec. A future phase shares an encoded payload across an
-	audience class without any change to ordering or assembly above.
-]=]
 function FrameCoordinator._SendFrame(self: FrameCoordinator, player: Player, runs: { OpRun })
 	const items = table.create(#runs) :: { WireItem }
 	for i, run in runs do

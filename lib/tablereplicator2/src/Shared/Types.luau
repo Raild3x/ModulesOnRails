@@ -8,7 +8,10 @@
 
 const TableManagerModule = require("../../../tablemanager2/src/TableManager")
 const Signal = require("../../Signal")
+const Promise = require("../../Promise")
+const Janitor = require("../../Janitor")
 const TokenCache = require("./TokenCache")
+const ReplicationScope = require("../Server/ReplicationScope")
 
 export type TableManager<T = { [any]: any }> = TableManagerModule.TableManager<T>
 export type AppliedOp = TableManagerModule.AppliedOp
@@ -107,7 +110,156 @@ export type WireMessage = {
 	Items: { WireItem },
 }
 
+--------------------------------------------------------------------------------
+	--// Type Functions //--
+--------------------------------------------------------------------------------
+
+-- Currently unused. Waiting for Luau type functions to better support generics.
+export type function xorKeySets(tbl, specA, specB)
+    assert(tbl:is("table"), "xorKeySets: first argument must be a table type")
+    assert(specA:is("table"), "xorKeySets: second argument must be a table type")
+    assert(specB:is("table"), "xorKeySets: third argument must be a table type")
+
+    local function keyName(key)
+        return key:is("singleton") and key:value() or nil
+    end
+
+    -- collect key names belonging to each branch
+    local aKeys, bKeys = {}, {}
+    for key in specA:properties() do
+        aKeys[keyName(key)] = true
+    end
+    for key in specB:properties() do
+        bKeys[keyName(key)] = true
+    end
+
+    local nilType = types.singleton(nil)
+
+    -- shared base = everything in tbl that isn't in either branch's keyset
+    local base = types.newtable({})
+    for key, prop in tbl:properties() do
+        local k = keyName(key)
+        if not aKeys[k] and not bKeys[k] then
+            base:setproperty(key, prop.read)
+        end
+    end
+
+    -- branch where A's keys are present, B's keys are forced nil
+    local onlyA = types.newtable({})
+    for key, prop in base:properties() do
+        onlyA:setproperty(key, prop.read)
+    end
+    for key, prop in specA:properties() do
+        onlyA:setproperty(key, prop.read)
+    end
+    for key in pairs(bKeys) do
+		assert(typeof(key) == "string", "xorKeySets: key name must be a string")
+        onlyA:setproperty(types.singleton(key), nilType)
+    end
+
+    -- branch where B's keys are present, A's keys are forced nil
+    local onlyB = types.newtable({})
+    for key, prop in base:properties() do
+        onlyB:setproperty(key, prop.read)
+    end
+    for key, prop in specB:properties() do
+        onlyB:setproperty(key, prop.read)
+    end
+    for key in pairs(aKeys) do
+		assert(typeof(key) == "string", "xorKeySets: key name must be a string")
+        onlyB:setproperty(types.singleton(key), nilType)
+    end
+
+    return types.unionof(onlyA, onlyB)
+end
+
+--------------------------------------------------------------------------------
+	--// Replicator type definitions //--
+--------------------------------------------------------------------------------
+export type BR_Public<BR> = {
+	-- Signals
+	ChildAdded: Signal.Signal<(child: BR) -> (), BR>,
+	ChildRemoved: Signal.Signal<(child: BR) -> (), BR>,
+	ParentChanged: Signal.Signal<
+		(newParent: BR?, oldParent: BR?) -> (),
+		BR?,
+		BR?
+	>,
+
+	-- Readable Fields
+	Id: Id,
+	Tags: Tags,
+	Manager: TableManager<any>,
+
+	-- Methods
+	GetTokenName: (self: BR) -> string,
+	IsTopLevel: (self: BR) -> boolean,
+
+	GetParent: (self: BR) -> BR?,
+	GetChildren: (self: BR) -> { BR },
+	GetDescendants: (self: BR) -> { BR },
+	FindFirstChild: (self: BR, condition: SearchCondition?, recursive: boolean?) -> BR?,
+	PromiseFirstChild: (self: BR, condition: SearchCondition?) -> Promise.TypedPromise<BR>,
+
+	IsSupersetOfTags: (self: BR, tags: Tags) -> boolean,
+	IsSubsetOfTags: (self: BR, tags: Tags) -> boolean,
+
+	Destroy: (self: BR) -> (),
+}
+
+
+export type BR_Internal<BR = BR_Internal> = {
+	_Token: ReplicationToken,
+	_Parent: BR?,
+	_Children: { BR },
+	_Janitor: Janitor.Janitor,
+	_CreationListenersFired: boolean,
+
+	_FireCreationListeners: (self: BR) -> (),
+	_SetParentRefs: (self: BR, newParent: BR?) -> (),
+} & BR_Public<BR>
+
+
+export type BaseReplicator = BR_Public<BaseReplicator>
+
+---------------------------------------------------------------
+export type SR_Public<SR> = {
+	SetTargets: (self: SR, targets: ReplicationTargets) -> (),
+	AddTarget: (self: SR, target: Player | { Player }) -> (),
+	RemoveTarget: (self: SR, target: Player | { Player }) -> (),
+	GetTargets: (self: SR) -> { Player },
+	IsReplicatingTo: (self: SR, player: Player) -> boolean,
+	SetParent: (self: SR, newParent: SR?) -> (),
+}
+
+export type SR_Internal = {
+	_Scope: ReplicationScope.ReplicationScope,
+	_Coalesced: boolean,
+	_Unreliable: boolean,
+
+	_SendSnapshotTo: (self: SR_Internal, player: Player) -> (),
+	_AddTarget: (self: SR_Internal, player: Player) -> (),
+	_RemoveTarget: (self: SR_Internal, player: Player) -> (),
+} & SR_Public<SR_Internal> & BR_Internal<SR_Internal>
+
+export type ServerReplicator = SR_Public<ServerReplicator> & BR_Public<ServerReplicator>
+
+---------------------------------------------------------------
+
+export type CR_Internal = BR_Internal<CR_Internal>
+
+--[=[
+	@within Types
+	@type ClientReplicator
+	Client-side mirror of a ServerReplicator.
+]=]
+export type ClientReplicator = BR_Public<ClientReplicator>
+
+---------------------------------------------------------------
+
 return {
 	Signal = Signal,
 	TableManager = TableManagerModule,
+	Promise = Promise,
+	Janitor = Janitor,
 }

@@ -3,17 +3,19 @@
 	@ignore
 	@class OpBuffer
 
-	Two roles: (1) `NormalizeAppliedOp` turns a TableManager2 `AppliedOp` into a
-	wire-ready `BufferedOp`, reused by `FrameCoordinator` (which now owns the
+	Three roles: (1) `NormalizeAppliedOp` turns a TableManager2 `AppliedOp` into
+	a wire-ready `BufferedOp`, reused by `FrameCoordinator` (which now owns the
 	actual per-frame ordering and flush -- a single global buffer rather than
-	one per scope); and (2) the `Push`/`Drain` grouping buffer, kept as a small
-	self-contained accumulator that groups ops per replicator in first-touched
-	order (exercised directly by the specs and the end-to-end fidelity test).
+	one per scope); (2) `PathKey`/`PathRelation`, pure path-comparison helpers
+	`FrameCoordinator` uses to implement opt-in per-replicator coalescing
+	(latest-wins in-place updates, ancestor subsumption, array-op barriers);
+	and (3) the `Push`/`Drain` grouping buffer, kept as a small self-contained
+	accumulator that groups ops per replicator in first-touched order
+	(exercised directly by the specs and the end-to-end fidelity test).
 
-	Ops are kept in strict per-replicator arrival order with no collapsing.
-	A later phase adds an opt-in `Coalesce` mode that collapses repeated
-	same-path `Set`s to latest-wins for bandwidth; correctness (exact replay)
-	comes first.
+	Ops are kept in strict per-replicator arrival order with no collapsing --
+	`Push`/`Drain` never coalesce; that opt-in behavior lives entirely in
+	`FrameCoordinator`, built on the helpers below.
 ]=]
 
 local Types = require("./Types")
@@ -21,6 +23,9 @@ local Types = require("./Types")
 type Id = Types.Id
 type AppliedOp = Types.AppliedOp
 type BufferedOp = Types.BufferedOp
+type PathArray = Types.PathArray
+
+export type PathRelation = "equal" | "aPrefixB" | "bPrefixA" | "disjoint"
 
 local OpBuffer = {}
 OpBuffer.__index = OpBuffer
@@ -59,6 +64,43 @@ local function normalizeAppliedOp(op: AppliedOp): BufferedOp
 	end
 end
 OpBuffer.NormalizeAppliedOp = normalizeAppliedOp
+
+-- Type-tagging each segment before joining keeps e.g. the number `1` and the
+-- string `"1"` from colliding into the same key.
+local function canonicalPathKey(path: PathArray): string
+	local parts = table.create(#path)
+	for i, segment in path do
+		parts[i] = `{typeof(segment)}:{tostring(segment)}`
+	end
+	return table.concat(parts, "\0")
+end
+OpBuffer.PathKey = canonicalPathKey
+
+--[=[
+	Compares two paths element-wise. `"equal"` means identical length and
+	elements; `"aPrefixB"`/`"bPrefixA"` means one path is a strict prefix of
+	the other (i.e. one addresses an ancestor of what the other addresses);
+	otherwise `"disjoint"`. Used by `FrameCoordinator`'s coalescing to decide
+	subsumption (a later ancestor `Set` drops buffered descendant `Set`s) and
+	array-op barriers (an array op invalidates any overlapping pending `Set`).
+]=]
+local function pathRelation(a: PathArray, b: PathArray): PathRelation
+	local lenA, lenB = #a, #b
+	local minLen = math.min(lenA, lenB)
+	for i = 1, minLen do
+		if a[i] ~= b[i] then
+			return "disjoint"
+		end
+	end
+	if lenA == lenB then
+		return "equal"
+	elseif lenA < lenB then
+		return "aPrefixB"
+	else
+		return "bPrefixA"
+	end
+end
+OpBuffer.PathRelation = pathRelation
 
 --[=[
 	Queues `op` (raw from `manager:OnApplied`) for replicator `id`.

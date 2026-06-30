@@ -153,6 +153,60 @@ return function(t: tiniest)
 
 	--------------------------------------------------------------------------------
 
+	describe("OpBuffer.PathKey", function()
+		test("identical paths produce identical keys", function()
+			expect(OpBuffer.PathKey({ "a", "b" })).is(OpBuffer.PathKey({ "a", "b" }))
+		end)
+
+		test("string and number segments with the same tostring never collide", function()
+			expect(OpBuffer.PathKey({ 1 }) == OpBuffer.PathKey({ "1" })).is(false)
+		end)
+
+		test("paths that only differ by element grouping never collide", function()
+			-- {"a","b"} vs {"a.b"} must not hash the same despite a naive
+			-- separator-only join producing identical strings.
+			expect(OpBuffer.PathKey({ "a", "b" }) == OpBuffer.PathKey({ "a.b" })).is(false)
+		end)
+
+		test("different paths produce different keys", function()
+			expect(OpBuffer.PathKey({ "a" }) == OpBuffer.PathKey({ "b" })).is(false)
+		end)
+
+		test("empty path produces a stable, distinct key", function()
+			expect(OpBuffer.PathKey({})).is(OpBuffer.PathKey({}))
+			expect(OpBuffer.PathKey({}) == OpBuffer.PathKey({ "a" })).is(false)
+		end)
+	end)
+
+	describe("OpBuffer.PathRelation", function()
+		test("identical paths are equal", function()
+			expect(OpBuffer.PathRelation({ "a", "b" }, { "a", "b" })).is("equal")
+		end)
+
+		test("a strict prefix of b reports aPrefixB", function()
+			expect(OpBuffer.PathRelation({ "a" }, { "a", "b" })).is("aPrefixB")
+		end)
+
+		test("b strict prefix of a reports bPrefixA", function()
+			expect(OpBuffer.PathRelation({ "a", "b" }, { "a" })).is("bPrefixA")
+		end)
+
+		test("non-overlapping paths are disjoint", function()
+			expect(OpBuffer.PathRelation({ "a" }, { "b" })).is("disjoint")
+		end)
+
+		test("siblings under a shared parent are disjoint, not prefixes", function()
+			expect(OpBuffer.PathRelation({ "stats", "hp" }, { "stats", "mp" })).is("disjoint")
+		end)
+
+		test("empty path is a prefix of everything", function()
+			expect(OpBuffer.PathRelation({}, { "a" })).is("aPrefixB")
+			expect(OpBuffer.PathRelation({ "a" }, {})).is("bPrefixA")
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
 	describe("MessageCodec (Phase 2 bit-packed framing + Phase 3 in-band table dedup)", function()
 		local function roundTrip(items: { any }): any
 			local buf, instances = MessageCodec.Encode(items)

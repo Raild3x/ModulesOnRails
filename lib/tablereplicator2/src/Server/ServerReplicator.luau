@@ -1,4 +1,6 @@
 --!strict
+--!native
+--!optimize 2
 --[=[
 	@class ServerReplicator
 	@server
@@ -17,17 +19,21 @@
 			ReplicationTargets = player,
 			Tags = { UserId = player.UserId },
 		})
+
+		player.Destroying:Connect(function()
+			replicator:Destroy()
+		end)
 	end)
 	```
 ]=]
 
 const Players = game:GetService("Players")
 
-const BaseReplicator = require("../Shared/BaseReplicator")
 const Types = require("../Shared/Types")
 const TableManagerModule = Types.TableManager
 const ReplicationScope = require("./ReplicationScope")
 const FrameCoordinator = require("./FrameCoordinator")
+const BaseReplicator = require("../Shared/BaseReplicator")
 const ServerTransportModule = require("../Shared/Transport/ServerTransport")
 const FlatCodec = require("../Shared/Serialization/FlatCodec")
 const MessageCodec = require("../Shared/Serialization/MessageCodec")
@@ -51,26 +57,10 @@ local ServerReplicator = setmetatable({}, BaseReplicator)
 ServerReplicator.ClassName = "ServerReplicator"
 ServerReplicator.__index = ServerReplicator
 
-type SR_Public<SR> = {
-	SetTargets: (self: SR, targets: ReplicationTargets) -> (),
-	AddTarget: (self: SR, target: Player | { Player }) -> (),
-	RemoveTarget: (self: SR, target: Player | { Player }) -> (),
-	GetTargets: (self: SR) -> { Player },
-	IsReplicatingTo: (self: SR, player: Player) -> boolean,
-	SetParent: (self: SR, newParent: SR?) -> (),
-}
+type SR_Public<SR> = Types.SR_Public<SR>
+type SR_Internal = Types.SR_Internal
 
-type SR_Internal = {
-	_Scope: ReplicationScope.ReplicationScope,
-	_Coalesced: boolean,
-	_Unreliable: boolean,
-
-	_SendSnapshotTo: (self: SR_Internal, player: Player) -> (),
-	_AddTarget: (self: SR_Internal, player: Player) -> (),
-	_RemoveTarget: (self: SR_Internal, player: Player) -> (),
-} & SR_Public<SR_Internal> & BaseReplicator.BR_Internal<SR_Internal>
-
-export type ServerReplicator = SR_Public<ServerReplicator> & BaseReplicator.BR_Public<ServerReplicator>
+export type ServerReplicator = Types.ServerReplicator
 
 --------------------------------------------------------------------------------
 --// Module-level: transport, token registry, top-level bookkeeping //--
@@ -181,7 +171,9 @@ table.freeze(ServerReplicator.Token)
 --[=[
 	@tag Static
 
-	Creates a new `ServerReplicator`. Exactly one of `Parent` or
+	Creates a new `ServerReplicator`. 
+	
+	Parent or Exactly one of `Parent` or
 	`ReplicationTargets` must be given: a top-level replicator is created with
 	`ReplicationTargets` (pass `{}` to start with none), and a child
 	replicator is created with `Parent` and inherits its top-level ancestor's
@@ -193,7 +185,7 @@ function ServerReplicator.new(config: {
 	ReplicationTargets: ReplicationTargets?,
 	Parent: ServerReplicator?,
 	Tags: Tags?,
-	Coalesced: boolean?, -- TODO: implement coalescing
+	Coalesced: boolean?,
 }): ServerReplicator
 	local token = config.Token
 	if typeof(token) == "string" then
@@ -230,6 +222,7 @@ function ServerReplicator.new(config: {
 		Parent = parent,
 	}
 	const self = setmetatable(base, ServerReplicator) :: SR_Internal
+	self._Coalesced = config.Coalesced == true
 
 	if parent then
 		self._Scope = parent._Scope
@@ -239,12 +232,12 @@ function ServerReplicator.new(config: {
 	end
 
 	const managerDestroyedConn = manager:OnDestroy(function()
-		self:Destroy()
+		self:Destroy() -- TR shouldnt outlive its manager, but if it does, destroy the replicator to avoid dangling references
 	end)
 	self._Janitor:Add(managerDestroyedConn)
 
 	const disconnectApplied = manager:OnApplied(function(op)
-		frameCoordinator:QueueOp(self._Scope, self.Id, op)
+		frameCoordinator:QueueOp(self._Scope, self.Id, op, self._Coalesced)
 	end)
 	self._Janitor:Add(disconnectApplied)
 
@@ -379,12 +372,13 @@ end
 --------------------------------------------------------------------------------
 
 --[=[
-	Reparents `self` under `newParent`. If they share a top-level ancestor,
-	every currently-active player just gets a `SetParent` item. Otherwise
-	`self`'s whole subtree moves to `newParent`'s scope: a player active in
-	the new scope but not the old one gets a fresh snapshot, a player active
-	in the old scope but not targeted by the new one gets a `Destroy`, and a
-	player active in both just gets `SetParent`.
+	Re-parents the replicator to another replicator. 
+	
+	If they share a top-level ancestor, every currently-active player just 
+	gets a `SetParent` item. Otherwise `self`'s whole subtree moves to 
+	`newParent`'s scope: a player active in the new scope but not the old one 
+	gets a fresh snapshot, a player active in the old scope but not targeted by
+	the new one gets a `Destroy`, and a player active in both just gets `SetParent`.
 ]=]
 function ServerReplicator.SetParent(self: SR_Internal, newParent: SR_Internal)
 	assert(not self:IsTopLevel(), "Cannot SetParent a top-level replicator")
@@ -519,7 +513,7 @@ local noneToken = ServerReplicator.Token("ServerReplicator.None")
 	@prop All ServerReplicator
 	A top-level replicator that replicates to every current and future
 	player. Useful as a `Parent` for children that should always be visible
-	to everyone. Do not modify it directly -- only parent to it.
+	to everyone, but may be moved later. Do not modify it directly -- only parent to it.
 ]=]
 ServerReplicator.All = ServerReplicator.new {
 	Token = allToken,
@@ -531,8 +525,8 @@ ServerReplicator.All = ServerReplicator.new {
 	@within ServerReplicator
 	@prop None ServerReplicator
 	A top-level replicator that replicates to nobody. Useful as a `Parent`
-	for children that should exist on the server only. Do not modify it
-	directly -- only parent to it.
+	for children that should not replicate yet and are waiting for a proper 
+	parent. Do not modify it directly -- only parent to it.
 ]=]
 ServerReplicator.None = ServerReplicator.new {
 	Token = noneToken,

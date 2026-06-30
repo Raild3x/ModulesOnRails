@@ -6,16 +6,33 @@
 
 	**[SERVER]**
 	```lua
-	local TableReplicator = require(Packages.TableReplicator2).Server
-	local PlayerToken = TableReplicator.Token("PlayerData")
+	const TableReplicator = require(Packages.TableReplicator).Server
+	const TableManager = require(Packages.TableManager)
+	const PlayerToken = TableReplicator.Token("PlayerData")
 
 	Players.PlayerAdded:Connect(function(player)
-		TableReplicator.new({
+		const manager = TableManager.new {
+			Coins = 0,
+		}
+
+		const replicator =TableReplicator.new({
 			Token = PlayerToken,
-			Data = { Coins = 0 },
+			Manager = manager,
 			ReplicationTargets = player,
-			Tags = { UserId = player.UserId },
 		})
+
+		task.spawn(function()
+			while player.Parent do
+				task.wait(1)
+				manager:Increment("Coins", math.random(1, 10))
+			end
+		end)
+
+		-- simple cleanup
+		player.Destroying:Connect(function()
+			replicator:Destroy()
+			manager:Destroy()
+		end)
 	end)
 	```
 
@@ -23,8 +40,8 @@
 	```lua
 	local TableReplicator = require(Packages.TableReplicator2).Client
 
-	TableReplicator.OnNew("PlayerData", function(replicator)
-		replicator:GetManager():Observe("Coins", function(coins)
+	TableReplicator.ForEach("PlayerData", function(replicator)
+		replicator.Manager:Observe("Coins", function(coins)
 			print("Coins:", coins)
 		end)
 	end)
@@ -35,8 +52,24 @@
 
 const RunService = game:GetService("RunService")
 
-export type ServerReplicator = typeof(require("@self/Server/ServerReplicator"))
-export type ClientReplicator = typeof(require("@self/Client/ClientReplicator"))
+const Types = require("@self/Shared/Types")
+
+export type ServerReplicatorClass = typeof(require("@self/Server/ServerReplicator"))
+export type ClientReplicatorClass = typeof(require("@self/Client/ClientReplicator"))
+
+export type BaseReplicator = Types.BaseReplicator
+export type ServerReplicator = Types.ServerReplicator
+export type ClientReplicator = Types.ClientReplicator
+export type Replicator = ServerReplicator | ClientReplicator
+
+export type ReplicationToken = Types.ReplicationToken
+export type ReplicationTargets = Types.ReplicationTargets
+export type SearchCondition = Types.SearchCondition
+export type Tags = Types.Tags
+
+--------------------------------------------------------------------------------
+	--// Entry Point //--
+--------------------------------------------------------------------------------
 
 const TableReplicator = {}
 
@@ -63,7 +96,7 @@ setmetatable(TableReplicator, {
 })
 
 return table.freeze(TableReplicator) :: {
-	Server: ServerReplicator,
-	Client: ClientReplicator,
-	Current: ServerReplicator | ClientReplicator,
+	Server: ServerReplicatorClass,
+	Client: ClientReplicatorClass,
+	Current: ServerReplicatorClass | ClientReplicatorClass,
 }

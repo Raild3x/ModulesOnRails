@@ -1,4 +1,6 @@
 --!strict
+--!native
+--!optimize 2
 --[=[
 	@ignore
 	@class ReplicationScope
@@ -148,8 +150,6 @@ end
 --[=[
 	Sends an already-built message to one player (e.g. an individual snapshot).
 	Per-frame data-op delivery is owned by `FrameCoordinator`, not the scope;
-	this direct send is for the synchronous structural items
-	(Create/Destroy/SetParent/snapshot) `ServerReplicator` ships immediately.
 ]=]
 function ReplicationScope.SendTo(self: ReplicationScope, player: Player, buf: buffer, instances: { Instance }?)
 	self._transport:SendMessage(player, buf, instances)

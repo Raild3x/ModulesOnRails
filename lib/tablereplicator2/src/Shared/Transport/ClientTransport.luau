@@ -76,8 +76,7 @@ end
 	Requests the initial snapshot from the server. Safe to call more than
 	once -- every call after the first just returns a promise for the same
 	in-flight (or already-resolved) request. Resolves once the server has
-	finished sending the snapshot (see `ServerTransport.NotifyDataSent`); the
-	snapshot's own messages arrive via `MessageReceived` slightly before that.
+	finished sending the snapshot.
 ]=]
 function ClientTransport.RequestData(self: ClientTransport): Promise.TypedPromise<()>
 	if not self._requested then
@@ -92,7 +91,6 @@ function ClientTransport.RequestData(self: ClientTransport): Promise.TypedPromis
 		return Promise.resolve()
 	end
 
-	-- TODO: What about if the server has already sent the snapshot and we missed it? We should probably
 	return Promise.fromEvent(self._dataComplete)
 end
 

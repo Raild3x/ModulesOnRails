@@ -11,10 +11,10 @@
 
 const RunService = game:GetService("RunService")
 
-const Signal = require("../../Signal")
-const Janitor = require("../../Janitor")
-const Promise = require("../../Promise")
 const Types = require("./Types")
+const Signal = Types.Signal
+const Promise = Types.Promise
+const Janitor = Types.Janitor
 const TokenCache = require("./TokenCache")
 
 type Id = Types.Id
@@ -27,7 +27,7 @@ type SearchCondition = Types.SearchCondition
 export type Realm = {
 	Storage: { [Id]: BaseReplicator },
 	CreationListeners: { [string]: { (replicator: BaseReplicator) -> () } },
-	ReplicatorCreated: Signal.Signal<(replicator: BaseReplicator) -> (), BaseReplicator>,
+	ReplicatorCreated: Types.Signal<(replicator: BaseReplicator) -> (), BaseReplicator>,
 }
 
 const function newRealm(): Realm
@@ -45,9 +45,9 @@ local nextId = 0
 --// Util Functions //--
 --------------------------------------------------------------------------------
 
---[=[
+--[[
 	Resolves a `SearchCondition` into a plain predicate function.
-]=]
+]]
 const function reconcileCondition(condition: SearchCondition?): (replicator: BaseReplicator) -> boolean
 	local conditionType = typeof(condition)
 
@@ -95,57 +95,10 @@ BaseReplicator.__index = BaseReplicator
 BaseReplicator._Realm = newRealm()
 BaseReplicator._NewRealm = newRealm
 
--- Written as a plain structural interface (every method/field listed
--- explicitly) rather than `typeof(setmetatable(..., BaseReplicator))`: the
--- latter bakes in `BaseReplicator` (the table) as a NOMINAL `@metatable`
--- requirement, which then rejects a value whose metatable was rebound to a
--- subclass (`ServerReplicator`/`ClientReplicator`) as "unrelated types" on
--- cast, even though it structurally provides every member through its own
--- `__index` chain back to `BaseReplicator`. A bare structural interface has
--- no such requirement, so subclasses cast/assign cleanly.
-export type BR_Public<BR> = {
-	-- Signals
-	ChildAdded: Signal.Signal<(child: BR) -> (), BR>,
-	ChildRemoved: Signal.Signal<(child: BR) -> (), BR>,
-	ParentChanged: Signal.Signal<
-		(newParent: BR?, oldParent: BR?) -> (),
-		BR?,
-		BR?
-	>,
-
-	-- Readable Fields
-	Id: Id,
-	Tags: Tags,
-	Manager: TableManager<any>,
-
-	-- Methods
-	GetTokenName: (self: BR) -> string,
-	IsTopLevel: (self: BR) -> boolean,
-
-	GetParent: (self: BR) -> BR?,
-	GetChildren: (self: BR) -> { BR },
-	GetDescendants: (self: BR) -> { BR },
-	FindFirstChild: (self: BR, condition: SearchCondition?, recursive: boolean?) -> BR?,
-	PromiseFirstChild: (self: BR, condition: SearchCondition?) -> Promise.TypedPromise<BR>,
-
-	IsSupersetOfTags: (self: BR, tags: Tags) -> boolean,
-	IsSubsetOfTags: (self: BR, tags: Tags) -> boolean,
-
-	Destroy: (self: BR) -> (),
-}
-
-export type BR_Internal<BR = BR_Internal> = {
-	_Token: ReplicationToken,
-	_Parent: BR?,
-	_Children: { BR },
-	_Janitor: Janitor.Janitor,
-	_CreationListenersFired: boolean,
-
-	_FireCreationListeners: (self: BR) -> (),
-	_SetParentRefs: (self: BR, newParent: BR?) -> (),
-} & BR_Public<BR>
-
-export type BaseReplicator = BR_Public<BaseReplicator>
+-- Re-export types from Types module for convenience
+export type BR_Public<BR> = Types.BR_Public<BR>
+export type BR_Internal<BR = BR_Internal> = Types.BR_Internal<BR>
+export type BaseReplicator = Types.BaseReplicator
 
 --[=[
 	@tag Static
@@ -169,6 +122,7 @@ end
 
 --[=[
 	@tag Static
+	@private
 
 	Generates a fresh, process-unique replicator Id.
 ]=]
