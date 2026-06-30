@@ -38,7 +38,23 @@ type WireDestroyItem = Types.WireDestroyItem
 type WireSetParentItem = Types.WireSetParentItem
 type WireOpsItem = Types.WireOpsItem
 type WireOpEntry = Types.WireOpEntry
-type RefPool = { [number]: any }
+
+-- Cycle-aware deep copy. Produces a fresh independent table graph from `value`,
+-- preserving aliasing and cycles within a single top-level call via `memo`.
+-- Non-table values are returned as-is. Called per Create Data and per op Value
+-- so that two items sharing a table identity get independent copies on decode.
+local function deepCopy(value: any, memo: { [any]: any }?): any
+	if type(value) ~= "table" then return value end
+	local m: { [any]: any } = memo or {}
+	local existing = m[value]
+	if existing ~= nil then return existing end
+	local copy: { [any]: any } = {}
+	m[value] = copy
+	for k, v in value :: { [any]: any } do
+		copy[k] = deepCopy(v, m)
+	end
+	return copy
+end
 
 const MessageCodec = {}
 
@@ -211,7 +227,7 @@ local function readOpEntry(reader: Reader, prevPath: { any }): (WireOpEntry, { a
 	end
 
 	local path: { any } = if samePath then prevPath else readPath(reader, prevPath)
-	local value: any = if hasValue then BufferCodec.readValue(reader) else nil
+	local value: any = if hasValue then deepCopy(BufferCodec.readValue(reader)) else nil
 
 	return { Kind = kind, Path = path, Value = value, Index = index }, path
 end
@@ -228,8 +244,8 @@ local function readItem(reader: Reader): WireItem
 			Id = BufferCodec.readValue(reader),
 			ParentId = BufferCodec.readValue(reader),
 			Token = BufferCodec.readValue(reader),
-			Tags = BufferCodec.readValue(reader),
-			Data = BufferCodec.readValue(reader),
+			Tags = deepCopy(BufferCodec.readValue(reader)),
+			Data = deepCopy(BufferCodec.readValue(reader)),
 		} :: WireCreateItem
 	elseif wireOp == WIRE_OP_DESTROY then
 		return { Op = flatOp, Id = BufferCodec.readValue(reader) } :: WireDestroyItem
@@ -256,24 +272,27 @@ local function readItem(reader: Reader): WireItem
 end
 
 --[=[
-	Encodes `items` (already run through `RefCodec.Encode`, if applicable) plus
-	the resulting `refs` pool into a buffer. Returns the buffer and the
-	deduplicated Instance side-list (or nil when the message carries none).
+	Encodes `items` into a compact binary buffer using bit-packed framing.
+	Shared tables within the message are automatically interned by BufferCodec's
+	identity table-tracking, eliminating the need for a separate RefCodec pass.
+	Returns the buffer and the deduplicated Instance side-list (or nil when the
+	message carries none).
 ]=]
-function MessageCodec.Encode(items: { WireItem }, refs: RefPool?): (buffer, { Instance }?)
+function MessageCodec.Encode(items: { WireItem }): (buffer, { Instance }?)
 	BufferCodec.resetWriter(writer)
 	BufferCodec.writeByte(writer, FlatCodec.Version)
 	BufferCodec.writeVarint(writer, #items)
 	for _, item in items do
 		writeItem(item)
 	end
-	BufferCodec.writeValue(writer, refs)
 	return BufferCodec.export(writer)
 end
 
 --[=[
 	Decodes a buffer produced by `Encode` back into a `WireMessage`, resolving
 	any Instance references against the side-list returned alongside the buffer.
+	Each Create item's Data/Tags and each op Value is deep-copied so that two
+	items which shared a table on the wire get independent copies on decode.
 ]=]
 function MessageCodec.Decode(buf: buffer, instances: { Instance }?): WireMessage
 	const reader = BufferCodec.newReader(buf, instances)
@@ -283,8 +302,7 @@ function MessageCodec.Decode(buf: buffer, instances: { Instance }?): WireMessage
 	for i = 1, itemCount do
 		items[i] = readItem(reader)
 	end
-	const refs = BufferCodec.readValue(reader) :: RefPool?
-	return { V = version, Items = items, Refs = refs }
+	return { V = version, Items = items }
 end
 
 return MessageCodec

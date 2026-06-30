@@ -38,6 +38,8 @@ export type Writer = {
 	internedCount: number,
 	instanceRefs: { [Instance]: number },
 	instances: { Instance },
+	tableRefs: { [{ [any]: any }]: number },
+	tableRefCount: number,
 }
 
 export type Reader = {
@@ -45,6 +47,7 @@ export type Reader = {
 	cursor: number,
 	interned: { string },
 	instances: { Instance }?,
+	tableRefs: { { [any]: any } },
 }
 
 ------------------------------------------------------------------------------------------------
@@ -77,7 +80,9 @@ local TAG_VECTOR3 = 0x16
 local TAG_VECTOR2 = 0x17
 local TAG_CFRAME = 0x18
 local TAG_COLOR3 = 0x19
-local TAG_INSTANCE = 0x1A -- varint index into the side instance list
+local TAG_INSTANCE   = 0x1A -- varint index into the side instance list
+local TAG_TABLEREF8  = 0x1B -- u8  back-ref id: table seen earlier this message
+local TAG_TABLEREF16 = 0x1C -- u16 back-ref id
 
 local TAG_FIXSTR = 0x20 -- 0x20..0x3F: string, length 0..31 in the low 5 bits
 local TAG_FIXARR = 0x40 -- 0x40..0x4F: array, size 0..15 in the low 4 bits
@@ -246,6 +251,8 @@ const function newWriter(): Writer
 		internedCount = 0,
 		instanceRefs = {},
 		instances = {},
+		tableRefs = {},
+		tableRefCount = 0,
 	}
 end
 
@@ -255,6 +262,8 @@ const function resetWriter(writer: Writer)
     writer.internedCount = 0
     writer.instanceRefs = {}
     writer.instances = {}
+    writer.tableRefs = {}
+    writer.tableRefCount = 0
 end
 
 --[=[
@@ -304,6 +313,7 @@ const function newReader(buf: buffer, instances: { Instance }?): Reader
 		cursor = 0,
 		interned = {},
 		instances = instances,
+		tableRefs = {},
 	}
 end
 
@@ -438,6 +448,20 @@ const function writeNumber(writer: Writer, value: number)
 end
 
 const function writeTable(writer: Writer, value: { [any]: any })
+	local ref = writer.tableRefs[value]
+	if ref then
+		if ref <= 0xFF then
+			putU8(writer, TAG_TABLEREF8)
+			putU8(writer, ref)
+		else
+			putU8(writer, TAG_TABLEREF16)
+			putU16(writer, ref)
+		end
+		return
+	end
+	writer.tableRefCount += 1
+	writer.tableRefs[value] = writer.tableRefCount
+
 	local arrayLength = #value
 	local totalKeys = 0
 	for _ in value do
@@ -552,6 +576,7 @@ end
 
 const function readArray(reader: Reader, count: number): { any }
 	local out = table.create(count)
+	table.insert(reader.tableRefs, out) -- register before filling so back-refs during fill alias correctly
 	for index = 1, count do
 		out[index] = readValue(reader)
 	end
@@ -560,6 +585,7 @@ end
 
 const function readMap(reader: Reader, count: number): { [any]: any }
 	local out = {}
+	table.insert(reader.tableRefs, out) -- register before filling so back-refs during fill alias correctly
 	for _ = 1, count do
 		local key = readValue(reader)
 		out[key] = readValue(reader)
@@ -643,6 +669,10 @@ function readValue(reader: Reader): any
 		return CFrame.new(table.unpack(components) :: any)
 	elseif tag == TAG_COLOR3 then
 		return Color3.new(getF32(reader), getF32(reader), getF32(reader))
+	elseif tag == TAG_TABLEREF8 then
+		return reader.tableRefs[getU8(reader)]
+	elseif tag == TAG_TABLEREF16 then
+		return reader.tableRefs[getU16(reader)]
 	end
 
 	error(`[TableReplicator] unknown value tag 0x{string.format("%02X", tag)}`)

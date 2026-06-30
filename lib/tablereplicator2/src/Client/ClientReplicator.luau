@@ -28,7 +28,6 @@ const TableManagerModule = Types.TableManager
 const BaseReplicator = require("../Shared/BaseReplicator")
 const ClientTransportModule = require("../Shared/Transport/ClientTransport")
 const FlatCodec = require("../Shared/Serialization/FlatCodec")
-const RefCodec = require("../Shared/Serialization/RefCodec")
 const OpApplier = require("./OpApplier")
 const TokenCache = require("../Shared/TokenCache")
 
@@ -68,15 +67,14 @@ const getFromId = BaseReplicator.GetFromId :: (id: number) -> CR_Internal?
 	parent here means the items arrived out of order -- a bug, not a race to
 	tolerate.
 ]=]
-const function buildFromCreateItem(item: WireCreateItem, refs: { [number]: any }?): CR_Internal
+const function buildFromCreateItem(item: WireCreateItem): CR_Internal
 	const parent = if item.ParentId ~= FlatCodec.NoParent
 		then getFromId(item.ParentId)
 		else nil
 	assert(item.ParentId == FlatCodec.NoParent or parent ~= nil, `ClientReplicator: parent {item.ParentId} for new replicator {item.Id} does not exist yet`)
 
-	-- Expand any Model V placeholders in the snapshot into independent copies.
-	const data = if refs then RefCodec.ResolveValue(item.Data, refs) else item.Data
-	const manager = TableManagerModule.new(data)
+	-- Data is already deep-copied per item by MessageCodec.Decode (table interning is in-band).
+	const manager = TableManagerModule.new(item.Data)
 	const base = BaseReplicator.new({
 		Id = item.Id,
 		Token = TokenCache.getOrCreateToken(item.Token),
@@ -108,11 +106,10 @@ end
 ]=]
 const function handleMessage(message: WireMessage)
 	const created: { CR_Internal } = {}
-	const refs = message.Refs
 
 	for _, item in message.Items do
 		if item.Op == FlatCodec.Op.Create then
-			table.insert(created, buildFromCreateItem(item :: WireCreateItem, refs))
+			table.insert(created, buildFromCreateItem(item :: WireCreateItem))
 		elseif item.Op == FlatCodec.Op.Destroy then
 			const destroyItem = item :: WireDestroyItem
 			const replicator = getFromId(destroyItem.Id)
@@ -128,15 +125,8 @@ const function handleMessage(message: WireMessage)
 			const opsItem = item :: WireOpsItem
 			const replicator = getFromId(opsItem.Id)
 			assert(replicator ~= nil, `ClientReplicator: Ops referenced unknown replicator {opsItem.Id}`)
-
-			const ops = FlatCodec.DecodeOps(opsItem)
-			if refs then
-				-- Expand any Model V placeholders in op values into independent copies.
-				for _, op in ops do
-					op.Value = RefCodec.ResolveValue(op.Value, refs)
-				end
-			end
-			OpApplier.Apply(replicator.Manager, ops)
+			-- op Values are already deep-copied per entry by MessageCodec.Decode.
+			OpApplier.Apply(replicator.Manager, FlatCodec.DecodeOps(opsItem))
 		end
 	end
 

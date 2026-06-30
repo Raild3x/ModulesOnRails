@@ -30,7 +30,6 @@ const ReplicationScope = require("./ReplicationScope")
 const FrameCoordinator = require("./FrameCoordinator")
 const ServerTransportModule = require("../Shared/Transport/ServerTransport")
 const FlatCodec = require("../Shared/Serialization/FlatCodec")
-const RefCodec = require("../Shared/Serialization/RefCodec")
 const MessageCodec = require("../Shared/Serialization/MessageCodec")
 const TokenCache = require("../Shared/TokenCache")
 
@@ -144,15 +143,11 @@ const function isTableManager(value: any): boolean
 end
 
 --[=[
-	Builds an encoded wire message from `items`, running them through
-	`RefCodec.Encode` first so a table shared across the message (e.g. one
-	inner table living at two paths in a snapshot) is transmitted once, then
-	`MessageCodec.Encode` into a `buffer` (no-op fast path on the RefCodec side
-	when nothing is shared).
+	Builds an encoded wire message from `items` via `MessageCodec.Encode`.
+	Shared tables are interned in-band by BufferCodec's identity tracking.
 ]=]
 const function buildMessage(items: { WireItem }): (buffer, { Instance }?)
-	const encoded, refs = RefCodec.Encode(items)
-	return MessageCodec.Encode(encoded, refs)
+	return MessageCodec.Encode(items)
 end
 
 --------------------------------------------------------------------------------

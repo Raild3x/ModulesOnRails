@@ -75,8 +75,8 @@ const OpKindToKind = table.freeze {
 } :: { [OpKind]: number }
 
 
-function FlatCodec.BuildMessage(items: { WireItem }, refs: { [number]: any }?): WireMessage
-	return { V = FlatCodec.Version, Items = items, Refs = refs }
+function FlatCodec.BuildMessage(items: { WireItem }): WireMessage
+	return { V = FlatCodec.Version, Items = items }
 end
 
 function FlatCodec.CreateItem(id: Id, parentId: Id?, token: string, tags: Tags, data: { [any]: any }): WireCreateItem

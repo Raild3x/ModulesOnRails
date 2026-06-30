@@ -12,6 +12,7 @@
 return function(t: tiniest)
 	local OpBuffer = require("../Shared/OpBuffer")
 	local FlatCodec = require("../Shared/Serialization/FlatCodec")
+	local MessageCodec = require("../Shared/Serialization/MessageCodec")
 	local ServerReplicator = require("../Server/ServerReplicator")
 	local OpApplier = require("../Client/OpApplier")
 	local Types = require("../Shared/Types")
@@ -272,6 +273,170 @@ return function(t: tiniest)
 			moved:Destroy()
 			oldTop:Destroy()
 			newTop:Destroy()
+			intermediary:Destroy()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("Multiple replicators watching the same or linked TableManagers", function()
+		test("shared TableManager root: single mutation reaches each replicator's targeted client", function()
+			local token = uniqueToken("SharedTMIndepClients")
+			local intermediary = FakeIntermediary.new()
+			local clientA = intermediary:Connect()
+			local clientB = intermediary:Connect()
+
+			-- Both replicators wrap the SAME TableManager instance.
+			local sharedTM = TableManagerModule.new({ Coins = 0 })
+			local repA = ServerReplicator.new({ Token = token, Data = sharedTM, ReplicationTargets = { clientA.Player } })
+			local repB = ServerReplicator.new({ Token = token, Data = sharedTM, ReplicationTargets = { clientB.Player } })
+
+			clientA:RequestData()
+			clientB:RequestData()
+
+			sharedTM:Set("Coins", 42)
+			;(ServerReplicator :: any)._FrameCoordinator:Flush()
+
+			local mA = clientA:GetFromId(repA.Id) :: any
+			local mB = clientB:GetFromId(repB.Id) :: any
+			expect(mA.Manager.Raw.Coins).is(42)
+			expect(mB.Manager.Raw.Coins).is(42)
+
+			-- Each client only sees its own replicator.
+			expect(clientA:GetFromId(repB.Id)).is(nil)
+			expect(clientB:GetFromId(repA.Id)).is(nil)
+
+			repA:Destroy()
+			repB:Destroy()
+			intermediary:Destroy()
+		end)
+
+		test("shared TableManager, same target client: one message with one OpsItem per replicator, no duplicate ops", function()
+			local token = uniqueToken("SharedTMOneFlush")
+			local intermediary = FakeIntermediary.new()
+			local client = intermediary:Connect()
+
+			local sharedTM = TableManagerModule.new({ Value = 0 })
+			local rep1 = ServerReplicator.new({ Token = token, Data = sharedTM, ReplicationTargets = { client.Player } })
+			local rep2 = ServerReplicator.new({ Token = token, Data = sharedTM, ReplicationTargets = { client.Player } })
+
+			client:RequestData()
+
+			-- Spy ON TOP of the intermediary's hook: decode the buffer so we can
+			-- inspect payload contents, and still forward so client state updates.
+			local captured: { { Player: any, Message: any } } = {}
+			local prevSend = (ServerReplicator :: any)._Transport.SendMessage
+			;(ServerReplicator :: any)._Transport.SendMessage = function(self, player, buf, instances)
+				table.insert(captured, { Player = player, Message = MessageCodec.Decode(buf, instances) })
+				prevSend(self, player, buf, instances)
+			end
+
+			sharedTM:Set("Value", 99)
+			;(ServerReplicator :: any)._FrameCoordinator:Flush()
+
+			;(ServerReplicator :: any)._Transport.SendMessage = prevSend
+
+			-- Exactly one message for this player (FrameCoordinator batches all ops).
+			expect(#captured).is(1)
+			expect(captured[1].Player).is(client.Player)
+
+			-- Two OpsItems (one per replicator ID), not four — proves the mutation
+			-- was not double-queued per replicator.
+			local items = captured[1].Message.Items
+			expect(#items).is(2)
+
+			-- Each OpsItem carries exactly one op with the correct value — proves
+			-- no internal duplication within a single replicator's run.
+			local seenIds: { [number]: boolean } = {}
+			for _, item in items do
+				local wireOps = item :: any
+				expect(wireOps.Op).is(FlatCodec.Op.Ops)
+				local decoded = FlatCodec.DecodeOps(wireOps)
+				expect(#decoded).is(1)
+				expect(decoded[1].Kind).is("Set")
+				expect(decoded[1].Value).is(99)
+				seenIds[wireOps.Id] = true
+			end
+			expect(seenIds[rep1.Id]).is(true)
+			expect(seenIds[rep2.Id]).is(true)
+
+			-- Client mirrors reflect the new value via the delivered message.
+			local m1 = client:GetFromId(rep1.Id) :: any
+			local m2 = client:GetFromId(rep2.Id) :: any
+			expect(m1.Manager.Raw.Value).is(99)
+			expect(m2.Manager.Raw.Value).is(99)
+
+			rep1:Destroy()
+			rep2:Destroy()
+			intermediary:Destroy()
+		end)
+
+		test("linked TableManagers (co-observers): mutation through child TM propagates to both replicators on client", function()
+			local token = uniqueToken("LinkedTMCoObserve")
+			local intermediary = FakeIntermediary.new()
+			local client = intermediary:Connect()
+
+			-- `sharedStats` is the shared interior node.
+			-- parentTM observes it at path "Stats"; childTM is rooted at it.
+			-- A write through either TM propagates to the other (TableManager2
+			-- implicit sharing).
+			local sharedStats = { Hp = 100, Mp = 50 }
+			local parentTM = TableManagerModule.new({ Stats = sharedStats, Name = "Hero" })
+			local childTM = TableManagerModule.new(sharedStats)
+
+			local parentRep = ServerReplicator.new({ Token = token, Data = parentTM, ReplicationTargets = { client.Player } })
+			local childRep  = ServerReplicator.new({ Token = token, Data = childTM,  Parent = parentRep })
+
+			client:RequestData()
+
+			-- Writing through childTM fires OnApplied on both managers (co-observation).
+			-- parentRep gets a translated path ("Stats.Hp"); childRep gets the root path ("Hp").
+			childTM:Set("Hp", 75)
+			;(ServerReplicator :: any)._FrameCoordinator:Flush()
+
+			local mirroredParent = client:GetFromId(parentRep.Id) :: any
+			local mirroredChild  = client:GetFromId(childRep.Id)  :: any
+
+			expect(mirroredParent.Manager.Raw.Stats.Hp).is(75)
+			expect(mirroredChild.Manager.Raw.Hp).is(75)
+			-- Mp was not touched.
+			expect(mirroredParent.Manager.Raw.Stats.Mp).is(50)
+
+			childRep:Destroy()
+			parentRep:Destroy()
+			intermediary:Destroy()
+		end)
+
+		test("two independent replicators same client: mutations stay isolated to each replicator's ID", function()
+			local token = uniqueToken("IndepTMsIsolation")
+			local intermediary = FakeIntermediary.new()
+			local client = intermediary:Connect()
+
+			local tm1 = TableManagerModule.new({ Score = 0 })
+			local tm2 = TableManagerModule.new({ Score = 0 })
+			local rep1 = ServerReplicator.new({ Token = token, Data = tm1, ReplicationTargets = { client.Player } })
+			local rep2 = ServerReplicator.new({ Token = token, Data = tm2, ReplicationTargets = { client.Player } })
+
+			client:RequestData()
+
+			-- Only mutate tm1.
+			tm1:Set("Score", 10)
+			;(ServerReplicator :: any)._FrameCoordinator:Flush()
+
+			local m1 = client:GetFromId(rep1.Id) :: any
+			local m2 = client:GetFromId(rep2.Id) :: any
+			expect(m1.Manager.Raw.Score).is(10)
+			expect(m2.Manager.Raw.Score).is(0) -- unaffected
+
+			-- Mutate only tm2.
+			tm2:Set("Score", 7)
+			;(ServerReplicator :: any)._FrameCoordinator:Flush()
+
+			expect(m1.Manager.Raw.Score).is(10) -- unchanged
+			expect(m2.Manager.Raw.Score).is(7)
+
+			rep1:Destroy()
+			rep2:Destroy()
 			intermediary:Destroy()
 		end)
 	end)

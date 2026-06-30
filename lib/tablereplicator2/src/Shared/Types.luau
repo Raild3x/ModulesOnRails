@@ -105,11 +105,6 @@ export type WireItem = WireCreateItem | WireDestroyItem | WireSetParentItem | Wi
 export type WireMessage = {
 	V: number,
 	Items: { WireItem },
-	-- Model V table de-dup pool (see RefCodec): present only when a table was
-	-- shared across this message's items. Maps a per-message ref id to the
-	-- table's contents; placeholders `{ [RefCodec.Marker] = id }` in item Data /
-	-- op Values resolve against it. Absent in the common no-aliasing case.
-	Refs: { [number]: any }?,
 }
 
 return {

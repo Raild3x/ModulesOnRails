@@ -23,7 +23,6 @@
 const RunService = game:GetService("RunService")
 
 const FlatCodec = require("../Shared/Serialization/FlatCodec")
-const RefCodec = require("../Shared/Serialization/RefCodec")
 const MessageCodec = require("../Shared/Serialization/MessageCodec")
 const OpBuffer = require("../Shared/OpBuffer")
 const Types = require("../Shared/Types")
@@ -210,20 +209,16 @@ end
 --[=[
 	@private
 	The single encode-and-send seam: turns one player's ordered run list into a
-	wire message and hands it to the transport. Runs through `RefCodec.Encode`
-	so a table shared across this frame's ops (e.g. one fanned-out to two
-	managers) is sent once, then `MessageCodec.Encode` into a `buffer` (no more
-	plain-table `FireClient` payloads). A future phase shares an encoded
-	payload across an audience class without any change to ordering or
-	assembly above.
+	wire message and hands it to the transport. Shared tables are interned
+	in-band by BufferCodec. A future phase shares an encoded payload across an
+	audience class without any change to ordering or assembly above.
 ]=]
 function FrameCoordinator._SendFrame(self: FrameCoordinator, player: Player, runs: { OpRun })
 	const items = table.create(#runs) :: { WireItem }
 	for i, run in runs do
 		items[i] = FlatCodec.OpsItem(run.Id, run.Ops)
 	end
-	const encoded, refs = RefCodec.Encode(items)
-	const buf, instances = MessageCodec.Encode(encoded, refs)
+	const buf, instances = MessageCodec.Encode(items)
 	self._transport:SendMessage(player, buf, instances)
 end
 
