@@ -29,6 +29,14 @@ return function(t: tiniest)
 	local test = t.test
 	local expect = t.expect
 
+	-- This file's OnNew test assumes synchronous dispatch, from before
+	-- ListenerFireMode existed; force "immediate" so it keeps passing regardless
+	-- of the environment's Workspace.SignalBehavior. Runs at collection time,
+	-- before any test body executes, so it's in effect for the whole file. See
+	-- TR.BaseReplicator.spec's "BaseReplicator.ListenerFireMode" describe block
+	-- for dedicated deferred/bindable timing coverage.
+	BaseReplicator.SetListenerFireMode("immediate")
+
 	local function handle(message: any)
 		ClientReplicator._HandleMessage(message)
 	end

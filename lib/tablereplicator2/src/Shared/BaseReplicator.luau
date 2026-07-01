@@ -23,6 +23,7 @@ type Tags = Types.Tags
 type TableManager<T> = Types.TableManager<T>
 type ReplicationToken = Types.ReplicationToken
 type SearchCondition = Types.SearchCondition
+type FireMode = Types.FireMode
 
 --// Module-level (per-realm) registries //--
 export type Realm = {
@@ -80,6 +81,44 @@ const function reconcileCondition(condition: SearchCondition?): (replicator: Bas
 	error(`Invalid SearchCondition type: '{conditionType}'`)
 end
 
+-- Cached probe for whether the current `Workspace.SignalBehavior` resolves to
+-- deferred BindableEvent firing -- same technique `better-signal`'s internal
+-- `IsDeferred` helper uses (not reused directly: it's a private `@self`-scoped
+-- module inside the installed package, not part of its public API).
+local cachedIsSignalBehaviorDeferred: boolean? = nil
+const function isSignalBehaviorDeferred(): boolean
+	if cachedIsSignalBehaviorDeferred == nil then
+		const bindable = Instance.new("BindableEvent")
+		local ran = false
+		bindable.Event:Once(function()
+			ran = true
+		end)
+		bindable:Fire()
+		bindable:Destroy()
+		cachedIsSignalBehaviorDeferred = not ran
+	end
+	return cachedIsSignalBehaviorDeferred :: boolean
+end
+
+-- Dispatches `fn(replicator)` per `mode`, mirroring how `Signal:Fire` /
+-- `:FireDeferred` / `:FireBindable` would schedule a connected handler. Used
+-- for discovery paths that don't go through an actual `Signal:Fire` call --
+-- namely `ForEach`'s already-existing-matches loop -- so their scheduling
+-- stays consistent with `ReplicatorCreated`'s.
+const function dispatchListener(mode: FireMode, fn: (replicator: BaseReplicator) -> (), replicator: BaseReplicator)
+	if mode == "deferred" then
+		task.defer(fn, replicator)
+	elseif mode == "bindable" then
+		if isSignalBehaviorDeferred() then
+			task.defer(fn, replicator)
+		else
+			task.spawn(fn, replicator)
+		end
+	else
+		task.spawn(fn, replicator)
+	end
+end
+
 --------------------------------------------------------------------------------
 --// Class //--
 --------------------------------------------------------------------------------
@@ -108,6 +147,36 @@ BaseReplicator._NewRealm = newRealm
 	Signal that fires whenever a new replicator is created, regardless of token.
 ]=]
 BaseReplicator.ReplicatorCreated = BaseReplicator._Realm.ReplicatorCreated -- re-export for convenience
+
+--[=[
+	@tag Static
+	@prop ServerReplicator.ListenerFireMode FireMode
+	@prop ClientReplicator.ListenerFireMode FireMode
+	How discovery listeners (`ReplicatorCreated`, `ForEach`, `OnNew`) are
+	scheduled when a matching replicator is found. Defaults to `"bindable"`.
+	Read-only -- use `SetListenerFireMode` to change it.
+]=]
+BaseReplicator.ListenerFireMode = "bindable" :: FireMode
+
+--[=[
+	@tag Static
+	@within ServerReplicator
+	@function SetListenerFireMode
+	@param mode FireMode
+	Overrides `ListenerFireMode`, the scheduling used for `ReplicatorCreated`,
+	`ForEach`, and `OnNew` listeners going forward.
+]=]
+--[=[
+	@tag Static
+	@within ClientReplicator
+	@function SetListenerFireMode
+	@param mode FireMode
+	Overrides `ListenerFireMode`, the scheduling used for `ReplicatorCreated`,
+	`ForEach`, and `OnNew` listeners going forward.
+]=]
+function BaseReplicator.SetListenerFireMode(mode: FireMode)
+	BaseReplicator.ListenerFireMode = mode
+end
 
 -- Re-export types from Types module for convenience
 export type BR_Public<BR> = Types.BR_Public<BR>
@@ -260,10 +329,11 @@ end
 ]=]
 function BaseReplicator.ForEach(condition: SearchCondition?, fn: (replicator: BaseReplicator) -> ()): () -> ()
 	const satisfies = reconcileCondition(condition)
+	const mode = BaseReplicator.ListenerFireMode
 
 	for _, replicator in BaseReplicator._Realm.Storage do
 		if satisfies(replicator) then
-			task.spawn(fn, replicator)
+			dispatchListener(mode, fn, replicator)
 		end
 	end
 
@@ -370,9 +440,12 @@ end
 ]=]
 function BaseReplicator.OnNew(condition: SearchCondition, fn: (replicator: BaseReplicator) -> ()): () -> ()
 	const satisfies = reconcileCondition(condition)
+	-- `fn` is called directly (not task.spawn'd here): ReplicatorCreated's
+	-- own Fire/FireDeferred/FireBindable call in `_FireCreationListeners`
+	-- already schedules each connected handler per `ListenerFireMode`.
 	const connection = BaseReplicator._Realm.ReplicatorCreated:Connect(function(replicator: BaseReplicator)
 		if satisfies(replicator) then
-			task.spawn(fn, replicator)
+			fn(replicator)
 		end
 	end)
 	return function()
@@ -446,7 +519,16 @@ end
 function BaseReplicator._FireCreationListeners(self: BR_Internal)
 	assert(not self._CreationListenersFired, "Creation listeners already fired for this replicator")
 	self._CreationListenersFired = true
-	BaseReplicator._Realm.ReplicatorCreated:Fire(self)
+
+	const signal = BaseReplicator._Realm.ReplicatorCreated
+	const mode = BaseReplicator.ListenerFireMode
+	if mode == "deferred" then
+		signal:FireDeferred(self)
+	elseif mode == "bindable" then
+		signal:FireBindable(self)
+	else
+		signal:Fire(self)
+	end
 end
 
 --[=[

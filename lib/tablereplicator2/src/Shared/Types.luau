@@ -49,6 +49,20 @@ export type ReplicationToken = TokenCache.ReplicationToken
 export type ReplicationTargets = "all" | Player | { Player }
 
 --[=[
+	@type TableReplicator.FireMode "immediate" | "deferred" | "bindable"
+	Controls how discovery listeners (`ReplicatorCreated`, `ForEach`, `OnNew`)
+	are scheduled when a matching replicator is found:
+	- `"immediate"`: runs right away, on a new thread (like `Signal:Fire`).
+	- `"deferred"`: runs at the end of the resumption cycle (like `Signal:FireDeferred`).
+	- `"bindable"`: mirrors `BindableEvent` behavior for the current
+	  `Workspace.SignalBehavior` setting -- immediate or deferred (like `Signal:FireBindable`).
+
+	Defaults to `"bindable"`. Set via `ServerReplicator.SetListenerFireMode`/
+	`ClientReplicator.SetListenerFireMode`.
+]=]
+export type FireMode = "immediate" | "deferred" | "bindable"
+
+--[=[
 	@type TableReplicator.SearchCondition string | ReplicationToken | Tags | (replicator: ServerReplicator | ClientReplicator) -> boolean
 	A condition used to filter replicators in `ForEach`/`OnNew`/`GetFirst`/etc.
 	- `string`: matches a replicator whose `Namespace` equals the string.

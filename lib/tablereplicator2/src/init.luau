@@ -68,6 +68,7 @@
 	- ReplicationTargets
 	- SearchCondition
 	- Tags
+	- FireMode
 
 ]=]
 
@@ -87,6 +88,7 @@ export type ReplicationToken = Types.ReplicationToken
 export type ReplicationTargets = Types.ReplicationTargets
 export type SearchCondition = Types.SearchCondition
 export type Tags = Types.Tags
+export type FireMode = Types.FireMode
 
 --------------------------------------------------------------------------------
 	--// Entry Point //--

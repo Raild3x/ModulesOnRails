@@ -32,6 +32,14 @@ return function(t: tiniest)
 		}
 	end
 
+	-- Every describe block below (except "BaseReplicator.ListenerFireMode") was
+	-- written assuming synchronous ForEach/OnNew/ReplicatorCreated dispatch, from
+	-- before ListenerFireMode existed. Force "immediate" so they keep passing
+	-- regardless of the environment's Workspace.SignalBehavior (the default,
+	-- "bindable", mirrors that setting and can defer). This runs at collection
+	-- time, before any test body executes, so it's in effect for the whole file.
+	BaseReplicator.SetListenerFireMode("immediate")
+
 	--------------------------------------------------------------------------------
 
 	describe("BaseReplicator.GetFromId", function()
@@ -418,16 +426,21 @@ return function(t: tiniest)
 		end)
 
 		test("accepts a predicate condition and fires when the predicate returns true", function()
-			local target: any = nil
+			-- Captures a tag value fixed up front, not the replicator identity
+			-- itself: under "immediate" dispatch the predicate runs synchronously
+			-- inside `newTop`/`ServerReplicator.new`, before it could return and
+			-- be assigned to a local, so a `target == r` predicate would always
+			-- see `target` as its pre-assignment (nil) value.
+			local wantedMarker = uniqueToken("OnNewPredicateTarget")
 			local seen: { any } = {}
 			local disconnect = BaseReplicator.OnNew(function(r)
-				return r == target
+				return r.Tags.Marker == wantedMarker
 			end, function(r)
 				table.insert(seen, r)
 			end)
 			local other = newTop("OnNewPredicateOther")
 			expect(#seen).is(0)
-			target = newTop("OnNewPredicateTarget")
+			local target = newTop("OnNewPredicateTarget", { Marker = wantedMarker })
 			expect(#seen).is(1)
 			expect(seen[1]).is(target)
 			disconnect()
@@ -461,6 +474,85 @@ return function(t: tiniest)
 			expect(count).is(0)
 			disconnect()
 			anon:Destroy()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	-- Every test here restores "immediate" before returning, since every other
+	-- describe block in this file depends on it.
+	describe("BaseReplicator.ListenerFireMode", function()
+		test("\"deferred\" mode defers ForEach/OnNew firing to the next resumption cycle", function()
+			BaseReplicator.SetListenerFireMode("deferred")
+			local token = uniqueToken("FireModeDeferredFuture")
+			local forEachCount, onNewCount = 0, 0
+			local disconnectForEach = BaseReplicator.ForEach(getTokenName(token), function()
+				forEachCount += 1
+			end)
+			local disconnectOnNew = BaseReplicator.OnNew(getTokenName(token), function()
+				onNewCount += 1
+			end)
+
+			local replicator = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			expect(forEachCount).is(0) -- nothing has run synchronously yet
+			expect(onNewCount).is(0)
+
+			task.wait()
+			expect(forEachCount).is(1)
+			expect(onNewCount).is(1)
+
+			disconnectForEach()
+			disconnectOnNew()
+			replicator:Destroy()
+			BaseReplicator.SetListenerFireMode("immediate")
+		end)
+
+		test("\"deferred\" mode also defers ForEach's already-existing-matches loop", function()
+			BaseReplicator.SetListenerFireMode("immediate")
+			local replicator = newTop("FireModeDeferredExisting")
+			BaseReplicator.SetListenerFireMode("deferred")
+
+			local seen: { any } = {}
+			local disconnect = BaseReplicator.ForEach(replicator.Namespace, function(r)
+				table.insert(seen, r)
+			end)
+			expect(#seen).is(0) -- nothing has run synchronously yet
+
+			task.wait()
+			expect(table.find(seen, replicator) ~= nil).is_true()
+
+			disconnect()
+			replicator:Destroy()
+			BaseReplicator.SetListenerFireMode("immediate")
+		end)
+
+		test("\"bindable\" mode mirrors the current Workspace.SignalBehavior", function()
+			BaseReplicator.SetListenerFireMode("bindable")
+			local token = uniqueToken("FireModeBindable")
+			local count = 0
+			local disconnect = BaseReplicator.OnNew(getTokenName(token), function()
+				count += 1
+			end)
+
+			local replicator = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			task.wait() -- covers both Immediate (already fired) and Deferred SignalBehavior
+			expect(count).is(1)
+
+			disconnect()
+			replicator:Destroy()
+			BaseReplicator.SetListenerFireMode("immediate")
+		end)
+
+		test("\"immediate\" mode runs ForEach/OnNew synchronously", function()
+			local token = uniqueToken("FireModeImmediate")
+			local count = 0
+			local disconnect = BaseReplicator.OnNew(getTokenName(token), function()
+				count += 1
+			end)
+			local replicator = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			expect(count).is(1)
+			disconnect()
+			replicator:Destroy()
 		end)
 	end)
 
