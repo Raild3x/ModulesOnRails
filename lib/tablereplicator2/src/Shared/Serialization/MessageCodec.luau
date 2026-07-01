@@ -130,6 +130,7 @@ local function writeOpEntry(entry: WireOpEntry, prevPath: { any }): { any }
 
 	local isArray = kind == Kind.ArrayInsert or kind == Kind.ArrayRemove or kind == Kind.ArraySet
 	local hasValue = kind == Kind.Set or kind == Kind.ArrayInsert or kind == Kind.ArraySet
+		or kind == Kind.Signal
 	local path = (entry.Path or {}) :: { any }
 	local index = entry.Index
 	local samePath = #path > 0 and #prevPath > 0 and pathsEqual(path, prevPath)
@@ -162,6 +163,7 @@ local function writeItem(item: WireItem)
 		BufferCodec.writeValue(writer, create.Token)
 		BufferCodec.writeValue(writer, create.Tags)
 		BufferCodec.writeValue(writer, create.Data)
+		BufferCodec.writeValue(writer, create.Remotes)
 	elseif item.Op == FlatCodec.Op.Destroy then
 		BufferCodec.writeByte(writer, ITEM_HDR_DESTROY)
 		BufferCodec.writeValue(writer, (item :: WireDestroyItem).Id)
@@ -217,6 +219,7 @@ local function readOpEntry(reader: Reader, prevPath: { any }): (WireOpEntry, { a
 
 	local isArray = kind == Kind.ArrayInsert or kind == Kind.ArrayRemove or kind == Kind.ArraySet
 	local hasValue = kind == Kind.Set or kind == Kind.ArrayInsert or kind == Kind.ArraySet
+		or kind == Kind.Signal
 	local index: number? = nil
 	if isArray then
 		if idxNibble == IDX_SENTINEL then
@@ -246,6 +249,7 @@ local function readItem(reader: Reader): WireItem
 			Token = BufferCodec.readValue(reader),
 			Tags = deepCopy(BufferCodec.readValue(reader)),
 			Data = deepCopy(BufferCodec.readValue(reader)),
+			Remotes = BufferCodec.readValue(reader),
 		} :: WireCreateItem
 	elseif wireOp == WIRE_OP_DESTROY then
 		return { Op = flatOp, Id = BufferCodec.readValue(reader) } :: WireDestroyItem

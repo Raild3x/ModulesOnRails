@@ -646,7 +646,7 @@ end
 --------------------------------------------------------------------------------
 
 function BaseReplicator.GetTokenName(self: BR_Internal): string
-	warn("BaseReplicator.GetToken is deprecated; use .Token instead")
+	warn("BaseReplicator.GetToken is deprecated; use .Token instead:", debug.traceback())
 	return self.Token.__NAME__
 end
 

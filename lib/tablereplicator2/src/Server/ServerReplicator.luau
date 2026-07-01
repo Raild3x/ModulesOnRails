@@ -33,6 +33,7 @@ const ReplicationScope = require("./ReplicationScope")
 const FrameCoordinator = require("./FrameCoordinator")
 const BaseReplicator = require("../Shared/BaseReplicator")
 const ServerTransportModule = require("../Shared/Transport/ServerTransport")
+const Protocol = require("../Shared/Transport/Protocol")
 const FlatCodec = require("../Shared/Serialization/FlatCodec")
 const MessageCodec = require("../Shared/Serialization/MessageCodec")
 const TokenCache = require("../Shared/TokenCache")
@@ -86,6 +87,20 @@ ServerReplicator._FrameCoordinator = frameCoordinator
 -- cross-scope `SetParent` walk this to find scopes.
 const topLevelReplicators: { SR_Internal } = {}
 
+-- Debounced immediate-flush scheduler. One `task.defer` per Luau thread covers
+-- all synchronous mutations on any ImmediateFlush replicator; subsequent calls
+-- within the same thread are no-ops until the deferred flush fires.
+local immediateFlushPending = false
+local function scheduleImmediateFlush()
+	if not immediateFlushPending then
+		immediateFlushPending = true
+		task.defer(function()
+			immediateFlushPending = false
+			frameCoordinator:Flush()
+		end)
+	end
+end
+
 -- A player who has completed the request-data handshake at least once.
 -- Mirrors v1's global ACTIVE_PLAYERS set: a second `RequestData` from the
 -- same player (e.g. a reconnect race) is a no-op rather than re-sending
@@ -102,6 +117,28 @@ const function collectSubtree(root: SR_Internal, out: { SR_Internal })
 	end
 end
 
+const function buildRemotesMap(replicator: SR_Internal): { [string]: string }?
+	local remotes: { [string]: string } = {}
+	for name, remote in (replicator :: any)._RemoteSignals do
+		local r: any = remote
+		if r._Coordinator ~= nil then
+			remotes[name] = "OrderedSignal"
+		elseif r._Unreliable then
+			remotes[name] = "Unreliable"
+		else
+			remotes[name] = "Signal"
+		end
+	end
+	for name in (replicator :: any)._RemoteFunctions do
+		if (replicator :: any)._OrderedFunctions[name] then
+			remotes[name] = "OrderedFunction"
+		else
+			remotes[name] = "Function"
+		end
+	end
+	return if next(remotes) then remotes else nil
+end
+
 const function buildCreateItem(replicator: SR_Internal): WireItem
 	const parent = replicator:GetParent()
 	return FlatCodec.CreateItem(
@@ -109,7 +146,8 @@ const function buildCreateItem(replicator: SR_Internal): WireItem
 		if parent then parent.Id else nil,
 		replicator.Token.Name,
 		replicator.Tags,
-		replicator.Manager.Raw
+		replicator.Manager.Raw,
+		buildRemotesMap(replicator)
 	)
 end
 
@@ -131,6 +169,22 @@ end
 -- Shared tables are interned in-band by BufferCodec's identity tracking.
 const function buildMessage(items: { WireItem }): (buffer, { Instance }?)
 	return MessageCodec.Encode(items)
+end
+
+-- Sends a metadata Signal op to all currently-active players in `replicator`'s
+-- scope so they can update their ClientCustomRemote type info. Called whenever
+-- a remote is registered after players may already have received the snapshot.
+const function sendRemoteMeta(replicator: SR_Internal, name: string, kind: string)
+	local scope = replicator._Scope
+	if scope == nil then return end -- called during new() before _Scope is assigned
+	const active = scope:GetActivePlayers()
+	if #active == 0 then return end
+	const op: Types.BufferedOp = { Kind = "Signal", Path = { Protocol.REMOTE_META }, Value = { name, kind } }
+	const opsItem = FlatCodec.OpsItem(replicator.Id, { op :: any })
+	const buf, instances = buildMessage { opsItem }
+	for _, player in active do
+		replicator._Scope:SendTo(player, buf, instances)
+	end
 end
 
 --------------------------------------------------------------------------------
@@ -157,7 +211,7 @@ ServerReplicator.TOKEN = setmetatable({
 	end,
 })
 table.freeze(ServerReplicator.TOKEN)
-ServerReplicator.Token = ServerReplicator.TOKEN
+ServerReplicator.Token = ServerReplicator.TOKEN -- Backwards compat alias
 
 -- User configurable escape hatch: if true, `ServerReplicator.new` will not warn
 -- when a raw string is passed as the `Token` argument instead of a proper `ReplicationToken`.
@@ -217,6 +271,23 @@ end
 	`ReplicationTargets` (pass `{}` to start with none), and a child
 	replicator is created with `Parent` and inherits its top-level ancestor's
 	targets.
+
+	Config table fields:
+	- `Token` - Unique token identifying this replicator class to the client. Use `ServerReplicator.TOKEN` to create one.
+	- `Data` - A `TableManager` instance or a raw table to replicate. Defaults to `{}`.
+	- `ReplicationTargets` - A `Player` or list of `Player`s to replicate to. Only valid for top-level replicators.
+	- `Parent` - A parent `ServerReplicator` to attach this replicator to. Only valid for child replicators.
+	- `Tags` - Optional table of string keys to string/number values to attach to this replicator for metadata and search purposes.
+	- `Coalesced` - If true, ops are buffered and only the latest op is sent at the end of the frame. Defaults to false.
+	- `ImmediateFlush` - If true, ops are flushed immediately instead of waiting for the end of the frame. Defaults to false.
+	This is useful for if you need you to guarantee changes are received by the client in the same order that external remote events are fired.
+
+
+	:::caution Conflicting Configurations
+	The following configurations are invalid and will throw an error:
+	- ReplicationTargets and Parent cannot both be specified.
+	- Coalesced and ImmediateFlush cannot both be true.
+	:::
 ]=]
 function ServerReplicator.new(config: {
 	Token: ReplicationToken,
@@ -225,6 +296,7 @@ function ServerReplicator.new(config: {
 	Parent: ServerReplicator?,
 	Tags: Tags?,
 	Coalesced: boolean?,
+	ImmediateFlush: boolean?,
 	Client: { [string]: any }?,
 }): ServerReplicator
 	local token = config.Token
@@ -236,7 +308,7 @@ function ServerReplicator.new(config: {
 	end
 	assert(TokenCache.isToken(token), "Invalid Token")
 
-	local  targets = config.ReplicationTargets
+	local targets = config.ReplicationTargets
 	if typeof(targets) == "string" then
 		targets = targets:lower()
 	end
@@ -248,6 +320,8 @@ function ServerReplicator.new(config: {
 		assert(targets ~= nil, "Top-level replicators must be given ReplicationTargets (pass {} for none)")
 	end
 
+	assert(not (config.Coalesced and config.ImmediateFlush), "Cannot set both Coalesced and ImmediateFlush")
+
 	local manager: TableManager<any>
 	const data = (config.Data or (config :: any).Manager or {}) :: unknown
 	if isTableManager(data) then
@@ -256,6 +330,7 @@ function ServerReplicator.new(config: {
 		manager = TableManagerModule.new(data)
 	end
 
+	---------------------------------------------------------
 	const base = BaseReplicator.new {
 		Id = BaseReplicator.GenerateId(),
 		Token = token,
@@ -265,42 +340,41 @@ function ServerReplicator.new(config: {
 	}
 	const self = setmetatable(base, ServerReplicator) :: SR_Internal
 	self._Coalesced = config.Coalesced == true
+	self._ImmediateFlush = config.ImmediateFlush == true
 	self._RemoteSignals = {}
 	self._RemoteFunctions = {}
+	self._OrderedFunctions = {}
 
+	---------------------------------------------------------
 	-- Build the Client proxy. __newindex routes sentinel/function assignments
 	-- to the appropriate Register* method; direct rawset values (e.g. the
 	-- registered ServerCustomRemote) are returned via normal __index.
-	local clientProxy = {}
-	setmetatable(clientProxy, {
-		__newindex = function(_t, k, v)
-			local val = v :: any
-			if val == REMOTE_EVENT_SENTINEL then
-				self:RegisterRemoteSignal(k)
-			elseif val == UNRELIABLE_REMOTE_EVENT_SENTINEL then
-				self:RegisterRemoteUnreliableSignal(k)
-			elseif type(val) == "function" then
-				self:RegisterRemoteFunction(k, val)
-			else
-				warn(`ServerReplicator.Client: invalid declaration for '{k}'. Use createRemoteEvent(), createUnreliableEvent(), or a function.`)
-			end
-		end,
-	})
-	self.Client = clientProxy :: any
+	do
+		const clientProxy = {}
+		setmetatable(clientProxy, {
+			__newindex = function(_t, k, v)
+				const val = v :: any
+				if val == REMOTE_EVENT_SENTINEL then
+					self:RegisterOrderedRemoteSignal(k)
+				elseif val == UNRELIABLE_REMOTE_EVENT_SENTINEL then
+					self:RegisterRemoteUnreliableSignal(k)
+				elseif type(val) == "function" then
+					self:RegisterOrderedRemoteFunction(k, val)
+				else
+					warn(`ServerReplicator.Client: invalid declaration for '{k}'. Use createRemoteEvent(), createUnreliableEvent(), or a function.`)
+				end
+			end,
+		})
+		self.Client = clientProxy :: any
 
-	-- Apply config.Client declarations up front so they're ready before any
-	-- _FireCreationListeners callbacks run.
-	for k, v in config.Client or {} do
-		self.Client[k] = v
+		-- Apply config.Client declarations up front so they're ready before any
+		-- _FireCreationListeners callbacks run.
+		for k, v in config.Client or {} do
+			self.Client[k] = v
+		end
 	end
 
-	if parent then
-		self._Scope = parent._Scope
-	else
-		self._Scope = ReplicationScope.new(transport)
-		table.insert(topLevelReplicators, self)
-	end
-
+	---------------------------------------------------------
 	const managerDestroyedConn = manager:OnDestroy(function()
 		self:Destroy() -- TR shouldnt outlive its manager, but if it does, destroy the replicator to avoid dangling references
 	end)
@@ -308,8 +382,19 @@ function ServerReplicator.new(config: {
 
 	const disconnectApplied = manager:OnApplied(function(op)
 		frameCoordinator:QueueOp(self._Scope, self.Id, op, self._Coalesced)
+		if self._ImmediateFlush then
+			scheduleImmediateFlush()
+		end
 	end)
 	self._Janitor:Add(disconnectApplied)
+
+	---------------------------------------------------------
+	if parent then
+		self._Scope = parent._Scope
+	else
+		self._Scope = ReplicationScope.new(transport)
+		table.insert(topLevelReplicators, self)
+	end
 
 	if parent then
 		parent.ChildAdded:Fire(self)
@@ -575,10 +660,12 @@ end
 ]=]
 function ServerReplicator.RegisterRemoteSignal(self: SR_Internal, name: string): any
 	assert(not self._RemoteSignals[name], `Remote signal '{name}' already registered`)
+	assert(not self._RemoteFunctions[name], `'{name}' is already registered as a remote function`)
 	local remote = ServerCustomRemote.new(name, self, transport, false)
 	self._RemoteSignals[name] = remote
 	self._Janitor:Add(remote, "Destroy")
 	rawset(self.Client, name, remote)
+	sendRemoteMeta(self, name, "Signal")
 	return remote
 end
 
@@ -592,10 +679,12 @@ end
 ]=]
 function ServerReplicator.RegisterRemoteUnreliableSignal(self: SR_Internal, name: string): any
 	assert(not self._RemoteSignals[name], `Remote signal '{name}' already registered`)
+	assert(not self._RemoteFunctions[name], `'{name}' is already registered as a remote function`)
 	local remote = ServerCustomRemote.new(name, self, transport, true)
 	self._RemoteSignals[name] = remote
 	self._Janitor:Add(remote, "Destroy")
 	rawset(self.Client, name, remote)
+	sendRemoteMeta(self, name, "Unreliable")
 	return remote
 end
 
@@ -610,8 +699,52 @@ end
 ]=]
 function ServerReplicator.RegisterRemoteFunction(self: SR_Internal, name: string, fn: any): any
 	assert(not self._RemoteFunctions[name], `Remote function '{name}' already registered`)
+	assert(not self._RemoteSignals[name], `'{name}' is already registered as a remote signal`)
 	self._RemoteFunctions[name] = fn
 	rawset(self.Client, name, fn)
+	sendRemoteMeta(self, name, "Function")
+	return fn
+end
+
+--[=[
+	@within ServerReplicator
+	@method RegisterOrderedRemoteSignal
+	@param name string
+	@return ServerCustomRemote
+
+	Like `RegisterRemoteSignal` but delivers fires through the frame buffer,
+	so they arrive at the client in the same ordered sequence as data ops
+	enqueued in the same frame. Clients connect to it the same way:
+	`replicator.Server[name]:Connect(...)`.
+]=]
+function ServerReplicator.RegisterOrderedRemoteSignal(self: SR_Internal, name: string): any
+	assert(not self._RemoteSignals[name], `Remote signal '{name}' already registered`)
+	assert(not self._RemoteFunctions[name], `'{name}' is already registered as a remote function`)
+	local remote = ServerCustomRemote.new(name, self, transport, false, frameCoordinator)
+	self._RemoteSignals[name] = remote
+	self._Janitor:Add(remote, "Destroy")
+	rawset(self.Client, name, remote)
+	sendRemoteMeta(self, name, "OrderedSignal")
+	return remote
+end
+
+--[=[
+	@within ServerReplicator
+	@method RegisterOrderedRemoteFunction
+	@param name string
+	@param fn (self: ServerReplicator, player: Player, ...any) -> ...any
+
+	Like `RegisterRemoteFunction` but the server's response is delivered
+	through the frame buffer so it arrives at the client in the same ordered
+	sequence as data ops. The client must call `InvokeAsync(...)` (returns a
+	Promise) instead of the blocking `Invoke(...)`.
+]=]
+function ServerReplicator.RegisterOrderedRemoteFunction(self: SR_Internal, name: string, fn: any): any
+	assert(not self._RemoteFunctions[name], `Remote function '{name}' already registered`)
+	assert(not self._RemoteSignals[name], `'{name}' is already registered as a remote signal`)
+	self._RemoteFunctions[name] = fn
+	self._OrderedFunctions[name] = true
+	sendRemoteMeta(self, name, "OrderedFunction")
 	return fn
 end
 
@@ -702,7 +835,13 @@ transport.PlayerRemoving:Connect(function(player: Player)
 	end
 end)
 
+-- Sentinel prefix for ordered function invocations from the client.
+-- The client fires this via the signal RemoteEvent; the server handles it,
+-- calls the registered function, and queues the response as a Signal op
+-- through the frame buffer so it arrives in order with data ops.
+
 -- Route inbound custom signals (client → server) to the matching remote.
+-- Also handles ordered function invocations identified by ORDERED_FN_CALL.
 local signalReceived = transport.SignalReceived :: any
 signalReceived:Connect(function(player: Player, id: number, name: string, ...: any)
 	if not hasBootstrapped[player] then
@@ -715,6 +854,30 @@ signalReceived:Connect(function(player: Player, id: number, name: string, ...: a
 	if not replicator._Scope:IsActive(player) then
 		return
 	end
+
+	-- Ordered function invocation: first arg is the sentinel, second is the
+	-- correlation ID the client is waiting on, rest are the actual call args.
+	local args = { ... }
+	if args[1] == Protocol.ORDERED_FN_CALL then
+		local corrId = args[2] :: number
+		local fn = replicator._RemoteFunctions[name]
+		if fn then
+			local results = table.pack(fn(replicator, player, table.unpack(args, 3)))
+			local responseArgs = { Protocol.ORDERED_FN_RESPONSE, corrId }
+			for i = 1, results.n do
+				responseArgs[i + 2] = results[i]
+			end
+			frameCoordinator:QueueSignal(
+				replicator._Scope,
+				replicator.Id,
+				name,
+				{ player },
+				responseArgs
+			)
+		end
+		return
+	end
+
 	const remote = replicator._RemoteSignals[name]
 	if remote then
 		remote:_FireServer(player, ...)
@@ -733,6 +896,16 @@ transport:SetFunctionHandler(function(player: Player, id: number, name: string, 
 	assert(fn ~= nil, `RemoteFunction: '{name}' not registered on replicator {id}`)
 	return fn(replicator, player, ...)
 end)
+
+--[=[
+	@tag Static
+	Immediately flushes all pending data ops to active players without waiting
+	for the end-of-frame deferred flush. Use this before firing an external
+	RemoteEvent when you need data changes to arrive before (or alongside) it.
+]=]
+function ServerReplicator.FlushNow()
+	frameCoordinator:Flush()
+end
 
 --------------------------------------------------------------------------------
 --// Finalization //--

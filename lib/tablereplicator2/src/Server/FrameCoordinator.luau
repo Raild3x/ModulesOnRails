@@ -245,6 +245,37 @@ function FrameCoordinator.QueueOp(self: FrameCoordinator, scope: Scope, replicat
 end
 
 --[=[
+	Queues an ordered signal (or ordered function response) for replicator `id`.
+	The signal rides the same sorted ops buffer as data ops, so it arrives at
+	each player in the exact same sequence relative to any data ops enqueued
+	in the same frame.
+
+	`audience` is the set of players who should receive the signal (typically
+	one player for `Fire` or `scope:GetActivePlayers()` for `FireAll`).
+	`args` is a plain array of the signal's payload values.
+
+	Signals are never coalesced or tombstoned — every call produces one entry.
+]=]
+function FrameCoordinator.QueueSignal(
+	self: FrameCoordinator,
+	scope: Scope,
+	replicatorId: Id,
+	name: string,
+	audience: { Player },
+	args: { any }
+)
+	self._seq += 1
+	table.insert(self._entries, {
+		Scope = scope,
+		Audience = audience,
+		Id = replicatorId,
+		Op = { Kind = "Signal", Path = { name }, Value = args },
+		Seq = self._seq,
+	})
+	scheduleCoordinatorFlush(self)
+end
+
+--[=[
 	Drops every queued op for replicator `id`. Called when a replicator is
 	destroyed so an op enqueued earlier this frame can't flush out after the
 	(synchronous) `Destroy` item and reference a replicator the client already

@@ -32,8 +32,19 @@ Protocol.RemoteContainer = script
 -- RemoteFunction for client->server function calls. These are kept separate
 -- from the data channel so arbitrary RPC args never intermingle with the
 -- binary MessageCodec stream.
-Protocol.SignalName = "Signal"
-Protocol.UnreliableSignalName = "UnreliableSignal"
-Protocol.FunctionName = "Function"
+Protocol.SignalName = "Sig"
+Protocol.UnreliableSignalName = "USig"
+Protocol.FunctionName = "Fn"
+
+-- Sentinel values for custom-remote wire protocol (all are reserved signal names).
+-- REMOTE_META: server→client wire for remote-type metadata pushes when remotes
+-- are registered after the client has bootstrapped.
+Protocol.REMOTE_META = "\0remote"
+-- ORDERED_FN_CALL: client→server wire to distinguish an ordered function
+-- invocation from a regular signal fire (carries correlation ID + args).
+Protocol.ORDERED_FN_CALL = "\0ofn"
+-- ORDERED_FN_RESPONSE: server→client wire for ordered function responses
+-- (carries correlation ID + results).
+Protocol.ORDERED_FN_RESPONSE = "\0ofnr"
 
 return Protocol

@@ -26,6 +26,7 @@ const Types = require("../Shared/Types")
 const TableManagerModule = Types.TableManager
 const BaseReplicator = require("../Shared/BaseReplicator")
 const ClientTransportModule = require("../Shared/Transport/ClientTransport")
+const Protocol = require("../Shared/Transport/Protocol")
 const FlatCodec = require("../Shared/Serialization/FlatCodec")
 const OpApplier = require("./OpApplier")
 const TokenCache = require("../Shared/TokenCache")
@@ -64,6 +65,7 @@ const getFromId = BaseReplicator.GetFromId :: (id: number) -> CR_Internal?
 local transport: ClientTransport? = nil
 local getTransport: () -> ClientTransport = nil :: any
 
+
 -- Builds a `ClientReplicator` from a decoded `Create` item. Its parent (if
 -- any) is asserted to already exist: every server-side path that emits a
 -- `Create` only does so after the referenced parent has already been sent
@@ -87,13 +89,18 @@ const function buildFromCreateItem(item: WireCreateItem): CR_Internal
 	})
 	const replicator = setmetatable(base, ClientReplicator) :: CR_Internal
 
+	-- Type map populated from the Create item's Remotes field and updated by
+	-- REMOTE_META signal ops for remotes registered after the snapshot.
+	local remoteTypes: { [string]: string } = (item.Remotes :: any) or {}
+	;(replicator :: any)._RemoteTypes = remoteTypes
+
 	-- Build the Server proxy. Accessing `replicator.Server.MySignal` lazily
 	-- creates a `ClientCustomRemote` for that name and caches it in the proxy
 	-- table so subsequent accesses return the same object.
 	local serverProxy = {}
 	setmetatable(serverProxy, {
 		__index = function(t, name)
-			local remote = ClientCustomRemote.new(name, replicator, getTransport)
+			local remote = ClientCustomRemote.new(name, replicator, getTransport, nil, remoteTypes[name])
 			rawset(t, name, remote)
 			return remote
 		end,
@@ -141,7 +148,57 @@ const function handleMessage(message: WireMessage)
 			const replicator = getFromId(opsItem.Id)
 			assert(replicator ~= nil, `ClientReplicator: Ops referenced unknown replicator {opsItem.Id}`)
 			-- op Values are already deep-copied per entry by MessageCodec.Decode.
-			OpApplier.Apply(replicator.Manager, FlatCodec.DecodeOps(opsItem))
+			-- Signal-kind entries are routed to the Server proxy; data ops go to
+			-- OpApplier. We separate them here to preserve delivery order: a Signal
+			-- that follows a Set in the same OpsItem fires after that Set is applied.
+			const allOps = FlatCodec.DecodeOps(opsItem)
+			const dataOps = {}
+			for _, op in allOps do
+				if op.Kind == "Signal" then
+					-- Flush any buffered data ops first so they're applied before
+					-- this signal fires (mirrors the server-side enqueue order).
+					if #dataOps > 0 then
+						OpApplier.Apply(replicator.Manager, dataOps :: any)
+						table.clear(dataOps)
+					end
+					local signalName = op.Path[1] :: string
+					local args = op.Value :: { any }
+					local serverProxy = (replicator :: any).Server
+					if serverProxy ~= nil then
+						-- Remote-type metadata push: update the type map and any cached remote.
+						if signalName == Protocol.REMOTE_META then
+							local remoteName = args[1] :: string
+							local remoteKind = args[2] :: string
+							local remoteTypes: { [string]: string } = (replicator :: any)._RemoteTypes
+							if remoteTypes then
+								remoteTypes[remoteName] = remoteKind
+							end
+							local cached = rawget(serverProxy, remoteName) :: any
+							if cached then
+								cached._RemoteType = remoteKind
+								cached._Unreliable = remoteKind == "Unreliable"
+							end
+						-- Ordered function response: resolve the pending InvokeAsync promise.
+						elseif type(args) == "table" and args[1] == Protocol.ORDERED_FN_RESPONSE then
+							local corrId = args[2] :: number
+							local results = table.create(#args - 2)
+							for i = 3, #args do results[i - 2] = args[i] end
+							ClientCustomRemote._ResolveInvocation(corrId, results)
+						else
+							-- Regular ordered signal: fire the matching ClientCustomRemote.
+							local remote = rawget(serverProxy, signalName) :: any
+							if remote then
+								remote:_FireClient(table.unpack(args))
+							end
+						end
+					end
+				else
+					table.insert(dataOps, op)
+				end
+			end
+			if #dataOps > 0 then
+				OpApplier.Apply(replicator.Manager, dataOps :: any)
+			end
 		end
 	end
 

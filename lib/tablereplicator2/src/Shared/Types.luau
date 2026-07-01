@@ -55,7 +55,7 @@ export type SearchCondition = string | ReplicationToken | Tags | (replicator: an
 -- The kind of a single normalized, wire-ready operation. Mirrors `AppliedOp.Kind`
 -- (see TableManager2's TMTypes) with no changes -- BatchBegin/BatchEnd are
 -- pass-through markers, not state-bearing ops.
-export type OpKind = "Set" | "ArrayInsert" | "ArrayRemove" | "ArraySet" | "BatchBegin" | "BatchEnd"
+export type OpKind = "Set" | "ArrayInsert" | "ArrayRemove" | "ArraySet" | "BatchBegin" | "BatchEnd" | "Signal"
 
 --[=[
 	@within TableReplicatorTypes
@@ -79,6 +79,10 @@ export type BufferedOp = {
 -- A single item in a wire message. `Op` distinguishes the item shape; see
 -- WireFormat for the opcode constants. Replicator hierarchy uses `ParentId = 0`
 -- to mean "top level" since `0` is never a valid replicator Id.
+-- Type strings stored in WireCreateItem.Remotes. Signals the client which
+-- API methods are valid for each named remote.
+export type RemoteKind = "Signal" | "Unreliable" | "Function" | "OrderedSignal" | "OrderedFunction"
+
 export type WireCreateItem = {
 	Op: number,
 	Id: Id,
@@ -86,6 +90,7 @@ export type WireCreateItem = {
 	Token: string,
 	Tags: Tags,
 	Data: { [any]: any },
+	Remotes: { [string]: RemoteKind }?,
 }
 
 export type WireDestroyItem = {
@@ -326,15 +331,19 @@ export type SR_Public<SR> = {
 	RegisterRemoteSignal: (self: SR, name: string) -> any,
 	RegisterRemoteUnreliableSignal: (self: SR, name: string) -> any,
 	RegisterRemoteFunction: (self: SR, name: string, fn: (self: SR, player: Player, ...any) -> ...any) -> (self: SR, player: Player, ...any) -> ...any,
+	RegisterOrderedRemoteSignal: (self: SR, name: string) -> any,
+	RegisterOrderedRemoteFunction: (self: SR, name: string, fn: (self: SR, player: Player, ...any) -> ...any) -> any,
 	GetRemoteSignal: (self: SR, name: string) -> any,
 }
 
 export type SR_Internal = {
 	_Scope: ReplicationScope.ReplicationScope,
 	_Coalesced: boolean,
+	_ImmediateFlush: boolean,
 	_Unreliable: boolean,
 	_RemoteSignals: { [string]: any },
 	_RemoteFunctions: { [string]: (self: SR_Internal, player: Player, ...any) -> ...any },
+	_OrderedFunctions: { [string]: boolean },
 
 	_SendSnapshotTo: (self: SR_Internal, player: Player) -> (),
 	_AddTarget: (self: SR_Internal, player: Player) -> (),

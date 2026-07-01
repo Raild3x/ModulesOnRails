@@ -30,7 +30,7 @@ local FlatCodec = {}
 
 -- Wire format version. Bump when the `WireItem`/`WireOpEntry` shapes change
 -- in a way that isn't backwards-readable.
-FlatCodec.Version = 1
+FlatCodec.Version = 2
 
 -- `0` is reserved to mean "no parent" (top-level) since real replicator Ids
 -- start at 1; this avoids sending a separate `ParentId: number?` optional field.
@@ -53,6 +53,10 @@ local Kind = table.freeze {
 	ArraySet = 4,
 	BatchBegin = 5,
 	BatchEnd = 6,
+	-- Ordered signal / ordered function response fired through the ops buffer so
+	-- it arrives at the client in the same sequence as adjacent data ops.
+	-- Wire layout: Path = { signalName }, Value = { ...args }.
+	Signal = 7,
 }
 FlatCodec.Kind = Kind
 
@@ -63,6 +67,7 @@ const KindToOpKind: { [number]: OpKind } = table.freeze {
 	[Kind.ArraySet] = "ArraySet" :: OpKind,
 	[Kind.BatchBegin] = "BatchBegin" :: OpKind,
 	[Kind.BatchEnd] = "BatchEnd" :: OpKind,
+	[Kind.Signal] = "Signal" :: OpKind,
 }
 
 const OpKindToKind = table.freeze {
@@ -72,6 +77,7 @@ const OpKindToKind = table.freeze {
 	ArraySet = Kind.ArraySet,
 	BatchBegin = Kind.BatchBegin,
 	BatchEnd = Kind.BatchEnd,
+	Signal = Kind.Signal,
 } :: { [OpKind]: number }
 
 
@@ -79,7 +85,7 @@ function FlatCodec.BuildMessage(items: { WireItem }): WireMessage
 	return { V = FlatCodec.Version, Items = items }
 end
 
-function FlatCodec.CreateItem(id: Id, parentId: Id?, token: string, tags: Tags, data: { [any]: any }): WireCreateItem
+function FlatCodec.CreateItem(id: Id, parentId: Id?, token: string, tags: Tags, data: { [any]: any }, remotes: { [string]: string }?): WireCreateItem
 	return {
 		Op = Op.Create,
 		Id = id,
@@ -87,6 +93,7 @@ function FlatCodec.CreateItem(id: Id, parentId: Id?, token: string, tags: Tags, 
 		Token = token,
 		Tags = tags,
 		Data = data,
+		Remotes = remotes,
 	}
 end
 

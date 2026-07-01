@@ -59,7 +59,7 @@ return function(t: tiniest)
 			-- Round-trip through the actual wire codec, not just OpApplier
 			-- directly, so the test also proves the codec preserves fidelity.
 			local opsItem = FlatCodec.OpsItem(drained[1].Id, drained[1].Ops)
-			local message = FlatCodec.BuildMessage({ opsItem })
+			local message = FlatCodec.BuildMessage { opsItem }
 			local decodedOps = FlatCodec.DecodeOps(message.Items[1] :: any)
 
 			OpApplier.Apply(replica, decodedOps)
@@ -77,12 +77,12 @@ return function(t: tiniest)
 			local client = intermediary:Connect()
 
 			local replicator =
-				ServerReplicator.new({ Token = token, Data = { Coins = 5 }, ReplicationTargets = { client.Player } })
+				ServerReplicator.new { Token = token, Data = { Coins = 5 }, ReplicationTargets = { client.Player } }
 			client:RequestData()
 
 			local mirrored = client:GetFromId(replicator.Id) :: any
 			expect(mirrored).never_is(nil)
-			expect(mirrored:GetTokenName()).is(getTokenName(token))
+			expect(mirrored.Token.Name).is(getTokenName(token))
 			expect(mirrored.Manager.Raw.Coins).is(5)
 
 			replicator:Destroy()
@@ -95,11 +95,11 @@ return function(t: tiniest)
 			local client = intermediary:Connect()
 
 			local replicator =
-				ServerReplicator.new({ Token = token, Data = { Coins = 0 }, ReplicationTargets = { client.Player } })
+				ServerReplicator.new { Token = token, Data = { Coins = 0 }, ReplicationTargets = { client.Player } }
 			client:RequestData()
 
-			replicator.Manager:Set("Coins", 42)
-			;(ServerReplicator :: any)._FrameCoordinator:Flush()
+			replicator.Manager:Set("Coins", 42);
+			(ServerReplicator :: any)._FrameCoordinator:Flush()
 
 			local mirrored = client:GetFromId(replicator.Id) :: any
 			expect(mirrored.Manager.Raw.Coins).is(42)
@@ -115,7 +115,7 @@ return function(t: tiniest)
 			local clientB = intermediary:Connect()
 
 			local replicator =
-				ServerReplicator.new({ Token = token, Data = { Coins = 7 }, ReplicationTargets = { clientA.Player } })
+				ServerReplicator.new { Token = token, Data = { Coins = 7 }, ReplicationTargets = { clientA.Player } }
 			clientA:RequestData()
 			clientB:RequestData()
 
@@ -139,11 +139,11 @@ return function(t: tiniest)
 			clientA:RequestData()
 			clientB:RequestData()
 
-			local replicator = ServerReplicator.new({ Token = token, Data = { Coins = 3 }, ReplicationTargets = {} })
+			local replicator = ServerReplicator.new { Token = token, Data = { Coins = 3 }, ReplicationTargets = {} }
 			-- `AddTarget` distinguishes a single Player from a list via
 			-- `typeof() == "Instance"`; the fake player stand-in is a plain
 			-- table, so it must be wrapped to take the list branch correctly.
-			replicator:AddTarget({ clientA.Player })
+			replicator:AddTarget { clientA.Player }
 
 			local mirroredA = clientA:GetFromId(replicator.Id) :: any
 			expect(mirroredA).never_is(nil)
@@ -160,11 +160,11 @@ return function(t: tiniest)
 			local clientA = intermediary:Connect()
 			local clientB = intermediary:Connect()
 
-			local replicator = ServerReplicator.new({
+			local replicator = ServerReplicator.new {
 				Token = token,
 				Data = { Coins = 1 },
 				ReplicationTargets = { clientA.Player, clientB.Player },
-			})
+			}
 			clientA:RequestData()
 			clientB:RequestData()
 
@@ -172,15 +172,15 @@ return function(t: tiniest)
 			expect(clientB:GetFromId(replicator.Id)).never_is(nil)
 
 			-- Same `typeof() == "Instance"` wrapping requirement as AddTarget above.
-			replicator:RemoveTarget({ clientA.Player })
+			replicator:RemoveTarget { clientA.Player }
 
 			expect(clientA:GetFromId(replicator.Id)).is(nil)
 			expect(clientB:GetFromId(replicator.Id)).never_is(nil)
 
 			-- Ops enqueued after the removal must not error trying to reach the
 			-- now-inactive clientA, and must still land on clientB.
-			replicator.Manager:Set("Coins", 99)
-			;(ServerReplicator :: any)._FrameCoordinator:Flush()
+			replicator.Manager:Set("Coins", 99);
+			(ServerReplicator :: any)._FrameCoordinator:Flush()
 
 			local mirroredB = clientB:GetFromId(replicator.Id) :: any
 			expect(mirroredB.Manager.Raw.Coins).is(99)
@@ -189,29 +189,35 @@ return function(t: tiniest)
 			intermediary:Destroy()
 		end)
 
-		test("SetTargets swaps the active client -- old target is torn down, new target gets a fresh snapshot", function()
-			local token = uniqueToken("FakeIntermediarySetTargetsSwap")
-			local intermediary = FakeIntermediary.new()
-			local clientA = intermediary:Connect()
-			local clientB = intermediary:Connect()
-			clientA:RequestData()
-			clientB:RequestData()
+		test(
+			"SetTargets swaps the active client -- old target is torn down, new target gets a fresh snapshot",
+			function()
+				local token = uniqueToken("FakeIntermediarySetTargetsSwap")
+				local intermediary = FakeIntermediary.new()
+				local clientA = intermediary:Connect()
+				local clientB = intermediary:Connect()
+				clientA:RequestData()
+				clientB:RequestData()
 
-			local replicator =
-				ServerReplicator.new({ Token = token, Data = { Coins = 4 }, ReplicationTargets = { clientA.Player } })
-			expect(clientA:GetFromId(replicator.Id)).never_is(nil)
-			expect(clientB:GetFromId(replicator.Id)).is(nil)
+				local replicator = ServerReplicator.new {
+					Token = token,
+					Data = { Coins = 4 },
+					ReplicationTargets = { clientA.Player },
+				}
+				expect(clientA:GetFromId(replicator.Id)).never_is(nil)
+				expect(clientB:GetFromId(replicator.Id)).is(nil)
 
-			replicator:SetTargets({ clientB.Player })
+				replicator:SetTargets { clientB.Player }
 
-			expect(clientA:GetFromId(replicator.Id)).is(nil)
-			local mirroredB = clientB:GetFromId(replicator.Id) :: any
-			expect(mirroredB).never_is(nil)
-			expect(mirroredB.Manager.Raw.Coins).is(4)
+				expect(clientA:GetFromId(replicator.Id)).is(nil)
+				local mirroredB = clientB:GetFromId(replicator.Id) :: any
+				expect(mirroredB).never_is(nil)
+				expect(mirroredB.Manager.Raw.Coins).is(4)
 
-			replicator:Destroy()
-			intermediary:Destroy()
-		end)
+				replicator:Destroy()
+				intermediary:Destroy()
+			end
+		)
 
 		test("a child replicator is visible only to its parent scope's targeted client", function()
 			local token = uniqueToken("FakeIntermediaryChildScope")
@@ -219,11 +225,11 @@ return function(t: tiniest)
 			local clientA = intermediary:Connect()
 			local clientB = intermediary:Connect()
 
-			local parent = ServerReplicator.new({ Token = token, Data = {}, ReplicationTargets = { clientA.Player } })
+			local parent = ServerReplicator.new { Token = token, Data = {}, ReplicationTargets = { clientA.Player } }
 			clientA:RequestData()
 			clientB:RequestData()
 
-			local child = ServerReplicator.new({ Token = token, Data = { Hp = 50 }, Parent = parent })
+			local child = ServerReplicator.new { Token = token, Data = { Hp = 50 }, Parent = parent }
 
 			local mirroredChildA = clientA:GetFromId(child.Id) :: any
 			expect(mirroredChildA).never_is(nil)
@@ -247,10 +253,10 @@ return function(t: tiniest)
 			both:RequestData()
 
 			local oldTop =
-				ServerReplicator.new({ Token = token, Data = {}, ReplicationTargets = { onlyOld.Player, both.Player } })
+				ServerReplicator.new { Token = token, Data = {}, ReplicationTargets = { onlyOld.Player, both.Player } }
 			local newTop =
-				ServerReplicator.new({ Token = token, Data = {}, ReplicationTargets = { onlyNew.Player, both.Player } })
-			local moved = ServerReplicator.new({ Token = token, Data = { Tag = "moved" }, Parent = oldTop })
+				ServerReplicator.new { Token = token, Data = {}, ReplicationTargets = { onlyNew.Player, both.Player } }
+			local moved = ServerReplicator.new { Token = token, Data = { Tag = "moved" }, Parent = oldTop }
 
 			expect(onlyOld:GetFromId(moved.Id)).never_is(nil)
 			expect(both:GetFromId(moved.Id)).never_is(nil)
@@ -282,9 +288,9 @@ return function(t: tiniest)
 			local intermediary = FakeIntermediary.new()
 			local client = intermediary:Connect()
 
-			local parent = ServerReplicator.new({ Token = token, Data = {}, ReplicationTargets = { client.Player } })
+			local parent = ServerReplicator.new { Token = token, Data = {}, ReplicationTargets = { client.Player } }
 			client:RequestData()
-			local child = ServerReplicator.new({ Token = token, Data = { Hp = 10 }, Parent = parent })
+			local child = ServerReplicator.new { Token = token, Data = { Hp = 10 }, Parent = parent }
 
 			expect(client:GetFromId(parent.Id)).never_is(nil)
 			expect(client:GetFromId(child.Id)).never_is(nil)
@@ -306,10 +312,10 @@ return function(t: tiniest)
 			local intermediary = FakeIntermediary.new()
 			local client = intermediary:Connect()
 
-			local top = ServerReplicator.new({ Token = token, Data = {}, ReplicationTargets = { client.Player } })
+			local top = ServerReplicator.new { Token = token, Data = {}, ReplicationTargets = { client.Player } }
 			client:RequestData()
-			local child = ServerReplicator.new({ Token = token, Data = {}, Parent = top })
-			local grandchild = ServerReplicator.new({ Token = token, Data = { X = 1 }, Parent = child })
+			local child = ServerReplicator.new { Token = token, Data = {}, Parent = top }
+			local grandchild = ServerReplicator.new { Token = token, Data = { X = 1 }, Parent = child }
 
 			expect(client:GetFromId(top.Id)).never_is(nil)
 			expect(client:GetFromId(child.Id)).never_is(nil)
@@ -331,10 +337,11 @@ return function(t: tiniest)
 			local intermediary = FakeIntermediary.new()
 			local client = intermediary:Connect()
 
-			local topA = ServerReplicator.new({ Token = token, Data = {}, ReplicationTargets = { client.Player } })
-			local topB = ServerReplicator.new({ Token = token, Data = { Val = 7 }, ReplicationTargets = { client.Player } })
+			local topA = ServerReplicator.new { Token = token, Data = {}, ReplicationTargets = { client.Player } }
+			local topB =
+				ServerReplicator.new { Token = token, Data = { Val = 7 }, ReplicationTargets = { client.Player } }
 			client:RequestData()
-			local childOfA = ServerReplicator.new({ Token = token, Data = {}, Parent = topA })
+			local childOfA = ServerReplicator.new { Token = token, Data = {}, Parent = topA }
 
 			topA:Destroy()
 
@@ -360,15 +367,17 @@ return function(t: tiniest)
 			local clientB = intermediary:Connect()
 
 			-- Both replicators wrap the SAME TableManager instance.
-			local sharedTM = TableManagerModule.new({ Coins = 0 })
-			local repA = ServerReplicator.new({ Token = token, Data = sharedTM, ReplicationTargets = { clientA.Player } })
-			local repB = ServerReplicator.new({ Token = token, Data = sharedTM, ReplicationTargets = { clientB.Player } })
+			local sharedTM = TableManagerModule.new { Coins = 0 }
+			local repA =
+				ServerReplicator.new { Token = token, Data = sharedTM, ReplicationTargets = { clientA.Player } }
+			local repB =
+				ServerReplicator.new { Token = token, Data = sharedTM, ReplicationTargets = { clientB.Player } }
 
 			clientA:RequestData()
 			clientB:RequestData()
 
 			sharedTM:Set("Coins", 42)
-			;(ServerReplicator :: any)._FrameCoordinator:Flush()
+			ServerReplicator._FrameCoordinator:Flush()
 
 			local mA = clientA:GetFromId(repA.Id) :: any
 			local mB = clientB:GetFromId(repB.Id) :: any
@@ -384,117 +393,125 @@ return function(t: tiniest)
 			intermediary:Destroy()
 		end)
 
-		test("shared TableManager, same target client: one message with one OpsItem per replicator, no duplicate ops", function()
-			local token = uniqueToken("SharedTMOneFlush")
-			local intermediary = FakeIntermediary.new()
-			local client = intermediary:Connect()
+		test(
+			"shared TableManager, same target client: one message with one OpsItem per replicator, no duplicate ops",
+			function()
+				local token = uniqueToken("SharedTMOneFlush")
+				local intermediary = FakeIntermediary.new()
+				local client = intermediary:Connect()
 
-			local sharedTM = TableManagerModule.new({ Value = 0 })
-			local rep1 = ServerReplicator.new({ Token = token, Data = sharedTM, ReplicationTargets = { client.Player } })
-			local rep2 = ServerReplicator.new({ Token = token, Data = sharedTM, ReplicationTargets = { client.Player } })
+				local sharedTM = TableManagerModule.new { Value = 0 }
+				local rep1 =
+					ServerReplicator.new { Token = token, Data = sharedTM, ReplicationTargets = { client.Player } }
+				local rep2 =
+					ServerReplicator.new { Token = token, Data = sharedTM, ReplicationTargets = { client.Player } }
 
-			client:RequestData()
+				client:RequestData()
 
-			-- Spy ON TOP of the intermediary's hook: decode the buffer so we can
-			-- inspect payload contents, and still forward so client state updates.
-			local captured: { { Player: any, Message: any } } = {}
-			local prevSend = (ServerReplicator :: any)._Transport.SendMessage
-			;(ServerReplicator :: any)._Transport.SendMessage = function(self, player, buf, instances)
-				table.insert(captured, { Player = player, Message = MessageCodec.Decode(buf, instances) })
-				prevSend(self, player, buf, instances)
+				-- Spy ON TOP of the intermediary's hook: decode the buffer so we can
+				-- inspect payload contents, and still forward so client state updates.
+				local captured: { { Player: any, Message: any } } = {}
+				local prevSend = (ServerReplicator :: any)._Transport.SendMessage;
+				(ServerReplicator :: any)._Transport.SendMessage = function(self, player, buf, instances)
+					table.insert(captured, { Player = player, Message = MessageCodec.Decode(buf, instances) })
+					prevSend(self, player, buf, instances)
+				end
+
+				sharedTM:Set("Value", 99);
+				(ServerReplicator :: any)._FrameCoordinator:Flush();
+				(ServerReplicator :: any)._Transport.SendMessage = prevSend
+
+				-- Exactly one message for this player (FrameCoordinator batches all ops).
+				expect(#captured).is(1)
+				expect(captured[1].Player).is(client.Player)
+
+				-- Two OpsItems (one per replicator ID), not four — proves the mutation
+				-- was not double-queued per replicator.
+				local items = captured[1].Message.Items
+				expect(#items).is(2)
+
+				-- Each OpsItem carries exactly one op with the correct value — proves
+				-- no internal duplication within a single replicator's run.
+				local seenIds: { [number]: boolean } = {}
+				for _, item in items do
+					local wireOps = item :: any
+					expect(wireOps.Op).is(FlatCodec.Op.Ops)
+					local decoded = FlatCodec.DecodeOps(wireOps)
+					expect(#decoded).is(1)
+					expect(decoded[1].Kind).is("Set")
+					expect(decoded[1].Value).is(99)
+					seenIds[wireOps.Id] = true
+				end
+				expect(seenIds[rep1.Id]).is(true)
+				expect(seenIds[rep2.Id]).is(true)
+
+				-- Client mirrors reflect the new value via the delivered message.
+				local m1 = client:GetFromId(rep1.Id) :: any
+				local m2 = client:GetFromId(rep2.Id) :: any
+				expect(m1.Manager.Raw.Value).is(99)
+				expect(m2.Manager.Raw.Value).is(99)
+
+				rep1:Destroy()
+				rep2:Destroy()
+				intermediary:Destroy()
 			end
+		)
 
-			sharedTM:Set("Value", 99)
-			;(ServerReplicator :: any)._FrameCoordinator:Flush()
+		test(
+			"linked TableManagers (co-observers): mutation through child TM propagates to both replicators on client",
+			function()
+				local token = uniqueToken("LinkedTMCoObserve")
+				local intermediary = FakeIntermediary.new()
+				local client = intermediary:Connect()
 
-			;(ServerReplicator :: any)._Transport.SendMessage = prevSend
+				-- `sharedStats` is the shared interior node.
+				-- parentTM observes it at path "Stats"; childTM is rooted at it.
+				-- A write through either TM propagates to the other (TableManager2
+				-- implicit sharing).
+				local sharedStats = { Hp = 100, Mp = 50 }
+				local parentTM = TableManagerModule.new { Stats = sharedStats, Name = "Hero" }
+				local childTM = TableManagerModule.new(sharedStats)
 
-			-- Exactly one message for this player (FrameCoordinator batches all ops).
-			expect(#captured).is(1)
-			expect(captured[1].Player).is(client.Player)
+				local parentRep =
+					ServerReplicator.new { Token = token, Data = parentTM, ReplicationTargets = { client.Player } }
+				local childRep = ServerReplicator.new { Token = token, Data = childTM, Parent = parentRep }
 
-			-- Two OpsItems (one per replicator ID), not four — proves the mutation
-			-- was not double-queued per replicator.
-			local items = captured[1].Message.Items
-			expect(#items).is(2)
+				client:RequestData()
 
-			-- Each OpsItem carries exactly one op with the correct value — proves
-			-- no internal duplication within a single replicator's run.
-			local seenIds: { [number]: boolean } = {}
-			for _, item in items do
-				local wireOps = item :: any
-				expect(wireOps.Op).is(FlatCodec.Op.Ops)
-				local decoded = FlatCodec.DecodeOps(wireOps)
-				expect(#decoded).is(1)
-				expect(decoded[1].Kind).is("Set")
-				expect(decoded[1].Value).is(99)
-				seenIds[wireOps.Id] = true
+				-- Writing through childTM fires OnApplied on both managers (co-observation).
+				-- parentRep gets a translated path ("Stats.Hp"); childRep gets the root path ("Hp").
+				childTM:Set("Hp", 75);
+				(ServerReplicator :: any)._FrameCoordinator:Flush()
+
+				local mirroredParent = client:GetFromId(parentRep.Id) :: any
+				local mirroredChild = client:GetFromId(childRep.Id) :: any
+
+				expect(mirroredParent.Manager.Raw.Stats.Hp).is(75)
+				expect(mirroredChild.Manager.Raw.Hp).is(75)
+				-- Mp was not touched.
+				expect(mirroredParent.Manager.Raw.Stats.Mp).is(50)
+
+				childRep:Destroy()
+				parentRep:Destroy()
+				intermediary:Destroy()
 			end
-			expect(seenIds[rep1.Id]).is(true)
-			expect(seenIds[rep2.Id]).is(true)
-
-			-- Client mirrors reflect the new value via the delivered message.
-			local m1 = client:GetFromId(rep1.Id) :: any
-			local m2 = client:GetFromId(rep2.Id) :: any
-			expect(m1.Manager.Raw.Value).is(99)
-			expect(m2.Manager.Raw.Value).is(99)
-
-			rep1:Destroy()
-			rep2:Destroy()
-			intermediary:Destroy()
-		end)
-
-		test("linked TableManagers (co-observers): mutation through child TM propagates to both replicators on client", function()
-			local token = uniqueToken("LinkedTMCoObserve")
-			local intermediary = FakeIntermediary.new()
-			local client = intermediary:Connect()
-
-			-- `sharedStats` is the shared interior node.
-			-- parentTM observes it at path "Stats"; childTM is rooted at it.
-			-- A write through either TM propagates to the other (TableManager2
-			-- implicit sharing).
-			local sharedStats = { Hp = 100, Mp = 50 }
-			local parentTM = TableManagerModule.new({ Stats = sharedStats, Name = "Hero" })
-			local childTM = TableManagerModule.new(sharedStats)
-
-			local parentRep = ServerReplicator.new({ Token = token, Data = parentTM, ReplicationTargets = { client.Player } })
-			local childRep  = ServerReplicator.new({ Token = token, Data = childTM,  Parent = parentRep })
-
-			client:RequestData()
-
-			-- Writing through childTM fires OnApplied on both managers (co-observation).
-			-- parentRep gets a translated path ("Stats.Hp"); childRep gets the root path ("Hp").
-			childTM:Set("Hp", 75)
-			;(ServerReplicator :: any)._FrameCoordinator:Flush()
-
-			local mirroredParent = client:GetFromId(parentRep.Id) :: any
-			local mirroredChild  = client:GetFromId(childRep.Id)  :: any
-
-			expect(mirroredParent.Manager.Raw.Stats.Hp).is(75)
-			expect(mirroredChild.Manager.Raw.Hp).is(75)
-			-- Mp was not touched.
-			expect(mirroredParent.Manager.Raw.Stats.Mp).is(50)
-
-			childRep:Destroy()
-			parentRep:Destroy()
-			intermediary:Destroy()
-		end)
+		)
 
 		test("two independent replicators same client: mutations stay isolated to each replicator's ID", function()
 			local token = uniqueToken("IndepTMsIsolation")
 			local intermediary = FakeIntermediary.new()
 			local client = intermediary:Connect()
 
-			local tm1 = TableManagerModule.new({ Score = 0 })
-			local tm2 = TableManagerModule.new({ Score = 0 })
-			local rep1 = ServerReplicator.new({ Token = token, Data = tm1, ReplicationTargets = { client.Player } })
-			local rep2 = ServerReplicator.new({ Token = token, Data = tm2, ReplicationTargets = { client.Player } })
+			local tm1 = TableManagerModule.new { Score = 0 }
+			local tm2 = TableManagerModule.new { Score = 0 }
+			local rep1 = ServerReplicator.new { Token = token, Data = tm1, ReplicationTargets = { client.Player } }
+			local rep2 = ServerReplicator.new { Token = token, Data = tm2, ReplicationTargets = { client.Player } }
 
 			client:RequestData()
 
 			-- Only mutate tm1.
-			tm1:Set("Score", 10)
-			;(ServerReplicator :: any)._FrameCoordinator:Flush()
+			tm1:Set("Score", 10);
+			(ServerReplicator :: any)._FrameCoordinator:Flush()
 
 			local m1 = client:GetFromId(rep1.Id) :: any
 			local m2 = client:GetFromId(rep2.Id) :: any
@@ -502,8 +519,8 @@ return function(t: tiniest)
 			expect(m2.Manager.Raw.Score).is(0) -- unaffected
 
 			-- Mutate only tm2.
-			tm2:Set("Score", 7)
-			;(ServerReplicator :: any)._FrameCoordinator:Flush()
+			tm2:Set("Score", 7);
+			(ServerReplicator :: any)._FrameCoordinator:Flush()
 
 			expect(m1.Manager.Raw.Score).is(10) -- unchanged
 			expect(m2.Manager.Raw.Score).is(7)
@@ -517,68 +534,70 @@ return function(t: tiniest)
 	--------------------------------------------------------------------------------
 
 	describe("Coalescing (opt-in per-replicator)", function()
-		test("a coalesced replicator collapses repeated same-frame writes to a single op; client lands on the final value", function()
-			local token = uniqueToken("CoalesceE2ESamePath")
-			local intermediary = FakeIntermediary.new()
-			local client = intermediary:Connect()
+		test(
+			"a coalesced replicator collapses repeated same-frame writes to a single op; client lands on the final value",
+			function()
+				local token = uniqueToken("CoalesceE2ESamePath")
+				local intermediary = FakeIntermediary.new()
+				local client = intermediary:Connect()
 
-			local replicator = ServerReplicator.new({
-				Token = token,
-				Data = { Hp = 0 },
-				ReplicationTargets = { client.Player },
-				Coalesced = true,
-			})
-			client:RequestData()
+				local replicator = ServerReplicator.new {
+					Token = token,
+					Data = { Hp = 0 },
+					ReplicationTargets = { client.Player },
+					Coalesced = true,
+				}
+				client:RequestData()
 
-			local captured: { { Player: any, Message: any } } = {}
-			local prevSend = (ServerReplicator :: any)._Transport.SendMessage
-			;(ServerReplicator :: any)._Transport.SendMessage = function(self, player, buf, instances)
-				table.insert(captured, { Player = player, Message = MessageCodec.Decode(buf, instances) })
-				prevSend(self, player, buf, instances)
+				local captured: { { Player: any, Message: any } } = {}
+				local prevSend = (ServerReplicator :: any)._Transport.SendMessage;
+				(ServerReplicator :: any)._Transport.SendMessage = function(self, player, buf, instances)
+					table.insert(captured, { Player = player, Message = MessageCodec.Decode(buf, instances) })
+					prevSend(self, player, buf, instances)
+				end
+
+				replicator.Manager:Set("Hp", 10)
+				replicator.Manager:Set("Hp", 20)
+				replicator.Manager:Set("Hp", 30);
+				(ServerReplicator :: any)._FrameCoordinator:Flush();
+				(ServerReplicator :: any)._Transport.SendMessage = prevSend
+
+				expect(#captured).is(1)
+				local items = captured[1].Message.Items
+				expect(#items).is(1)
+				local decoded = FlatCodec.DecodeOps(items[1] :: any)
+				expect(#decoded).is(1)
+				expect(decoded[1].Value).is(30)
+
+				local mirrored = client:GetFromId(replicator.Id) :: any
+				expect(mirrored.Manager.Raw.Hp).is(30)
+
+				replicator:Destroy()
+				intermediary:Destroy()
 			end
-
-			replicator.Manager:Set("Hp", 10)
-			replicator.Manager:Set("Hp", 20)
-			replicator.Manager:Set("Hp", 30)
-			;(ServerReplicator :: any)._FrameCoordinator:Flush()
-
-			;(ServerReplicator :: any)._Transport.SendMessage = prevSend
-
-			expect(#captured).is(1)
-			local items = captured[1].Message.Items
-			expect(#items).is(1)
-			local decoded = FlatCodec.DecodeOps(items[1] :: any)
-			expect(#decoded).is(1)
-			expect(decoded[1].Value).is(30)
-
-			local mirrored = client:GetFromId(replicator.Id) :: any
-			expect(mirrored.Manager.Raw.Hp).is(30)
-
-			replicator:Destroy()
-			intermediary:Destroy()
-		end)
+		)
 
 		test("a non-coalesced (default) replicator still delivers every intermediate write", function()
 			local token = uniqueToken("CoalesceE2EControl")
 			local intermediary = FakeIntermediary.new()
 			local client = intermediary:Connect()
 
-			local replicator = ServerReplicator.new({ Token = token, Data = { Hp = 0 }, ReplicationTargets = { client.Player } })
+			local replicator =
+				ServerReplicator.new { Token = token, Data = { Hp = 0 }, ReplicationTargets = { client.Player } }
 			client:RequestData()
 
 			local captured: { { Player: any, Message: any } } = {}
-			local prevSend = (ServerReplicator :: any)._Transport.SendMessage
-			;(ServerReplicator :: any)._Transport.SendMessage = function(self, player, buf, instances)
+			local prevSend = (ServerReplicator :: any)._Transport.SendMessage;
+			(ServerReplicator :: any)._Transport.SendMessage = function(self, player, buf, instances)
 				table.insert(captured, { Player = player, Message = MessageCodec.Decode(buf, instances) })
 				prevSend(self, player, buf, instances)
 			end
 
 			replicator.Manager:Set("Hp", 10)
 			replicator.Manager:Set("Hp", 20)
-			replicator.Manager:Set("Hp", 30)
-			;(ServerReplicator :: any)._FrameCoordinator:Flush()
-
-			;(ServerReplicator :: any)._Transport.SendMessage = prevSend
+			replicator.Manager:Set("Hp", 30);
+			(ServerReplicator :: any)._FrameCoordinator:Flush();
+			(ServerReplicator :: any)._Transport.SendMessage = prevSend
 
 			local items = captured[1].Message.Items
 			local decoded = FlatCodec.DecodeOps(items[1] :: any)
@@ -591,59 +610,62 @@ return function(t: tiniest)
 			intermediary:Destroy()
 		end)
 
-		test("two replicators sharing one TableManager, one coalesced and one not: independent streams, identical final client state", function()
-			local token = uniqueToken("CoalesceE2ESharedTM")
-			local intermediary = FakeIntermediary.new()
-			local clientA = intermediary:Connect()
-			local clientB = intermediary:Connect()
+		test(
+			"two replicators sharing one TableManager, one coalesced and one not: independent streams, identical final client state",
+			function()
+				local token = uniqueToken("CoalesceE2ESharedTM")
+				local intermediary = FakeIntermediary.new()
+				local clientA = intermediary:Connect()
+				local clientB = intermediary:Connect()
 
-			-- Both replicators wrap the SAME TableManager instance; only `coalescedRep`
-			-- opts into coalescing. The two are independent op streams (own `Id`s),
-			-- so collapsing one must never affect the other.
-			local sharedTM = TableManagerModule.new({ Hp = 0 })
-			local coalescedRep = ServerReplicator.new({
-				Token = token,
-				Data = sharedTM,
-				ReplicationTargets = { clientA.Player },
-				Coalesced = true,
-			})
-			local plainRep = ServerReplicator.new({ Token = token, Data = sharedTM, ReplicationTargets = { clientB.Player } })
+				-- Both replicators wrap the SAME TableManager instance; only `coalescedRep`
+				-- opts into coalescing. The two are independent op streams (own `Id`s),
+				-- so collapsing one must never affect the other.
+				local sharedTM = TableManagerModule.new { Hp = 0 }
+				local coalescedRep = ServerReplicator.new {
+					Token = token,
+					Data = sharedTM,
+					ReplicationTargets = { clientA.Player },
+					Coalesced = true,
+				}
+				local plainRep =
+					ServerReplicator.new { Token = token, Data = sharedTM, ReplicationTargets = { clientB.Player } }
 
-			clientA:RequestData()
-			clientB:RequestData()
+				clientA:RequestData()
+				clientB:RequestData()
 
-			local captured: { { Player: any, Message: any } } = {}
-			local prevSend = (ServerReplicator :: any)._Transport.SendMessage
-			;(ServerReplicator :: any)._Transport.SendMessage = function(self, player, buf, instances)
-				table.insert(captured, { Player = player, Message = MessageCodec.Decode(buf, instances) })
-				prevSend(self, player, buf, instances)
+				local captured: { { Player: any, Message: any } } = {}
+				local prevSend = (ServerReplicator :: any)._Transport.SendMessage;
+				(ServerReplicator :: any)._Transport.SendMessage = function(self, player, buf, instances)
+					table.insert(captured, { Player = player, Message = MessageCodec.Decode(buf, instances) })
+					prevSend(self, player, buf, instances)
+				end
+
+				sharedTM:Set("Hp", 10)
+				sharedTM:Set("Hp", 20)
+				sharedTM:Set("Hp", 30);
+				(ServerReplicator :: any)._FrameCoordinator:Flush();
+				(ServerReplicator :: any)._Transport.SendMessage = prevSend
+
+				local byPlayer: { [any]: any } = {}
+				for _, call in captured do
+					byPlayer[call.Player] = call.Message
+				end
+
+				local coalescedOps = FlatCodec.DecodeOps(byPlayer[clientA.Player].Items[1] :: any)
+				local plainOps = FlatCodec.DecodeOps(byPlayer[clientB.Player].Items[1] :: any)
+				expect(#coalescedOps).is(1)
+				expect(#plainOps).is(3)
+
+				local mirroredA = clientA:GetFromId(coalescedRep.Id) :: any
+				local mirroredB = clientB:GetFromId(plainRep.Id) :: any
+				expect(mirroredA.Manager.Raw.Hp).is(30)
+				expect(mirroredB.Manager.Raw.Hp).is(30)
+
+				coalescedRep:Destroy()
+				plainRep:Destroy()
+				intermediary:Destroy()
 			end
-
-			sharedTM:Set("Hp", 10)
-			sharedTM:Set("Hp", 20)
-			sharedTM:Set("Hp", 30)
-			;(ServerReplicator :: any)._FrameCoordinator:Flush()
-
-			;(ServerReplicator :: any)._Transport.SendMessage = prevSend
-
-			local byPlayer: { [any]: any } = {}
-			for _, call in captured do
-				byPlayer[call.Player] = call.Message
-			end
-
-			local coalescedOps = FlatCodec.DecodeOps(byPlayer[clientA.Player].Items[1] :: any)
-			local plainOps = FlatCodec.DecodeOps(byPlayer[clientB.Player].Items[1] :: any)
-			expect(#coalescedOps).is(1)
-			expect(#plainOps).is(3)
-
-			local mirroredA = clientA:GetFromId(coalescedRep.Id) :: any
-			local mirroredB = clientB:GetFromId(plainRep.Id) :: any
-			expect(mirroredA.Manager.Raw.Hp).is(30)
-			expect(mirroredB.Manager.Raw.Hp).is(30)
-
-			coalescedRep:Destroy()
-			plainRep:Destroy()
-			intermediary:Destroy()
-		end)
+		)
 	end)
 end
