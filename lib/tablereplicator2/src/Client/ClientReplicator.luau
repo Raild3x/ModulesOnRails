@@ -29,10 +29,8 @@ const ClientTransportModule = require("../Shared/Transport/ClientTransport")
 const Protocol = require("../Shared/Transport/Protocol")
 const FlatCodec = require("../Shared/Serialization/FlatCodec")
 const OpApplier = require("./OpApplier")
-const TokenCache = require("../Shared/TokenCache")
 const ClientCustomRemote = require("./ClientCustomRemote")
 
-type ReplicationToken = Types.ReplicationToken
 type WireMessage = Types.WireMessage
 type WireCreateItem = Types.WireCreateItem
 type WireDestroyItem = Types.WireDestroyItem
@@ -80,9 +78,10 @@ const function buildFromCreateItem(item: WireCreateItem): CR_Internal
 
 	-- Data is already deep-copied per item by MessageCodec.Decode (table interning is in-band).
 	const manager = TableManagerModule.new(item.Data)
+	-- Empty string on the wire encodes "no namespace" (anonymous replicator).
 	const base = BaseReplicator.new({
 		Id = item.Id,
-		Token = TokenCache.getOrCreateToken(item.Token),
+		Namespace = if item.Token ~= "" then item.Token else nil,
 		Tags = item.Tags,
 		Manager = manager,
 		Parent = parent,

@@ -25,8 +25,8 @@ return function(t: tiniest)
 	describe("FrameCoordinator global ordering", function()
 		test("interleaved ops across two replicators replay in one message in server order", function()
 			local player = { Name = "P" } :: any
-			local repA = ServerReplicator.new({ Token = uniqueToken("OrderA"), Data = { x = 0 }, ReplicationTargets = { player } })
-			local repB = ServerReplicator.new({ Token = uniqueToken("OrderB"), Data = { y = 0 }, ReplicationTargets = { player } })
+			local repA = ServerReplicator.new({ Namespace = uniqueToken("OrderA"), Data = { x = 0 }, ReplicationTargets = { player } })
+			local repB = ServerReplicator.new({ Namespace = uniqueToken("OrderB"), Data = { y = 0 }, ReplicationTargets = { player } })
 			;(repA :: any)._Scope:Activate(player)
 			;(repB :: any)._Scope:Activate(player)
 
@@ -53,7 +53,7 @@ return function(t: tiniest)
 
 		test("consecutive ops for one replicator merge into a single Ops item", function()
 			local player = { Name = "P" } :: any
-			local replicator = ServerReplicator.new({ Token = uniqueToken("MergeRun"), Data = { x = 0 }, ReplicationTargets = { player } })
+			local replicator = ServerReplicator.new({ Namespace = uniqueToken("MergeRun"), Data = { x = 0 }, ReplicationTargets = { player } })
 			;(replicator :: any)._Scope:Activate(player)
 
 			local calls, restore = spyOnTransport()
@@ -75,7 +75,7 @@ return function(t: tiniest)
 			local existing = { Name = "Existing" } :: any
 			local late = { Name = "Late" } :: any
 			local replicator =
-				ServerReplicator.new({ Token = uniqueToken("MidFrameAdd"), Data = { x = 0 }, ReplicationTargets = { existing } })
+				ServerReplicator.new({ Namespace = uniqueToken("MidFrameAdd"), Data = { x = 0 }, ReplicationTargets = { existing } })
 			;(replicator :: any)._Scope:Activate(existing)
 
 			local calls, restore = spyOnTransport()
@@ -100,7 +100,7 @@ return function(t: tiniest)
 			local stayer = { Name = "Stayer" } :: any
 			local leaver = { Name = "Leaver" } :: any
 			local replicator =
-				ServerReplicator.new({ Token = uniqueToken("MidFrameRemove"), Data = { x = 0 }, ReplicationTargets = { stayer, leaver } })
+				ServerReplicator.new({ Namespace = uniqueToken("MidFrameRemove"), Data = { x = 0 }, ReplicationTargets = { stayer, leaver } })
 			;(replicator :: any)._Scope:Activate(stayer)
 			;(replicator :: any)._Scope:Activate(leaver)
 
@@ -123,8 +123,8 @@ return function(t: tiniest)
 		test("ops for two different replicators going to two disjoint audiences each reach only their own player", function()
 			local playerA = { Name = "A" } :: any
 			local playerB = { Name = "B" } :: any
-			local repA = ServerReplicator.new({ Token = uniqueToken("DisjointA"), Data = { x = 0 }, ReplicationTargets = { playerA } })
-			local repB = ServerReplicator.new({ Token = uniqueToken("DisjointB"), Data = { y = 0 }, ReplicationTargets = { playerB } })
+			local repA = ServerReplicator.new({ Namespace = uniqueToken("DisjointA"), Data = { x = 0 }, ReplicationTargets = { playerA } })
+			local repB = ServerReplicator.new({ Namespace = uniqueToken("DisjointB"), Data = { y = 0 }, ReplicationTargets = { playerB } })
 			;(repA :: any)._Scope:Activate(playerA)
 			;(repB :: any)._Scope:Activate(playerB)
 
@@ -153,7 +153,7 @@ return function(t: tiniest)
 		test("repeated same-path Sets on a coalesced replicator collapse to one op carrying the final value", function()
 			local player = { Name = "P" } :: any
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("CoalesceSamePath"),
+				Namespace = uniqueToken("CoalesceSamePath"),
 				Data = { x = 0 },
 				ReplicationTargets = { player },
 				Coalesced = true,
@@ -180,7 +180,7 @@ return function(t: tiniest)
 		test("a later ancestor Set drops an already-buffered descendant Set on the same coalesced replicator", function()
 			local player = { Name = "P" } :: any
 			local replicator =
-				ServerReplicator.new({ Token = uniqueToken("CoalesceAncestor"), Data = { Stats = { Hp = 10 } }, ReplicationTargets = { player } })
+				ServerReplicator.new({ Namespace = uniqueToken("CoalesceAncestor"), Data = { Stats = { Hp = 10 } }, ReplicationTargets = { player } })
 			local scope = (replicator :: any)._Scope
 			scope:Activate(player)
 			local coordinator = (ServerReplicator :: any)._FrameCoordinator
@@ -211,7 +211,7 @@ return function(t: tiniest)
 		test("a descendant Set after an ancestor Set is kept (refines the leaf, not subsumed)", function()
 			local player = { Name = "P" } :: any
 			local replicator =
-				ServerReplicator.new({ Token = uniqueToken("CoalesceDescendantAfter"), Data = { Stats = { Hp = 10 } }, ReplicationTargets = { player } })
+				ServerReplicator.new({ Namespace = uniqueToken("CoalesceDescendantAfter"), Data = { Stats = { Hp = 10 } }, ReplicationTargets = { player } })
 			local scope = (replicator :: any)._Scope
 			scope:Activate(player)
 			local coordinator = (ServerReplicator :: any)._FrameCoordinator
@@ -242,7 +242,7 @@ return function(t: tiniest)
 		test("an array op barriers coalescing: Sets before and after it on the same path are not merged", function()
 			local player = { Name = "P" } :: any
 			local replicator =
-				ServerReplicator.new({ Token = uniqueToken("CoalesceArrayBarrier"), Data = { Items = {} }, ReplicationTargets = { player } })
+				ServerReplicator.new({ Namespace = uniqueToken("CoalesceArrayBarrier"), Data = { Items = {} }, ReplicationTargets = { player } })
 			local scope = (replicator :: any)._Scope
 			scope:Activate(player)
 			local coordinator = (ServerReplicator :: any)._FrameCoordinator
@@ -279,7 +279,7 @@ return function(t: tiniest)
 
 		test("BatchBegin/BatchEnd markers are dropped entirely for a coalesced replicator", function()
 			local player = { Name = "P" } :: any
-			local replicator = ServerReplicator.new({ Token = uniqueToken("CoalesceBatchMarkers"), Data = { x = 0 }, ReplicationTargets = { player } })
+			local replicator = ServerReplicator.new({ Namespace = uniqueToken("CoalesceBatchMarkers"), Data = { x = 0 }, ReplicationTargets = { player } })
 			local scope = (replicator :: any)._Scope
 			scope:Activate(player)
 			local coordinator = (ServerReplicator :: any)._FrameCoordinator
@@ -303,8 +303,8 @@ return function(t: tiniest)
 
 		test("a coalesced replicator's in-place update sorts to its last-write position, preserving cross-replicator order", function()
 			local player = { Name = "P" } :: any
-			local repA = ServerReplicator.new({ Token = uniqueToken("CoalesceOrderA"), Data = { x = 0 }, ReplicationTargets = { player } })
-			local repB = ServerReplicator.new({ Token = uniqueToken("CoalesceOrderB"), Data = { y = 0 }, ReplicationTargets = { player } })
+			local repA = ServerReplicator.new({ Namespace = uniqueToken("CoalesceOrderA"), Data = { x = 0 }, ReplicationTargets = { player } })
+			local repB = ServerReplicator.new({ Namespace = uniqueToken("CoalesceOrderB"), Data = { y = 0 }, ReplicationTargets = { player } })
 			local scopeA = (repA :: any)._Scope
 			local scopeB = (repB :: any)._Scope
 			scopeA:Activate(player)
@@ -335,7 +335,7 @@ return function(t: tiniest)
 
 		test("dropping a coalesced replicator clears its pending coalesce slots", function()
 			local player = { Name = "P" } :: any
-			local replicator = ServerReplicator.new({ Token = uniqueToken("CoalesceDropClears"), Data = { x = 0 }, ReplicationTargets = { player } })
+			local replicator = ServerReplicator.new({ Namespace = uniqueToken("CoalesceDropClears"), Data = { x = 0 }, ReplicationTargets = { player } })
 			local scope = (replicator :: any)._Scope
 			scope:Activate(player)
 			local coordinator = (ServerReplicator :: any)._FrameCoordinator

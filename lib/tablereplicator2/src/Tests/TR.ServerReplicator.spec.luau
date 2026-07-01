@@ -65,19 +65,19 @@ return function(t: tiniest)
 		test("requires exactly one of Parent / ReplicationTargets", function()
 			local token = uniqueToken("ParentXorTargets")
 			expect(function()
-				ServerReplicator.new({ Token = token, Data = FakeManager.new() })
+				ServerReplicator.new({ Namespace = token, Data = FakeManager.new() })
 			end).fails()
 
-			local parent = ServerReplicator.new({ Token = token, Data = FakeManager.new(), ReplicationTargets = {} })
+			local parent = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} })
 			expect(function()
-				ServerReplicator.new({ Token = token, Data = FakeManager.new(), Parent = parent, ReplicationTargets = {} })
+				ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), Parent = parent, ReplicationTargets = {} })
 			end).fails()
 			parent:Destroy()
 		end)
 
 		test("a plain Data table is wrapped in a real TableManager", function()
 			local replicator =
-				ServerReplicator.new({ Token = uniqueToken("NewPlainData"), Data = { Coins = 5 }, ReplicationTargets = {} })
+				ServerReplicator.new({ Namespace = uniqueToken("NewPlainData"), Data = { Coins = 5 }, ReplicationTargets = {} })
 			expect(replicator.Manager.Raw.Coins).is(5)
 			replicator:Destroy()
 		end)
@@ -85,14 +85,14 @@ return function(t: tiniest)
 		test("an existing TableManager passed as Data is used directly, not re-wrapped", function()
 			local FakeManagerInstance = FakeManager.new({ Tag = "original" })
 			local replicator =
-				ServerReplicator.new({ Token = uniqueToken("NewExistingManager"), Data = FakeManagerInstance, ReplicationTargets = {} })
+				ServerReplicator.new({ Namespace = uniqueToken("NewExistingManager"), Data = FakeManagerInstance, ReplicationTargets = {} })
 			expect(replicator.Manager).is(FakeManagerInstance)
 			replicator:Destroy()
 		end)
 
 		test("Tags default to an empty table when omitted", function()
 			local replicator =
-				ServerReplicator.new({ Token = uniqueToken("NewDefaultTags"), Data = FakeManager.new(), ReplicationTargets = {} })
+				ServerReplicator.new({ Namespace = uniqueToken("NewDefaultTags"), Data = FakeManager.new(), ReplicationTargets = {} })
 			-- `IsSubsetOfTags({})` is only true if the replicator's OWN tags
 			-- are themselves empty -- unlike `IsSupersetOfTags({})`, which is
 			-- trivially true no matter what tags the replicator actually has.
@@ -103,8 +103,8 @@ return function(t: tiniest)
 		test("a child automatically inherits its parent's replication scope", function()
 			local player = { Name = "P" } :: any
 			local parent =
-				ServerReplicator.new({ Token = uniqueToken("NewScopeInheritParent"), Data = FakeManager.new(), ReplicationTargets = { player } })
-			local child = ServerReplicator.new({ Token = uniqueToken("NewScopeInheritChild"), Data = FakeManager.new(), Parent = parent })
+				ServerReplicator.new({ Namespace = uniqueToken("NewScopeInheritParent"), Data = FakeManager.new(), ReplicationTargets = { player } })
+			local child = ServerReplicator.new({ Namespace = uniqueToken("NewScopeInheritChild"), Data = FakeManager.new(), Parent = parent })
 			expect(child:IsReplicatingTo(player)).is_true()
 			child:Destroy()
 			parent:Destroy()
@@ -119,7 +119,7 @@ return function(t: tiniest)
 			local playerA = { Name = "A" } :: any
 			local playerB = { Name = "B" } :: any
 
-			local replicator = ServerReplicator.new({ Token = token, Data = FakeManager.new(), ReplicationTargets = { playerA } })
+			local replicator = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), ReplicationTargets = { playerA } })
 			expect(replicator:IsReplicatingTo(playerA)).is_true()
 			expect(replicator:IsReplicatingTo(playerB)).is(false)
 
@@ -134,7 +134,7 @@ return function(t: tiniest)
 			local playerA = { Name = "A" } :: any
 			local playerB = { Name = "B" } :: any
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("SetTargetsShrink"),
+				Namespace = uniqueToken("SetTargetsShrink"),
 				Data = FakeManager.new(),
 				ReplicationTargets = { playerA, playerB },
 			})
@@ -148,7 +148,7 @@ return function(t: tiniest)
 			local player = { Name = "AllModePlayer" } :: any
 			;(ServerReplicator :: any)._Transport.PlayerRequestedData:Fire(player)
 
-			local replicator = ServerReplicator.new({ Token = uniqueToken("SetTargetsAll"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local replicator = ServerReplicator.new({ Namespace = uniqueToken("SetTargetsAll"), Data = FakeManager.new(), ReplicationTargets = {} })
 			replicator:SetTargets("all" :: any)
 			expect(replicator:IsReplicatingTo(player)).is_true()
 
@@ -156,7 +156,7 @@ return function(t: tiniest)
 		end)
 
 		test('SetTargets("all") a second time is a no-op (does not re-send)', function()
-			local replicator = ServerReplicator.new({ Token = uniqueToken("SetTargetsAllTwice"), Data = FakeManager.new(), ReplicationTargets = "all" :: any })
+			local replicator = ServerReplicator.new({ Namespace = uniqueToken("SetTargetsAllTwice"), Data = FakeManager.new(), ReplicationTargets = "all" :: any })
 
 			local calls, restore = spyOnTransport()
 			replicator:SetTargets("all" :: any)
@@ -167,8 +167,8 @@ return function(t: tiniest)
 		end)
 
 		test("errors when called on a non-top-level replicator", function()
-			local top = ServerReplicator.new({ Token = uniqueToken("SetTargetsNonTopTop"), Data = FakeManager.new(), ReplicationTargets = {} })
-			local child = ServerReplicator.new({ Token = uniqueToken("SetTargetsNonTopChild"), Data = FakeManager.new(), Parent = top })
+			local top = ServerReplicator.new({ Namespace = uniqueToken("SetTargetsNonTopTop"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local child = ServerReplicator.new({ Namespace = uniqueToken("SetTargetsNonTopChild"), Data = FakeManager.new(), Parent = top })
 			expect(function()
 				child:SetTargets({})
 			end).fails()
@@ -183,7 +183,7 @@ return function(t: tiniest)
 		test("sends a snapshot to an already-bootstrapped player", function()
 			local token = uniqueToken("AddTargetBootstrapped")
 			local player = { Name = "Bootstrapped" } :: any
-			local replicator = ServerReplicator.new({ Token = token, Data = FakeManager.new(), ReplicationTargets = {} })
+			local replicator = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} })
 
 			-- Simulate the player having already completed the request-data
 			-- handshake for some OTHER scope at some earlier point.
@@ -205,7 +205,7 @@ return function(t: tiniest)
 		end)
 
 		test("a not-yet-bootstrapped player is queued pending without sending anything yet", function()
-			local replicator = ServerReplicator.new({ Token = uniqueToken("AddTargetPending"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local replicator = ServerReplicator.new({ Namespace = uniqueToken("AddTargetPending"), Data = FakeManager.new(), ReplicationTargets = {} })
 			local player = { Name = "NeverBootstrapped" } :: any
 
 			local calls, restore = spyOnTransport()
@@ -220,7 +220,7 @@ return function(t: tiniest)
 		test("adds every player in a list at once", function()
 			local playerA = { Name = "A" } :: any
 			local playerB = { Name = "B" } :: any
-			local replicator = ServerReplicator.new({ Token = uniqueToken("AddTargetMultiple"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local replicator = ServerReplicator.new({ Namespace = uniqueToken("AddTargetMultiple"), Data = FakeManager.new(), ReplicationTargets = {} })
 			replicator:AddTarget({ playerA, playerB })
 			expect(replicator:IsReplicatingTo(playerA)).is_true()
 			expect(replicator:IsReplicatingTo(playerB)).is_true()
@@ -229,7 +229,7 @@ return function(t: tiniest)
 
 		test("is a no-op once the scope is already replicating to everyone", function()
 			local replicator =
-				ServerReplicator.new({ Token = uniqueToken("AddTargetAllNoOp"), Data = FakeManager.new(), ReplicationTargets = "all" :: any })
+				ServerReplicator.new({ Namespace = uniqueToken("AddTargetAllNoOp"), Data = FakeManager.new(), ReplicationTargets = "all" :: any })
 			local player = { Name = "Irrelevant" } :: any
 
 			local calls, restore = spyOnTransport()
@@ -241,8 +241,8 @@ return function(t: tiniest)
 		end)
 
 		test("errors when called on a non-top-level replicator", function()
-			local top = ServerReplicator.new({ Token = uniqueToken("AddTargetNonTopTop"), Data = FakeManager.new(), ReplicationTargets = {} })
-			local child = ServerReplicator.new({ Token = uniqueToken("AddTargetNonTopChild"), Data = FakeManager.new(), Parent = top })
+			local top = ServerReplicator.new({ Namespace = uniqueToken("AddTargetNonTopTop"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local child = ServerReplicator.new({ Namespace = uniqueToken("AddTargetNonTopChild"), Data = FakeManager.new(), Parent = top })
 			expect(function()
 				child:AddTarget({ { Name = "X" } :: any })
 			end).fails()
@@ -257,7 +257,7 @@ return function(t: tiniest)
 		test("sends a Destroy to a currently-active player", function()
 			local token = uniqueToken("RemoveTargetActive")
 			local player = { Name = "Active" } :: any
-			local replicator = ServerReplicator.new({ Token = token, Data = FakeManager.new(), ReplicationTargets = { player } })
+			local replicator = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), ReplicationTargets = { player } })
 			-- Not yet bootstrapped, so the player is only Pending; force them
 			-- Active the same way the request-data handshake would.
 			;(replicator :: any)._Scope:Activate(player)
@@ -276,7 +276,7 @@ return function(t: tiniest)
 
 		test("a pending (not yet active) player is dropped without sending anything", function()
 			local player = { Name = "Pending" } :: any
-			local replicator = ServerReplicator.new({ Token = uniqueToken("RemoveTargetPending"), Data = FakeManager.new(), ReplicationTargets = { player } })
+			local replicator = ServerReplicator.new({ Namespace = uniqueToken("RemoveTargetPending"), Data = FakeManager.new(), ReplicationTargets = { player } })
 
 			local calls, restore = spyOnTransport()
 			replicator:RemoveTarget({ player })
@@ -288,7 +288,7 @@ return function(t: tiniest)
 		end)
 
 		test("removing a player that was never targeted is a safe no-op", function()
-			local replicator = ServerReplicator.new({ Token = uniqueToken("RemoveTargetUntracked"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local replicator = ServerReplicator.new({ Namespace = uniqueToken("RemoveTargetUntracked"), Data = FakeManager.new(), ReplicationTargets = {} })
 			local player = { Name = "NeverTargeted" } :: any
 			expect(function()
 				replicator:RemoveTarget({ player })
@@ -300,7 +300,7 @@ return function(t: tiniest)
 			local playerA = { Name = "A" } :: any
 			local playerB = { Name = "B" } :: any
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("RemoveTargetMultiple"),
+				Namespace = uniqueToken("RemoveTargetMultiple"),
 				Data = FakeManager.new(),
 				ReplicationTargets = { playerA, playerB },
 			})
@@ -311,8 +311,8 @@ return function(t: tiniest)
 		end)
 
 		test("errors when called on a non-top-level replicator", function()
-			local top = ServerReplicator.new({ Token = uniqueToken("RemoveTargetNonTopTop"), Data = FakeManager.new(), ReplicationTargets = {} })
-			local child = ServerReplicator.new({ Token = uniqueToken("RemoveTargetNonTopChild"), Data = FakeManager.new(), Parent = top })
+			local top = ServerReplicator.new({ Namespace = uniqueToken("RemoveTargetNonTopTop"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local child = ServerReplicator.new({ Namespace = uniqueToken("RemoveTargetNonTopChild"), Data = FakeManager.new(), Parent = top })
 			expect(function()
 				child:RemoveTarget({ { Name = "X" } :: any })
 			end).fails()
@@ -328,7 +328,7 @@ return function(t: tiniest)
 			local playerA = { Name = "A" } :: any
 			local playerB = { Name = "B" } :: any
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("GetTargetsExplicit"),
+				Namespace = uniqueToken("GetTargetsExplicit"),
 				Data = FakeManager.new(),
 				ReplicationTargets = { playerA, playerB },
 			})
@@ -339,13 +339,13 @@ return function(t: tiniest)
 		end)
 
 		test("returns an empty list for ReplicationTargets = {}", function()
-			local replicator = ServerReplicator.new({ Token = uniqueToken("GetTargetsEmpty"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local replicator = ServerReplicator.new({ Namespace = uniqueToken("GetTargetsEmpty"), Data = FakeManager.new(), ReplicationTargets = {} })
 			expect(#replicator:GetTargets()).is(0)
 			replicator:Destroy()
 		end)
 
 		test("reflects membership after AddTarget", function()
-			local replicator = ServerReplicator.new({ Token = uniqueToken("GetTargetsAfterAdd"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local replicator = ServerReplicator.new({ Namespace = uniqueToken("GetTargetsAfterAdd"), Data = FakeManager.new(), ReplicationTargets = {} })
 			local player = { Name = "Added" } :: any
 			replicator:AddTarget({ player })
 			expect(table.find(replicator:GetTargets(), player) ~= nil).is_true()
@@ -355,7 +355,7 @@ return function(t: tiniest)
 		test("reflects membership after RemoveTarget", function()
 			local player = { Name = "Removed" } :: any
 			local replicator =
-				ServerReplicator.new({ Token = uniqueToken("GetTargetsAfterRemove"), Data = FakeManager.new(), ReplicationTargets = { player } })
+				ServerReplicator.new({ Namespace = uniqueToken("GetTargetsAfterRemove"), Data = FakeManager.new(), ReplicationTargets = { player } })
 			replicator:RemoveTarget({ player })
 			expect(table.find(replicator:GetTargets(), player) ~= nil).never_is_true()
 			replicator:Destroy()
@@ -363,7 +363,7 @@ return function(t: tiniest)
 
 		test("does not error in \"all\" mode", function()
 			local replicator =
-				ServerReplicator.new({ Token = uniqueToken("GetTargetsAllMode"), Data = FakeManager.new(), ReplicationTargets = "all" :: any })
+				ServerReplicator.new({ Namespace = uniqueToken("GetTargetsAllMode"), Data = FakeManager.new(), ReplicationTargets = "all" :: any })
 			expect(function()
 				replicator:GetTargets()
 			end).never_fails()
@@ -377,14 +377,14 @@ return function(t: tiniest)
 		test("true for an active target", function()
 			local player = { Name = "Active" } :: any
 			local replicator =
-				ServerReplicator.new({ Token = uniqueToken("IsReplicatingToActive"), Data = FakeManager.new(), ReplicationTargets = { player } })
+				ServerReplicator.new({ Namespace = uniqueToken("IsReplicatingToActive"), Data = FakeManager.new(), ReplicationTargets = { player } })
 			;(replicator :: any)._Scope:Activate(player)
 			expect(replicator:IsReplicatingTo(player)).is_true()
 			replicator:Destroy()
 		end)
 
 		test("false for a player that was never targeted", function()
-			local replicator = ServerReplicator.new({ Token = uniqueToken("IsReplicatingToNever"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local replicator = ServerReplicator.new({ Namespace = uniqueToken("IsReplicatingToNever"), Data = FakeManager.new(), ReplicationTargets = {} })
 			expect(replicator:IsReplicatingTo({ Name = "Stranger" } :: any)).is(false)
 			replicator:Destroy()
 		end)
@@ -392,7 +392,7 @@ return function(t: tiniest)
 		test("true for a pending (not yet active) target", function()
 			local player = { Name = "Pending" } :: any
 			local replicator =
-				ServerReplicator.new({ Token = uniqueToken("IsReplicatingToPending"), Data = FakeManager.new(), ReplicationTargets = { player } })
+				ServerReplicator.new({ Namespace = uniqueToken("IsReplicatingToPending"), Data = FakeManager.new(), ReplicationTargets = { player } })
 			expect(replicator:IsReplicatingTo(player)).is_true()
 			replicator:Destroy()
 		end)
@@ -400,7 +400,7 @@ return function(t: tiniest)
 		test("false after RemoveTarget", function()
 			local player = { Name = "Removed" } :: any
 			local replicator =
-				ServerReplicator.new({ Token = uniqueToken("IsReplicatingToRemoved"), Data = FakeManager.new(), ReplicationTargets = { player } })
+				ServerReplicator.new({ Namespace = uniqueToken("IsReplicatingToRemoved"), Data = FakeManager.new(), ReplicationTargets = { player } })
 			replicator:RemoveTarget({ player })
 			expect(replicator:IsReplicatingTo(player)).is(false)
 			replicator:Destroy()
@@ -408,7 +408,7 @@ return function(t: tiniest)
 
 		test("true for any player at all once the scope replicates to everyone", function()
 			local replicator =
-				ServerReplicator.new({ Token = uniqueToken("IsReplicatingToAllMode"), Data = FakeManager.new(), ReplicationTargets = "all" :: any })
+				ServerReplicator.new({ Namespace = uniqueToken("IsReplicatingToAllMode"), Data = FakeManager.new(), ReplicationTargets = "all" :: any })
 			expect(replicator:IsReplicatingTo({ Name = "AnyoneAtAll" } :: any)).is_true()
 			replicator:Destroy()
 		end)
@@ -420,10 +420,10 @@ return function(t: tiniest)
 		test("within the same scope sends a SetParent item", function()
 			local token = uniqueToken("SetParentSameScope")
 			local player = { Name = "P" } :: any
-			local top = ServerReplicator.new({ Token = token, Data = FakeManager.new(), ReplicationTargets = { player } })
+			local top = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), ReplicationTargets = { player } })
 			;(top :: any)._Scope:Activate(player)
-			local childA = ServerReplicator.new({ Token = token, Data = FakeManager.new(), Parent = top })
-			local childB = ServerReplicator.new({ Token = token, Data = FakeManager.new(), Parent = top })
+			local childA = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), Parent = top })
+			local childB = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), Parent = top })
 
 			local calls, restore = spyOnTransport()
 			childA:SetParent(childB)
@@ -441,9 +441,9 @@ return function(t: tiniest)
 
 		test("errors when the new parent is a descendant of self", function()
 			local token = uniqueToken("SetParentCircular")
-			local top = ServerReplicator.new({ Token = token, Data = FakeManager.new(), ReplicationTargets = {} })
-			local child = ServerReplicator.new({ Token = token, Data = FakeManager.new(), Parent = top })
-			local grandchild = ServerReplicator.new({ Token = token, Data = FakeManager.new(), Parent = child })
+			local top = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} })
+			local child = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), Parent = top })
+			local grandchild = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), Parent = child })
 
 			expect(function()
 				child:SetParent(grandchild)
@@ -460,14 +460,14 @@ return function(t: tiniest)
 			local onlyNew = { Name = "OnlyNew" } :: any
 			local both = { Name = "Both" } :: any
 
-			local oldTop = ServerReplicator.new({ Token = token, Data = FakeManager.new(), ReplicationTargets = { onlyOld, both } })
-			local newTop = ServerReplicator.new({ Token = token, Data = FakeManager.new(), ReplicationTargets = { onlyNew, both } })
+			local oldTop = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), ReplicationTargets = { onlyOld, both } })
+			local newTop = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), ReplicationTargets = { onlyNew, both } })
 			;(oldTop :: any)._Scope:Activate(onlyOld)
 			;(oldTop :: any)._Scope:Activate(both)
 			;(newTop :: any)._Scope:Activate(onlyNew)
 			;(newTop :: any)._Scope:Activate(both)
 
-			local moved = ServerReplicator.new({ Token = token, Data = FakeManager.new(), Parent = oldTop })
+			local moved = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), Parent = oldTop })
 
 			local calls, restore = spyOnTransport()
 			moved:SetParent(newTop)
@@ -489,8 +489,8 @@ return function(t: tiniest)
 		end)
 
 		test("is a no-op when the new parent is already the current parent", function()
-			local top = ServerReplicator.new({ Token = uniqueToken("SetParentNoOpTop"), Data = FakeManager.new(), ReplicationTargets = {} })
-			local child = ServerReplicator.new({ Token = uniqueToken("SetParentNoOpChild"), Data = FakeManager.new(), Parent = top })
+			local top = ServerReplicator.new({ Namespace = uniqueToken("SetParentNoOpTop"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local child = ServerReplicator.new({ Namespace = uniqueToken("SetParentNoOpChild"), Data = FakeManager.new(), Parent = top })
 
 			local calls, restore = spyOnTransport()
 			child:SetParent(top)
@@ -502,8 +502,8 @@ return function(t: tiniest)
 		end)
 
 		test("errors when called on a top-level replicator", function()
-			local top = ServerReplicator.new({ Token = uniqueToken("SetParentTopLevelError"), Data = FakeManager.new(), ReplicationTargets = {} })
-			local otherTop = ServerReplicator.new({ Token = uniqueToken("SetParentTopLevelErrorOther"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local top = ServerReplicator.new({ Namespace = uniqueToken("SetParentTopLevelError"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local otherTop = ServerReplicator.new({ Namespace = uniqueToken("SetParentTopLevelErrorOther"), Data = FakeManager.new(), ReplicationTargets = {} })
 			expect(function()
 				top:SetParent(otherTop)
 			end).fails()
@@ -518,7 +518,7 @@ return function(t: tiniest)
 		test("sends a Destroy item to active players and drops from discovery", function()
 			local token = uniqueToken("DestroyTest")
 			local player = { Name = "P" } :: any
-			local replicator = ServerReplicator.new({ Token = token, Data = FakeManager.new(), ReplicationTargets = { player } })
+			local replicator = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), ReplicationTargets = { player } })
 			;(replicator :: any)._Scope:Activate(player)
 			local id = replicator.Id
 
@@ -535,7 +535,7 @@ return function(t: tiniest)
 			local playerA = { Name = "A" } :: any
 			local playerB = { Name = "B" } :: any
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("DestroyMultiplePlayers"),
+				Namespace = uniqueToken("DestroyMultiplePlayers"),
 				Data = FakeManager.new(),
 				ReplicationTargets = { playerA, playerB },
 			})
@@ -552,7 +552,7 @@ return function(t: tiniest)
 		test("drops any data ops queued earlier this frame for that replicator", function()
 			local player = { Name = "P" } :: any
 			local replicator =
-				ServerReplicator.new({ Token = uniqueToken("DestroyDropsQueuedOps"), Data = { x = 0 }, ReplicationTargets = { player } })
+				ServerReplicator.new({ Namespace = uniqueToken("DestroyDropsQueuedOps"), Data = { x = 0 }, ReplicationTargets = { player } })
 			;(replicator :: any)._Scope:Activate(player)
 
 			replicator.Manager:Set("x", 1) -- queued, not yet flushed
@@ -567,8 +567,8 @@ return function(t: tiniest)
 		end)
 
 		test("does not affect an unrelated replicator", function()
-			local a = ServerReplicator.new({ Token = uniqueToken("DestroyUnrelatedA"), Data = FakeManager.new(), ReplicationTargets = {} })
-			local b = ServerReplicator.new({ Token = uniqueToken("DestroyUnrelatedB"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local a = ServerReplicator.new({ Namespace = uniqueToken("DestroyUnrelatedA"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local b = ServerReplicator.new({ Namespace = uniqueToken("DestroyUnrelatedB"), Data = FakeManager.new(), ReplicationTargets = {} })
 			a:Destroy()
 			expect(BaseReplicator.GetFromId(b.Id)).is(b)
 			b:Destroy()
@@ -577,7 +577,7 @@ return function(t: tiniest)
 		test("a pending (never-activated) target receives nothing, since it was never sent anything", function()
 			local player = { Name = "NeverActivated" } :: any
 			local replicator =
-				ServerReplicator.new({ Token = uniqueToken("DestroyPendingOnly"), Data = FakeManager.new(), ReplicationTargets = { player } })
+				ServerReplicator.new({ Namespace = uniqueToken("DestroyPendingOnly"), Data = FakeManager.new(), ReplicationTargets = { player } })
 
 			local calls, restore = spyOnTransport()
 			replicator:Destroy()
@@ -587,8 +587,8 @@ return function(t: tiniest)
 		end)
 
 		test("destroying a parent reparents its children to ServerReplicator.None server-side", function()
-			local parent = ServerReplicator.new({ Token = uniqueToken("DestroyReparentsToNone"), Data = FakeManager.new(), ReplicationTargets = {} })
-			local child = ServerReplicator.new({ Token = uniqueToken("DestroyReparentsToNoneChild"), Data = FakeManager.new(), Parent = parent })
+			local parent = ServerReplicator.new({ Namespace = uniqueToken("DestroyReparentsToNone"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local child = ServerReplicator.new({ Namespace = uniqueToken("DestroyReparentsToNoneChild"), Data = FakeManager.new(), Parent = parent })
 			parent:Destroy()
 			expect(BaseReplicator.GetFromId(child.Id)).is(child)
 			expect(child:GetParent()).is(ServerReplicator.None)
@@ -598,9 +598,9 @@ return function(t: tiniest)
 
 		test("destroying a parent with an active-player child sends the child's Destroy before the parent's", function()
 			local player = { Name = "P" } :: any
-			local parent = ServerReplicator.new({ Token = uniqueToken("DestroyOrderParent"), Data = FakeManager.new(), ReplicationTargets = { player } })
+			local parent = ServerReplicator.new({ Namespace = uniqueToken("DestroyOrderParent"), Data = FakeManager.new(), ReplicationTargets = { player } })
 			;(parent :: any)._Scope:Activate(player)
-			local child = ServerReplicator.new({ Token = uniqueToken("DestroyOrderChild"), Data = FakeManager.new(), Parent = parent })
+			local child = ServerReplicator.new({ Namespace = uniqueToken("DestroyOrderChild"), Data = FakeManager.new(), Parent = parent })
 			local parentId = parent.Id
 			local childId = child.Id
 
@@ -628,10 +628,10 @@ return function(t: tiniest)
 
 		test("destroying a parent with multiple active-player children sends a Destroy for each child", function()
 			local player = { Name = "P" } :: any
-			local parent = ServerReplicator.new({ Token = uniqueToken("DestroyMultiChildParent"), Data = FakeManager.new(), ReplicationTargets = { player } })
+			local parent = ServerReplicator.new({ Namespace = uniqueToken("DestroyMultiChildParent"), Data = FakeManager.new(), ReplicationTargets = { player } })
 			;(parent :: any)._Scope:Activate(player)
-			local childA = ServerReplicator.new({ Token = uniqueToken("DestroyMultiChildA"), Data = FakeManager.new(), Parent = parent })
-			local childB = ServerReplicator.new({ Token = uniqueToken("DestroyMultiChildB"), Data = FakeManager.new(), Parent = parent })
+			local childA = ServerReplicator.new({ Namespace = uniqueToken("DestroyMultiChildA"), Data = FakeManager.new(), Parent = parent })
+			local childB = ServerReplicator.new({ Namespace = uniqueToken("DestroyMultiChildB"), Data = FakeManager.new(), Parent = parent })
 
 			local calls, restore = spyOnTransport()
 			parent:Destroy()
@@ -651,7 +651,7 @@ return function(t: tiniest)
 		end)
 
 		test("destroying a childless replicator still works (no-op children loop)", function()
-			local replicator = ServerReplicator.new({ Token = uniqueToken("DestroyNoChildrenNoop"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local replicator = ServerReplicator.new({ Namespace = uniqueToken("DestroyNoChildrenNoop"), Data = FakeManager.new(), ReplicationTargets = {} })
 			expect(function()
 				replicator:Destroy()
 			end).never_fails()

@@ -27,14 +27,12 @@ type SearchCondition = Types.SearchCondition
 --// Module-level (per-realm) registries //--
 export type Realm = {
 	Storage: { [Id]: BaseReplicator },
-	CreationListeners: { [string]: { (replicator: BaseReplicator) -> () } },
 	ReplicatorCreated: Types.Signal<(replicator: BaseReplicator) -> (), BaseReplicator>,
 }
 
 const function newRealm(): Realm
 	return {
 		Storage = {},
-		CreationListeners = {},
 		ReplicatorCreated = Signal.new() :: any,
 	}
 end
@@ -48,6 +46,8 @@ local nextId = 0
 
 --[[
 	Resolves a `SearchCondition` into a plain predicate function.
+	String and token conditions compare against `replicator.Namespace`; anonymous
+	replicators (Namespace == nil) never match either.
 ]]
 const function reconcileCondition(condition: SearchCondition?): (replicator: BaseReplicator) -> boolean
 	local conditionType = typeof(condition)
@@ -59,15 +59,16 @@ const function reconcileCondition(condition: SearchCondition?): (replicator: Bas
 	elseif conditionType == "function" then
 		return condition :: any
 	elseif conditionType == "string" then
-		const tokenName = condition :: string
+		const nameToMatch = condition :: string
 		return function(replicator)
-			return replicator.Token.Name == tokenName
+			return (replicator :: any).Namespace == nameToMatch
 		end
 	elseif conditionType == "table" then
 		const asToken = condition :: ReplicationToken
 		if TokenCache.isToken(asToken) then
+			const nameToMatch = TokenCache.getTokenName(asToken)
 			return function(replicator)
-				return replicator.Token.Name == TokenCache.getTokenName(asToken)
+				return (replicator :: any).Namespace == nameToMatch
 			end
 		end
 		const tags = condition :: Tags
@@ -311,52 +312,43 @@ end
 	@tag Static
 	@within ServerReplicator
 	@function OnNew
-	@param tokenName string
+	@param condition SearchCondition
 	@param fn (replicator: ServerReplicator) -> ()
 	@return () -> ()
-	Listens for new replicators whose token name matches `tokenName`. Returns
-	a disconnect function.
+	Listens for *new* replicators matching `condition`. `condition` accepts the
+	same forms as `GetAll`/`ForEach`: a namespace string, a `ReplicationToken`,
+	a tags table, or a custom predicate. Returns a disconnect function.
 
-	:::caution Hooking after RequestData
-	Calling `OnNew` after `ClientReplicator.RequestData()` has already resolved
-	will miss any replicators that were created in the initial snapshot. ForEach is
-	the preferred way to listen for new replicators, since it also runs for any existing
-	replicators that match the condition.
+	:::caution Prefer ForEach
+	`OnNew` only fires for replicators created **after** this call. Use `ForEach`
+	to also handle any already-existing matches (it runs the callback for those
+	immediately, then subscribes for future ones).
 	:::
 ]=]
 --[=[
 	@tag Static
 	@within ClientReplicator
 	@function OnNew
-	@param tokenName string
+	@param condition SearchCondition
 	@param fn (replicator: ClientReplicator) -> ()
 	@return () -> ()
-	Listens for new replicators whose token name matches `tokenName`. Returns
-	a disconnect function.
+	Listens for *new* replicators matching `condition`. Returns a disconnect function.
 
-	:::caution Hooking after RequestData
-	Calling `OnNew` after `ClientReplicator.RequestData()` has already resolved
-	will miss any replicators that were created in the initial snapshot. ForEach is
-	the preferred way to listen for new replicators, since it also runs for any existing
-	replicators that match the condition.
+	:::caution Prefer ForEach
+	`OnNew` only fires for replicators created **after** this call. Call `ForEach`
+	to handle any already-existing matches too. If called after `RequestData` has
+	resolved, any replicators in the initial snapshot will be missed.
 	:::
 ]=]
-function BaseReplicator.OnNew(tokenName: string, fn: (replicator: BaseReplicator) -> ()): () -> ()
-	const creationListeners = BaseReplicator._Realm.CreationListeners
-	local listeners = creationListeners[tokenName]
-	if listeners == nil then
-		listeners = {}
-		creationListeners[tokenName] = listeners
-	end
-	table.insert(listeners, fn)
-
-	return function()
-		-- Removes from the exact list `fn` was inserted into above, regardless
-		-- of which realm is active by the time this disconnect runs.
-		local index = table.find(listeners, fn)
-		if index then
-			table.remove(listeners, index)
+function BaseReplicator.OnNew(condition: SearchCondition, fn: (replicator: BaseReplicator) -> ()): () -> ()
+	const satisfies = reconcileCondition(condition)
+	const connection = BaseReplicator._Realm.ReplicatorCreated:Connect(function(replicator: BaseReplicator)
+		if satisfies(replicator) then
+			task.spawn(fn, replicator)
 		end
+	end)
+	return function()
+		connection:Disconnect()
 	end
 end
 
@@ -364,24 +356,41 @@ end
 --// Constructor //--
 --------------------------------------------------------------------------------
 
--- Shared base constructor for both `ServerReplicator` and `ClientReplicator` subclasses
+-- Shared base constructor for both `ServerReplicator` and `ClientReplicator` subclasses.
+-- `Namespace` accepts a string, a ReplicationToken, or nil (anonymous).
+-- Both `self.Namespace` (string?) and `self.Token` (handle?) are set from it.
 function BaseReplicator.new(config: {
 	Id: Id,
-	Token: ReplicationToken,
+	Namespace: (string | ReplicationToken)?,
 	Tags: Tags?,
 	Manager: TableManager<any>,
 	Parent: BaseReplicator?,
 }): BaseReplicator
 	const self = setmetatable({}, BaseReplicator) :: BR_Internal
 
+	-- Normalize namespace: token -> use as-is; string -> resolve handle; nil -> anonymous.
+	local namespace: string? = nil
+	local token: ReplicationToken? = nil
+	local rawNs = config.Namespace
+	if rawNs ~= nil then
+		if TokenCache.isToken(rawNs) then
+			token = rawNs :: ReplicationToken
+			namespace = token.Name
+		elseif typeof(rawNs) == "string" and rawNs ~= "" then
+			namespace = rawNs :: string
+			token = TokenCache.getOrCreateToken(namespace)
+		end
+	end
+
 	self.Id = config.Id
+	self.Namespace = namespace
+	self.Token = token
 	self.Tags = table.freeze(config.Tags or {})
 	self.Manager = config.Manager
-	self.Token = config.Token
 	self._Parent = config.Parent :: BR_Internal?
 	self._Children = {}
 	self._CreationListenersFired = false
-	
+
 	self._Janitor = Janitor.new()
 	self.ChildAdded = Signal.new(self._Janitor) :: any
 	self.ChildRemoved = Signal.new(self._Janitor) :: any
@@ -402,22 +411,14 @@ end
 
 --[=[
 	@private
-	Fires every registered creation listener (and the global `ReplicatorCreated`
-	signal) for this replicator's token. Subclasses call this once, after their
-	own construction has fully finished.
+	Fires the global `ReplicatorCreated` signal for this replicator.
+	`OnNew` listeners are connected directly to that signal; no per-name bucket
+	is needed. Subclasses call this once, after their own construction finishes.
 ]=]
 function BaseReplicator._FireCreationListeners(self: BR_Internal)
 	assert(not self._CreationListenersFired, "Creation listeners already fired for this replicator")
 	self._CreationListenersFired = true
-
-	const realm = BaseReplicator._Realm
-	const listeners = realm.CreationListeners[self.Token.Name]
-	if listeners then
-		for _, listener in table.clone(listeners) do
-			task.spawn(listener, self)
-		end
-	end
-	realm.ReplicatorCreated:Fire(self)
+	BaseReplicator._Realm.ReplicatorCreated:Fire(self)
 end
 
 --[=[
@@ -646,8 +647,8 @@ end
 --------------------------------------------------------------------------------
 
 function BaseReplicator.GetTokenName(self: BR_Internal): string
-	warn("BaseReplicator.GetToken is deprecated; use .Token instead:", debug.traceback())
-	return self.Token.__NAME__
+	warn("BaseReplicator.GetToken is deprecated; use .Namespace instead:", debug.traceback())
+	return self.Namespace or ""
 end
 
 return BaseReplicator

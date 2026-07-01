@@ -7,21 +7,30 @@
 
 	Replicates a TableManager instance to one or more clients.
 
-	```lua
-	local PlayerToken = ServerReplicator.TOKEN("PlayerData")
+	`Namespace` is an optional string class identifier. Omit it for anonymous
+	replicators (discoverable only by Id, tags, or predicate). For large
+	codebases that need collision protection, use `TOKEN()` to claim a name
+	exclusively — see below.
 
+	```lua
+	-- Simple: plain string Namespace, no ceremony.
 	Players.PlayerAdded:Connect(function(player)
 		local replicator = ServerReplicator.new({
-			Token = PlayerToken,
+			Namespace = "PlayerData",
 			Data = { Coins = 0 },
 			ReplicationTargets = player,
 			Tags = { UserId = player.UserId },
 		})
-
 		player.Destroying:Connect(function()
 			replicator:Destroy()
 		end)
 	end)
+
+	-- Opt-in collision guard: TOKEN() claims a name exclusively.
+	local PlayerToken = ServerReplicator.TOKEN("PlayerData")
+	ServerReplicator.new({ Namespace = PlayerToken, Data = ..., ReplicationTargets = {} })
+	-- Release the name after all replicators using it are destroyed:
+	ServerReplicator.TOKEN.destroy(PlayerToken)
 	```
 ]=]
 
@@ -72,6 +81,45 @@ const transport: ServerTransport = ServerTransportModule.new()
 -- `NotifyDataSent` on the real singleton transport without needing a live
 -- second client. Not part of the public API.
 ServerReplicator._Transport = transport
+
+-- Namespace ownership ledger (server-only, never sent to the client).
+-- `tokenOwner[name]` holds the ReplicationToken that exclusively claimed `name`
+-- via TOKEN(); raw-string replicators cannot use that name while an owner exists.
+-- `liveCount[name]` tracks live ServerReplicators using each named namespace so
+-- TOKEN.destroy() can refuse to unregister while replicators still exist.
+-- `tokenDestroyers[name]` holds the zero-argument cleanup function for each
+-- registered token, looked up by name in TOKEN.destroy(token).
+const tokenOwner: { [string]: ReplicationToken } = {}
+const liveCount: { [string]: number } = {}
+const tokenDestroyers: { [string]: () -> () } = {}
+
+-- Registers `name` in the ledger and returns a token handle. The corresponding
+-- destroyer is stored in `tokenDestroyers` and called via `TOKEN.destroy(token)`.
+local function registerToken(name: string): ReplicationToken
+	assert(
+		tokenOwner[name] == nil,
+		`ServerReplicator.TOKEN: namespace "{name}" is already owned by a token`
+	)
+	assert(
+		(liveCount[name] or 0) == 0,
+		`ServerReplicator.TOKEN: namespace "{name}" is currently used by raw-string replicators; claim it with TOKEN() before creating any replicators with that name`
+	)
+	local token = TokenCache.getOrCreateToken(name)
+	tokenOwner[name] = token
+	tokenDestroyers[name] = function()
+		assert(
+			tokenOwner[name] == token,
+			`ReplicationToken: token "{name}" is not the registered owner or was already destroyed`
+		)
+		assert(
+			(liveCount[name] or 0) == 0,
+			`ReplicationToken: cannot destroy token "{name}" — {liveCount[name] or 0} replicator(s) still use this namespace; destroy them first`
+		)
+		tokenOwner[name] = nil
+		tokenDestroyers[name] = nil
+	end
+	return token
+end
 
 -- The single server-wide ordering point for outbound data ops. Every scope's
 -- `OnApplied` ops funnel here so they replay on the client in exact server
@@ -144,7 +192,7 @@ const function buildCreateItem(replicator: SR_Internal): WireItem
 	return FlatCodec.CreateItem(
 		replicator.Id,
 		if parent then parent.Id else nil,
-		replicator.Token.Name,
+		replicator.Namespace or "",
 		replicator.Tags,
 		replicator.Manager.Raw,
 		buildRemotesMap(replicator)
@@ -195,26 +243,58 @@ end
 	@within ServerReplicator
 	@tag Static
 	@prop TOKEN (name: string) -> ReplicationToken
-	Creates a unique `ReplicationToken` identifying a replicator "class" to
-	the client. May only be called once per `tokenName`; store and reuse the
-	returned token rather than calling this again with the same name.
+	Registers `name` in the namespace-ownership ledger and returns a
+	`ReplicationToken` that exclusively owns that name for its lifetime.
 
-	This is intended to help prevent accidental collisions between different
-	replicators in the same experience.
+	Using a token prevents any other system from accidentally creating a
+	replicator with the same namespace string. Call this once per name
+	(usually at the top of a module), store the result, and pass it as the
+	`Namespace` (or `Token`) field when creating replicators.
+
+	To release the name, call `token:Destroy()` after all replicators using
+	it have been destroyed.
+
+	**You do not need a token** for simple cases — a plain string `Namespace`
+	is fully supported and costs nothing extra:
+	```lua
+	-- Simple (no collision guard):
+	ServerReplicator.new({ Namespace = "PlayerData", ... })
+
+	-- Opt-in collision safety:
+	local PlayerToken = ServerReplicator.TOKEN("PlayerData")
+	ServerReplicator.new({ Namespace = PlayerToken, ... })
+	```
+
+	:::caution One owner per name
+	`TOKEN("name")` errors if the name is already owned by another live token
+	**or** if any raw-string replicators with that name already exist. Claim the
+	token at module load before creating any replicators with that name.
+	:::
 ]=]
 ServerReplicator.TOKEN = setmetatable({
-	new = TokenCache.registerNewToken,
+	new = registerToken,
 	get = TokenCache.getExistingToken,
+	--[=[
+		Destroys a token that was created with `TOKEN()`, releasing its name.
+		Errors if any live replicators still use this namespace.
+	]=]
+	destroy = function(token: ReplicationToken)
+		local fn = tokenDestroyers[token.Name]
+		assert(
+			fn ~= nil,
+			`ReplicationToken: token "{token.Name}" is not a registered namespace owner or was already destroyed`
+		)
+		fn()
+	end,
 }, {
 	__call = function(_, name: string): ReplicationToken
-		return TokenCache.registerNewToken(name)
+		return registerToken(name)
 	end,
 })
 table.freeze(ServerReplicator.TOKEN)
 ServerReplicator.Token = ServerReplicator.TOKEN -- Backwards compat alias
 
--- User configurable escape hatch: if true, `ServerReplicator.new` will not warn
--- when a raw string is passed as the `Token` argument instead of a proper `ReplicationToken`.
+-- Deprecated no-op; raw strings are now accepted without a warning.
 ServerReplicator.SuppressTokenWarnings = false
 
 -- Unique sentinel values used inside a `config.Client` table to declare remotes.
@@ -232,7 +312,7 @@ local UNRELIABLE_REMOTE_EVENT_SENTINEL = table.freeze({})
 
 	```lua
 	local r = ServerReplicator.new({
-		Token = token,
+		Namespace = "MyReplicator",
 		ReplicationTargets = player,
 		Client = {
 			Hit = ServerReplicator.createRemoteEvent(),
@@ -264,33 +344,45 @@ end
 --[=[
 	@tag Static
 
-	Creates a new `ServerReplicator`. 
-	
-	Parent or Exactly one of `Parent` or
-	`ReplicationTargets` must be given: a top-level replicator is created with
-	`ReplicationTargets` (pass `{}` to start with none), and a child
-	replicator is created with `Parent` and inherits its top-level ancestor's
-	targets.
+	Creates a new `ServerReplicator`.
+
+	Exactly one of `Parent` or `ReplicationTargets` must be given: a top-level
+	replicator is created with `ReplicationTargets` (pass `{}` to start with
+	none), and a child replicator is created with `Parent` and inherits its
+	top-level ancestor's targets.
 
 	Config table fields:
-	- `Token` - Unique token identifying this replicator class to the client. Use `ServerReplicator.TOKEN` to create one.
+	- `Namespace` - Optional string or `ReplicationToken` identifying the
+	  replicator's class. Pass a plain string for simple cases, or a token
+	  created with `ServerReplicator.TOKEN()` for opt-in collision safety.
+	  Omit entirely for anonymous replicators (reachable only via id, tags,
+	  or a predicate condition).
+	- `Token` - Alias for `Namespace`; accepted for backwards compatibility.
 	- `Data` - A `TableManager` instance or a raw table to replicate. Defaults to `{}`.
 	- `ReplicationTargets` - A `Player` or list of `Player`s to replicate to. Only valid for top-level replicators.
 	- `Parent` - A parent `ServerReplicator` to attach this replicator to. Only valid for child replicators.
-	- `Tags` - Optional table of string keys to string/number values to attach to this replicator for metadata and search purposes.
+	- `Tags` - Optional table of string keys to any values for metadata and search.
 	- `Coalesced` - If true, ops are buffered and only the latest op is sent at the end of the frame. Defaults to false.
 	- `ImmediateFlush` - If true, ops are flushed immediately instead of waiting for the end of the frame. Defaults to false.
-	This is useful for if you need you to guarantee changes are received by the client in the same order that external remote events are fired.
+	  This is useful to guarantee changes are received by the client in the same order that external remote events are fired.
 
+	:::caution Namespace collision guard
+	If you call `ServerReplicator.TOKEN("name")` to claim a namespace, any
+	attempt to create a replicator with that name as a raw string will throw.
+	Pass the token object directly instead of the string. Conversely, if raw-
+	string replicators already exist for a name, `TOKEN()` will refuse to claim
+	it until they are all destroyed.
+	:::
 
 	:::caution Conflicting Configurations
 	The following configurations are invalid and will throw an error:
-	- ReplicationTargets and Parent cannot both be specified.
-	- Coalesced and ImmediateFlush cannot both be true.
+	- `ReplicationTargets` and `Parent` cannot both be specified.
+	- `Coalesced` and `ImmediateFlush` cannot both be true.
 	:::
 ]=]
 function ServerReplicator.new(config: {
-	Token: ReplicationToken,
+	Namespace: (string | ReplicationToken)?,
+	Token: (string | ReplicationToken)?,
 	Data: (TableManager<any> | { [any]: any })?,
 	ReplicationTargets: ReplicationTargets?,
 	Parent: ServerReplicator?,
@@ -299,14 +391,38 @@ function ServerReplicator.new(config: {
 	ImmediateFlush: boolean?,
 	Client: { [string]: any }?,
 }): ServerReplicator
-	local token = config.Token
-	if typeof(token) == "string" then
-		if not ServerReplicator.SuppressTokenWarnings then
-			warn("Avoid using raw strings for tokens; use ServerReplicator.Token instead")
+	-- Resolve namespace: prefer `Namespace`, fall back to `Token` (compat alias).
+	local rawNs: (string | ReplicationToken)? = config.Namespace or config.Token
+	local resolvedNamespace: string? = nil
+	local wasExplicitToken = false
+
+	if rawNs ~= nil then
+		if TokenCache.isToken(rawNs) then
+			wasExplicitToken = true
+			resolvedNamespace = TokenCache.getTokenName(rawNs :: ReplicationToken)
+		elseif typeof(rawNs) == "string" and rawNs ~= "" then
+			resolvedNamespace = rawNs :: string
 		end
-		token = TokenCache.getOrCreateToken(token)
 	end
-	assert(TokenCache.isToken(token), "Invalid Token")
+
+	-- Ledger enforcement (server-only collision guard).
+	if resolvedNamespace ~= nil then
+		local ns = resolvedNamespace
+		if wasExplicitToken then
+			-- An explicit token must be the registered owner.
+			assert(
+				tokenOwner[ns] == rawNs,
+				`ServerReplicator.new: token for namespace "{ns}" was destroyed or is not the registered owner`
+			)
+		else
+			-- A raw string must not be owned by a token.
+			assert(
+				tokenOwner[ns] == nil,
+				`ServerReplicator.new: namespace "{ns}" is reserved by a ReplicationToken; pass the token instead of a raw string`
+			)
+		end
+		liveCount[ns] = (liveCount[ns] or 0) + 1
+	end
 
 	local targets = config.ReplicationTargets
 	if typeof(targets) == "string" then
@@ -333,7 +449,7 @@ function ServerReplicator.new(config: {
 	---------------------------------------------------------
 	const base = BaseReplicator.new {
 		Id = BaseReplicator.GenerateId(),
-		Token = token,
+		Namespace = rawNs,
 		Tags = config.Tags,
 		Manager = manager,
 		Parent = parent,
@@ -800,6 +916,18 @@ function ServerReplicator.Destroy(self: SR_Internal)
 		end
 	end
 
+	-- Decrement the namespace liveCount so TOKEN.destroy() can tell when the
+	-- name is fully released and safe to unregister.
+	const ns = self.Namespace
+	if ns then
+		const count = (liveCount[ns] or 1) - 1
+		if count <= 0 then
+			liveCount[ns] = nil
+		else
+			liveCount[ns] = count
+		end
+	end
+
 	getmetatable(ServerReplicator).Destroy(self)
 end
 
@@ -911,31 +1039,31 @@ end
 --// Finalization //--
 --------------------------------------------------------------------------------
 
-local allToken = ServerReplicator.Token("ServerReplicator.All")
-local noneToken = ServerReplicator.Token("ServerReplicator.None")
+local allToken = ServerReplicator.TOKEN("ServerReplicator.All")
+local noneToken = ServerReplicator.TOKEN("ServerReplicator.None")
 
 --[=[
-	@tag Static 
+	@tag Static
 	@prop ServerReplicator.All ServerReplicator
 	A top-level replicator that replicates to every current and future
 	player. Useful as a `Parent` for children that should always be visible
-	to everyone, but may be moved later. Do not modify it directly -- only parent to it.
+	to everyone, but may be moved later. Do not modify it directly — only parent to it.
 ]=]
 ServerReplicator.All = ServerReplicator.new {
-	Token = allToken,
+	Namespace = allToken,
 	Data = {},
 	ReplicationTargets = REPLICATE_TO_ALL,
 }
 
 --[=[
-	@tag Static 
+	@tag Static
 	@prop ServerReplicator.None ServerReplicator
 	A top-level replicator that replicates to nobody. Useful as a `Parent`
-	for children that should not replicate yet and are waiting for a proper 
-	parent. Do not modify it directly -- only parent to it.
+	for children that should not replicate yet and are waiting for a proper
+	parent. Do not modify it directly — only parent to it.
 ]=]
 ServerReplicator.None = ServerReplicator.new {
-	Token = noneToken,
+	Namespace = noneToken,
 	Data = {},
 	ReplicationTargets = {},
 }

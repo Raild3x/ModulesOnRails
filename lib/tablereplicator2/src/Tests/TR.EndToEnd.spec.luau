@@ -77,12 +77,12 @@ return function(t: tiniest)
 			local client = intermediary:Connect()
 
 			local replicator =
-				ServerReplicator.new { Token = token, Data = { Coins = 5 }, ReplicationTargets = { client.Player } }
+				ServerReplicator.new { Namespace = token, Data = { Coins = 5 }, ReplicationTargets = { client.Player } }
 			client:RequestData()
 
 			local mirrored = client:GetFromId(replicator.Id) :: any
 			expect(mirrored).never_is(nil)
-			expect(mirrored.Token.Name).is(getTokenName(token))
+			expect(mirrored.Namespace).is(getTokenName(token))
 			expect(mirrored.Manager.Raw.Coins).is(5)
 
 			replicator:Destroy()
@@ -95,7 +95,7 @@ return function(t: tiniest)
 			local client = intermediary:Connect()
 
 			local replicator =
-				ServerReplicator.new { Token = token, Data = { Coins = 0 }, ReplicationTargets = { client.Player } }
+				ServerReplicator.new { Namespace = token, Data = { Coins = 0 }, ReplicationTargets = { client.Player } }
 			client:RequestData()
 
 			replicator.Manager:Set("Coins", 42);
@@ -115,7 +115,7 @@ return function(t: tiniest)
 			local clientB = intermediary:Connect()
 
 			local replicator =
-				ServerReplicator.new { Token = token, Data = { Coins = 7 }, ReplicationTargets = { clientA.Player } }
+				ServerReplicator.new { Namespace = token, Data = { Coins = 7 }, ReplicationTargets = { clientA.Player } }
 			clientA:RequestData()
 			clientB:RequestData()
 
@@ -139,7 +139,7 @@ return function(t: tiniest)
 			clientA:RequestData()
 			clientB:RequestData()
 
-			local replicator = ServerReplicator.new { Token = token, Data = { Coins = 3 }, ReplicationTargets = {} }
+			local replicator = ServerReplicator.new { Namespace = token, Data = { Coins = 3 }, ReplicationTargets = {} }
 			-- `AddTarget` distinguishes a single Player from a list via
 			-- `typeof() == "Instance"`; the fake player stand-in is a plain
 			-- table, so it must be wrapped to take the list branch correctly.
@@ -161,7 +161,7 @@ return function(t: tiniest)
 			local clientB = intermediary:Connect()
 
 			local replicator = ServerReplicator.new {
-				Token = token,
+				Namespace = token,
 				Data = { Coins = 1 },
 				ReplicationTargets = { clientA.Player, clientB.Player },
 			}
@@ -200,7 +200,7 @@ return function(t: tiniest)
 				clientB:RequestData()
 
 				local replicator = ServerReplicator.new {
-					Token = token,
+					Namespace = token,
 					Data = { Coins = 4 },
 					ReplicationTargets = { clientA.Player },
 				}
@@ -225,11 +225,11 @@ return function(t: tiniest)
 			local clientA = intermediary:Connect()
 			local clientB = intermediary:Connect()
 
-			local parent = ServerReplicator.new { Token = token, Data = {}, ReplicationTargets = { clientA.Player } }
+			local parent = ServerReplicator.new { Namespace = token, Data = {}, ReplicationTargets = { clientA.Player } }
 			clientA:RequestData()
 			clientB:RequestData()
 
-			local child = ServerReplicator.new { Token = token, Data = { Hp = 50 }, Parent = parent }
+			local child = ServerReplicator.new { Namespace = token, Data = { Hp = 50 }, Parent = parent }
 
 			local mirroredChildA = clientA:GetFromId(child.Id) :: any
 			expect(mirroredChildA).never_is(nil)
@@ -253,10 +253,10 @@ return function(t: tiniest)
 			both:RequestData()
 
 			local oldTop =
-				ServerReplicator.new { Token = token, Data = {}, ReplicationTargets = { onlyOld.Player, both.Player } }
+				ServerReplicator.new { Namespace = token, Data = {}, ReplicationTargets = { onlyOld.Player, both.Player } }
 			local newTop =
-				ServerReplicator.new { Token = token, Data = {}, ReplicationTargets = { onlyNew.Player, both.Player } }
-			local moved = ServerReplicator.new { Token = token, Data = { Tag = "moved" }, Parent = oldTop }
+				ServerReplicator.new { Namespace = token, Data = {}, ReplicationTargets = { onlyNew.Player, both.Player } }
+			local moved = ServerReplicator.new { Namespace = token, Data = { Tag = "moved" }, Parent = oldTop }
 
 			expect(onlyOld:GetFromId(moved.Id)).never_is(nil)
 			expect(both:GetFromId(moved.Id)).never_is(nil)
@@ -288,9 +288,9 @@ return function(t: tiniest)
 			local intermediary = FakeIntermediary.new()
 			local client = intermediary:Connect()
 
-			local parent = ServerReplicator.new { Token = token, Data = {}, ReplicationTargets = { client.Player } }
+			local parent = ServerReplicator.new { Namespace = token, Data = {}, ReplicationTargets = { client.Player } }
 			client:RequestData()
-			local child = ServerReplicator.new { Token = token, Data = { Hp = 10 }, Parent = parent }
+			local child = ServerReplicator.new { Namespace = token, Data = { Hp = 10 }, Parent = parent }
 
 			expect(client:GetFromId(parent.Id)).never_is(nil)
 			expect(client:GetFromId(child.Id)).never_is(nil)
@@ -312,10 +312,10 @@ return function(t: tiniest)
 			local intermediary = FakeIntermediary.new()
 			local client = intermediary:Connect()
 
-			local top = ServerReplicator.new { Token = token, Data = {}, ReplicationTargets = { client.Player } }
+			local top = ServerReplicator.new { Namespace = token, Data = {}, ReplicationTargets = { client.Player } }
 			client:RequestData()
-			local child = ServerReplicator.new { Token = token, Data = {}, Parent = top }
-			local grandchild = ServerReplicator.new { Token = token, Data = { X = 1 }, Parent = child }
+			local child = ServerReplicator.new { Namespace = token, Data = {}, Parent = top }
+			local grandchild = ServerReplicator.new { Namespace = token, Data = { X = 1 }, Parent = child }
 
 			expect(client:GetFromId(top.Id)).never_is(nil)
 			expect(client:GetFromId(child.Id)).never_is(nil)
@@ -337,11 +337,11 @@ return function(t: tiniest)
 			local intermediary = FakeIntermediary.new()
 			local client = intermediary:Connect()
 
-			local topA = ServerReplicator.new { Token = token, Data = {}, ReplicationTargets = { client.Player } }
+			local topA = ServerReplicator.new { Namespace = token, Data = {}, ReplicationTargets = { client.Player } }
 			local topB =
-				ServerReplicator.new { Token = token, Data = { Val = 7 }, ReplicationTargets = { client.Player } }
+				ServerReplicator.new { Namespace = token, Data = { Val = 7 }, ReplicationTargets = { client.Player } }
 			client:RequestData()
-			local childOfA = ServerReplicator.new { Token = token, Data = {}, Parent = topA }
+			local childOfA = ServerReplicator.new { Namespace = token, Data = {}, Parent = topA }
 
 			topA:Destroy()
 
@@ -369,9 +369,9 @@ return function(t: tiniest)
 			-- Both replicators wrap the SAME TableManager instance.
 			local sharedTM = TableManagerModule.new { Coins = 0 }
 			local repA =
-				ServerReplicator.new { Token = token, Data = sharedTM, ReplicationTargets = { clientA.Player } }
+				ServerReplicator.new { Namespace = token, Data = sharedTM, ReplicationTargets = { clientA.Player } }
 			local repB =
-				ServerReplicator.new { Token = token, Data = sharedTM, ReplicationTargets = { clientB.Player } }
+				ServerReplicator.new { Namespace = token, Data = sharedTM, ReplicationTargets = { clientB.Player } }
 
 			clientA:RequestData()
 			clientB:RequestData()
@@ -402,9 +402,9 @@ return function(t: tiniest)
 
 				local sharedTM = TableManagerModule.new { Value = 0 }
 				local rep1 =
-					ServerReplicator.new { Token = token, Data = sharedTM, ReplicationTargets = { client.Player } }
+					ServerReplicator.new { Namespace = token, Data = sharedTM, ReplicationTargets = { client.Player } }
 				local rep2 =
-					ServerReplicator.new { Token = token, Data = sharedTM, ReplicationTargets = { client.Player } }
+					ServerReplicator.new { Namespace = token, Data = sharedTM, ReplicationTargets = { client.Player } }
 
 				client:RequestData()
 
@@ -473,8 +473,8 @@ return function(t: tiniest)
 				local childTM = TableManagerModule.new(sharedStats)
 
 				local parentRep =
-					ServerReplicator.new { Token = token, Data = parentTM, ReplicationTargets = { client.Player } }
-				local childRep = ServerReplicator.new { Token = token, Data = childTM, Parent = parentRep }
+					ServerReplicator.new { Namespace = token, Data = parentTM, ReplicationTargets = { client.Player } }
+				local childRep = ServerReplicator.new { Namespace = token, Data = childTM, Parent = parentRep }
 
 				client:RequestData()
 
@@ -504,8 +504,8 @@ return function(t: tiniest)
 
 			local tm1 = TableManagerModule.new { Score = 0 }
 			local tm2 = TableManagerModule.new { Score = 0 }
-			local rep1 = ServerReplicator.new { Token = token, Data = tm1, ReplicationTargets = { client.Player } }
-			local rep2 = ServerReplicator.new { Token = token, Data = tm2, ReplicationTargets = { client.Player } }
+			local rep1 = ServerReplicator.new { Namespace = token, Data = tm1, ReplicationTargets = { client.Player } }
+			local rep2 = ServerReplicator.new { Namespace = token, Data = tm2, ReplicationTargets = { client.Player } }
 
 			client:RequestData()
 
@@ -542,7 +542,7 @@ return function(t: tiniest)
 				local client = intermediary:Connect()
 
 				local replicator = ServerReplicator.new {
-					Token = token,
+					Namespace = token,
 					Data = { Hp = 0 },
 					ReplicationTargets = { client.Player },
 					Coalesced = true,
@@ -583,7 +583,7 @@ return function(t: tiniest)
 			local client = intermediary:Connect()
 
 			local replicator =
-				ServerReplicator.new { Token = token, Data = { Hp = 0 }, ReplicationTargets = { client.Player } }
+				ServerReplicator.new { Namespace = token, Data = { Hp = 0 }, ReplicationTargets = { client.Player } }
 			client:RequestData()
 
 			local captured: { { Player: any, Message: any } } = {}
@@ -623,13 +623,13 @@ return function(t: tiniest)
 				-- so collapsing one must never affect the other.
 				local sharedTM = TableManagerModule.new { Hp = 0 }
 				local coalescedRep = ServerReplicator.new {
-					Token = token,
+					Namespace = token,
 					Data = sharedTM,
 					ReplicationTargets = { clientA.Player },
 					Coalesced = true,
 				}
 				local plainRep =
-					ServerReplicator.new { Token = token, Data = sharedTM, ReplicationTargets = { clientB.Player } }
+					ServerReplicator.new { Namespace = token, Data = sharedTM, ReplicationTargets = { clientB.Player } }
 
 				clientA:RequestData()
 				clientB:RequestData()

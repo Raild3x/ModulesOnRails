@@ -28,10 +28,16 @@ export type Connection = Signal.Connection
 
 --[=[
 	@type TableReplicator.ReplicationToken { Name: string }
-	A special token that identifies a replicator. Tokens are used to find replicators
-	by name. We use these to help prevent accidental namespace collisions by different
-	systems. You can create a new token with `ServerReplicator.TOKEN("MyToken")`.
-	Do not attempt to make one manually.
+	An optional, opt-in handle that exclusively owns a namespace name for its
+	lifetime. Tokens are created with `ServerReplicator.TOKEN("MyToken")` and
+	enforce collision safety: no other token or raw-string replicator may claim
+	the same name while this token is alive.
+
+	Tokens are optional — a `Namespace` can be a plain `string` without a token.
+	Use `TOKEN()` only when you need the collision guard.
+
+	To release ownership, call `ServerReplicator.TOKEN.destroy(token)` after all
+	replicators using this namespace have been destroyed.
 ]=]
 export type ReplicationToken = TokenCache.ReplicationToken
 
@@ -44,11 +50,14 @@ export type ReplicationTargets = "all" | Player | { Player }
 
 --[=[
 	@type TableReplicator.SearchCondition string | ReplicationToken | Tags | (replicator: ServerReplicator | ClientReplicator) -> boolean
-	A condition used to filter replicators in `ForEach`/`OnNew`/`FindFirstChild`/etc.
-	- `string`: matches a replicator whose token name equals the string.
-	- `ReplicationToken`: matches a replicator using that exact token.
+	A condition used to filter replicators in `ForEach`/`OnNew`/`GetFirst`/etc.
+	- `string`: matches a replicator whose `Namespace` equals the string.
+	- `ReplicationToken`: matches a replicator whose `Namespace` equals the token's name.
 	- `Tags`: matches a replicator whose tags are a superset of the given tags.
 	- `function`: a custom predicate.
+
+	Anonymous replicators (no `Namespace`) never match a string or token condition
+	but are reachable via tags, `GetFromId`, `ForEach(predicate)`, and `ReplicatorCreated`.
 ]=]
 export type SearchCondition = string | ReplicationToken | Tags | (replicator: any) -> boolean
 
@@ -213,13 +222,27 @@ end
 ]=]
 --[=[
 	@readonly
-	@prop ServerReplicator.Token ReplicationToken
-	The token of this replicator.
+	@prop ServerReplicator.Namespace string?
+	The namespace string of this replicator, or `nil` if anonymous.
+	Matches any `string` or `ReplicationToken` `SearchCondition` when non-nil.
 ]=]
 --[=[
 	@readonly
-	@prop ClientReplicator.Token ReplicationToken
-	The token of this replicator.
+	@prop ClientReplicator.Namespace string?
+	The namespace string of this replicator, or `nil` if anonymous.
+]=]
+--[=[
+	@readonly
+	@prop ServerReplicator.Token ReplicationToken?
+	The token handle for this replicator, or `nil` if anonymous or created with
+	a raw-string namespace. Present when the namespace was claimed with
+	`ServerReplicator.TOKEN()` or when a raw string resolves to the same cached
+	handle. Prefer `.Namespace` for string comparisons.
+]=]
+--[=[
+	@readonly
+	@prop ClientReplicator.Token ReplicationToken?
+	The token handle for this replicator, or `nil` if anonymous.
 ]=]
 --[=[
 	@readonly
@@ -279,13 +302,17 @@ export type BR_Public<BR> = {
 	-- Read only Fields
 	Id: Id,
 
-
 	Tags: Tags,
-
 
 	Manager: TableManager<any>,
 
-	Token: ReplicationToken,
+	-- `Namespace` is the canonical class-id string. Nil for anonymous replicators.
+	Namespace: string?,
+
+	-- `Token` is the cached handle for this namespace, present when the namespace
+	-- was set (either via TOKEN() or a raw string). Nil for anonymous replicators.
+	-- Prefer `.Namespace` for string comparisons; `.Token` for identity checks.
+	Token: ReplicationToken?,
 
 	-- Methods
 	IsTopLevel: (self: BR) -> boolean,
@@ -311,7 +338,6 @@ export type BR_Internal<BR = BR_Internal> = {
 
 	_FireCreationListeners: (self: BR) -> (),
 	_SetParentRefs: (self: BR, newParent: BR?) -> (),
-
 } & BR_Public<BR>
 
 

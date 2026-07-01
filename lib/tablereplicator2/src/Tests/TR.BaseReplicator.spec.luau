@@ -25,7 +25,7 @@ return function(t: tiniest)
 
 	local function newTop(label: string, tags: { [string]: any }?)
 		return ServerReplicator.new {
-			Token = uniqueToken(label),
+			Namespace = uniqueToken(label),
 			Data = FakeManager.new(),
 			ReplicationTargets = {},
 			Tags = tags,
@@ -65,7 +65,7 @@ return function(t: tiniest)
 		test("works for a child replicator's id, not just top-level ones", function()
 			local parent = newTop("GetFromIdParent")
 			local child = ServerReplicator.new {
-				Token = uniqueToken("GetFromIdChild"),
+				Namespace = uniqueToken("GetFromIdChild"),
 				Data = FakeManager.new(),
 				Parent = parent,
 			}
@@ -124,8 +124,8 @@ return function(t: tiniest)
 		test("filters by ReplicationToken, returning only replicators using it", function()
 			local tokenA = uniqueToken("GetAllTokenA")
 			local tokenB = uniqueToken("GetAllTokenB")
-			local a = ServerReplicator.new { Token = tokenA, Data = FakeManager.new(), ReplicationTargets = {} }
-			local b = ServerReplicator.new { Token = tokenB, Data = FakeManager.new(), ReplicationTargets = {} }
+			local a = ServerReplicator.new { Namespace = tokenA, Data = FakeManager.new(), ReplicationTargets = {} }
+			local b = ServerReplicator.new { Namespace = tokenB, Data = FakeManager.new(), ReplicationTargets = {} }
 
 			local resultsA = BaseReplicator.GetAll(tokenA)
 			expect(#resultsA).is(1)
@@ -137,7 +137,7 @@ return function(t: tiniest)
 
 		test("filters by token name string", function()
 			local token = uniqueToken("GetAllStringToken")
-			local replicator = ServerReplicator.new { Token = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			local replicator = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
 
 			local results = BaseReplicator.GetAll(getTokenName(token))
 			expect(#results).is(1)
@@ -180,7 +180,7 @@ return function(t: tiniest)
 		test("runs immediately for an existing matching replicator", function()
 			local replicator = newTop("ForEachExisting")
 			local seen: { any } = {}
-			local disconnect = BaseReplicator.ForEach(getTokenName(replicator.Token), function(r)
+			local disconnect = BaseReplicator.ForEach(replicator.Namespace, function(r)
 				table.insert(seen, r)
 			end)
 			expect(table.find(seen, replicator) ~= nil).is_true()
@@ -194,7 +194,7 @@ return function(t: tiniest)
 			local disconnect = BaseReplicator.ForEach(getTokenName(token), function(r)
 				table.insert(seen, r)
 			end)
-			local replicator = ServerReplicator.new { Token = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			local replicator = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
 			expect(#seen).is(1)
 			expect(seen[1]).is(replicator)
 			disconnect()
@@ -208,7 +208,7 @@ return function(t: tiniest)
 				count += 1
 			end)
 			disconnect()
-			local replicator = ServerReplicator.new { Token = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			local replicator = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
 			expect(count).is(0)
 			replicator:Destroy()
 		end)
@@ -235,7 +235,7 @@ return function(t: tiniest)
 				count += 1
 			end)
 			local replicator =
-				ServerReplicator.new { Token = tokenB, Data = FakeManager.new(), ReplicationTargets = {} }
+				ServerReplicator.new { Namespace = tokenB, Data = FakeManager.new(), ReplicationTargets = {} }
 			expect(count).is(0)
 			disconnect()
 			replicator:Destroy()
@@ -247,7 +247,7 @@ return function(t: tiniest)
 	describe("BaseReplicator.PromiseFirst", function()
 		test("resolves immediately when a match already exists", function()
 			local replicator = newTop("PromiseFirstExisting")
-			local promise = BaseReplicator.PromiseFirst(getTokenName(replicator.Token))
+			local promise = BaseReplicator.PromiseFirst(replicator.Namespace)
 			expect(promise:getStatus()).is("Resolved")
 			replicator:Destroy()
 		end)
@@ -261,7 +261,7 @@ return function(t: tiniest)
 		test("resolves once a future matching replicator is created", function()
 			local token = uniqueToken("PromiseFirstFuture")
 			local promise = BaseReplicator.PromiseFirst(getTokenName(token))
-			local replicator = ServerReplicator.new { Token = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			local replicator = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
 			expect(promise:getStatus()).is("Resolved")
 			replicator:Destroy()
 		end)
@@ -293,7 +293,7 @@ return function(t: tiniest)
 
 		test("returns a match by token name", function()
 			local replicator = newTop("GetFirstToken")
-			expect(BaseReplicator.GetFirst(getTokenName(replicator.Token))).is(replicator)
+			expect(BaseReplicator.GetFirst(replicator.Namespace)).is(replicator)
 			replicator:Destroy()
 		end)
 
@@ -315,7 +315,7 @@ return function(t: tiniest)
 		test("does not wait for a future match -- nil now even if one is created right after", function()
 			local token = uniqueToken("GetFirstNoWait")
 			expect(BaseReplicator.GetFirst(getTokenName(token))).is(nil)
-			local replicator = ServerReplicator.new { Token = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			local replicator = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
 			replicator:Destroy()
 		end)
 	end)
@@ -330,7 +330,7 @@ return function(t: tiniest)
 				table.insert(seen, replicator)
 			end)
 
-			local replicator = ServerReplicator.new { Token = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			local replicator = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
 
 			expect(#seen).is(1)
 			expect(seen[1]).is(replicator)
@@ -346,8 +346,8 @@ return function(t: tiniest)
 				count += 1
 			end)
 
-			local a = ServerReplicator.new { Token = token, Data = FakeManager.new(), ReplicationTargets = {} }
-			local b = ServerReplicator.new { Token = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			local a = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			local b = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
 			expect(count).is(2)
 
 			disconnect()
@@ -365,7 +365,7 @@ return function(t: tiniest)
 				countB += 1
 			end)
 
-			local replicator = ServerReplicator.new { Token = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			local replicator = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
 			expect(countA).is(1)
 			expect(countB).is(1)
 
@@ -382,7 +382,7 @@ return function(t: tiniest)
 			end)
 			disconnect()
 
-			local replicator = ServerReplicator.new { Token = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			local replicator = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
 			expect(count).is(0)
 			replicator:Destroy()
 		end)
@@ -396,37 +396,176 @@ return function(t: tiniest)
 			end)
 
 			local replicator =
-				ServerReplicator.new { Token = tokenB, Data = FakeManager.new(), ReplicationTargets = {} }
+				ServerReplicator.new { Namespace = tokenB, Data = FakeManager.new(), ReplicationTargets = {} }
 			expect(count).is(0)
 
 			disconnect()
 			replicator:Destroy()
 		end)
+
+		test("accepts a tag-table condition and fires only for matching replicators", function()
+			local seen: { any } = {}
+			local disconnect = BaseReplicator.OnNew({ Kind = "OnNewTagMatch" }, function(r)
+				table.insert(seen, r)
+			end)
+			local matching = newTop("OnNewTagYes", { Kind = "OnNewTagMatch" })
+			local nonMatching = newTop("OnNewTagNo", { Kind = "Other" })
+			expect(table.find(seen, matching) ~= nil).is_true()
+			expect(table.find(seen, nonMatching) ~= nil).never_is_true()
+			disconnect()
+			matching:Destroy()
+			nonMatching:Destroy()
+		end)
+
+		test("accepts a predicate condition and fires when the predicate returns true", function()
+			local target: any = nil
+			local seen: { any } = {}
+			local disconnect = BaseReplicator.OnNew(function(r)
+				return r == target
+			end, function(r)
+				table.insert(seen, r)
+			end)
+			local other = newTop("OnNewPredicateOther")
+			expect(#seen).is(0)
+			target = newTop("OnNewPredicateTarget")
+			expect(#seen).is(1)
+			expect(seen[1]).is(target)
+			disconnect()
+			other:Destroy()
+			target:Destroy()
+		end)
+
+		test("a throwing listener does not prevent sibling listeners from firing", function()
+			local token = uniqueToken("OnNewIsolation")
+			local safeCount = 0
+			local disconnectBad = BaseReplicator.OnNew(getTokenName(token), function()
+				error("intentional error")
+			end)
+			local disconnectGood = BaseReplicator.OnNew(getTokenName(token), function()
+				safeCount += 1
+			end)
+			local replicator = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			-- task.spawn isolates each listener; the good one still fires
+			expect(safeCount).is(1)
+			disconnectBad()
+			disconnectGood()
+			replicator:Destroy()
+		end)
+
+		test("anonymous replicator does NOT fire a string-condition OnNew listener", function()
+			local count = 0
+			local disconnect = BaseReplicator.OnNew("SomeNamespace", function()
+				count += 1
+			end)
+			local anon = ServerReplicator.new { Data = FakeManager.new(), ReplicationTargets = {} }
+			expect(count).is(0)
+			disconnect()
+			anon:Destroy()
+		end)
 	end)
 
 	--------------------------------------------------------------------------------
 
-	describe("BaseReplicator.GetTokenName", function()
+	describe("Namespace ownership ledger (TOKEN)", function()
+		test("TOKEN() claims a name exclusively; raw-string replicator with same name throws", function()
+			local token = uniqueToken("LedgerRawBlock")
+			local name = getTokenName(token)
+			local ok, err = pcall(function()
+				ServerReplicator.new { Namespace = name, Data = FakeManager.new(), ReplicationTargets = {} }
+			end)
+			expect(ok).is(false)
+			expect(typeof(err) == "string" and string.find(err, "ReplicationToken") ~= nil).is_true()
+		end)
+
+		test("TOKEN() on a name with live raw-string replicators throws", function()
+			local name = "LedgerTokenAfterRaw#" .. tostring(math.random(1e9))
+			local r = ServerReplicator.new { Namespace = name, Data = FakeManager.new(), ReplicationTargets = {} }
+			local ok, err = pcall(function()
+				ServerReplicator.TOKEN(name)
+			end)
+			expect(ok).is(false)
+			expect(typeof(err) == "string" and string.find(err, "raw-string") ~= nil).is_true()
+			r:Destroy()
+		end)
+
+		test("TOKEN.destroy() frees the name; the name can then be used as a raw string", function()
+			local token = uniqueToken("LedgerDestroyFrees")
+			local name = getTokenName(token)
+			ServerReplicator.TOKEN.destroy(token)
+			-- After destroy, raw-string use is allowed again
+			local r = ServerReplicator.new { Namespace = name, Data = FakeManager.new(), ReplicationTargets = {} }
+			expect(r.Namespace).is(name)
+			r:Destroy()
+		end)
+
+		test("TOKEN.destroy() throws when a replicator still uses the namespace", function()
+			local token = uniqueToken("LedgerDestroyInUse")
+			local r = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			local ok, err = pcall(function()
+				ServerReplicator.TOKEN.destroy(token)
+			end)
+			expect(ok).is(false)
+			expect(typeof(err) == "string" and string.find(err, "destroy") ~= nil).is_true()
+			r:Destroy()
+			-- Now succeeds
+			ServerReplicator.TOKEN.destroy(token)
+		end)
+
+		test("TOKEN.destroy() throws on an already-destroyed token", function()
+			local token = uniqueToken("LedgerDoubleDestroy")
+			ServerReplicator.TOKEN.destroy(token)
+			local ok, _ = pcall(function()
+				ServerReplicator.TOKEN.destroy(token)
+			end)
+			expect(ok).is(false)
+		end)
+
+		test("destroy → re-claim: after destroy, TOKEN() can claim the name again", function()
+			local token = uniqueToken("LedgerReClaim")
+			local name = getTokenName(token)
+			ServerReplicator.TOKEN.destroy(token)
+			local token2 = ServerReplicator.TOKEN(name)
+			expect(getTokenName(token2)).is(name)
+			ServerReplicator.TOKEN.destroy(token2)
+		end)
+
+		test("multiple live replicators with the same token: all must be destroyed before TOKEN.destroy", function()
+			local token = uniqueToken("LedgerMultiLive")
+			local r1 = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			local r2 = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			r1:Destroy()
+			local ok, _ = pcall(function()
+				ServerReplicator.TOKEN.destroy(token)
+			end)
+			expect(ok).is(false)
+			r2:Destroy()
+			ServerReplicator.TOKEN.destroy(token) -- now succeeds
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("BaseReplicator.Namespace", function()
 		test("matches the registered token's name for a top-level replicator", function()
 			local token = uniqueToken("GetTokenNameTop")
-			local replicator = ServerReplicator.new { Token = token, Data = FakeManager.new(), ReplicationTargets = {} }
-			expect(replicator.Token.Name).is(getTokenName(token))
+			local replicator = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			expect(replicator.Namespace).is(getTokenName(token))
 			replicator:Destroy()
 		end)
 
 		test("matches for a child replicator", function()
 			local parent = newTop("GetTokenNameParent")
-			local childToken = uniqueToken("GetTokenNameChild")
-			local child = ServerReplicator.new { Token = childToken, Data = FakeManager.new(), Parent = parent }
-			expect(child.Token.Name).is(getTokenName(childToken))
+			local childNamespace = uniqueToken("GetTokenNameChild")
+			local child = ServerReplicator.new { Namespace = childNamespace, Data = FakeManager.new(), Parent = parent }
+			expect(child.Namespace).is(getTokenName(childNamespace))
 			child:Destroy()
 			parent:Destroy()
 		end)
 
-		test("distinguishes two different tokens", function()
+		test("distinguishes two different namespaces", function()
 			local a = newTop("GetTokenNameA")
 			local b = newTop("GetTokenNameB")
-			expect(a.Token.Name == b.Token.Name).is(false)
+			expect(a.Namespace == b.Namespace).is(false)
 			a:Destroy()
 			b:Destroy()
 		end)
@@ -435,7 +574,7 @@ return function(t: tiniest)
 			local message = FlatCodec.BuildMessage { FlatCodec.CreateItem(50001, nil, "GetTokenNameClient", {}, {}) };
 			(ClientReplicator :: any)._HandleMessage(message)
 			local mirrored = BaseReplicator.GetFromId(50001) :: any
-			expect(mirrored.Token.Name).is("GetTokenNameClient");
+			expect(mirrored.Namespace).is("GetTokenNameClient");
 			(ClientReplicator :: any)._HandleMessage(FlatCodec.BuildMessage { FlatCodec.DestroyItem(50001) })
 		end)
 
@@ -443,12 +582,34 @@ return function(t: tiniest)
 			local token = uniqueToken("GetTokenNameAfterReparent")
 			local top = newTop("GetTokenNameOtherTop")
 			local otherTop = newTop("GetTokenNameOtherTop2")
-			local child = ServerReplicator.new { Token = token, Data = FakeManager.new(), Parent = top }
+			local child = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), Parent = top }
 			child:SetParent(otherTop)
-			expect(child.Token.Name).is(getTokenName(token))
+			expect(child.Namespace).is(getTokenName(token))
 			child:Destroy()
 			top:Destroy()
 			otherTop:Destroy()
+		end)
+
+		test("is nil for an anonymous replicator (no Namespace given)", function()
+			local replicator = ServerReplicator.new { Data = FakeManager.new(), ReplicationTargets = {} }
+			expect(replicator.Namespace).is(nil)
+			replicator:Destroy()
+		end)
+
+		test("plain string Namespace works without a token", function()
+			-- Each test run appends a unique suffix to avoid ledger conflicts.
+			local name = "PlainNs#" .. tostring(math.random(1e9))
+			local r = ServerReplicator.new { Namespace = name, Data = FakeManager.new(), ReplicationTargets = {} }
+			expect(r.Namespace).is(name)
+			r:Destroy()
+		end)
+
+		test("anonymous replicator round-trips through encode/decode with empty namespace", function()
+			local message = FlatCodec.BuildMessage { FlatCodec.CreateItem(50099, nil, "", {}, {}) };
+			(ClientReplicator :: any)._HandleMessage(message)
+			local mirrored = BaseReplicator.GetFromId(50099) :: any
+			expect(mirrored.Namespace).is(nil);
+			(ClientReplicator :: any)._HandleMessage(FlatCodec.BuildMessage { FlatCodec.DestroyItem(50099) })
 		end)
 	end)
 
@@ -464,7 +625,7 @@ return function(t: tiniest)
 		test("false for a direct child", function()
 			local parent = newTop("IsTopLevelParent")
 			local child = ServerReplicator.new {
-				Token = uniqueToken("IsTopLevelChild"),
+				Namespace = uniqueToken("IsTopLevelChild"),
 				Data = FakeManager.new(),
 				Parent = parent,
 			}
@@ -476,12 +637,12 @@ return function(t: tiniest)
 		test("false for a grandchild", function()
 			local top = newTop("IsTopLevelGrandparent")
 			local child = ServerReplicator.new {
-				Token = uniqueToken("IsTopLevelMidChild"),
+				Namespace = uniqueToken("IsTopLevelMidChild"),
 				Data = FakeManager.new(),
 				Parent = top,
 			}
 			local grandchild = ServerReplicator.new {
-				Token = uniqueToken("IsTopLevelGrandchild"),
+				Namespace = uniqueToken("IsTopLevelGrandchild"),
 				Data = FakeManager.new(),
 				Parent = child,
 			}
@@ -521,7 +682,7 @@ return function(t: tiniest)
 		test("returns the immediate parent for a child", function()
 			local parent = newTop("GetParentParent")
 			local child = ServerReplicator.new {
-				Token = uniqueToken("GetParentChild"),
+				Namespace = uniqueToken("GetParentChild"),
 				Data = FakeManager.new(),
 				Parent = parent,
 			}
@@ -533,12 +694,12 @@ return function(t: tiniest)
 		test("returns the immediate parent, not the grandparent, for a grandchild", function()
 			local top = newTop("GetParentGrandparent")
 			local child = ServerReplicator.new {
-				Token = uniqueToken("GetParentMidChild"),
+				Namespace = uniqueToken("GetParentMidChild"),
 				Data = FakeManager.new(),
 				Parent = top,
 			}
 			local grandchild = ServerReplicator.new {
-				Token = uniqueToken("GetParentGrandchild"),
+				Namespace = uniqueToken("GetParentGrandchild"),
 				Data = FakeManager.new(),
 				Parent = child,
 			}
@@ -553,7 +714,7 @@ return function(t: tiniest)
 			local topA = newTop("GetParentTopA")
 			local topB = newTop("GetParentTopB")
 			local child = ServerReplicator.new {
-				Token = uniqueToken("GetParentSwapChild"),
+				Namespace = uniqueToken("GetParentSwapChild"),
 				Data = FakeManager.new(),
 				Parent = topA,
 			}
@@ -588,12 +749,12 @@ return function(t: tiniest)
 		test("contains exactly the direct children, not grandchildren", function()
 			local parent = newTop("GetChildrenParent")
 			local child = ServerReplicator.new {
-				Token = uniqueToken("GetChildrenChild"),
+				Namespace = uniqueToken("GetChildrenChild"),
 				Data = FakeManager.new(),
 				Parent = parent,
 			}
 			local grandchild = ServerReplicator.new {
-				Token = uniqueToken("GetChildrenGrandchild"),
+				Namespace = uniqueToken("GetChildrenGrandchild"),
 				Data = FakeManager.new(),
 				Parent = child,
 			}
@@ -609,7 +770,7 @@ return function(t: tiniest)
 			local parent = newTop("GetChildrenFresh")
 			expect(#parent:GetChildren()).is(0)
 			local child = ServerReplicator.new {
-				Token = uniqueToken("GetChildrenFreshChild"),
+				Namespace = uniqueToken("GetChildrenFreshChild"),
 				Data = FakeManager.new(),
 				Parent = parent,
 			}
@@ -621,7 +782,7 @@ return function(t: tiniest)
 		test("no longer contains a child after that child is destroyed", function()
 			local parent = newTop("GetChildrenAfterDestroy")
 			local child = ServerReplicator.new {
-				Token = uniqueToken("GetChildrenAfterDestroyChild"),
+				Namespace = uniqueToken("GetChildrenAfterDestroyChild"),
 				Data = FakeManager.new(),
 				Parent = parent,
 			}
@@ -633,12 +794,12 @@ return function(t: tiniest)
 		test("returns every sibling when there are multiple children", function()
 			local parent = newTop("GetChildrenSiblings")
 			local childA = ServerReplicator.new {
-				Token = uniqueToken("GetChildrenSiblingA"),
+				Namespace = uniqueToken("GetChildrenSiblingA"),
 				Data = FakeManager.new(),
 				Parent = parent,
 			}
 			local childB = ServerReplicator.new {
-				Token = uniqueToken("GetChildrenSiblingB"),
+				Namespace = uniqueToken("GetChildrenSiblingB"),
 				Data = FakeManager.new(),
 				Parent = parent,
 			}
@@ -664,12 +825,12 @@ return function(t: tiniest)
 		test("includes children and grandchildren", function()
 			local top = newTop("GetDescendantsTop")
 			local child = ServerReplicator.new {
-				Token = uniqueToken("GetDescendantsChild"),
+				Namespace = uniqueToken("GetDescendantsChild"),
 				Data = FakeManager.new(),
 				Parent = top,
 			}
 			local grandchild = ServerReplicator.new {
-				Token = uniqueToken("GetDescendantsGrandchild"),
+				Namespace = uniqueToken("GetDescendantsGrandchild"),
 				Data = FakeManager.new(),
 				Parent = child,
 			}
@@ -684,17 +845,17 @@ return function(t: tiniest)
 		test("count matches the total subtree size excluding self", function()
 			local top = newTop("GetDescendantsCount")
 			local childA = ServerReplicator.new {
-				Token = uniqueToken("GetDescendantsCountA"),
+				Namespace = uniqueToken("GetDescendantsCountA"),
 				Data = FakeManager.new(),
 				Parent = top,
 			}
 			local childB = ServerReplicator.new {
-				Token = uniqueToken("GetDescendantsCountB"),
+				Namespace = uniqueToken("GetDescendantsCountB"),
 				Data = FakeManager.new(),
 				Parent = top,
 			}
 			local grandchild = ServerReplicator.new {
-				Token = uniqueToken("GetDescendantsCountGrandchild"),
+				Namespace = uniqueToken("GetDescendantsCountGrandchild"),
 				Data = FakeManager.new(),
 				Parent = childA,
 			}
@@ -709,7 +870,7 @@ return function(t: tiniest)
 			local top = newTop("GetDescendantsUpdate")
 			expect(#top:GetDescendants()).is(0)
 			local child = ServerReplicator.new {
-				Token = uniqueToken("GetDescendantsUpdateChild"),
+				Namespace = uniqueToken("GetDescendantsUpdateChild"),
 				Data = FakeManager.new(),
 				Parent = top,
 			}
@@ -721,12 +882,12 @@ return function(t: tiniest)
 		test("shrinks after a descendant subtree is destroyed", function()
 			local top = newTop("GetDescendantsShrink")
 			local child = ServerReplicator.new {
-				Token = uniqueToken("GetDescendantsShrinkChild"),
+				Namespace = uniqueToken("GetDescendantsShrinkChild"),
 				Data = FakeManager.new(),
 				Parent = top,
 			}
 			local grandchild = ServerReplicator.new {
-				Token = uniqueToken("GetDescendantsShrinkGrandchild"),
+				Namespace = uniqueToken("GetDescendantsShrinkGrandchild"),
 				Data = FakeManager.new(),
 				Parent = child,
 			}
@@ -744,7 +905,7 @@ return function(t: tiniest)
 		test("non-recursive finds a direct child matching tags", function()
 			local parent = newTop("FindFirstChildDirect")
 			local child = ServerReplicator.new {
-				Token = uniqueToken("FindFirstChildDirectChild"),
+				Namespace = uniqueToken("FindFirstChildDirectChild"),
 				Data = FakeManager.new(),
 				Parent = parent,
 				Tags = { Name = "Target" },
@@ -757,12 +918,12 @@ return function(t: tiniest)
 		test("non-recursive returns nil for a grandchild", function()
 			local top = newTop("FindFirstChildNonRecursive")
 			local child = ServerReplicator.new {
-				Token = uniqueToken("FindFirstChildMid"),
+				Namespace = uniqueToken("FindFirstChildMid"),
 				Data = FakeManager.new(),
 				Parent = top,
 			}
 			local grandchild = ServerReplicator.new {
-				Token = uniqueToken("FindFirstChildGrandchild"),
+				Namespace = uniqueToken("FindFirstChildGrandchild"),
 				Data = FakeManager.new(),
 				Parent = child,
 				Tags = { Name = "Grandchild" },
@@ -776,12 +937,12 @@ return function(t: tiniest)
 		test("recursive=true finds a grandchild", function()
 			local top = newTop("FindFirstChildRecursive")
 			local child = ServerReplicator.new {
-				Token = uniqueToken("FindFirstChildRecursiveMid"),
+				Namespace = uniqueToken("FindFirstChildRecursiveMid"),
 				Data = FakeManager.new(),
 				Parent = top,
 			}
 			local grandchild = ServerReplicator.new {
-				Token = uniqueToken("FindFirstChildRecursiveGrandchild"),
+				Namespace = uniqueToken("FindFirstChildRecursiveGrandchild"),
 				Data = FakeManager.new(),
 				Parent = child,
 				Tags = { Name = "Grandchild" },
@@ -795,7 +956,7 @@ return function(t: tiniest)
 		test("returns nil when nothing matches even recursively", function()
 			local top = newTop("FindFirstChildNoMatch")
 			local child = ServerReplicator.new {
-				Token = uniqueToken("FindFirstChildNoMatchChild"),
+				Namespace = uniqueToken("FindFirstChildNoMatchChild"),
 				Data = FakeManager.new(),
 				Parent = top,
 			}
@@ -807,7 +968,7 @@ return function(t: tiniest)
 		test("matches via a custom function condition", function()
 			local top = newTop("FindFirstChildFunction")
 			local child = ServerReplicator.new {
-				Token = uniqueToken("FindFirstChildFunctionChild"),
+				Namespace = uniqueToken("FindFirstChildFunctionChild"),
 				Data = FakeManager.new(),
 				Parent = top,
 			}
@@ -826,7 +987,7 @@ return function(t: tiniest)
 		test("resolves immediately if a matching child already exists", function()
 			local parent = newTop("PromiseFirstChildExisting")
 			local child = ServerReplicator.new {
-				Token = uniqueToken("PromiseFirstChildExistingChild"),
+				Namespace = uniqueToken("PromiseFirstChildExistingChild"),
 				Data = FakeManager.new(),
 				Parent = parent,
 				Tags = { Name = "Target" },
@@ -848,7 +1009,7 @@ return function(t: tiniest)
 			local parent = newTop("PromiseFirstChildFuture")
 			local promise = parent:PromiseFirstChild { Name = "Target" }
 			local child = ServerReplicator.new {
-				Token = uniqueToken("PromiseFirstChildFutureChild"),
+				Namespace = uniqueToken("PromiseFirstChildFutureChild"),
 				Data = FakeManager.new(),
 				Parent = parent,
 				Tags = { Name = "Target" },
@@ -863,7 +1024,7 @@ return function(t: tiniest)
 			local parentB = newTop("PromiseFirstChildScopeB")
 			local promise = parentA:PromiseFirstChild { Name = "Target" }
 			local child = ServerReplicator.new {
-				Token = uniqueToken("PromiseFirstChildScopeBChild"),
+				Namespace = uniqueToken("PromiseFirstChildScopeBChild"),
 				Data = FakeManager.new(),
 				Parent = parentB,
 				Tags = { Name = "Target" },
@@ -878,7 +1039,7 @@ return function(t: tiniest)
 			local parent = newTop("PromiseFirstChildNoCondition")
 			local promise = parent:PromiseFirstChild()
 			local child = ServerReplicator.new {
-				Token = uniqueToken("PromiseFirstChildNoConditionChild"),
+				Namespace = uniqueToken("PromiseFirstChildNoConditionChild"),
 				Data = FakeManager.new(),
 				Parent = parent,
 			}
@@ -970,7 +1131,7 @@ return function(t: tiniest)
 		test("detaches the replicator from its parent's GetChildren", function()
 			local parent = newTop("DestroyDetaches")
 			local child = ServerReplicator.new {
-				Token = uniqueToken("DestroyDetachesChild"),
+				Namespace = uniqueToken("DestroyDetachesChild"),
 				Data = FakeManager.new(),
 				Parent = parent,
 			}
@@ -982,7 +1143,7 @@ return function(t: tiniest)
 		test("fires ChildRemoved on the former parent", function()
 			local parent = newTop("DestroyFiresChildRemoved")
 			local child = ServerReplicator.new {
-				Token = uniqueToken("DestroyFiresChildRemovedChild"),
+				Namespace = uniqueToken("DestroyFiresChildRemovedChild"),
 				Data = FakeManager.new(),
 				Parent = parent,
 			}
@@ -998,7 +1159,7 @@ return function(t: tiniest)
 		test("children survive parent destruction: discoverable and reparented to ServerReplicator.None", function()
 			local parent = newTop("DestroyNoCascade")
 			local child = ServerReplicator.new {
-				Token = uniqueToken("DestroyNoCascadeChild"),
+				Namespace = uniqueToken("DestroyNoCascadeChild"),
 				Data = FakeManager.new(),
 				Parent = parent,
 			}
@@ -1012,7 +1173,7 @@ return function(t: tiniest)
 		test("children orphaned to None are not treated as top-level replicators", function()
 			local parent = newTop("DestroyOrphanNotTopLevel")
 			local child = ServerReplicator.new {
-				Token = uniqueToken("DestroyOrphanNotTopLevelChild"),
+				Namespace = uniqueToken("DestroyOrphanNotTopLevelChild"),
 				Data = FakeManager.new(),
 				Parent = parent,
 			}
@@ -1025,12 +1186,12 @@ return function(t: tiniest)
 		test("grandchildren ride along to None when their immediate parent is the one destroyed", function()
 			local top = newTop("DestroyGrandchildRideAlong")
 			local child = ServerReplicator.new {
-				Token = uniqueToken("DestroyGrandchildRideAlongChild"),
+				Namespace = uniqueToken("DestroyGrandchildRideAlongChild"),
 				Data = FakeManager.new(),
 				Parent = top,
 			}
 			local grandchild = ServerReplicator.new {
-				Token = uniqueToken("DestroyGrandchildRideAlongGrand"),
+				Namespace = uniqueToken("DestroyGrandchildRideAlongGrand"),
 				Data = FakeManager.new(),
 				Parent = child,
 			}
@@ -1046,7 +1207,7 @@ return function(t: tiniest)
 		test("ChildAdded fires on None and ChildRemoved fires on parent when a child is orphaned", function()
 			local parent = newTop("DestroyOrphanSignals")
 			local child = ServerReplicator.new {
-				Token = uniqueToken("DestroyOrphanSignalsChild"),
+				Namespace = uniqueToken("DestroyOrphanSignalsChild"),
 				Data = FakeManager.new(),
 				Parent = parent,
 			}
@@ -1067,12 +1228,12 @@ return function(t: tiniest)
 		test("destroying a child leaves the parent and siblings unaffected", function()
 			local parent = newTop("DestroySiblingsUnaffected")
 			local childA = ServerReplicator.new {
-				Token = uniqueToken("DestroySiblingA"),
+				Namespace = uniqueToken("DestroySiblingA"),
 				Data = FakeManager.new(),
 				Parent = parent,
 			}
 			local childB = ServerReplicator.new {
-				Token = uniqueToken("DestroySiblingB"),
+				Namespace = uniqueToken("DestroySiblingB"),
 				Data = FakeManager.new(),
 				Parent = parent,
 			}

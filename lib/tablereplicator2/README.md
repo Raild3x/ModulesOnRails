@@ -15,11 +15,10 @@ the client. For the public API, see the moonwave docs / doc comments on
 **Server**
 ```lua
 local TableReplicator = require(Packages.TableReplicator2).Server
-local PlayerToken = TableReplicator.Token("PlayerData")
 
 Players.PlayerAdded:Connect(function(player)
 	local replicator = TableReplicator.new({
-		Token = PlayerToken,
+		Namespace = "PlayerData",
 		Data = { Coins = 0 },
 		ReplicationTargets = player,
 		Tags = { UserId = player.UserId },
@@ -42,13 +41,54 @@ end)
 TableReplicator.RequestData()
 ```
 
+### Namespace is optional
+
+`Namespace` is just a plain string class identifier — no registration ceremony
+required. If you omit it entirely, the replicator is **anonymous**: still
+usable via `GetFromId`, tags, `ForEach(predicate)`, and `ReplicatorCreated`,
+but intentionally unreachable by string `OnNew`/`GetAll` searches.
+
+```lua
+-- Named (discoverable by Namespace string)
+ServerReplicator.new({ Namespace = "Inventory", Data = ..., ReplicationTargets = {} })
+
+-- Anonymous (discoverable only by Id / tags / predicate)
+ServerReplicator.new({ Data = ..., ReplicationTargets = {}, Tags = { Kind = "Ephemeral" } })
+```
+
+### Opt-in collision safety with `TOKEN()`
+
+For large codebases where accidental Namespace reuse across modules would be a
+problem, use `TOKEN()` to claim a name exclusively:
+
+```lua
+-- Claiming a name up-front gives a hard error on any duplicate registration.
+local PlayerToken = ServerReplicator.TOKEN("PlayerData")
+
+-- The token IS a valid Namespace value:
+ServerReplicator.new({ Namespace = PlayerToken, Data = ..., ReplicationTargets = {} })
+
+-- Once every replicator using the token is destroyed, release the name:
+ServerReplicator.TOKEN.destroy(PlayerToken)
+-- Name is now free for re-use.
+```
+
+Collision rules enforced by the ownership ledger:
+- `TOKEN("Name")` throws if `"Name"` is already claimed by another token.
+- `TOKEN("Name")` throws if live replicators already use `"Name"` as a raw
+  string Namespace (raw string → token upgrade must go through `Destroy` first).
+- Passing a raw string `Namespace` when a token owns that name throws —
+  use the token instead.
+- `TOKEN.destroy(token)` throws if any replicator using that token is still
+  alive. Destroy all replicators first.
+
 ## Module map
 
 | Area | File | Responsibility |
 | --- | --- | --- |
 | Shared | `Shared/BaseReplicator.luau` | Identity, hierarchy (parent/children), tags, and static discovery (`GetAll`/`OnNew`/`ForEach`/...). Inherited by both `ServerReplicator` and `ClientReplicator`. |
 | Shared | `Shared/Types.luau` | Shared type definitions: `BufferedOp`, `WireItem`, `WireMessage`, etc. |
-| Shared | `Shared/TokenCache.luau` | `ReplicationToken` registry (token name ↔ token object). |
+| Shared | `Shared/TokenCache.luau` | Claim-free `ReplicationToken` handle cache (name ↔ object). Ownership ledger lives in `ServerReplicator`. |
 | Shared | `Shared/OpBuffer.luau` | `NormalizeAppliedOp`: TableManager2 `AppliedOp` → wire-ready `BufferedOp`. |
 | Shared | `Shared/Serialization/FlatCodec.luau` | Numeric-opcode wire item/message shapes. The generic fallback codec. |
 | Shared | `Shared/Serialization/RefCodec.luau` | "Model V" per-message table de-duplication. |
@@ -217,7 +257,7 @@ decoder for them.
 
 | Opcode (`FlatCodec.Op`) | Item | Carries |
 | --- | --- | --- |
-| `Create` | `WireCreateItem` | `Id`, `ParentId` (`0` = top-level), `Token`, `Tags`, `Data` |
+| `Create` | `WireCreateItem` | `Id`, `ParentId` (`0` = top-level), `Token` (Namespace string; `""` = anonymous), `Tags`, `Data` |
 | `Destroy` | `WireDestroyItem` | `Id` |
 | `SetParent` | `WireSetParentItem` | `Id`, `ParentId` |
 | `Ops` | `WireOpsItem` | `Id`, `Ops: { WireOpEntry }` (numeric `Kind`, `Path`, `Value?`, `Index?`) |

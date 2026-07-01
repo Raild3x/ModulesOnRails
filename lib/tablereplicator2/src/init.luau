@@ -11,7 +11,6 @@
 	```lua
 	local TableReplicator = require(Packages.TableReplicator).Server
 	local TableManager = require(Packages.TableManager)
-	local PlayerToken = TableReplicator.TOKEN("PlayerData")
 
 	Players.PlayerAdded:Connect(function(player)
 		local manager = TableManager.new {
@@ -19,7 +18,7 @@
 		}
 
 		local replicator = TableReplicator.new({
-			Token = PlayerToken,
+			Namespace = "PlayerData",
 			Manager = manager,
 			ReplicationTargets = player,
 		})

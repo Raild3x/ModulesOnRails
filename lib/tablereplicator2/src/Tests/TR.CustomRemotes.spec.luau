@@ -63,7 +63,7 @@ return function(t: tiniest)
 	describe("RegisterRemoteSignal / RegisterRemoteUnreliableSignal", function()
 		test("registered signal is accessible via replicator.Client.Name", function()
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("CR.Access"),
+				Namespace = uniqueToken("CR.Access"),
 				Data = {},
 				ReplicationTargets = {},
 			})
@@ -75,7 +75,7 @@ return function(t: tiniest)
 
 		test("registering the same name twice errors", function()
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("CR.Dup"),
+				Namespace = uniqueToken("CR.Dup"),
 				Data = {},
 				ReplicationTargets = {},
 			})
@@ -88,7 +88,7 @@ return function(t: tiniest)
 
 		test("IsUnreliable() is false for a reliable signal", function()
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("CR.Reliable"),
+				Namespace = uniqueToken("CR.Reliable"),
 				Data = {},
 				ReplicationTargets = {},
 			})
@@ -99,7 +99,7 @@ return function(t: tiniest)
 
 		test("IsUnreliable() is true for an unreliable signal", function()
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("CR.Unreliable"),
+				Namespace = uniqueToken("CR.Unreliable"),
 				Data = {},
 				ReplicationTargets = {},
 			})
@@ -110,7 +110,7 @@ return function(t: tiniest)
 
 		test("config.Client shorthand registers signals via sentinels", function()
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("CR.Shorthand"),
+				Namespace = uniqueToken("CR.Shorthand"),
 				Data = {},
 				ReplicationTargets = {},
 				Client = {
@@ -128,7 +128,7 @@ return function(t: tiniest)
 
 		test("GetRemoteSignal returns the registered signal", function()
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("CR.GetRemote"),
+				Namespace = uniqueToken("CR.GetRemote"),
 				Data = {},
 				ReplicationTargets = {},
 			})
@@ -139,7 +139,7 @@ return function(t: tiniest)
 
 		test("GetRemoteSignal errors for an unregistered name", function()
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("CR.GetRemoteMissing"),
+				Namespace = uniqueToken("CR.GetRemoteMissing"),
 				Data = {},
 				ReplicationTargets = {},
 			})
@@ -159,7 +159,7 @@ return function(t: tiniest)
 			local playerA = { Name = "A" } :: any
 			local playerB = { Name = "B" } :: any
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("CR.FireAll"),
+				Namespace = uniqueToken("CR.FireAll"),
 				Data = {},
 				ReplicationTargets = {},
 			})
@@ -187,7 +187,7 @@ return function(t: tiniest)
 
 		test("FireAll with no active players sends nothing", function()
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("CR.FireAllEmpty"),
+				Namespace = uniqueToken("CR.FireAllEmpty"),
 				Data = {},
 				ReplicationTargets = {},
 			})
@@ -205,7 +205,7 @@ return function(t: tiniest)
 			local playerA = { Name = "A" } :: any
 			local playerB = { Name = "B" } :: any
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("CR.FireExcept"),
+				Namespace = uniqueToken("CR.FireExcept"),
 				Data = {},
 				ReplicationTargets = {},
 			})
@@ -229,7 +229,7 @@ return function(t: tiniest)
 			local playerB = { Name = "B" } :: any
 			local playerC = { Name = "C" } :: any
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("CR.FireExceptList"),
+				Namespace = uniqueToken("CR.FireExceptList"),
 				Data = {},
 				ReplicationTargets = {},
 			})
@@ -251,7 +251,7 @@ return function(t: tiniest)
 			local playerA = { Name = "A", Admin = true } :: any
 			local playerB = { Name = "B", Admin = false } :: any
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("CR.FirePredicate"),
+				Namespace = uniqueToken("CR.FirePredicate"),
 				Data = {},
 				ReplicationTargets = {},
 			})
@@ -273,7 +273,7 @@ return function(t: tiniest)
 		test("unreliable FireAll passes Unreliable=true to FireSignal", function()
 			local player = { Name = "P" } :: any
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("CR.UnreliableFireAll"),
+				Namespace = uniqueToken("CR.UnreliableFireAll"),
 				Data = {},
 				ReplicationTargets = {},
 			})
@@ -298,7 +298,7 @@ return function(t: tiniest)
 		test("Connect callback fires when SignalReceived fires for an active player", function()
 			local player = { Name = "P" } :: any
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("CR.C2S.Connect"),
+				Namespace = uniqueToken("CR.C2S.Connect"),
 				Data = {},
 				ReplicationTargets = { player },
 			})
@@ -324,7 +324,7 @@ return function(t: tiniest)
 			local player = { Name = "P" } :: any
 			local outsider = { Name = "Outsider" } :: any
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("CR.C2S.NotActive"),
+				Namespace = uniqueToken("CR.C2S.NotActive"),
 				Data = {},
 				ReplicationTargets = { player },
 			})
@@ -347,7 +347,7 @@ return function(t: tiniest)
 		test("Once disconnects after the first fire", function()
 			local player = { Name = "P" } :: any
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("CR.C2S.Once"),
+				Namespace = uniqueToken("CR.C2S.Once"),
 				Data = {},
 				ReplicationTargets = { player },
 			})
@@ -369,7 +369,7 @@ return function(t: tiniest)
 		test("multiple Connect callbacks all fire for the same inbound signal", function()
 			local player = { Name = "P" } :: any
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("CR.C2S.Multi"),
+				Namespace = uniqueToken("CR.C2S.Multi"),
 				Data = {},
 				ReplicationTargets = { player },
 			})
@@ -394,7 +394,7 @@ return function(t: tiniest)
 		test("Disconnect stops the callback from firing", function()
 			local player = { Name = "P" } :: any
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("CR.C2S.Disconnect"),
+				Namespace = uniqueToken("CR.C2S.Disconnect"),
 				Data = {},
 				ReplicationTargets = { player },
 			})
@@ -424,7 +424,7 @@ return function(t: tiniest)
 				return 42
 			end
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("CR.Fn.Store"),
+				Namespace = uniqueToken("CR.Fn.Store"),
 				Data = {},
 				ReplicationTargets = {},
 			})
@@ -439,7 +439,7 @@ return function(t: tiniest)
 				return 0
 			end
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("CR.Fn.Shorthand"),
+				Namespace = uniqueToken("CR.Fn.Shorthand"),
 				Data = {},
 				ReplicationTargets = {},
 				Client = { GetScore = fn },
@@ -450,7 +450,7 @@ return function(t: tiniest)
 
 		test("duplicate RegisterRemoteFunction errors", function()
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("CR.Fn.Dup"),
+				Namespace = uniqueToken("CR.Fn.Dup"),
 				Data = {},
 				ReplicationTargets = {},
 			})
@@ -473,7 +473,7 @@ return function(t: tiniest)
 	describe("cross-type name collisions", function()
 		test("registering a function after a signal with the same name errors", function()
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("CR.Cross.SigThenFn"),
+				Namespace = uniqueToken("CR.Cross.SigThenFn"),
 				Data = {},
 				ReplicationTargets = {},
 			})
@@ -486,7 +486,7 @@ return function(t: tiniest)
 
 		test("registering a signal after a function with the same name errors", function()
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("CR.Cross.FnThenSig"),
+				Namespace = uniqueToken("CR.Cross.FnThenSig"),
 				Data = {},
 				ReplicationTargets = {},
 			})
@@ -499,7 +499,7 @@ return function(t: tiniest)
 
 		test("registering an ordered function after an ordered signal with the same name errors", function()
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("CR.Cross.OrdSigThenFn"),
+				Namespace = uniqueToken("CR.Cross.OrdSigThenFn"),
 				Data = {},
 				ReplicationTargets = {},
 			})
@@ -512,7 +512,7 @@ return function(t: tiniest)
 
 		test("registering an ordered signal after an ordered function with the same name errors", function()
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("CR.Cross.OrdFnThenSig"),
+				Namespace = uniqueToken("CR.Cross.OrdFnThenSig"),
 				Data = {},
 				ReplicationTargets = {},
 			})
@@ -531,7 +531,7 @@ return function(t: tiniest)
 	describe("RegisterOrderedRemoteSignal", function()
 		test("registered ordered signal is accessible via replicator.Client.Name", function()
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("OrdSig.Access"),
+				Namespace = uniqueToken("OrdSig.Access"),
 				Data = {},
 				ReplicationTargets = {},
 			})
@@ -543,7 +543,7 @@ return function(t: tiniest)
 
 		test("ordered signal GetRemoteSignal returns the same object", function()
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("OrdSig.GetRemote"),
+				Namespace = uniqueToken("OrdSig.GetRemote"),
 				Data = {},
 				ReplicationTargets = {},
 			})
@@ -555,7 +555,7 @@ return function(t: tiniest)
 		test("FireAll does NOT call transport.FireSignal (routes to coordinator)", function()
 			local player = { Name = "P" } :: any
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("OrdSig.NoFireSignal"),
+				Namespace = uniqueToken("OrdSig.NoFireSignal"),
 				Data = {},
 				ReplicationTargets = {},
 			})
@@ -583,7 +583,7 @@ return function(t: tiniest)
 			local client = intermediary:Connect()
 
 			local replicator = ServerReplicator.new({
-				Token = token,
+				Namespace = token,
 				Data = {},
 				ReplicationTargets = { client.Player },
 			})
@@ -614,7 +614,7 @@ return function(t: tiniest)
 			local clientB = intermediary:Connect()
 
 			local replicator = ServerReplicator.new({
-				Token = token,
+				Namespace = token,
 				Data = {},
 				ReplicationTargets = { clientA.Player, clientB.Player },
 			})
@@ -649,7 +649,7 @@ return function(t: tiniest)
 			local clientB = intermediary:Connect()
 
 			local replicator = ServerReplicator.new({
-				Token = token,
+				Namespace = token,
 				Data = {},
 				ReplicationTargets = { clientA.Player, clientB.Player },
 			})
@@ -684,7 +684,7 @@ return function(t: tiniest)
 			local clientB = intermediary:Connect()
 
 			local replicator = ServerReplicator.new({
-				Token = token,
+				Namespace = token,
 				Data = {},
 				ReplicationTargets = { clientA.Player, clientB.Player },
 			})
@@ -720,7 +720,7 @@ return function(t: tiniest)
 			local client = intermediary:Connect()
 
 			local replicator = ServerReplicator.new({
-				Token = token,
+				Namespace = token,
 				Data = { Coins = 0 },
 				ReplicationTargets = { client.Player },
 			})
@@ -751,7 +751,7 @@ return function(t: tiniest)
 			local client = intermediary:Connect()
 
 			local replicator = ServerReplicator.new({
-				Token = token,
+				Namespace = token,
 				Data = {},
 				ReplicationTargets = { client.Player },
 			})
@@ -791,7 +791,7 @@ return function(t: tiniest)
 				return "ordered"
 			end
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("OrdFn.Store"),
+				Namespace = uniqueToken("OrdFn.Store"),
 				Data = {},
 				ReplicationTargets = {},
 			})
@@ -803,7 +803,7 @@ return function(t: tiniest)
 
 		test("duplicate RegisterOrderedRemoteFunction errors", function()
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("OrdFn.Dup"),
+				Namespace = uniqueToken("OrdFn.Dup"),
 				Data = {},
 				ReplicationTargets = {},
 			})
@@ -821,7 +821,7 @@ return function(t: tiniest)
 		test("ORDERED_FN_CALL sentinel calls the registered fn with the correct args", function()
 			local player = { Name = "P" } :: any
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("OrdFn.CallArgs"),
+				Namespace = uniqueToken("OrdFn.CallArgs"),
 				Data = {},
 				ReplicationTargets = { player },
 			})
@@ -846,7 +846,7 @@ return function(t: tiniest)
 		test("unknown function name is silently dropped without error or response", function()
 			local player = { Name = "P" } :: any
 			local replicator = ServerReplicator.new({
-				Token = uniqueToken("OrdFn.Unknown"),
+				Namespace = uniqueToken("OrdFn.Unknown"),
 				Data = {},
 				ReplicationTargets = { player },
 			})
@@ -866,7 +866,7 @@ return function(t: tiniest)
 			local client = intermediary:Connect()
 
 			local replicator = ServerReplicator.new({
-				Token = token,
+				Namespace = token,
 				Data = {},
 				ReplicationTargets = { client.Player },
 			})
@@ -905,7 +905,7 @@ return function(t: tiniest)
 			local client = intermediary:Connect()
 
 			local replicator = ServerReplicator.new({
-				Token = token,
+				Namespace = token,
 				Data = {},
 				ReplicationTargets = { client.Player },
 			})
@@ -944,7 +944,7 @@ return function(t: tiniest)
 			local client = intermediary:Connect()
 
 			local replicator = ServerReplicator.new({
-				Token = token,
+				Namespace = token,
 				Data = { Coins = 0 },
 				ReplicationTargets = { client.Player },
 			})

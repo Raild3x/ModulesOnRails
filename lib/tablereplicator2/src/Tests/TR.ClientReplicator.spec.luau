@@ -47,7 +47,7 @@ return function(t: tiniest)
 
 			local replicator = BaseReplicator.GetFromId(60001) :: any
 			expect(replicator).never_is(nil)
-			expect(replicator.Token.Name).is("ClientCreateTest")
+			expect(replicator.Namespace).is("ClientCreateTest")
 			expect(replicator.Tags.K).is("v")
 			expect(replicator.Manager.Raw.Coins).is(5)
 			expect(replicator:IsTopLevel()).is_true()
