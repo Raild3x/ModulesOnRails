@@ -4,14 +4,17 @@
 	@client
 
 	The client-side mirror of a `ServerReplicator`. Construction is entirely
-	server-driven -- use `ClientReplicator.RequestData()` to start
-	replication, then `BaseReplicator.OnNew`/`ForEach`/`PromiseFirst` to
-	find replicators as they arrive.
+	server-driven — clients never create or destroy replicators directly.
+
+	Call `RequestData()` once to request the initial snapshot and begin live
+	replication. Register `ForEach`/`OnNew` listeners **before** calling it so
+	they receive replicators from the initial snapshot too.
 
 	```lua
+	local ClientReplicator = require(Packages.TableReplicator2).Client
+
 	ClientReplicator.ForEach("PlayerData", function(replicator)
-		local manager = replicator:GetManager()
-		manager:Observe("Coins", function(coins)
+		replicator.Manager:Observe("Coins", function(coins)
 			print("Coins:", coins)
 		end)
 	end)
@@ -20,6 +23,9 @@
 		print("initial snapshot applied")
 	end)
 	```
+
+	Access replicated data through the `.Manager` property. To listen to server-fired
+	custom signals, use the `.Server` proxy: `replicator.Server.MySignal:Connect(fn)`.
 ]=]
 
 const Types = require("../Shared/Types")
@@ -223,8 +229,11 @@ ClientReplicator._HandleMessage = handleMessage
 --------------------------------------------------------------------------------
 
 --[=[
-	Replication is entirely server-driven; a `ClientReplicator` is torn down
-	when the server sends a `Destroy` for it, never by local code.
+	@within ClientReplicator
+	@method Destroy
+	@ignore
+	ClientReplicators are torn down by the server, never by local code. Calling
+	this method directly raises an error.
 ]=]
 function ClientReplicator.Destroy(self: CR_Internal)
 	error("Cannot destroy a ClientReplicator directly -- destruction is server-driven.")
@@ -258,10 +267,16 @@ end
 
 --[=[
 	@tag Static
-	Requests the initial snapshot from the server and begins live
-	replication. Safe to call more than once. Register `OnNew`/`ForEach`
-	listeners before calling this so they don't miss anything already in the
-	snapshot.
+	@within ClientReplicator
+	@function RequestData
+	@return Promise<()>
+
+	Requests the initial snapshot from the server and begins live replication.
+	Returns a Promise that resolves once the server confirms the full snapshot
+	has been sent. Safe to call more than once (subsequent calls are no-ops).
+
+	Register `ForEach`/`OnNew` listeners **before** calling this so they receive
+	replicators from the initial snapshot.
 ]=]
 function ClientReplicator.RequestData(): Promise
 	return getTransport():RequestData()

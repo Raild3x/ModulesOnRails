@@ -301,17 +301,10 @@ export type BR_Public<BR> = {
 
 	-- Read only Fields
 	Id: Id,
-
 	Tags: Tags,
-
 	Manager: TableManager<any>,
 
-	-- `Namespace` is the canonical class-id string. Nil for anonymous replicators.
 	Namespace: string?,
-
-	-- `Token` is the cached handle for this namespace, present when the namespace
-	-- was set (either via TOKEN() or a raw string). Nil for anonymous replicators.
-	-- Prefer `.Namespace` for string comparisons; `.Token` for identity checks.
 	Token: ReplicationToken?,
 
 	-- Methods

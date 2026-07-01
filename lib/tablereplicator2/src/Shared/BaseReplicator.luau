@@ -224,6 +224,14 @@ end
 
 	Runs `fn` for every existing replicator matching `condition`, and again for
 	every future one. Returns a disconnect function that stops future invocations.
+
+	```lua
+	local disconnect = ServerReplicator.ForEach("PlayerData", function(replicator)
+		print("replicator", replicator.Id, "for", replicator.Tags.UserId)
+	end)
+	-- later:
+	disconnect()
+	```
 ]=]
 --[=[
 	@tag Static
@@ -235,6 +243,20 @@ end
 
 	Runs `fn` for every existing replicator matching `condition`, and again for
 	every future one. Returns a disconnect function that stops future invocations.
+
+	```lua
+	-- By namespace string:
+	local disconnect = ClientReplicator.ForEach("PlayerData", function(replicator)
+		replicator.Manager:Observe("Coins", function(coins)
+			print("Coins:", coins)
+		end)
+	end)
+
+	-- By tag predicate:
+	ClientReplicator.ForEach({ UserId = localPlayer.UserId }, function(replicator)
+		-- only fires for the local player's replicator
+	end)
+	```
 ]=]
 function BaseReplicator.ForEach(condition: SearchCondition?, fn: (replicator: BaseReplicator) -> ()): () -> ()
 	const satisfies = reconcileCondition(condition)
@@ -271,6 +293,12 @@ end
 	@param condition SearchCondition?
 	@return Promise<ClientReplicator>
 	Resolves with the first existing-or-future replicator matching `condition`.
+
+	```lua
+	ClientReplicator.PromiseFirst("PlayerData"):andThen(function(replicator)
+		print("Got PlayerData replicator:", replicator.Id)
+	end)
+	```
 ]=]
 function BaseReplicator.PromiseFirst(condition: SearchCondition?): Promise<BaseReplicator>
 	const satisfies = reconcileCondition(condition)
@@ -490,15 +518,14 @@ end
 	@within ServerReplicator
 	@method IsTopLevel
 	@return boolean
-	A top-level replicator has no parent. Only top-level replicators can have
-	their replication targets set directly on the server.
+	Returns true if this replicator has no parent. Only top-level replicators
+	can have their replication targets set directly.
 ]=]
 --[=[
 	@within ClientReplicator
 	@method IsTopLevel
 	@return boolean
-	A top-level replicator has no parent. Only top-level replicators can have
-	their replication targets set directly on the server.
+	Returns true if this replicator has no parent.
 ]=]
 function BaseReplicator.IsTopLevel(self: BR_Internal): boolean
 	return self._Parent == nil
@@ -544,6 +571,12 @@ end
 	@within ServerReplicator
 	@method GetDescendants
 	@return { ServerReplicator }
+	Gets all descendants of this replicator, recursively.
+]=]
+--[=[
+	@within ClientReplicator
+	@method GetDescendants
+	@return { ClientReplicator }
 	Gets all descendants of this replicator, recursively.
 ]=]
 function BaseReplicator.GetDescendants(self: BR_Internal): { BR_Internal }
@@ -599,6 +632,24 @@ function BaseReplicator.FindFirstChild(
 	return nil
 end
 
+--[=[
+	@within ServerReplicator
+	@method PromiseFirstChild
+	@param condition SearchCondition?
+	@return Promise<ServerReplicator>
+	Returns a Promise that resolves with the first child matching `condition`.
+	Resolves immediately if a matching child already exists; otherwise waits for
+	one to be added.
+]=]
+--[=[
+	@within ClientReplicator
+	@method PromiseFirstChild
+	@param condition SearchCondition?
+	@return Promise<ClientReplicator>
+	Returns a Promise that resolves with the first child matching `condition`.
+	Resolves immediately if a matching child already exists; otherwise waits for
+	one to be added.
+]=]
 function BaseReplicator.PromiseFirstChild(
 	self: BR_Internal,
 	condition: SearchCondition?
@@ -617,7 +668,20 @@ end
 --------------------------------------------------------------------------------
 
 --[=[
-	True if every key/value in `tags` is also present on this replicator
+	@within ServerReplicator
+	@method HasTags
+	@param tags Tags
+	@return boolean
+	Returns true if every key/value in `tags` is present on this replicator.
+	`IsSupersetOfTags` is an alias for this method.
+]=]
+--[=[
+	@within ClientReplicator
+	@method HasTags
+	@param tags Tags
+	@return boolean
+	Returns true if every key/value in `tags` is present on this replicator.
+	`IsSupersetOfTags` is an alias for this method.
 ]=]
 function BaseReplicator.HasTags(self: BR_Internal, tags: Tags): boolean
 	for tag, value in tags do
@@ -627,11 +691,38 @@ function BaseReplicator.HasTags(self: BR_Internal, tags: Tags): boolean
 	end
 	return true
 end
+
+--[=[
+	@within ServerReplicator
+	@method IsSupersetOfTags
+	@param tags Tags
+	@return boolean
+	Alias for `HasTags`.
+]=]
+--[=[
+	@within ClientReplicator
+	@method IsSupersetOfTags
+	@param tags Tags
+	@return boolean
+	Alias for `HasTags`.
+]=]
 BaseReplicator.IsSupersetOfTags = BaseReplicator.HasTags
 
 --[=[
-	True if every key/value on this replicator is also present in `tags`
-	(ELI5: are all of this replicator's tags also in the given tags?).
+	@within ServerReplicator
+	@method IsSubsetOfTags
+	@param tags Tags
+	@return boolean
+	Returns true if every key/value on this replicator is present in `tags`.
+	The inverse of `HasTags`: this replicator's tags must be a subset of `tags`.
+]=]
+--[=[
+	@within ClientReplicator
+	@method IsSubsetOfTags
+	@param tags Tags
+	@return boolean
+	Returns true if every key/value on this replicator is present in `tags`.
+	The inverse of `HasTags`: this replicator's tags must be a subset of `tags`.
 ]=]
 function BaseReplicator.IsSubsetOfTags(self: BR_Internal, tags: Tags): boolean
 	for tag, value in self.Tags do

@@ -484,7 +484,7 @@ return function(t: tiniest)
 				ServerReplicator.TOKEN(name)
 			end)
 			expect(ok).is(false)
-			expect(typeof(err) == "string" and string.find(err, "raw-string") ~= nil).is_true()
+			expect(typeof(err) == "string" and string.find(err, "raw-string", 1, true) ~= nil).is_true()
 			r:Destroy()
 		end)
 

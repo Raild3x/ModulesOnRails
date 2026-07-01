@@ -2,54 +2,61 @@
 --[=[
 	@class TableReplicator
 
-	Simple wrapper that replicates TableManager instances from the server to clients.
+	Replicates `TableManager` instances from the server to clients. A
+	`ServerReplicator` wraps a `TableManager`, decides which players can see it,
+	and mirrors every write to a matching `ClientReplicator` on each targeted client.
 
-	Entry point for the TableReplicator package. Use `TableReplicator.Server` or 
-	`TableReplicator.Client` to access the server-side or client-side API, respectively.
+	Access the API through `TableReplicator.Server` (server) or
+	`TableReplicator.Client` (client).
 
-	**[SERVER]**
+	**Server**
 	```lua
-	local TableReplicator = require(Packages.TableReplicator).Server
-	local TableManager = require(Packages.TableManager)
+	local ServerReplicator = require(Packages.TableReplicator2).Server
 
 	Players.PlayerAdded:Connect(function(player)
-		local manager = TableManager.new {
-			Coins = 0,
-		}
-
-		local replicator = TableReplicator.new({
+		local replicator = ServerReplicator.new({
 			Namespace = "PlayerData",
-			Manager = manager,
+			Data = { Coins = 0 },
 			ReplicationTargets = player,
 		})
 
-		task.spawn(function()
-			while player.Parent do
-				task.wait(1)
-				manager:Increment("Coins", math.random(1, 10))
-			end
-		end)
+		replicator.Manager:Set("Coins", 100) -- automatically replicated
 
-		-- simple cleanup
 		player.Destroying:Connect(function()
 			replicator:Destroy()
-			manager:Destroy()
 		end)
 	end)
 	```
 
-	**[CLIENT]**
+	**Client**
 	```lua
-	local TableReplicator = require(Packages.TableReplicator).Client
+	local ClientReplicator = require(Packages.TableReplicator2).Client
 
-	TableReplicator.ForEach("PlayerData", function(replicator)
+	-- Register listeners before requesting data to catch replicators in the snapshot.
+	ClientReplicator.ForEach("PlayerData", function(replicator)
 		replicator.Manager:Observe("Coins", function(coins)
 			print("Coins:", coins)
 		end)
 	end)
 
-	TableReplicator.RequestData()
+	ClientReplicator.RequestData()
 	```
+
+	---
+	### Core concepts
+	- **Namespace** — Optional string class identifier used for discovery
+	  (e.g. `"PlayerData"`). Omit for anonymous replicators, which are reachable
+	  only by Id, tags, or predicate.
+	- **ReplicationTargets** — Which players a top-level replicator sends data to.
+	  Accepts a single `Player`, a list, or `"all"`. Child replicators inherit from
+	  their top-level ancestor.
+	- **Tags** — Arbitrary key/value metadata (e.g. `{ UserId = player.UserId }`)
+	  used for filtering in `ForEach`/`GetAll`/`GetFirst`.
+	- **Discovery** — Use `ForEach` to react to existing and future replicators by
+	  namespace, tag, or predicate. Prefer it over `OnNew`, which misses replicators
+	  that already exist at call time.
+	- **RequestData** — Clients must call `ClientReplicator.RequestData()` once to
+	  receive the initial snapshot. Register `ForEach`/`OnNew` listeners before calling it.
 
 	---
 	### Exported Types

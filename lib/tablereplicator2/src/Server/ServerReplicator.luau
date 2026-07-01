@@ -5,33 +5,45 @@
 	@class ServerReplicator
 	@server
 
-	Replicates a TableManager instance to one or more clients.
-
-	`Namespace` is an optional string class identifier. Omit it for anonymous
-	replicators (discoverable only by Id, tags, or predicate). For large
-	codebases that need collision protection, use `TOKEN()` to claim a name
-	exclusively — see below.
+	Wraps a `TableManager` and replicates it to one or more clients. Every write
+	made through `.Manager` is automatically queued and sent at the end of the
+	current frame.
 
 	```lua
-	-- Simple: plain string Namespace, no ceremony.
 	Players.PlayerAdded:Connect(function(player)
 		local replicator = ServerReplicator.new({
 			Namespace = "PlayerData",
 			Data = { Coins = 0 },
-			ReplicationTargets = player,
+			Targets = player,
 			Tags = { UserId = player.UserId },
 		})
+
+		replicator.Manager:Set("Coins", 100) -- replicated automatically
+
 		player.Destroying:Connect(function()
 			replicator:Destroy()
 		end)
 	end)
-
-	-- Opt-in collision guard: TOKEN() claims a name exclusively.
-	local PlayerToken = ServerReplicator.TOKEN("PlayerData")
-	ServerReplicator.new({ Namespace = PlayerToken, Data = ..., ReplicationTargets = {} })
-	-- Release the name after all replicators using it are destroyed:
-	ServerReplicator.TOKEN.destroy(PlayerToken)
 	```
+
+	:::caution Always destroy when done
+	Call `replicator:Destroy()` when a replicator is no longer needed. The replicator
+	also listens to its manager's `OnDestroy` and tears itself down, so destroying
+	the manager is sufficient when the manager's lifetime drives cleanup.
+	:::
+
+	### Going further
+	- **Namespace collision safety** — See `TOKEN` for exclusive namespace ownership
+	  in large codebases.
+	- **Hierarchy** — Pass `Parent` instead of `ReplicationTargets` to create a child
+	  replicator that inherits its ancestor's targets. Use `SetParent` to reparent later.
+	- **Custom remotes** — Declare signals and functions in `config.Client` to send
+	  events alongside data. See `RegisterRemoteSignal`, `RegisterOrderedRemoteSignal`,
+	  `RegisterRemoteFunction`, and `RegisterOrderedRemoteFunction`.
+	- **Flush control** — `Coalesced = true` deduplicates redundant same-key ops per
+	  frame. `ImmediateFlush = true` sends each op immediately instead of batching.
+	- **Sentinels** — `ServerReplicator.All` and `ServerReplicator.None` are
+	  pre-built top-level replicators useful as parents.
 ]=]
 
 const Players = game:GetService("Players")
@@ -82,45 +94,6 @@ const transport: ServerTransport = ServerTransportModule.new()
 -- second client. Not part of the public API.
 ServerReplicator._Transport = transport
 
--- Namespace ownership ledger (server-only, never sent to the client).
--- `tokenOwner[name]` holds the ReplicationToken that exclusively claimed `name`
--- via TOKEN(); raw-string replicators cannot use that name while an owner exists.
--- `liveCount[name]` tracks live ServerReplicators using each named namespace so
--- TOKEN.destroy() can refuse to unregister while replicators still exist.
--- `tokenDestroyers[name]` holds the zero-argument cleanup function for each
--- registered token, looked up by name in TOKEN.destroy(token).
-const tokenOwner: { [string]: ReplicationToken } = {}
-const liveCount: { [string]: number } = {}
-const tokenDestroyers: { [string]: () -> () } = {}
-
--- Registers `name` in the ledger and returns a token handle. The corresponding
--- destroyer is stored in `tokenDestroyers` and called via `TOKEN.destroy(token)`.
-local function registerToken(name: string): ReplicationToken
-	assert(
-		tokenOwner[name] == nil,
-		`ServerReplicator.TOKEN: namespace "{name}" is already owned by a token`
-	)
-	assert(
-		(liveCount[name] or 0) == 0,
-		`ServerReplicator.TOKEN: namespace "{name}" is currently used by raw-string replicators; claim it with TOKEN() before creating any replicators with that name`
-	)
-	local token = TokenCache.getOrCreateToken(name)
-	tokenOwner[name] = token
-	tokenDestroyers[name] = function()
-		assert(
-			tokenOwner[name] == token,
-			`ReplicationToken: token "{name}" is not the registered owner or was already destroyed`
-		)
-		assert(
-			(liveCount[name] or 0) == 0,
-			`ReplicationToken: cannot destroy token "{name}" — {liveCount[name] or 0} replicator(s) still use this namespace; destroy them first`
-		)
-		tokenOwner[name] = nil
-		tokenDestroyers[name] = nil
-	end
-	return token
-end
-
 -- The single server-wide ordering point for outbound data ops. Every scope's
 -- `OnApplied` ops funnel here so they replay on the client in exact server
 -- order regardless of which replicator produced them (per-scope flushing could
@@ -139,7 +112,7 @@ const topLevelReplicators: { SR_Internal } = {}
 -- all synchronous mutations on any ImmediateFlush replicator; subsequent calls
 -- within the same thread are no-ops until the deferred flush fires.
 local immediateFlushPending = false
-local function scheduleImmediateFlush()
+const function scheduleImmediateFlush()
 	if not immediateFlushPending then
 		immediateFlushPending = true
 		task.defer(function()
@@ -251,8 +224,8 @@ end
 	(usually at the top of a module), store the result, and pass it as the
 	`Namespace` (or `Token`) field when creating replicators.
 
-	To release the name, call `token:Destroy()` after all replicators using
-	it have been destroyed.
+	To release the name, call `ServerReplicator.TOKEN.destroy(token)` after all
+	replicators using it have been destroyed.
 
 	**You do not need a token** for simple cases — a plain string `Namespace`
 	is fully supported and costs nothing extra:
@@ -272,23 +245,12 @@ end
 	:::
 ]=]
 ServerReplicator.TOKEN = setmetatable({
-	new = registerToken,
+	new = TokenCache.registerToken,
 	get = TokenCache.getExistingToken,
-	--[=[
-		Destroys a token that was created with `TOKEN()`, releasing its name.
-		Errors if any live replicators still use this namespace.
-	]=]
-	destroy = function(token: ReplicationToken)
-		local fn = tokenDestroyers[token.Name]
-		assert(
-			fn ~= nil,
-			`ReplicationToken: token "{token.Name}" is not a registered namespace owner or was already destroyed`
-		)
-		fn()
-	end,
+	destroy = TokenCache.destroyToken,
 }, {
 	__call = function(_, name: string): ReplicationToken
-		return registerToken(name)
+		return TokenCache.registerToken(name)
 	end,
 })
 table.freeze(ServerReplicator.TOKEN)
@@ -343,6 +305,8 @@ end
 
 --[=[
 	@tag Static
+	@within ServerReplicator
+	@function new
 
 	Creates a new `ServerReplicator`.
 
@@ -354,17 +318,21 @@ end
 	Config table fields:
 	- `Namespace` - Optional string or `ReplicationToken` identifying the
 	  replicator's class. Pass a plain string for simple cases, or a token
-	  created with `ServerReplicator.TOKEN()` for opt-in collision safety.
-	  Omit entirely for anonymous replicators (reachable only via id, tags,
-	  or a predicate condition).
-	- `Token` - Alias for `Namespace`; accepted for backwards compatibility.
+	  from `ServerReplicator.TOKEN()` for opt-in collision safety. Omit for
+	  anonymous replicators (reachable only by Id, tags, or predicate).
 	- `Data` - A `TableManager` instance or a raw table to replicate. Defaults to `{}`.
-	- `ReplicationTargets` - A `Player` or list of `Player`s to replicate to. Only valid for top-level replicators.
-	- `Parent` - A parent `ServerReplicator` to attach this replicator to. Only valid for child replicators.
-	- `Tags` - Optional table of string keys to any values for metadata and search.
-	- `Coalesced` - If true, ops are buffered and only the latest op is sent at the end of the frame. Defaults to false.
-	- `ImmediateFlush` - If true, ops are flushed immediately instead of waiting for the end of the frame. Defaults to false.
-	  This is useful to guarantee changes are received by the client in the same order that external remote events are fired.
+	- `Targets` - A `Player`, list of `Player`s, or `"all"`. Only valid
+	  for top-level replicators; pass `{}` to start with no targets.
+	- `Parent` - A parent `ServerReplicator`. Only valid for child replicators.
+	- `Tags` - Optional `{ [string]: any }` metadata table used for filtering in
+	  `ForEach`/`GetAll`/`GetFirst`.
+	- `Coalesced` - If true, only the latest op per key is sent at frame end,
+	  dropping intermediate writes. Defaults to false.
+	- `ImmediateFlush` - If true, each op is sent immediately rather than batched.
+	  Useful to guarantee ordering relative to external `RemoteEvent` fires.
+	- `Client` - Table declaring custom remotes. Values can be
+	  `ServerReplicator.createRemoteEvent()`, `ServerReplicator.createUnreliableEvent()`,
+	  or plain functions (registered as remote functions). See `RegisterRemoteSignal`.
 
 	:::caution Namespace collision guard
 	If you call `ServerReplicator.TOKEN("name")` to claim a namespace, any
@@ -376,23 +344,21 @@ end
 
 	:::caution Conflicting Configurations
 	The following configurations are invalid and will throw an error:
-	- `ReplicationTargets` and `Parent` cannot both be specified.
+	- `Targets` and `Parent` cannot both be specified.
 	- `Coalesced` and `ImmediateFlush` cannot both be true.
 	:::
 ]=]
 function ServerReplicator.new(config: {
 	Namespace: (string | ReplicationToken)?,
-	Token: (string | ReplicationToken)?,
 	Data: (TableManager<any> | { [any]: any })?,
-	ReplicationTargets: ReplicationTargets?,
+	Targets: ReplicationTargets?,
 	Parent: ServerReplicator?,
 	Tags: Tags?,
 	Coalesced: boolean?,
 	ImmediateFlush: boolean?,
 	Client: { [string]: any }?,
 }): ServerReplicator
-	-- Resolve namespace: prefer `Namespace`, fall back to `Token` (compat alias).
-	local rawNs: (string | ReplicationToken)? = config.Namespace or config.Token
+	local rawNs: (string | ReplicationToken)? = config.Namespace or (config :: any).Token
 	local resolvedNamespace: string? = nil
 	local wasExplicitToken = false
 
@@ -407,33 +373,19 @@ function ServerReplicator.new(config: {
 
 	-- Ledger enforcement (server-only collision guard).
 	if resolvedNamespace ~= nil then
-		local ns = resolvedNamespace
-		if wasExplicitToken then
-			-- An explicit token must be the registered owner.
-			assert(
-				tokenOwner[ns] == rawNs,
-				`ServerReplicator.new: token for namespace "{ns}" was destroyed or is not the registered owner`
-			)
-		else
-			-- A raw string must not be owned by a token.
-			assert(
-				tokenOwner[ns] == nil,
-				`ServerReplicator.new: namespace "{ns}" is reserved by a ReplicationToken; pass the token instead of a raw string`
-			)
-		end
-		liveCount[ns] = (liveCount[ns] or 0) + 1
+		TokenCache.acquireNamespace(resolvedNamespace, rawNs :: string | ReplicationToken, wasExplicitToken)
 	end
 
-	local targets = config.ReplicationTargets
+	local targets = config.Targets or (config :: any).ReplicationTargets
 	if typeof(targets) == "string" then
 		targets = targets:lower()
 	end
 
 	const parent = config.Parent :: SR_Internal?
 	if parent then
-		assert(targets == nil, "Cannot specify ReplicationTargets when creating a child replicator")
+		assert(targets == nil, "Cannot specify replication Targets when creating a child replicator")
 	else
-		assert(targets ~= nil, "Top-level replicators must be given ReplicationTargets (pass {} for none)")
+		assert(targets ~= nil, "Top-level replicators must be given replication Targets (pass {} for none)")
 	end
 
 	assert(not (config.Coalesced and config.ImmediateFlush), "Cannot set both Coalesced and ImmediateFlush")
@@ -582,6 +534,12 @@ end
 	@tag TopLevel
 
 	Overwrites this top-level replicator's replication targets.
+
+	```lua
+	replicator:SetTargets("all")              -- replicate to everyone
+	replicator:SetTargets(player)             -- single player
+	replicator:SetTargets({ player1, player2 }) -- explicit list
+	```
 ]=]
 function ServerReplicator.SetTargets(self: SR_Internal, targets: ReplicationTargets)
 	assert(self:IsTopLevel(), "Cannot set replication targets on a non-top-level replicator")
@@ -687,13 +645,12 @@ end
 	@method SetParent
 	@param newParent ServerReplicator
 
-	Re-parents the replicator to another replicator. 
-	
-	If they share a top-level ancestor, every currently-active player just 
-	gets a `SetParent` item. Otherwise `self`'s whole subtree moves to 
-	`newParent`'s scope: a player active in the new scope but not the old one 
-	gets a fresh snapshot, a player active in the old scope but not targeted by
-	the new one gets a `Destroy`, and a player active in both just gets `SetParent`.
+	Re-parents this replicator under `newParent`, moving its entire subtree.
+	Cannot be called on a top-level replicator; cannot create cycles.
+
+	If the move crosses scope boundaries (different top-level ancestors), players
+	only in the old scope receive a `Destroy`, players only in the new scope
+	receive a fresh snapshot, and players in both receive a `SetParent`.
 ]=]
 function ServerReplicator.SetParent(self: SR_Internal, newParent: SR_Internal)
 	assert(not self:IsTopLevel(), "Cannot SetParent a top-level replicator")
@@ -773,6 +730,17 @@ end
 	Registers a reliable custom signal on this replicator. After registration,
 	`replicator.Client[name]` returns a `ServerCustomRemote` with `Fire`,
 	`FireAll`, `FireExcept`, `FirePredicate`, `Connect`, `Once`, and `Wait`.
+
+	```lua
+	-- Server
+	local hitSignal = replicator:RegisterRemoteSignal("Hit")
+	hitSignal:FireAll("headshot")
+
+	-- Client
+	replicator.Server.Hit:Connect(function(hitType)
+		print("Hit:", hitType)
+	end)
+	```
 ]=]
 function ServerReplicator.RegisterRemoteSignal(self: SR_Internal, name: string): any
 	assert(not self._RemoteSignals[name], `Remote signal '{name}' already registered`)
@@ -920,12 +888,7 @@ function ServerReplicator.Destroy(self: SR_Internal)
 	-- name is fully released and safe to unregister.
 	const ns = self.Namespace
 	if ns then
-		const count = (liveCount[ns] or 1) - 1
-		if count <= 0 then
-			liveCount[ns] = nil
-		else
-			liveCount[ns] = count
-		end
+		TokenCache.releaseNamespace(ns)
 	end
 
 	getmetatable(ServerReplicator).Destroy(self)
@@ -1027,9 +990,11 @@ end)
 
 --[=[
 	@tag Static
+	@within ServerReplicator
+	@function FlushNow
 	Immediately flushes all pending data ops to active players without waiting
-	for the end-of-frame deferred flush. Use this before firing an external
-	RemoteEvent when you need data changes to arrive before (or alongside) it.
+	for the end-of-frame deferred flush. Use this when you need data changes to
+	arrive before (or alongside) an external `RemoteEvent` fired in the same frame.
 ]=]
 function ServerReplicator.FlushNow()
 	frameCoordinator:Flush()

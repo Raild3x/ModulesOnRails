@@ -1,52 +1,62 @@
 # TableReplicator2
 
-Replicates `TableManager2` instances from the server to clients with minimal
-effort. A `ServerReplicator` wraps a `TableManager`, decides who can see it,
-and mirrors every write that manager makes onto a matching `ClientReplicator`
-on each targeted client.
+Replicates `TableManager2` instances from the server to clients. A `ServerReplicator`
+wraps a `TableManager`, decides who can see it, and mirrors every write to a matching
+`ClientReplicator` on each targeted client.
 
-This document covers the internal architecture: how a single
-`manager:Set(...)` call on the server ends up mutating a `TableManager` on
-the client. For the public API, see the moonwave docs / doc comments on
-`Server/ServerReplicator.luau` and `Client/ClientReplicator.luau`.
+For the full API, see the moonwave docs.
 
 ## Quick start
 
 **Server**
 ```lua
-local TableReplicator = require(Packages.TableReplicator2).Server
+local ServerReplicator = require(Packages.TableReplicator2).Server
 
 Players.PlayerAdded:Connect(function(player)
-	local replicator = TableReplicator.new({
+	local replicator = ServerReplicator.new({
 		Namespace = "PlayerData",
 		Data = { Coins = 0 },
 		ReplicationTargets = player,
 		Tags = { UserId = player.UserId },
 	})
 
-	replicator.Manager:Set("Coins", 100) -- replicates automatically
+	replicator.Manager:Set("Coins", 100) -- automatically replicated
+
+	player.Destroying:Connect(function()
+		replicator:Destroy()
+	end)
 end)
 ```
 
 **Client**
 ```lua
-local TableReplicator = require(Packages.TableReplicator2).Client
+local ClientReplicator = require(Packages.TableReplicator2).Client
 
-TableReplicator.OnNew("PlayerData", function(replicator)
-	replicator:GetManager():Observe("Coins", function(coins)
+-- Register listeners before requesting data to catch everything in the snapshot.
+ClientReplicator.ForEach("PlayerData", function(replicator)
+	replicator.Manager:Observe("Coins", function(coins)
 		print("Coins:", coins)
 	end)
 end)
 
-TableReplicator.RequestData()
+ClientReplicator.RequestData()
 ```
+
+## Core concepts
+
+| Concept | Description |
+| --- | --- |
+| **Namespace** | Optional string class identifier. Used for discovery (`ForEach("PlayerData", fn)`). Omit for anonymous replicators, which are reachable only by Id, tags, or predicate. |
+| **ReplicationTargets** | Who a top-level replicator sends data to: a `Player`, a list, or `"all"`. Child replicators inherit from their top-level ancestor. |
+| **Tags** | Arbitrary key/value metadata (`{ UserId = player.UserId }`) for filtering in `ForEach`/`GetAll`/`GetFirst`. |
+| **ForEach vs OnNew** | `ForEach` runs for existing **and** future matches. `OnNew` only fires for replicators created after the call. Prefer `ForEach`. |
+| **RequestData** | Clients must call this once to receive the initial snapshot. Register `ForEach`/`OnNew` listeners before calling it. |
 
 ### Namespace is optional
 
-`Namespace` is just a plain string class identifier — no registration ceremony
-required. If you omit it entirely, the replicator is **anonymous**: still
-usable via `GetFromId`, tags, `ForEach(predicate)`, and `ReplicatorCreated`,
-but intentionally unreachable by string `OnNew`/`GetAll` searches.
+Omit `Namespace` entirely for anonymous replicators — still usable via `GetFromId`,
+tags, `ForEach(predicate)`, and `ReplicatorCreated`, but intentionally unreachable by
+string `OnNew`/`GetAll` searches.
 
 ```lua
 -- Named (discoverable by Namespace string)
@@ -58,229 +68,38 @@ ServerReplicator.new({ Data = ..., ReplicationTargets = {}, Tags = { Kind = "Eph
 
 ### Opt-in collision safety with `TOKEN()`
 
-For large codebases where accidental Namespace reuse across modules would be a
-problem, use `TOKEN()` to claim a name exclusively:
+For large codebases where accidental namespace reuse across modules would be a problem,
+use `TOKEN()` to claim a name exclusively:
 
 ```lua
--- Claiming a name up-front gives a hard error on any duplicate registration.
 local PlayerToken = ServerReplicator.TOKEN("PlayerData")
 
--- The token IS a valid Namespace value:
 ServerReplicator.new({ Namespace = PlayerToken, Data = ..., ReplicationTargets = {} })
 
--- Once every replicator using the token is destroyed, release the name:
+-- Release the name after all replicators using it are destroyed:
 ServerReplicator.TOKEN.destroy(PlayerToken)
--- Name is now free for re-use.
 ```
 
 Collision rules enforced by the ownership ledger:
 - `TOKEN("Name")` throws if `"Name"` is already claimed by another token.
-- `TOKEN("Name")` throws if live replicators already use `"Name"` as a raw
-  string Namespace (raw string → token upgrade must go through `Destroy` first).
-- Passing a raw string `Namespace` when a token owns that name throws —
-  use the token instead.
-- `TOKEN.destroy(token)` throws if any replicator using that token is still
-  alive. Destroy all replicators first.
+- `TOKEN("Name")` throws if live replicators already use `"Name"` as a raw string.
+- Passing a raw string `Namespace` when a token owns that name throws — use the token.
+- `TOKEN.destroy(token)` throws if any replicator using that token is still alive.
 
-## Module map
+## Things to be aware of
 
-| Area | File | Responsibility |
-| --- | --- | --- |
-| Shared | `Shared/BaseReplicator.luau` | Identity, hierarchy (parent/children), tags, and static discovery (`GetAll`/`OnNew`/`ForEach`/...). Inherited by both `ServerReplicator` and `ClientReplicator`. |
-| Shared | `Shared/Types.luau` | Shared type definitions: `BufferedOp`, `WireItem`, `WireMessage`, etc. |
-| Shared | `Shared/TokenCache.luau` | Claim-free `ReplicationToken` handle cache (name ↔ object). Ownership ledger lives in `ServerReplicator`. |
-| Shared | `Shared/OpBuffer.luau` | `NormalizeAppliedOp`: TableManager2 `AppliedOp` → wire-ready `BufferedOp`. |
-| Shared | `Shared/Serialization/FlatCodec.luau` | Numeric-opcode wire item/message shapes. The generic fallback codec. |
-| Shared | `Shared/Serialization/RefCodec.luau` | "Model V" per-message table de-duplication. |
-| Shared | `Shared/Serialization/BufferCodec.luau` | Byte-level value codec. **Built but not wired into the live pipeline yet** (planned compression phase). |
-| Shared | `Shared/Transport/Protocol.luau` | Names/constants agreed on by both transports (RemoteEvent name, control strings). |
-| Shared | `Shared/Transport/ServerTransport.luau` | Thin wrapper over the replication `RemoteEvent` (server side). |
-| Shared | `Shared/Transport/ClientTransport.luau` | Thin wrapper over the replication `RemoteEvent` (client side) + `RequestData` handshake. |
-| Server | `Server/ServerReplicator.luau` | Public server API. Owns structural sends (Create/Destroy/SetParent) and the request-data handshake. |
-| Server | `Server/ReplicationScope.luau` | Per-top-level-subtree targeting state (active/pending/all players). |
-| Server | `Server/FrameCoordinator.luau` | The single, server-wide ordering point for outbound **data ops**. |
-| Client | `Client/ClientReplicator.luau` | Builds/destroys/reparents `ClientReplicator`s from incoming wire messages. |
-| Client | `Client/OpApplier.luau` | Replays a decoded op list onto a client `TableManager` inside one `Batch`. |
+- **Always destroy when done.** Call `replicator:Destroy()` when a replicator is no
+  longer needed. The replicator also listens to its manager's `OnDestroy` and tears
+  itself down, so destroying the manager is sufficient when the manager's lifetime
+  drives cleanup.
+- **Exactly one of `ReplicationTargets` or `Parent` is required** on construction.
+  Pass `{}` for `ReplicationTargets` to start with no targets and add players later.
+- **Client code never creates or destroys replicators.** Lifetime is server-driven.
+- **Call `RequestData()` once at startup.** Subsequent calls are safe but no-ops.
+- **Register listeners before `RequestData()`.** `ForEach`/`OnNew` listeners registered
+  after `RequestData()` resolves may miss replicators from the initial snapshot.
 
-## End-to-end flow: a write on the server, applied on the client
+## Architecture
 
-Two kinds of things travel over the wire:
-
-- **Data ops** (`Set`/`ArrayInsert`/`ArrayRemove`/`ArraySet`/batch markers) —
-  buffered per-frame by `FrameCoordinator` and sent at most once per player
-  per frame.
-- **Structural items** (`Create`/`Destroy`/`SetParent`) — sent immediately
-  and synchronously by `ServerReplicator` itself, never buffered. Existence
-  changes must be ordered relative to the call site (e.g. a child's `Create`
-  must reach the client before any op for it does), so these skip the
-  per-frame batching entirely.
-
-The diagram below follows the data-op path, since that's the one with real
-plumbing (buffer → flush → encode → transport):
-
-```
- SERVER
- ──────────────────────────────────────────────────────────────────────
- [1] Application code
-     manager:Set(...) / ArrayInsert / ArrayRemove / ArraySet / Batch(fn)
-       │
-       ▼  TableManager2 applies the write, fires OnApplied(AppliedOp)
- [2] ServerReplicator.new(...)
-     manager:OnApplied(op) -> frameCoordinator:QueueOp(self._Scope, self.Id, op)
-       │
-       ▼
- [3] FrameCoordinator:QueueOp                 (uses OpBuffer.NormalizeAppliedOp)
-     • op -> BufferedOp
-     • capture the scope's active-player audience, cached per targeting "era"
-       (ReplicationScope:GetActiveVersion) so a hot frame allocates at most
-       one player list per scope
-     • push { Scope, Audience, Id, Op } onto ONE global, ordered _entries list
-       (every scope funnels through here, so cross-replicator/cross-manager
-       order is preserved exactly as produced)
-     • task.defer(task.defer(Flush))          -- coalesces the rest of this frame
-       │
-       ▼  (deferred, once per frame)
- [4] FrameCoordinator:Flush
-     • group _entries by player, preserving original global arrival order
-     • re-check scope:IsActive(player) LIVE (catches a player added/removed
-       mid-frame so they never double-apply or receive a stale op)
-     • collapse consecutive ops for the same replicator into one OpRun
-       │
-       ▼
- [5] FrameCoordinator:_SendFrame               -- the encode-and-send seam
-     • FlatCodec.OpsItem(id, ops)      BufferedOp (string Kind) -> WireOpEntry (numeric Kind)
-     • RefCodec.Encode(items)          dedup tables shared 2+ times -> Refs pool + {Marker=id} placeholders
-     • FlatCodec.BuildMessage(items, refs) -> WireMessage { V, Items, Refs }
-       │
-       ▼
- [6] ServerTransport:SendMessage(player, message)
-     remote:FireClient(player, message)
-       │
-       ▼
- ═══════════════════════════ RemoteEvent "Reliable" ═══════════════════════
-       │
-       ▼
- CLIENT
- ──────────────────────────────────────────────────────────────────────
- [7] ClientTransport
-     remote.OnClientEvent -> MessageReceived:Fire(message)
-       │
-       ▼
- [8] ClientReplicator.handleMessage(message)       -- Items applied IN ORDER
-     • Create     -> buildFromCreateItem: RefCodec.ResolveValue(Data),
-                      new TableManager, BaseReplicator.new
-     • Destroy    -> destroyInternal (recursive teardown of the subtree)
-     • SetParent  -> child:_SetParentRefs(newParent)
-     • Ops        -> FlatCodec.DecodeOps + RefCodec.ResolveValue (per op Value)
-                      -> OpApplier.Apply(replicator.Manager, ops)
-     (ChildAdded / creation listeners fire only AFTER the whole message has
-      been built, so a later item in the same message always sees a
-      fully-formed hierarchy)
-       │
-       ▼
- [9] OpApplier.Apply(manager, ops)
-     manager:Batch(function()
-         Set              -> manager:Set(path, value, true)
-         ArraySet         -> manager:Set(path .. {index}, value, true)
-         ArrayInsert      -> manager:ArrayInsert(path, index, value)
-         ArrayRemove      -> manager:ArrayRemove(path, index)
-         BatchBegin/End   -> manager:Suspend() / manager:Resume()
-     end)
-       │
-       ▼
- [10] Client TableManager2 instance is now mutated
-      -> fires its own :Observe / :OnChanged / :OnArrayInsert / etc.
-      -> application code reacts (UI, gameplay, ...)
-```
-
-### Why the double `task.defer`
-
-`FrameCoordinator:_ScheduleFlush` defers twice before flushing. This is a
-best-effort attempt to let as many same-frame writes as possible land in the
-buffer before it drains, so a frame with many `Set` calls across many
-replicators still produces only one wire message per player.
-
-### Structural items (Create / Destroy / SetParent)
-
-These bypass `FrameCoordinator` and go straight from `ServerReplicator`
-through `ReplicationScope:SendTo` / `transport:SendMessage`, still encoded
-with the same `RefCodec.Encode` → `FlatCodec.BuildMessage` pair (see
-`buildMessage` in `Server/ServerReplicator.luau`). Because a child's `Create`
-must always precede any op targeting it, and a `Destroy` must always be the
-last thing sent for a replicator, these stay synchronous rather than
-sharing the per-frame buffer. `ServerReplicator.Destroy` also calls
-`frameCoordinator:DropReplicator(id)` first, so any op already queued this
-frame for a replicator can't flush out *after* its `Destroy` item.
-
-### Initial snapshot (the `RequestData` handshake)
-
-```
-Client                                  Server
-  │  ClientReplicator.RequestData()       │
-  │  -> remote:FireServer("RequestData")  │
-  ├───────────────────────────────────────▶
-  │                                       │ transport.PlayerRequestedData fires
-  │                                       │ for each top-level replicator targeting
-  │                                       │ this player: scope:Activate(player),
-  │                                       │ DFS-collect Create items (parent before child)
-  │  ◀── WireMessage { Items = [Create...] } (one message, all snapshots)
-  │                                       │
-  │  ◀── "RequestDataComplete" (bare string marker)
-  │  _dataComplete:Fire() -> RequestData()'s Promise resolves
-```
-
-Both messages travel over the same reliable `RemoteEvent`, so Roblox's
-ordered-delivery guarantee is what lets the client trust that every snapshot
-item already arrived by the time `RequestDataComplete` does.
-
-## Ordering & consistency guarantees
-
-- **Global order, not per-scope.** All scopes funnel data ops through one
-  `FrameCoordinator`, so ops from *different* replicators/`TableManager`s
-  replay on the client in the exact order the server produced them. Per-scope
-  flushing (the v1 design) couldn't guarantee this, since each scope drained
-  independently.
-- **Audience captured at enqueue, validated at flush.** A player added to a
-  scope mid-frame never double-applies an op already baked into their
-  snapshot; a player removed mid-frame never receives an op for a replicator
-  they were already told to drop.
-- **At most one message per player per frame** for data ops, via the
-  deferred flush.
-- **One `Batch` per flush on the client.** `OpApplier.Apply` wraps a whole
-  flush's ops in a single `manager:Batch`, so client-side listeners see one
-  coalesced update regardless of how many writes the server made.
-
-## Wire format
-
-`Shared/Types.luau` defines the wire shapes; `FlatCodec.luau` is the encoder/
-decoder for them.
-
-| Opcode (`FlatCodec.Op`) | Item | Carries |
-| --- | --- | --- |
-| `Create` | `WireCreateItem` | `Id`, `ParentId` (`0` = top-level), `Token` (Namespace string; `""` = anonymous), `Tags`, `Data` |
-| `Destroy` | `WireDestroyItem` | `Id` |
-| `SetParent` | `WireSetParentItem` | `Id`, `ParentId` |
-| `Ops` | `WireOpsItem` | `Id`, `Ops: { WireOpEntry }` (numeric `Kind`, `Path`, `Value?`, `Index?`) |
-
-A `WireMessage` is `{ V, Items, Refs? }` — `V` is `FlatCodec.Version`, `Refs`
-is the optional Model V de-dup pool below.
-
-### RefCodec ("Model V" table de-duplication)
-
-A Luau table referenced from two or more places in the **same message**
-(e.g. one inner table shared at two paths in a snapshot, or fanned out to two
-managers) is sent once: its contents go into `WireMessage.Refs[id]`, and every
-occurrence in the items is replaced by a placeholder `{ ["\0RR_REF"] = id }`.
-The client (`RefCodec.ResolveValue`) expands each placeholder into an
-**independent copy** per top-level value — two managers that shared a table
-on the server end up with two equal-but-separate client tables, kept in sync
-by the server continuing to fan out ops to both. No-op fast path (no rewrite,
-no `Refs`) when nothing in a message is actually shared.
-
-### Planned: byte-level codec
-
-`Shared/Serialization/BufferCodec.luau` is a compact binary value codec
-(buffer-backed, tag-byte packing, string interning, an `Instance` side-channel)
-intended to sit underneath `FlatCodec` as a future compression phase. It is
-fully implemented but **not yet wired into the live send path** — today's
-wire messages are plain Luau tables handed straight to `RemoteEvent:FireClient`.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the internal module map, end-to-end op-flow
+diagram, ordering guarantees, and wire format reference.
