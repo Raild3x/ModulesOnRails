@@ -1,0 +1,149 @@
+--!strict
+--[=[
+	@module core/Report
+
+	Renders a merged coverage report to the console. M2 shows the metric table
+	and the uncovered-function list; ranked branch/decision/condition findings are
+	added in M3/M4.
+]=]
+
+local Merge = require("./Merge")
+type Merged = Merge.Merged
+type Metric = Merge.Metric
+
+local Report = {}
+
+local function pct(m: Metric): number
+	if m.total == 0 then
+		return 100
+	end
+	return 100 * m.covered / m.total
+end
+
+local function bar(p: number): string
+	local width = 20
+	local filled = math.floor((p / 100) * width + 0.5)
+	return string.rep("\u{2588}", filled) .. string.rep("\u{2591}", width - filled)
+end
+
+local function metricLine(label: string, m: Metric): string
+	return string.format("  %-11s %5d / %-5d  %5.1f%%  %s", label, m.covered, m.total, pct(m), bar(pct(m)))
+end
+
+export type RunInfo = {
+	pipeline: string,
+	pipelineReason: string,
+	tally: { pass: number, fail: number, skipped: number },
+	duration: number,
+}
+
+function Report.console(merged: Merged, info: RunInfo)
+	print("")
+	print(string.format("coverage \u{2014} %s  [%s: %s]", merged.package, info.pipeline, info.pipelineReason))
+	print(string.format(
+		"  %d tests: %d pass \u{00b7} %d fail \u{00b7} %d skipped \u{00b7} run %.2fs",
+		info.tally.pass + info.tally.fail + info.tally.skipped,
+		info.tally.pass,
+		info.tally.fail,
+		info.tally.skipped,
+		info.duration
+	))
+	print("")
+	print(metricLine("Lines", merged.totals.lines))
+	print(metricLine("Statements", merged.totals.statements))
+	print(metricLine("Functions", merged.totals.functions))
+	print(metricLine("Branches", merged.totals.branches))
+	print(metricLine("Decisions", merged.totals.decisions))
+	if merged.totals.conditions.total > 0 then
+		print(metricLine("Conditions", merged.totals.conditions))
+	end
+
+	-- Uncovered public functions, ranked by file.
+	local uncovered: { { file: string, line: number, name: string, priv: boolean } } = {}
+	for _, file in merged.files do
+		for _, fn in file.fnEntries do
+			if fn.hits == 0 then
+				table.insert(uncovered, { file = file.path, line = fn.line, name = fn.name, priv = fn.isPrivate })
+			end
+		end
+	end
+	table.sort(uncovered, function(a, b)
+		if a.file ~= b.file then
+			return a.file < b.file
+		end
+		return a.line < b.line
+	end)
+
+	local publics = {}
+	local privates = 0
+	for _, u in uncovered do
+		if u.priv then
+			privates += 1
+		else
+			table.insert(publics, u)
+		end
+	end
+
+	if #publics > 0 then
+		print("")
+		print(string.format("  Functions never entered (%d):", #publics))
+		for _, u in publics do
+			print(string.format("    %s:%d  %s", u.file, u.line, u.name))
+		end
+	end
+	if privates > 0 then
+		print(string.format("  \u{2026} %d private/local function(s) also uncovered", privates))
+	end
+
+	-- One-sided decisions: reached, but the condition never varied.
+	local partials: { Merge.PartialDecision } = {}
+	for _, file in merged.files do
+		for _, p in file.partials do
+			table.insert(partials, p)
+		end
+	end
+	table.sort(partials, function(a, b)
+		if a.file ~= b.file then
+			return a.file < b.file
+		end
+		return a.line < b.line
+	end)
+	if #partials > 0 then
+		print("")
+		print(string.format("  Decisions never taken both ways (%d):", #partials))
+		for _, p in partials do
+			local snippet = p.src
+			if #snippet > 48 then
+				snippet = snippet:sub(1, 45) .. "..."
+			end
+			print(string.format("    %s:%d  %s '%s' \u{2014} %s", p.file, p.line, p.ctx, snippet, p.missing))
+		end
+	end
+
+	-- Boolean operands that never varied.
+	local condPartials: { Merge.PartialCondition } = {}
+	for _, file in merged.files do
+		for _, c in file.condPartials do
+			table.insert(condPartials, c)
+		end
+	end
+	table.sort(condPartials, function(a, b)
+		if a.file ~= b.file then
+			return a.file < b.file
+		end
+		return a.line < b.line
+	end)
+	if #condPartials > 0 then
+		print("")
+		print(string.format("  Conditions that never varied (%d):", #condPartials))
+		for _, c in condPartials do
+			local snippet = c.src
+			if #snippet > 48 then
+				snippet = snippet:sub(1, 45) .. "..."
+			end
+			print(string.format("    %s:%d  '%s' \u{2014} %s", c.file, c.line, snippet, c.missing))
+		end
+	end
+end
+
+return Report
