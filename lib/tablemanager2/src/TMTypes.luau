@@ -62,7 +62,7 @@ export type ListenerFireMode = ListenerRegistryModule.FireMode
 export type SignalFireMode = "immediate" | "deferred" | "bindable" | "coalesced"
 
 -- Controls WHEN `_doFlush` (the shadow diff + fire + reconcile cycle) runs for
--- a direct write. "immediate" (default) runs it synchronously, same as today.
+-- a direct write. "immediate" runs it synchronously.
 -- "coalesced" defers it to frame-end (`task.defer`) and merges every flush
 -- request made before then into one flush at their common ancestor path, so a
 -- frame with N writes under one subtree costs one diff/fire instead of N. See
@@ -112,13 +112,13 @@ export type ArrayOpPayload = {
 	@interface TableManagerConfig
 	.Schema SchemaCheck?
 	.OnValidationFailed (path: PathArray, value: any, err: string) -> ()?
-	.ListenerFireMode ListenerFireMode? -- Controls how listener callbacks (OnChange, OnValueChange, etc.) are scheduled when fired. Defaults to "immediate".
-	.SignalFireMode SignalFireMode? -- Controls how the per-change Signals (ValueChanged, KeyAdded, etc.) are scheduled when fired. Defaults to "immediate".
-	.FlushMode FlushMode? -- Controls WHEN a direct write's diff+fire+reconcile cycle runs. Defaults to "immediate". See `FlushMode`.
-	.DuplicateReferenceMode DuplicateReferenceMode? -- Defaults to "allow" (multi-location references are supported). See `DuplicateReferenceMode`.
+	.ListenerFireMode ListenerFireMode? -- Controls how listener callbacks (OnChange, OnValueChange, etc.) are scheduled when fired.
+	.SignalFireMode SignalFireMode? -- Controls how the per-change Signals (ValueChanged, KeyAdded, etc.) are scheduled when fired.
+	.FlushMode FlushMode? -- Controls WHEN a direct write's diff+fire+reconcile cycle runs.
+	.DuplicateReferenceMode DuplicateReferenceMode? -- Defaults to "allow" (multi-location references are supported).
 	.EnableProxies boolean? -- Defaults to true. When false, `Proxy`/`GetProxy` are unavailable.
-	.IgnoredPaths { Path }? -- Paths (and their descendants) that skip diff/snapshot/event work entirely; see `SetPathIgnored`.
-	.FrozenTablesAreOpaque boolean? -- Defaults to false. When true, a SHALLOWLY frozen table (`table.isfrozen` true, descendants untested) is also treated as opaque (no clone/walk, identity-compared only), trusting the freeze as an immutability assertion the same way `Opaque` is opt-in trust. A DEEPLY frozen table (every table-typed descendant also frozen) is always treated as opaque, regardless of this flag — that case is provably safe and needs no opt-in.
+	.IgnoredPaths { Path }? -- Paths (and their descendants) that skip diff/snapshot/event work entirely.
+	.FrozenTablesAreOpaque boolean? -- Defaults to false. When true, a SHALLOWLY frozen table is also treated as opaque (no clone/walk, identity-compared only), trusting the freeze as an immutability assertion the same way `Opaque` is opt-in trust. A DEEPLY frozen table (every table-typed descendant also frozen) is always treated as opaque, regardless of this flag — that case is provably safe and needs no opt-in.
 
 	:::note Implicit sharing
 	Linking is automatic: any table reachable (transparently) in two or more

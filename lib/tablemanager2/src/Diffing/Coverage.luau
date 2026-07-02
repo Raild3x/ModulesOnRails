@@ -33,14 +33,12 @@ type TableManagerLike = TMTypes.TableManagerLike
 
 const Coverage = {}
 
---[=[
-	True if a change at `path` would fire any of THIS manager's own
-	listeners/signals — a global Signal connection (each fires for any path) or
-	a registry listener covering `path` (including via an ancestor/subtree, see
-	`ListenerRegistry.CoversChangesAt`). Unlike `IsTrackable`, membership in a
-	link group does NOT make this true: it answers "does this manager itself
-	observe `path`", independent of fan-out obligations.
-]=]
+-- True if a change at `path` would fire any of THIS manager's own
+-- listeners/signals — a global Signal connection (each fires for any path) or
+-- a registry listener covering `path` (including via an ancestor/subtree, see
+-- `ListenerRegistry.CoversChangesAt`). Unlike `IsTrackable`, membership in a
+-- link group does NOT make this true: it answers "does this manager itself
+-- observe `path`", independent of fan-out obligations.
 -- True if ANY of the manager's 7 public per-change Signals has a connection.
 -- Each Signal fires for ANY path, and the dict diff drives one fire per changed
 -- leaf, so a single connection both forces tracking AND makes the full diff depth

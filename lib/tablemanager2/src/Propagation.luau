@@ -42,6 +42,9 @@ export type ArrayOpPayload = TMTypes.ArrayOpPayload
 
 type opKind = "Set" | "ArrayInsert" | "ArrayRemove" | "ArraySet"
 
+const function isTMDestroyed(tm: TableManagerLike): boolean
+	return tm._Destroyed == true
+end
 --------------------------------------------------------------------------------
 --// Observer registry //--
 --------------------------------------------------------------------------------
@@ -133,7 +136,7 @@ const function registerOwner(manager: TableManagerLike, t: any)
 		return
 	end
 	for other in observers do
-		if other ~= manager and not (other :: TableManagerLike)._Destroyed then
+		if other ~= manager and not isTMDestroyed(other :: TableManagerLike) then
 			manager._sharesObservers = true
 			;(other :: TableManagerLike)._sharesObservers = true
 		end
@@ -141,16 +144,12 @@ const function registerOwner(manager: TableManagerLike, t: any)
 	observers[manager] = true
 end
 
---[=[
-	@within Propagation
-
-	Walks `value`'s table graph (cycle-guarded) recording each node as observed by
-	`manager`. Stops at the opacity boundary: an opaque table is neither registered
-	nor descended into, and the table children of an `OpaqueChildren` parent are
-	skipped — so opaque regions never participate in implicit sharing. Called as
-	tables enter a manager's tree (construction / table writes / array inserts /
-	root replacement).
-]=]
+-- Walks `value`'s table graph (cycle-guarded) recording each node as observed by
+-- `manager`. Stops at the opacity boundary: an opaque table is neither registered
+-- nor descended into, and the table children of an `OpaqueChildren` parent are
+-- skipped — so opaque regions never participate in implicit sharing. Called as
+-- tables enter a manager's tree (construction / table writes / array inserts /
+-- root replacement).
 const function registerSubtree(manager: TableManagerLike, value: any)
 	if type(value) ~= "table" then
 		return
@@ -241,7 +240,7 @@ const function collectRecipients(
 		if observers ~= nil then
 			for other in observers do
 				const otherTM = other :: TableManagerLike
-				if otherTM == self or otherTM._Destroyed or recipients[otherTM] then
+				if otherTM == self or isTMDestroyed(otherTM) or recipients[otherTM] then
 					continue
 				end
 				const anchorInOther = pathOfTableIn(otherTM, prefixTable)
@@ -266,19 +265,12 @@ const function translate(anchor: PathArray, path: PathArray, relStart: number): 
 	return out
 end
 
---[=[
-	@within Propagation
-
-	Fan-out hook for "Set"-kind changes (called from the OnValueChanged emit).
-	`path` is the changed location in `self`'s own coordinates. Propagates to
-	every other observer of a shared table strictly above `path`, once each.
-]=]
+-- Fan-out hook for "Set"-kind changes (called from the OnValueChanged emit).
+-- `path` is the changed location in `self`'s own coordinates. Propagates to
+-- every other observer of a shared table strictly above `path`, once each.
 const function fanOutSet(self: TableManagerLike, path: PathArray, newValue: any, oldValue: any, diffNode: DiffNode?)
-	-- Phase B reuse is only safe when the origin has no PER-MANAGER opacity (see
-	-- `_NotifyApplied`); recipients re-check their own.
 	const originHasNoOpacity = self._opaqueRegistries.Count == 0
-	-- Only identities STRICTLY above `path` contain this change; `path` itself
-	-- being shared is a reference-replacement (divergence), not interior fan-out.
+
 	const recipients = collectRecipients(self, path, #path - 1)
 	for recipient, info in recipients do
 		deliver(recipient, {
@@ -292,13 +284,9 @@ const function fanOutSet(self: TableManagerLike, path: PathArray, newValue: any,
 	end
 end
 
---[=[
-	@within Propagation
-
-	Fan-out hook for array-op changes (called from `fireArrayOperation`).
-	`basePath` is the array's own path in `self`'s coordinates. The array itself
-	may be the shared identity, so identities at or above `basePath` are eligible.
-]=]
+-- Fan-out hook for array-op changes (called from `fireArrayOperation`).
+-- `basePath` is the array's own path in `self`'s coordinates. The array itself
+-- may be the shared identity, so identities at or above `basePath` are eligible.
 const function fanOutArrayOp(
 	self: TableManagerLike,
 	eventName: "ArrayInserted" | "ArrayRemoved" | "ArraySet",
@@ -337,8 +325,6 @@ const function getCoObservers(manager: TableManagerLike): { TableManagerLike }
 		if type(node) ~= "table" or visited[node] then
 			return
 		end
-		-- Mirror `registerSubtree`'s opacity boundary: a region `manager` treats as
-		-- opaque was never registered as observed, so it must not count as sharing.
 		if ctx ~= nil and ctx.isOpaque(node) then
 			return
 		end
@@ -347,7 +333,7 @@ const function getCoObservers(manager: TableManagerLike): { TableManagerLike }
 		if observers ~= nil then
 			for other in observers do
 				const otherTM = other :: TableManagerLike
-				if otherTM ~= manager and not otherTM._Destroyed and not seen[otherTM] then
+				if otherTM ~= manager and not isTMDestroyed(otherTM) and not seen[otherTM] then
 					-- Only count it as live sharing if `other` still holds this identity.
 					if pathOfTableIn(otherTM, node) ~= nil then
 						seen[otherTM] = true
