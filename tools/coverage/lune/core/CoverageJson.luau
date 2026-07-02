@@ -103,6 +103,19 @@ function CoverageJson.build(merged: Merged, info: BuildInfo, perTest: { any }?):
 		files = files,
 	}
 
+	local function supList(entries: { Merge.SuppressedEntry })
+		local out = {}
+		for _, e in entries do
+			table.insert(out, { file = e.file, line = e.line, site = e.site, kind = e.kind, detail = e.detail })
+		end
+		return out
+	end
+	doc.suppressed = {
+		ignored = supList(merged.suppressed.ignored),
+		env_gated = supList(merged.suppressed.gated),
+		dead = supList(merged.suppressed.dead),
+	}
+
 	if perTest then
 		local out = {}
 		for _, t in perTest do

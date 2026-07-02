@@ -10,9 +10,27 @@
 local fs = require("@lune/fs")
 local serde = require("@lune/serde")
 
+local Ignore = require("./Ignore")
+
 local Merge = {}
 
 export type Metric = { covered: number, total: number }
+
+-- A site excluded from the metrics and shown in the suppressed footer instead.
+export type SuppressedEntry = {
+	file: string,
+	line: number,
+	site: string,
+	kind: string,
+	label: string, -- fn name or condition snippet, for the report
+	detail: string, -- which rule/marker suppressed it
+}
+
+export type Suppressed = {
+	ignored: { SuppressedEntry },
+	gated: { SuppressedEntry },
+	dead: { SuppressedEntry },
+}
 
 export type FnEntry = { name: string, line: number, hits: number, isPrivate: boolean }
 
@@ -62,6 +80,8 @@ export type Merged = {
 	files: { FileReport },
 	-- dense probe id -> stable site key, for per-test attribution export
 	idToSite: { [number]: string },
+	-- sites excluded from the metrics above, grouped by why
+	suppressed: Suppressed,
 }
 
 local function metric(): Metric
@@ -76,13 +96,21 @@ end
 --[=[
 	@param mapPath -- path to map.json
 	@param coverage -- the CoverageResult (hits array indexed by slot id, total, map_sha)
+	@param rules -- optional ignore rules; matched sites drop out of the metrics
 ]=]
-function Merge.merge(mapPath: string, coverage: { hits: { number }, total: number, map_sha: string }): Merged
+function Merge.merge(
+	mapPath: string,
+	coverage: { hits: { number }, total: number, map_sha: string },
+	rules: Ignore.Rules?
+): Merged
 	local map = serde.decode("json", fs.readFile(mapPath))
 	assert(
 		map.total_slots == coverage.total,
 		`map/hits slot mismatch ({map.total_slots} vs {coverage.total}) -- stale artifacts?`
 	)
+
+	local ignoreRules = rules or Ignore.empty()
+	local suppressed: Suppressed = { ignored = {}, gated = {}, dead = {} }
 
 	local hits = coverage.hits
 	local files: { FileReport } = {}
@@ -114,7 +142,36 @@ function Merge.merge(mapPath: string, coverage: { hits: { number }, total: numbe
 		local lineHasProbe: { [number]: boolean } = {}
 		local lineCovered: { [number]: boolean } = {}
 
+		-- Functions matched by a name rule: their whole body drops out too.
+		local ignoredFnIds: { [number]: boolean } = {}
+		if not ignoreRules.isEmpty and next(ignoreRules.names) ~= nil then
+			for _, probe in file.probes do
+				if probe.kind == "fn" and probe.name ~= nil and ignoreRules.names[probe.name] then
+					ignoredFnIds[probe.id] = true
+				end
+			end
+		end
+
 		for _, probe in file.probes do
+			-- Suppression: excluded from the metrics, listed separately. `probe.fn`
+			-- is the enclosing function's id (map field is `fn`), so a name rule
+			-- takes the whole body with it.
+			local direct = Ignore.matchDirect(ignoreRules, file.path, probe)
+			local inherited = probe.fn ~= nil and ignoredFnIds[probe.fn] == true
+			if direct ~= nil or inherited then
+				if direct ~= nil then
+					table.insert(suppressed.ignored, {
+						file = file.path,
+						line = probe.line,
+						site = probe.site,
+						kind = probe.kind,
+						label = probe.name or probe.src or "",
+						detail = direct,
+					})
+				end
+				continue
+			end
+
 			local count = hits[probe.id] or 0
 			if probe.kind == "stmt" then
 				stmts.total += 1
@@ -212,6 +269,7 @@ function Merge.merge(mapPath: string, coverage: { hits: { number }, total: numbe
 		totals = pkgTotals,
 		files = files,
 		idToSite = idToSite,
+		suppressed = suppressed,
 	}
 end
 

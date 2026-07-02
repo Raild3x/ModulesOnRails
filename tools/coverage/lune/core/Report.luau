@@ -144,6 +144,39 @@ function Report.console(merged: Merged, info: RunInfo)
 			print(string.format("    %s:%d  '%s' \u{2014} %s", c.file, c.line, snippet, c.missing))
 		end
 	end
+
+	-- Sites excluded from the metrics above (ignore rules / env gates / dead code).
+	local sup = merged.suppressed
+	local total = #sup.ignored + #sup.gated + #sup.dead
+	if total > 0 then
+		print("")
+		print(string.format("  Suppressed \u{2014} excluded from the metrics above (%d):", total))
+		local function line(e: Merge.SuppressedEntry): string
+			local label = if e.label ~= "" then e.label else e.kind
+			if #label > 48 then
+				label = label:sub(1, 45) .. "..."
+			end
+			return string.format("    %s:%d  %s", e.file, e.line, label)
+		end
+		if #sup.ignored > 0 then
+			print(string.format("  \u{00b7} ignore rule (%d):", #sup.ignored))
+			for _, e in sup.ignored do
+				print(line(e))
+			end
+		end
+		if #sup.gated > 0 then
+			print(string.format("  \u{00b7} env-gated, unreachable in edit mode (%d):", #sup.gated))
+			for _, e in sup.gated do
+				print(line(e))
+			end
+		end
+		if #sup.dead > 0 then
+			print(string.format("  \u{00b7} dead code (%d):", #sup.dead))
+			for _, e in sup.dead do
+				print(line(e))
+			end
+		end
+	end
 end
 
 return Report

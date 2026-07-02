@@ -17,6 +17,7 @@ local RobloxRunner = require("./RobloxRunner")
 local Merge = require("./Merge")
 local Report = require("./Report")
 local CoverageJson = require("./CoverageJson")
+local Ignore = require("./Ignore")
 
 type RepoAdapter = adapterMod.RepoAdapter
 type PackageSpec = adapterMod.PackageSpec
@@ -89,7 +90,8 @@ function Orchestrator.run(adapter: RepoAdapter, selector: string, options: Optio
 		end
 		writeHits(hitsOut, spec, env, run)
 
-		local merged = Merge.merge(mapOut, run.coverage)
+		local rules = Ignore.load(spec.root, spec.ignoreFiles)
+		local merged = Merge.merge(mapOut, run.coverage, rules)
 		Report.console(merged, {
 			pipeline = spec.pipeline,
 			pipelineReason = spec.pipelineReason,
