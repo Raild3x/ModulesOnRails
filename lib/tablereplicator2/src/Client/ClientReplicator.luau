@@ -11,7 +11,7 @@
 	they receive replicators from the initial snapshot too.
 
 	```lua
-	local ClientReplicator = require(Packages.TableReplicator2).Client
+	local ClientReplicator = require(Packages.TableReplicator).Client
 
 	ClientReplicator.ForEach("PlayerData", function(replicator)
 		replicator.Manager:Observe("Coins", function(coins)

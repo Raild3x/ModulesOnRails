@@ -11,7 +11,7 @@
 
 	**Server**
 	```lua
-	local ServerReplicator = require(Packages.TableReplicator2).Server
+	local ServerReplicator = require(Packages.TableReplicator).Server
 
 	Players.PlayerAdded:Connect(function(player)
 		local replicator = ServerReplicator.new({
@@ -30,7 +30,7 @@
 
 	**Client**
 	```lua
-	local ClientReplicator = require(Packages.TableReplicator2).Client
+	local ClientReplicator = require(Packages.TableReplicator).Client
 
 	-- Register listeners before requesting data to catch replicators in the snapshot.
 	ClientReplicator.ForEach("PlayerData", function(replicator)
@@ -41,23 +41,6 @@
 
 	ClientReplicator.RequestData()
 	```
-
-	---
-	### Core concepts
-	- **Namespace** — Optional string class identifier used for discovery
-	  (e.g. `"PlayerData"`). Omit for anonymous replicators, which are reachable
-	  only by Id, tags, or predicate.
-	- **ReplicationTargets** — Which players a top-level replicator sends data to.
-	  Accepts a single `Player`, a list, or `"all"`. Child replicators inherit from
-	  their top-level ancestor.
-	- **Tags** — Arbitrary key/value metadata (e.g. `{ UserId = player.UserId }`)
-	  used for filtering in `ForEach`/`GetAll`/`GetFirst`.
-	- **Discovery** — Use `ForEach` to react to existing and future replicators by
-	  namespace, tag, or predicate. Prefer it over `OnNew`, which misses replicators
-	  that already exist at call time.
-	- **RequestData** — Clients must call `ClientReplicator.RequestData()` once to
-	  receive the initial snapshot. Register `ForEach`/`OnNew` listeners before calling it.
-
 	---
 	### Exported Types
 	- ServerReplicator

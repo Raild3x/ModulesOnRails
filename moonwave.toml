@@ -19,6 +19,17 @@ classes = ["TableManager"]
 section = "TableReplicator"
 classes = ["TableReplicator", "ServerReplicator", "ClientReplicator"]
 
+[[classOrder.items]]
+section = "[Guides]"
+classes = [
+	"TR Getting Started",
+	"TR Discovery & Targeting",
+	"TR Namespaces & Tokens",
+	"TR Parent-Child Guide",
+	"TR Custom Remotes",
+	"TR Performance & Ordering",
+]
+
 [[classOrder]]
 section = "NetWire"
 classes = ["NetWire", "ServerNetWire", "ClientNetWire", "----------------", "ServerRemoteEvent", "ServerRemoteProperty", "ClientRemoteEvent", "ClientRemoteProperty"]

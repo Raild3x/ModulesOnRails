@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Wire codec coverage for TableReplicator2: the flat opcode item format
+	Wire codec coverage for TableReplicator: the flat opcode item format
 	(`FlatCodec`), the binary message framing (`MessageCodec`) including Phase 3
 	in-band table dedup, and the per-frame op buffer (`OpBuffer`). Pure
 	data-structure tests -- no `ServerReplicator` instances needed, except where
@@ -79,12 +79,11 @@ return function(t: tiniest)
 		end)
 
 		test("BuildMessage wraps items with the current version", function()
-			local message = FlatCodec.BuildMessage({})
+			local message = FlatCodec.BuildMessage {}
 			expect(message.V).is(FlatCodec.Version)
 			expect(#message.Items).is(0)
 		end)
 	end)
-
 
 	--------------------------------------------------------------------------------
 
@@ -155,26 +154,26 @@ return function(t: tiniest)
 
 	describe("OpBuffer.PathKey", function()
 		test("identical paths produce identical keys", function()
-			expect(OpBuffer.PathKey({ "a", "b" })).is(OpBuffer.PathKey({ "a", "b" }))
+			expect(OpBuffer.PathKey { "a", "b" }).is(OpBuffer.PathKey { "a", "b" })
 		end)
 
 		test("string and number segments with the same tostring never collide", function()
-			expect(OpBuffer.PathKey({ 1 }) == OpBuffer.PathKey({ "1" })).is(false)
+			expect(OpBuffer.PathKey { 1 } == OpBuffer.PathKey { "1" }).is(false)
 		end)
 
 		test("paths that only differ by element grouping never collide", function()
 			-- {"a","b"} vs {"a.b"} must not hash the same despite a naive
 			-- separator-only join producing identical strings.
-			expect(OpBuffer.PathKey({ "a", "b" }) == OpBuffer.PathKey({ "a.b" })).is(false)
+			expect(OpBuffer.PathKey { "a", "b" } == OpBuffer.PathKey { "a.b" }).is(false)
 		end)
 
 		test("different paths produce different keys", function()
-			expect(OpBuffer.PathKey({ "a" }) == OpBuffer.PathKey({ "b" })).is(false)
+			expect(OpBuffer.PathKey { "a" } == OpBuffer.PathKey { "b" }).is(false)
 		end)
 
 		test("empty path produces a stable, distinct key", function()
-			expect(OpBuffer.PathKey({})).is(OpBuffer.PathKey({}))
-			expect(OpBuffer.PathKey({}) == OpBuffer.PathKey({ "a" })).is(false)
+			expect(OpBuffer.PathKey {}).is(OpBuffer.PathKey {})
+			expect(OpBuffer.PathKey {} == OpBuffer.PathKey { "a" }).is(false)
 		end)
 	end)
 
@@ -214,13 +213,13 @@ return function(t: tiniest)
 		end
 
 		test("version is preserved", function()
-			local msg = roundTrip({})
+			local msg = roundTrip {}
 			expect(msg.V).is(FlatCodec.Version)
 		end)
 
 		test("Create item round-trips Id/ParentId/Token/Tags/Data", function()
 			local item = FlatCodec.CreateItem(5, 2, "PlayerData", { role = "admin" }, { Coins = 100 })
-			local msg = roundTrip({ item })
+			local msg = roundTrip { item }
 			expect(#msg.Items).is(1)
 			local got = msg.Items[1] :: any
 			expect(got.Op).is(FlatCodec.Op.Create)
@@ -233,13 +232,13 @@ return function(t: tiniest)
 
 		test("Create item with no parent uses the NoParent sentinel", function()
 			local item = FlatCodec.CreateItem(1, nil, "T", {}, {})
-			local msg = roundTrip({ item })
+			local msg = roundTrip { item }
 			expect((msg.Items[1] :: any).ParentId).is(FlatCodec.NoParent)
 		end)
 
 		test("Destroy item round-trips Id", function()
 			local item = FlatCodec.DestroyItem(9)
-			local msg = roundTrip({ item })
+			local msg = roundTrip { item }
 			local got = msg.Items[1] :: any
 			expect(got.Op).is(FlatCodec.Op.Destroy)
 			expect(got.Id).is(9)
@@ -247,7 +246,7 @@ return function(t: tiniest)
 
 		test("SetParent item round-trips Id/ParentId", function()
 			local item = FlatCodec.SetParentItem(9, 3)
-			local msg = roundTrip({ item })
+			local msg = roundTrip { item }
 			local got = msg.Items[1] :: any
 			expect(got.Op).is(FlatCodec.Op.SetParent)
 			expect(got.Id).is(9)
@@ -256,15 +255,15 @@ return function(t: tiniest)
 
 		test("Ops item round-trips all six op kinds via FlatCodec.OpsItem/DecodeOps", function()
 			local ops: any = {
-				{ Kind = "Set",         Path = { "a", "b" }, Value = 5 },
-				{ Kind = "ArrayInsert", Path = { "arr" },    Index = 1, Value = "x" },
-				{ Kind = "ArrayRemove", Path = { "arr" },    Index = 2 },
-				{ Kind = "ArraySet",    Path = { "arr" },    Index = 1, Value = "y" },
-				{ Kind = "BatchBegin",  Path = {} },
-				{ Kind = "BatchEnd",    Path = {} },
+				{ Kind = "Set", Path = { "a", "b" }, Value = 5 },
+				{ Kind = "ArrayInsert", Path = { "arr" }, Index = 1, Value = "x" },
+				{ Kind = "ArrayRemove", Path = { "arr" }, Index = 2 },
+				{ Kind = "ArraySet", Path = { "arr" }, Index = 1, Value = "y" },
+				{ Kind = "BatchBegin", Path = {} },
+				{ Kind = "BatchEnd", Path = {} },
 			}
 			local item = FlatCodec.OpsItem(7, ops)
-			local msg = roundTrip({ item })
+			local msg = roundTrip { item }
 			local got = msg.Items[1] :: any
 			expect(got.Op).is(FlatCodec.Op.Ops)
 			expect(got.Id).is(7)
@@ -285,10 +284,10 @@ return function(t: tiniest)
 		test("BatchBegin/BatchEnd are single-byte ops -- no path or value bytes", function()
 			local ops: any = {
 				{ Kind = "BatchBegin", Path = {} },
-				{ Kind = "Set",        Path = { "x" }, Value = 1 },
-				{ Kind = "BatchEnd",   Path = {} },
+				{ Kind = "Set", Path = { "x" }, Value = 1 },
+				{ Kind = "BatchEnd", Path = {} },
 			}
-			local msg = roundTrip({ FlatCodec.OpsItem(1, ops) })
+			local msg = roundTrip { FlatCodec.OpsItem(1, ops) }
 			local decoded = FlatCodec.DecodeOps(msg.Items[1] :: any)
 			expect(decoded[1].Kind).is("BatchBegin")
 			expect(decoded[2].Kind).is("Set")
@@ -300,7 +299,7 @@ return function(t: tiniest)
 				{ Kind = "Set", Path = { "hp" }, Value = 10 },
 				{ Kind = "Set", Path = { "hp" }, Value = 20 }, -- triggers samePath=1
 			}
-			local msg = roundTrip({ FlatCodec.OpsItem(1, ops) })
+			local msg = roundTrip { FlatCodec.OpsItem(1, ops) }
 			local decoded = FlatCodec.DecodeOps(msg.Items[1] :: any)
 			expect(decoded[1].Value).is(10)
 			expect(decoded[1].Path[1]).is("hp")
@@ -313,7 +312,7 @@ return function(t: tiniest)
 				{ Kind = "Set", Path = { "stats", "hp" }, Value = 100 },
 				{ Kind = "Set", Path = { "stats", "mp" }, Value = 50 }, -- shares "stats"
 			}
-			local msg = roundTrip({ FlatCodec.OpsItem(1, ops) })
+			local msg = roundTrip { FlatCodec.OpsItem(1, ops) }
 			local decoded = FlatCodec.DecodeOps(msg.Items[1] :: any)
 			expect(decoded[1].Path[1]).is("stats")
 			expect(decoded[1].Path[2]).is("hp")
@@ -328,7 +327,7 @@ return function(t: tiniest)
 				{ Kind = "ArrayInsert", Path = { "items" }, Index = 3, Value = "Sword" },
 				{ Kind = "ArrayRemove", Path = { "items" }, Index = 14 },
 			}
-			local msg = roundTrip({ FlatCodec.OpsItem(1, ops) })
+			local msg = roundTrip { FlatCodec.OpsItem(1, ops) }
 			local decoded = FlatCodec.DecodeOps(msg.Items[1] :: any)
 			expect(decoded[1].Index).is(3)
 			expect(decoded[1].Value).is("Sword")
@@ -340,7 +339,7 @@ return function(t: tiniest)
 				{ Kind = "ArrayRemove", Path = { "items" }, Index = 15 },
 				{ Kind = "ArrayInsert", Path = { "items" }, Index = 300, Value = "x" },
 			}
-			local msg = roundTrip({ FlatCodec.OpsItem(1, ops) })
+			local msg = roundTrip { FlatCodec.OpsItem(1, ops) }
 			local decoded = FlatCodec.DecodeOps(msg.Items[1] :: any)
 			expect(decoded[1].Index).is(15)
 			expect(decoded[2].Index).is(300)
@@ -352,7 +351,7 @@ return function(t: tiniest)
 			for i = 1, 100 do
 				ops[i] = { Kind = "Set", Path = { "x" }, Value = i }
 			end
-			local msg = roundTrip({ FlatCodec.OpsItem(1, ops) })
+			local msg = roundTrip { FlatCodec.OpsItem(1, ops) }
 			local decoded = FlatCodec.DecodeOps(msg.Items[1] :: any)
 			expect(#decoded).is(100)
 			expect(decoded[100].Value).is(100)
@@ -375,7 +374,7 @@ return function(t: tiniest)
 			local ops: any = {
 				{ Kind = "Set", Path = { "inv", 2, "id" }, Value = "A7" },
 			}
-			local msg = roundTrip({ FlatCodec.OpsItem(1, ops) })
+			local msg = roundTrip { FlatCodec.OpsItem(1, ops) }
 			local decoded = FlatCodec.DecodeOps(msg.Items[1] :: any)
 			expect(decoded[1].Path[1]).is("inv")
 			expect(decoded[1].Path[2]).is(2)
@@ -385,12 +384,12 @@ return function(t: tiniest)
 
 		test("BatchBegin/BatchEnd between data ops do not reset path-prefix dedup", function()
 			local ops: any = {
-				{ Kind = "Set",        Path = { "stats", "hp" }, Value = 10 },
+				{ Kind = "Set", Path = { "stats", "hp" }, Value = 10 },
 				{ Kind = "BatchBegin", Path = {} },
-				{ Kind = "Set",        Path = { "stats", "mp" }, Value = 5 }, -- still shares "stats"
-				{ Kind = "BatchEnd",   Path = {} },
+				{ Kind = "Set", Path = { "stats", "mp" }, Value = 5 }, -- still shares "stats"
+				{ Kind = "BatchEnd", Path = {} },
 			}
-			local msg = roundTrip({ FlatCodec.OpsItem(1, ops) })
+			local msg = roundTrip { FlatCodec.OpsItem(1, ops) }
 			local decoded = FlatCodec.DecodeOps(msg.Items[1] :: any)
 			expect(decoded[1].Path[2]).is("hp")
 			expect(decoded[3].Path[1]).is("stats")
@@ -420,7 +419,7 @@ return function(t: tiniest)
 				{ Kind = "Set", Path = { "a" }, Value = shared },
 				{ Kind = "Set", Path = { "b" }, Value = shared },
 			}
-			local msg = roundTrip({ FlatCodec.OpsItem(1, ops) })
+			local msg = roundTrip { FlatCodec.OpsItem(1, ops) }
 			local decoded = FlatCodec.DecodeOps(msg.Items[1] :: any)
 			expect(decoded[1].Value.tag).is("v")
 			expect(decoded[2].Value.tag).is("v")
@@ -436,24 +435,30 @@ return function(t: tiniest)
 
 			local ops: any = {
 				{ Kind = "Set", Path = { "A", "B" }, Value = C },
-				{ Kind = "Set", Path = { "D"      }, Value = B },
+				{ Kind = "Set", Path = { "D" }, Value = B },
 			}
 
-			local optimizedBuf = (MessageCodec.Encode({ FlatCodec.OpsItem(1, ops) }))
+			local optimizedBuf = (MessageCodec.Encode { FlatCodec.OpsItem(1, ops) })
 			local optimizedBytes = buffer.len(optimizedBuf)
 
 			local naiveBytes = 0
 			for _, op in ops do
-				local b = (MessageCodec.Encode({ FlatCodec.OpsItem(1, { op }) }))
+				local b = (MessageCodec.Encode { FlatCodec.OpsItem(1, { op }) })
 				naiveBytes += buffer.len(b)
 			end
 
 			local rawBytes = #HttpService:JSONEncode(ops)
 			local saved = naiveBytes - optimizedBytes
-			print(string.format(
-				"[MessageCodec] nested table dedup (C direct + C nested inside B): %d optimized / %d naive / %d raw — saved %d vs naive, %.0f%% of raw",
-				optimizedBytes, naiveBytes, rawBytes, saved, optimizedBytes / rawBytes * 100
-			))
+			print(
+				string.format(
+					"[MessageCodec] nested table dedup (C direct + C nested inside B): %d optimized / %d naive / %d raw — saved %d vs naive, %.0f%% of raw",
+					optimizedBytes,
+					naiveBytes,
+					rawBytes,
+					saved,
+					optimizedBytes / rawBytes * 100
+				)
+			)
 
 			expect(optimizedBytes < naiveBytes).is_true()
 
@@ -497,33 +502,40 @@ return function(t: tiniest)
 
 		test("path-prefix dedup: 10 ops sharing a two-segment parent path", function()
 			local ops: any = {
-				{ Kind = "Set", Path = { "Character", "Stats", "Hp"  }, Value = 100 },
-				{ Kind = "Set", Path = { "Character", "Stats", "Mp"  }, Value = 80  },
-				{ Kind = "Set", Path = { "Character", "Stats", "Atk" }, Value = 15  },
-				{ Kind = "Set", Path = { "Character", "Stats", "Def" }, Value = 10  },
-				{ Kind = "Set", Path = { "Character", "Stats", "Spd" }, Value = 20  },
-				{ Kind = "Set", Path = { "Character", "Stats", "Luk" }, Value = 5   },
-				{ Kind = "Set", Path = { "Character", "Stats", "Crt" }, Value = 12  },
-				{ Kind = "Set", Path = { "Character", "Stats", "Eva" }, Value = 8   },
-				{ Kind = "Set", Path = { "Character", "Stats", "Acc" }, Value = 95  },
-				{ Kind = "Set", Path = { "Character", "Stats", "Res" }, Value = 30  },
+				{ Kind = "Set", Path = { "Character", "Stats", "Hp" }, Value = 100 },
+				{ Kind = "Set", Path = { "Character", "Stats", "Mp" }, Value = 80 },
+				{ Kind = "Set", Path = { "Character", "Stats", "Atk" }, Value = 15 },
+				{ Kind = "Set", Path = { "Character", "Stats", "Def" }, Value = 10 },
+				{ Kind = "Set", Path = { "Character", "Stats", "Spd" }, Value = 20 },
+				{ Kind = "Set", Path = { "Character", "Stats", "Luk" }, Value = 5 },
+				{ Kind = "Set", Path = { "Character", "Stats", "Crt" }, Value = 12 },
+				{ Kind = "Set", Path = { "Character", "Stats", "Eva" }, Value = 8 },
+				{ Kind = "Set", Path = { "Character", "Stats", "Acc" }, Value = 95 },
+				{ Kind = "Set", Path = { "Character", "Stats", "Res" }, Value = 30 },
 			}
 
-			local optimizedBuf = (MessageCodec.Encode({ FlatCodec.OpsItem(1, ops) }))
+			local optimizedBuf = (MessageCodec.Encode { FlatCodec.OpsItem(1, ops) })
 			local optimizedBytes = buffer.len(optimizedBuf)
 
 			local naiveBytes = 0
 			for _, op in ops do
-				local b = (MessageCodec.Encode({ FlatCodec.OpsItem(1, { op }) }))
+				local b = (MessageCodec.Encode { FlatCodec.OpsItem(1, { op }) })
 				naiveBytes += buffer.len(b)
 			end
 
 			local rawBytes = #HttpService:JSONEncode(ops)
 			local saved = naiveBytes - optimizedBytes
-			print(string.format(
-				"[MessageCodec] path-prefix dedup (%d ops under Character.Stats.*): %d optimized / %d naive / %d raw — saved %d vs naive, %.0f%% of raw",
-				#ops, optimizedBytes, naiveBytes, rawBytes, saved, optimizedBytes / rawBytes * 100
-			))
+			print(
+				string.format(
+					"[MessageCodec] path-prefix dedup (%d ops under Character.Stats.*): %d optimized / %d naive / %d raw — saved %d vs naive, %.0f%% of raw",
+					#ops,
+					optimizedBytes,
+					naiveBytes,
+					rawBytes,
+					saved,
+					optimizedBytes / rawBytes * 100
+				)
+			)
 
 			expect(optimizedBytes < naiveBytes).is_true()
 			local msg = MessageCodec.Decode(optimizedBuf, nil)
@@ -541,21 +553,27 @@ return function(t: tiniest)
 				ops[i] = { Kind = "Set", Path = { "Inventory", "SelectedSlot" }, Value = i }
 			end
 
-			local optimizedBuf = (MessageCodec.Encode({ FlatCodec.OpsItem(1, ops) }))
+			local optimizedBuf = (MessageCodec.Encode { FlatCodec.OpsItem(1, ops) })
 			local optimizedBytes = buffer.len(optimizedBuf)
 
 			local naiveBytes = 0
 			for _, op in ops do
-				local b = (MessageCodec.Encode({ FlatCodec.OpsItem(1, { op }) }))
+				local b = (MessageCodec.Encode { FlatCodec.OpsItem(1, { op }) })
 				naiveBytes += buffer.len(b)
 			end
 
 			local rawBytes = #HttpService:JSONEncode(ops)
 			local saved = naiveBytes - optimizedBytes
-			print(string.format(
-				"[MessageCodec] samePath compaction (20 updates to Inventory.SelectedSlot): %d optimized / %d naive / %d raw — saved %d vs naive, %.0f%% of raw",
-				optimizedBytes, naiveBytes, rawBytes, saved, optimizedBytes / rawBytes * 100
-			))
+			print(
+				string.format(
+					"[MessageCodec] samePath compaction (20 updates to Inventory.SelectedSlot): %d optimized / %d naive / %d raw — saved %d vs naive, %.0f%% of raw",
+					optimizedBytes,
+					naiveBytes,
+					rawBytes,
+					saved,
+					optimizedBytes / rawBytes * 100
+				)
+			)
 
 			expect(optimizedBytes < naiveBytes).is_true()
 			local msg = MessageCodec.Decode(optimizedBuf, nil)
@@ -582,16 +600,22 @@ return function(t: tiniest)
 
 			local naiveBytes = 0
 			for _, item in items do
-				local b = (MessageCodec.Encode({ item }))
+				local b = (MessageCodec.Encode { item })
 				naiveBytes += buffer.len(b)
 			end
 
 			local rawBytes = #HttpService:JSONEncode(items)
 			local saved = naiveBytes - optimizedBytes
-			print(string.format(
-				"[MessageCodec] cross-item string interning (5 Create items, shared schema keys): %d optimized / %d naive / %d raw — saved %d vs naive, %.0f%% of raw",
-				optimizedBytes, naiveBytes, rawBytes, saved, optimizedBytes / rawBytes * 100
-			))
+			print(
+				string.format(
+					"[MessageCodec] cross-item string interning (5 Create items, shared schema keys): %d optimized / %d naive / %d raw — saved %d vs naive, %.0f%% of raw",
+					optimizedBytes,
+					naiveBytes,
+					rawBytes,
+					saved,
+					optimizedBytes / rawBytes * 100
+				)
+			)
 
 			expect(optimizedBytes < naiveBytes).is_true()
 			local msg = MessageCodec.Decode(optimizedBuf, optimizedInst)
@@ -601,78 +625,87 @@ return function(t: tiniest)
 			expect((msg.Items[5] :: any).Data.Inventory[2]).is("Shield")
 		end)
 
-		test("combined workload: realistic mixed Create + multi-op Ops message with deep paths and mixed types", function()
-			-- One Create bootstrapping a player character, followed by an ops frame
-			-- touching many different nested paths with mixed value types.
-			local createItem = FlatCodec.CreateItem(200, nil, "Character", {}, {
-				Name = "Hero",
-				Level = 1,
-				Position = { X = 10.5, Y = 0.0, Z = 22.3 },
-				Stats = { Hp = 100, Mp = 50, Atk = 12, Def = 8 },
-				Inventory = { "IronSword", "WoodShield", "HealthPotion" },
-			})
-			-- Keep a reference to the original BufferedOp list for the per-op
-			-- naive measurement; opsItem.Ops holds already-converted WireOpEntry
-			-- (numeric Kind), which cannot be fed back through FlatCodec.OpsItem.
-			local rawOps: any = {
-				{ Kind = "Set",         Path = { "Stats", "Hp"  }, Value = 85                      },
-				{ Kind = "Set",         Path = { "Stats", "Mp"  }, Value = 45                      },
-				{ Kind = "Set",         Path = { "Level"        }, Value = 2                       },
-				{ Kind = "ArrayInsert", Path = { "Inventory"    }, Index = 4, Value = "MagicStaff" },
-				{ Kind = "ArrayRemove", Path = { "Inventory"    }, Index = 2                       },
-				{ Kind = "Set",         Path = { "Stats", "Atk" }, Value = 15                      },
-				{ Kind = "BatchBegin",  Path = {}                                                   },
-				{ Kind = "Set",         Path = { "Stats", "Def" }, Value = 10                      },
-				{ Kind = "Set",         Path = { "Stats", "Hp"  }, Value = 90                      },
-				{ Kind = "BatchEnd",    Path = {}                                                   },
-			}
-			local opsItem = FlatCodec.OpsItem(200, rawOps)
-			local items = { createItem, opsItem }
+		test(
+			"combined workload: realistic mixed Create + multi-op Ops message with deep paths and mixed types",
+			function()
+				-- One Create bootstrapping a player character, followed by an ops frame
+				-- touching many different nested paths with mixed value types.
+				local createItem = FlatCodec.CreateItem(200, nil, "Character", {}, {
+					Name = "Hero",
+					Level = 1,
+					Position = { X = 10.5, Y = 0.0, Z = 22.3 },
+					Stats = { Hp = 100, Mp = 50, Atk = 12, Def = 8 },
+					Inventory = { "IronSword", "WoodShield", "HealthPotion" },
+				})
+				-- Keep a reference to the original BufferedOp list for the per-op
+				-- naive measurement; opsItem.Ops holds already-converted WireOpEntry
+				-- (numeric Kind), which cannot be fed back through FlatCodec.OpsItem.
+				local rawOps: any = {
+					{ Kind = "Set", Path = { "Stats", "Hp" }, Value = 85 },
+					{ Kind = "Set", Path = { "Stats", "Mp" }, Value = 45 },
+					{ Kind = "Set", Path = { "Level" }, Value = 2 },
+					{ Kind = "ArrayInsert", Path = { "Inventory" }, Index = 4, Value = "MagicStaff" },
+					{ Kind = "ArrayRemove", Path = { "Inventory" }, Index = 2 },
+					{ Kind = "Set", Path = { "Stats", "Atk" }, Value = 15 },
+					{ Kind = "BatchBegin", Path = {} },
+					{ Kind = "Set", Path = { "Stats", "Def" }, Value = 10 },
+					{ Kind = "Set", Path = { "Stats", "Hp" }, Value = 90 },
+					{ Kind = "BatchEnd", Path = {} },
+				}
+				local opsItem = FlatCodec.OpsItem(200, rawOps)
+				local items = { createItem, opsItem }
 
-			local optimizedBuf, optimizedInst = MessageCodec.Encode(items)
-			local optimizedBytes = buffer.len(optimizedBuf)
+				local optimizedBuf, optimizedInst = MessageCodec.Encode(items)
+				local optimizedBytes = buffer.len(optimizedBuf)
 
-			-- Cross-item naive: each item encoded separately (loses cross-item interning).
-			local naiveBytes = 0
-			for _, item in items do
-				local b = (MessageCodec.Encode({ item }))
-				naiveBytes += buffer.len(b)
+				-- Cross-item naive: each item encoded separately (loses cross-item interning).
+				local naiveBytes = 0
+				for _, item in items do
+					local b = (MessageCodec.Encode { item })
+					naiveBytes += buffer.len(b)
+				end
+				-- Per-op naive: each op in its own OpsItem (loses samePath + prefix dedup too).
+				-- Uses rawOps (string Kind) so FlatCodec.OpsItem can re-convert correctly.
+				local naiveBytesPerOp = naiveBytes - buffer.len((MessageCodec.Encode { opsItem }))
+				local opsOnlyNaive = 0
+				for _, op in rawOps do
+					local b = (MessageCodec.Encode { FlatCodec.OpsItem(200, { op }) })
+					opsOnlyNaive += buffer.len(b)
+				end
+				naiveBytesPerOp += opsOnlyNaive
+
+				local rawBytes = #HttpService:JSONEncode { createItem, rawOps }
+				print(
+					string.format(
+						"[MessageCodec] combined workload (1 Create + 10 ops): %d optimized / %d naive (per-item) / %d naive (per-op) / %d raw — %.0f%% of raw",
+						optimizedBytes,
+						naiveBytes,
+						naiveBytesPerOp,
+						rawBytes,
+						optimizedBytes / rawBytes * 100
+					)
+				)
+
+				-- Correctness assertions
+				local msg = MessageCodec.Decode(optimizedBuf, optimizedInst)
+				expect(#msg.Items).is(2)
+				local gotCreate = msg.Items[1] :: any
+				expect(gotCreate.Op).is(FlatCodec.Op.Create)
+				expect(gotCreate.Data.Name).is("Hero")
+				expect(gotCreate.Data.Stats.Atk).is(12)
+				expect(#gotCreate.Data.Inventory).is(3)
+				local decoded = FlatCodec.DecodeOps(msg.Items[2] :: any)
+				expect(#decoded).is(10)
+				expect(decoded[1].Path[1]).is("Stats")
+				expect(decoded[1].Path[2]).is("Hp")
+				expect(decoded[1].Value).is(85)
+				expect(decoded[4].Kind).is("ArrayInsert")
+				expect(decoded[4].Index).is(4)
+				expect(decoded[4].Value).is("MagicStaff")
+				expect(decoded[7].Kind).is("BatchBegin")
+				expect(decoded[10].Kind).is("BatchEnd")
 			end
-			-- Per-op naive: each op in its own OpsItem (loses samePath + prefix dedup too).
-			-- Uses rawOps (string Kind) so FlatCodec.OpsItem can re-convert correctly.
-			local naiveBytesPerOp = naiveBytes - buffer.len((MessageCodec.Encode({ opsItem })))
-			local opsOnlyNaive = 0
-			for _, op in rawOps do
-				local b = (MessageCodec.Encode({ FlatCodec.OpsItem(200, { op }) }))
-				opsOnlyNaive += buffer.len(b)
-			end
-			naiveBytesPerOp += opsOnlyNaive
-
-			local rawBytes = #HttpService:JSONEncode({ createItem, rawOps })
-			print(string.format(
-				"[MessageCodec] combined workload (1 Create + 10 ops): %d optimized / %d naive (per-item) / %d naive (per-op) / %d raw — %.0f%% of raw",
-				optimizedBytes, naiveBytes, naiveBytesPerOp, rawBytes, optimizedBytes / rawBytes * 100
-			))
-
-			-- Correctness assertions
-			local msg = MessageCodec.Decode(optimizedBuf, optimizedInst)
-			expect(#msg.Items).is(2)
-			local gotCreate = msg.Items[1] :: any
-			expect(gotCreate.Op).is(FlatCodec.Op.Create)
-			expect(gotCreate.Data.Name).is("Hero")
-			expect(gotCreate.Data.Stats.Atk).is(12)
-			expect(#gotCreate.Data.Inventory).is(3)
-			local decoded = FlatCodec.DecodeOps(msg.Items[2] :: any)
-			expect(#decoded).is(10)
-			expect(decoded[1].Path[1]).is("Stats")
-			expect(decoded[1].Path[2]).is("Hp")
-			expect(decoded[1].Value).is(85)
-			expect(decoded[4].Kind).is("ArrayInsert")
-			expect(decoded[4].Index).is(4)
-			expect(decoded[4].Value).is("MagicStaff")
-			expect(decoded[7].Kind).is("BatchBegin")
-			expect(decoded[10].Kind).is("BatchEnd")
-		end)
+		)
 
 		test("shared snapshot table arrives as independent copies on the client via full pipeline", function()
 			local shared = { hp = 100 }
@@ -680,8 +713,8 @@ return function(t: tiniest)
 				FlatCodec.CreateItem(801, nil, "DedupeA", {}, { B = shared }),
 				FlatCodec.CreateItem(802, nil, "DedupeB", {}, { B = shared }),
 			}
-			local buf, instances = MessageCodec.Encode(items)
-			;(ClientReplicator :: any)._HandleMessage(MessageCodec.Decode(buf, instances))
+			local buf, instances = MessageCodec.Encode(items);
+			(ClientReplicator :: any)._HandleMessage(MessageCodec.Decode(buf, instances))
 
 			local a = BaseReplicator.GetFromId(801) :: any
 			local b = BaseReplicator.GetFromId(802) :: any
@@ -691,9 +724,9 @@ return function(t: tiniest)
 			-- Mutating one copy leaves the other untouched
 			a.Manager.Raw.B.hp = 5
 			expect(b.Manager.Raw.B.hp).is(100)
-
-			;(ClientReplicator :: any)._HandleMessage(FlatCodec.BuildMessage({ FlatCodec.DestroyItem(801) }))
-			;(ClientReplicator :: any)._HandleMessage(FlatCodec.BuildMessage({ FlatCodec.DestroyItem(802) }))
+;
+			(ClientReplicator :: any)._HandleMessage(FlatCodec.BuildMessage { FlatCodec.DestroyItem(801) });
+			(ClientReplicator :: any)._HandleMessage(FlatCodec.BuildMessage { FlatCodec.DestroyItem(802) })
 		end)
 	end)
 end

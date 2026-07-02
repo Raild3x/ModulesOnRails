@@ -1,4 +1,4 @@
-# TableReplicator2
+# TableReplicator
 
 Replicates `TableManager2` instances from the server to clients. A `ServerReplicator`
 wraps a `TableManager`, decides who can see it, and mirrors every write to a matching
@@ -10,7 +10,7 @@ For the full API, see the moonwave docs.
 
 **Server**
 ```lua
-local ServerReplicator = require(Packages.TableReplicator2).Server
+local ServerReplicator = require(Packages.TableReplicator).Server
 
 Players.PlayerAdded:Connect(function(player)
 	local replicator = ServerReplicator.new({
@@ -30,7 +30,7 @@ end)
 
 **Client**
 ```lua
-local ClientReplicator = require(Packages.TableReplicator2).Client
+local ClientReplicator = require(Packages.TableReplicator).Client
 
 -- Register listeners before requesting data to catch everything in the snapshot.
 ClientReplicator.ForEach("PlayerData", function(replicator)

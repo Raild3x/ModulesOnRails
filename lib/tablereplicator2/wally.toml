@@ -1,8 +1,8 @@
 [package]
-name = "raild3x/tablereplicator2"
-description = "Replicates a TableManager2 instance from server to client with minimal effort."
+name = "raild3x/tablereplicator"
+description = "Replicates a TableManager instance from server to client with minimal effort."
 authors = ["Logan Hunt (Raildex)"]
-version = "0.1.0"
+version = "0.2.7"
 license = "MIT"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
@@ -11,7 +11,7 @@ realm = "shared"
 # The properly capitalized and spaced name of the library
 formattedName = "TableReplicator"
 # The intro page for the documentation
-docsLink = "ServerReplicator"
+docsLink = "TableReplicator"
 
 [dependencies]
 T = "raild3x/t@^1"

@@ -1,25 +1,26 @@
 --!strict
-
---[=[
+--[[
 	A `ReplicationToken` is a lightweight handle that identifies a replicator's
-	namespace. It carries the name as both `.Name` and `.__NAME__` (legacy alias).
+	namespace.
 
 	Tokens created by `getOrCreateToken` are plain handles with no ownership
 	semantics. Tokens created by `registerToken` (exposed as
 	`ServerReplicator.TOKEN()`) exclusively own their namespace name and can be
 	released via `destroyToken` (`ServerReplicator.TOKEN.destroy(token)`). The
 	ownership ledger backing that exclusivity lives entirely in this module.
-]=]
-export type ReplicationToken = {
-	__NAME__: string,
-	Name: string,
-}
+]]
+
 
 const tokenMT = {
 	__tostring = function(self: ReplicationToken)
-		return "ReplicationToken<" .. self.__NAME__ .. ">"
+		return "ReplicationToken<" .. self.Name .. ">"
 	end,
+	__metatable = false,
 }
+
+export type ReplicationToken = typeof(setmetatable({
+	Name = "" :: string,
+}, tokenMT))
 
 -- Weak-valued handle cache: name -> token object. Allows GC of tokens that no
 -- longer have strong references (e.g. after a server TOKEN is destroyed and all
@@ -33,13 +34,12 @@ const function getOrCreateToken(name: string): ReplicationToken
 	if UsedNames[name] then
 		return UsedNames[name]
 	end
-	local token = {
-		__NAME__ = name,
+	const token = {
 		Name = name,
-	} :: ReplicationToken
+	}
 	setmetatable(token, tokenMT)
 	UsedNames[name] = token
-	return token
+	return token 
 end
 
 const function getExistingToken(name: string): ReplicationToken?
@@ -48,17 +48,17 @@ end
 
 const function isTokenInUse(name: string | ReplicationToken): boolean
 	if typeof(name) == "table" then
-		name = name.__NAME__
+		name = name.Name
 	end
 	return UsedNames[name :: string] ~= nil
 end
 
 const function isToken(value: any): boolean
-	return typeof(value) == "table" and value.__NAME__ ~= nil
+	return typeof(value) == "table" and getmetatable(value) == tokenMT
 end
 
 const function getTokenName(token: ReplicationToken): string
-	return token.__NAME__
+	return token.Name
 end
 
 --------------------------------------------------------------------------------

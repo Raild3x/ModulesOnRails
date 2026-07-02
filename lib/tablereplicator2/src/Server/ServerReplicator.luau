@@ -51,8 +51,8 @@ const Players = game:GetService("Players")
 const Types = require("../Shared/Types")
 const TableManagerModule = Types.TableManager
 const ReplicationScope = require("./ReplicationScope")
-const FrameCoordinator = require("./FrameCoordinator")
 const BaseReplicator = require("../Shared/BaseReplicator")
+const FrameCoordinatorModule = require("./FrameCoordinator")
 const ServerTransportModule = require("../Shared/Transport/ServerTransport")
 const Protocol = require("../Shared/Transport/Protocol")
 const FlatCodec = require("../Shared/Serialization/FlatCodec")
@@ -87,25 +87,18 @@ export type ServerReplicator = Types.ServerReplicator
 --// Module-level: transport, token registry, top-level bookkeeping //--
 --------------------------------------------------------------------------------
 
-const transport: ServerTransport = ServerTransportModule.new()
+const transport = ServerTransportModule.new()
 
--- Test-only escape hatch: lets a spec spy on/replace `SendMessage`/
--- `NotifyDataSent` on the real singleton transport without needing a live
--- second client. Not part of the public API.
+-- Test-only escape hatch
 ServerReplicator._Transport = transport
 
--- The single server-wide ordering point for outbound data ops. Every scope's
--- `OnApplied` ops funnel here so they replay on the client in exact server
--- order regardless of which replicator produced them (per-scope flushing could
--- not guarantee that). Structural items are still sent directly below.
-const frameCoordinator = FrameCoordinator.new(transport)
+-- The single server-wide ordering point for outbound data ops.
+const frameCoordinator = FrameCoordinatorModule.new(transport)
 
--- Test-only escape hatch: lets a spec force a deterministic flush of the
--- global per-frame op buffer instead of waiting for the deferred one.
+-- Test-only escape hatch
 ServerReplicator._FrameCoordinator = frameCoordinator
 
--- Every top-level replicator currently alive; the request-data handshake and
--- cross-scope `SetParent` walk this to find scopes.
+-- Every top-level replicator currently alive.
 const topLevelReplicators: { SR_Internal } = {}
 
 -- Debounced immediate-flush scheduler. One `task.defer` per Luau thread covers
@@ -123,9 +116,6 @@ const function scheduleImmediateFlush()
 end
 
 -- A player who has completed the request-data handshake at least once.
--- Mirrors v1's global ACTIVE_PLAYERS set: a second `RequestData` from the
--- same player (e.g. a reconnect race) is a no-op rather than re-sending
--- every scope's snapshot a second time.
 const hasBootstrapped: { [Player]: true } = {}
 
 -- Depth-first collects `root` and every descendant into `out`, parents
@@ -853,23 +843,15 @@ end
 --[=[
 	@within ServerReplicator
 	@method Destroy
-	Destroys the replicator and all its children. This is synchronous and
-	immediate; any queued ops for this replicator are dropped, and a `Destroy`
-	item is sent to every active player.
+	Destroys the replicator and orphans any children to `ServerReplicator.None`.
+	This is synchronous and immediate; any queued ops for this replicator are 
+	dropped, and all active players with the replicator have it destroyed on their end.
 ]=]
 function ServerReplicator.Destroy(self: SR_Internal)
-	-- Drop any ops queued earlier this frame so they can't flush out after the
-	-- (synchronous) Destroy item below and reference a torn-down replicator.
 	frameCoordinator:DropReplicator(self.Id)
 
-	-- Children survive their parent's destruction (see BaseReplicator.Destroy),
-	-- but must never end up with a bare nil parent. Reparenting through
-	-- SetParent (rather than touching _Parent directly) reuses its existing
-	-- scope-move + wire notification so every client still sees a consistent
-	-- tree, and must happen before self's own Destroy item below so clients
-	-- detach the children first instead of cascading them away themselves.
-	for _, child in self:GetChildren() do
-		(child :: SR_Internal):SetParent(ServerReplicator.None :: SR_Internal)
+	for _, child: SR_Internal in self:GetChildren() do
+		child:SetParent(ServerReplicator.None :: SR_Internal)
 	end
 
 	const buf, instances = buildMessage { FlatCodec.DestroyItem(self.Id) }
@@ -884,11 +866,8 @@ function ServerReplicator.Destroy(self: SR_Internal)
 		end
 	end
 
-	-- Decrement the namespace liveCount so TOKEN.destroy() can tell when the
-	-- name is fully released and safe to unregister.
-	const ns = self.Namespace
-	if ns then
-		TokenCache.releaseNamespace(ns)
+	if self.Namespace then
+		TokenCache.releaseNamespace(self.Namespace)
 	end
 
 	getmetatable(ServerReplicator).Destroy(self)
@@ -933,7 +912,7 @@ end)
 
 -- Route inbound custom signals (client → server) to the matching remote.
 -- Also handles ordered function invocations identified by ORDERED_FN_CALL.
-local signalReceived = transport.SignalReceived :: any
+const signalReceived = transport.SignalReceived :: any
 signalReceived:Connect(function(player: Player, id: number, name: string, ...: any)
 	if not hasBootstrapped[player] then
 		return

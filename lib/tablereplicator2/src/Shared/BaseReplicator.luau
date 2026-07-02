@@ -150,8 +150,7 @@ BaseReplicator.ReplicatorCreated = BaseReplicator._Realm.ReplicatorCreated -- re
 
 --[=[
 	@tag Static
-	@prop ServerReplicator.ListenerFireMode FireMode
-	@prop ClientReplicator.ListenerFireMode FireMode
+	@prop BaseReplicator.ListenerFireMode FireMode
 	How discovery listeners (`ReplicatorCreated`, `ForEach`, `OnNew`) are
 	scheduled when a matching replicator is found. Defaults to `"bindable"`.
 	Read-only -- use `SetListenerFireMode` to change it.

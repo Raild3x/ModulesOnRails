@@ -269,7 +269,7 @@ function FrameCoordinator.QueueSignal(
 		Scope = scope,
 		Audience = audience,
 		Id = replicatorId,
-		Op = { Kind = "Signal", Path = { name }, Value = args },
+		Op = { Kind = "Signal" :: "Signal", Path = { name }, Value = args },
 		Seq = self._seq,
 	})
 	scheduleCoordinatorFlush(self)
