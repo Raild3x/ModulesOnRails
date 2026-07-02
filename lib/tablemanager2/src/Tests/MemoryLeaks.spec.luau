@@ -67,12 +67,14 @@ return function(t: tiniest)
 			local e2 = { id = 2 }
 			local e3 = { id = 3 }
 			local data = { items = { e1, e2, e3 } }
-			local tm = TableManager.new(data) :: any
-			local pm = tm._proxyManager
+			local tm = TableManager.new(data)
+			local pm = (tm :: any)._proxyManager
 
 			local itemsArray = data.items
 			-- Touch all elements through the proxy so each gets tracked.
-			for _index, _element in tm.Proxy.items do
+			local sum = 0
+			for index, _element in tm.Proxy.items do
+				sum += index
 			end
 			expect(pm._originalToProxy[e1]).exists()
 			expect(pm._proxiesByParent[itemsArray]).exists()
