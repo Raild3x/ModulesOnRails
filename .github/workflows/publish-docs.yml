@@ -34,8 +34,8 @@ jobs:
         with:
           python-version: '3.x'
 
-      - name: Run generateReadMe.py
-        run: python scripts/generateReadMe.py
+      - name: Run generate_readme.py
+        run: python scripts/generate_readme.py
 
       - name: Commit README update
         run: |
