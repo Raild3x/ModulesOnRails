@@ -26,3 +26,5 @@ last_tested_package.txt
 !**/default.project.json
 !**/README.md
 node_modules
+
+**/__pycache__
