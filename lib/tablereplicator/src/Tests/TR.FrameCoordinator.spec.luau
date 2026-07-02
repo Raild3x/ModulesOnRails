@@ -10,6 +10,7 @@
 
 return function(t: tiniest)
 	local ServerReplicator = require("../Server/ServerReplicator")
+	local FrameCoordinator = require("../Server/FrameCoordinator")
 	local FlatCodec = require("../Shared/Serialization/FlatCodec")
 	local SpecUtils = require("./Helpers/SpecUtils")
 
@@ -411,6 +412,42 @@ return function(t: tiniest)
 
 			repA:Destroy()
 			repB:Destroy()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("FrameCoordinator deferred auto-flush (scheduler seam)", function()
+		test("a queued op auto-flushes on the scheduler pump, without an explicit Flush", function()
+			local player = { Name = "P" } :: any
+			local replicator =
+				ServerReplicator.new({ Namespace = uniqueToken("AutoFlush"), Data = { x = 0 }, ReplicationTargets = { player } })
+			;(replicator :: any)._Scope:Activate(player)
+
+			local calls, restore = spyOnTransport()
+			-- The write enqueues the op and marks the shared coordinator scheduled;
+			-- it does NOT flush synchronously.
+			replicator.Manager:Set("x", 1)
+
+			-- Drive the scheduler exactly as the live Heartbeat connection would,
+			-- then let the deferred drain run across the next couple of frames --
+			-- no direct coordinator:Flush(), so this covers the real reschedule path.
+			FrameCoordinator._PumpScheduler()
+			task.wait()
+			task.wait()
+			restore()
+
+			local sawOp = false
+			for _, call in calls do
+				for _, item in call.Message.Items do
+					if item.Id == replicator.Id then
+						sawOp = true
+					end
+				end
+			end
+			expect(sawOp).is_true()
+
+			replicator:Destroy()
 		end)
 	end)
 end

@@ -76,31 +76,43 @@ const function scheduleCoordinatorFlush(coordinator: FrameCoordinator)
 	scheduledCoordinators[coordinator] = true
 end
 
-if RunService:IsRunning() then
-	const function reschedule()
-		if scheduleDirty then
-			scheduleDirty = false
-			task.defer(reschedule)
-			return 
-		end
-		for coordinator in scheduledCoordinators do
-			coordinator:Flush()
-		end
-		table.clear(scheduledCoordinators)
+-- The per-frame drain. Hoisted out of the `IsRunning()` gate below so tests can
+-- drive it (via the `_PumpScheduler` seam) -- the Heartbeat connection is still
+-- only installed in a live game (RunService:IsRunning()), so production behavior
+-- is unchanged.
+const function reschedule()
+	if scheduleDirty then
+		scheduleDirty = false
+		task.defer(reschedule)
+		return
 	end
+	for coordinator in scheduledCoordinators do
+		coordinator:Flush()
+	end
+	table.clear(scheduledCoordinators)
+end
 
-	-- Hearbeat is the last thing to run before Replication, so we defer 
-	-- here to try and flush during it's following resumption point
-	RunService.Heartbeat:Connect(function()
-		if next(scheduledCoordinators) ~= nil then
-			task.defer(reschedule)
-		end
-	end)
+-- One Heartbeat step: if anything is queued this frame, defer a drain so it
+-- flushes at the following resumption point. Hearbeat is the last thing to run
+-- before Replication, so deferring here targets its following resumption point.
+const function pumpScheduler()
+	if next(scheduledCoordinators) ~= nil then
+		task.defer(reschedule)
+	end
+end
+
+if RunService:IsRunning() then
+	RunService.Heartbeat:Connect(pumpScheduler)
 end
 
 
 const FrameCoordinator = {}
 FrameCoordinator.__index = FrameCoordinator
+
+-- Test seam (not part of the public API): runs one Heartbeat scheduler step, so
+-- specs can exercise the deferred auto-flush path that is otherwise only wired to
+-- Heartbeat in a live game (RunService:IsRunning()).
+FrameCoordinator._PumpScheduler = pumpScheduler
 
 -- Per coalesced replicator, `pathKey -> live entry` (see `OpBuffer.PathKey`)
 -- so a repeat `Set` on the same path can be updated in place instead of
