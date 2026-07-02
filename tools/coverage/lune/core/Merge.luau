@@ -88,6 +88,19 @@ local function metric(): Metric
 	return { covered = 0, total = 0 }
 end
 
+-- The span (gate or dead range) whose inclusive scope covers `line`, or nil.
+local function spanForLine(spans: { any }?, line: number): any?
+	if spans == nil then
+		return nil
+	end
+	for _, s in spans do
+		if line >= s.scope[1] and line <= s.scope[2] then
+			return s
+		end
+	end
+	return nil
+end
+
 local function addTo(dst: Metric, src: Metric)
 	dst.covered += src.covered
 	dst.total += src.total
@@ -169,6 +182,34 @@ function Merge.merge(
 						detail = direct,
 					})
 				end
+				continue
+			end
+
+			-- Env gates and dead code take precedence over counting, but not over
+			-- ignore rules.
+			local gate = spanForLine(file.gates, probe.line)
+			if gate ~= nil then
+				table.insert(suppressed.gated, {
+					file = file.path,
+					line = probe.line,
+					site = probe.site,
+					kind = probe.kind,
+					label = probe.src or probe.name or "",
+					detail = gate.note,
+				})
+				continue
+			end
+
+			local dead = spanForLine(file.dead, probe.line)
+			if dead ~= nil then
+				table.insert(suppressed.dead, {
+					file = file.path,
+					line = probe.line,
+					site = probe.site,
+					kind = probe.kind,
+					label = probe.src or probe.name or "",
+					detail = dead.reason,
+				})
 				continue
 			end
 

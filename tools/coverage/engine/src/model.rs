@@ -118,7 +118,7 @@ fn site_tag(kind: &str) -> &'static str {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct Gate {
     pub marker: String,
     pub note: String,
@@ -126,8 +126,11 @@ pub struct Gate {
     pub scope: [usize; 2],
 }
 
-#[derive(Serialize)]
+/// A span the analyzer proved unreachable (statements after a terminal
+/// `error(...)`, or the untaken arm of a constant condition). Excluded from the
+/// denominators and reported separately. `scope` is an inclusive line range.
+#[derive(Serialize, Clone)]
 pub struct Dead {
-    pub lines: Vec<usize>,
     pub reason: String,
+    pub scope: [usize; 2],
 }

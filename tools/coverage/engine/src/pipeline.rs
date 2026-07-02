@@ -14,6 +14,8 @@ pub struct FileData {
     pub sha256: String,
     pub original_lines: usize,
     pub probes: Vec<Probe>,
+    pub gates: Vec<crate::model::Gate>,
+    pub dead: Vec<crate::model::Dead>,
 }
 
 pub struct PackageData {
@@ -66,11 +68,11 @@ pub fn collect_package(
             }
         };
         let line_starts = parse::line_starts(&src);
-        let probes = {
+        let (probes, gates, dead) = {
             let mut collector = Collector::new(&src, line_starts.clone(), sf.rel.clone(), next_id, conditions);
             collector.collect_ast(ast.nodes());
             next_id = collector.next_id();
-            collector.probes
+            (collector.probes, collector.gates, collector.dead)
         };
 
         files.push(FileData {
@@ -80,6 +82,8 @@ pub fn collect_package(
             line_starts,
             src,
             probes,
+            gates,
+            dead,
         });
     }
 
@@ -98,31 +102,4 @@ pub fn collect_package(
 pub struct SourceFile {
     pub abs: PathBuf,
     pub rel: String,
-}
-
-/// Environment gates: code the edit-mode Studio harness (run-in-roblox) cannot
-/// reach, so an uncovered unit behind one reads as expected, not a test gap.
-/// Detected by text scan (matches covaudit's proven approach).
-const ENV_GATES: &[(&str, &str)] = &[
-    (":IsRunning(", "RunService:IsRunning() is false in edit mode"),
-    (":IsRunMode(", "RunService:IsRunMode() is false in edit mode"),
-    (".Stepped:", "RunService.Stepped does not fire in edit mode"),
-];
-
-pub fn detect_gates(src: &str) -> Vec<crate::model::Gate> {
-    let mut gates = Vec::new();
-    for (idx, line) in src.lines().enumerate() {
-        let line_no = idx + 1;
-        for (marker, note) in ENV_GATES {
-            if line.contains(marker) {
-                gates.push(crate::model::Gate {
-                    marker: marker.to_string(),
-                    note: note.to_string(),
-                    line: line_no,
-                    scope: [line_no, line_no],
-                });
-            }
-        }
-    }
-    gates
 }

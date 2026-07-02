@@ -124,8 +124,8 @@ fn build_map(package_dir: &Path, package_name: Option<String>, conditions: bool,
             sha256: f.sha256.clone(),
             original_lines: f.original_lines,
             probes: f.probes.clone(),
-            gates: pipeline::detect_gates(&f.src),
-            dead: Vec::new(),
+            gates: f.gates.clone(),
+            dead: f.dead.clone(),
         })
         .collect();
     CoverageMap {

@@ -14,14 +14,26 @@ use full_moon::ast::{
 use full_moon::node::Node;
 use full_moon::tokenizer::{Position, TokenReference};
 
-use crate::model::Probe;
+use crate::model::{Dead, Gate, Probe};
 use crate::parse::first_on_line;
+
+/// Environment gates: code the edit-mode Studio harness (run-in-roblox) cannot
+/// reach, so an uncovered unit behind one reads as expected, not a test gap.
+/// Detected on AST condition tokens (never comments/strings), and scoped to the
+/// guarded arm so the whole gated body -- not just the marker line -- drops out.
+const ENV_GATES: &[(&str, &str)] = &[
+    (":IsRunning(", "RunService:IsRunning() is false in edit mode"),
+    (":IsRunMode(", "RunService:IsRunMode() is false in edit mode"),
+    (".Stepped:", "RunService.Stepped does not fire in edit mode"),
+];
 
 pub struct Collector<'s> {
     src: &'s str,
     line_starts: Vec<usize>,
     rel_path: String,
     pub probes: Vec<Probe>,
+    pub gates: Vec<Gate>,
+    pub dead: Vec<Dead>,
     next_id: u32,
     fn_stack: Vec<u32>,
     conditions: bool,
@@ -34,6 +46,8 @@ impl<'s> Collector<'s> {
             line_starts,
             rel_path,
             probes: Vec::new(),
+            gates: Vec::new(),
+            dead: Vec::new(),
             next_id: start_id,
             fn_stack: Vec::new(),
             conditions,
@@ -118,6 +132,36 @@ impl<'s> Collector<'s> {
         }
     }
 
+    /// If `cond` mentions an env-gate marker (scanning significant tokens only,
+    /// so comments and strings never match), returns the marker, its note, and
+    /// the condition's start line.
+    fn condition_gate(&self, cond: &Expression) -> Option<(String, String, usize)> {
+        let text: String = cond.tokens().map(|t| t.token().to_string()).collect();
+        for (marker, note) in ENV_GATES {
+            if text.contains(marker) {
+                let line = self
+                    .expr_span(cond)
+                    .map(|(s, _, _)| s.line())
+                    .or_else(|| cond.start_position().map(|p| p.line()))
+                    .unwrap_or(0);
+                return Some((marker.to_string(), note.to_string(), line));
+            }
+        }
+        None
+    }
+
+    fn block_end_line(block: &Block) -> Option<usize> {
+        block.tokens().filter_map(|t| t.end_position()).map(|p| p.line()).max()
+    }
+
+    /// Records a gate spanning the guarded arm: from the condition line through
+    /// the last line of `block`, so the decision probe and every body site fall
+    /// inside the scope.
+    fn push_gate(&mut self, marker: String, note: String, cond_line: usize, block: &Block) {
+        let end = Self::block_end_line(block).unwrap_or(cond_line).max(cond_line);
+        self.gates.push(Gate { marker, note, line: cond_line, scope: [cond_line, end] });
+    }
+
     fn push_probe(&mut self, kind: &'static str, anchor: Position, end_line: usize) -> u32 {
         let id = self.alloc();
         let byte = anchor.bytes();
@@ -136,11 +180,51 @@ impl<'s> Collector<'s> {
     }
 
     fn collect_block(&mut self, block: &Block) {
-        for stmt in block.stmts() {
+        let stmts: Vec<&Stmt> = block.stmts().collect();
+
+        // Dead code: a terminal `error(...)` makes every later statement in this
+        // block unreachable. (return/break/continue are Luau LastStmts, so they
+        // can never be followed by more statements -- only error() can.)
+        let terminal = stmts.iter().position(|s| is_terminal_error_stmt(s));
+
+        for stmt in &stmts {
             self.collect_stmt(stmt);
         }
         if let Some(last) = block.last_stmt() {
             self.collect_last_stmt(last);
+        }
+
+        if let Some(ti) = terminal {
+            let start = if ti + 1 < stmts.len() {
+                stmts[ti + 1].start_position().map(|p| p.line())
+            } else {
+                block.last_stmt().and_then(|l| l.start_position()).map(|p| p.line())
+            };
+            if let Some(start) = start {
+                let end = block
+                    .tokens()
+                    .filter_map(|t| t.end_position())
+                    .map(|p| p.line())
+                    .max()
+                    .unwrap_or(start);
+                self.push_dead(start, end, "unreachable after error(...)");
+            }
+        }
+    }
+
+    fn push_dead(&mut self, start: usize, end: usize, reason: &str) {
+        if end < start {
+            return;
+        }
+        self.dead.push(Dead { reason: reason.to_string(), scope: [start, end] });
+    }
+
+    /// Marks a constant-condition arm dead: `if false then <A>` kills A;
+    /// `if true then A else <B>` kills B (and any elseif arms); `while false`
+    /// kills the loop body.
+    fn mark_dead_block(&mut self, block: &Block, reason: &str) {
+        if let Some((s, e)) = block_range(block) {
+            self.push_dead(s, e, reason);
         }
     }
 
@@ -175,11 +259,32 @@ impl<'s> Collector<'s> {
             Stmt::If(if_stmt) => {
                 let has_else = if_stmt.else_block().is_some();
                 self.push_decision(if_stmt.condition(), "if", Some(has_else));
+                if let Some((m, n, l)) = self.condition_gate(if_stmt.condition()) {
+                    self.push_gate(m, n, l, if_stmt.block());
+                }
+                match const_bool(if_stmt.condition()) {
+                    Some(false) => self.mark_dead_block(if_stmt.block(), "arm of a constant `if false`"),
+                    Some(true) => {
+                        // The then-arm always runs, so every alternative is dead.
+                        if let Some(elseifs) = if_stmt.else_if() {
+                            for ei in elseifs {
+                                self.mark_dead_block(ei.block(), "unreachable after constant `if true`");
+                            }
+                        }
+                        if let Some(eb) = if_stmt.else_block() {
+                            self.mark_dead_block(eb, "else of a constant `if true`");
+                        }
+                    }
+                    None => {}
+                }
                 self.walk_expr(if_stmt.condition());
                 self.collect_block(if_stmt.block());
                 if let Some(elseifs) = if_stmt.else_if() {
                     for ei in elseifs {
                         self.push_decision(ei.condition(), "elseif", Some(false));
+                        if let Some((m, n, l)) = self.condition_gate(ei.condition()) {
+                            self.push_gate(m, n, l, ei.block());
+                        }
                         self.walk_expr(ei.condition());
                         self.collect_block(ei.block());
                     }
@@ -190,12 +295,21 @@ impl<'s> Collector<'s> {
             }
             Stmt::While(w) => {
                 self.push_decision(w.condition(), "while", None);
+                if let Some((m, n, l)) = self.condition_gate(w.condition()) {
+                    self.push_gate(m, n, l, w.block());
+                }
+                if const_bool(w.condition()) == Some(false) {
+                    self.mark_dead_block(w.block(), "body of a constant `while false`");
+                }
                 self.walk_expr(w.condition());
                 self.collect_block(w.block());
             }
             Stmt::Repeat(r) => {
                 self.collect_block(r.block());
                 self.push_decision(r.until(), "repeat", None);
+                if let Some((m, n, l)) = self.condition_gate(r.until()) {
+                    self.push_gate(m, n, l, r.block());
+                }
                 self.walk_expr(r.until());
             }
             Stmt::NumericFor(nf) => self.collect_block(nf.block()),
@@ -396,6 +510,53 @@ fn collect_bool_operands<'a>(expr: &'a Expression, out: &mut Vec<&'a Expression>
         }
         Expression::Parentheses { expression, .. } => collect_bool_operands(expression, out),
         _ => out.push(expr),
+    }
+}
+
+/// Whether `stmt` is a bare `error(...)` call -- an unconditional throw, after
+/// which the rest of the block is unreachable.
+fn is_terminal_error_stmt(stmt: &Stmt) -> bool {
+    if let Stmt::FunctionCall(fc) = stmt {
+        if let Prefix::Name(t) = fc.prefix() {
+            if t.token().to_string() == "error" {
+                return matches!(fc.suffixes().next(), Some(Suffix::Call(_)));
+            }
+        }
+    }
+    false
+}
+
+/// The boolean value of a constant condition (`true`/`false`, through parens),
+/// or None if it is not a literal boolean.
+fn const_bool(expr: &Expression) -> Option<bool> {
+    match expr {
+        Expression::Symbol(t) => match t.token().to_string().trim() {
+            "true" => Some(true),
+            "false" => Some(false),
+            _ => None,
+        },
+        Expression::Parentheses { expression, .. } => const_bool(expression),
+        _ => None,
+    }
+}
+
+/// Inclusive first/last source line spanned by a block's significant tokens, or
+/// None for an empty block.
+fn block_range(block: &Block) -> Option<(usize, usize)> {
+    let mut min = usize::MAX;
+    let mut max = 0usize;
+    for t in block.tokens() {
+        if let Some(p) = t.start_position() {
+            min = min.min(p.line());
+        }
+        if let Some(p) = t.end_position() {
+            max = max.max(p.line());
+        }
+    }
+    if max == 0 {
+        None
+    } else {
+        Some((min, max))
     }
 }
 
