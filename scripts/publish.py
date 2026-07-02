@@ -203,9 +203,14 @@ def main():
     publish_success: Optional[bool] = None
     try:
         if src_dir.is_dir() and not (src_dir / "init.luau").is_file() and not (src_dir / "init.lua").is_file():
+            candidate: Optional[Path] = None
             for ext in (".luau", ".lua"):
-                candidate = src_dir / f"{package_name}{ext}"
-                if candidate.is_file():
+                target = f"{package_name}{ext}".lower()
+                for entry in src_dir.iterdir():
+                    if entry.is_file() and entry.name.lower() == target:
+                        candidate = entry
+                        break
+                if candidate:
                     exported_types = find_exported_types(candidate)
                     init_content = generate_passthrough_init(candidate.stem, exported_types)
                     temp_init = (src_dir / "init.luau").resolve()
