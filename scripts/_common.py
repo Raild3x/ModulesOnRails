@@ -34,6 +34,7 @@ parse_wally_toml()    : Lightweight ``wally.toml`` section/key parser
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import shutil
 import subprocess
@@ -48,10 +49,10 @@ from typing import Optional
 #: Root directory that contains every Wally package subdirectory.
 SRC_DIR: Path = Path("lib")
 
-#: File and directory names that are always preserved when a package directory
-#: is cleaned before ``wally install`` or ``wally publish``.  Extend this list
-#: when a caller needs extra files kept (e.g. ``"README.md"``).
-WALLY_IGNORE_LIST: list[str] = ["src", "default.project.json", "wally.toml"]
+#: File and directory names (or glob patterns) that are always preserved when
+#: a package directory is cleaned before ``wally install`` or ``wally
+#: publish``.  Extend this list when a caller needs extra files kept.
+WALLY_IGNORE_LIST: list[str] = ["src", "default.project.json", "wally.toml", "*.md"]
 
 
 # ---------------------------------------------------------------------------
@@ -115,7 +116,7 @@ def run_command(cmd: list, error_msg: Optional[str] = None) -> bool:
 def clear_package_dir(
     package_dir: Path,
     ignore_list: list[str] = WALLY_IGNORE_LIST,
-) -> None:
+) -> int:
     """Remove every entry inside *package_dir* that is not in *ignore_list*.
 
     This is called before ``wally install`` or ``wally publish`` to ensure that
@@ -124,18 +125,21 @@ def clear_package_dir(
 
     Arguments:
         package_dir: Path to the package directory to clean.
-        ignore_list: Names (not full paths) of entries to preserve.
-                     Defaults to :data:`WALLY_IGNORE_LIST`.  Pass a custom list
-                     to preserve additional files, for example::
+        ignore_list: Names or glob patterns (not full paths) of entries to
+                     preserve. Defaults to :data:`WALLY_IGNORE_LIST`. Pass a
+                     custom list to preserve additional files, for example::
 
-                         clear_package_dir(pkg, WALLY_IGNORE_LIST + ["README.md"])
+                         clear_package_dir(pkg, WALLY_IGNORE_LIST + ["CHANGELOG.txt"])
     """
+    count = 0
     for item in package_dir.iterdir():
-        if item.name not in ignore_list:
+        if not any(fnmatch.fnmatch(item.name, pattern) for pattern in ignore_list):
             if item.is_dir():
                 shutil.rmtree(item)
             else:
                 item.unlink()
+            count += 1
+    return count
 
 
 # ---------------------------------------------------------------------------

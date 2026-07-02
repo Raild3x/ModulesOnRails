@@ -1,11 +1,10 @@
 {
   "scripts": {
-    "readme": "python scripts/generateReadMe.py",
+    "readme": "python scripts/generate_readme.py",
     "setup": "python scripts/setup_package_for_testing.py",
-    "clear": "python scripts/clearPackages.py",
+    "clear": "python scripts/clear_packages.py",
     "publish": "python scripts/publish.py",
-    "test": "python scripts/runTests.py",
-    "newpackage": "python scripts/newPackage.py"
+    "newpackage": "python scripts/new_package.py"
   },
   "devDependencies": {
     "caniuse-lite": "^1.0.30001757"
