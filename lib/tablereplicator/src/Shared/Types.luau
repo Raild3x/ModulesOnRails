@@ -6,7 +6,7 @@
 	Shared type definitions used across the Server, Client, and Shared modules.
 ]=]
 
-const TableManagerModule = require("../../../tablemanager2/src/TableManager") -- TODO: remove this once TableManager2 is published
+const TableManagerModule = require("../../TableManager")
 const Signal = require("../../Signal")
 const Promise = require("../../Promise")
 const Janitor = require("../../Janitor")

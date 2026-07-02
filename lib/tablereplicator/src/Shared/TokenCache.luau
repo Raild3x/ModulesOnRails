@@ -10,12 +10,13 @@
 	ownership ledger backing that exclusivity lives entirely in this module.
 ]]
 
+const METATABLE_SENTINEL = "ReplicationToken"
 
 const tokenMT = {
 	__tostring = function(self: ReplicationToken)
 		return "ReplicationToken<" .. self.Name .. ">"
 	end,
-	__metatable = false,
+	__metatable = METATABLE_SENTINEL,
 }
 
 export type ReplicationToken = typeof(setmetatable({
@@ -54,7 +55,7 @@ const function isTokenInUse(name: string | ReplicationToken): boolean
 end
 
 const function isToken(value: any): boolean
-	return typeof(value) == "table" and getmetatable(value) == tokenMT
+	return typeof(value) == "table" and getmetatable(value) == METATABLE_SENTINEL
 end
 
 const function getTokenName(token: ReplicationToken): string

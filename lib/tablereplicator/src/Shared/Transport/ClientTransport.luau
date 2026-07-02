@@ -10,12 +10,16 @@
 	initial snapshot was fully sent.
 ]=]
 
+const RunService = game:GetService("RunService")
+
 const Signal = require("../../../Signal")
 const Janitor = require("../../../Janitor")
 const Promise = require("../../../Promise")
 const Protocol = require("./Protocol")
 const Types = require("../Types")
 const MessageCodec = require("../Serialization/MessageCodec")
+
+const IS_CLIENT = RunService:IsClient()
 
 type WireMessage = Types.WireMessage
 
@@ -57,18 +61,18 @@ function ClientTransport.new(): ClientTransport
 	self._unreliableRemote = nil
 	self._functionRemote = nil
 
-	self._janitor:Add(function()
+	self._janitor:Add(task.spawn(function()
 		const remote = Protocol.RemoteContainer:WaitForChild(Protocol.ReliableName)
 		assert(remote:IsA("RemoteEvent"), "Expected RemoteEvent")
 		self:_connect(remote :: RemoteEvent)
-	end)
+	end))
 
 	-- Connect the custom-signal remotes in the background so they're ready
 	-- as soon as RequestData resolves (the server creates them at startup).
 	-- Guarded by IsClient() so tests that construct ClientTransport on the
 	-- server-side test runner don't hit the client-only OnClientEvent API.
-	if game:GetService("RunService"):IsClient() then
-		task.spawn(function()
+	if IS_CLIENT then
+		self._janitor:Add(task.spawn(function()
 			const rawSignal = Protocol.RemoteContainer:WaitForChild(Protocol.SignalName)
 			assert(rawSignal:IsA("RemoteEvent"), "Expected RemoteEvent for Signal")
 			const signalRemote = rawSignal :: RemoteEvent
@@ -92,26 +96,30 @@ function ClientTransport.new(): ClientTransport
 			const rawFn = Protocol.RemoteContainer:WaitForChild(Protocol.FunctionName)
 			assert(rawFn:IsA("RemoteFunction"), "Expected RemoteFunction")
 			self._functionRemote = rawFn :: RemoteFunction
-		end)
+		end))
 	end
 
 	return self
 end
 
 function ClientTransport._connect(self: ClientTransport, remote: RemoteEvent)
+	assert(not self._remote, "Already connected to a RemoteEvent")
 	self._remote = remote
-
+	
 	self._janitor:Add(remote.OnClientEvent:Connect(function(payload: buffer | string, instances: { Instance }?)
 		if payload == Protocol.RequestDataComplete then
+			self._receivedData = true
 			self._dataComplete:Fire()
 		else
 			self.MessageReceived:Fire(MessageCodec.Decode(payload :: buffer, instances))
 		end
 	end))
-
+	
 	if self._requested then
 		remote:FireServer(Protocol.RequestData)
 	end
+
+	self._connected = true
 end
 
 --[=[

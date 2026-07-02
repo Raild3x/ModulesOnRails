@@ -3,7 +3,7 @@
 	@ignore
 	@class SpecUtils
 
-	Shared test-only utilities used across every `tablereplicator2` spec
+	Shared test-only utilities used across every `tablereplicator` spec
 	file, so each file doesn't redeclare the same ~70 lines of setup.
 	Requiring this module (from any spec file) installs the permanent no-op
 	`SendMessage`/`NotifyDataSent` baseline on `ServerReplicator._Transport`

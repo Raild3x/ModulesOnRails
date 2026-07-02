@@ -92,7 +92,9 @@ if RunService:IsRunning() then
 	-- Hearbeat is the last thing to run before Replication, so we defer 
 	-- here to try and flush during it's following resumption point
 	RunService.Heartbeat:Connect(function()
-		task.defer(reschedule)
+		if next(scheduledCoordinators) ~= nil then
+			task.defer(reschedule)
+		end
 	end)
 end
 
