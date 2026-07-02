@@ -49,4 +49,4 @@ jobs:
         with:
           python-version: '3.x'
       - name: Generate README
-        run: python scripts/generateReadMe.py
+        run: python scripts/generate_readme.py
