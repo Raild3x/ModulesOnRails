@@ -1,6 +1,6 @@
 [package]
-name = "raild3x/tablemanager2"
-description = "A better version of tablemanager"
+name = "raild3x/tablemanager"
+description = "A Luau library for managing tables."
 authors = ["Logan Hunt (Raildex)"]
 version = "0.1.0"
 license = "MIT"

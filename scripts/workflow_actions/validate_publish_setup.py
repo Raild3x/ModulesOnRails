@@ -40,12 +40,12 @@ def validate_wally_ready() -> bool:
     """
     lib_dir = Path("lib")
     if not lib_dir.is_dir():
-        print("✗ lib/ directory not found")
+        print("[✗] lib/ directory not found")
         return False
 
     packages = sorted([d for d in lib_dir.iterdir() if d.is_dir()])
     if not packages:
-        print("✗ No package directories found under lib/")
+        print("[✗] No package directories found under lib/")
         return False
 
     pkg_dir = packages[0]
@@ -54,13 +54,13 @@ def validate_wally_ready() -> bool:
 
     # Verify wally.toml is present.
     if not (pkg_dir / "wally.toml").is_file():
-        print(f"✗ {pkg_name}: missing wally.toml")
+        print(f"[✗] {pkg_name}: missing wally.toml")
         return False
     print("✓ wally.toml present")
 
     # Verify src/ directory is present.
     if not (pkg_dir / "src").is_dir():
-        print(f"✗ {pkg_name}: missing src/ directory")
+        print(f"[✗] {pkg_name}: missing src/ directory")
         return False
     print("✓ src/ directory present")
 
@@ -70,7 +70,7 @@ def validate_wally_ready() -> bool:
     ver_match = re.search(r'^version\s*=\s*"([^"]+)"', content, re.MULTILINE)
 
     if not name_match or not ver_match:
-        print("✗ Could not parse package info from wally.toml")
+        print("[✗] Could not parse package info from wally.toml ")
         return False
 
     print(f"✓ Package: {name_match.group(1)} @ {ver_match.group(1)}")
@@ -86,7 +86,7 @@ def find_packages() -> List[Path]:
     
     packages = sorted([d for d in lib_dir.iterdir() if d.is_dir()])
     if not packages:
-        print("✗ No package directories found in lib/")
+        print("[✗] No package directories found in lib/")
     return packages
 
 
@@ -154,8 +154,10 @@ def check_src_entrypoint(pkg_dir: Path) -> Tuple[bool, str]:
 
     pkg_name = pkg_dir.name
     for ext in (".luau", ".lua"):
-        if (src_dir / f"{pkg_name}{ext}").is_file():
-            return True, f"Has {pkg_name}{ext} (passthrough will be generated)"
+        target = f"{pkg_name}{ext}".lower()
+        for entry in src_dir.iterdir():
+            if entry.is_file() and entry.name.lower() == target:
+                return True, f"Has {entry.name} (passthrough will be generated)"
 
     return False, "No init.luau, init.lua, or package-named entrypoint found in src/"
 
