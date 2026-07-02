@@ -21,6 +21,7 @@
 
 const ServerReplicator = require("../../Server/ServerReplicator")
 const MessageCodec = require("../../Shared/Serialization/MessageCodec")
+const TokenCache = require("../../Shared/TokenCache")
 
 local SpecUtils = {}
 
@@ -63,9 +64,7 @@ function SpecUtils.uniqueToken(label: string)
 	return ServerReplicator.Token(`{label}#{tokenCounter}`)
 end
 
-function SpecUtils.getTokenName(token: any): string
-	return token.__NAME__
-end
+SpecUtils.getTokenName = TokenCache.getTokenName
 
 function SpecUtils.deepEqual(a: any, b: any): boolean
 	if a == b then

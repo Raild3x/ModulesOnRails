@@ -36,7 +36,7 @@ export type ClientTransport = typeof(setmetatable(
 		_signalRemote: RemoteEvent?,
 		_unreliableRemote: UnreliableRemoteEvent?,
 		_functionRemote: RemoteFunction?,
-		_janitor: Janitor.Janitor,
+		_janitor: Types.Janitor,
 		_dataComplete: Types.Signal<() -> ()>,
 		_requested: boolean,
 		_connected: boolean,
@@ -61,17 +61,20 @@ function ClientTransport.new(): ClientTransport
 	self._unreliableRemote = nil
 	self._functionRemote = nil
 
-	self._janitor:Add(task.spawn(function()
-		const remote = Protocol.RemoteContainer:WaitForChild(Protocol.ReliableName)
-		assert(remote:IsA("RemoteEvent"), "Expected RemoteEvent")
-		self:_connect(remote :: RemoteEvent)
-	end))
-
-	-- Connect the custom-signal remotes in the background so they're ready
-	-- as soon as RequestData resolves (the server creates them at startup).
-	-- Guarded by IsClient() so tests that construct ClientTransport on the
-	-- server-side test runner don't hit the client-only OnClientEvent API.
+	-- Every remote here is wired with client-only APIs (OnClientEvent /
+	-- FireServer), so all connection setup lives behind this single IsClient()
+	-- gate. On the server -- only ever reached from the test runner -- nothing
+	-- connects: `_remote`/`_connected` stay unset, so the outbound methods below
+	-- short-circuit on their own and no method needs its own IsClient() check.
 	if IS_CLIENT then
+		self._janitor:Add(task.spawn(function()
+			const remote = Protocol.RemoteContainer:WaitForChild(Protocol.ReliableName)
+			assert(remote:IsA("RemoteEvent"), "Expected RemoteEvent")
+			self:_connect(remote :: RemoteEvent)
+		end))
+
+		-- Connect the custom-signal remotes in the background so they're ready
+		-- as soon as RequestData resolves (the server creates them at startup).
 		self._janitor:Add(task.spawn(function()
 			const rawSignal = Protocol.RemoteContainer:WaitForChild(Protocol.SignalName)
 			assert(rawSignal:IsA("RemoteEvent"), "Expected RemoteEvent for Signal")
@@ -102,10 +105,11 @@ function ClientTransport.new(): ClientTransport
 	return self
 end
 
+-- Client-only: only ever called from the IsClient()-gated spawn in `new`.
 function ClientTransport._connect(self: ClientTransport, remote: RemoteEvent)
 	assert(not self._remote, "Already connected to a RemoteEvent")
 	self._remote = remote
-	
+
 	self._janitor:Add(remote.OnClientEvent:Connect(function(payload: buffer | string, instances: { Instance }?)
 		if payload == Protocol.RequestDataComplete then
 			self._receivedData = true
@@ -114,7 +118,7 @@ function ClientTransport._connect(self: ClientTransport, remote: RemoteEvent)
 			self.MessageReceived:Fire(MessageCodec.Decode(payload :: buffer, instances))
 		end
 	end))
-	
+
 	if self._requested then
 		remote:FireServer(Protocol.RequestData)
 	end
@@ -154,7 +158,7 @@ end
 	in-flight (or already-resolved) request. Resolves once the server has
 	finished sending the snapshot.
 ]=]
-function ClientTransport.RequestData(self: ClientTransport): Promise.TypedPromise<()>
+function ClientTransport.RequestData(self: ClientTransport): Types.Promise<()>
 	if not self._requested then
 		self._requested = true
 

@@ -3,10 +3,8 @@
 	@ignore
 	@class BaseReplicator
 
-	Shared identity, hierarchy, tag, and discovery logic inherited by both
-	`ServerReplicator` and `ClientReplicator` (classic Luau prototype-chain
-	inheritance: a subclass module does
-	`setmetatable({}, BaseReplicator)` so missing keys fall through to here).
+	Shared identity, hierarchy, tag, and discovery logic inherited 
+	by both `ServerReplicator` and `ClientReplicator`.
 ]=]
 
 const RunService = game:GetService("RunService")

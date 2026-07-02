@@ -373,6 +373,10 @@ export type SR_Internal = {
 	_Scope: ReplicationScope.ReplicationScope,
 	_Coalesced: boolean,
 	_ImmediateFlush: boolean,
+	-- True while an ImmediateFlush replicator is inside a manager batch window
+	-- (BatchBegin seen, BatchEnd not yet), so the immediate flush is held until
+	-- the whole window is buffered. See ServerReplicator's OnApplied handler.
+	_ImmediateBatchOpen: boolean,
 	_Unreliable: boolean,
 	_RemoteSignals: { [string]: any },
 	_RemoteFunctions: { [string]: (self: SR_Internal, player: Player, ...any) -> ...any },
@@ -381,6 +385,7 @@ export type SR_Internal = {
 	_SendSnapshotTo: (self: SR_Internal, player: Player) -> (),
 	_AddTarget: (self: SR_Internal, player: Player) -> (),
 	_RemoveTarget: (self: SR_Internal, player: Player) -> (),
+	_FlushIfImmediate: (self: SR_Internal) -> (),
 } & SR_Public<SR_Internal> & BR_Internal<SR_Internal>
 
 export type ServerReplicator = SR_Public<ServerReplicator> & BR_Public<ServerReplicator>

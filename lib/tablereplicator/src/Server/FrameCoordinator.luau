@@ -296,6 +296,79 @@ function FrameCoordinator.DropReplicator(self: FrameCoordinator, replicatorId: I
 end
 
 --[=[
+	Assembles each active player's ordered run list from `entries` (already in
+	send order) and ships one message per player. Shared by `Flush` (whole
+	buffer) and `FlushReplicator` (one replicator's slice). Consecutive ops for
+	the same replicator collapse into one run (per-player adjacency).
+]=]
+const function sendEntries(self: FrameCoordinator, entries: { Entry })
+	const perPlayer: { [Player]: { OpRun } } = {}
+
+	for _, entry in entries do
+		const scope = entry.Scope
+		for _, player in entry.Audience do
+			if not scope:IsActive(player) then
+				continue
+			end
+
+			local runs = perPlayer[player]
+			if runs == nil then
+				runs = {}
+				perPlayer[player] = runs
+			end
+
+			const last = runs[#runs]
+			if last ~= nil and last.Id == entry.Id then
+				table.insert(last.Ops, entry.Op)
+			else
+				table.insert(runs, { Id = entry.Id, Ops = { entry.Op } })
+			end
+		end
+	end
+
+	for player, runs in perPlayer do
+		self:_SendFrame(player, runs)
+	end
+end
+
+--[=[
+	Flushes exactly one replicator's queued entries now, leaving every other
+	replicator's frame buffering untouched -- the per-replicator counterpart to
+	`Flush`, used by `ImmediateFlush` replicators to reach the wire synchronously
+	(before the caller's next line) without sweeping out unrelated pending ops.
+
+	Only ever called for a non-coalesced replicator (`ImmediateFlush` and
+	`Coalesced` are mutually exclusive), so its entries carry neither bumped
+	`Seq` nor `Dead` -- array order already equals send order, so no sort or
+	dead-filter is needed. Unlike `Flush`, this does NOT reset `_seq` or clear
+	`_audienceCache`: the frame continues and the remaining entries still need
+	their captured audience and the monotonic seq counter.
+]=]
+function FrameCoordinator.FlushReplicator(self: FrameCoordinator, replicatorId: Id)
+	const entries = self._entries
+	const mine: { Entry } = {}
+	const rest: { Entry } = {}
+	for _, entry in entries do
+		if entry.Id == replicatorId then
+			table.insert(mine, entry)
+		else
+			table.insert(rest, entry)
+		end
+	end
+
+	if mine[1] == nil then
+		return
+	end
+
+	self._entries = rest
+	self._coalesceSlots[replicatorId] = nil
+
+	debug.profilebegin("TR.FlushReplicator")
+	sendEntries(self, mine)
+	debug.profileend()
+end
+
+--[=[
 	Drains the global op buffer and sends one ordered message per active player.
 	Safe to call directly (e.g. from tests) to force a deterministic flush
 	instead of waiting for the deferred one.
@@ -331,33 +404,7 @@ function FrameCoordinator.Flush(self: FrameCoordinator)
 	-- adjacency). NOTE: when the byte-codec phase wants reusable per-item
 	-- segments, switch this to merge on *global* adjacency so run boundaries are
 	-- identical for every player (see the plan's performance section).
-	const perPlayer: { [Player]: { OpRun } } = {}
-
-	for _, entry in live do
-		const scope = entry.Scope
-		for _, player in entry.Audience do
-			if not scope:IsActive(player) then
-				continue
-			end
-
-			local runs = perPlayer[player]
-			if runs == nil then
-				runs = {}
-				perPlayer[player] = runs
-			end
-
-			const last = runs[#runs]
-			if last ~= nil and last.Id == entry.Id then
-				table.insert(last.Ops, entry.Op)
-			else
-				table.insert(runs, { Id = entry.Id, Ops = { entry.Op } })
-			end
-		end
-	end
-
-	for player, runs in perPlayer do
-		self:_SendFrame(player, runs)
-	end
+	sendEntries(self, live)
 	debug.profileend()
 end
 

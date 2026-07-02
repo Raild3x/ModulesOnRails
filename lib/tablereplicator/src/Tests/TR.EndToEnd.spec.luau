@@ -29,6 +29,7 @@ return function(t: tiniest)
 	local getTokenName = SpecUtils.getTokenName
 	local deepEqual = SpecUtils.deepEqual
 	local wireCopy = SpecUtils.wireCopy
+	local spyOnTransport = SpecUtils.spyOnTransport
 
 	--------------------------------------------------------------------------------
 
@@ -667,5 +668,183 @@ return function(t: tiniest)
 				intermediary:Destroy()
 			end
 		)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("ImmediateFlush (synchronous per-replicator send)", function()
+		test("a bare Set sends synchronously, before any explicit Flush", function()
+			local player = { Name = "P" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("ImmediateBareSet"),
+				Data = { Hp = 0 },
+				ReplicationTargets = { player },
+				ImmediateFlush = true,
+			})
+			;(replicator :: any)._Scope:Activate(player)
+
+			local calls, restore = spyOnTransport()
+			replicator.Manager:Set("Hp", 10)
+			-- No Flush() called -- the message must already be on the wire.
+			expect(#calls).is(1)
+			expect(calls[1].Message.Items[1].Id).is(replicator.Id)
+			local decoded = FlatCodec.DecodeOps(calls[1].Message.Items[1] :: any)
+			expect(decoded[1].Value).is(10)
+			restore()
+
+			replicator:Destroy()
+		end)
+
+		test("N separate non-batched Sets produce N messages (the immediate tradeoff)", function()
+			local player = { Name = "P" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("ImmediateNSets"),
+				Data = { Hp = 0 },
+				ReplicationTargets = { player },
+				ImmediateFlush = true,
+			})
+			;(replicator :: any)._Scope:Activate(player)
+
+			local calls, restore = spyOnTransport()
+			replicator.Manager:Set("Hp", 10)
+			replicator.Manager:Set("Hp", 20)
+			replicator.Manager:Set("Hp", 30)
+			restore()
+
+			expect(#calls).is(3)
+
+			replicator:Destroy()
+		end)
+
+		test("a manager Batch of several writes produces exactly one message at BatchEnd; client lands on net end-state", function()
+			local token = uniqueToken("ImmediateBatchE2E")
+			local intermediary = FakeIntermediary.new()
+			local client = intermediary:Connect()
+
+			local replicator = ServerReplicator.new({
+				Namespace = token,
+				Data = { Hp = 0, Mp = 0 },
+				ReplicationTargets = { client.Player },
+				ImmediateFlush = true,
+			})
+			client:RequestData()
+
+			local captured: { any } = {}
+			local prevSend = (ServerReplicator :: any)._Transport.SendMessage;
+			(ServerReplicator :: any)._Transport.SendMessage = function(self, p, buf, instances)
+				table.insert(captured, MessageCodec.Decode(buf, instances))
+				prevSend(self, p, buf, instances)
+			end
+
+			replicator.Manager:Batch(function()
+				replicator.Manager:Set("Hp", 100)
+				replicator.Manager:Set("Hp", 50) -- overwrite within the batch -> net 50
+				replicator.Manager:Set("Mp", 10)
+			end);
+			(ServerReplicator :: any)._Transport.SendMessage = prevSend
+
+			-- One message from the whole batch (flushed at BatchEnd), not one per write.
+			expect(#captured).is(1)
+			local mirrored = client:GetFromId(replicator.Id) :: any
+			expect(mirrored.Manager.Raw.Hp).is(50)
+			expect(mirrored.Manager.Raw.Mp).is(10)
+
+			replicator:Destroy()
+			intermediary:Destroy()
+		end)
+
+		test("isolation: an ImmediateFlush replicator sends synchronously; a plain replicator on the same TableManager stays buffered", function()
+			local playerImm = { Name = "Imm" } :: any
+			local playerPlain = { Name = "Plain" } :: any
+			local sharedTM = TableManagerModule.new({ Hp = 0 })
+			local immRep = ServerReplicator.new({
+				Namespace = uniqueToken("ImmediateIsoImm"),
+				Data = sharedTM,
+				ReplicationTargets = { playerImm },
+				ImmediateFlush = true,
+			})
+			local plainRep = ServerReplicator.new({
+				Namespace = uniqueToken("ImmediateIsoPlain"),
+				Data = sharedTM,
+				ReplicationTargets = { playerPlain },
+			})
+			;(immRep :: any)._Scope:Activate(playerImm)
+			;(plainRep :: any)._Scope:Activate(playerPlain)
+
+			local calls, restore = spyOnTransport()
+			sharedTM:Set("Hp", 10)
+
+			-- Only the immediate replicator has sent so far, to its own player.
+			expect(#calls).is(1)
+			expect(calls[1].Player).is(playerImm)
+			expect(calls[1].Message.Items[1].Id).is(immRep.Id)
+
+			-- The plain replicator's op is still buffered -- a Flush delivers it.
+			;(ServerReplicator :: any)._FrameCoordinator:Flush()
+			expect(#calls).is(2)
+			expect(calls[2].Player).is(playerPlain)
+			expect(calls[2].Message.Items[1].Id).is(plainRep.Id)
+			restore()
+
+			immRep:Destroy()
+			plainRep:Destroy()
+		end)
+
+		test("an ordered signal FireAll sends synchronously on an ImmediateFlush replicator", function()
+			local player = { Name = "P" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("ImmediateSignal"),
+				Data = {},
+				ReplicationTargets = { player },
+				ImmediateFlush = true,
+			})
+			;(replicator :: any)._Scope:Activate(player)
+			replicator:RegisterOrderedRemoteSignal("Hit")
+
+			local calls, restore = spyOnTransport()
+			;(replicator :: any).Client.Hit:FireAll("dmg")
+			-- No Flush() -- the ordered signal must already be on the wire.
+			expect(#calls).is(1)
+			restore()
+
+			replicator:Destroy()
+		end)
+
+		test("a signal fired inside a Batch is held until BatchEnd and ships in one complete window", function()
+			local player = { Name = "P" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("ImmediateSignalInBatch"),
+				Data = { Hp = 0 },
+				ReplicationTargets = { player },
+				ImmediateFlush = true,
+			})
+			;(replicator :: any)._Scope:Activate(player)
+			replicator:RegisterOrderedRemoteSignal("Hit")
+
+			local calls, restore = spyOnTransport()
+			replicator.Manager:Batch(function()
+				replicator.Manager:Set("Hp", 5)
+				;(replicator :: any).Client.Hit:FireAll("dmg")
+				-- Mid-batch: nothing sent yet (the window is still open).
+				expect(#calls).is(0)
+			end)
+
+			-- One message after BatchEnd, framed by a complete Batch window so no
+			-- unterminated Suspend reaches the client.
+			expect(#calls).is(1)
+			local decoded = FlatCodec.DecodeOps(calls[1].Message.Items[1] :: any)
+			expect(decoded[1].Kind).is("BatchBegin")
+			expect(decoded[#decoded].Kind).is("BatchEnd")
+			local sawSignal = false
+			for _, op in decoded do
+				if op.Kind == "Signal" then
+					sawSignal = true
+				end
+			end
+			expect(sawSignal).is(true)
+			restore()
+
+			replicator:Destroy()
+		end)
 	end)
 end

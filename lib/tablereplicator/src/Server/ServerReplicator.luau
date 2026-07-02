@@ -41,7 +41,8 @@
 	  events alongside data. See `RegisterRemoteSignal`, `RegisterOrderedRemoteSignal`,
 	  `RegisterRemoteFunction`, and `RegisterOrderedRemoteFunction`.
 	- **Flush control** — `Coalesced = true` deduplicates redundant same-key ops per
-	  frame. `ImmediateFlush = true` sends each op immediately instead of batching.
+	  frame. `ImmediateFlush = true` sends this replicator's ops synchronously
+	  (before the caller's next line) instead of batching to frame end.
 	- **Sentinels** — `ServerReplicator.All` and `ServerReplicator.None` are
 	  pre-built top-level replicators useful as parents.
 ]=]
@@ -100,20 +101,6 @@ ServerReplicator._FrameCoordinator = frameCoordinator
 
 -- Every top-level replicator currently alive.
 const topLevelReplicators: { SR_Internal } = {}
-
--- Debounced immediate-flush scheduler. One `task.defer` per Luau thread covers
--- all synchronous mutations on any ImmediateFlush replicator; subsequent calls
--- within the same thread are no-ops until the deferred flush fires.
-local immediateFlushPending = false
-const function scheduleImmediateFlush()
-	if not immediateFlushPending then
-		immediateFlushPending = true
-		task.defer(function()
-			immediateFlushPending = false
-			frameCoordinator:Flush()
-		end)
-	end
-end
 
 -- A player who has completed the request-data handshake at least once.
 const hasBootstrapped: { [Player]: true } = {}
@@ -318,8 +305,13 @@ end
 	  `ForEach`/`GetAll`/`GetFirst`.
 	- `Coalesced` - If true, only the latest op per key is sent at frame end,
 	  dropping intermediate writes. Defaults to false.
-	- `ImmediateFlush` - If true, each op is sent immediately rather than batched.
-	  Useful to guarantee ordering relative to external `RemoteEvent` fires.
+	- `ImmediateFlush` - If true, this replicator's ops are flushed to the wire
+	  synchronously (before the caller's next line) instead of at frame end, so a
+	  write lands before any external `RemoteEvent` fired in the same frame. Only
+	  this replicator is flushed; others keep their normal frame batching. Because
+	  each write sends immediately, N separate non-batched `Set`s produce N
+	  messages -- wrap bulk writes in `manager:Batch(...)` to coalesce them into a
+	  single immediate send at the end of the batch.
 	- `Client` - Table declaring custom remotes. Values can be
 	  `ServerReplicator.createRemoteEvent()`, `ServerReplicator.createUnreliableEvent()`,
 	  or plain functions (registered as remote functions). See `RegisterRemoteSignal`.
@@ -399,6 +391,7 @@ function ServerReplicator.new(config: {
 	const self = setmetatable(base, ServerReplicator) :: SR_Internal
 	self._Coalesced = config.Coalesced == true
 	self._ImmediateFlush = config.ImmediateFlush == true
+	self._ImmediateBatchOpen = false
 	self._RemoteSignals = {}
 	self._RemoteFunctions = {}
 	self._OrderedFunctions = {}
@@ -438,10 +431,24 @@ function ServerReplicator.new(config: {
 	end)
 	self._Janitor:Add(managerDestroyedConn)
 
-	const disconnectApplied = manager:OnApplied(function(op)
+	const disconnectApplied = manager:OnApplied(function(op: Types.AppliedOp)
 		frameCoordinator:QueueOp(self._Scope, self.Id, op, self._Coalesced)
-		if self._ImmediateFlush then
-			scheduleImmediateFlush()
+		if not self._ImmediateFlush then
+			return
+		end
+
+		-- Flush synchronously (before the caller's next line) so this
+		-- replicator's ops beat any external RemoteEvent fired in the same frame.
+		-- A manager batch fires BatchBegin -> net ops -> BatchEnd synchronously
+		-- during Resume; hold the flush until BatchEnd so the whole window ships
+		-- in one message rather than a Suspend with no matching Resume.
+		if op.Kind == "BatchBegin" then
+			self._ImmediateBatchOpen = true
+		elseif op.Kind == "BatchEnd" then
+			self._ImmediateBatchOpen = false
+			frameCoordinator:FlushReplicator(self.Id)
+		elseif not self._ImmediateBatchOpen then
+			frameCoordinator:FlushReplicator(self.Id)
 		end
 	end)
 	self._Janitor:Add(disconnectApplied)
@@ -466,6 +473,22 @@ function ServerReplicator.new(config: {
 
 	self:_FireCreationListeners()
 	return self
+end
+
+--[=[
+	@ignore
+	Flushes this replicator's queued ops to the wire now if it's an ImmediateFlush
+	replicator and no manager batch window is currently open. Called from the
+	signal paths (custom-remote fires, ordered-fn responses) after `QueueSignal`,
+	mirroring the data path's synchronous flush. The batch guard keeps a signal
+	fired inside a `manager:Batch(...)` buffered until the whole window ships at
+	BatchEnd (see the OnApplied handler), so an ordered signal never jumps ahead
+	of data queued before it.
+]=]
+function ServerReplicator._FlushIfImmediate(self: SR_Internal)
+	if self._ImmediateFlush and not self._ImmediateBatchOpen then
+		frameCoordinator:FlushReplicator(self.Id)
+	end
 end
 
 --------------------------------------------------------------------------------
@@ -944,6 +967,7 @@ signalReceived:Connect(function(player: Player, id: number, name: string, ...: a
 				{ player },
 				responseArgs
 			)
+			replicator:_FlushIfImmediate()
 		end
 		return
 	end

@@ -83,6 +83,7 @@ function ServerCustomRemote.Fire(self: ServerCustomRemote, player: Player, ...: 
 	end
 	if self._Coordinator then
 		self._Coordinator:QueueSignal(scope, self._Replicator.Id, self._Name, { player }, { ... })
+		self._Replicator:_FlushIfImmediate()
 	else
 		self._Transport:FireSignal(player, self._Replicator.Id, self._Name, self._Unreliable, ...)
 	end
@@ -97,6 +98,7 @@ function ServerCustomRemote.FireAll(self: ServerCustomRemote, ...: any)
 	if self._Coordinator then
 		if #players > 0 then
 			self._Coordinator:QueueSignal(scope, self._Replicator.Id, self._Name, players, { ... })
+			self._Replicator:_FlushIfImmediate()
 		end
 	else
 		for _, player in players do
@@ -120,6 +122,7 @@ function ServerCustomRemote.FireExcept(self: ServerCustomRemote, ignored: Player
 		end
 		if #audience > 0 then
 			self._Coordinator:QueueSignal(scope, self._Replicator.Id, self._Name, audience, { ... })
+			self._Replicator:_FlushIfImmediate()
 		end
 	else
 		for _, player in scope:GetActivePlayers() do
@@ -144,6 +147,7 @@ function ServerCustomRemote.FirePredicate(self: ServerCustomRemote, predicate: P
 		end
 		if #audience > 0 then
 			self._Coordinator:QueueSignal(scope, self._Replicator.Id, self._Name, audience, { ... })
+			self._Replicator:_FlushIfImmediate()
 		end
 	else
 		for _, player in scope:GetActivePlayers() do

@@ -10,40 +10,40 @@
 	own -- `ServerReplicator` decides WHAT to send and WHEN.
 ]=]
 
-local Players = game:GetService("Players")
+const Players = game:GetService("Players")
 
-local Signal = require("../../../Signal")
-local Janitor = require("../../../Janitor")
-local Protocol = require("./Protocol")
+const Signal = require("../../../Signal")
+const Janitor = require("../../../Janitor")
+const Protocol = require("./Protocol")
 
-local function findOrCreateRemoteEvent(container: Instance, name: string): RemoteEvent
-	local existing = container:FindFirstChild(name)
+const function findOrCreateRemoteEvent(container: Instance, name: string): RemoteEvent
+	const existing = container:FindFirstChild(name)
 	if existing then
 		return existing :: RemoteEvent
 	end
-	local remote = Instance.new("RemoteEvent")
+	const remote = Instance.new("RemoteEvent")
 	remote.Name = name
 	remote.Parent = container
 	return remote
 end
 
-local function findOrCreateUnreliableRemote(container: Instance): UnreliableRemoteEvent
-	local existing = container:FindFirstChild(Protocol.UnreliableSignalName)
+const function findOrCreateUnreliableRemote(container: Instance): UnreliableRemoteEvent
+	const existing = container:FindFirstChild(Protocol.UnreliableSignalName)
 	if existing then
 		return existing :: UnreliableRemoteEvent
 	end
-	local remote = Instance.new("UnreliableRemoteEvent")
+	const remote = Instance.new("UnreliableRemoteEvent")
 	remote.Name = Protocol.UnreliableSignalName
 	remote.Parent = container
 	return remote
 end
 
-local function findOrCreateFunction(container: Instance): RemoteFunction
-	local existing = container:FindFirstChild(Protocol.FunctionName)
+const function findOrCreateFunction(container: Instance): RemoteFunction
+	const existing = container:FindFirstChild(Protocol.FunctionName)
 	if existing then
 		return existing :: RemoteFunction
 	end
-	local remote = Instance.new("RemoteFunction")
+	const remote = Instance.new("RemoteFunction")
 	remote.Name = Protocol.FunctionName
 	remote.Parent = container
 	return remote
@@ -126,7 +126,7 @@ end
 ]=]
 function ServerTransport.FireSignal(self: ServerTransport, player: Player, id: number, name: string, unreliable: boolean, ...: any)
 	if unreliable then
-		(self._unreliableRemote :: any):FireClient(player, id, name, ...)
+		self._unreliableRemote:FireClient(player, id, name, ...)
 	else
 		self._signalRemote:FireClient(player, id, name, ...)
 	end

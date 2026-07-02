@@ -355,4 +355,62 @@ return function(t: tiniest)
 			end
 		end)
 	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("FrameCoordinator per-replicator flush (FlushReplicator)", function()
+		test("sends only the target replicator's ops and leaves other replicators' entries buffered", function()
+			local player = { Name = "P" } :: any
+			local repA = ServerReplicator.new({ Namespace = uniqueToken("FlushReplA"), Data = { x = 0 }, ReplicationTargets = { player } })
+			local repB = ServerReplicator.new({ Namespace = uniqueToken("FlushReplB"), Data = { y = 0 }, ReplicationTargets = { player } })
+			local scopeA = (repA :: any)._Scope
+			local scopeB = (repB :: any)._Scope
+			scopeA:Activate(player)
+			scopeB:Activate(player)
+			local coordinator = (ServerReplicator :: any)._FrameCoordinator
+
+			local calls, restore = spyOnTransport()
+			coordinator:QueueOp(scopeA, repA.Id, { Kind = "Set", Path = { "x" }, NewValue = 1 } :: any, false)
+			coordinator:QueueOp(scopeB, repB.Id, { Kind = "Set", Path = { "y" }, NewValue = 1 } :: any, false)
+
+			-- Flush only A: exactly one message, carrying only A's op.
+			coordinator:FlushReplicator(repA.Id)
+			expect(#calls).is(1)
+			expect(#calls[1].Message.Items).is(1)
+			expect(calls[1].Message.Items[1].Id).is(repA.Id)
+
+			-- B's entry is still buffered -- a plain Flush now sends it.
+			coordinator:Flush()
+			expect(#calls).is(2)
+			expect(calls[2].Message.Items[1].Id).is(repB.Id)
+			restore()
+
+			repA:Destroy()
+			repB:Destroy()
+		end)
+
+		test("is a no-op when the target replicator has no queued entries", function()
+			local player = { Name = "P" } :: any
+			local repA = ServerReplicator.new({ Namespace = uniqueToken("FlushReplEmptyA"), Data = { x = 0 }, ReplicationTargets = { player } })
+			local repB = ServerReplicator.new({ Namespace = uniqueToken("FlushReplEmptyB"), Data = { y = 0 }, ReplicationTargets = { player } })
+			local scopeB = (repB :: any)._Scope
+			scopeB:Activate(player)
+			local coordinator = (ServerReplicator :: any)._FrameCoordinator
+
+			local calls, restore = spyOnTransport()
+			coordinator:QueueOp(scopeB, repB.Id, { Kind = "Set", Path = { "y" }, NewValue = 1 } :: any, false)
+
+			-- A has nothing queued -> no send, and B's entry is untouched.
+			coordinator:FlushReplicator(repA.Id)
+			expect(#calls).is(0)
+
+			coordinator:Flush()
+			expect(#calls).is(1)
+			expect(calls[1].Message.Items[1].Id).is(repB.Id)
+			restore()
+
+			repA:Destroy()
+			repB:Destroy()
+		end)
+	end)
 end
