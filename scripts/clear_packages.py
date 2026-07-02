@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Clear Wally packages from lib directories.
-Removes all files except src, default.project.json, and wally.toml.
+Removes all files except src, default.project.json, .md files, and wally.toml.
 """
 
 import os
@@ -33,24 +33,26 @@ def main():
     # Process each package directory
     for package_dir in sorted(SRC_DIR.iterdir()):
         if not package_dir.is_dir():
-            print(f"Skipping non-directory: {package_dir}")
+            # print(f"Skipping non-directory: {package_dir}")
             continue
 
         # Check if this package should be processed
         if not process_all and package_dir.name not in args:
-            print(f"Skipping non-argument directory: {package_dir}")
+            # print(f"Skipping non-argument directory: {package_dir}")
             continue
 
         raw_name = package_dir.name
-        print(f"Parsing directory: {raw_name}")
+        # print(f"Parsing directory: {raw_name}")
 
         try:
-            clear_package_dir(package_dir)
+            removedCount = clear_package_dir(package_dir)
+            if removedCount > 0:
+                print(f"Removed {removedCount} files from {package_dir}")
         except Exception as e:
             print(f"Error: Failed to remove files from {package_dir}: {e}")
             return 1
 
-    print("Packages Removed!")
+    print("Cleared packages successfully.")
     return 0
 
 

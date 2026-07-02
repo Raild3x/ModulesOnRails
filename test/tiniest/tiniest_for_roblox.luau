@@ -143,6 +143,10 @@ function tiniest_for_roblox.configure(options: Options)
 	self.describe = tiniest.describe
 	self.FOCUS = tiniest.FOCUS
 	self.test = tiniest.test
+	self.before_all = tiniest.before_all
+	self.after_all = tiniest.after_all
+	self.before_each = tiniest.before_each
+	self.after_each = tiniest.after_each
 	self.collect_tests = tiniest.collect_tests
 	self.run_tests = tiniest.run_tests
 

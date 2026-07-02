@@ -14,11 +14,22 @@ local tiniest_plugin = require("./tiniest_plugin")
 
 local task: typeof(task) = task or require("@lune/task") :: any
 
+export type HookFn = (Context) -> ()
+
+export type HookSet = {
+	before_all: { HookFn },
+	after_all: { HookFn },
+	before_each: { HookFn },
+	after_each: { HookFn },
+}
+
 type DescribeContext = {
 	type: "describe",
 	labels: { string },
 	is_focused: boolean,
 	add_test: (Test) -> (),
+	hooks: HookSet,
+	hook_chain: { HookSet },
 }
 
 type RunContext = {
@@ -44,6 +55,7 @@ export type Test = {
 	labels: { string },
 	run: (Context) -> (),
 	is_focused: boolean,
+	hook_chain: { HookSet },
 }
 
 export type RunResult = {
@@ -159,6 +171,15 @@ function tiniest.configure(options: Options)
 
 	local self = {}
 
+	local function new_hook_set(): HookSet
+		return {
+			before_all = {},
+			after_all = {},
+			before_each = {},
+			after_each = {},
+		}
+	end
+
 	local function build_unexpected_termination_error(test: Test): ErrorReport
 		return {
 			type = "tiniest.ErrorReport",
@@ -206,6 +227,83 @@ function tiniest.configure(options: Options)
 			or string.find(message, "Watchdog timeout after", 1, true) ~= nil
 	end
 
+	-- Outer-to-inner: parent describe's before_each hooks run before the child's.
+	local function collect_before_each(test: Test): { HookFn }
+		local fns = {}
+		for _, hook_set in test.hook_chain do
+			for _, fn in hook_set.before_each do
+				table.insert(fns, fn)
+			end
+		end
+		return fns
+	end
+
+	-- Inner-to-outer: child describe's after_each hooks run before the parent's.
+	local function collect_after_each(test: Test): { HookFn }
+		local fns = {}
+		for i = #test.hook_chain, 1, -1 do
+			for _, fn in test.hook_chain[i].after_each do
+				table.insert(fns, fn)
+			end
+		end
+		return fns
+	end
+
+	-- Wraps the test body so before_each/after_each run inside the same context and error
+	-- handling as the test itself. after_each always runs; a before_each/body failure takes
+	-- priority over an after_each failure when both occur.
+	local function build_composed_run(test: Test): (Context) -> ()
+		local before_each_fns = collect_before_each(test)
+		local after_each_fns = collect_after_each(test)
+		return function(inner_context: Context)
+			local primary_ok, primary_err = pcall(function()
+				for _, fn in before_each_fns do
+					fn(inner_context)
+				end
+				test.run(inner_context)
+			end)
+
+			local first_after_each_err: any = nil
+			for _, fn in after_each_fns do
+				local ok, err = pcall(fn, inner_context)
+				if not ok and first_after_each_err == nil then
+					first_after_each_err = err
+				end
+			end
+
+			if not primary_ok then
+				error(primary_err, 0)
+			elseif first_after_each_err ~= nil then
+				error(first_after_each_err, 0)
+			end
+		end
+	end
+
+	-- Runs hooks in order, stopping (and reporting) at the first failure. Used for before_all,
+	-- where a failed hook means the scope's setup is incomplete and later hooks shouldn't run.
+	local function run_hooks_stop_on_error(context: Context, fns: { HookFn }): ErrorReport?
+		for _, fn in fns do
+			local ok, err = pcall(with_root_context, context, fn)
+			if not ok then
+				return err :: ErrorReport
+			end
+		end
+		return nil
+	end
+
+	-- Runs every hook regardless of earlier failures, returning the first error encountered.
+	-- Used for after_all, so one failing cleanup hook doesn't skip the rest.
+	local function run_hooks_continue_on_error(context: Context, fns: { HookFn }): ErrorReport?
+		local first_err: ErrorReport? = nil
+		for _, fn in fns do
+			local ok, err = pcall(with_root_context, context, fn)
+			if not ok and first_err == nil then
+				first_err = err :: ErrorReport
+			end
+		end
+		return first_err
+	end
+
 	local function run_single_test(
 		test: Test,
 		context: Context,
@@ -219,7 +317,7 @@ function tiniest.configure(options: Options)
 
 		local function run_test_body(): (boolean, TestRunResult)
 			return xpcall(function()
-				with_root_context(context, test.run)
+				with_root_context(context, build_composed_run(test))
 				local pass: TestRunResult = {
 					status = "pass",
 				}
@@ -336,6 +434,10 @@ function tiniest.configure(options: Options)
 			local context = table.clone(outer_context)
 			context.labels = table.clone(context.labels)
 			table.insert(context.labels, label)
+			local hooks = new_hook_set()
+			context.hooks = hooks
+			context.hook_chain = table.clone(context.hook_chain)
+			table.insert(context.hook_chain, hooks)
 			return context
 		end, inner)
 	end
@@ -380,9 +482,72 @@ function tiniest.configure(options: Options)
 			labels = labels,
 			run = run,
 			is_focused = context.is_focused,
+			hook_chain = context.hook_chain,
 		}
 		context.add_test(test)
 	end
+
+	local function register_hook(select_hook_list: (HookSet) -> { HookFn }, fn: HookFn): ()
+		assert(typeof(fn) == "function", `Lifecycle hook body must be a function, got {typeof(fn)}`)
+		local context = get_context()
+		assert(context.type == "describe", "Lifecycle hooks can only be called inside a describe block")
+		table.insert(select_hook_list(context.hooks), fn)
+	end
+
+	--[=[
+		Registers a function to run once before any tests in the current describe scope
+		(and its nested describes) are run.
+
+		@param fn (Context) -> () -- Function to run once before the scope's tests
+
+		## Example
+		```lua
+		describe("Database", function()
+			before_all(function()
+				db = Database.new()
+			end)
+		end)
+		```
+	]=]
+	function self.before_all(fn: HookFn): ()
+		register_hook(function(hooks) return hooks.before_all end, fn)
+	end
+
+	--[=[
+		Registers a function to run once after all tests in the current describe scope
+		(and its nested describes) have run.
+
+		@param fn (Context) -> () -- Function to run once after the scope's tests
+	]=]
+	function self.after_all(fn: HookFn): ()
+		register_hook(function(hooks) return hooks.after_all end, fn)
+	end
+
+	--[=[
+		Registers a function to run before each test in the current describe scope
+		(and its nested describes). Outer before_each hooks run before inner ones.
+
+		@param fn (Context) -> () -- Function to run before each test
+	]=]
+	function self.before_each(fn: HookFn): ()
+		register_hook(function(hooks) return hooks.before_each end, fn)
+	end
+
+	--[=[
+		Registers a function to run after each test in the current describe scope
+		(and its nested describes). Inner after_each hooks run before outer ones,
+		and all after_each hooks run even if the test or an earlier after_each fails.
+
+		@param fn (Context) -> () -- Function to run after each test
+	]=]
+	function self.after_each(fn: HookFn): ()
+		register_hook(function(hooks) return hooks.after_each end, fn)
+	end
+
+	self.beforeAll = self.before_all
+	self.afterAll = self.after_all
+	self.beforeEach = self.before_each
+	self.afterEach = self.after_each
 
 	--[=[
 		Collects all tests defined within the inner function.
@@ -408,6 +573,7 @@ function tiniest.configure(options: Options)
 	]=]
 	function self.collect_tests(inner: (Context) -> ()): { Test }
 		local tests = {}
+		local root_hooks = new_hook_set()
 		local context: Context = {
 			type = "describe",
 			labels = {},
@@ -415,6 +581,8 @@ function tiniest.configure(options: Options)
 			add_test = function(test)
 				table.insert(tests, test)
 			end,
+			hooks = root_hooks,
+			hook_chain = { root_hooks },
 		}
 		with_root_context(context, inner)
 		return tests
@@ -498,14 +666,69 @@ function tiniest.configure(options: Options)
 			type = "run",
 		}
 
+		-- Scopes whose tests are currently "entered" (before_all has run, after_all hasn't yet).
+		-- Since collection is depth-first, each scope's tests are contiguous, so this can be
+		-- maintained as a stack diffed against each test's hook_chain.
+		local active_scopes: { HookSet } = {}
+		local scope_setup_errors: { [HookSet]: ErrorReport } = {}
+
+		local function exit_scope(scope: HookSet): ()
+			local err = run_hooks_continue_on_error(context, scope.after_all)
+			if err ~= nil and diagnostics_enabled then
+				warn(`[tiniest] after_all hook failed: {err.message}`)
+			end
+		end
+
 		local individual: { [Test]: TestRunResult } = {}
 		local tests_executed = 0
 		for _, test in tests_to_run do
 			-- Defensive reset so a timed-out worker cannot poison subsequent runs.
 			reset_context()
+
+			local chain = test.hook_chain
+			local common = 0
+			while
+				common < #active_scopes
+				and common < #chain
+				and active_scopes[common + 1] == chain[common + 1]
+			do
+				common += 1
+			end
+
+			for i = #active_scopes, common + 1, -1 do
+				exit_scope(active_scopes[i])
+				active_scopes[i] = nil
+			end
+
+			for i = common + 1, #chain do
+				local scope = chain[i]
+				table.insert(active_scopes, scope)
+				local err = run_hooks_stop_on_error(context, scope.before_all)
+				if err ~= nil then
+					scope_setup_errors[scope] = err
+					break
+				end
+			end
+
+			local setup_error: ErrorReport? = nil
+			for _, scope in chain do
+				if scope_setup_errors[scope] ~= nil then
+					setup_error = scope_setup_errors[scope]
+					break
+				end
+			end
+
 			plugins.notify("before_test", test, run_options)
-			local test_run_result =
-				run_single_test(test, context, run_options, diagnostics_enabled, diagnostics_on_error_only)
+			local test_run_result: TestRunResult
+			if setup_error ~= nil then
+				test_run_result = {
+					status = "fail",
+					error = setup_error,
+				}
+			else
+				test_run_result =
+					run_single_test(test, context, run_options, diagnostics_enabled, diagnostics_on_error_only)
+			end
 			plugins.notify("after_test", test, test_run_result, run_options)
 			individual[test] = test_run_result
 			tests_executed += 1
@@ -517,6 +740,11 @@ function tiniest.configure(options: Options)
 				break
 			end
 		end
+
+		for i = #active_scopes, 1, -1 do
+			exit_scope(active_scopes[i])
+		end
+
 		FINISHED_SUCCESSFULLY = true
 
 		local tests_run: { Test } = {}

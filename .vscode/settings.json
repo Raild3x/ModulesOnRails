@@ -10,7 +10,12 @@
   "luau-lsp.types.definitionFiles": [
     "types/tiniest_lib.d.luau"
   ],
+  "luau-lsp.fflags.override": {
+    "DebugLuauTimeTracing": "false"
+  },
 
   "selene.selenePath": "",
-  "stylua.targetReleaseVersion": "latest"
+  "stylua.targetReleaseVersion": "latest",
+
+
 }
