@@ -27,6 +27,12 @@ return function(t: tiniest)
 	local test = t.test
 	local describe = t.describe
 
+	local ENABLE_PERF_TESTS = false
+	if not ENABLE_PERF_TESTS then
+		warn("[TableManager] Performance tests are disabled. Enable them in TableManager.performance.spec.luau to run.")
+		return
+	end
+
 	local ITERATIONS = 5000
 	local WARMUP = 100
 	local PRINT_PER_OP_AVERAGES = true

@@ -656,8 +656,15 @@ function ReplicationHarness.Diagnose(self: ReplicationHarness): string
 end
 
 function ReplicationHarness.Destroy(self: ReplicationHarness)
+	-- `_connections` is heterogeneous: signal :Connect returns an
+	-- RBXScriptConnection (disconnect via :Disconnect()), while OnApplied/OnChange
+	-- return a plain disconnect function (call it directly). Handle both.
 	for _, conn in self._connections do
-		conn:Disconnect()
+		if type(conn) == "function" then
+			conn()
+		else
+			conn:Disconnect()
+		end
 	end
 	self.Source:Destroy()
 	self.Replica:Destroy()

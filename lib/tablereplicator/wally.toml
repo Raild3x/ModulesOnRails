@@ -16,6 +16,7 @@ docsLink = "ServerTableReplicator"
 
 [dependencies]
 Janitor = "howmanysmall/janitor@^1.16.0"
+<<<<<<< Updated upstream
 Signal = "lucasmzreal/fastsignal@^10.2.1"
 Fusion = "elttob/fusion@0.3.0"
 Symbol = "sleitnick/symbol@^2.0.1"
@@ -24,3 +25,6 @@ TableManager = "raild3x/tablemanager@^0.2"
 RailUtil = "raild3x/railutil@1"
 NetWire = "raild3x/netwire@^0.3.4"
 BaseObject = "raild3x/baseobject@^0"
+=======
+Promise = "howmanysmall/typed-promise@^4.0.6"
+>>>>>>> Stashed changes
