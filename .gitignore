@@ -16,6 +16,7 @@ last_tested_package.txt
 # Coverage system work dir + Rust build artifacts
 .coverage/
 tools/coverage/engine/target/
+Cargo.lock
 
 !**/wally.toml
 !**/default.project.json
