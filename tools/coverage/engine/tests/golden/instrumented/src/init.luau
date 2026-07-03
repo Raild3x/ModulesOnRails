@@ -1,4 +1,4 @@
-local __covrt=require("./_cov");local _COV=__covrt.cov;local _COVD=__covrt.covd;local _COVC=__covrt.covd;local _COVL=__covrt.covl; --!tm-coverage-instrumented
+local __covrt=require("@self/_cov");local _COV=__covrt.cov;local _COVD=__covrt.covd;local _COVC=__covrt.covd;local _COVL=__covrt.covl; --!tm-coverage-instrumented
 -- Coverage fixture: exercises each collector feature once.
 -- Golden files pin probe positions -- do not reformat this file.
 

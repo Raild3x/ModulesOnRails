@@ -128,12 +128,24 @@ fn probe_text(p: &Probe, src: &str, line_starts: &[usize]) -> String {
 
 /// The require path from a source file to the emitted `_cov` module, which sits
 /// at `<source_root>/_cov.luau`. Uses Luau string-require semantics.
+///
+/// A root `init.luau` is special: it *represents* the source root directory, and
+/// Roblox's instance-tree require resolves its `./` to the script's siblings (one
+/// level above the directory it represents) rather than its children. `@self`
+/// names "the directory this module represents" identically under both file and
+/// instance semantics, so it is the only spelling that finds `_cov` in both
+/// pipelines.
 pub fn cov_require_path(rel: &str, source_root: &str) -> String {
     let prefix = format!("{}/", source_root);
     let within = rel.strip_prefix(&prefix).unwrap_or(rel);
     let depth = within.matches('/').count();
+    let file_name = within.rsplit('/').next().unwrap_or(within);
     if depth == 0 {
-        "./_cov".to_string()
+        if file_name == "init.luau" || file_name == "init.lua" {
+            "@self/_cov".to_string()
+        } else {
+            "./_cov".to_string()
+        }
     } else {
         format!("{}_cov", "../".repeat(depth))
     }
@@ -245,7 +257,10 @@ mod tests {
 
     #[test]
     fn cov_require_path_climbs_to_the_source_root() {
-        assert_eq!(cov_require_path("src/init.luau", "src"), "./_cov");
+        // A root init represents the source root itself; `@self` is the only
+        // spelling that resolves to its children in both pipelines.
+        assert_eq!(cov_require_path("src/init.luau", "src"), "@self/_cov");
+        assert_eq!(cov_require_path("src/root.luau", "src"), "./_cov");
         assert_eq!(cov_require_path("src/util/deep.luau", "src"), "../_cov");
         assert_eq!(cov_require_path("src/a/b/c.luau", "src"), "../../_cov");
     }

@@ -1,5 +1,9 @@
 gitSourceBranch = "main"
 
+apiCategories = [
+	"Static",
+]
+
 [docusaurus]
 url = "https://raild3x.github.io"
 baseUrl = "/ModulesOnRails"
