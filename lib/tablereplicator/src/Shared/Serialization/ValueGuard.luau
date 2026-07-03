@@ -1,8 +1,5 @@
 --!strict
---[=[
-	@ignore
-	@class ValueGuard
-
+--[[
 	Single source of truth for which values a `RemoteEvent` can't serialize, shared
 	by two layers:
 
@@ -15,7 +12,7 @@
 	ever names types that genuinely can't cross a remote, so a real datatype value
 	is never flagged. The trade-off is that an exotic non-serializable userdata not
 	listed here slips through -- extend the set as such cases surface.
-]=]
+]]
 
 -- `typeof` results a RemoteEvent can't serialize. Contents never change.
 const NON_REPLICABLE_TYPES: { [string]: true } = {
@@ -28,12 +25,12 @@ const NON_REPLICABLE_TYPES: { [string]: true } = {
 local ValueGuard = {}
 ValueGuard.NonReplicableTypes = NON_REPLICABLE_TYPES
 
---[=[
+--[[
 	Shallow O(1) check: returns the offending `typeof` name when `value` itself is
 	a type a RemoteEvent can't serialize, along with an (empty) relative path so the
 	shape matches `FindNonReplicable`. Returns `nil` when `value`'s own type is fine
 	(it does NOT descend into a table's contents). Cheap enough to run on every write.
-]=]
+]]
 const function badTopLevelType(value: any): (string?, { any }?)
 	const valueType = typeof(value)
 	if NON_REPLICABLE_TYPES[valueType] then
@@ -73,12 +70,12 @@ const function find(value: any, seen: { [any]: true }): (string?, { any }?)
 	return nil, nil
 end
 
---[=[
+--[[
 	Deep check: recursively scans `value`, returning the offending `typeof` name and
 	the key-path to it (outermost first) at the first non-serializable node found, or
 	`nil` when the whole graph is clean. Cycle-aware. Only worth running when the
 	extra traversal is acceptable (see `ServerReplicator.StrictValueChecks`).
-]=]
+]]
 const function findNonReplicable(value: any): (string?, { any }?)
 	return find(value, {})
 end
