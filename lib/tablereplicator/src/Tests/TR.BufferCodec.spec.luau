@@ -419,6 +419,17 @@ return function(t: tiniest)
 			end).fails()
 		end)
 
+		test("readString errors on a tag just past the fixstr range (array tag)", function()
+			-- 0x40 is TAG_FIXARR: above TAG_FIXSTR but outside fixstr's window,
+			-- exercising the upper-bound half of the fixstr range check.
+			local writer = BufferCodec.newWriter()
+			BufferCodec.writeByte(writer, 0x40)
+			local buf = BufferCodec.export(writer)
+			expect(function()
+				BufferCodec.readString(BufferCodec.newReader(buf, nil))
+			end).fails()
+		end)
+
 		test("readValue errors on an unknown tag byte", function()
 			local writer = BufferCodec.newWriter()
 			BufferCodec.writeByte(writer, 0x1F) -- unassigned tag range

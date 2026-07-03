@@ -707,6 +707,25 @@ return function(t: tiniest)
 			end
 		)
 
+		test("Encode rejects an unknown item opcode", function()
+			expect(function()
+				MessageCodec.Encode({ { Op = 99, Id = 1 } } :: any)
+			end).fails()
+		end)
+
+		test("an array op without an Index round-trips with Index = nil", function()
+			-- The wire format reserves index-nibble 0 for "no index"; nothing in
+			-- the current server emits it, but the decoder must honor it.
+			local ops: any = {
+				{ Kind = "ArrayRemove", Path = { "arr" } },
+			}
+			local msg = roundTrip { FlatCodec.OpsItem(1, ops) }
+			local decoded = FlatCodec.DecodeOps(msg.Items[1] :: any)
+			expect(decoded[1].Kind).is("ArrayRemove")
+			expect(decoded[1].Index).is(nil)
+			expect(decoded[1].Path[1]).is("arr")
+		end)
+
 		test("shared snapshot table arrives as independent copies on the client via full pipeline", function()
 			local shared = { hp = 100 }
 			local items = {
@@ -727,6 +746,89 @@ return function(t: tiniest)
 ;
 			(ClientReplicator :: any)._HandleMessage(FlatCodec.BuildMessage { FlatCodec.DestroyItem(801) });
 			(ClientReplicator :: any)._HandleMessage(FlatCodec.BuildMessage { FlatCodec.DestroyItem(802) })
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("OpApplier", function()
+		local TableManagerModule = require("../Shared/Types").TableManager
+		local OpApplier = require("../Client/OpApplier")
+
+		test("applies every known op kind through one outer batch", function()
+			local manager = TableManagerModule.new({ hp = 1, arr = { "a", "c" } })
+			OpApplier.Apply(manager, {
+				{ Kind = "BatchBegin", Path = {} },
+				{ Kind = "Set", Path = { "hp" }, Value = 50 },
+				{ Kind = "ArrayInsert", Path = { "arr" }, Index = 2, Value = "b" },
+				{ Kind = "ArraySet", Path = { "arr" }, Index = 3, Value = "C" },
+				{ Kind = "ArrayRemove", Path = { "arr" }, Index = 1 },
+				{ Kind = "BatchEnd", Path = {} },
+			} :: any)
+			expect(manager.Raw.hp).is(50)
+			expect(manager.Raw.arr[1]).is("b")
+			expect(manager.Raw.arr[2]).is("C")
+			expect(#manager.Raw.arr).is(2)
+		end)
+
+		test("an unknown op kind is skipped without aborting the batch", function()
+			local manager = TableManagerModule.new({ hp = 1 })
+			OpApplier.Apply(manager, {
+				{ Kind = "SomethingNew", Path = { "hp" }, Value = 999 },
+				{ Kind = "Set", Path = { "hp" }, Value = 2 },
+			} :: any)
+			expect(manager.Raw.hp).is(2)
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("ClientReplicator._HandleMessage guard paths", function()
+		test("an item with an unknown Op is skipped without error", function()
+			expect(function()
+				(ClientReplicator :: any)._HandleMessage(FlatCodec.BuildMessage { { Op = 99, Id = 1 } :: any })
+			end).never_fails()
+		end)
+
+		test("the Server proxy is read-only", function()
+			(ClientReplicator :: any)._HandleMessage(
+				FlatCodec.BuildMessage { FlatCodec.CreateItem(60031, nil, "ServerProxyReadOnly", {}, {}) }
+			)
+			local mirrored = BaseReplicator.GetFromId(60031) :: any
+			expect(function()
+				mirrored.Server.Anything = 5
+			end).fails();
+			(ClientReplicator :: any)._HandleMessage(FlatCodec.BuildMessage { FlatCodec.DestroyItem(60031) })
+		end)
+
+		test("a Signal op with a non-table payload for an untouched remote is dropped safely", function()
+			(ClientReplicator :: any)._HandleMessage(
+				FlatCodec.BuildMessage { FlatCodec.CreateItem(60021, nil, "SignalGuardNonTable", {}, {}) }
+			)
+			expect(function()
+				(ClientReplicator :: any)._HandleMessage(FlatCodec.BuildMessage {
+					FlatCodec.OpsItem(60021, { { Kind = "Signal", Path = { "NeverAccessed" }, Value = 7 } } :: any),
+				})
+			end).never_fails();
+			(ClientReplicator :: any)._HandleMessage(FlatCodec.BuildMessage { FlatCodec.DestroyItem(60021) })
+		end)
+
+		test("a Signal op aimed at a replicator with no Server proxy is dropped safely", function()
+			-- Server-side replicators live in the same realm during specs but have
+			-- no `.Server` proxy; a stray Signal op for one must not crash.
+			local ServerReplicator = require("../Server/ServerReplicator")
+			local SpecUtils = require("./Helpers/SpecUtils")
+			local replicator = ServerReplicator.new({
+				Namespace = SpecUtils.uniqueToken("SignalGuardNoProxy"),
+				Data = {},
+				ReplicationTargets = {},
+			})
+			expect(function()
+				(ClientReplicator :: any)._HandleMessage(FlatCodec.BuildMessage {
+					FlatCodec.OpsItem(replicator.Id, { { Kind = "Signal", Path = { "X" }, Value = { 1 } } } :: any),
+				})
+			end).never_fails()
+			replicator:Destroy()
 		end)
 	end)
 end

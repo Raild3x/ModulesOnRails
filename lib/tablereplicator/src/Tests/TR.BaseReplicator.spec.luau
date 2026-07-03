@@ -556,19 +556,28 @@ return function(t: tiniest)
 
 		test('"bindable" mode also applies to ForEach\'s already-existing-matches loop', function()
 			BaseReplicator.SetListenerFireMode("immediate")
-			local replicator = newTop("FireModeBindableExisting")
+			-- Two pre-existing matches: the second dispatch consumes the cached
+			-- SignalBehavior probe instead of re-probing.
+			local replicatorA = newTop("FireModeBindableExisting")
+			local replicatorB = ServerReplicator.new {
+				Namespace = replicatorA.Token,
+				Data = FakeManager.new(),
+				ReplicationTargets = {},
+			}
 			BaseReplicator.SetListenerFireMode("bindable")
 
 			local seen: { any } = {}
-			local disconnect = BaseReplicator.ForEach(replicator.Namespace, function(r)
+			local disconnect = BaseReplicator.ForEach(replicatorA.Namespace, function(r)
 				table.insert(seen, r)
 			end)
 
 			task.wait() -- covers both Immediate (already fired) and Deferred SignalBehavior
-			expect(table.find(seen, replicator) ~= nil).is_true()
+			expect(table.find(seen, replicatorA) ~= nil).is_true()
+			expect(table.find(seen, replicatorB) ~= nil).is_true()
 
 			disconnect()
-			replicator:Destroy()
+			replicatorA:Destroy()
+			replicatorB:Destroy()
 			BaseReplicator.SetListenerFireMode("immediate")
 		end)
 
@@ -1407,6 +1416,33 @@ return function(t: tiniest)
 
 	--------------------------------------------------------------------------------
 
+	describe("BaseReplicator generalized iteration (__iter)", function()
+		test("iterating a base-metatable replicator walks every live replicator in the realm", function()
+			-- `__iter` lives on the BaseReplicator table, and metamethod lookup is
+			-- raw: it only engages for objects whose DIRECT metatable is
+			-- BaseReplicator (subclass instances re-metatable to their subclass).
+			local replicator = newTop("IterFindsMe")
+			local bare = BaseReplicator.new({
+				Id = 60041,
+				Manager = FakeManager.new(),
+			} :: any)
+
+			local found = false
+			for id, r in bare :: any do
+				if r == replicator then
+					expect(id).is(replicator.Id)
+					found = true
+				end
+			end
+			expect(found).is_true()
+
+			bare:Destroy()
+			replicator:Destroy()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
 	describe("BaseReplicator search-condition validation", function()
 		test("GetAll with an unsupported condition type errors", function()
 			expect(function()
@@ -1444,6 +1480,61 @@ return function(t: tiniest)
 			expect(#parent:GetChildren()).is(1)
 
 			;(ClientReplicator :: any)._HandleMessage(FlatCodec.BuildMessage { FlatCodec.DestroyItem(60011) })
+		end)
+
+		test("a SetParent item can adopt a previously top-level replicator", function()
+			-- Both created parentless; the wire then parents A under B, so the
+			-- reparent bookkeeping runs with no old parent to detach from.
+			(ClientReplicator :: any)._HandleMessage(FlatCodec.BuildMessage {
+				FlatCodec.CreateItem(60013, nil, "AdoptTopLevelChild", {}, {}),
+				FlatCodec.CreateItem(60014, nil, "AdoptTopLevelParent", {}, {}),
+			})
+			local child = BaseReplicator.GetFromId(60013) :: any
+			local parent = BaseReplicator.GetFromId(60014) :: any
+			expect(child:GetParent()).is(nil)
+
+			;(ClientReplicator :: any)._HandleMessage(
+				FlatCodec.BuildMessage { FlatCodec.SetParentItem(60013, 60014) }
+			)
+
+			expect(child:GetParent()).is(parent)
+			expect(parent:GetChildren()[1]).is(child)
+
+			;(ClientReplicator :: any)._HandleMessage(FlatCodec.BuildMessage { FlatCodec.DestroyItem(60014) })
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("BaseReplicator._SetParentRefs to nil (detach)", function()
+		test("detaching clears both sides and fires ChildRemoved/ParentChanged", function()
+			local parent = newTop("DetachParent")
+			local child = ServerReplicator.new {
+				Namespace = uniqueToken("DetachChild"),
+				Data = FakeManager.new(),
+				Parent = parent,
+			}
+
+			local removed: any = nil
+			local parentChanged = false
+			parent.ChildRemoved:Connect(function(r)
+				removed = r
+			end)
+			child.ParentChanged:Connect(function()
+				parentChanged = true
+			end)
+
+			-- The wire never expresses "no parent", so exercise the bookkeeping
+			-- seam directly: pure child-list/signal maintenance by contract.
+			;(child :: any):_SetParentRefs(nil)
+
+			expect(child:GetParent()).is(nil)
+			expect(#parent:GetChildren()).is(0)
+			expect(removed).is(child)
+			expect(parentChanged).is_true()
+
+			child:Destroy()
+			parent:Destroy()
 		end)
 	end)
 

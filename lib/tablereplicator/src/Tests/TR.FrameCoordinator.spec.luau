@@ -449,5 +449,91 @@ return function(t: tiniest)
 
 			replicator:Destroy()
 		end)
+
+		test("pumping an idle scheduler is a no-op", function()
+			-- Drain anything a previous test left scheduled, then pump again with
+			-- an empty schedule.
+			FrameCoordinator._PumpScheduler()
+			task.wait()
+			task.wait()
+			expect(function()
+				FrameCoordinator._PumpScheduler()
+			end).never_fails()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("FrameCoordinator audience cache invalidation", function()
+		test("an activation between two enqueues refreshes the cached audience", function()
+			local early = { Name = "Early" } :: any
+			local late = { Name = "Late" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("AudienceCacheStale"),
+				Data = { x = 0 },
+				ReplicationTargets = { early, late },
+			})
+			local scope = (replicator :: any)._Scope
+			scope:Activate(early)
+
+			local calls, restore = spyOnTransport()
+			replicator.Manager:Set("x", 1) -- audience cached as { early }
+			scope:Activate(late) -- bumps the scope's active version
+			replicator.Manager:Set("x", 2) -- stale cache detected, re-captured
+			;(ServerReplicator :: any)._FrameCoordinator:Flush()
+			restore()
+
+			local opsSeen: { [any]: number } = {}
+			for _, call in calls do
+				local decoded = FlatCodec.DecodeOps(call.Message.Items[1])
+				opsSeen[call.Player] = #decoded
+			end
+			expect(opsSeen[early]).is(2) -- both writes
+			expect(opsSeen[late]).is(1) -- only the write enqueued after activation
+
+			replicator:Destroy()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("FrameCoordinator coalescing with disjoint array ops", function()
+		test("an array op on a disjoint path leaves a pending coalesced Set untouched", function()
+			local player = { Name = "P" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("CoalesceDisjointArray"),
+				Data = { a = 0, list = {} },
+				ReplicationTargets = { player },
+			})
+			local scope = (replicator :: any)._Scope
+			scope:Activate(player)
+			local coordinator = (ServerReplicator :: any)._FrameCoordinator
+
+			local calls, restore = spyOnTransport()
+			coordinator:QueueOp(scope, replicator.Id, { Kind = "Set", Path = { "a" }, NewValue = 1 } :: any, true)
+			-- Disjoint path: must NOT invalidate the pending Set slot on { a }.
+			coordinator:QueueOp(
+				scope,
+				replicator.Id,
+				{ Kind = "ArrayInsert", Path = { "list" }, Index = 1, NewValue = "x" } :: any,
+				true
+			)
+			-- A follow-up Set on { a } must still coalesce into the original slot.
+			coordinator:QueueOp(scope, replicator.Id, { Kind = "Set", Path = { "a" }, NewValue = 2 } :: any, true)
+			coordinator:Flush()
+			restore()
+
+			expect(#calls).is(1)
+			local decoded = FlatCodec.DecodeOps(calls[1].Message.Items[1])
+			expect(#decoded).is(2) -- coalesced Set + the array op, not three entries
+			local kinds: { [string]: any } = {}
+			for _, op in decoded do
+				kinds[op.Kind] = op
+			end
+			expect(kinds.Set.Value).is(2)
+			expect(kinds.ArrayInsert.Value).is("x")
+
+			replicator:Destroy()
+		end)
 	end)
 end

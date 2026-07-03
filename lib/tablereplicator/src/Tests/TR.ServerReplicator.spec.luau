@@ -754,6 +754,147 @@ return function(t: tiniest)
 			end).never_fails()
 			replicator:Destroy()
 		end)
+
+		test("PlayerRemoving deactivates the player everywhere and re-arms the handshake", function()
+			local player = { Name = "Leaver" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("PlayerRemovingCleanup"),
+				Data = FakeManager.new(),
+				ReplicationTargets = { player },
+			})
+			bootstrap(player)
+			expect((replicator :: any)._Scope:IsActive(player)).is(true)
+
+			-- While bootstrapped, a repeat request is ignored entirely.
+			local callsBefore, restoreBefore = spyOnTransport()
+			bootstrap(player)
+			restoreBefore()
+			expect(#callsBefore).is(0)
+
+			;(ServerReplicator :: any)._Transport.PlayerRemoving:Fire(player)
+
+			expect((replicator :: any)._Scope:IsActive(player)).is(false)
+
+			-- The bootstrap flag was cleared too: a fresh request is handled
+			-- again (ServerReplicator.All's "all" scope always has a snapshot).
+			local callsAfter, restoreAfter = spyOnTransport()
+			bootstrap(player)
+			restoreAfter()
+			expect(#callsAfter > 0).is_true()
+
+			replicator:Destroy()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("manager lifetime coupling", function()
+		test("destroying the backing TableManager destroys the replicator", function()
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("ManagerDestroyCascades"),
+				Data = { x = 1 }, -- plain table: wrapped in a real TableManager
+				ReplicationTargets = {},
+			})
+			local id = replicator.Id
+			replicator.Manager:Destroy()
+			expect(BaseReplicator.GetFromId(id)).is(nil)
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("TokenCache introspection", function()
+		local TokenCache = require("../Shared/TokenCache")
+
+		test("isTokenInUse accepts a token, its name, and reports unknown names false", function()
+			local token = uniqueToken("TokenInUse")
+			expect(TokenCache.isTokenInUse(token)).is(true)
+			expect(TokenCache.isTokenInUse(SpecUtils.getTokenName(token))).is(true)
+			expect(TokenCache.isTokenInUse("NameThatWasNeverRegistered")).is(false)
+		end)
+
+		test("tostring renders a token as ReplicationToken<name>", function()
+			local token = uniqueToken("TokenToString")
+			expect(tostring(token)).is(`ReplicationToken<{SpecUtils.getTokenName(token)}>`)
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("snapshot Remotes map", function()
+		test("the Create item advertises every remote kind registered before bootstrap", function()
+			local FakeIntermediary = require("./Helpers/FakeIntermediary")
+			local intermediary = FakeIntermediary.new()
+			local client = intermediary:Connect()
+
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("RemotesMapAllKinds"),
+				Data = FakeManager.new(),
+				ReplicationTargets = { client.Player },
+			})
+			replicator:RegisterRemoteSignal("PlainSig")
+			replicator:RegisterRemoteUnreliableSignal("FastSig")
+			replicator:RegisterOrderedRemoteSignal("OrderedSig")
+			replicator:RegisterRemoteFunction("PlainFn", function()
+				return 0
+			end)
+			replicator:RegisterOrderedRemoteFunction("OrderedFn", function()
+				return 0
+			end)
+
+			client:RequestData()
+
+			local mirrored = client:GetFromId(replicator.Id) :: any
+			expect(mirrored._RemoteTypes.PlainSig).is("Signal")
+			expect(mirrored._RemoteTypes.FastSig).is("Unreliable")
+			expect(mirrored._RemoteTypes.OrderedSig).is("OrderedSignal")
+			expect(mirrored._RemoteTypes.PlainFn).is("Function")
+			expect(mirrored._RemoteTypes.OrderedFn).is("OrderedFunction")
+
+			replicator:Destroy()
+			intermediary:Destroy()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("SetParent across scopes with pending targets", function()
+		test("a pending (never-activated) target of the new scope receives nothing on reparent", function()
+			local activePlayer = { Name = "Active" } :: any
+			local pendingPlayer = { Name = "PendingOnly" } :: any
+
+			local oldTop = ServerReplicator.new({
+				Namespace = uniqueToken("PendingReparentOldTop"),
+				Data = FakeManager.new(),
+				ReplicationTargets = { activePlayer },
+			})
+			;(oldTop :: any)._Scope:Activate(activePlayer)
+			local child = ServerReplicator.new({
+				Namespace = uniqueToken("PendingReparentChild"),
+				Data = FakeManager.new(),
+				Parent = oldTop,
+			})
+			-- newTop targets a player who never completed the handshake: pending,
+			-- targeted, but NOT active.
+			local newTop = ServerReplicator.new({
+				Namespace = uniqueToken("PendingReparentNewTop"),
+				Data = FakeManager.new(),
+				ReplicationTargets = { pendingPlayer },
+			})
+			;(newTop :: any)._Scope:AddPending(pendingPlayer)
+
+			local calls, restore = spyOnTransport()
+			child:SetParent(newTop)
+			restore()
+
+			for _, call in calls do
+				expect(call.Player == pendingPlayer).is(false)
+			end
+
+			child:Destroy()
+			oldTop:Destroy()
+			newTop:Destroy()
+		end)
 	end)
 
 	--------------------------------------------------------------------------------

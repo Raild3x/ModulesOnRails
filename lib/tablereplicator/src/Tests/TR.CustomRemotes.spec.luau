@@ -1410,5 +1410,28 @@ return function(t: tiniest)
 			replicator:Destroy()
 			intermediary:Destroy()
 		end)
+
+		test("REMOTE_META for a remote the client never touched only updates the type map", function()
+			local intermediary = FakeIntermediary.new()
+			local client = intermediary:Connect()
+
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("CR.LateMetaUntouched"),
+				Data = {},
+				ReplicationTargets = { client.Player },
+			})
+			client:RequestData()
+
+			-- No `.Server.Fresh` access first: there is no cached remote to retype.
+			replicator:RegisterRemoteSignal("Fresh")
+
+			local mirrored = client:GetFromId(replicator.Id) :: any
+			expect(mirrored._RemoteTypes.Fresh).is("Signal")
+			-- First touch after the meta arrives picks the pushed type up.
+			expect(mirrored.Server.Fresh:IsUnreliable()).is(false)
+
+			replicator:Destroy()
+			intermediary:Destroy()
+		end)
 	end)
 end

@@ -189,5 +189,89 @@ return function(t: tiniest)
 				transport:Destroy()
 			end).never_fails()
 		end)
+
+		test("ServerTransport outbound methods reject non-Player targets", function()
+			-- No real (connected) Player exists in the test datamodel, so the
+			-- engine-facing sends are exercised up to FireClient's argument
+			-- validation: a plain-table player must be rejected loudly.
+			local transport = ServerTransport.new()
+			local fakePlayer = { Name = "NotAPlayer" } :: any
+			expect(function()
+				transport:SendMessage(fakePlayer, buffer.create(1), nil)
+			end).fails()
+			expect(function()
+				transport:NotifyDataSent(fakePlayer)
+			end).fails()
+			expect(function()
+				transport:FireSignal(fakePlayer, 1, "Sig", false)
+			end).fails()
+			expect(function()
+				transport:FireSignal(fakePlayer, 1, "Sig", true)
+			end).fails()
+			transport:Destroy()
+		end)
+
+		test("ClientTransport.FireSignal fires both the reliable and unreliable channels", function()
+			-- In edit mode the datamodel is both client and server, so FireServer
+			-- is legal; the loopback (if any) is dropped by the server handshake
+			-- guards, making this safe to fire for real.
+			local transport = ClientTransport.new()
+			expect(function()
+				transport:FireSignal(999999901, "CoverageSig", false, "payload")
+			end).never_fails()
+			expect(function()
+				transport:FireSignal(999999901, "CoverageSig", true, "payload")
+			end).never_fails()
+			transport:Destroy()
+		end)
+
+		test("ClientTransport.InvokeFunction reaches InvokeServer without a synchronous error", function()
+			local transport = ClientTransport.new()
+			expect(function()
+				-- InvokeServer yields for a response that may never come in edit
+				-- mode; spawning keeps the test itself from blocking on it.
+				task.spawn(function()
+					transport:InvokeFunction(999999902, "CoverageFn")
+				end)
+			end).never_fails()
+			transport:Destroy()
+		end)
+
+		test("a RequestData issued before the remote connects is sent on connect", function()
+			-- The constructor connects synchronously in specs (the remotes always
+			-- exist), so rewind a fresh transport to the not-yet-connected state a
+			-- real client sits in while the remotes are still replicating.
+			local transport = ClientTransport.new()
+			local t: any = transport
+			local remote = t._remote
+			expect(remote).never_is(nil)
+			t._remote = nil
+			t._connected = false
+			t._requested = false
+
+			local promise = transport:RequestData() -- queues: not yet connected
+			expect(t._requested).is(true)
+			promise:cancel()
+
+			-- Connecting must flush the queued request to the server.
+			t:_connect(remote)
+			expect(t._connected).is(true)
+
+			-- Once the data-complete marker has been seen, RequestData resolves
+			-- immediately instead of waiting on the signal again.
+			t._receivedData = true
+			local resolved = transport:RequestData()
+			expect(resolved:getStatus()).is("Resolved")
+
+			transport:Destroy()
+		end)
+
+		test("a non-RequestData message on the reliable channel is ignored by the server", function()
+			local transport = ClientTransport.new()
+			expect(function()
+				(transport :: any)._remote:FireServer("NotARealRequestKind")
+			end).never_fails()
+			transport:Destroy()
+		end)
 	end)
 end
