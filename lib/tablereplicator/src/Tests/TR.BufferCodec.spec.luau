@@ -2,9 +2,9 @@
 --[[
 	Byte-level coverage for `BufferCodec`: every tag family (fixed-width ints,
 	explicit-width ints, floats, all string widths, string interning refs, all
-	array/map widths, Roblox datatypes, instance side-list refs, and table
-	back-refs), plus buffer growth, varints, and every encode/decode error path.
-	Pure round-trip tests -- no replicators, no transport.
+	array/map widths, Roblox datatypes, side-list refs for Instances and untagged
+	raw values, and table back-refs), plus buffer growth, varints, and every
+	decode error path. Pure round-trip tests -- no replicators, no transport.
 ]]
 
 return function(t: tiniest)
@@ -366,6 +366,107 @@ return function(t: tiniest)
 
 	--------------------------------------------------------------------------------
 
+	describe("BufferCodec raw side-list values", function()
+		-- A Roblox datatype with no dedicated buffer tag: instead of erroring, the
+		-- writer offloads it to the side list exactly as it does an Instance.
+		test("an untagged datatype rides the side list instead of erroring", function()
+			local value = NumberRange.new(2, 8)
+			local writer = BufferCodec.newWriter()
+			BufferCodec.writeValue(writer, { range = value })
+			local buf, instances = BufferCodec.export(writer)
+			expect(instances).never_is(nil)
+			expect(#(instances :: { any })).is(1)
+			local decoded = BufferCodec.readValue(BufferCodec.newReader(buf, instances))
+			expect(decoded.range).is(value)
+		end)
+
+		test("the same untagged value written twice is deduplicated in the side list", function()
+			local value = UDim2.new(0, 5, 1, 10)
+			local writer = BufferCodec.newWriter()
+			BufferCodec.writeValue(writer, { a = value, b = value })
+			local buf, instances = BufferCodec.export(writer)
+			expect(#(instances :: { any })).is(1)
+			local decoded = BufferCodec.readValue(BufferCodec.newReader(buf, instances))
+			expect(decoded.a).is(value)
+			expect(decoded.b).is(value)
+		end)
+
+		test("Instances and untagged values share the one side list", function()
+			local folder = Instance.new("Folder")
+			local range = NumberRange.new(1, 3)
+			local writer = BufferCodec.newWriter()
+			BufferCodec.writeValue(writer, { folder, range })
+			local buf, instances = BufferCodec.export(writer)
+			expect(#(instances :: { any })).is(2)
+			local decoded = BufferCodec.readValue(BufferCodec.newReader(buf, instances))
+			expect(decoded[1]).is(folder)
+			expect(decoded[2]).is(range)
+			folder:Destroy()
+		end)
+
+		test("an untagged value decodes as nil when the side list is missing", function()
+			local writer = BufferCodec.newWriter()
+			BufferCodec.writeValue(writer, NumberRange.new(4, 4))
+			local buf = BufferCodec.export(writer)
+			expect(BufferCodec.readValue(BufferCodec.newReader(buf, nil))).is(nil)
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("BufferCodec non-serializable values", function()
+		-- Functions/threads/signals can't cross a RemoteEvent, so they can't ride the
+		-- side list either. The writer drops them to nil (warning as it does) so one
+		-- bad value can't fail the whole batched message. These paths `warn`.
+		test("a function is dropped to nil, never added to the side list", function()
+			local writer = BufferCodec.newWriter()
+			BufferCodec.writeValue(writer, function() end)
+			local buf, instances = BufferCodec.export(writer)
+			expect(instances).is(nil) -- nothing offloaded
+			expect(BufferCodec.readValue(BufferCodec.newReader(buf, instances))).is(nil)
+		end)
+
+		test("a thread is dropped to nil", function()
+			local writer = BufferCodec.newWriter()
+			BufferCodec.writeValue(writer, coroutine.create(function() end))
+			local buf, instances = BufferCodec.export(writer)
+			expect(instances).is(nil)
+			expect(BufferCodec.readValue(BufferCodec.newReader(buf, instances))).is(nil)
+		end)
+
+		test("an RBXScriptSignal is dropped to nil", function()
+			local folder = Instance.new("Folder")
+			local writer = BufferCodec.newWriter()
+			BufferCodec.writeValue(writer, folder.ChildAdded)
+			local buf, instances = BufferCodec.export(writer)
+			expect(instances).is(nil)
+			expect(BufferCodec.readValue(BufferCodec.newReader(buf, instances))).is(nil)
+			folder:Destroy()
+		end)
+
+		test("a bad value is dropped without losing its siblings in the same table", function()
+			local folder = Instance.new("Folder")
+			local writer = BufferCodec.newWriter()
+			BufferCodec.writeValue(writer, {
+				name = "keep-me",
+				count = 42,
+				ref = folder,
+				bad = function() end,
+			})
+			local buf, instances = BufferCodec.export(writer)
+			-- Only `folder` reached the side list; the function did not.
+			expect(#(instances :: { any })).is(1)
+			local decoded = BufferCodec.readValue(BufferCodec.newReader(buf, instances))
+			expect(decoded.name).is("keep-me")
+			expect(decoded.count).is(42)
+			expect(decoded.ref).is(folder)
+			expect(decoded.bad).is(nil) -- the only casualty
+			folder:Destroy()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
 	describe("BufferCodec varints", function()
 		test("varints round-trip across width boundaries", function()
 			for _, value in { 0, 1, 127, 128, 300, 16383, 16384, 2 ^ 31 } do
@@ -403,13 +504,6 @@ return function(t: tiniest)
 	--------------------------------------------------------------------------------
 
 	describe("BufferCodec error paths", function()
-		test("writeValue rejects unsupported value types", function()
-			expect(function()
-				local writer = BufferCodec.newWriter()
-				BufferCodec.writeValue(writer, function() end)
-			end).fails()
-		end)
-
 		test("readString errors on a non-string tag", function()
 			local writer = BufferCodec.newWriter()
 			BufferCodec.writeValue(writer, true)

@@ -104,9 +104,9 @@ end
 
 --[=[
 	Sends an encoded wire message (a `buffer` from `MessageCodec.Encode`, plus
-	its `Instance` side-list) to `player`.
+	its side-list of raw values) to `player`.
 ]=]
-function ServerTransport.SendMessage(self: ServerTransport, player: Player, buf: buffer, instances: { Instance }?)
+function ServerTransport.SendMessage(self: ServerTransport, player: Player, buf: buffer, instances: { any }?)
 	self._remote:FireClient(player, buf, instances)
 end
 

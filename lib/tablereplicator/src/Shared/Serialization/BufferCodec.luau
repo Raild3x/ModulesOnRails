@@ -21,9 +21,20 @@
 	against the received list. A ref the engine can not resolve on the client (streamed
 	out, server-only) decodes as nil.
 
-	Supported value types: nil, boolean, number, string, table, Instance, Vector3, Vector2,
-	CFrame, Color3. Anything else errors at encode time — loudly, so unsupported data is
-	caught in Studio rather than silently corrupting the mirror.
+	Any value the buffer has no tag for (Roblox datatypes without a dedicated tag — Ray,
+	Region3, UDim2, EnumItem, … — as well as anything else) rides that same side list rather
+	than being rejected: the codec hands the raw value to the remote to serialize natively,
+	exactly like an Instance ref. The buffer stores only the index. This keeps unsupported
+	data flowing (at native remote cost) instead of erroring out the whole message.
+
+	A value a RemoteEvent genuinely can't serialize (function, thread, RBXScriptSignal,
+	RBXScriptConnection — see NON_REPLICABLE_TYPES) can't ride the side list either: sending
+	it would throw at FireClient and take the whole batched message down. The writer instead
+	warns and encodes nil in its place, so that one bad value is dropped in isolation while
+	every unrelated op sharing the frame still delivers.
+
+	Directly-tagged value types (bit-packed into the buffer): nil, boolean, number, string,
+	table, Vector3, Vector2, CFrame, Color3. Instances and everything else ride the side list.
 
 ]=]
 
@@ -36,8 +47,10 @@ export type Writer = {
 	cursor: number,
 	interned: { [string]: number },
 	internedCount: number,
-	instanceRefs: { [Instance]: number },
-	instances: { Instance },
+	-- Side list of values the buffer can't hold inline (Instances and any
+	-- untagged type), deduplicated by identity; the buffer stores a 1-based index.
+	instanceRefs: { [any]: number },
+	instances: { any },
 	tableRefs: { [{ [any]: any }]: number },
 	tableRefCount: number,
 }
@@ -46,7 +59,7 @@ export type Reader = {
 	buf: buffer,
 	cursor: number,
 	interned: { string },
-	instances: { Instance }?,
+	instances: { any }?,
 	tableRefs: { { [any]: any } },
 }
 
@@ -80,7 +93,7 @@ local TAG_VECTOR3 = 0x16
 local TAG_VECTOR2 = 0x17
 local TAG_CFRAME = 0x18
 local TAG_COLOR3 = 0x19
-local TAG_INSTANCE   = 0x1A -- varint index into the side instance list
+local TAG_REF        = 0x1A -- varint index into the side list (Instance or any untagged value)
 local TAG_TABLEREF8  = 0x1B -- u8  back-ref id: table seen earlier this message
 local TAG_TABLEREF16 = 0x1C -- u16 back-ref id
 
@@ -98,6 +111,19 @@ local INTERN_MIN_LENGTH = 2
 local INTERN_MAX_COUNT = 0xFFFF
 
 local INITIAL_CAPACITY = 64
+
+-- Best-effort block-list of `typeof` results a RemoteEvent can't serialize. A
+-- value of one of these types can't ride the side list -- offloading it would
+-- throw at FireClient and take the whole batched message down with it -- so the
+-- writer warns and encodes nil in its place, letting the unrelated ops in the
+-- same frame still deliver. Extend this as other non-serializable types surface;
+-- it deliberately never lists a valid datatype, so a real value is never dropped.
+local NON_REPLICABLE_TYPES: { [string]: true } = {
+	["function"] = true,
+	thread = true,
+	RBXScriptSignal = true,
+	RBXScriptConnection = true,
+}
 
 local f32Scratch = buffer.create(4)
 
@@ -274,8 +300,8 @@ end
 	Finalizes a writer.
 
 	Returns a tightly-sized buffer containing the encoded bytes and an
-	optional instance reference array which must accompany the buffer when
-	transmitting over a RemoteEvent.
+	optional side list of raw values (Instances and any untagged types) which
+	must accompany the buffer when transmitting over a RemoteEvent.
 
 	```lua
 	local buffer, instances = BufferCodec.export(writer)
@@ -286,9 +312,9 @@ end
 	@param writer Writer
 
 	@return buffer
-	@return {Instance}?
+	@return {any}?
 ]=]
-const function export(writer: Writer): (buffer, { Instance }?)
+const function export(writer: Writer): (buffer, { any }?)
 	local out = buffer.create(writer.cursor)
 	buffer.copy(out, 0, writer.buf, 0, writer.cursor)
 	return out, if #writer.instances > 0 then writer.instances else nil
@@ -299,7 +325,7 @@ end
 	@function newReader
 	Creates a reader for decoding values from an encoded buffer.
 
-	The supplied instance list should be the same list returned by
+	The supplied side list should be the same list returned by
 	`export` on the writing side.
 
 	```lua
@@ -309,11 +335,11 @@ end
 	```
 
 	@param buffer buffer
-	@param instances {Instance}?
+	@param instances {any}?
 
 	@return Reader
 ]=]
-const function newReader(buf: buffer, instances: { Instance }?): Reader
+const function newReader(buf: buffer, instances: { any }?): Reader
 	return {
 		buf = buf,
 		cursor = 0,
@@ -512,25 +538,43 @@ const function writeTable(writer: Writer, value: { [any]: any })
 	end
 end
 
+-- Offloads a value the buffer can't hold inline (an Instance, or any type without
+-- a dedicated tag) to the deduplicated side list, writing only its 1-based index.
+-- The reader resolves that index against the list shipped alongside the buffer.
+local function writeRef(writer: Writer, value: any)
+	local ref = writer.instanceRefs[value]
+	if not ref then
+		table.insert(writer.instances, value)
+		ref = #writer.instances
+		writer.instanceRefs[value] = ref
+	end
+	putU8(writer, TAG_REF)
+	writeVarint(writer, ref)
+end
+
 --[=[
 	@within BufferCodec
 	@function writeValue
-	Encodes any supported Luau value.
+	Encodes any Luau value.
 
-	Supported types:
+	Directly tagged into the buffer:
 
 	• nil
 	• boolean
 	• number
 	• string
 	• table
-	• Instance
 	• Vector2
 	• Vector3
 	• CFrame
 	• Color3
 
-	Unsupported types throw an error.
+	Instances and any other type (Roblox datatypes without a dedicated tag, etc.)
+	ride the side list as raw values and are serialized natively by the remote.
+
+	A value the remote can't serialize at all (function, thread, RBXScriptSignal,
+	RBXScriptConnection) is dropped in isolation: the writer warns and encodes nil
+	so the rest of the message still delivers.
 
 	@param writer Writer
 	@param value any
@@ -549,14 +593,7 @@ function writeValue(writer: Writer, value: any)
 	elseif valueType == "table" then
 		writeTable(writer, value)
 	elseif valueType == "Instance" then
-		local ref = writer.instanceRefs[value]
-		if not ref then
-			table.insert(writer.instances, value)
-			ref = #writer.instances
-			writer.instanceRefs[value] = ref
-		end
-		putU8(writer, TAG_INSTANCE)
-		writeVarint(writer, ref)
+		writeRef(writer, value)
 	elseif valueType == "Vector3" then
 		putU8(writer, TAG_VECTOR3)
 		putF32(writer, value.X)
@@ -577,8 +614,16 @@ function writeValue(writer: Writer, value: any)
 		putF32(writer, value.R)
 		putF32(writer, value.G)
 		putF32(writer, value.B)
+	elseif NON_REPLICABLE_TYPES[valueType] then
+		-- The remote can't serialize this, so it can't ride the side list either.
+		-- Drop just this value (encode nil) and warn, rather than letting it throw
+		-- at FireClient and lose every unrelated op batched into the same message.
+		warn(`[TableReplicator] cannot replicate a value of type "{valueType}"; encoding nil in its place so the rest of the message still delivers`)
+		putU8(writer, TAG_NIL)
 	else
-		error(`[TableReplicator] cannot serialize value of type {valueType}`)
+		-- No dedicated tag, but the remote can serialize it: offload the raw value
+		-- to the side list and let the remote handle it, exactly like an Instance ref.
+		writeRef(writer, value)
 	end
 end
 
@@ -663,7 +708,7 @@ function readValue(reader: Reader): any
 		return readMap(reader, getU16(reader))
 	elseif tag == TAG_MAP32 then
 		return readMap(reader, getU32(reader))
-	elseif tag == TAG_INSTANCE then
+	elseif tag == TAG_REF then
 		local ref = readVarint(reader)
 		return if reader.instances then reader.instances[ref] else nil
 	elseif tag == TAG_VECTOR3 then

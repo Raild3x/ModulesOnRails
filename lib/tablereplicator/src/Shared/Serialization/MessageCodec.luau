@@ -279,10 +279,10 @@ end
 	Encodes `items` into a compact binary buffer using bit-packed framing.
 	Shared tables within the message are automatically interned by BufferCodec's
 	identity table-tracking, eliminating the need for a separate RefCodec pass.
-	Returns the buffer and the deduplicated Instance side-list (or nil when the
-	message carries none).
+	Returns the buffer and the deduplicated side-list of raw values — Instances
+	and any type the buffer has no tag for (or nil when the message carries none).
 ]=]
-function MessageCodec.Encode(items: { WireItem }): (buffer, { Instance }?)
+function MessageCodec.Encode(items: { WireItem }): (buffer, { any }?)
 	BufferCodec.resetWriter(writer)
 	BufferCodec.writeByte(writer, FlatCodec.Version)
 	BufferCodec.writeVarint(writer, #items)
@@ -294,11 +294,12 @@ end
 
 --[=[
 	Decodes a buffer produced by `Encode` back into a `WireMessage`, resolving
-	any Instance references against the side-list returned alongside the buffer.
+	any side-list references (Instances and other raw values) against the
+	side-list returned alongside the buffer.
 	Each Create item's Data/Tags and each op Value is deep-copied so that two
 	items which shared a table on the wire get independent copies on decode.
 ]=]
-function MessageCodec.Decode(buf: buffer, instances: { Instance }?): WireMessage
+function MessageCodec.Decode(buf: buffer, instances: { any }?): WireMessage
 	const reader = BufferCodec.newReader(buf, instances)
 	const version = BufferCodec.readByte(reader)
 	const itemCount = BufferCodec.readVarint(reader)

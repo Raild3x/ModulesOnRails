@@ -165,7 +165,7 @@ end
 
 -- Builds an encoded wire message from `items` via `MessageCodec.Encode`.
 -- Shared tables are interned in-band by BufferCodec's identity tracking.
-const function buildMessage(items: { WireItem }): (buffer, { Instance }?)
+const function buildMessage(items: { WireItem }): (buffer, { any }?)
 	return MessageCodec.Encode(items)
 end
 

@@ -151,7 +151,7 @@ end
 	Sends an already-built message to one player (e.g. an individual snapshot).
 	Per-frame data-op delivery is owned by `FrameCoordinator`, not the scope;
 ]=]
-function ReplicationScope.SendTo(self: ReplicationScope, player: Player, buf: buffer, instances: { Instance }?)
+function ReplicationScope.SendTo(self: ReplicationScope, player: Player, buf: buffer, instances: { any }?)
 	self._transport:SendMessage(player, buf, instances)
 end
 

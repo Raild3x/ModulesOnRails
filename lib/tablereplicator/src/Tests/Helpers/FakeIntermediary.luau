@@ -35,7 +35,7 @@ const ClientReplicator = require("../../Client/ClientReplicator")
 const BaseReplicator = require("../../Shared/BaseReplicator")
 const MessageCodec = require("../../Shared/Serialization/MessageCodec")
 
-type SendMessage = (self: any, player: Player, buf: buffer, instances: { Instance }?) -> ()
+type SendMessage = (self: any, player: Player, buf: buffer, instances: { any }?) -> ()
 
 --------------------------------------------------------------------------------
 --// FakeClient //--

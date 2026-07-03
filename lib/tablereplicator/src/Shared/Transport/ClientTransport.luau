@@ -110,7 +110,7 @@ function ClientTransport._connect(self: ClientTransport, remote: RemoteEvent)
 	assert(not self._remote, "Already connected to a RemoteEvent")
 	self._remote = remote
 
-	self._janitor:Add(remote.OnClientEvent:Connect(function(payload: buffer | string, instances: { Instance }?)
+	self._janitor:Add(remote.OnClientEvent:Connect(function(payload: buffer | string, instances: { any }?)
 		if payload == Protocol.RequestDataComplete then
 			self._receivedData = true
 			self._dataComplete:Fire()
