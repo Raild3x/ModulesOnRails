@@ -43,6 +43,16 @@ export type LuneFrameworkConfig = {
 }
 
 --[=[
+	Per-run knobs the runner scaffold honors. `perTest` gates emission of
+	per-test attribution: it multiplies payload size by the test count and the
+	Studio transport (run-in-roblox stdout) has a hard post-size cap, so it must
+	stay off unless the caller actually asked for `--per-test`.
+]=]
+export type RobloxRunOptions = {
+	perTest: boolean?,
+}
+
+--[=[
 	Roblox pipeline scaffolding for a package's instrumented copy.
 ]=]
 export type RobloxScaffold = {
@@ -59,7 +69,7 @@ export type RepoAdapter = {
 	-- Produce a runnable, uninstrumented copy of the package at `buildDir`.
 	materialize: (spec: PackageSpec, buildDir: string) -> (),
 	luneFramework: (spec: PackageSpec, buildDir: string) -> LuneFrameworkConfig,
-	robloxScaffold: (spec: PackageSpec, buildDir: string) -> RobloxScaffold,
+	robloxScaffold: (spec: PackageSpec, buildDir: string, runOptions: RobloxRunOptions?) -> RobloxScaffold,
 	-- The per-package coverage work dir, e.g. ".coverage/<name>".
 	workDir: (spec: PackageSpec) -> string,
 }

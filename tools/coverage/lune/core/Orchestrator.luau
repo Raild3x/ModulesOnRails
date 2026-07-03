@@ -288,7 +288,7 @@ function Orchestrator.run(adapter: RepoAdapter, selector: string, options: Optio
 		local run: LuneRunner.RunOutput
 		if spec.pipeline == "roblox" then
 			env = "roblox-edit"
-			run = RobloxRunner.run(adapter, spec, buildDir, workDir)
+			run = RobloxRunner.run(adapter, spec, buildDir, workDir, { perTest = options.perTest })
 		else
 			env = "lune"
 			run = LuneRunner.run(spec, buildDir, { timeout = options.timeout })

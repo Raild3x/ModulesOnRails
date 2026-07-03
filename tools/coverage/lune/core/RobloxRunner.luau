@@ -50,8 +50,14 @@ local function forwardStudioOutput(output: string)
 	end
 end
 
-function RobloxRunner.run(adapter: RepoAdapter, spec: PackageSpec, buildDir: string, workDir: string): RunOutput
-	local scaffold = adapter.robloxScaffold(spec, buildDir)
+function RobloxRunner.run(
+	adapter: RepoAdapter,
+	spec: PackageSpec,
+	buildDir: string,
+	workDir: string,
+	runOptions: adapterMod.RobloxRunOptions?
+): RunOutput
+	local scaffold = adapter.robloxScaffold(spec, buildDir, runOptions)
 
 	local projectPath = workDir .. "/place.project.json"
 	fs.writeFile(
@@ -83,6 +89,20 @@ function RobloxRunner.run(adapter: RepoAdapter, spec: PackageSpec, buildDir: str
 	if output:find("[[TM-COV-ERROR]]", 1, true) then
 		local msg = output:match("%[%[TM%-COV%-ERROR%]%](.-)\n") or "unknown error"
 		error("[roblox] runner errored inside Studio: " .. msg)
+	end
+
+	-- run-in-roblox ships Studio's captured logs back over an HTTP post with a
+	-- hard size cap; when the payload exceeds it the whole post is dropped and no
+	-- sentinel survives. Detect that specific failure so the fix is obvious (drop
+	-- --per-test, whose per-test matrix scales with the test count) rather than a
+	-- generic "no coverage output captured".
+	local limit, size = output:match("Post data too large%. Limit: (%d+ KB)%. Post size: (%d+ KB)")
+	if limit ~= nil then
+		error(
+			`[roblox] coverage payload too large for run-in-roblox: post size {size} exceeds the {limit} cap, `
+				.. `so Studio's output was dropped. Re-run without --per-test (its per-test attribution scales `
+				.. `with the number of tests); the aggregate report does not need it.`
+		)
 	end
 
 	local payload = StdoutCodec.decode(output)

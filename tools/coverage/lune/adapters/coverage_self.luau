@@ -54,7 +54,11 @@ function M.luneFramework(_spec: PackageSpec, _buildDir: string): adapter.LuneFra
 	}
 end
 
-function M.robloxScaffold(_spec: PackageSpec, _buildDir: string): adapter.RobloxScaffold
+function M.robloxScaffold(
+	_spec: PackageSpec,
+	_buildDir: string,
+	_runOptions: adapter.RobloxRunOptions?
+): adapter.RobloxScaffold
 	error("coverage_self never uses the roblox pipeline")
 end
 

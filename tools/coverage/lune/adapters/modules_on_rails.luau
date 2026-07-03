@@ -194,7 +194,7 @@ local tiniest = require(tiniestFolder.tiniest_for_roblox).configure({
 	plugins = {
 		require(tiniestFolder.tiniest_coverage).configure({
 			runtime = require(srcFolder._cov),
-			enable_per_test = true,
+			enable_per_test = __PER_TEST__,
 		}),
 	},
 })
@@ -283,11 +283,20 @@ end
 print("[[TM-COV-END]]")
 ]==]
 
-local function robloxRunnerSource(pkg: string): string
-	return (RUNNER_TEMPLATE:gsub("__PKG__", pkg))
+local function robloxRunnerSource(pkg: string, perTest: boolean): string
+	-- __PKG__ first, then the per-test toggle. Per-test attribution is gated
+	-- because it multiplies the payload by the test count, and run-in-roblox caps
+	-- the stdout post it ships back (~1 MB); a large suite's per-test matrix blows
+	-- that cap and drops the whole payload ("no coverage output captured").
+	local src = RUNNER_TEMPLATE:gsub("__PKG__", pkg)
+	return (src:gsub("__PER_TEST__", if perTest then "true" else "false"))
 end
 
-function M.robloxScaffold(spec: PackageSpec, _buildDir: string): adapter.RobloxScaffold
+function M.robloxScaffold(
+	spec: PackageSpec,
+	_buildDir: string,
+	runOptions: adapter.RobloxRunOptions?
+): adapter.RobloxScaffold
 	-- Project file lives at <workDir>/place.project.json; $path values are
 	-- relative to it. Mount every lib package explicitly, pointing the target
 	-- package at the instrumented build. Explicit children avoid rojo's
@@ -321,9 +330,10 @@ function M.robloxScaffold(spec: PackageSpec, _buildDir: string): adapter.RobloxS
 			},
 		},
 	}
+	local perTest = if runOptions ~= nil then runOptions.perTest == true else false
 	return {
 		projectTree = projectTree,
-		runnerSource = robloxRunnerSource(spec.name),
+		runnerSource = robloxRunnerSource(spec.name, perTest),
 	}
 end
 
