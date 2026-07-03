@@ -1,0 +1,907 @@
+{
+  "engine_version": "0.1.0",
+  "files": [
+    {
+      "dead": [
+        {
+          "reason": "unreachable after error(...)",
+          "scope": [
+            69,
+            69
+          ]
+        },
+        {
+          "reason": "arm of a constant `if false`",
+          "scope": [
+            73,
+            73
+          ]
+        },
+        {
+          "reason": "else of a constant `if true`",
+          "scope": [
+            79,
+            79
+          ]
+        }
+      ],
+      "gates": [
+        {
+          "line": 61,
+          "marker": ":IsRunning(",
+          "note": "RunService:IsRunning() is false in edit mode",
+          "scope": [
+            61,
+            62
+          ]
+        }
+      ],
+      "original_lines": 83,
+      "path": "src/init.luau",
+      "probes": [
+        {
+          "byte": 127,
+          "col": 1,
+          "end_line": 4,
+          "first_on_line": true,
+          "id": 1,
+          "kind": "stmt",
+          "line": 4,
+          "site": "stmt:src/init.luau:4:1"
+        },
+        {
+          "byte": 167,
+          "col": 1,
+          "end_line": 8,
+          "first_on_line": true,
+          "id": 2,
+          "kind": "stmt",
+          "line": 8,
+          "site": "stmt:src/init.luau:8:1"
+        },
+        {
+          "byte": 179,
+          "col": 13,
+          "end_line": 8,
+          "first_on_line": false,
+          "id": 3,
+          "kind": "stmt",
+          "line": 8,
+          "site": "stmt:src/init.luau:8:13"
+        },
+        {
+          "byte": 192,
+          "col": 1,
+          "end_line": 16,
+          "first_on_line": true,
+          "id": 4,
+          "kind": "stmt",
+          "line": 10,
+          "site": "stmt:src/init.luau:10:1"
+        },
+        {
+          "byte": 238,
+          "col": 2,
+          "end_line": 11,
+          "first_on_line": true,
+          "id": 5,
+          "is_private": false,
+          "kind": "fn",
+          "line": 11,
+          "name": "M.add",
+          "params": [
+            "a",
+            "b"
+          ],
+          "site": "fn:src/init.luau:11:2"
+        },
+        {
+          "byte": 238,
+          "col": 2,
+          "end_line": 15,
+          "first_on_line": true,
+          "fn": 5,
+          "id": 6,
+          "kind": "stmt",
+          "line": 11,
+          "site": "stmt:src/init.luau:11:2"
+        },
+        {
+          "byte": 241,
+          "col": 5,
+          "ctx": "if",
+          "end_byte": 256,
+          "end_line": 11,
+          "false_id": 8,
+          "first_on_line": false,
+          "fn": 5,
+          "has_else": true,
+          "id": 7,
+          "kind": "decision",
+          "line": 11,
+          "site": "dec:src/init.luau:11:5",
+          "src": "a > 0 and b > 0"
+        },
+        {
+          "byte": 241,
+          "col": 5,
+          "end_byte": 246,
+          "end_line": 11,
+          "false_id": 10,
+          "first_on_line": false,
+          "fn": 5,
+          "id": 9,
+          "kind": "cond",
+          "line": 11,
+          "site": "cond:src/init.luau:11:5",
+          "src": "a > 0"
+        },
+        {
+          "byte": 251,
+          "col": 15,
+          "end_byte": 256,
+          "end_line": 11,
+          "false_id": 12,
+          "first_on_line": false,
+          "fn": 5,
+          "id": 11,
+          "kind": "cond",
+          "line": 11,
+          "site": "cond:src/init.luau:11:15",
+          "src": "b > 0"
+        },
+        {
+          "byte": 264,
+          "col": 3,
+          "end_line": 12,
+          "first_on_line": true,
+          "fn": 5,
+          "id": 13,
+          "kind": "stmt",
+          "line": 12,
+          "site": "stmt:src/init.luau:12:3"
+        },
+        {
+          "byte": 285,
+          "col": 3,
+          "end_line": 14,
+          "first_on_line": true,
+          "fn": 5,
+          "id": 14,
+          "kind": "stmt",
+          "line": 14,
+          "site": "stmt:src/init.luau:14:3"
+        },
+        {
+          "byte": 308,
+          "col": 1,
+          "end_line": 25,
+          "first_on_line": true,
+          "id": 15,
+          "kind": "stmt",
+          "line": 18,
+          "site": "stmt:src/init.luau:18:1"
+        },
+        {
+          "byte": 329,
+          "col": 2,
+          "end_line": 19,
+          "first_on_line": true,
+          "id": 16,
+          "is_private": true,
+          "kind": "fn",
+          "line": 19,
+          "name": "M:_reset",
+          "params": [],
+          "site": "fn:src/init.luau:19:2"
+        },
+        {
+          "byte": 329,
+          "col": 2,
+          "end_line": 19,
+          "first_on_line": true,
+          "fn": 16,
+          "id": 17,
+          "kind": "stmt",
+          "line": 19,
+          "site": "stmt:src/init.luau:19:2"
+        },
+        {
+          "byte": 346,
+          "col": 2,
+          "end_line": 22,
+          "first_on_line": true,
+          "fn": 16,
+          "id": 18,
+          "kind": "stmt",
+          "line": 20,
+          "site": "stmt:src/init.luau:20:2"
+        },
+        {
+          "byte": 364,
+          "col": 3,
+          "end_line": 21,
+          "first_on_line": true,
+          "fn": 16,
+          "id": 19,
+          "kind": "stmt",
+          "line": 21,
+          "site": "stmt:src/init.luau:21:3"
+        },
+        {
+          "body_byte": 364,
+          "byte": 346,
+          "col": 2,
+          "ctx": "for",
+          "end_byte": 383,
+          "end_line": 22,
+          "first_on_line": true,
+          "fn": 16,
+          "id": 20,
+          "kind": "loop",
+          "line": 20,
+          "site": "loop:src/init.luau:20:2"
+        },
+        {
+          "byte": 385,
+          "col": 2,
+          "end_line": 23,
+          "first_on_line": true,
+          "fn": 16,
+          "id": 23,
+          "kind": "stmt",
+          "line": 23,
+          "site": "stmt:src/init.luau:23:2"
+        },
+        {
+          "byte": 407,
+          "col": 2,
+          "end_line": 24,
+          "first_on_line": true,
+          "fn": 16,
+          "id": 24,
+          "kind": "stmt",
+          "line": 24,
+          "site": "stmt:src/init.luau:24:2"
+        },
+        {
+          "byte": 425,
+          "col": 1,
+          "end_line": 34,
+          "first_on_line": true,
+          "id": 25,
+          "kind": "stmt",
+          "line": 27,
+          "site": "stmt:src/init.luau:27:1"
+        },
+        {
+          "byte": 467,
+          "col": 2,
+          "end_line": 28,
+          "first_on_line": true,
+          "id": 26,
+          "is_private": true,
+          "kind": "fn",
+          "line": 28,
+          "name": "local helper",
+          "params": [
+            "n"
+          ],
+          "site": "fn:src/init.luau:28:2"
+        },
+        {
+          "byte": 467,
+          "col": 2,
+          "end_line": 32,
+          "first_on_line": true,
+          "fn": 26,
+          "id": 27,
+          "kind": "stmt",
+          "line": 28,
+          "site": "stmt:src/init.luau:28:2"
+        },
+        {
+          "byte": 470,
+          "col": 5,
+          "ctx": "if",
+          "end_byte": 476,
+          "end_line": 28,
+          "false_id": 29,
+          "first_on_line": false,
+          "fn": 26,
+          "has_else": false,
+          "id": 28,
+          "kind": "decision",
+          "line": 28,
+          "site": "dec:src/init.luau:28:5",
+          "src": "n > 10"
+        },
+        {
+          "byte": 484,
+          "col": 3,
+          "end_line": 29,
+          "first_on_line": true,
+          "fn": 26,
+          "id": 30,
+          "kind": "stmt",
+          "line": 29,
+          "site": "stmt:src/init.luau:29:3"
+        },
+        {
+          "byte": 502,
+          "col": 9,
+          "ctx": "elseif",
+          "end_byte": 507,
+          "end_line": 30,
+          "false_id": 32,
+          "first_on_line": false,
+          "fn": 26,
+          "has_else": false,
+          "id": 31,
+          "kind": "decision",
+          "line": 30,
+          "site": "dec:src/init.luau:30:9",
+          "src": "n > 5"
+        },
+        {
+          "byte": 515,
+          "col": 3,
+          "end_line": 31,
+          "first_on_line": true,
+          "fn": 26,
+          "id": 33,
+          "kind": "stmt",
+          "line": 31,
+          "site": "stmt:src/init.luau:31:3"
+        },
+        {
+          "byte": 530,
+          "col": 2,
+          "end_line": 33,
+          "first_on_line": true,
+          "fn": 26,
+          "id": 34,
+          "kind": "stmt",
+          "line": 33,
+          "site": "stmt:src/init.luau:33:2"
+        },
+        {
+          "byte": 544,
+          "col": 1,
+          "end_line": 38,
+          "first_on_line": true,
+          "id": 35,
+          "kind": "stmt",
+          "line": 36,
+          "site": "stmt:src/init.luau:36:1"
+        },
+        {
+          "byte": 575,
+          "col": 2,
+          "end_line": 37,
+          "first_on_line": true,
+          "id": 36,
+          "is_private": true,
+          "kind": "fn",
+          "line": 37,
+          "name": "local cb",
+          "params": [],
+          "site": "fn:src/init.luau:37:2"
+        },
+        {
+          "byte": 575,
+          "col": 2,
+          "end_line": 37,
+          "first_on_line": true,
+          "fn": 36,
+          "id": 37,
+          "kind": "stmt",
+          "line": 37,
+          "site": "stmt:src/init.luau:37:2"
+        },
+        {
+          "byte": 597,
+          "col": 1,
+          "end_line": 49,
+          "first_on_line": true,
+          "id": 38,
+          "kind": "stmt",
+          "line": 40,
+          "site": "stmt:src/init.luau:40:1"
+        },
+        {
+          "byte": 641,
+          "col": 2,
+          "end_line": 41,
+          "first_on_line": true,
+          "id": 39,
+          "is_private": false,
+          "kind": "fn",
+          "line": 41,
+          "name": "M.drain",
+          "params": [
+            "list"
+          ],
+          "site": "fn:src/init.luau:41:2"
+        },
+        {
+          "byte": 641,
+          "col": 2,
+          "end_line": 41,
+          "first_on_line": true,
+          "fn": 39,
+          "id": 40,
+          "kind": "stmt",
+          "line": 41,
+          "site": "stmt:src/init.luau:41:2"
+        },
+        {
+          "byte": 658,
+          "col": 2,
+          "end_line": 44,
+          "first_on_line": true,
+          "fn": 39,
+          "id": 41,
+          "kind": "stmt",
+          "line": 42,
+          "site": "stmt:src/init.luau:42:2"
+        },
+        {
+          "byte": 664,
+          "col": 8,
+          "ctx": "while",
+          "end_byte": 669,
+          "end_line": 42,
+          "false_id": 43,
+          "first_on_line": false,
+          "fn": 39,
+          "id": 42,
+          "kind": "decision",
+          "line": 42,
+          "site": "dec:src/init.luau:42:8",
+          "src": "i > 0"
+        },
+        {
+          "byte": 675,
+          "col": 3,
+          "end_line": 43,
+          "first_on_line": true,
+          "fn": 39,
+          "id": 44,
+          "kind": "stmt",
+          "line": 43,
+          "site": "stmt:src/init.luau:43:3"
+        },
+        {
+          "body_byte": 675,
+          "byte": 658,
+          "col": 2,
+          "ctx": "while",
+          "end_byte": 686,
+          "end_line": 44,
+          "first_on_line": true,
+          "fn": 39,
+          "id": 45,
+          "kind": "loop",
+          "line": 42,
+          "site": "loop:src/init.luau:42:2"
+        },
+        {
+          "byte": 688,
+          "col": 2,
+          "end_line": 47,
+          "first_on_line": true,
+          "fn": 39,
+          "id": 48,
+          "kind": "stmt",
+          "line": 45,
+          "site": "stmt:src/init.luau:45:2"
+        },
+        {
+          "byte": 697,
+          "col": 3,
+          "end_line": 46,
+          "first_on_line": true,
+          "fn": 39,
+          "id": 49,
+          "kind": "stmt",
+          "line": 46,
+          "site": "stmt:src/init.luau:46:3"
+        },
+        {
+          "body_byte": 697,
+          "byte": 688,
+          "col": 2,
+          "ctx": "repeat",
+          "end_byte": 717,
+          "end_line": 47,
+          "first_on_line": true,
+          "fn": 39,
+          "id": 50,
+          "kind": "loop",
+          "line": 45,
+          "site": "loop:src/init.luau:45:2"
+        },
+        {
+          "byte": 711,
+          "col": 8,
+          "ctx": "repeat",
+          "end_byte": 717,
+          "end_line": 47,
+          "false_id": 54,
+          "first_on_line": false,
+          "fn": 39,
+          "id": 53,
+          "kind": "decision",
+          "line": 47,
+          "site": "dec:src/init.luau:47:8",
+          "src": "i >= 1"
+        },
+        {
+          "byte": 719,
+          "col": 2,
+          "end_line": 48,
+          "first_on_line": true,
+          "fn": 39,
+          "id": 55,
+          "kind": "stmt",
+          "line": 48,
+          "site": "stmt:src/init.luau:48:2"
+        },
+        {
+          "byte": 736,
+          "col": 1,
+          "end_line": 58,
+          "first_on_line": true,
+          "id": 56,
+          "kind": "stmt",
+          "line": 51,
+          "site": "stmt:src/init.luau:51:1"
+        },
+        {
+          "byte": 791,
+          "col": 2,
+          "end_line": 52,
+          "first_on_line": true,
+          "id": 57,
+          "is_private": false,
+          "kind": "fn",
+          "line": 52,
+          "name": "M.each",
+          "params": [
+            "items",
+            "f"
+          ],
+          "site": "fn:src/init.luau:52:2"
+        },
+        {
+          "byte": 791,
+          "col": 2,
+          "end_line": 54,
+          "first_on_line": true,
+          "fn": 57,
+          "id": 58,
+          "kind": "stmt",
+          "line": 52,
+          "site": "stmt:src/init.luau:52:2"
+        },
+        {
+          "byte": 826,
+          "col": 3,
+          "end_line": 53,
+          "first_on_line": true,
+          "fn": 57,
+          "id": 59,
+          "is_private": true,
+          "kind": "fn",
+          "line": 53,
+          "params": [
+            "a",
+            "b"
+          ],
+          "site": "fn:src/init.luau:53:3"
+        },
+        {
+          "byte": 826,
+          "col": 3,
+          "end_line": 53,
+          "first_on_line": true,
+          "fn": 59,
+          "id": 60,
+          "kind": "stmt",
+          "line": 53,
+          "site": "stmt:src/init.luau:53:3"
+        },
+        {
+          "byte": 846,
+          "col": 2,
+          "end_line": 57,
+          "first_on_line": true,
+          "fn": 57,
+          "id": 61,
+          "kind": "stmt",
+          "line": 55,
+          "site": "stmt:src/init.luau:55:2"
+        },
+        {
+          "byte": 869,
+          "col": 3,
+          "end_line": 56,
+          "first_on_line": true,
+          "fn": 57,
+          "id": 62,
+          "kind": "stmt",
+          "line": 56,
+          "site": "stmt:src/init.luau:56:3"
+        },
+        {
+          "body_byte": 869,
+          "byte": 846,
+          "col": 2,
+          "ctx": "for",
+          "end_byte": 878,
+          "end_line": 57,
+          "first_on_line": true,
+          "fn": 57,
+          "id": 63,
+          "kind": "loop",
+          "line": 55,
+          "site": "loop:src/init.luau:55:2"
+        },
+        {
+          "byte": 884,
+          "col": 1,
+          "end_line": 65,
+          "first_on_line": true,
+          "id": 66,
+          "kind": "stmt",
+          "line": 60,
+          "site": "stmt:src/init.luau:60:1"
+        },
+        {
+          "byte": 919,
+          "col": 2,
+          "end_line": 61,
+          "first_on_line": true,
+          "id": 67,
+          "is_private": false,
+          "kind": "fn",
+          "line": 61,
+          "name": "M.gated",
+          "params": [
+            "service"
+          ],
+          "site": "fn:src/init.luau:61:2"
+        },
+        {
+          "byte": 919,
+          "col": 2,
+          "end_line": 63,
+          "first_on_line": true,
+          "fn": 67,
+          "id": 68,
+          "kind": "stmt",
+          "line": 61,
+          "site": "stmt:src/init.luau:61:2"
+        },
+        {
+          "byte": 922,
+          "col": 5,
+          "ctx": "if",
+          "end_byte": 941,
+          "end_line": 61,
+          "false_id": 70,
+          "first_on_line": false,
+          "fn": 67,
+          "has_else": false,
+          "id": 69,
+          "kind": "decision",
+          "line": 61,
+          "site": "dec:src/init.luau:61:5",
+          "src": "service:IsRunning()"
+        },
+        {
+          "byte": 949,
+          "col": 3,
+          "end_line": 62,
+          "first_on_line": true,
+          "fn": 67,
+          "id": 71,
+          "kind": "stmt",
+          "line": 62,
+          "site": "stmt:src/init.luau:62:3"
+        },
+        {
+          "byte": 964,
+          "col": 2,
+          "end_line": 64,
+          "first_on_line": true,
+          "fn": 67,
+          "id": 72,
+          "kind": "stmt",
+          "line": 64,
+          "site": "stmt:src/init.luau:64:2"
+        },
+        {
+          "byte": 978,
+          "col": 1,
+          "end_line": 70,
+          "first_on_line": true,
+          "id": 73,
+          "kind": "stmt",
+          "line": 67,
+          "site": "stmt:src/init.luau:67:1"
+        },
+        {
+          "byte": 997,
+          "col": 2,
+          "end_line": 68,
+          "first_on_line": true,
+          "id": 74,
+          "is_private": false,
+          "kind": "fn",
+          "line": 68,
+          "name": "M.boom",
+          "params": [],
+          "site": "fn:src/init.luau:68:2"
+        },
+        {
+          "byte": 997,
+          "col": 2,
+          "end_line": 68,
+          "first_on_line": true,
+          "fn": 74,
+          "id": 75,
+          "kind": "stmt",
+          "line": 68,
+          "site": "stmt:src/init.luau:68:2"
+        },
+        {
+          "byte": 1012,
+          "col": 2,
+          "end_line": 69,
+          "first_on_line": true,
+          "fn": 74,
+          "id": 76,
+          "kind": "stmt",
+          "line": 69,
+          "site": "stmt:src/init.luau:69:2"
+        },
+        {
+          "byte": 1024,
+          "col": 1,
+          "end_line": 74,
+          "first_on_line": true,
+          "id": 77,
+          "kind": "stmt",
+          "line": 72,
+          "site": "stmt:src/init.luau:72:1"
+        },
+        {
+          "byte": 1039,
+          "col": 2,
+          "end_line": 73,
+          "first_on_line": true,
+          "id": 78,
+          "kind": "stmt",
+          "line": 73,
+          "site": "stmt:src/init.luau:73:2"
+        },
+        {
+          "byte": 1051,
+          "col": 1,
+          "end_line": 80,
+          "first_on_line": true,
+          "id": 79,
+          "kind": "stmt",
+          "line": 76,
+          "site": "stmt:src/init.luau:76:1"
+        },
+        {
+          "byte": 1065,
+          "col": 2,
+          "end_line": 77,
+          "first_on_line": true,
+          "id": 80,
+          "kind": "stmt",
+          "line": 77,
+          "site": "stmt:src/init.luau:77:2"
+        },
+        {
+          "byte": 1077,
+          "col": 2,
+          "end_line": 79,
+          "first_on_line": true,
+          "id": 81,
+          "kind": "stmt",
+          "line": 79,
+          "site": "stmt:src/init.luau:79:2"
+        },
+        {
+          "byte": 1089,
+          "col": 1,
+          "end_line": 82,
+          "first_on_line": true,
+          "id": 82,
+          "kind": "stmt",
+          "line": 82,
+          "site": "stmt:src/init.luau:82:1"
+        }
+      ],
+      "sha256": "872f5cbaaaaad93f1b770fbf2b3998b84eaa3f62ee717241aff60c4cde8149f0"
+    },
+    {
+      "dead": [],
+      "gates": [],
+      "original_lines": 10,
+      "path": "src/util/deep.luau",
+      "probes": [
+        {
+          "byte": 78,
+          "col": 1,
+          "end_line": 3,
+          "first_on_line": true,
+          "id": 83,
+          "kind": "stmt",
+          "line": 3,
+          "site": "stmt:src/util/deep.luau:3:1"
+        },
+        {
+          "byte": 95,
+          "col": 1,
+          "end_line": 7,
+          "first_on_line": true,
+          "id": 84,
+          "kind": "stmt",
+          "line": 5,
+          "site": "stmt:src/util/deep.luau:5:1"
+        },
+        {
+          "byte": 136,
+          "col": 2,
+          "end_line": 6,
+          "first_on_line": true,
+          "id": 85,
+          "is_private": false,
+          "kind": "fn",
+          "line": 6,
+          "name": "Deep.double",
+          "params": [
+            "n"
+          ],
+          "site": "fn:src/util/deep.luau:6:2"
+        },
+        {
+          "byte": 136,
+          "col": 2,
+          "end_line": 6,
+          "first_on_line": true,
+          "fn": 85,
+          "id": 86,
+          "kind": "stmt",
+          "line": 6,
+          "site": "stmt:src/util/deep.luau:6:2"
+        },
+        {
+          "byte": 154,
+          "col": 1,
+          "end_line": 9,
+          "first_on_line": true,
+          "id": 87,
+          "kind": "stmt",
+          "line": 9,
+          "site": "stmt:src/util/deep.luau:9:1"
+        }
+      ],
+      "sha256": "6e7c21e9d1bd1b78aa67b210d611bd69a981c6f760f106d0f63f6ba972677707"
+    }
+  ],
+  "generated_at": "0",
+  "options": {
+    "conditions": true
+  },
+  "package": "simple_pkg",
+  "package_dir": "<fixture>",
+  "schema": "tm-coverage-map/1",
+  "total_slots": 87
+}

@@ -62,11 +62,15 @@ local tiniest_expect = require("./tiniest_expect")
 local tiniest_time = require("./tiniest_time")
 local tiniest_pretty = require("./tiniest_pretty")
 local tiniest_context = require("./tiniest_context")
+local tiniest_plugin = require("./tiniest_plugin")
 local tiniest = require("./tiniest")
 
 export type Options = {
 	snapshot_path: string?,
 	save_snapshots: boolean?,
+	-- Extra tiniest plugins (e.g. coverage). Inserted just before the pretty
+	-- printer so their after_run decoration is visible to add_line_items.
+	plugins: { tiniest_plugin.Plugin }?,
 	pretty: nil | {
 		disable_emoji: boolean?,
 		disable_unicode: boolean?,
@@ -75,6 +79,7 @@ export type Options = {
 		},
 		format: ("flat" | "tree")?,
 		trim_duplicate_trace: boolean?,
+		hide_passed_tests: boolean?,
 	},
 }
 
@@ -103,6 +108,8 @@ local tiniest_for_roblox = {}
 		  an indented tree grouped by describe blocks
 		- `trim_duplicate_trace: boolean?` -- When multiple tests fail, omit the stack frames shared
 		  identically by all of their traces (printed once at the end instead) (defaults to false)
+		- `hide_passed_tests: boolean?` -- Omit passing tests from the status list, showing only
+		  failures (and, in tree format, only the groups that contain them) (defaults to false)
 
 	## Example
 	```lua
@@ -126,6 +133,12 @@ function tiniest_for_roblox.configure(options: Options)
 		get_timestamp = os.clock,
 	}
 
+	local extra_plugins = options.plugins or {}
+
+	local pretty_plugins: { any } = { tiniest_time :: any }
+	for _, p in extra_plugins do
+		table.insert(pretty_plugins, p)
+	end
 	local tiniest_pretty = tiniest_pretty.configure {
 		disable_colour = true,
 		disable_emoji = options.pretty and options.pretty.disable_emoji,
@@ -133,12 +146,20 @@ function tiniest_for_roblox.configure(options: Options)
 		disable_output = options.pretty and options.pretty.disable_output,
 		format = options.pretty and options.pretty.format,
 		trim_duplicate_trace = options.pretty and options.pretty.trim_duplicate_trace,
-		plugins = { tiniest_time :: any },
+		hide_passed_tests = options.pretty and options.pretty.hide_passed_tests,
+		plugins = pretty_plugins,
 	}
 	self.format_run = tiniest_pretty.format_run
 
+	-- Extras run before the pretty printer so their after_run decoration is set
+	-- before pretty's after_run triggers format_run.
+	local main_plugins: { any } = { tiniest_time :: any, tiniest_context :: any }
+	for _, p in extra_plugins do
+		table.insert(main_plugins, p)
+	end
+	table.insert(main_plugins, tiniest_pretty)
 	local tiniest = tiniest.configure {
-		plugins = { tiniest_time :: any, tiniest_context :: any, tiniest_pretty },
+		plugins = main_plugins,
 	}
 	self.describe = tiniest.describe
 	self.FOCUS = tiniest.FOCUS

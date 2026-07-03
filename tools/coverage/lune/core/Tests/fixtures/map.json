@@ -1,0 +1,168 @@
+{
+  "schema": "tm-coverage-map/1",
+  "engine_version": "0.1.0",
+  "package": "fixture_pkg",
+  "package_dir": "<fixture>",
+  "generated_at": "0",
+  "options": {
+    "conditions": true
+  },
+  "total_slots": 15,
+  "files": [
+    {
+      "path": "src/a.luau",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "original_lines": 15,
+      "probes": [
+        {
+          "id": 1,
+          "kind": "stmt",
+          "line": 3,
+          "col": 1,
+          "end_line": 3,
+          "byte": 20,
+          "first_on_line": true,
+          "site": "stmt:src/a.luau:3:1"
+        },
+        {
+          "id": 2,
+          "kind": "stmt",
+          "line": 3,
+          "col": 13,
+          "end_line": 3,
+          "byte": 32,
+          "first_on_line": false,
+          "site": "stmt:src/a.luau:3:13"
+        },
+        {
+          "id": 3,
+          "kind": "fn",
+          "line": 5,
+          "col": 1,
+          "end_line": 7,
+          "byte": 50,
+          "first_on_line": true,
+          "site": "fn:src/a.luau:5:1",
+          "name": "M.doThing",
+          "params": ["n"],
+          "is_private": false
+        },
+        {
+          "id": 4,
+          "kind": "stmt",
+          "line": 6,
+          "col": 2,
+          "end_line": 6,
+          "byte": 70,
+          "first_on_line": true,
+          "fn": 3,
+          "site": "stmt:src/a.luau:6:2"
+        },
+        {
+          "id": 5,
+          "kind": "decision",
+          "line": 8,
+          "col": 4,
+          "end_line": 8,
+          "byte": 90,
+          "first_on_line": false,
+          "site": "dec:src/a.luau:8:4",
+          "end_byte": 97,
+          "false_id": 6,
+          "ctx": "if",
+          "has_else": false,
+          "src": "a and b"
+        },
+        {
+          "id": 7,
+          "kind": "cond",
+          "line": 8,
+          "col": 4,
+          "end_line": 8,
+          "byte": 90,
+          "first_on_line": false,
+          "site": "cond:src/a.luau:8:4",
+          "end_byte": 91,
+          "false_id": 8,
+          "src": "a"
+        },
+        {
+          "id": 9,
+          "kind": "cond",
+          "line": 8,
+          "col": 10,
+          "end_line": 8,
+          "byte": 96,
+          "first_on_line": false,
+          "site": "cond:src/a.luau:8:10",
+          "end_byte": 97,
+          "false_id": 10,
+          "src": "b"
+        },
+        {
+          "id": 11,
+          "kind": "loop",
+          "line": 10,
+          "col": 1,
+          "end_line": 11,
+          "byte": 110,
+          "first_on_line": true,
+          "site": "loop:src/a.luau:10:1",
+          "end_byte": 140,
+          "body_byte": 120,
+          "ctx": "for"
+        },
+        {
+          "id": 14,
+          "kind": "stmt",
+          "line": 12,
+          "col": 2,
+          "end_line": 12,
+          "byte": 150,
+          "first_on_line": true,
+          "site": "stmt:src/a.luau:12:2"
+        },
+        {
+          "id": 15,
+          "kind": "stmt",
+          "line": 14,
+          "col": 2,
+          "end_line": 14,
+          "byte": 170,
+          "first_on_line": true,
+          "site": "stmt:src/a.luau:14:2"
+        }
+      ],
+      "gates": [
+        {
+          "marker": ":IsRunning(",
+          "note": "RunService:IsRunning() is false in edit mode",
+          "line": 12,
+          "scope": [12, 12]
+        }
+      ],
+      "dead": [
+        {
+          "reason": "unreachable after error(...)",
+          "scope": [14, 14]
+        }
+      ],
+      "const_candidates": [
+        {
+          "kind": "local",
+          "names": ["M"],
+          "line": 1,
+          "col": 1,
+          "site": "const:src/a.luau:1:1"
+        },
+        {
+          "kind": "local_function",
+          "names": ["helper"],
+          "line": 2,
+          "col": 1,
+          "site": "const:src/a.luau:2:1"
+        }
+      ]
+    }
+  ]
+}
