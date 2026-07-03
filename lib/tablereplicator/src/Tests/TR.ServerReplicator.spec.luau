@@ -692,6 +692,80 @@ return function(t: tiniest)
 
 	--------------------------------------------------------------------------------
 
+	describe("write-time value checks", function()
+		-- These paths `warn` on the server; the offending value is still queued and
+		-- the BufferCodec encode guard nils it on the wire, asserted here end-to-end.
+		test("(strict on) a top-level non-serializable value arrives as nil on the wire", function()
+			local player = { Name = "P" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("StrictTopLevel"),
+				Data = { Value = 0 },
+				ReplicationTargets = { player },
+			})
+			;(replicator :: any)._Scope:Activate(player)
+
+			replicator.Manager:Set("Value", function() end) -- deep scan warns; still queued
+
+			local calls, restore = spyOnTransport()
+			ServerReplicator.FlushNow()
+			restore()
+
+			expect(#calls).is(1)
+			local ops = (calls[1].Message.Items[1] :: any).Ops
+			expect(ops[1].Value).is(nil)
+			replicator:Destroy()
+		end)
+
+		test("(strict on) a non-serializable value nested in an inserted element is dropped, siblings kept", function()
+			local player = { Name = "P" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("StrictNested"),
+				Data = { Items = {} },
+				ReplicationTargets = { player },
+			})
+			;(replicator :: any)._Scope:Activate(player)
+
+			-- ArrayInsert ships the whole element table as one op value, so the deep
+			-- scan builds a real sub-path (Items -> OnUse) into it before warning.
+			replicator.Manager:ArrayInsert("Items", { Name = "Sword", OnUse = function() end })
+
+			local calls, restore = spyOnTransport()
+			ServerReplicator.FlushNow()
+			restore()
+
+			local element = ((calls[1].Message.Items[1] :: any).Ops[1] :: any).Value
+			expect(element.Name).is("Sword")
+			expect(element.OnUse).is(nil)
+			replicator:Destroy()
+		end)
+
+		test("(strict off) only the value's own type is checked; it is still nil'd on the wire", function()
+			ServerReplicator.SetStrictValueChecks(false)
+
+			local player = { Name = "P" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("StrictOff"),
+				Data = { Value = 0 },
+				ReplicationTargets = { player },
+			})
+			;(replicator :: any)._Scope:Activate(player)
+
+			replicator.Manager:Set("Value", function() end) -- shallow (top-level) check warns
+
+			local calls, restore = spyOnTransport()
+			ServerReplicator.FlushNow()
+			restore()
+
+			local value = ((calls[1].Message.Items[1] :: any).Ops[1] :: any).Value
+			replicator:Destroy()
+			ServerReplicator.SetStrictValueChecks(true) -- restore the Studio default before asserting
+
+			expect(value).is(nil)
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
 	describe("request-data handshake and inbound-signal guards", function()
 		local function bootstrap(player: any)
 			(ServerReplicator :: any)._Transport.PlayerRequestedData:Fire(player)

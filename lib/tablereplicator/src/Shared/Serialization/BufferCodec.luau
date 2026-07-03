@@ -38,6 +38,8 @@
 
 ]=]
 
+const ValueGuard = require("./ValueGuard")
+
 ------------------------------------------------------------------------------------------------
 -- // Types
 ------------------------------------------------------------------------------------------------
@@ -116,14 +118,9 @@ local INITIAL_CAPACITY = 64
 -- value of one of these types can't ride the side list -- offloading it would
 -- throw at FireClient and take the whole batched message down with it -- so the
 -- writer warns and encodes nil in its place, letting the unrelated ops in the
--- same frame still deliver. Extend this as other non-serializable types surface;
--- it deliberately never lists a valid datatype, so a real value is never dropped.
-local NON_REPLICABLE_TYPES: { [string]: true } = {
-	["function"] = true,
-	thread = true,
-	RBXScriptSignal = true,
-	RBXScriptConnection = true,
-}
+-- same frame still deliver. The set is shared with the server's write-time checks
+-- (see ValueGuard), so both layers agree on what "non-serializable" means.
+const NON_REPLICABLE_TYPES = ValueGuard.NonReplicableTypes
 
 local f32Scratch = buffer.create(4)
 

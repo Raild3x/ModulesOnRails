@@ -48,8 +48,11 @@
 ]=]
 
 const Players = game:GetService("Players")
+const RunService = game:GetService("RunService")
 
 const Types = require("../Shared/Types")
+const ValueGuard = require("../Shared/Serialization/ValueGuard")
+const OpBuffer = require("../Shared/OpBuffer")
 const TableManagerModule = Types.TableManager
 const ReplicationScope = require("./ReplicationScope")
 const BaseReplicator = require("../Shared/BaseReplicator")
@@ -83,6 +86,35 @@ type SR_Public<SR> = Types.SR_Public<SR>
 type SR_Internal = Types.SR_Internal
 
 export type ServerReplicator = Types.ServerReplicator
+
+--[=[
+	@tag Static
+	@prop ServerReplicator.StrictValueChecks boolean
+	When `true`, every value written through a replicator's `.Manager` is
+	recursively scanned before it is queued, and a warning naming the exact path
+	is emitted if it contains anything a `RemoteEvent` can't serialize (a function,
+	thread, `RBXScriptSignal`, or `RBXScriptConnection`). When `false`, only the
+	written value's own top-level type is checked (an O(1) test that still catches
+	the common `Manager:Set(path, someFunction)` mistake). Defaults to
+	`RunService:IsStudio()` -- deep scanning in Studio, cheap checks in production.
+
+	Either way the offending value is dropped in isolation and arrives as nil on
+	clients (see `ValueGuard` / `BufferCodec`); these checks only surface *where*
+	the bad value came from. Read-only -- use `SetStrictValueChecks` to change it.
+]=]
+ServerReplicator.StrictValueChecks = RunService:IsStudio()
+
+--[=[
+	@tag Static
+	@within ServerReplicator
+	@function SetStrictValueChecks
+	@param enabled boolean
+	Overrides `StrictValueChecks`, toggling the recursive write-time scan of
+	replicated values going forward.
+]=]
+function ServerReplicator.SetStrictValueChecks(enabled: boolean)
+	ServerReplicator.StrictValueChecks = enabled
+end
 
 --------------------------------------------------------------------------------
 --// Module-level: transport, token registry, top-level bookkeeping //--
@@ -167,6 +199,53 @@ end
 -- Shared tables are interned in-band by BufferCodec's identity tracking.
 const function buildMessage(items: { WireItem }): (buffer, { any }?)
 	return MessageCodec.Encode(items)
+end
+
+-- Op kinds that carry a replicated value worth validating. ArrayRemove and the
+-- batch markers carry no value, so they're skipped.
+const VALUE_OP_KINDS: { [string]: true } = {
+	Set = true,
+	ArrayInsert = true,
+	ArraySet = true,
+}
+
+-- Renders a path array as a readable dotted string for warnings.
+const function pathToString(path: { any }): string
+	const parts = table.create(#path)
+	for i, segment in path do
+		parts[i] = tostring(segment)
+	end
+	return table.concat(parts, ".")
+end
+
+-- Server-side dev diagnostic (see `ServerReplicator.StrictValueChecks`): warns
+-- when an applied op writes a value a RemoteEvent can't serialize, naming the
+-- full path so the source is easy to find. Warn-only -- the value is still queued
+-- and the BufferCodec encode guard nils it on the wire; this just surfaces where
+-- it came from. The one-line message stays greppable and won't flood logs if the
+-- same bad write repeats every frame.
+const function warnIfNonReplicable(replicator: SR_Internal, op: Types.AppliedOp)
+	if not VALUE_OP_KINDS[op.Kind] then
+		return
+	end
+	const value = OpBuffer.AppliedOpValue(op)
+
+	local badType: string?
+	local subPath: { any }?
+	if ServerReplicator.StrictValueChecks then
+		badType, subPath = ValueGuard.FindNonReplicable(value)
+	else
+		badType, subPath = ValueGuard.BadTopLevelType(value)
+	end
+	if not badType then
+		return
+	end
+
+	const fullPath = table.clone(op.Path)
+	table.move(subPath :: { any }, 1, #(subPath :: { any }), #fullPath + 1, fullPath)
+	warn(
+		`[TableReplicator] {(replicator :: any).Namespace} (#{replicator.Id}): value at "{pathToString(fullPath)}" is a {badType}, which a RemoteEvent can't replicate -- it will arrive as nil on clients. Remove it from replicated data.`
+	)
 end
 
 -- Sends a metadata Signal op to all currently-active players in `replicator`'s
@@ -432,6 +511,7 @@ function ServerReplicator.new(config: {
 	self._Janitor:Add(managerDestroyedConn)
 
 	const disconnectApplied = manager:OnApplied(function(op: Types.AppliedOp)
+		warnIfNonReplicable(self, op)
 		frameCoordinator:QueueOp(self._Scope, self.Id, op, self._Coalesced)
 		if not self._ImmediateFlush then
 			return

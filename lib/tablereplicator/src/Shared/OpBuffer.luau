@@ -45,14 +45,22 @@ function OpBuffer.new(): OpBuffer
 	}, OpBuffer)
 end
 
+-- Resolves the value a value-carrying `AppliedOp` will replicate: the `Diff`'s
+-- leaf value when the op rode a diff node (a diffed op carries no `NewValue`),
+-- else the raw `NewValue`. Shared by `NormalizeAppliedOp` and the server's
+-- write-time value checks so both read the exact same value.
+local function appliedOpValue(op: AppliedOp): any
+	return if op.Diff ~= nil then (op.Diff :: any).new else op.NewValue
+end
+OpBuffer.AppliedOpValue = appliedOpValue
+
 -- Converts a TableManager2 `AppliedOp` into a `BufferedOp`. For a `Set`, the
 -- op's `Diff` (when present) carries the exact same value as `NewValue` would
 -- have -- riding it instead of re-sending `NewValue` is free, never a
 -- flatten/decomposition step (see CONTRACT.md S1.3).
 local function normalizeAppliedOp(op: AppliedOp): BufferedOp
 	if op.Kind == "Set" then
-		local value = if op.Diff ~= nil then (op.Diff :: any).new else op.NewValue
-		return { Kind = "Set", Path = op.Path, Value = value }
+		return { Kind = "Set", Path = op.Path, Value = appliedOpValue(op) }
 	elseif op.Kind == "ArrayInsert" or op.Kind == "ArraySet" then
 		return { Kind = op.Kind :: "ArrayInsert" | "ArraySet", Path = op.Path, Value = op.NewValue, Index = op.Index }
 	elseif op.Kind == "ArrayRemove" then
