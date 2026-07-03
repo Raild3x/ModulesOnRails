@@ -212,6 +212,43 @@ impl<'s> Collector<'s> {
         }
     }
 
+    /// Emits a loop probe (3 slots: zero / one / many iterations) after
+    /// collecting the body. `start` is the loop keyword; `end_byte`/`end_line`
+    /// mark just past the loop's terminator (the `end` token, or the `until`
+    /// condition for `repeat`) -- taken from the loop node itself, since
+    /// `Stmt::end_position()` is unreliable for typed generic-for variables. The
+    /// body's first statement probe marks where the per-iteration increment
+    /// splices. Skips loops with an empty body (nothing to count).
+    fn emit_loop(&mut self, ctx: &'static str, start: Position, end_byte: usize, end_line: usize, body: &Block) {
+        let body_start_idx = self.probes.len();
+        self.collect_block(body);
+        let body_byte = self.probes[body_start_idx..]
+            .iter()
+            .find(|p| p.kind == "stmt")
+            .map(|p| p.byte);
+        let body_byte = match body_byte {
+            Some(b) => b,
+            None => return,
+        };
+        let id = self.alloc();
+        self.alloc(); // id + 1 (exactly one iteration)
+        self.alloc(); // id + 2 (many iterations)
+        let byte = start.bytes();
+        let line = start.line();
+        let col = start.character();
+        let fol = first_on_line(self.src, byte, line, &self.line_starts);
+        let mut probe = Probe::new(id, "loop", line, col, end_line, byte, fol, &self.rel_path, self.cur_fn());
+        probe.body_byte = Some(body_byte);
+        probe.end_byte = Some(end_byte);
+        probe.ctx = Some(ctx);
+        self.probes.push(probe);
+    }
+
+    /// Byte-after and line of a loop's terminating `end` token.
+    fn end_token_pos(t: &TokenReference) -> Option<(usize, usize)> {
+        t.end_position().map(|p| (p.bytes(), p.line()))
+    }
+
     fn push_dead(&mut self, start: usize, end: usize, reason: &str) {
         if end < start {
             return;
@@ -248,6 +285,17 @@ impl<'s> Collector<'s> {
                 self.push_probe("stmt", start, end.line());
             }
         }
+
+        // Full span of a loop statement, for the loop probe's enclosing splices.
+        let loop_span = match stmt {
+            Stmt::NumericFor(_) | Stmt::GenericFor(_) | Stmt::While(_) | Stmt::Repeat(_) => {
+                match (stmt.start_position(), stmt.end_position()) {
+                    (Some(s), Some(e)) => Some((s, e)),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
 
         match stmt {
             Stmt::FunctionDeclaration(decl) => self.collect_function_decl(decl),
@@ -302,18 +350,32 @@ impl<'s> Collector<'s> {
                     self.mark_dead_block(w.block(), "body of a constant `while false`");
                 }
                 self.walk_expr(w.condition());
-                self.collect_block(w.block());
+                match (loop_span, Self::end_token_pos(w.end_token())) {
+                    (Some((s, _)), Some((eb, el))) => self.emit_loop("while", s, eb, el, w.block()),
+                    _ => self.collect_block(w.block()),
+                }
             }
             Stmt::Repeat(r) => {
-                self.collect_block(r.block());
+                // repeat has no `end`; it terminates at the `until` condition.
+                let repeat_end = self.expr_span(r.until()).map(|(_, eb, el)| (eb, el));
+                match (loop_span, repeat_end) {
+                    (Some((s, _)), Some((eb, el))) => self.emit_loop("repeat", s, eb, el, r.block()),
+                    _ => self.collect_block(r.block()),
+                }
                 self.push_decision(r.until(), "repeat", None);
                 if let Some((m, n, l)) = self.condition_gate(r.until()) {
                     self.push_gate(m, n, l, r.block());
                 }
                 self.walk_expr(r.until());
             }
-            Stmt::NumericFor(nf) => self.collect_block(nf.block()),
-            Stmt::GenericFor(gf) => self.collect_block(gf.block()),
+            Stmt::NumericFor(nf) => match (loop_span, Self::end_token_pos(nf.end_token())) {
+                (Some((s, _)), Some((eb, el))) => self.emit_loop("for", s, eb, el, nf.block()),
+                _ => self.collect_block(nf.block()),
+            },
+            Stmt::GenericFor(gf) => match (loop_span, Self::end_token_pos(gf.end_token())) {
+                (Some((s, _)), Some((eb, el))) => self.emit_loop("for", s, eb, el, gf.block()),
+                _ => self.collect_block(gf.block()),
+            },
             Stmt::Do(d) => self.collect_block(d.block()),
             Stmt::FunctionCall(fc) => self.walk_function_call(fc),
             Stmt::CompoundAssignment(ca) => self.walk_expr(ca.rhs()),

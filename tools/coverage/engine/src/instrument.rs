@@ -15,8 +15,15 @@ struct Edit {
 // Emission order at a shared byte offset (lower = earlier in output). Wrapper
 // nesting: at a shared START, outer (shallower) opens first; at a shared END,
 // inner (deeper) closes first. Point inserts sit between closes and opens.
+const ORDER_LOOP_INIT: i32 = 0; // `local __covLn = 0;` before the loop stmt
 const ORDER_FN: i32 = 1; // fn-entry probe
 const ORDER_STMT: i32 = 2; // statement / arm probe
+const ORDER_LOOP_INC: i32 = 3; // `__covLn += 1;` at the loop body top
+const ORDER_LOOP_EXIT: i32 = 5; // `; _COVL(n, __covLn)` after the loop stmt
+
+fn loop_counter(id: u32) -> String {
+    format!("__covL{}", id)
+}
 
 // A decision wraps the whole condition (depth 0); its operand conditions nest
 // one level inside (depth 1).
@@ -51,6 +58,31 @@ pub fn splice_file(src: &str, probes: &[Probe], line_starts: &[usize]) -> String
                     offset: end,
                     order: -100 - depth,
                     text: ")".to_string(),
+                });
+            }
+            "loop" => {
+                let (body_byte, end) = match (p.body_byte, p.end_byte) {
+                    (Some(b), Some(e)) => (b, e),
+                    _ => continue,
+                };
+                let counter = loop_counter(p.id);
+                // Per-entry counter, reset each time the loop is reached.
+                edits.push(Edit {
+                    offset: p.byte,
+                    order: ORDER_LOOP_INIT,
+                    text: format!("local {} = 0; ", counter),
+                });
+                // One increment per iteration, at the top of the body.
+                edits.push(Edit {
+                    offset: body_byte,
+                    order: ORDER_LOOP_INC,
+                    text: format!("{} += 1; ", counter),
+                });
+                // Classify the entry's iteration count (0 / 1 / many) after exit.
+                edits.push(Edit {
+                    offset: end,
+                    order: ORDER_LOOP_EXIT,
+                    text: format!("; _COVL({}, {})", p.id, counter),
                 });
             }
             "fn" => edits.push(Edit {
@@ -110,7 +142,7 @@ pub fn cov_require_path(rel: &str, source_root: &str) -> String {
 /// The single header line prepended to each instrumented file.
 pub fn header_line(cov_path: &str) -> String {
     format!(
-        "local __covrt=require(\"{}\");local _COV=__covrt.cov;local _COVD=__covrt.covd;local _COVC=__covrt.covd; --!tm-coverage-instrumented\n",
+        "local __covrt=require(\"{}\");local _COV=__covrt.cov;local _COVD=__covrt.covd;local _COVC=__covrt.covd;local _COVL=__covrt.covl; --!tm-coverage-instrumented\n",
         cov_path
     )
 }
@@ -125,6 +157,7 @@ local hits = table.create(TOTAL, 0)
 local rt = {{ hits = hits, total = TOTAL, map_sha = "{sha}" }}
 function rt.cov(i) hits[i] += 1 end
 function rt.covd(i, v) if v then hits[i] += 1 else hits[i + 1] += 1 end return v end
+function rt.covl(i, n) if n == 0 then hits[i] += 1 elseif n == 1 then hits[i + 1] += 1 else hits[i + 2] += 1 end end
 function rt.new_baseline() return table.create(TOTAL, 0) end
 function rt.delta(prev)
 	local changed = {{}}

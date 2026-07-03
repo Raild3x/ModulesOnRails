@@ -72,7 +72,7 @@ end
 
 local adapter
 if adapterPath then
-	local loaded: any = require(adapterPath)
+	local loaded: any = require(adapterPath) :: any
 	adapter = adapterMod.validate(loaded)
 else
 	adapter = defaultAdapter

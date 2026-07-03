@@ -145,6 +145,27 @@ function Report.console(merged: Merged, info: RunInfo)
 		end
 	end
 
+	-- Loops reached but never seen iterating more than once (multi-iteration
+	-- behaviour untested). Informational; does not affect the metrics above.
+	if #merged.loops > 0 then
+		local sorted = table.clone(merged.loops)
+		table.sort(sorted, function(a, b)
+			if a.file ~= b.file then
+				return a.file < b.file
+			end
+			return a.line < b.line
+		end)
+		print("")
+		print(string.format("  Loops never iterated more than once (%d):", #sorted))
+		for _, l in sorted do
+			local detail = if l.one > 0 and l.zero == 0
+				then "always exactly 1 iteration"
+				elseif l.one == 0 then "body never ran (0 iterations)"
+				else "only 0 or 1 iteration(s)"
+			print(string.format("    %s:%d  %s loop \u{2014} %s", l.file, l.line, l.ctx, detail))
+		end
+	end
+
 	-- Sites excluded from the metrics above (ignore rules / env gates / dead code).
 	local sup = merged.suppressed
 	local total = #sup.ignored + #sup.gated + #sup.dead

@@ -116,6 +116,19 @@ function CoverageJson.build(merged: Merged, info: BuildInfo, perTest: { any }?):
 		dead = supList(merged.suppressed.dead),
 	}
 
+	local loops = {}
+	for _, l in merged.loops do
+		table.insert(loops, {
+			file = l.file,
+			line = l.line,
+			ctx = l.ctx,
+			zero = l.zero,
+			one = l.one,
+			many = l.many,
+		})
+	end
+	doc.loops_single_iteration = loops
+
 	if perTest then
 		local out = {}
 		for _, t in perTest do

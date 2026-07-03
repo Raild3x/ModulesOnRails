@@ -51,6 +51,18 @@ export type PartialCondition = {
 	missing: string, -- "never true" | "never false"
 }
 
+-- A loop reached during the run but never observed iterating more than once, so
+-- its multi-iteration behaviour is untested. `zero`/`one`/`many` count entries
+-- by how many times the body ran that entry.
+export type LoopFinding = {
+	file: string,
+	line: number,
+	ctx: string, -- "for" | "while" | "repeat"
+	zero: number,
+	one: number,
+	many: number,
+}
+
 export type FileReport = {
 	path: string,
 	lines: Metric,
@@ -82,6 +94,8 @@ export type Merged = {
 	idToSite: { [number]: string },
 	-- sites excluded from the metrics above, grouped by why
 	suppressed: Suppressed,
+	-- loops reached but never iterated more than once (informational)
+	loops: { LoopFinding },
 }
 
 local function metric(): Metric
@@ -124,6 +138,7 @@ function Merge.merge(
 
 	local ignoreRules = rules or Ignore.empty()
 	local suppressed: Suppressed = { ignored = {}, gated = {}, dead = {} }
+	local loops: { LoopFinding } = {}
 
 	local hits = coverage.hits
 	local files: { FileReport } = {}
@@ -272,6 +287,21 @@ function Merge.merge(
 						missing = if trueHits > 0 then "never false" else "never true",
 					})
 				end
+			elseif probe.kind == "loop" then
+				-- Three slots: id (0 iterations), id+1 (exactly 1), id+2 (many).
+				local zero = hits[probe.id] or 0
+				local one = hits[(probe.id + 1)] or 0
+				local many = hits[(probe.id + 2)] or 0
+				if zero + one + many > 0 and many == 0 then
+					table.insert(loops, {
+						file = file.path,
+						line = probe.line,
+						ctx = probe.ctx or "loop",
+						zero = zero,
+						one = one,
+						many = many,
+					})
+				end
 			end
 		end
 
@@ -311,6 +341,7 @@ function Merge.merge(
 		files = files,
 		idToSite = idToSite,
 		suppressed = suppressed,
+		loops = loops,
 	}
 end
 

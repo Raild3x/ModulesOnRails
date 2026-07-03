@@ -66,9 +66,14 @@ pub struct Probe {
     pub is_private: Option<bool>,
 
     // decision/cond-specific (wrapper probes)
-    /// End byte of the wrapped expression (close-paren splice point).
+    /// End byte of the wrapped expression (close-paren splice point). For a
+    /// `loop` probe, the byte just after the loop statement (the `_COVL` splice).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_byte: Option<usize>,
+    /// loop-specific: byte at the top of the loop body (per-iteration increment
+    /// splice point).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body_byte: Option<usize>,
     /// Slot recording the false outcome (== id + 1 for wrapper probes).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub false_id: Option<u32>,
@@ -99,6 +104,7 @@ impl Probe {
             params: None,
             is_private: None,
             end_byte: None,
+            body_byte: None,
             false_id: None,
             ctx: None,
             has_else: None,
@@ -114,6 +120,7 @@ fn site_tag(kind: &str) -> &'static str {
         "decision" => "dec",
         "cond" => "cond",
         "arm" => "arm",
+        "loop" => "loop",
         _ => "site",
     }
 }
