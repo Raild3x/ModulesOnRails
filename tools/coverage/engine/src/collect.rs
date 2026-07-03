@@ -109,6 +109,13 @@ impl<'s> Collector<'s> {
     /// if condition coverage is enabled and the condition is a compound
     /// and/or expression, a condition probe per leaf operand.
     fn push_decision(&mut self, cond: &Expression, ctx: &'static str, has_else: Option<bool>) {
+        // A literal `true`/`false` condition is not a real branch: its non-taken
+        // side is structurally unreachable (e.g. `while true` exits via break),
+        // so it must not create a both-ways decision expectation. Dead-code
+        // marking of the folded arm/body is handled separately in collect_stmt.
+        if const_bool(cond).is_some() {
+            return;
+        }
         let (start, end_byte, end_line) = match self.expr_span(cond) {
             Some(s) => s,
             None => return,
@@ -688,4 +695,385 @@ fn param_names(body: &FunctionBody) -> Vec<String> {
             _ => format!("{}", p).trim().to_string(),
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parse;
+
+    fn collect(src: &str, conditions: bool) -> Collector<'_> {
+        let ast = parse::parse(src).expect("test source must parse");
+        let mut c = Collector::new(src, parse::line_starts(src), "src/t.luau".to_string(), 1, conditions);
+        c.collect_ast(ast.nodes());
+        c
+    }
+
+    fn of_kind<'a>(c: &'a Collector, kind: &str) -> Vec<&'a Probe> {
+        c.probes.iter().filter(|p| p.kind == kind).collect()
+    }
+
+    // -- stmt probes -------------------------------------------------------
+
+    #[test]
+    fn every_executable_statement_gets_a_stmt_probe() {
+        let c = collect("local a = 1\nlocal b = 2\na = b\n", false);
+        let stmts = of_kind(&c, "stmt");
+        assert_eq!(stmts.len(), 3);
+        assert_eq!(stmts.iter().map(|p| p.id).collect::<Vec<_>>(), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn type_declarations_get_no_probe() {
+        let c = collect("type Foo = { n: number }\nexport type Bar = number\n", false);
+        assert!(c.probes.is_empty());
+        assert_eq!(c.next_id(), 1);
+    }
+
+    #[test]
+    fn same_line_statements_flip_first_on_line() {
+        let c = collect("local a = 1 local b = 2\n", false);
+        let stmts = of_kind(&c, "stmt");
+        assert!(stmts[0].first_on_line);
+        assert!(!stmts[1].first_on_line);
+        assert_eq!(stmts[0].line, stmts[1].line);
+    }
+
+    // -- fn probes -----------------------------------------------------------
+
+    #[test]
+    fn public_function_declaration_records_name_and_params() {
+        let c = collect("local M = {}\nfunction M.add(a, b)\n\treturn a + b\nend\n", false);
+        let fns = of_kind(&c, "fn");
+        assert_eq!(fns.len(), 1);
+        let f = fns[0];
+        assert_eq!(f.name.as_deref(), Some("M.add"));
+        assert_eq!(f.params.as_deref(), Some(&["a".to_string(), "b".to_string()][..]));
+        assert_eq!(f.is_private, Some(false));
+        // Anchored at the first body statement.
+        assert_eq!(f.byte, c.probes.iter().find(|p| p.kind == "stmt" && p.line == 3).unwrap().byte);
+    }
+
+    #[test]
+    fn underscore_and_local_functions_are_private() {
+        let c = collect(
+            "local M = {}\nfunction M._hidden() end\nfunction M:_m(a) end\nlocal function f()\n\treturn 1\nend\n",
+            false,
+        );
+        let fns = of_kind(&c, "fn");
+        assert_eq!(fns.len(), 3);
+        assert_eq!(fns[0].name.as_deref(), Some("M._hidden"));
+        assert_eq!(fns[0].is_private, Some(true));
+        assert_eq!(fns[1].name.as_deref(), Some("M:_m"));
+        assert_eq!(fns[1].is_private, Some(true));
+        assert_eq!(fns[2].name.as_deref(), Some("local f"));
+        assert_eq!(fns[2].is_private, Some(true));
+    }
+
+    #[test]
+    fn binding_named_and_anonymous_functions() {
+        let c = collect("local cb = function()\n\treturn 1\nend\nprint(function() end)\n", false);
+        let fns = of_kind(&c, "fn");
+        assert_eq!(fns.len(), 2);
+        assert_eq!(fns[0].name.as_deref(), Some("local cb"));
+        assert_eq!(fns[0].is_private, Some(true));
+        assert_eq!(fns[1].name, None);
+        assert_eq!(fns[1].is_private, Some(true));
+    }
+
+    #[test]
+    fn varargs_param_is_recorded_as_ellipsis() {
+        let c = collect("local function g(a, ...)\n\treturn a\nend\n", false);
+        let fns = of_kind(&c, "fn");
+        assert_eq!(fns[0].params.as_deref(), Some(&["a".to_string(), "...".to_string()][..]));
+    }
+
+    #[test]
+    fn empty_function_body_anchors_at_end_token() {
+        let src = "local function f() end\n";
+        let c = collect(src, false);
+        let fns = of_kind(&c, "fn");
+        assert_eq!(fns[0].byte, src.find("end").unwrap());
+    }
+
+    #[test]
+    fn body_statements_record_enclosing_fn_id() {
+        let c = collect("local function f()\n\tlocal a = 1\n\treturn a\nend\n", false);
+        let fn_id = of_kind(&c, "fn")[0].id;
+        for p in c.probes.iter().filter(|p| p.kind == "stmt" && p.id != fn_id && p.line > 1) {
+            assert_eq!(p.fn_id, Some(fn_id), "probe at line {} should be inside f", p.line);
+        }
+    }
+
+    // -- decision probes -----------------------------------------------------
+
+    #[test]
+    fn if_produces_a_two_slot_decision_probe() {
+        let c = collect("if x then\n\tprint(1)\nend\n", false);
+        let decs = of_kind(&c, "decision");
+        assert_eq!(decs.len(), 1);
+        let d = decs[0];
+        assert_eq!(d.false_id, Some(d.id + 1));
+        assert_eq!(d.ctx, Some("if"));
+        assert_eq!(d.has_else, Some(false));
+        assert_eq!(d.src.as_deref(), Some("x"));
+        // The next probe allocated after the decision skips the reserved slot.
+        let next = c.probes.iter().find(|p| p.id > d.id).unwrap();
+        assert_eq!(next.id, d.id + 2);
+    }
+
+    #[test]
+    fn decision_ctx_variants() {
+        let c = collect(
+            "if a then\n\tprint(1)\nelseif b then\n\tprint(2)\nelse\n\tprint(3)\nend\nwhile c do\n\tprint(4)\nend\nrepeat\n\tprint(5)\nuntil d\n",
+            false,
+        );
+        let decs = of_kind(&c, "decision");
+        assert_eq!(decs.len(), 4);
+        assert_eq!(decs[0].ctx, Some("if"));
+        assert_eq!(decs[0].has_else, Some(true));
+        assert_eq!(decs[1].ctx, Some("elseif"));
+        assert_eq!(decs[1].has_else, Some(false));
+        assert_eq!(decs[2].ctx, Some("while"));
+        assert_eq!(decs[2].has_else, None);
+        assert_eq!(decs[3].ctx, Some("repeat"));
+        assert_eq!(decs[3].src.as_deref(), Some("d"));
+    }
+
+    // -- cond probes -----------------------------------------------------------
+
+    #[test]
+    fn compound_condition_yields_a_cond_probe_per_leaf() {
+        let c = collect("if a and b or c then\n\tprint(1)\nend\n", true);
+        let conds = of_kind(&c, "cond");
+        assert_eq!(conds.len(), 3);
+        assert_eq!(conds[0].src.as_deref(), Some("a"));
+        assert_eq!(conds[1].src.as_deref(), Some("b"));
+        assert_eq!(conds[2].src.as_deref(), Some("c"));
+        for p in conds {
+            assert_eq!(p.false_id, Some(p.id + 1));
+        }
+    }
+
+    #[test]
+    fn conditions_disabled_yields_no_cond_probes() {
+        let c = collect("if a and b or c then\n\tprint(1)\nend\n", false);
+        assert!(of_kind(&c, "cond").is_empty());
+    }
+
+    #[test]
+    fn single_operand_condition_yields_no_cond_probes() {
+        let c = collect("if a then\n\tprint(1)\nend\n", true);
+        assert!(of_kind(&c, "cond").is_empty());
+    }
+
+    #[test]
+    fn not_expression_is_a_single_leaf() {
+        let c = collect("if not a and b then\n\tprint(1)\nend\n", true);
+        let conds = of_kind(&c, "cond");
+        assert_eq!(conds.len(), 2);
+        assert_eq!(conds[0].src.as_deref(), Some("not a"));
+        assert_eq!(conds[1].src.as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn constant_conditions_produce_no_decision_probe() {
+        // A literal true/false is not a real branch: the non-taken side is
+        // structurally unreachable, so no both-ways expectation is created.
+        let c = collect(
+            "if false then\n\tprint(1)\nend\nif (true) then\n\tprint(2)\nend\nwhile true do\n\tbreak\nend\n",
+            true,
+        );
+        assert!(of_kind(&c, "decision").is_empty());
+        assert!(of_kind(&c, "cond").is_empty());
+    }
+
+    // -- loop probes -----------------------------------------------------------
+
+    #[test]
+    fn numeric_for_emits_a_three_slot_loop_probe() {
+        let src = "for i = 1, 3 do\n\tprint(i)\nend\n";
+        let c = collect(src, false);
+        let loops = of_kind(&c, "loop");
+        assert_eq!(loops.len(), 1);
+        let l = loops[0];
+        assert_eq!(l.ctx, Some("for"));
+        assert_eq!(l.body_byte, Some(src.find("print").unwrap()));
+        // Three slots: the loop id plus two reserved siblings.
+        assert_eq!(c.next_id(), l.id + 3);
+    }
+
+    #[test]
+    fn empty_body_loop_is_skipped() {
+        let c = collect("for i = 1, 10 do end\n", false);
+        assert!(of_kind(&c, "loop").is_empty());
+    }
+
+    #[test]
+    fn repeat_loop_ends_at_the_until_condition() {
+        let src = "local i = 0\nrepeat\n\ti += 1\nuntil i > 3\n";
+        let c = collect(src, false);
+        let loops = of_kind(&c, "loop");
+        assert_eq!(loops.len(), 1);
+        assert_eq!(loops[0].ctx, Some("repeat"));
+        assert_eq!(loops[0].body_byte, Some(src.find("i += 1").unwrap()));
+        assert_eq!(loops[0].end_byte, Some(src.trim_end().len()));
+    }
+
+    #[test]
+    fn while_loop_records_body_and_end() {
+        let src = "while x do\n\tprint(1)\nend\n";
+        let c = collect(src, false);
+        let loops = of_kind(&c, "loop");
+        assert_eq!(loops.len(), 1);
+        assert_eq!(loops[0].ctx, Some("while"));
+        assert_eq!(loops[0].end_byte, Some(src.trim_end().len()));
+    }
+
+    // -- env gates -----------------------------------------------------------
+
+    #[test]
+    fn is_running_condition_records_a_gate_over_the_arm() {
+        let src = "if RunService:IsRunning() then\n\tprint(1)\n\tprint(2)\nend\nprint(3)\n";
+        let c = collect(src, false);
+        assert_eq!(c.gates.len(), 1);
+        let g = &c.gates[0];
+        assert_eq!(g.marker, ":IsRunning(");
+        assert_eq!(g.note, "RunService:IsRunning() is false in edit mode");
+        assert_eq!(g.line, 1);
+        assert_eq!(g.scope, [1, 3]);
+    }
+
+    #[test]
+    fn stepped_marker_in_a_while_condition_gates() {
+        let c = collect("while RunService.Stepped:Wait() do\n\tprint(1)\nend\n", false);
+        assert_eq!(c.gates.len(), 1);
+        assert_eq!(c.gates[0].marker, ".Stepped:");
+        assert_eq!(c.gates[0].note, "RunService.Stepped does not fire in edit mode");
+    }
+
+    #[test]
+    fn gate_marker_in_a_comment_does_not_gate() {
+        let c = collect("if x then\n\t-- guarded by :IsRunning( in a comment only\n\tprint(1)\nend\n", false);
+        assert!(c.gates.is_empty());
+    }
+
+    // -- dead code -----------------------------------------------------------
+
+    #[test]
+    fn statements_after_terminal_error_are_dead() {
+        let c = collect("local function f()\n\terror(\"x\")\n\tprint(1)\nend\n", false);
+        assert_eq!(c.dead.len(), 1);
+        assert_eq!(c.dead[0].reason, "unreachable after error(...)");
+        assert_eq!(c.dead[0].scope, [3, 3]);
+    }
+
+    #[test]
+    fn error_in_a_nested_block_only_kills_that_block() {
+        let c = collect(
+            "local function f()\n\tif x then\n\t\terror(\"x\")\n\tend\n\tprint(1)\nend\n",
+            false,
+        );
+        assert!(c.dead.is_empty());
+    }
+
+    #[test]
+    fn constant_if_false_kills_the_then_arm() {
+        let c = collect("if false then\n\tprint(1)\nend\n", false);
+        assert_eq!(c.dead.len(), 1);
+        assert_eq!(c.dead[0].reason, "arm of a constant `if false`");
+        assert_eq!(c.dead[0].scope, [2, 2]);
+    }
+
+    #[test]
+    fn constant_if_true_kills_all_alternatives() {
+        let c = collect(
+            "if true then\n\tprint(1)\nelseif x then\n\tprint(2)\nelse\n\tprint(3)\nend\n",
+            false,
+        );
+        let reasons: Vec<&str> = c.dead.iter().map(|d| d.reason.as_str()).collect();
+        assert_eq!(
+            reasons,
+            vec!["unreachable after constant `if true`", "else of a constant `if true`"]
+        );
+        assert_eq!(c.dead[0].scope, [4, 4]);
+        assert_eq!(c.dead[1].scope, [6, 6]);
+    }
+
+    #[test]
+    fn constant_while_false_kills_the_body() {
+        let c = collect("while false do\n\tprint(1)\nend\n", false);
+        assert_eq!(c.dead.len(), 1);
+        assert_eq!(c.dead[0].reason, "body of a constant `while false`");
+    }
+
+    // -- literal-boolean conditions are not decisions --------------------------
+
+    #[test]
+    fn while_true_emits_a_loop_but_no_decision() {
+        // A `while true` loop exits via break, so its condition can never be
+        // false: it is not a branch. The loop probe still tracks iterations.
+        let c = collect("while true do\n\tprint(1)\n\tbreak\nend\n", false);
+        assert!(of_kind(&c, "decision").is_empty());
+        assert_eq!(of_kind(&c, "loop").len(), 1);
+    }
+
+    #[test]
+    fn constant_if_conditions_emit_no_decision() {
+        let c = collect("if true then\n\tprint(1)\nend\n", false);
+        assert!(of_kind(&c, "decision").is_empty());
+        let c = collect("if false then\n\tprint(1)\nend\n", false);
+        assert!(of_kind(&c, "decision").is_empty());
+    }
+
+    #[test]
+    fn non_constant_condition_still_emits_a_decision() {
+        let c = collect("while x do\n\tprint(1)\nend\n", false);
+        assert_eq!(of_kind(&c, "decision").len(), 1);
+    }
+
+    // -- id density + site stability -------------------------------------------
+
+    const MIXED_SRC: &str = "local M = {}\nfunction M.go(n)\n\tif n > 1 and n < 10 then\n\t\tfor i = 1, n do\n\t\t\tprint(i)\n\t\tend\n\tend\n\treturn n\nend\nreturn M\n";
+
+    #[test]
+    fn ids_are_dense_with_no_gaps_or_overlaps() {
+        let c = collect(MIXED_SRC, true);
+        let mut slots: Vec<u32> = Vec::new();
+        for p in &c.probes {
+            slots.push(p.id);
+            match p.kind {
+                "decision" | "cond" => slots.push(p.id + 1),
+                "loop" => {
+                    slots.push(p.id + 1);
+                    slots.push(p.id + 2);
+                }
+                _ => {}
+            }
+        }
+        slots.sort_unstable();
+        let expected: Vec<u32> = (1..c.next_id()).collect();
+        assert_eq!(slots, expected);
+    }
+
+    #[test]
+    fn site_keys_are_stable_across_runs() {
+        let a = collect(MIXED_SRC, true);
+        let b = collect(MIXED_SRC, true);
+        let sa: Vec<&str> = a.probes.iter().map(|p| p.site.as_str()).collect();
+        let sb: Vec<&str> = b.probes.iter().map(|p| p.site.as_str()).collect();
+        assert_eq!(sa, sb);
+        assert!(sa[0].starts_with("stmt:src/t.luau:1:"));
+    }
+
+    #[test]
+    fn a_second_file_continues_id_allocation_densely() {
+        let first = collect("local a = 1\n", false);
+        let src = "local b = 2\n";
+        let ast = parse::parse(src).unwrap();
+        let mut second = Collector::new(src, parse::line_starts(src), "src/u.luau".to_string(), first.next_id(), false);
+        second.collect_ast(ast.nodes());
+        assert_eq!(second.probes[0].id, first.next_id());
+        assert_eq!(second.next_id(), first.next_id() + 1);
+    }
 }

@@ -1,7 +1,5 @@
 --!strict
 --[=[
-	@module core/RobloxRunner
-
 	Runs a package's instrumented suite inside Roblox Studio (edit mode) via
 	run-in-roblox. The generic mechanics -- write project, rojo build, launch,
 	decode -- live here; the rojo tree shape and runner source are adapter-owned.
@@ -89,10 +87,7 @@ function RobloxRunner.run(adapter: RepoAdapter, spec: PackageSpec, buildDir: str
 
 	local payload = StdoutCodec.decode(output)
 	if payload == nil then
-		error(
-			"[roblox] no coverage output captured. run-in-roblox output was:\n"
-				.. output:sub(1, 2000)
-		)
+		error("[roblox] no coverage output captured. run-in-roblox output was:\n" .. output:sub(1, 2000))
 	end
 
 	return {

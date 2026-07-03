@@ -35,9 +35,32 @@ end
 	@param perTest -- optional { id, status, probes(dense ids) } list to site-key
 ]=]
 function CoverageJson.build(merged: Merged, info: BuildInfo, perTest: { any }?): { [string]: any }
+	-- Const candidates live flat on Merged; group them per file for findings.
+	local constByFile: { [string]: { Merge.ConstCandidate } } = {}
+	local allConstCandidates: { Merge.ConstCandidate } = merged.constCandidates or {}
+	for _, c in allConstCandidates do
+		local list = constByFile[c.file]
+		if list == nil then
+			list = {}
+			constByFile[c.file] = list
+		end
+		table.insert(list, c)
+	end
+
 	local files = {}
 	for _, f in merged.files do
-		local findings = {}
+		local findings: { any } = {}
+		local fileConstCandidates: { Merge.ConstCandidate } = constByFile[f.path] or {}
+		for _, c in fileConstCandidates do
+			table.insert(findings, {
+				type = "const_candidate",
+				line = c.line,
+				kind = c.kind,
+				names = c.names,
+				site = c.site,
+				detail = "never reassigned",
+			})
+		end
 		for _, p in f.partials do
 			table.insert(findings, {
 				type = "decision_partial",

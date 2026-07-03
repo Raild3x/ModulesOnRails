@@ -99,7 +99,8 @@ if not dirName or dirName == "" then
 	process.exit(1)
 end
 
-local basePath = "lib/" .. dirName
+-- A slash means a repo-relative path (e.g. tools/coverage/lune); otherwise a lib package name.
+local basePath = if dirName:find("/", 1, true) then dirName else "lib/" .. dirName
 
 -- Function to collect `.spec` files recursively
 local function collectSpecFiles(path, result)

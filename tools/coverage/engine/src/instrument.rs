@@ -177,3 +177,92 @@ return rt
         sha = map_sha
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::collect::Collector;
+    use crate::parse;
+
+    /// Collect + splice, as run_instrument does (minus the header).
+    fn splice(src: &str, conditions: bool) -> String {
+        let ast = parse::parse(src).expect("test source must parse");
+        let line_starts = parse::line_starts(src);
+        let mut c = Collector::new(src, line_starts.clone(), "src/t.luau".to_string(), 1, conditions);
+        c.collect_ast(ast.nodes());
+        let out = splice_file(src, &c.probes, &line_starts);
+        // Everything we emit must survive the same verify pass the engine runs.
+        let body = format!("{}{}", header_line("./_cov"), out);
+        assert!(parse::parse(&body).is_ok(), "spliced output must re-parse:\n{}", body);
+        out
+    }
+
+    #[test]
+    fn first_on_line_probe_keeps_the_statement_column() {
+        let out = splice("do\n\tlocal a = 1\nend\n", false);
+        assert!(out.starts_with("_COV(1);\ndo\n"), "got:\n{}", out);
+        assert!(out.contains("\t_COV(2);\n\tlocal a = 1"), "got:\n{}", out);
+    }
+
+    #[test]
+    fn inline_probe_is_used_after_code_on_the_same_line() {
+        let out = splice("local a = 1 local b = 2\n", false);
+        assert!(out.contains("local a = 1 _COV(2); local b = 2"), "got:\n{}", out);
+    }
+
+    #[test]
+    fn decision_wraps_the_condition() {
+        let out = splice("if c then\n\tprint(1)\nend\n", false);
+        assert!(out.contains("if _COVD(2, c) then"), "got:\n{}", out);
+    }
+
+    #[test]
+    fn compound_condition_nests_cond_wrappers_inside_the_decision() {
+        let out = splice("if a and b then\n\tprint(1)\nend\n", true);
+        assert!(
+            out.contains("if _COVD(2, _COVC(4, a) and _COVC(6, b)) then"),
+            "got:\n{}",
+            out
+        );
+    }
+
+    #[test]
+    fn loop_gets_init_increment_and_exit_splices() {
+        let out = splice("for i = 1, 3 do\n\tprint(i)\nend\n", false);
+        assert!(out.contains("local __covL3 = 0; "), "got:\n{}", out);
+        assert!(out.contains("__covL3 += 1; "), "got:\n{}", out);
+        assert!(out.contains("; _COVL(3, __covL3)"), "got:\n{}", out);
+        // Init precedes the loop keyword; exit follows the loop's `end`.
+        assert!(out.find("local __covL3").unwrap() < out.find("for i").unwrap());
+        assert!(out.rfind("; _COVL(3").unwrap() > out.rfind("end").unwrap());
+    }
+
+    #[test]
+    fn splice_is_deterministic() {
+        let src = "if a and b then\n\tfor i = 1, 2 do\n\t\tprint(i)\n\tend\nend\n";
+        assert_eq!(splice(src, true), splice(src, true));
+    }
+
+    #[test]
+    fn cov_require_path_climbs_to_the_source_root() {
+        assert_eq!(cov_require_path("src/init.luau", "src"), "./_cov");
+        assert_eq!(cov_require_path("src/util/deep.luau", "src"), "../_cov");
+        assert_eq!(cov_require_path("src/a/b/c.luau", "src"), "../../_cov");
+    }
+
+    #[test]
+    fn header_line_binds_the_runtime_and_carries_the_marker() {
+        let h = header_line("../_cov");
+        assert!(h.contains("require(\"../_cov\")"));
+        assert!(h.contains("--!tm-coverage-instrumented"));
+        assert!(h.ends_with('\n'));
+    }
+
+    #[test]
+    fn cov_module_embeds_totals_and_sha_and_parses() {
+        let m = cov_module(7, "abc123");
+        assert!(m.contains("local TOTAL = 7"));
+        assert!(m.contains("map_sha = \"abc123\""));
+        assert!(parse::parse(&m).is_ok());
+    }
+}

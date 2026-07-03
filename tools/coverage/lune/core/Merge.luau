@@ -1,7 +1,5 @@
 --!strict
 --[=[
-	@module core/Merge
-
 	Joins a runtime hit buffer onto a static coverage map, producing per-file and
 	package-level metrics. M2 computes line/statement/function coverage; arm,
 	decision and condition metrics are added in M3/M4.
@@ -32,7 +30,7 @@ export type Suppressed = {
 	dead: { SuppressedEntry },
 }
 
-export type FnEntry = { name: string, line: number, hits: number, isPrivate: boolean }
+export type FnEntry = { name: string, line: number, hits: number, isPrivate: boolean, params: { string }? }
 
 -- A decision that was reached but only ever went one way.
 export type PartialDecision = {
@@ -49,6 +47,18 @@ export type PartialCondition = {
 	line: number,
 	src: string,
 	missing: string, -- "never true" | "never false"
+}
+
+-- A `local` declaration (or `local function`) never reassigned anywhere in its
+-- file, so the statement could use `const`. Only present when the run was made
+-- with `--suggest-const`; informational, never part of the denominators.
+export type ConstCandidate = {
+	file: string,
+	line: number,
+	col: number,
+	kind: string, -- "local" | "local_function"
+	names: { string },
+	site: string,
 }
 
 -- A loop reached during the run but never observed iterating more than once, so
@@ -74,6 +84,9 @@ export type FileReport = {
 	fnEntries: { FnEntry },
 	partials: { PartialDecision },
 	condPartials: { PartialCondition },
+	-- line -> true for every line whose statement probes were hit; feeds the
+	-- mutation planner's no-coverage filter.
+	coveredLines: { [number]: boolean }?,
 }
 
 export type Totals = {
@@ -96,6 +109,8 @@ export type Merged = {
 	suppressed: Suppressed,
 	-- loops reached but never iterated more than once (informational)
 	loops: { LoopFinding },
+	-- locals that could be `const` (only when the map was built with the flag)
+	constCandidates: { ConstCandidate },
 }
 
 local function metric(): Metric
@@ -139,6 +154,15 @@ function Merge.merge(
 	local ignoreRules = rules or Ignore.empty()
 	local suppressed: Suppressed = { ignored = {}, gated = {}, dead = {} }
 	local loops: { LoopFinding } = {}
+	local constCandidates: { ConstCandidate } = {}
+
+	-- `local a, b` / `local function f`, for report labels.
+	local function constLabel(c: any): string
+		if c.kind == "local_function" then
+			return "local function " .. tostring(c.names[1])
+		end
+		return "local " .. table.concat(c.names, ", ")
+	end
 
 	local hits = coverage.hits
 	local files: { FileReport } = {}
@@ -164,8 +188,8 @@ function Merge.merge(
 		local decisions = metric()
 		local conditions = metric()
 		local fnEntries: { FnEntry } = {}
-		local partials: { Merge.PartialDecision } = {}
-		local condPartials: { Merge.PartialCondition } = {}
+		local partials: { PartialDecision } = {}
+		local condPartials: { PartialCondition } = {}
 		-- line coverage derived from statement probes
 		local lineHasProbe: { [number]: boolean } = {}
 		local lineCovered: { [number]: boolean } = {}
@@ -174,7 +198,7 @@ function Merge.merge(
 		local ignoredFnIds: { [number]: boolean } = {}
 		if not ignoreRules.isEmpty and next(ignoreRules.names) ~= nil then
 			for _, probe in file.probes do
-				if probe.kind == "fn" and probe.name ~= nil and ignoreRules.names[probe.name] then
+				if probe.kind == "fn" and probe.name ~= nil and ignoreRules.names[(probe :: any).name] then
 					ignoredFnIds[probe.id] = true
 				end
 			end
@@ -194,7 +218,7 @@ function Merge.merge(
 						site = probe.site,
 						kind = probe.kind,
 						label = probe.name or probe.src or "",
-						detail = direct,
+						detail = direct :: string,
 					})
 				end
 				continue
@@ -248,11 +272,12 @@ function Merge.merge(
 					line = probe.line,
 					hits = count,
 					isPrivate = probe.is_private == true,
+					params = probe.params,
 				})
 			elseif probe.kind == "decision" then
 				-- Two slots: id (true) and id+1 (false). Each is a branch arm.
 				local trueHits = hits[probe.id] or 0
-				local falseHits = hits[(probe.false_id :: number)] or 0
+				local falseHits = hits[probe.false_id :: number] or 0
 				branches.total += 2
 				if trueHits > 0 then
 					branches.covered += 1
@@ -275,7 +300,7 @@ function Merge.merge(
 				end
 			elseif probe.kind == "cond" then
 				local trueHits = hits[probe.id] or 0
-				local falseHits = hits[(probe.false_id :: number)] or 0
+				local falseHits = hits[probe.false_id :: number] or 0
 				conditions.total += 1
 				if trueHits > 0 and falseHits > 0 then
 					conditions.covered += 1
@@ -305,6 +330,32 @@ function Merge.merge(
 			end
 		end
 
+		-- Const candidates ride along with the map when the flag was on. The
+		-- existing site/line ignore rules apply; matched ones are listed as
+		-- suppressed instead.
+		for _, c in (file.const_candidates or {}) :: { any } do
+			local direct = Ignore.matchDirect(ignoreRules, file.path, { site = c.site, line = c.line, kind = "const" })
+			if direct ~= nil then
+				table.insert(suppressed.ignored, {
+					file = file.path,
+					line = c.line,
+					site = c.site,
+					kind = "const",
+					label = constLabel(c),
+					detail = direct :: string,
+				})
+			else
+				table.insert(constCandidates, {
+					file = file.path,
+					line = c.line,
+					col = c.col,
+					kind = c.kind,
+					names = c.names,
+					site = c.site,
+				})
+			end
+		end
+
 		local lines = metric()
 		for lineNo in lineHasProbe do
 			lines.total += 1
@@ -324,6 +375,7 @@ function Merge.merge(
 			fnEntries = fnEntries,
 			partials = partials,
 			condPartials = condPartials,
+			coveredLines = lineCovered,
 		}
 		table.insert(files, fileReport)
 		addTo(pkgTotals.lines, lines)
@@ -342,6 +394,7 @@ function Merge.merge(
 		idToSite = idToSite,
 		suppressed = suppressed,
 		loops = loops,
+		constCandidates = constCandidates,
 	}
 end
 

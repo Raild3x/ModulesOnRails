@@ -6,8 +6,10 @@
 mod collect;
 mod instrument;
 mod model;
+mod mutate;
 mod parse;
 mod pipeline;
+mod scopes;
 
 use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
@@ -41,6 +43,9 @@ enum Command {
         out: PathBuf,
         #[arg(long, default_value_t = false)]
         no_conditions: bool,
+        /// Also report `local`s never reassigned that could be `const`.
+        #[arg(long, default_value_t = false)]
+        detect_const: bool,
     },
     /// Instrument a package (in place, or into --out-dir) and emit map.json.
     Instrument {
@@ -61,6 +66,9 @@ enum Command {
         map_out: PathBuf,
         #[arg(long, default_value_t = false)]
         no_conditions: bool,
+        /// Also report `local`s never reassigned that could be `const`.
+        #[arg(long, default_value_t = false)]
+        detect_const: bool,
     },
     /// Re-parse an instrumented copy and check structural integrity.
     Verify {
@@ -70,6 +78,30 @@ enum Command {
         original: PathBuf,
         #[arg(long)]
         instrumented: PathBuf,
+    },
+    /// Enumerate mutation sites from uninstrumented sources into mutants.json.
+    Mutate {
+        #[arg(long)]
+        package_dir: PathBuf,
+        #[arg(long)]
+        package_name: Option<String>,
+        #[arg(long, default_value = "src")]
+        source_root: String,
+        #[arg(long, default_value = r"\.spec\.luau$")]
+        spec_pattern: String,
+        #[arg(long)]
+        exclude: Vec<String>,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Apply one mutant from mutants.json in place under --root.
+    ApplyMutant {
+        #[arg(long)]
+        mutants: PathBuf,
+        #[arg(long)]
+        id: u32,
+        #[arg(long)]
+        root: PathBuf,
     },
 }
 
@@ -84,7 +116,17 @@ fn main() {
             exclude,
             out,
             no_conditions,
-        } => run_analyze(&package_dir, package_name, &source_root, &spec_pattern, &exclude, &out, !no_conditions),
+            detect_const,
+        } => run_analyze(
+            &package_dir,
+            package_name,
+            &source_root,
+            &spec_pattern,
+            &exclude,
+            &out,
+            !no_conditions,
+            detect_const,
+        ),
         Command::Instrument {
             package_dir,
             package_name,
@@ -94,6 +136,7 @@ fn main() {
             out_dir,
             map_out,
             no_conditions,
+            detect_const,
         } => run_instrument(
             &package_dir,
             package_name,
@@ -103,19 +146,161 @@ fn main() {
             out_dir.as_deref(),
             &map_out,
             !no_conditions,
+            detect_const,
         ),
         Command::Verify { map, original, instrumented } => run_verify(&map, &original, &instrumented),
+        Command::Mutate {
+            package_dir,
+            package_name,
+            source_root,
+            spec_pattern,
+            exclude,
+            out,
+        } => run_mutate(&package_dir, package_name, &source_root, &spec_pattern, &exclude, &out),
+        Command::ApplyMutant { mutants, id, root } => run_apply_mutant(&mutants, id, &root),
     };
     exit(code);
 }
 
-fn build_map(package_dir: &Path, package_name: Option<String>, conditions: bool, data: &PackageData) -> CoverageMap {
-    let package = package_name.unwrap_or_else(|| {
+fn package_name_or_dir(package_dir: &Path, package_name: Option<String>) -> String {
+    package_name.unwrap_or_else(|| {
         package_dir
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| "unknown".to_string())
-    });
+    })
+}
+
+fn run_mutate(
+    package_dir: &Path,
+    package_name: Option<String>,
+    source_root: &str,
+    spec_pattern: &str,
+    exclude: &[String],
+    out: &Path,
+) -> i32 {
+    let sources = match discover_sources(package_dir, source_root, spec_pattern, exclude) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("coverage-engine: {}", e);
+            return 1;
+        }
+    };
+
+    let mut files: Vec<mutate::MutantFile> = Vec::new();
+    let mut next_id: u32 = 1;
+    let mut parse_failures: Vec<(String, String)> = Vec::new();
+    for sf in sources {
+        let src = match std::fs::read_to_string(&sf.abs) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("coverage-engine: cannot read {}: {}", sf.abs.display(), e);
+                return 1;
+            }
+        };
+        if src.contains("--!tm-coverage-instrumented") {
+            eprintln!(
+                "coverage-engine: {} is instrumented (marker present); mutate targets pristine sources",
+                sf.rel
+            );
+            return 1;
+        }
+        let ast = match parse::parse(&src) {
+            Ok(a) => a,
+            Err(errs) => {
+                let msg = errs.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("; ");
+                parse_failures.push((sf.rel.clone(), msg));
+                continue;
+            }
+        };
+        let (mutants, next) = mutate::collect_file(ast.nodes(), &sf.rel, next_id);
+        next_id = next;
+        files.push(mutate::MutantFile {
+            path: sf.rel,
+            sha256: parse::sha256_hex(src.as_bytes()),
+            mutants,
+        });
+    }
+    if !parse_failures.is_empty() {
+        eprintln!("coverage-engine: parse failures:");
+        for (path, msg) in &parse_failures {
+            eprintln!("  {}: {}", path, msg);
+        }
+        return 2;
+    }
+
+    let doc = mutate::MutantsDoc {
+        schema: mutate::MUTANTS_SCHEMA.to_string(),
+        engine_version: ENGINE_VERSION.to_string(),
+        package: package_name_or_dir(package_dir, package_name),
+        total: next_id - 1,
+        files,
+    };
+    let json = match serde_json::to_string_pretty(&doc) {
+        Ok(j) => j,
+        Err(e) => {
+            eprintln!("coverage-engine: serialize error: {}", e);
+            return 1;
+        }
+    };
+    if let Some(parent) = out.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            eprintln!("coverage-engine: cannot create {}: {}", parent.display(), e);
+            return 1;
+        }
+    }
+    if let Err(e) = std::fs::write(out, &json) {
+        eprintln!("coverage-engine: cannot write {}: {}", out.display(), e);
+        return 1;
+    }
+    eprintln!(
+        "coverage-engine: enumerated {} mutant(s) across {} file(s) -> {}",
+        doc.total,
+        doc.files.len(),
+        out.display()
+    );
+    0
+}
+
+fn run_apply_mutant(mutants_path: &Path, id: u32, root: &Path) -> i32 {
+    let raw = match std::fs::read_to_string(mutants_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("coverage-engine: cannot read {}: {}", mutants_path.display(), e);
+            return 1;
+        }
+    };
+    let doc: mutate::MutantsDoc = match serde_json::from_str(&raw) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("coverage-engine: bad mutants json: {}", e);
+            return 1;
+        }
+    };
+    if doc.schema != mutate::MUTANTS_SCHEMA {
+        eprintln!("coverage-engine: unexpected mutants schema {:?}", doc.schema);
+        return 1;
+    }
+    match mutate::apply(&doc, id, root) {
+        Ok(rel) => {
+            eprintln!("coverage-engine: applied mutant {} to {}", id, rel);
+            0
+        }
+        Err((code, msg)) => {
+            eprintln!("coverage-engine: {}", msg);
+            code
+        }
+    }
+}
+
+fn build_map(
+    package_dir: &Path,
+    package_name: Option<String>,
+    conditions: bool,
+    detect_const: bool,
+    data: &PackageData,
+) -> CoverageMap {
+    let package = package_name_or_dir(package_dir, package_name);
     let files = data
         .files
         .iter()
@@ -126,6 +311,7 @@ fn build_map(package_dir: &Path, package_name: Option<String>, conditions: bool,
             probes: f.probes.clone(),
             gates: f.gates.clone(),
             dead: f.dead.clone(),
+            const_candidates: f.const_candidates.clone(),
         })
         .collect();
     CoverageMap {
@@ -134,7 +320,7 @@ fn build_map(package_dir: &Path, package_name: Option<String>, conditions: bool,
         package,
         package_dir: package_dir.to_string_lossy().replace('\\', "/"),
         generated_at: unix_secs(),
-        options: MapOptions { conditions },
+        options: MapOptions { conditions, detect_const },
         total_slots: data.total_slots,
         files,
     }
@@ -166,12 +352,13 @@ fn run_analyze(
     exclude: &[String],
     out: &Path,
     conditions: bool,
+    detect_const: bool,
 ) -> i32 {
-    let data = match collect_package(package_dir, source_root, spec_pattern, exclude, conditions) {
+    let data = match collect_package(package_dir, source_root, spec_pattern, exclude, conditions, detect_const) {
         Ok(d) => d,
         Err(code) => return code,
     };
-    let map = build_map(package_dir, package_name, conditions, &data);
+    let map = build_map(package_dir, package_name, conditions, detect_const, &data);
     if write_json(&map, out).is_err() {
         return 1;
     }
@@ -193,8 +380,9 @@ fn run_instrument(
     out_dir: Option<&Path>,
     map_out: &Path,
     conditions: bool,
+    detect_const: bool,
 ) -> i32 {
-    let data = match collect_package(package_dir, source_root, spec_pattern, exclude, conditions) {
+    let data = match collect_package(package_dir, source_root, spec_pattern, exclude, conditions, detect_const) {
         Ok(d) => d,
         Err(code) => return code,
     };
@@ -212,7 +400,7 @@ fn run_instrument(
     };
 
     // map.json must be byte-identical to what we hash into _cov.luau.
-    let map = build_map(package_dir, package_name, conditions, &data);
+    let map = build_map(package_dir, package_name, conditions, detect_const, &data);
     let json = match serde_json::to_string_pretty(&map) {
         Ok(j) => j,
         Err(e) => {
@@ -473,4 +661,60 @@ fn glob_match(pattern: &str, path: &str) -> bool {
         }
     }
     helper(pattern.as_bytes(), path.as_bytes())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn simple_regex_tail_anchored_matches_suffix_only() {
+        let re = simple_regex(r"\.spec\.luau$");
+        assert!(re.matches("x.spec.luau"));
+        assert!(re.matches("nested.name.spec.luau"));
+        assert!(!re.matches("x.spec.luau.bak"));
+        assert!(!re.matches("x.luau"));
+    }
+
+    #[test]
+    fn simple_regex_unanchored_falls_back_to_contains() {
+        let re = simple_regex("spec");
+        assert!(re.matches("myspecfile.luau"));
+        assert!(!re.matches("plain.luau"));
+    }
+
+    #[test]
+    fn glob_double_star_crosses_path_segments() {
+        assert!(glob_match("src/_Index/**", "src/_Index/x.luau"));
+        assert!(glob_match("src/_Index/**", "src/_Index/a/b.luau"));
+        assert!(!glob_match("src/_Index/**", "src/other/x.luau"));
+        assert!(glob_match("**/x.luau", "a/b/x.luau"));
+    }
+
+    #[test]
+    fn glob_single_star_stays_within_a_segment() {
+        assert!(glob_match("src/*.luau", "src/a.luau"));
+        assert!(!glob_match("src/*.luau", "src/a/b.luau"));
+    }
+
+    #[test]
+    fn glob_literal_patterns_match_exactly() {
+        assert!(glob_match("src/a.luau", "src/a.luau"));
+        assert!(!glob_match("src/a.luau", "src/b.luau"));
+    }
+
+    #[test]
+    fn discover_sources_drops_specs_excludes_and_non_luau() {
+        let pkg = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/simple_pkg");
+        let found = discover_sources(&pkg, "src", r"\.spec\.luau$", &["src/_Index/**".to_string()]).unwrap();
+        let rels: Vec<&str> = found.iter().map(|f| f.rel.as_str()).collect();
+        assert_eq!(rels, vec!["src/init.luau", "src/util/deep.luau"]);
+    }
+
+    #[test]
+    fn discover_sources_errors_on_a_missing_source_root() {
+        let pkg = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/simple_pkg");
+        let err = discover_sources(&pkg, "no_such_root", r"\.spec\.luau$", &[]).err().unwrap();
+        assert!(err.contains("source root not found"));
+    }
 }

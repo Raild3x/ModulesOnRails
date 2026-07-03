@@ -67,7 +67,7 @@ end
 --[=[
 	Runs static analysis on `packageDir`, writing map.json to `mapOut`.
 ]=]
-function Engine.analyze(spec: PackageSpec, packageDir: string, mapOut: string, noConditions: boolean?)
+function Engine.analyze(spec: PackageSpec, packageDir: string, mapOut: string, noConditions: boolean?, detectConst: boolean?)
 	local exe = Engine.ensure(false)
 	local args = { "analyze" }
 	for _, a in commonArgs(spec, packageDir) do
@@ -77,6 +77,9 @@ function Engine.analyze(spec: PackageSpec, packageDir: string, mapOut: string, n
 	table.insert(args, mapOut)
 	if noConditions then
 		table.insert(args, "--no-conditions")
+	end
+	if detectConst then
+		table.insert(args, "--detect-const")
 	end
 	local result = process.exec(exe, args)
 	if result.stderr ~= "" then
@@ -90,7 +93,7 @@ end
 --[=[
 	Instruments `buildDir` in place (a materialized copy) and writes map.json.
 ]=]
-function Engine.instrument(spec: PackageSpec, buildDir: string, mapOut: string, noConditions: boolean?)
+function Engine.instrument(spec: PackageSpec, buildDir: string, mapOut: string, noConditions: boolean?, detectConst: boolean?)
 	local exe = Engine.ensure(false)
 	local args = { "instrument" }
 	for _, a in commonArgs(spec, buildDir) do
@@ -101,6 +104,9 @@ function Engine.instrument(spec: PackageSpec, buildDir: string, mapOut: string, 
 	if noConditions then
 		table.insert(args, "--no-conditions")
 	end
+	if detectConst then
+		table.insert(args, "--detect-const")
+	end
 	local result = process.exec(exe, args)
 	if result.stderr ~= "" then
 		print(result.stderr:gsub("%s+$", ""))
@@ -108,6 +114,45 @@ function Engine.instrument(spec: PackageSpec, buildDir: string, mapOut: string, 
 	if not result.ok then
 		error("[engine] instrument failed for " .. spec.name .. " (exit " .. tostring(result.code) .. ")")
 	end
+end
+
+--[=[
+	Enumerates mutation sites in `packageDir` (a pristine, uninstrumented copy),
+	writing mutants.json to `outPath`.
+]=]
+function Engine.mutate(spec: PackageSpec, packageDir: string, outPath: string)
+	local exe = Engine.ensure(false)
+	local args = { "mutate" }
+	for _, a in commonArgs(spec, packageDir) do
+		table.insert(args, a)
+	end
+	table.insert(args, "--out")
+	table.insert(args, outPath)
+	local result = process.exec(exe, args)
+	if result.stderr ~= "" then
+		print(result.stderr:gsub("%s+$", ""))
+	end
+	if not result.ok then
+		error("[engine] mutate failed for " .. spec.name .. " (exit " .. tostring(result.code) .. ")")
+	end
+end
+
+--[=[
+	Applies one mutant in place under `root`. Returns "ok", or "invalid" when
+	the engine refused it (the mutated file would not parse, exit 3). Any other
+	failure — including the sha guard against stale/unrestored files — errors.
+]=]
+function Engine.applyMutant(mutantsPath: string, id: number, root: string): string
+	local exe = Engine.ensure(false)
+	local result = process.exec(exe, { "apply-mutant", "--mutants", mutantsPath, "--id", tostring(id), "--root", root })
+	if result.ok then
+		return "ok"
+	end
+	if result.code == 3 then
+		return "invalid"
+	end
+	print(result.stderr:gsub("%s+$", ""))
+	error("[engine] apply-mutant " .. tostring(id) .. " failed (exit " .. tostring(result.code) .. ")")
 end
 
 return Engine

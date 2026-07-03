@@ -1,7 +1,5 @@
 --!strict
 --[=[
-	@module core/StdoutCodec
-
 	Decodes the chunked sentinel protocol the Studio coverage runner prints
 	through run-in-roblox's stdout. The runner emits (protocol v2):
 
@@ -82,7 +80,7 @@ function StdoutCodec.decode(output: string): any?
 		end
 		if idx then
 			local i = tonumber(idx) :: number
-			chunks[i] = body
+			chunks[i] = body :: string
 			if len then
 				chunkLens[i] = tonumber(len) :: number
 			end

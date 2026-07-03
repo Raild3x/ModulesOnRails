@@ -3,8 +3,9 @@
 use std::path::{Path, PathBuf};
 
 use crate::collect::Collector;
-use crate::model::Probe;
+use crate::model::{ConstCandidate, Probe};
 use crate::parse;
+use crate::scopes;
 
 /// A discovered source file plus its parsed probes.
 pub struct FileData {
@@ -16,6 +17,7 @@ pub struct FileData {
     pub probes: Vec<Probe>,
     pub gates: Vec<crate::model::Gate>,
     pub dead: Vec<crate::model::Dead>,
+    pub const_candidates: Vec<ConstCandidate>,
 }
 
 pub struct PackageData {
@@ -31,6 +33,7 @@ pub fn collect_package(
     spec_pattern: &str,
     exclude: &[String],
     conditions: bool,
+    detect_const: bool,
 ) -> Result<PackageData, i32> {
     let sources = match crate::discover_sources(package_dir, source_root, spec_pattern, exclude) {
         Ok(s) => s,
@@ -74,6 +77,11 @@ pub fn collect_package(
             next_id = collector.next_id();
             (collector.probes, collector.gates, collector.dead)
         };
+        let const_candidates = if detect_const {
+            scopes::scan(ast.nodes(), &sf.rel)
+        } else {
+            Vec::new()
+        };
 
         files.push(FileData {
             rel: sf.rel.clone(),
@@ -84,6 +92,7 @@ pub fn collect_package(
             probes,
             gates,
             dead,
+            const_candidates,
         });
     }
 

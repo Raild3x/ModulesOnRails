@@ -1,7 +1,5 @@
 --!strict
 --[=[
-	@module core/Ignore
-
 	Loads per-package suppression rules from ignore files (`.coverage-ignore`, and
 	the legacy `.covaudit-ignore`) and matches them against probes. A matched probe
 	is excluded from the coverage denominators and listed in the report's
@@ -71,9 +69,7 @@ function Ignore.load(root: string, fileNames: { string }): Rules
 			parseInto(fs.readFile(path), rules)
 		end
 	end
-	rules.isEmpty = next(rules.names) == nil
-		and next(rules.fileLines) == nil
-		and next(rules.sites) == nil
+	rules.isEmpty = next(rules.names) == nil and next(rules.fileLines) == nil and next(rules.sites) == nil
 	return rules
 end
 
@@ -84,7 +80,11 @@ end
 	excluded but not individually listed. Returns the rule kind that matched (for
 	the report), or nil.
 ]=]
-function Ignore.matchDirect(rules: Rules, filePath: string, probe: any): string?
+function Ignore.matchDirect(
+	rules: Rules,
+	filePath: string,
+	probe: { site: string, line: number, kind: string, name: string? }
+): string?
 	if rules.isEmpty then
 		return nil
 	end
@@ -94,7 +94,7 @@ function Ignore.matchDirect(rules: Rules, filePath: string, probe: any): string?
 	if rules.fileLines[filePath .. ":" .. tostring(probe.line)] then
 		return "line rule"
 	end
-	if probe.kind == "fn" and probe.name ~= nil and rules.names[probe.name] then
+	if probe.kind == "fn" and probe.name and rules.names[probe.name] then
 		return "name rule"
 	end
 	return nil

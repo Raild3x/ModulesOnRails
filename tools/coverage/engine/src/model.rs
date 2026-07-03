@@ -25,6 +25,15 @@ pub struct CoverageMap {
 #[derive(Serialize)]
 pub struct MapOptions {
     pub conditions: bool,
+    /// Const-candidate detection is opt-in; the field (and per-file
+    /// `const_candidates`) is omitted when off so existing maps/goldens and the
+    /// embedded map sha stay byte-identical.
+    #[serde(skip_serializing_if = "is_false")]
+    pub detect_const: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 #[derive(Serialize)]
@@ -35,6 +44,23 @@ pub struct FileMap {
     pub probes: Vec<Probe>,
     pub gates: Vec<Gate>,
     pub dead: Vec<Dead>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub const_candidates: Vec<ConstCandidate>,
+}
+
+/// A `local` declaration (or `local function`) whose names are never
+/// reassigned, so the statement could use `const`. Informational only — never
+/// part of coverage denominators.
+#[derive(Serialize, Clone)]
+pub struct ConstCandidate {
+    /// "local" | "local_function"
+    pub kind: &'static str,
+    /// Every name in the declaration (all must be clean for it to be emitted).
+    pub names: Vec<String>,
+    pub line: usize,
+    pub col: usize,
+    /// Cross-run-stable key: `const:<relpath>:<line>:<col>`.
+    pub site: String,
 }
 
 /// One instrumentation site. `kind` ∈ { stmt, fn, decision, cond, arm, ... }.

@@ -110,7 +110,7 @@ local function buildSpec(name: string): PackageSpec
 	local root = `{LIB_ROOT}/{name}`
 	local srcPath = `{root}/src`
 	assert(fs.isDir(srcPath), `package has no src directory: {srcPath}`)
-	local pipeline, reason = classify(srcPath)
+	local pipeline: Pipeline, reason: string = classify(srcPath)
 	return {
 		name = name,
 		root = root,

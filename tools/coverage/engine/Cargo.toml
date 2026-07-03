@@ -18,3 +18,9 @@ walkdir = "2"
 
 [profile.release]
 opt-level = 2
+
+# full_moon's recursive-descent parser overflows the default stack in
+# unoptimized builds; optimize just that crate so `cargo test` (which runs the
+# engine binary in the dev profile) can parse real fixture files.
+[profile.dev.package.full_moon]
+opt-level = 3
