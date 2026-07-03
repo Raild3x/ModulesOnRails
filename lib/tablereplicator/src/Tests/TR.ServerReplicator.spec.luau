@@ -657,4 +657,176 @@ return function(t: tiniest)
 			end).never_fails()
 		end)
 	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("ServerReplicator.FlushNow", function()
+		test("drains queued data ops to active players immediately", function()
+			local player = { Name = "P" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("FlushNowBasic"),
+				Data = { Coins = 0 },
+				ReplicationTargets = { player },
+			})
+			;(replicator :: any)._Scope:Activate(player)
+
+			replicator.Manager:Set("Coins", 42) -- queued, not yet flushed
+
+			local calls, restore = spyOnTransport()
+			ServerReplicator.FlushNow()
+			restore()
+
+			expect(#calls).is(1)
+			local item = calls[1].Message.Items[1] :: any
+			expect(item.Op).is(FlatCodec.Op.Ops)
+			expect(item.Id).is(replicator.Id)
+			replicator:Destroy()
+		end)
+
+		test("is safe to call with nothing queued", function()
+			expect(function()
+				ServerReplicator.FlushNow()
+			end).never_fails()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("request-data handshake and inbound-signal guards", function()
+		local function bootstrap(player: any)
+			(ServerReplicator :: any)._Transport.PlayerRequestedData:Fire(player)
+		end
+
+		test("a second RequestData from the same player is ignored", function()
+			local player = { Name = "DoubleRequest" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("DoubleRequestData"),
+				Data = FakeManager.new(),
+				ReplicationTargets = { player },
+			})
+
+			local calls, restore = spyOnTransport()
+			bootstrap(player) -- first: sends the snapshot
+			bootstrap(player) -- second: early-out, nothing re-sent
+			restore()
+
+			expect(#calls).is(1)
+			replicator:Destroy()
+		end)
+
+		test("an inbound signal from a never-bootstrapped player is dropped", function()
+			local stranger = { Name = "NeverBootstrapped" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("SignalGuardNotBootstrapped"),
+				Data = FakeManager.new(),
+				ReplicationTargets = {},
+			})
+			local remote = replicator:RegisterRemoteSignal("Hit") :: any
+
+			local fired = false
+			remote:Connect(function()
+				fired = true
+			end)
+			;(ServerReplicator :: any)._Transport.SignalReceived:Fire(stranger, replicator.Id, "Hit")
+
+			expect(fired).is(false)
+			replicator:Destroy()
+		end)
+
+		test("an inbound signal for an unknown replicator id is dropped without error", function()
+			local player = { Name = "UnknownIdSender" } :: any
+			bootstrap(player)
+			expect(function()
+				(ServerReplicator :: any)._Transport.SignalReceived:Fire(player, 999999999, "Hit")
+			end).never_fails()
+		end)
+
+		test("an inbound signal naming an unregistered remote is dropped without error", function()
+			local player = { Name = "UnregisteredNameSender" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("SignalGuardUnregisteredName"),
+				Data = FakeManager.new(),
+				ReplicationTargets = { player },
+			})
+			bootstrap(player)
+			expect(function()
+				(ServerReplicator :: any)._Transport.SignalReceived:Fire(player, replicator.Id, "NeverRegistered")
+			end).never_fails()
+			replicator:Destroy()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("config validation fallbacks", function()
+		test("a Namespace that is neither a token nor a non-empty string yields an anonymous replicator", function()
+			local numeric = ServerReplicator.new({
+				Namespace = 123 :: any,
+				Data = FakeManager.new(),
+				ReplicationTargets = {},
+			})
+			expect(numeric.Namespace).is(nil)
+			numeric:Destroy()
+
+			local empty = ServerReplicator.new({
+				Namespace = "" :: any,
+				Data = FakeManager.new(),
+				ReplicationTargets = {},
+			})
+			expect(empty.Namespace).is(nil)
+			empty:Destroy()
+		end)
+
+		test("a config.Client value that is neither a sentinel nor a function warns and registers nothing", function()
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("ClientDeclInvalid"),
+				Data = FakeManager.new(),
+				ReplicationTargets = {},
+				Client = { Bad = 5 :: any },
+			})
+			expect((replicator :: any)._RemoteSignals.Bad).is(nil)
+			expect((replicator :: any)._RemoteFunctions.Bad).is(nil)
+			replicator:Destroy()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("frame buffer isolation between replicators", function()
+		test("destroying one replicator preserves another's queued ops in the same frame", function()
+			local player = { Name = "P" } :: any
+			local doomed = ServerReplicator.new({
+				Namespace = uniqueToken("QueuedIsolationDoomed"),
+				Data = { x = 0 },
+				ReplicationTargets = { player },
+			})
+			local survivor = ServerReplicator.new({
+				Namespace = uniqueToken("QueuedIsolationSurvivor"),
+				Data = { y = 0 },
+				ReplicationTargets = { player },
+			})
+			;(doomed :: any)._Scope:Activate(player)
+			;(survivor :: any)._Scope:Activate(player)
+
+			doomed.Manager:Set("x", 1)
+			survivor.Manager:Set("y", 2)
+
+			local calls, restore = spyOnTransport()
+			doomed:Destroy() -- drops only its own queued op
+			;(ServerReplicator :: any)._FrameCoordinator:Flush()
+			restore()
+
+			-- One Destroy item for `doomed` plus one Ops message for `survivor`.
+			local sawSurvivorOps = false
+			for _, call in calls do
+				local item = call.Message.Items[1] :: any
+				if item.Op == FlatCodec.Op.Ops then
+					expect(item.Id).is(survivor.Id)
+					sawSurvivorOps = true
+				end
+			end
+			expect(sawSurvivorOps).is_true()
+			survivor:Destroy()
+		end)
+	end)
 end

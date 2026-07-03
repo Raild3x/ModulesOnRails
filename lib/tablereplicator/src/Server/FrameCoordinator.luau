@@ -307,12 +307,12 @@ function FrameCoordinator.DropReplicator(self: FrameCoordinator, replicatorId: I
 	self._coalesceSlots[replicatorId] = nil
 end
 
---[=[
+--[[
 	Assembles each active player's ordered run list from `entries` (already in
 	send order) and ships one message per player. Shared by `Flush` (whole
 	buffer) and `FlushReplicator` (one replicator's slice). Consecutive ops for
 	the same replicator collapse into one run (per-player adjacency).
-]=]
+]]
 const function sendEntries(self: FrameCoordinator, entries: { Entry })
 	const perPlayer: { [Player]: { OpRun } } = {}
 

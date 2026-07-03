@@ -676,7 +676,9 @@ function readValue(reader: Reader): any
 			components[index] = getF32(reader)
 		end
 
-		return CFrame.new(table.unpack(components) :: any)
+		-- Casting `table.unpack(...) :: any` would truncate the multi-return to a
+		-- single value, so cast the constructor instead of the argument list.
+		return (CFrame.new :: any)(table.unpack(components))
 	elseif tag == TAG_COLOR3 then
 		return Color3.new(getF32(reader), getF32(reader), getF32(reader))
 	elseif tag == TAG_TABLEREF8 then

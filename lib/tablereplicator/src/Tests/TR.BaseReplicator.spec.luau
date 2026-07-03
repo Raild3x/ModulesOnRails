@@ -145,7 +145,8 @@ return function(t: tiniest)
 
 		test("filters by token name string", function()
 			local token = uniqueToken("GetAllStringToken")
-			local replicator = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			local replicator =
+				ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
 
 			local results = BaseReplicator.GetAll(getTokenName(token))
 			expect(#results).is(1)
@@ -202,7 +203,8 @@ return function(t: tiniest)
 			local disconnect = BaseReplicator.ForEach(getTokenName(token), function(r)
 				table.insert(seen, r)
 			end)
-			local replicator = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			local replicator =
+				ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
 			expect(#seen).is(1)
 			expect(seen[1]).is(replicator)
 			disconnect()
@@ -216,7 +218,8 @@ return function(t: tiniest)
 				count += 1
 			end)
 			disconnect()
-			local replicator = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			local replicator =
+				ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
 			expect(count).is(0)
 			replicator:Destroy()
 		end)
@@ -269,7 +272,8 @@ return function(t: tiniest)
 		test("resolves once a future matching replicator is created", function()
 			local token = uniqueToken("PromiseFirstFuture")
 			local promise = BaseReplicator.PromiseFirst(getTokenName(token))
-			local replicator = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			local replicator =
+				ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
 			expect(promise:getStatus()).is("Resolved")
 			replicator:Destroy()
 		end)
@@ -323,7 +327,8 @@ return function(t: tiniest)
 		test("does not wait for a future match -- nil now even if one is created right after", function()
 			local token = uniqueToken("GetFirstNoWait")
 			expect(BaseReplicator.GetFirst(getTokenName(token))).is(nil)
-			local replicator = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			local replicator =
+				ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
 			replicator:Destroy()
 		end)
 	end)
@@ -338,7 +343,8 @@ return function(t: tiniest)
 				table.insert(seen, replicator)
 			end)
 
-			local replicator = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			local replicator =
+				ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
 
 			expect(#seen).is(1)
 			expect(seen[1]).is(replicator)
@@ -373,7 +379,8 @@ return function(t: tiniest)
 				countB += 1
 			end)
 
-			local replicator = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			local replicator =
+				ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
 			expect(countA).is(1)
 			expect(countB).is(1)
 
@@ -390,7 +397,8 @@ return function(t: tiniest)
 			end)
 			disconnect()
 
-			local replicator = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			local replicator =
+				ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
 			expect(count).is(0)
 			replicator:Destroy()
 		end)
@@ -457,7 +465,8 @@ return function(t: tiniest)
 			local disconnectGood = BaseReplicator.OnNew(getTokenName(token), function()
 				safeCount += 1
 			end)
-			local replicator = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			local replicator =
+				ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
 			-- task.spawn isolates each listener; the good one still fires
 			expect(safeCount).is(1)
 			disconnectBad()
@@ -482,7 +491,7 @@ return function(t: tiniest)
 	-- Every test here restores "immediate" before returning, since every other
 	-- describe block in this file depends on it.
 	describe("BaseReplicator.ListenerFireMode", function()
-		test("\"deferred\" mode defers ForEach/OnNew firing to the next resumption cycle", function()
+		test('"deferred" mode defers ForEach/OnNew firing to the next resumption cycle', function()
 			BaseReplicator.SetListenerFireMode("deferred")
 			local token = uniqueToken("FireModeDeferredFuture")
 			local forEachCount, onNewCount = 0, 0
@@ -493,7 +502,8 @@ return function(t: tiniest)
 				onNewCount += 1
 			end)
 
-			local replicator = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			local replicator =
+				ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
 			expect(forEachCount).is(0) -- nothing has run synchronously yet
 			expect(onNewCount).is(0)
 
@@ -507,7 +517,7 @@ return function(t: tiniest)
 			BaseReplicator.SetListenerFireMode("immediate")
 		end)
 
-		test("\"deferred\" mode also defers ForEach's already-existing-matches loop", function()
+		test('"deferred" mode also defers ForEach\'s already-existing-matches loop', function()
 			BaseReplicator.SetListenerFireMode("immediate")
 			local replicator = newTop("FireModeDeferredExisting")
 			BaseReplicator.SetListenerFireMode("deferred")
@@ -526,7 +536,7 @@ return function(t: tiniest)
 			BaseReplicator.SetListenerFireMode("immediate")
 		end)
 
-		test("\"bindable\" mode mirrors the current Workspace.SignalBehavior", function()
+		test('"bindable" mode mirrors the current Workspace.SignalBehavior', function()
 			BaseReplicator.SetListenerFireMode("bindable")
 			local token = uniqueToken("FireModeBindable")
 			local count = 0
@@ -534,7 +544,8 @@ return function(t: tiniest)
 				count += 1
 			end)
 
-			local replicator = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			local replicator =
+				ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
 			task.wait() -- covers both Immediate (already fired) and Deferred SignalBehavior
 			expect(count).is(1)
 
@@ -543,13 +554,32 @@ return function(t: tiniest)
 			BaseReplicator.SetListenerFireMode("immediate")
 		end)
 
-		test("\"immediate\" mode runs ForEach/OnNew synchronously", function()
+		test('"bindable" mode also applies to ForEach\'s already-existing-matches loop', function()
+			BaseReplicator.SetListenerFireMode("immediate")
+			local replicator = newTop("FireModeBindableExisting")
+			BaseReplicator.SetListenerFireMode("bindable")
+
+			local seen: { any } = {}
+			local disconnect = BaseReplicator.ForEach(replicator.Namespace, function(r)
+				table.insert(seen, r)
+			end)
+
+			task.wait() -- covers both Immediate (already fired) and Deferred SignalBehavior
+			expect(table.find(seen, replicator) ~= nil).is_true()
+
+			disconnect()
+			replicator:Destroy()
+			BaseReplicator.SetListenerFireMode("immediate")
+		end)
+
+		test('"immediate" mode runs ForEach/OnNew synchronously', function()
 			local token = uniqueToken("FireModeImmediate")
 			local count = 0
 			local disconnect = BaseReplicator.OnNew(getTokenName(token), function()
 				count += 1
 			end)
-			local replicator = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			local replicator =
+				ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
 			expect(count).is(1)
 			disconnect()
 			replicator:Destroy()
@@ -640,7 +670,8 @@ return function(t: tiniest)
 	describe("BaseReplicator.Namespace", function()
 		test("matches the registered token's name for a top-level replicator", function()
 			local token = uniqueToken("GetTokenNameTop")
-			local replicator = ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			local replicator =
+				ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
 			expect(replicator.Namespace).is(getTokenName(token))
 			replicator:Destroy()
 		end)
@@ -1335,6 +1366,102 @@ return function(t: tiniest)
 			expect(parent:GetChildren()[1]).is(childB)
 			childB:Destroy()
 			parent:Destroy()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("BaseReplicator.PromiseFromId", function()
+		test("resolves immediately for an already-existing id", function()
+			local replicator = newTop("PromiseFromIdExisting")
+			local promise = BaseReplicator.PromiseFromId(replicator.Id)
+			expect(promise:getStatus()).is("Resolved")
+			expect(promise:expect()).is(replicator)
+			replicator:Destroy()
+		end)
+
+		test("resolves once a replicator with that id is created later", function()
+			-- Wire-created client replicators carry an explicit id, so the id can
+			-- be known (and waited on) before the replicator exists.
+			local promise = BaseReplicator.PromiseFromId(60001)
+			expect(promise:getStatus()).is("Started")
+
+			;(ClientReplicator :: any)._HandleMessage(
+				FlatCodec.BuildMessage { FlatCodec.CreateItem(60001, nil, "PromiseFromIdFuture", {}, {}) }
+			)
+
+			expect(promise:getStatus()).is("Resolved")
+			expect((promise:expect() :: any).Id).is(60001)
+
+			;(ClientReplicator :: any)._HandleMessage(FlatCodec.BuildMessage { FlatCodec.DestroyItem(60001) })
+		end)
+
+		test("does not resolve for a different newly-created replicator", function()
+			local promise = BaseReplicator.PromiseFromId(60002)
+			local other = newTop("PromiseFromIdOther")
+			expect(promise:getStatus()).is("Started")
+			promise:cancel()
+			other:Destroy()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("BaseReplicator search-condition validation", function()
+		test("GetAll with an unsupported condition type errors", function()
+			expect(function()
+				BaseReplicator.GetAll(123 :: any)
+			end).fails()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("redundant wire SetParent (client-side)", function()
+		test("a SetParent item naming the current parent is a no-op", function()
+			-- The server guards its own SetParent calls, but a redundant item
+			-- arriving over the wire must not double-insert into child lists or
+			-- re-fire hierarchy signals.
+			(ClientReplicator :: any)._HandleMessage(FlatCodec.BuildMessage {
+				FlatCodec.CreateItem(60011, nil, "RedundantSetParentTop", {}, {}),
+				FlatCodec.CreateItem(60012, 60011, "RedundantSetParentChild", {}, {}),
+			})
+			local parent = BaseReplicator.GetFromId(60011) :: any
+			local child = BaseReplicator.GetFromId(60012) :: any
+			expect(child:GetParent()).is(parent)
+
+			local parentChangedFired = false
+			child.ParentChanged:Connect(function()
+				parentChangedFired = true
+			end)
+
+			;(ClientReplicator :: any)._HandleMessage(
+				FlatCodec.BuildMessage { FlatCodec.SetParentItem(60012, 60011) }
+			)
+
+			expect(parentChangedFired).is(false)
+			expect(child:GetParent()).is(parent)
+			expect(#parent:GetChildren()).is(1)
+
+			;(ClientReplicator :: any)._HandleMessage(FlatCodec.BuildMessage { FlatCodec.DestroyItem(60011) })
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("BaseReplicator.GetTokenName (deprecated)", function()
+		test("returns the namespace name for a named replicator", function()
+			local token = uniqueToken("DeprecatedGetTokenName")
+			local replicator =
+				ServerReplicator.new { Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} }
+			expect((replicator :: any):GetTokenName()).is(getTokenName(token))
+			replicator:Destroy()
+		end)
+
+		test("returns an empty string for an anonymous replicator", function()
+			local anonymous = ServerReplicator.new { Data = FakeManager.new(), ReplicationTargets = {} }
+			expect((anonymous :: any):GetTokenName()).is("")
+			anonymous:Destroy()
 		end)
 	end)
 end

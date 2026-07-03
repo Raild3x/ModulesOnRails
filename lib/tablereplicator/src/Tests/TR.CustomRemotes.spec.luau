@@ -977,4 +977,438 @@ return function(t: tiniest)
 			intermediary:Destroy()
 		end)
 	end)
+
+	--------------------------------------------------------------------------------
+	--// ServerCustomRemote.Fire (single-player) //--
+	--------------------------------------------------------------------------------
+
+	describe("ServerCustomRemote.Fire (single player)", function()
+		-- `Fire`'s happy path requires a real Player instance to get past its
+		-- typeof/IsA assert, and the sandboxed test thread can create none:
+		-- `Instance.new("Player")` needs the WritePlayer capability and
+		-- `Players:CreateLocalPlayer()` needs LocalUser. Only the validation
+		-- path is testable here; the active-player paths share their delivery
+		-- machinery with FireAll/FireExcept, which are covered above.
+		test("errors when given a non-Player value", function()
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("CR.Fire.NotPlayer"),
+				Data = {},
+				ReplicationTargets = {},
+			})
+			local remote = replicator:RegisterRemoteSignal("Hit") :: any
+			expect(function()
+				remote:Fire({ Name = "NotAnInstance" })
+			end).fails()
+			replicator:Destroy()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+	--// ServerCustomRemote.Wait //--
+	--------------------------------------------------------------------------------
+
+	describe("ServerCustomRemote.Wait", function()
+		test("resumes with (player, args) on the next inbound fire", function()
+			local player = { Name = "P" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("CR.Wait.Basic"),
+				Data = {},
+				ReplicationTargets = { player },
+			})
+			bootstrap(player)
+			local remote = replicator:RegisterRemoteSignal("Hit") :: any
+
+			local got: { any }? = nil
+			task.spawn(function()
+				got = table.pack(remote:Wait())
+			end)
+
+			;(ServerReplicator :: any)._Transport.SignalReceived:Fire(player, replicator.Id, "Hit", "payload")
+
+			expect(got).never_is(nil)
+			expect((got :: { any })[1]).is(player)
+			expect((got :: { any })[2]).is("payload")
+			replicator:Destroy()
+		end)
+
+		test("a predicate function skips non-matching fires", function()
+			local player = { Name = "P" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("CR.Wait.Predicate"),
+				Data = {},
+				ReplicationTargets = { player },
+			})
+			bootstrap(player)
+			local remote = replicator:RegisterRemoteSignal("Hit") :: any
+
+			local got: { any }? = nil
+			task.spawn(function()
+				got = table.pack(remote:Wait(function(_p, kind)
+					return kind == "wanted"
+				end))
+			end)
+
+			local signal: any = (ServerReplicator :: any)._Transport.SignalReceived
+			signal:Fire(player, replicator.Id, "Hit", "ignored")
+			expect(got).is(nil)
+			signal:Fire(player, replicator.Id, "Hit", "wanted")
+
+			expect(got).never_is(nil)
+			expect((got :: { any })[2]).is("wanted")
+			replicator:Destroy()
+		end)
+
+		test("a player target waits for that specific player's fire", function()
+			local playerA = { Name = "A" } :: any
+			local playerB = { Name = "B" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("CR.Wait.Player"),
+				Data = {},
+				ReplicationTargets = { playerA, playerB },
+			})
+			bootstrap(playerA)
+			bootstrap(playerB)
+			local remote = replicator:RegisterRemoteSignal("Hit") :: any
+
+			local got: { any }? = nil
+			task.spawn(function()
+				got = table.pack(remote:Wait(playerB))
+			end)
+
+			local signal: any = (ServerReplicator :: any)._Transport.SignalReceived
+			signal:Fire(playerA, replicator.Id, "Hit", "fromA")
+			expect(got).is(nil)
+			signal:Fire(playerB, replicator.Id, "Hit", "fromB")
+
+			expect(got).never_is(nil)
+			expect((got :: { any })[1]).is(playerB)
+			expect((got :: { any })[2]).is("fromB")
+			replicator:Destroy()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+	--// Ordered fires: audience edge cases + FirePredicate //--
+	--------------------------------------------------------------------------------
+
+	describe("Ordered fire audience edge cases", function()
+		test("ordered FireAll with no active players queues nothing", function()
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("OrdSig.FireAllNobody"),
+				Data = {},
+				ReplicationTargets = {},
+			})
+			replicator:RegisterOrderedRemoteSignal("Hit")
+			expect(function()
+				(replicator :: any).Client.Hit:FireAll("payload")
+				flush()
+			end).never_fails()
+			replicator:Destroy()
+		end)
+
+		test("ordered FireExcept excluding every active player queues nothing", function()
+			local player = { Name = "P" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("OrdSig.FireExceptEveryone"),
+				Data = {},
+				ReplicationTargets = {},
+			})
+			;(replicator :: any)._Scope:Activate(player)
+			replicator:RegisterOrderedRemoteSignal("Hit")
+			expect(function()
+				(replicator :: any).Client.Hit:FireExcept({ player })
+				flush()
+			end).never_fails()
+			replicator:Destroy()
+		end)
+
+		test("ordered FirePredicate reaches only matching clients (E2E)", function()
+			local intermediary = FakeIntermediary.new()
+			local clientA = intermediary:Connect()
+			local clientB = intermediary:Connect()
+
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("OrdSig.PredicateE2E"),
+				Data = {},
+				ReplicationTargets = { clientA.Player, clientB.Player },
+			})
+			replicator:RegisterOrderedRemoteSignal("Hit")
+			clientA:RequestData()
+			clientB:RequestData()
+
+			local mirroredA = clientA:GetFromId(replicator.Id) :: any
+			local mirroredB = clientB:GetFromId(replicator.Id) :: any
+			local firedA, firedB = false, false
+			mirroredA.Server.Hit:Connect(function()
+				firedA = true
+			end)
+			mirroredB.Server.Hit:Connect(function()
+				firedB = true
+			end)
+
+			;(replicator :: any).Client.Hit:FirePredicate(function(player)
+				return player == clientA.Player
+			end)
+			flush()
+
+			expect(firedA).is_true()
+			expect(firedB).is(false)
+
+			replicator:Destroy()
+			intermediary:Destroy()
+		end)
+
+		test("ordered FirePredicate matching nobody queues nothing", function()
+			local player = { Name = "P" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("OrdSig.PredicateNobody"),
+				Data = {},
+				ReplicationTargets = {},
+			})
+			;(replicator :: any)._Scope:Activate(player)
+			replicator:RegisterOrderedRemoteSignal("Hit")
+			expect(function()
+				(replicator :: any).Client.Hit:FirePredicate(function()
+					return false
+				end)
+				flush()
+			end).never_fails()
+			replicator:Destroy()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+	--// ClientCustomRemote (unit, stub transport) //--
+	--------------------------------------------------------------------------------
+
+	-- These construct ClientCustomRemote directly with a recording stub in place
+	-- of the real ClientTransport, exactly matching the `getTransport` seam the
+	-- Server proxy uses, so every client-side method can run without a live
+	-- RemoteEvent.
+	describe("ClientCustomRemote (stub transport)", function()
+		local function makeRemote(remoteType: string?, unreliable: boolean?)
+			local fired: { { Id: number, Name: string, Unreliable: boolean, Args: { any } } } = {}
+			local invoked: { { Id: number, Name: string, Args: { any } } } = {}
+			local stubTransport = {
+				FireSignal = function(_self, id, name, unrel, ...)
+					table.insert(fired, { Id = id, Name = name, Unreliable = unrel, Args = { ... } })
+				end,
+				InvokeFunction = function(_self, id, name, ...)
+					table.insert(invoked, { Id = id, Name = name, Args = { ... } })
+					return "result", 42
+				end,
+			}
+			local remote = ClientCustomRemote.new(
+				"TestRemote",
+				{ Id = 555 },
+				function()
+					return stubTransport :: any
+				end,
+				unreliable,
+				remoteType
+			)
+			return remote :: any, fired, invoked
+		end
+
+		test("IsUnreliable reflects the unreliable flag and the Unreliable remote type", function()
+			local reliable = makeRemote("Signal")
+			expect(reliable:IsUnreliable()).is(false)
+			local viaFlag = makeRemote("Signal", true)
+			expect(viaFlag:IsUnreliable()).is(true)
+			local viaType = makeRemote("Unreliable")
+			expect(viaType:IsUnreliable()).is(true)
+			reliable:Destroy()
+			viaFlag:Destroy()
+			viaType:Destroy()
+		end)
+
+		test("Fire sends id/name/args through the transport", function()
+			local remote, fired = makeRemote("Signal")
+			remote:Fire("damage", 10)
+			expect(#fired).is(1)
+			expect(fired[1].Id).is(555)
+			expect(fired[1].Name).is("TestRemote")
+			expect(fired[1].Unreliable).is(false)
+			expect(fired[1].Args[1]).is("damage")
+			expect(fired[1].Args[2]).is(10)
+			remote:Destroy()
+		end)
+
+		test("Fire on a Function-type remote warns but still sends", function()
+			local remote, fired = makeRemote("Function")
+			remote:Fire("x") -- emits the use-Invoke-instead warning
+			expect(#fired).is(1)
+			remote:Destroy()
+		end)
+
+		test("FireUnreliable forces unreliable delivery even on a reliable remote", function()
+			local remote, fired = makeRemote("Signal")
+			remote:FireUnreliable("fast")
+			expect(#fired).is(1)
+			expect(fired[1].Unreliable).is(true)
+			expect(fired[1].Args[1]).is("fast")
+			remote:Destroy()
+		end)
+
+		test("Invoke forwards args and returns the transport's results", function()
+			local remote, _fired, invoked = makeRemote("Function")
+			local a, b = remote:Invoke("question", 1)
+			expect(a).is("result")
+			expect(b).is(42)
+			expect(#invoked).is(1)
+			expect(invoked[1].Id).is(555)
+			expect(invoked[1].Name).is("TestRemote")
+			expect(invoked[1].Args[1]).is("question")
+			expect(invoked[1].Args[2]).is(1)
+			remote:Destroy()
+		end)
+
+		test("Invoke on a Signal-type remote warns but still invokes", function()
+			local remote, _fired, invoked = makeRemote("Signal")
+			remote:Invoke() -- emits the use-Connect-instead warning
+			expect(#invoked).is(1)
+			remote:Destroy()
+		end)
+
+		test("Fire on an OrderedFunction-type remote warns but still sends", function()
+			local remote, fired = makeRemote("OrderedFunction")
+			remote:Fire()
+			expect(#fired).is(1)
+			remote:Destroy()
+		end)
+
+		test("Invoke on Unreliable- and OrderedSignal-type remotes warns but still invokes", function()
+			local unreliable, _f1, invoked1 = makeRemote("Unreliable")
+			unreliable:Invoke()
+			expect(#invoked1).is(1)
+			unreliable:Destroy()
+
+			local ordered, _f2, invoked2 = makeRemote("OrderedSignal")
+			ordered:Invoke()
+			expect(#invoked2).is(1)
+			ordered:Destroy()
+		end)
+
+		test("InvokeAsync fires the ordered-call sentinel and resolves via _ResolveInvocation", function()
+			local remote, fired = makeRemote("OrderedFunction")
+			local promise = remote:InvokeAsync("alpha", 2)
+
+			expect(#fired).is(1)
+			expect(fired[1].Unreliable).is(false)
+			expect(fired[1].Args[1]).is(OFNCALL)
+			local corrId = fired[1].Args[2] :: number
+			expect(type(corrId)).is("number")
+			expect(fired[1].Args[3]).is("alpha")
+			expect(fired[1].Args[4]).is(2)
+			expect(promise:getStatus()).is("Started")
+
+			ClientCustomRemote._ResolveInvocation(corrId, { "answer", 7 })
+
+			expect(promise:getStatus()).is("Resolved")
+			local a, b = promise:expect()
+			expect(a).is("answer")
+			expect(b).is(7)
+			remote:Destroy()
+		end)
+
+		test("InvokeAsync rejects when the transport fire throws", function()
+			local remote = ClientCustomRemote.new("Broken", { Id = 1 }, function()
+				return {
+					FireSignal = function()
+						error("transport down")
+					end,
+				} :: any
+			end, nil, "OrderedFunction") :: any
+			local promise = remote:InvokeAsync()
+			promise:catch(function() end)
+			expect(promise:getStatus()).is("Rejected")
+			remote:Destroy()
+		end)
+
+		test("_ResolveInvocation with an unknown correlation id is a no-op", function()
+			expect(function()
+				ClientCustomRemote._ResolveInvocation(999999999, {})
+			end).never_fails()
+		end)
+
+		test("Connect receives server-side fires via _FireClient", function()
+			local remote = makeRemote("Signal")
+			local got: { any }? = nil
+			remote:Connect(function(...)
+				got = { ... }
+			end)
+			remote:_FireClient("ping", 5)
+			expect(got).never_is(nil)
+			expect((got :: { any })[1]).is("ping")
+			expect((got :: { any })[2]).is(5)
+			remote:Destroy()
+		end)
+
+		test("Once disconnects after the first fire", function()
+			local remote = makeRemote("Signal")
+			local count = 0
+			remote:Once(function()
+				count += 1
+			end)
+			remote:_FireClient()
+			remote:_FireClient()
+			expect(count).is(1)
+			remote:Destroy()
+		end)
+
+		test("Wait resumes with the fired args", function()
+			local remote = makeRemote("Signal")
+			local got: { any }? = nil
+			task.spawn(function()
+				got = table.pack(remote:Wait())
+			end)
+			remote:_FireClient("resumed")
+			expect(got).never_is(nil)
+			expect((got :: { any })[1]).is("resumed")
+			remote:Destroy()
+		end)
+
+		test("Destroy tears the remote down; methods stop working", function()
+			local remote = makeRemote("Signal")
+			remote:Destroy()
+			expect(function()
+				remote:IsUnreliable()
+			end).fails()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+	--// Late registration: REMOTE_META type push //--
+	--------------------------------------------------------------------------------
+
+	describe("late remote registration (REMOTE_META push)", function()
+		test("a remote registered after bootstrap updates the client's cached remote type", function()
+			local intermediary = FakeIntermediary.new()
+			local client = intermediary:Connect()
+
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("CR.LateMeta"),
+				Data = {},
+				ReplicationTargets = { client.Player },
+			})
+			client:RequestData()
+
+			-- Touch the remote BEFORE the server registers it, so the proxy caches
+			-- a ClientCustomRemote with an unknown type...
+			local mirrored = client:GetFromId(replicator.Id) :: any
+			local cached = mirrored.Server.Fast
+			expect(cached:IsUnreliable()).is(false)
+
+			-- ...then the late registration pushes REMOTE_META, which must retype
+			-- the already-cached remote in place. sendRemoteMeta ships directly
+			-- (not through the frame buffer), so no flush is needed.
+			replicator:RegisterRemoteUnreliableSignal("Fast")
+
+			expect(cached:IsUnreliable()).is(true)
+			expect(mirrored._RemoteTypes.Fast).is("Unreliable")
+
+			replicator:Destroy()
+			intermediary:Destroy()
+		end)
+	end)
 end
