@@ -386,6 +386,12 @@ export type TM_Internal<T = { [any]: any }> = TableManager<T> & {
 	_sharesObservers: boolean?,
 	_janitor: Janitor,
 
+	-- Set to true by `Destroy` before it strips the metatable. `Propagation`
+	-- (observer walks) and `CoalescedFlush` gate on it so a destroyed manager
+	-- lingering in the weak observer registry is skipped rather than having its
+	-- now-missing methods called.
+	_Destroyed: boolean?,
+
 	_appliedListeners: { (op: AppliedOp) -> () },
 	_destroyListeners: { () -> () },
 

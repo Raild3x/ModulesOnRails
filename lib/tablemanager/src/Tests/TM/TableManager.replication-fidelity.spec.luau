@@ -856,7 +856,7 @@ return function(t: tiniest)
 					local harness = ReplicationHarness.new({ player = { health = 100 } }, feedMode)
 					harness:Connect()
 
-					(harness.Source.Raw :: any).player.health = 50
+					harness.Source.Raw.player.health = 50
 					harness.Source:Flush("player.health")
 
 					expect(harness:IsConverged()).is_true()
@@ -968,10 +968,10 @@ return function(t: tiniest)
 		local TableManager = require("../../TableManager")
 
 		test("a write with no local listeners ships the raw value -- no diff was produced", function()
-			local manager = TableManager.new({ player = { stats = { str = 5, dex = 3 } } })
+			local manager = TableManager.new { player = { stats = { str = 5, dex = 3 } } }
 
 			local ops = {}
-			local appliedConn = manager:OnApplied(function(op)
+			local disconnectApplied = manager:OnApplied(function(op)
 				table.insert(ops, op)
 			end)
 
@@ -981,32 +981,35 @@ return function(t: tiniest)
 			expect(ops[1].Diff).is(nil)
 			expect(ops[1].NewValue).is(9)
 
-			appliedConn:Disconnect()
+			disconnectApplied()
 			manager:Destroy()
 		end)
 
-		test("a ProvideDiff opt-in on one path rides a delta there while an unwatched sibling stays on the value-shipping fast path", function()
-			local manager = TableManager.new({ a = { x = 1 }, b = { y = 1 } })
+		test(
+			"a ProvideDiff opt-in on one path rides a delta there while an unwatched sibling stays on the value-shipping fast path",
+			function()
+				local manager = TableManager.new { a = { x = 1 }, b = { y = 1 } }
 
-			local ops = {}
-			local appliedConn = manager:OnApplied(function(op)
-				table.insert(ops, op)
-			end)
-			local watchConn = manager:OnChange({ "a", "x" }, function() end, { ProvideDiff = true })
+				local ops = {}
+				local disconnectApplied = manager:OnApplied(function(op)
+					table.insert(ops, op)
+				end)
+				local watchConn = manager:OnChange({ "a", "x" }, function() end, { ProvideDiff = true })
 
-			manager.Proxy.a.x = 2
-			manager.Proxy.b.y = 2
+				manager.Proxy.a.x = 2
+				manager.Proxy.b.y = 2
 
-			expect(#ops).is(2)
-			expect(ops[1].Diff).never_is(nil)
-			expect(ops[1].Diff.new).is(2)
-			expect(ops[2].Diff).is(nil)
-			expect(ops[2].NewValue).is(2)
+				expect(#ops).is(2)
+				expect(ops[1].Diff).never_is(nil)
+				expect(ops[1].Diff.new).is(2)
+				expect(ops[2].Diff).is(nil)
+				expect(ops[2].NewValue).is(2)
 
-			watchConn:Disconnect()
-			appliedConn:Disconnect()
-			manager:Destroy()
-		end)
+				watchConn:Disconnect()
+				disconnectApplied()
+				manager:Destroy()
+			end
+		)
 	end)
 
 	describe("echo order (signals feed)", function()

@@ -1258,7 +1258,11 @@ function TableManager.PromiseValue<T, S>(self: TM_Internal<T>, path: Path<S>, pr
 	const parsedPath = PathHelpers.ParsePath(path)
 	const prom = Promise.new(function(resolve, reject, onCancel)
 		local connection: Connection
-		connection = self:Observe(parsedPath, function(newValue)
+		-- `OnValueChange` (not `Observe`) so we only settle on an actual change:
+		-- `Observe` fires the initial callback synchronously with the CURRENT value
+		-- before `connection` is assigned, which both crashes (`connection` is nil)
+		-- and contradicts the documented "resolves when the value first changes".
+		connection = self:OnValueChange(parsedPath, function(newValue)
 			if predicate == nil or predicate(newValue) then
 				connection:Disconnect()
 				resolve(newValue)
@@ -1313,6 +1317,14 @@ end
 	Destroy the TableManager and clean up all resources.
 ]=]
 function TableManager.Destroy<T>(self: TM_Internal<T>)
+	-- Flag as destroyed up front so any propagation/flush that re-enters during
+	-- teardown treats this manager as gone. `Propagation.isTMDestroyed` and
+	-- `CoalescedFlush` both gate on `_Destroyed`, and after the `setmetatable(self, nil)`
+	-- below the method table is gone -- an observer walk (e.g. a survivor's
+	-- `GetLinkedManagers`) that still finds this manager in the weak registry
+	-- would otherwise call `:Get` on a methodless table and error.
+	self._Destroyed = true
+
 	for _, callback in self._destroyListeners or {} do
 		callback()
 	end

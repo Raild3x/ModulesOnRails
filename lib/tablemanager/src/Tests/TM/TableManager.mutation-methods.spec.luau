@@ -314,4 +314,125 @@ return function(t: tiniest)
 			manager:Destroy()
 		end)
 	end)
+
+	describe("Method: Update", function()
+		test("passes the old value to the updater and stores its return", function()
+			local manager = TableManager.new {
+				player = { health = 100 },
+			}
+
+			local seenOld = nil
+			local returned = manager:Update({ "player", "health" }, function(old)
+				seenOld = old
+				return old + 5
+			end)
+
+			expect(seenOld).is(100)
+			expect(returned).is(105)
+			expect(manager:Get({ "player", "health" })).is(105)
+
+			manager:Destroy()
+		end)
+
+		test("fires ValueChanged for the updated path", function()
+			local manager = TableManager.new {
+				score = 1,
+			}
+
+			local fired = 0
+			manager:OnValueChange("score", function()
+				fired += 1
+			end)
+
+			manager:Update("score", function(old)
+				return old * 10
+			end)
+
+			expect(fired).is(1)
+			expect(manager:Get("score")).is(10)
+
+			manager:Destroy()
+		end)
+	end)
+
+	describe("Method: Increment", function()
+		test("adds the delta and returns the new value", function()
+			local manager = TableManager.new {
+				player = { coins = 10 },
+			}
+
+			local returned = manager:Increment({ "player", "coins" }, 5)
+
+			expect(returned).is(15)
+			expect(manager:Get({ "player", "coins" })).is(15)
+
+			manager:Destroy()
+		end)
+
+		test("supports negative deltas", function()
+			local manager = TableManager.new { coins = 10 }
+
+			expect(manager:Increment("coins", -4)).is(6)
+			expect(manager:Get("coins")).is(6)
+
+			manager:Destroy()
+		end)
+	end)
+
+	describe("Method: UpdateKey", function()
+		test("updates the value at path[key] via the updater", function()
+			local manager = TableManager.new {
+				inventory = { apples = 3 },
+			}
+
+			local returned = manager:UpdateKey({ "inventory" }, "apples", function(old)
+				return old + 2
+			end)
+
+			expect(returned).is(5)
+			expect(manager:Get({ "inventory", "apples" })).is(5)
+
+			manager:Destroy()
+		end)
+
+		test("ArrayUpdate is an alias for UpdateKey", function()
+			local manager = TableManager.new {
+				list = { 10, 20, 30 },
+			}
+
+			manager:ArrayUpdate({ "list" }, 2, function(old)
+				return old + 5
+			end)
+
+			expect(manager:Get({ "list", 2 })).is(25)
+
+			manager:Destroy()
+		end)
+	end)
+
+	describe("Method: IncrementKey", function()
+		test("adds the delta at path[key] and returns the new value", function()
+			local manager = TableManager.new {
+				stats = { xp = 100 },
+			}
+
+			local returned = manager:IncrementKey({ "stats" }, "xp", 50)
+
+			expect(returned).is(150)
+			expect(manager:Get({ "stats", "xp" })).is(150)
+
+			manager:Destroy()
+		end)
+
+		test("ArrayIncrement is an alias for IncrementKey", function()
+			local manager = TableManager.new {
+				list = { 1, 2, 3 },
+			}
+
+			expect(manager:ArrayIncrement({ "list" }, 3, 7)).is(10)
+			expect(manager:Get({ "list", 3 })).is(10)
+
+			manager:Destroy()
+		end)
+	end)
 end

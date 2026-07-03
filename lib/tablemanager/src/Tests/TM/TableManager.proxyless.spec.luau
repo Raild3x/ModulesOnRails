@@ -216,7 +216,7 @@ return function(t: tiniest)
 			local manager = TableManager.new({ player = { health = 100 } }, { EnableProxies = false })
 
 			local ops = {}
-			local conn = manager:OnApplied(function(op)
+			local disconnect = manager:OnApplied(function(op)
 				table.insert(ops, op)
 			end)
 
@@ -224,7 +224,7 @@ return function(t: tiniest)
 			expect(#ops).is(1)
 			expect(ops[1].Kind).is("Set")
 
-			conn:Disconnect()
+			disconnect()
 			manager:Destroy()
 		end)
 
