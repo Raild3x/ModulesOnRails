@@ -60,6 +60,15 @@ type FlagSpec = {
 	apply: (value: string?) -> (),
 }
 
+local function parseNumberFlag(usage: string, value: string?): number
+	local n = value and tonumber(value)
+	if n == nil then
+		print(("Invalid value for %s: expected a number, got %s"):format(usage, value or "<none>"))
+		process.exit(1)
+	end
+	return n :: number
+end
+
 local FLAGS: { FlagSpec } = {
 	{
 		match = "--json",
@@ -121,7 +130,7 @@ local FLAGS: { FlagSpec } = {
 		description = "Cap the number of mutants run (deterministic sampling spread across files). Default: run every mutant on a covered line.",
 		takesValue = true,
 		apply = function(value)
-			options.mutateLimit = tonumber(value)
+			options.mutateLimit = parseNumberFlag("--mutate-limit=<n>", value)
 		end,
 	},
 	{
@@ -139,7 +148,7 @@ local FLAGS: { FlagSpec } = {
 		description = "Per-mutant suite timeout; a hung mutant is killed and counted as detected. Default: 3x the baseline suite duration (min 5s).",
 		takesValue = true,
 		apply = function(value)
-			options.mutateTimeout = tonumber(value)
+			options.mutateTimeout = parseNumberFlag("--mutate-timeout=<sec>", value)
 		end,
 	},
 	{
@@ -166,7 +175,7 @@ local FLAGS: { FlagSpec } = {
 		description = "Maximum seconds to let the test run execute before aborting. Defaults to no timeout.",
 		takesValue = true,
 		apply = function(value)
-			options.timeout = tonumber(value)
+			options.timeout = parseNumberFlag("--timeout=<sec>", value)
 		end,
 	},
 	{
