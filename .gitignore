@@ -3,15 +3,6 @@
 *.rbxl.lock
 *.pyc
 
-src/baseobject/*
-!src/baseobject/baseobject
-
-src/tablemanager/*
-
-
-src/tablereplicator/*
-!src/tablereplicator/tablereplicator
-
 lib/*/*
 !lib/*/src
 !lib/*/README.md
@@ -22,7 +13,14 @@ last_tested_package.txt
 **/build
 **/sourcemap.json
 
+# Coverage system work dir + Rust build artifacts
+.coverage/
+tools/coverage/engine/target/
+Cargo.lock
+
 !**/wally.toml
 !**/default.project.json
 !**/README.md
 node_modules
+
+**/__pycache__

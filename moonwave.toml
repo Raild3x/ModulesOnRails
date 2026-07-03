@@ -1,5 +1,9 @@
 gitSourceBranch = "main"
 
+apiCategories = [
+	"Static",
+]
+
 [docusaurus]
 url = "https://raild3x.github.io"
 baseUrl = "/ModulesOnRails"
@@ -17,7 +21,18 @@ classes = ["TableManager"]
 
 [[classOrder]]
 section = "TableReplicator"
-classes = ["TableReplicator", "ServerTableReplicator", "ClientTableReplicator", "TableReplicatorSingleton", "BaseTableReplicator"]
+classes = ["TableReplicator", "ServerReplicator", "ClientReplicator"]
+
+[[classOrder.items]]
+section = "[Guides]"
+classes = [
+	"TR Getting Started",
+	"TR Discovery & Targeting",
+	"TR Namespaces & Tokens",
+	"TR Parent-Child Guide",
+	"TR Custom Remotes",
+	"TR Performance & Ordering",
+]
 
 [[classOrder]]
 section = "NetWire"

@@ -1,141 +1,187 @@
 --!strict
--- Authors: Logan Hunt [Raildex]
--- February 21, 2023
 --[=[
-    @class ClientCustomRemote
-    @client
-    @unreleased
-    @ignore
+	@class ClientCustomRemote
+	@client
+	@ignore
 
-    Serves as a middleware for handling RemoteObject RemoteEvents.
-
-    This class is not intended for end user usage. It is used internally by the TableReplicator class.
+	The client-side mirror of a `ServerCustomRemote`. Lazily created on first
+	access via `replicator.Server.MySignal`. Fires to the server and receives
+	fires from the server (both via direct RemoteEvent and via the ordered ops
+	buffer).
 ]=]
 
---[[
-    [API]
-    .new(index: string, replicator: TableReplicator, isUnreliable: boolean?)
-    :Destroy()
-    :Fire(player: Player, ...any)
-    :FireAll(...any)
-    :FireExcept(ignoredPlayers: Player | {Player}, ...any)
-    :FirePredicate(predicate: (plr: Player, T...) -> boolean, ...: T...)
-    :Connect(fn: (...any) -> ()) -> Connection
-    :Wait(predicate: (Player | Predicate)?) -> (Player, ...any)
-]]
+const Types = require("../Shared/Types")
+const Signal = Types.Signal
+const Promise = Types.Promise
+const Protocol = require("../Shared/Transport/Protocol")
+
+const ClientTransportModule = require("../Shared/Transport/ClientTransport")
+type ClientTransport = ClientTransportModule.ClientTransport
+
+type Connection = Types.Connection
+type GetTransport = () -> ClientTransport
 
 
---// Requires //--
-local Packages = script.Parent.Parent.Parent
-local Signal = require(Packages.Signal)
-local Symbol = require(Packages.Symbol)
-local NetWire = require(Packages.NetWire)
+-- Module-level map of correlation-ID → resolve callback for in-flight
+-- InvokeAsync calls. The correlation ID is a monotonically incrementing number;
+-- because client Lua is single-threaded, there are no races on `_nextCorrId`.
+local _pendingInvocations: { [number]: (results: { any }) -> () } = {}
+local _nextCorrId = 0
 
-local KEY_NAME = Symbol("Name")
-local KEY_REPLICATOR = Symbol("Replicator")
-local KEY_INBOUND_EVENT = Symbol("InboundEvent")
-local KEY_IS_UNRELIABLE = Symbol("IsUnreliable")
-
-type Connection = any
-
---------------------------------------------------------------------------------
-    --// Class //--
---------------------------------------------------------------------------------
-
+-- Exposed so ClientReplicator can resolve pending invocations when an ordered
+-- function response arrives via the ops buffer.
 local ClientCustomRemote = {}
 ClientCustomRemote.__index = ClientCustomRemote
-ClientCustomRemote.__call = function(remote, serverTbl, ...)
-    local args
-    if serverTbl == remote[KEY_REPLICATOR].Server then
-        args = {...}
-    else
-        args = {serverTbl, ...}
-    end
-    local CTR = remote[KEY_REPLICATOR]
-    local name = remote[KEY_NAME]
-    local wire = NetWire.Client("TableReplicator")
-    return wire:RedirectFunction(CTR:GetServerId(), name, table.unpack(args))
+ClientCustomRemote._ORDERED_FN_RESPONSE = Protocol.ORDERED_FN_RESPONSE
+
+export type ClientCustomRemote = typeof(setmetatable(
+	{} :: {
+		_Name: string,
+		_Replicator: any,
+		_GetTransport: GetTransport,
+		_Inbound: any,
+		_Unreliable: boolean,
+		_RemoteType: string?,
+	},
+	ClientCustomRemote
+))
+
+function ClientCustomRemote.new(name: string, replicator: any, getTransport: GetTransport, unreliable: boolean?, remoteType: string?): ClientCustomRemote
+	local self = setmetatable({}, ClientCustomRemote) :: ClientCustomRemote
+	self._Name = name
+	self._Replicator = replicator
+	self._GetTransport = getTransport
+	self._Inbound = Signal.new()
+	self._Unreliable = unreliable == true or remoteType == "Unreliable"
+	self._RemoteType = remoteType
+	return self
 end
 
-function ClientCustomRemote.new(remoteName: string, replicator: any, isUnreliable: boolean?)
-    local self = setmetatable({}, ClientCustomRemote)
-    self[KEY_NAME] = remoteName
-    self[KEY_REPLICATOR] = replicator
-    self[KEY_INBOUND_EVENT] = Signal.new()
-    self[KEY_IS_UNRELIABLE] = isUnreliable
-    return self
+local function warnSignalOnFunction(self: ClientCustomRemote, method: string)
+	if self._RemoteType == "Function" or self._RemoteType == "OrderedFunction" then
+		warn(`ClientCustomRemote: '{self._Name}' is registered as a {self._RemoteType} on the server — use Invoke() or InvokeAsync() instead of {method}()`)
+	end
 end
 
-function ClientCustomRemote:Destroy()
-    self[KEY_INBOUND_EVENT]:Destroy()
-    self[KEY_INBOUND_EVENT] = nil
-    self[KEY_REPLICATOR] = nil
-    self[KEY_NAME] = nil
-    setmetatable(self, nil)
+local function warnFunctionOnSignal(self: ClientCustomRemote, method: string)
+	local t = self._RemoteType
+	if t == "Signal" or t == "Unreliable" or t == "OrderedSignal" then
+		warn(`ClientCustomRemote: '{self._Name}' is registered as a {t} on the server — use Connect() instead of {method}()`)
+	end
 end
 
---[=[
-    @private
-]=]
-function ClientCustomRemote:_FireClient(...: any)
-    self[KEY_INBOUND_EVENT]:Fire(...)
-end
-
---[=[
-    Fires to the server
-]=]
-function ClientCustomRemote:Fire(...: any)
-    local ReplicatorWire = NetWire.Client("TableReplicator")
-
-    local id, name = self[KEY_REPLICATOR]:GetServerId(), self[KEY_NAME]
-    if self:IsUnreliable() then
-        ReplicatorWire.NetworkUnreliableEvent:Fire(id, name, ...)
-    else
-        ReplicatorWire.NetworkEvent:Fire(id, name, ...)
-    end
+function ClientCustomRemote.Destroy(self: ClientCustomRemote)
+	self._Inbound:Destroy()
+	setmetatable(self :: any, nil)
 end
 
 --[=[
-    Fires this as an unreliable event to the server
+	Returns whether this signal uses unreliable delivery.
 ]=]
-function ClientCustomRemote:FireUnreliable(...: any)
-    local ReplicatorWire = NetWire.Client("TableReplicator")
+function ClientCustomRemote.IsUnreliable(self: ClientCustomRemote): boolean
+	return self._Unreliable
+end
 
-    --assert(self[KEY_IS_UNRELIABLE], "This remote is not unreliable")
-    local id, name = self[KEY_REPLICATOR]:GetServerId(), self[KEY_NAME]
-    ReplicatorWire.NetworkUnreliableEvent:Fire(id, name, ...)
+-- Called by ClientReplicator when the server fires this signal (either via the
+-- direct RemoteEvent or via the ordered ops buffer).
+function ClientCustomRemote._FireClient(self: ClientCustomRemote, ...: any)
+	self._Inbound:Fire(...)
+end
+
+-- Called by ClientReplicator when an ordered function response arrives via the
+-- ops buffer. `corrId` identifies the pending InvokeAsync call to resolve.
+function ClientCustomRemote._ResolveInvocation(corrId: number, results: { any })
+	local resolve = _pendingInvocations[corrId]
+	if resolve then
+		_pendingInvocations[corrId] = nil
+		resolve(results)
+	end
 end
 
 --[=[
-    @ignore
-    Returns whether or not this remote is unreliable
+	Fires this signal to the server.
 ]=]
-function ClientCustomRemote:IsUnreliable(): boolean
-    return self[KEY_IS_UNRELIABLE] == true
+function ClientCustomRemote.Fire(self: ClientCustomRemote, ...: any)
+	warnSignalOnFunction(self, "Fire")
+	self._GetTransport():FireSignal(self._Replicator.Id, self._Name, self._Unreliable, ...)
 end
 
 --[=[
-    Connects to the event and waits for the server to fire to the client
+	Fires this signal to the server using unreliable delivery, regardless of how
+	the remote was originally registered.
 ]=]
-function ClientCustomRemote:Connect(callback: (...any) -> ()): Connection
-    return self[KEY_INBOUND_EVENT]:Connect(callback)
+function ClientCustomRemote.FireUnreliable(self: ClientCustomRemote, ...: any)
+	warnSignalOnFunction(self, "FireUnreliable")
+	self._GetTransport():FireSignal(self._Replicator.Id, self._Name, true, ...)
 end
 
 --[=[
-    Connects to the event and waits for the server to fire to the client
-    one time and then disconnects
+	Invokes the matching server-side **unordered** function and returns the
+	result. Yields until the server's `OnServerInvoke` returns.
+	Use `InvokeAsync` for ordered functions registered with
+	`RegisterOrderedRemoteFunction`.
 ]=]
-function ClientCustomRemote:Once(callback: (...any) -> ()): Connection
-    return self[KEY_INBOUND_EVENT]:Once(callback)
+function ClientCustomRemote.Invoke(self: ClientCustomRemote, ...: any): ...any
+	warnFunctionOnSignal(self, "Invoke")
+	return self._GetTransport():InvokeFunction(self._Replicator.Id, self._Name, ...)
 end
 
 --[=[
-    Waits for any or a specified client to fire to the server
+	Invokes the matching server-side **ordered** function and returns a Promise
+	that resolves with the function's return values. The response arrives
+	through the ops buffer so it is guaranteed to come after any data ops the
+	server enqueued in the same frame.
+
+	Use this with functions registered via `RegisterOrderedRemoteFunction`.
 ]=]
-function ClientCustomRemote:Wait(): (...any)
-    return self[KEY_INBOUND_EVENT]:Wait()
+function ClientCustomRemote.InvokeAsync(self: ClientCustomRemote, ...: any): Types.Promise<...any>
+	warnFunctionOnSignal(self, "InvokeAsync")
+	local args = { ... }
+	return Promise.new(function(resolve, reject)
+		_nextCorrId += 1
+		local corrId = _nextCorrId
+		_pendingInvocations[corrId] = function(results: { any })
+			resolve(table.unpack(results))
+		end
+		local ok, err = pcall(function()
+			self._GetTransport():FireSignal(
+				self._Replicator.Id,
+				self._Name,
+				false,
+				Protocol.ORDERED_FN_CALL,
+				corrId,
+				table.unpack(args)
+			)
+		end)
+		if not ok then
+			_pendingInvocations[corrId] = nil
+			reject(err)
+		end
+	end) :: any
 end
 
-export type ClientCustomRemote = typeof(ClientCustomRemote.new("Test", nil, false))
+--[=[
+	Connects a callback that fires whenever the server fires this signal.
+]=]
+function ClientCustomRemote.Connect(self: ClientCustomRemote, callback: (...any) -> ()): Connection
+	warnSignalOnFunction(self, "Connect")
+	return self._Inbound:Connect(callback)
+end
+
+--[=[
+	Like `Connect` but disconnects automatically after the first fire.
+]=]
+function ClientCustomRemote.Once(self: ClientCustomRemote, callback: (...any) -> ()): Connection
+	warnSignalOnFunction(self, "Once")
+	return self._Inbound:Once(callback)
+end
+
+--[=[
+	Yields until the server fires this signal.
+]=]
+function ClientCustomRemote.Wait(self: ClientCustomRemote): ...any
+	warnSignalOnFunction(self, "Wait")
+	return self._Inbound:Wait()
+end
 
 return ClientCustomRemote
