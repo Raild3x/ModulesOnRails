@@ -103,17 +103,25 @@ return function(t: tiniest)
 		end)
 	end)
 
-	describe("Method: IsDestroyed", function()
+	describe("Static: IsDestroyed", function()
 		test("reports false while alive and true after Destroy", function()
 			local manager = TableManager.new { x = 1 }
 
-			-- `Destroy` strips the metatable, so the method is not callable via `:`
-			-- afterwards; capture the function reference up front to probe both states.
-			local isDestroyed = manager.IsDestroyed
-
-			expect(isDestroyed(manager)).never_is_true()
+			expect(TableManager.IsDestroyed(manager)).never_is_true()
 			manager:Destroy()
-			expect(isDestroyed(manager)).is_true()
+			expect(TableManager.IsDestroyed(manager)).is_true()
+		end)
+
+		test("the colon form errors once destroyed, unlike the static form", function()
+			-- `Destroy` strips the instance's metatable, so `manager:IsDestroyed()`
+			-- has no method table left to resolve through -- this is exactly why
+			-- `TableManager.IsDestroyed(manager)` is the documented preferred form.
+			local manager = TableManager.new { x = 1 }
+			manager:Destroy()
+
+			expect(function()
+				(manager :: any):IsDestroyed()
+			end).fails()
 		end)
 	end)
 

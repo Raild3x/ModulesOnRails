@@ -327,6 +327,7 @@ end
 
 --[=[
 	@within TableManager
+	@tag Static
 	@function new
 
 	Creates a new TableManager instance.
@@ -404,6 +405,9 @@ end
 --------------------------------------------------------------------------------
 
 --[=[
+	@within TableManager
+	@method Get
+
 	Reads the value at `path`. The path may be a dot-string (`"player.health"`)
 	or a path array (`{ "player", "health" }`); an empty path returns the root
 	table.
@@ -441,6 +445,9 @@ function TableManager.Get<T, S>(self: TM_Internal<T>, path: Path<S>, suppressNil
 end
 
 --[=[
+	@within TableManager
+	@method GetProxy
+
 	Returns a live [Proxy] for the table at `path`, or the raw value when `path`
 	resolves to a non-table. Reads through the proxy see live data, and writes
 	through it route back into the manager exactly as [TableManager:Set] would.
@@ -484,13 +491,20 @@ function TableManager.GetProxy<T, S>(
 end
 
 --[=[
-	Set the value at a path.
+	@within TableManager
+	@method Set
+
+	Writes `value` at `path`, firing the events for whatever changed.
 
 	An empty path (`Set({}, newTable)` / `Set("", newTable)`) replaces the entire
 	root table: its identity is swapped to `newTable`, stale proxies of the old
 	tree are pruned, and root/child change listeners fire for the diff. The new
 	root must be a table (the root cannot become a scalar or `nil`), and the root
 	cannot be replaced while a batch is open.
+
+	@param path Path
+	@param value any -- The value to write. May be wrapped with [TableManager.Opaque] or similar.
+	@param buildTablesDynamically boolean? -- When `true`, missing intermediate tables along `path` are created rather than erroring.
 ]=]
 function TableManager.Set<T, S>(
 	self: TM_Internal<T>,
@@ -554,6 +568,9 @@ function TableManager.Set<T, S>(
 end
 
 --[=[
+	@within TableManager
+	@method Update
+
 	Reads the value at `path`, passes it through `updater`, and writes the result
 	back. Equivalent to a [TableManager:Get] followed by [TableManager:Set], so it
 	fires the same change events as a plain `Set`.
@@ -577,6 +594,9 @@ function TableManager.Update<T, S>(self: TM_Internal<T>, path: Path<S>, updater:
 end
 
 --[=[
+	@within TableManager
+	@method Increment
+
 	Adds `delta` to the number at `path` and writes the result back. Shorthand for
 	an [TableManager:Update] that returns `oldValue + delta`; errors if the current
 	value is not addable.
@@ -598,6 +618,9 @@ function TableManager.Increment<T, S>(self: TM_Internal<T>, path: Path<S>, delta
 end
 
 --[=[
+	@within TableManager
+	@method ArrayInsert
+
 	Inserts a value into the array at `pathOrProxy`. Two call shapes:
 
 	- `ArrayInsert(path, value)` -- appends `value` to the end.
@@ -659,6 +682,9 @@ end
 TableManager.Insert = TableManager.ArrayInsert
 
 --[=[
+	@within TableManager
+	@method ArrayRemove
+
 	Removes the element at `index` from the array at `pathOrProxy`, shifting the
 	following elements one slot to the left. Fires `ArrayRemoved` (and ancestor
 	change events) at the remove path.
@@ -696,6 +722,9 @@ end
 TableManager.Remove = TableManager.ArrayRemove
 
 --[=[
+	@within TableManager
+	@method ArrayRemoveFirstValue
+
 	Finds the first element equal to `valueToFind` and removes it via
 	[TableManager:ArrayRemove].
 
@@ -719,6 +748,9 @@ end
 TableManager.RemoveFirstValue = TableManager.ArrayRemoveFirstValue
 
 --[=[
+	@within TableManager
+	@method ArraySwapRemove
+
 	Removes the element at `index` in O(1) by moving the last element into its
 	slot, instead of shifting every following element. **Order is not preserved.**
 
@@ -774,6 +806,9 @@ end
 TableManager.SwapRemove = TableManager.ArraySwapRemove
 
 --[=[
+	@within TableManager
+	@method ArraySwapRemoveFirstValue
+
 	Finds the first element equal to `valueToFind` and removes it via
 	[TableManager:ArraySwapRemove] (O(1), order not preserved).
 
@@ -801,6 +836,9 @@ end
 TableManager.SwapRemoveFirstValue = TableManager.ArraySwapRemoveFirstValue
 
 --[=[
+	@within TableManager
+	@method UpdateKey
+
 	Like [TableManager:Update], but for the child `key` under `path` -- it updates
 	the value at `path` extended by `key`. Handy for a single dictionary entry or
 	array index without building the combined path yourself.
@@ -828,6 +866,9 @@ end
 TableManager.ArrayUpdate = TableManager.UpdateKey
 
 --[=[
+	@within TableManager
+	@method IncrementKey
+
 	Like [TableManager:Increment], but for the child `key` under `path` -- it adds
 	`delta` to the value at `path` extended by `key`.
 
@@ -850,6 +891,10 @@ end
 TableManager.ArrayIncrement = TableManager.IncrementKey
 
 --[=[
+	@within TableManager
+	@method Batch
+	@param fn () -> ()
+
 	Holds off firing signals for the duration of the callback, then fires needed signals at the end.
 	Useful for batch operations where you want to suppress intermediate signals and only fire final results.
 
@@ -875,6 +920,9 @@ function TableManager.Batch(self: TM_Internal, fn: () -> ())
 end
 
 --[=[
+	@within TableManager
+	@method Suspend
+
 	Suspends all signal and listener firing.
 
 	It is recommended to use `:Batch` for better ergonomics and safety,
@@ -887,6 +935,9 @@ function TableManager.Suspend(self: TM_Internal)
 end
 
 --[=[
+	@within TableManager
+	@method Resume
+
 	Resumes after `Suspend()` and flushes all pending changes.
 
 	Flush is a single array-aware pass: per dirty branch, `CheckForChangesBetween`
@@ -925,6 +976,10 @@ function TableManager._doFlush<T>(self: TM_Internal<T>, path: PathArray, forceFu
 end
 
 --[=[
+	@within TableManager
+	@method Flush
+	@param path Path? -- The subtree to flush; the whole tree when omitted.
+
 	Diffs the persistent shadow baseline against the live value at `path`
 	(the whole tree when omitted), fires any resulting events, then
 	reconciles the shadow to the current live value. A no-op when nothing
@@ -959,6 +1014,11 @@ function TableManager.Flush<T, S>(self: TM_Internal<T>, path: Path<S>?)
 end
 
 --[=[
+	@within TableManager
+	@method MoveTo
+	@param currentPath Path | Proxy
+	@param newPath Path | Proxy
+
 	Move an element from one location to another within the same table.
 	This unsets the value at the current path and sets it at the new path, firing appropriate notifications.
 	This is specifically useful for moving tables around without breaking proxy references.
@@ -1010,6 +1070,11 @@ function TableManager.MoveTo<T, S1, S2>(
 end
 
 --[=[
+	@within TableManager
+	@method CopyTo
+	@param currentPath Path | Proxy
+	@param newPath Path
+
 	DeepCopy a value from one location to another within the same table.
 	This sets the value at the new path to be the same as the value at the current path, firing appropriate notifications.
 	This is specifically useful for copying tables around without breaking proxy references.
@@ -1039,6 +1104,9 @@ function TableManager.CopyTo<T, S1, S2>(self: TM_Internal<T>, currentPath: Path<
 end
 
 --[=[
+	@within TableManager
+	@method Swap
+
 	Swaps the values at paths `a` and `b` within this manager. The swap is applied
 	as a single batched pair of writes, and proxy references are preserved across
 	the move. If either write fails the reparenting is rolled back so neither path
@@ -1101,6 +1169,13 @@ end
 --------------------------------------------------------------------------------
 
 --[=[
+	@within TableManager
+	@method OnValueChange
+	@param path Path
+	@param callback (newValue: any, oldValue: any?, metadata: ChangeMetadata) -> ()
+	@param options ListenerOptions?
+	@return Connection
+
 	Fires ONLY when this exact path is directly reassigned (not when a
 	descendant of it changes). Shorthand for `OnChange` with
 	`ListenDepth = 0, ListenDepthStyle = "=="`.
@@ -1118,6 +1193,13 @@ function TableManager.OnValueChange<T, S>(
 end
 
 --[=[
+	@within TableManager
+	@method OnChange
+	@param path Path
+	@param callback (newValue: any, oldValue: any?, metadata: ChangeMetadata) -> ()
+	@param options ListenerOptions?
+	@return Connection
+
 	Fires when this path is directly reassigned OR any descendant of it
 	changes.
 ]=]
@@ -1131,6 +1213,13 @@ function TableManager.OnChange<T, S>(
 end
 
 --[=[
+	@within TableManager
+	@method Observe
+	@param path Path
+	@param callback (newValue: any, oldValue: any?, metadata: ChangeMetadata?) -> ()
+	@param options ListenerOptions?
+	@return Connection
+
 	Immediately invokes `callback` with the current value at `path`
 	(`oldValue` and `metadata` both `nil`), then behaves like
 	`OnValueChange` for subsequent changes.
@@ -1158,6 +1247,9 @@ function TableManager.Observe<T, S>(
 end
 
 --[=[
+	@within TableManager
+	@method OnKeyAdd
+
 	Fires when a new key appears in the table at `path` (a key that did not exist
 	before is assigned a non-nil value).
 
@@ -1182,6 +1274,9 @@ function TableManager.OnKeyAdd<T, S>(
 end
 
 --[=[
+	@within TableManager
+	@method OnKeyRemove
+
 	Fires when a key is removed from the table at `path` (an existing key is set to
 	`nil`).
 
@@ -1206,6 +1301,9 @@ function TableManager.OnKeyRemove<T, S>(
 end
 
 --[=[
+	@within TableManager
+	@method OnKeyChange
+
 	Fires when an existing key in the table at `path` is reassigned to a different
 	value (not added or removed -- see [TableManager:OnKeyAdd] /
 	[TableManager:OnKeyRemove] for those).
@@ -1225,6 +1323,9 @@ function TableManager.OnKeyChange<T, S>(
 end
 
 --[=[
+	@within TableManager
+	@method OnArrayInsert
+
 	Fires when an element is inserted into the array at `path`, reporting the index
 	it landed at. Driven by array-aware diffing, so it reflects true insertions with
 	replay-faithful indices rather than a blanket "the array changed".
@@ -1244,6 +1345,9 @@ function TableManager.OnArrayInsert<T, S>(
 end
 
 --[=[
+	@within TableManager
+	@method OnArrayRemove
+
 	Fires when an element is removed from the array at `path`, reporting the index
 	it was removed from and its old value.
 
@@ -1262,6 +1366,9 @@ function TableManager.OnArrayRemove<T, S>(
 end
 
 --[=[
+	@within TableManager
+	@method OnArraySet
+
 	Fires when an existing array slot at `path` is overwritten in place (its index
 	kept, its value replaced), reporting the index, new value, and old value.
 
@@ -1350,7 +1457,10 @@ end
 
 --[=[
 	@within TableManager
+	@method Extend
 	@unreleased
+	@param target Proxy | Path
+	@return TableManager
 
 	Returns a plain `TableManager` rooted at the shared table found at `target`,
 	linked (via `Link`) to this manager so writes on either side fan out to the
@@ -1403,6 +1513,9 @@ end
 
 --[=[
 	@within TableManager
+	@method GetLinkedManagers
+	@return { TableManager }
+
 	Returns the other managers currently sharing (co-observing) at least one
 	live table identity with this one — de-duplicated, excluding self.
 ]=]
@@ -1412,6 +1525,10 @@ end
 
 --[=[
 	@within TableManager
+	@method IsLinkedWith
+	@param other TableManager
+	@return boolean
+
 	Returns true if this manager currently shares a live table identity with `other`.
 ]=]
 function TableManager.IsLinkedWith<T>(self: TM_Internal<T>, other: TableManager<any>): boolean
@@ -1423,6 +1540,13 @@ end
 --------------------------------------------------------------------------------
 
 --[=[
+	@within TableManager
+	@method ForKeys
+	@param path Path
+	@param handler (itemJanitor: Janitor, key: any, metadata: ChangeMetadata?) -> ()
+	@param options ForOptions?
+	@return Connection
+
 	Reconciles the items found at `path` by KEY: `handler` runs once per key
 	(passed a per-item Janitor, the key, and change metadata — `nil` on the
 	initial fire), and is NOT re-run when the value at an existing key
@@ -1442,6 +1566,13 @@ function TableManager.ForKeys<T, S>(
 end
 
 --[=[
+	@within TableManager
+	@method ForValues
+	@param path Path
+	@param handler (itemJanitor: Janitor, value: any, metadata: ChangeMetadata?) -> ()
+	@param options ForOptions?
+	@return Connection
+
 	Reconciles the items found at `path` by VALUE (as a multiset — duplicate
 	values are tracked as independent items): `handler` runs once per value
 	occurrence and is NOT re-run when that value moves between keys/indices
@@ -1459,6 +1590,13 @@ function TableManager.ForValues<T, S>(
 end
 
 --[=[
+	@within TableManager
+	@method ForPairs
+	@param path Path
+	@param handler (itemJanitor: Janitor, key: any, value: any, metadata: ChangeMetadata?) -> ()
+	@param options ForOptions?
+	@return Connection
+
 	Reconciles the items found at `path` by KEY AND VALUE: `handler` re-runs
 	(tearing down the previous item's Janitor first) whenever EITHER the key
 	or the value changes — a value change at an existing key is treated as
@@ -1481,7 +1619,12 @@ end
 
 --[=[
 	@within TableManager
+	@method MapKeys
 	@unreleased
+	@param path Path
+	@param transform (entryJanitor: Janitor, key: any, value: any) -> any
+	@return TableManager
+
 	Returns a live `TableManager` keyed by `transform(entryJanitor, key, value)`,
 	with values passed through unchanged. `transform` re-runs only when the
 	source key is added/removed; a value change at an existing key refreshes
@@ -1509,7 +1652,12 @@ end
 
 --[=[
 	@within TableManager
+	@method MapValues
 	@unreleased
+	@param path Path
+	@param transform (entryJanitor: Janitor, value: any, key: any) -> any
+	@return TableManager
+
 	Returns a live `TableManager` keyed by the SOURCE key, with each entry
 	recomputed via `transform(entryJanitor, value, key)` whenever its value
 	changes. Same ownership/lifecycle rules as `MapKeys`.
@@ -1543,7 +1691,12 @@ end
 
 --[=[
 	@within TableManager
+	@method MapPairs
 	@unreleased
+	@param path Path
+	@param transform (entryJanitor: Janitor, key: any, value: any) -> (any, any)
+	@return TableManager
+
 	Returns a live `TableManager` keyed by `transform(entryJanitor, key, value)`'s
 	first return value (the second is the output value); the entry is
 	recomputed whenever the source key or value changes. On an output-key
@@ -1570,7 +1723,12 @@ end
 --------------------------------------------------------------------------------
 
 --[=[
+	@within TableManager
+	@method SetPathIgnored
 	@unreleased
+	@param path Path
+	@param ignored boolean
+
 	Marks `path` (and every descendant of it) as ignored or not. An ignored
 	write still happens — `Get`/`Raw` reflect it immediately — but skips all
 	diff/snapshot/event work, so it never fires listeners/signals and is never
@@ -1583,7 +1741,12 @@ end
 
 --[=[
 	@within TableManager
+	@method PromiseValue
 	@unreleased
+	@param path Path
+	@param predicate ((value: any?) -> boolean)?
+	@return Promise
+
 	Returns a promise that resolves when the value at `path` satisfies `predicate`.
 	If no predicate is provided, resolves when the value at `path` first changes.
 ]=]
@@ -1638,7 +1801,11 @@ end
 
 --[=[
 	@within TableManager
-	Runs a callback when the TableManager is destroyed. 
+	@method OnDestroy
+	@param callback () -> ()
+	@return () -> () -- Call to unsubscribe.
+
+	Runs a callback when the TableManager is destroyed.
 	Useful for cleaning up resources that are tied to the lifetime of the TableManager.
 ]=]
 function TableManager.OnDestroy<T>(self: TM_Internal<T>, callback: () -> ()): () -> ()
@@ -1647,6 +1814,9 @@ function TableManager.OnDestroy<T>(self: TM_Internal<T>, callback: () -> ()): ()
 end
 
 --[=[
+	@within TableManager
+	@method Destroy
+
 	Destroy the TableManager and clean up all resources.
 ]=]
 function TableManager.Destroy<T>(self: TM_Internal<T>)
@@ -1699,13 +1869,29 @@ function TableManager.Destroy<T>(self: TM_Internal<T>)
 end
 
 --[=[
-	Returns `true` once [TableManager:Destroy] has run on this instance, `false`
+	@within TableManager
+	@tag Static
+	@function IsDestroyed
+	@param manager TableManager
+	@return boolean
+
+	Returns `true` once [TableManager:Destroy] has run on `manager`, `false`
 	otherwise. Pairs with [TableManager:OnDestroy] for teardown-time checks.
 
-	@return boolean
+	:::caution Call this as `TableManager.IsDestroyed(manager)`, not `manager:IsDestroyed()`
+	`Destroy` strips the instance's metatable, so a colon call (`manager:IsDestroyed()`)
+	errors ("attempt to call a nil value") once the manager is already destroyed
+	-- there is no longer a method table to resolve `IsDestroyed` through. Calling
+	it as a static function on `TableManager` looks it up directly and works in
+	both states, which is the whole point of a "was this destroyed?" check.
+	:::
+
+	```lua
+	TableManager.IsDestroyed(manager) -- safe before AND after manager:Destroy()
+	```
 ]=]
-function TableManager.IsDestroyed(self: TM_Internal): boolean
-	return getmetatable(self) == nil
+function TableManager.IsDestroyed(manager: TM_Internal): boolean
+	return getmetatable(manager) == nil
 end
 
 -- Opacity wrapper constructors (see OpaqueRegistry): mark a value (or a
@@ -1723,7 +1909,7 @@ end
 	never cloned, frozen, or walked by the diff engine -- only identity-compared.
 	The wrapper is unwrapped at write time, so the stored value is the bare inner
 	value. Useful for large immutable blobs or foreign objects you don't want the
-	diff engine to traverse. See the Schema Validation & Opaque Tables guide.
+	diff engine to traverse. See the Opaque Values guide.
 ]=]
 TableManager.Opaque = OpaqueRegistryModule.Opaque
 

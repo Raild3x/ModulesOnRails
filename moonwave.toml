@@ -17,7 +17,21 @@ classes = ["BaseObject"]
 classes = ["Roam"]
 
 [[classOrder]]
+section = "TableManager"
 classes = ["TableManager"]
+
+[[classOrder.items]]
+section = "[Guides]"
+classes = [
+	"TM Getting Started",
+	"TM Listeners & Fire Modes",
+	"TM Flushing",
+	"TM Batching",
+	"TM Proxies & Direct Table Access",
+	"TM Schema Validation",
+	"TM Opaque Values",
+	"TM For & Map Reactive Views",
+]
 
 [[classOrder]]
 section = "TableReplicator"
