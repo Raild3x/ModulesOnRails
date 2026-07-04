@@ -41,32 +41,54 @@ export type Proxy<T, S> = ProxyManagerModule.Proxy<T, S>
 -- at write time; the literal value stored at the path is always the bare inner.
 export type OpaqueWrapper<T> = OpaqueRegistryModule.Wrapper<T>
 
--- "allow" (default): a table written to a second location is a SUPPORTED
--- multi-location reference, not an error — both paths share identity, and the
--- write fires its own independent change events at the new path. The proxy
--- graph still reports a single "primary" anchor (whichever path established
--- the value's proxy first; see `ProxyManager._originalToProxy`). "copy": opt
--- OUT of sharing for this write by deep-cloning the value first, so the new
--- path gets its own, independent identity instead.
+--[=[
+	@within TableManager
+	@type DuplicateReferenceMode "allow" | "copy"
+	Controls what happens when the same table is written to more than one path.
+
+	- `"allow"` (default): the table becomes a SUPPORTED multi-location reference,
+	  not an error -- both paths share identity, and the write fires its own
+	  independent change events at the new path. The proxy graph still reports a
+	  single "primary" anchor (whichever path established the value's proxy first).
+	- `"copy"`: opt OUT of sharing for this write by deep-cloning the value first,
+	  so the new path gets its own independent identity instead.
+]=]
 export type DuplicateReferenceMode = "allow" | "copy"
 
--- Re-export of `ListenerRegistry.FireMode` for config-surface convenience.
+--[=[
+	@within TableManager
+	@type ListenerFireMode "immediate" | "deferred" | "bindable" | "coalesced"
+	How listener callbacks (`OnChange`, `OnValueChange`, `Observe`, `OnKey*`,
+	`OnArray*`, `For*`) are scheduled when they fire.
+
+	- `"immediate"`: run now via the free-thread pool, like a signal in immediate mode.
+	- `"deferred"`: run via `task.defer`, like a signal in deferred mode.
+	- `"bindable"`: mirror the engine's actual `Enum.SignalBehavior`, resolved once at construction time.
+	- `"coalesced"`: like `"deferred"`, but repeated fires of the SAME listener before the deferred flush collapse into one call carrying the latest event data.
+]=]
 export type ListenerFireMode = ListenerRegistryModule.FireMode
 
--- Controls how the per-change Signals (`ValueChanged`, `KeyAdded`, etc.) are
--- dispatched. Defined here rather than in the `Signal` package itself since
--- it's a TableManager-level dispatch policy, not a native `Signal` method:
--- "Immediate"/"Deferred"/"Bindable" map onto `Signal:Fire`/`:FireDeferred`/
--- `:FireBindable`; "Coalesced" is implemented in `Emitter.luau` by wrapping
--- `:Fire` (see `Emitter.fireSignal`).
+--[=[
+	@within TableManager
+	@type SignalFireMode "immediate" | "deferred" | "bindable" | "coalesced"
+	How the per-change Signals (`ValueChanged`, `KeyAdded`, etc.) are dispatched.
+	`"immediate"`/`"deferred"`/`"bindable"` map onto `Signal:Fire`/`:FireDeferred`/
+	`:FireBindable`; `"coalesced"` is implemented in `Emitter.luau` by wrapping
+	`:Fire` so repeated fires within a frame collapse into one carrying the latest
+	values.
+]=]
 export type SignalFireMode = "immediate" | "deferred" | "bindable" | "coalesced"
 
--- Controls WHEN `_doFlush` (the shadow diff + fire + reconcile cycle) runs for
--- a direct write. "immediate" runs it synchronously.
--- "coalesced" defers it to frame-end (`task.defer`) and merges every flush
--- request made before then into one flush at their common ancestor path, so a
--- frame with N writes under one subtree costs one diff/fire instead of N. See
--- `CoalescedFlush.luau`.
+--[=[
+	@within TableManager
+	@type FlushMode "immediate" | "coalesced"
+	Controls WHEN the diff-and-fire cycle runs for a direct write.
+
+	- `"immediate"` (default): runs synchronously with the write.
+	- `"coalesced"`: defers it to frame-end and merges every flush request made
+	  before then into one flush at their common ancestor path, so a frame with N
+	  writes under one subtree costs one diff/fire instead of N.
+]=]
 export type FlushMode = "immediate" | "coalesced"
 
 --------------------------------------------------------------------------------

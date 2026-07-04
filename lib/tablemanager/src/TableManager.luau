@@ -404,7 +404,22 @@ end
 --------------------------------------------------------------------------------
 
 --[=[
-	Get the value at a path.
+	Reads the value at `path`. The path may be a dot-string (`"player.health"`)
+	or a path array (`{ "player", "health" }`); an empty path returns the root
+	table.
+
+	By default this errors if an intermediate segment is not a table (e.g. reading
+	`"a.b"` when `a` is a number). Pass `suppressNilPartialPaths = true` to return
+	`nil` in that case instead.
+
+	@param path Path
+	@param suppressNilPartialPaths boolean? -- Return `nil` instead of erroring when a segment along the path is not a table.
+	@return any -- The value at `path`.
+
+	```lua
+	manager:Get("player.health")        -- dot-string path
+	manager:Get({ "player", "health" }) -- array path (equivalent)
+	```
 ]=]
 function TableManager.Get<T, S>(self: TM_Internal<T>, path: Path<S>, suppressNilPartialPaths: boolean?): ValueAtPath<T, S>?
 	debug.profilebegin("TM.Get")
@@ -426,8 +441,18 @@ function TableManager.Get<T, S>(self: TM_Internal<T>, path: Path<S>, suppressNil
 end
 
 --[=[
-	Gets a Proxy for the table at the given path, or the raw value if the path
-	doesn't point to a table.
+	Returns a live [Proxy] for the table at `path`, or the raw value when `path`
+	resolves to a non-table. Reads through the proxy see live data, and writes
+	through it route back into the manager exactly as [TableManager:Set] would.
+
+	:::caution
+	Errors if this manager was created with `Config.EnableProxies = false` -- there
+	is no proxy graph to hand out. See the Proxies & Direct Table Access guide.
+	:::
+
+	@param path Path
+	@param suppressNilPartialPaths boolean? -- Return `nil` instead of erroring when a segment along the path is not a table.
+	@return Proxy | any -- A proxy for the table at `path`, or the raw value if it is not a table.
 ]=]
 function TableManager.GetProxy<T, S>(
 	self: TM_Internal<T>,
@@ -529,8 +554,19 @@ function TableManager.Set<T, S>(
 end
 
 --[=[
-	Update a value at a path using an updater function.
-	The updater function receives the old value and should return the new value.
+	Reads the value at `path`, passes it through `updater`, and writes the result
+	back. Equivalent to a [TableManager:Get] followed by [TableManager:Set], so it
+	fires the same change events as a plain `Set`.
+
+	@param path Path
+	@param updater (oldValue: any) -> any -- Receives the current value; returns the new value.
+	@return any -- The new value that was written.
+
+	```lua
+	manager:Update("coins", function(current)
+		return current * 2
+	end)
+	```
 ]=]
 function TableManager.Update<T, S>(self: TM_Internal<T>, path: Path<S>, updater: (oldValue: ValueAtPath<T, S>) -> ValueAtPath<T, S>): ValueAtPath<T, S>
 	-- TODO: update this to be more efficient at updating by reducing the need to traverse the path twice
@@ -541,7 +577,17 @@ function TableManager.Update<T, S>(self: TM_Internal<T>, path: Path<S>, updater:
 end
 
 --[=[
-	Increment a value at a path by a delta.
+	Adds `delta` to the number at `path` and writes the result back. Shorthand for
+	an [TableManager:Update] that returns `oldValue + delta`; errors if the current
+	value is not addable.
+
+	@param path Path
+	@param delta any -- The amount to add (any value supporting `+` with the current value).
+	@return any -- The new value that was written.
+
+	```lua
+	manager:Increment("coins", 50)  -- coins += 50
+	```
 ]=]
 function TableManager.Increment<T, S>(self: TM_Internal<T>, path: Path<S>, delta: any): any
 	-- TODO: update this to be more efficient at updating by reducing the need to traverse the path twice
@@ -552,7 +598,24 @@ function TableManager.Increment<T, S>(self: TM_Internal<T>, path: Path<S>, delta
 end
 
 --[=[
-	Insert value(s) into an array at a specific position or at the end.
+	Inserts a value into the array at `pathOrProxy`. Two call shapes:
+
+	- `ArrayInsert(path, value)` -- appends `value` to the end.
+	- `ArrayInsert(path, index, value)` -- inserts `value` at `index`, shifting
+	  the existing elements at and after `index` one slot to the right.
+
+	Fires `ArrayInserted` (and ancestor change events) for the affected index.
+	`pathOrProxy` may be a path or a [Proxy] of the array.
+
+	*Aliased as `Insert`.*
+
+	@param pathOrProxy Path | Proxy
+	@param ... any -- Either `value`, or `index, value`.
+
+	```lua
+	manager:ArrayInsert("items", "sword")   -- append
+	manager:ArrayInsert("items", 1, "shield") -- insert at index 1
+	```
 ]=]
 function TableManager.ArrayInsert<T, S>(self: TM_Internal<T>, pathOrProxy: Path<S> | Proxy<T, S>, ...: any): ()
 	debug.profilebegin("TM.ArrayInsert")
@@ -596,7 +659,15 @@ end
 TableManager.Insert = TableManager.ArrayInsert
 
 --[=[
-	Remove an element from an array at a specific index.
+	Removes the element at `index` from the array at `pathOrProxy`, shifting the
+	following elements one slot to the left. Fires `ArrayRemoved` (and ancestor
+	change events) at the remove path.
+
+	*Aliased as `Remove`.*
+
+	@param pathOrProxy Path | Proxy
+	@param index number -- 1-based index of the element to remove.
+	@return any -- The removed element.
 ]=]
 function TableManager.ArrayRemove<T, S>(self: TM_Internal<T>, pathOrProxy: Path<S> | Proxy<T, S>, index: number): any
 	debug.profilebegin("TM.ArrayRemove")
@@ -625,8 +696,14 @@ end
 TableManager.Remove = TableManager.ArrayRemove
 
 --[=[
-	Remove the first matching value from an array.
-	Returns the index it was removed from, or nil if not found.
+	Finds the first element equal to `valueToFind` and removes it via
+	[TableManager:ArrayRemove].
+
+	*Aliased as `RemoveFirstValue`.*
+
+	@param pathOrProxy Path
+	@param valueToFind any -- The value to search for (compared by equality).
+	@return number? -- The index it was removed from, or `nil` if not found.
 ]=]
 function TableManager.ArrayRemoveFirstValue<T, S>(self: TM_Internal<T>, pathOrProxy: Path<S>, valueToFind: any): number?
 	local parsedPath, array = resolveArrayForWrite(self, pathOrProxy)
@@ -642,8 +719,19 @@ end
 TableManager.RemoveFirstValue = TableManager.ArrayRemoveFirstValue
 
 --[=[
-	Remove an array element in O(1) by swapping in the last element.
-	Order is not preserved.
+	Removes the element at `index` in O(1) by moving the last element into its
+	slot, instead of shifting every following element. **Order is not preserved.**
+
+	Because the last element backfills the hole, this emits two events rather than
+	one: an `ArraySet` at `index` (the backfill) followed by an `ArrayRemoved` at
+	the old last index (the shrink). When `index` is already the last element, only
+	the `ArrayRemoved` fires.
+
+	*Aliased as `SwapRemove`.*
+
+	@param pathOrProxy Path | Proxy
+	@param index number -- 1-based index of the element to remove.
+	@return any -- The removed element, or `nil` if `index` is out of range.
 ]=]
 function TableManager.ArraySwapRemove<T, S>(self: TM_Internal<T>, pathOrProxy: Path<S> | Proxy<T, S>, index: number): any
 	local parsedPath, array = resolveArrayForWrite(self, pathOrProxy)
@@ -686,8 +774,14 @@ end
 TableManager.SwapRemove = TableManager.ArraySwapRemove
 
 --[=[
-	Find and swap-remove the first matching value in an array.
-	Returns the removed index, or nil if not found.
+	Finds the first element equal to `valueToFind` and removes it via
+	[TableManager:ArraySwapRemove] (O(1), order not preserved).
+
+	*Aliased as `SwapRemoveFirstValue`.*
+
+	@param pathOrProxy Path | Proxy
+	@param valueToFind any -- The value to search for (compared by equality).
+	@return number? -- The index it was removed from, or `nil` if not found.
 ]=]
 function TableManager.ArraySwapRemoveFirstValue<T, S>(
 	self: TM_Internal<T>,
@@ -707,8 +801,20 @@ end
 TableManager.SwapRemoveFirstValue = TableManager.ArraySwapRemoveFirstValue
 
 --[=[
-	Update a value at a path using an updater function.
-	The updater function receives the old value and should return the new value.
+	Like [TableManager:Update], but for the child `key` under `path` -- it updates
+	the value at `path` extended by `key`. Handy for a single dictionary entry or
+	array index without building the combined path yourself.
+
+	*Aliased as `ArrayUpdate`.*
+
+	@param path Path
+	@param key any -- The child key/index under `path` to update.
+	@param updater (oldValue: any) -> any -- Receives the current value; returns the new value.
+	@return any -- The new value that was written.
+
+	```lua
+	manager:UpdateKey("inventory", "gold", function(n) return n + 10 end)
+	```
 ]=]
 function TableManager.UpdateKey<T, S>(self: TM_Internal<T>, path: Path<S>, key: any, updater: (oldValue: ElementAtPath<T, S>) -> ElementAtPath<T, S>): ElementAtPath<T, S>
 	-- TODO: update this to be more efficient at updating by reducing the need to traverse the path twice
@@ -722,7 +828,15 @@ end
 TableManager.ArrayUpdate = TableManager.UpdateKey
 
 --[=[
-	Increment a value at a path by a delta.
+	Like [TableManager:Increment], but for the child `key` under `path` -- it adds
+	`delta` to the value at `path` extended by `key`.
+
+	*Aliased as `ArrayIncrement`.*
+
+	@param path Path
+	@param key any -- The child key/index under `path` to increment.
+	@param delta any -- The amount to add.
+	@return any -- The new value that was written.
 ]=]
 function TableManager.IncrementKey<T, S>(self: TM_Internal<T>, path: Path<S>, key: any, delta: ElementAtPath<T, S>): ElementAtPath<T, S>
 	-- TODO: update this to be more efficient at updating by reducing the need to traverse the path twice
@@ -925,7 +1039,21 @@ function TableManager.CopyTo<T, S1, S2>(self: TM_Internal<T>, currentPath: Path<
 end
 
 --[=[
-	Swap values at two paths within the same TM.
+	Swaps the values at paths `a` and `b` within this manager. The swap is applied
+	as a single batched pair of writes, and proxy references are preserved across
+	the move. If either write fails the reparenting is rolled back so neither path
+	is left in a partial state.
+
+	Either argument may be a path or a [Proxy]. Errors if a path is the root or if
+	one path is an ancestor/descendant of the other (an overlapping swap is not
+	well-defined).
+
+	@param a Path | Proxy
+	@param b Path | Proxy
+
+	```lua
+	manager:Swap("slots.1", "slots.2")
+	```
 ]=]
 function TableManager.Swap<T, S1, S2>(self: TM_Internal<T>, a: Path<S1> | Proxy<T, S1>, b: Path<S2> | Proxy<T, S2>)
 	const pathA = resolvePathFromPathOrProxy(self, a)
@@ -1029,24 +1157,64 @@ function TableManager.Observe<T, S>(
 	return self._listenerRegistry:RegisterListener("ValueChanged", parsedPath, callback, options)
 end
 
+--[=[
+	Fires when a new key appears in the table at `path` (a key that did not exist
+	before is assigned a non-nil value).
+
+	@param path Path
+	@param callback (key: any, newValue: any, metadata: ChangeMetadata) -> ()
+	@param options ListenerOptions?
+	@return Connection
+
+	```lua
+	manager:OnKeyAdd("inventory", function(key, newValue)
+		print(`gained {key} = {newValue}`)
+	end)
+	```
+]=]
 function TableManager.OnKeyAdd<T, S>(
 	self: TM_Internal<T>,
 	path: Path<S>,
-	callback: (newValue: any, metadata: ChangeMetadata) -> (),
+	callback: (key: any, newValue: any, metadata: ChangeMetadata) -> (),
 	options: ListenerOptions?
 ): Connection
 	return self._listenerRegistry:RegisterListener("KeyAdded", PathHelpers.ParsePath(path), callback, options)
 end
 
+--[=[
+	Fires when a key is removed from the table at `path` (an existing key is set to
+	`nil`).
+
+	@param path Path
+	@param callback (key: any, oldValue: any, metadata: ChangeMetadata) -> ()
+	@param options ListenerOptions?
+	@return Connection
+
+	```lua
+	manager:OnKeyRemove("inventory", function(key, oldValue)
+		print(`lost {key} (was {oldValue})`)
+	end)
+	```
+]=]
 function TableManager.OnKeyRemove<T, S>(
 	self: TM_Internal<T>,
 	path: Path<S>,
-	callback: (oldValue: any, metadata: ChangeMetadata) -> (),
+	callback: (key: any, oldValue: any, metadata: ChangeMetadata) -> (),
 	options: ListenerOptions?
 ): Connection
 	return self._listenerRegistry:RegisterListener("KeyRemoved", PathHelpers.ParsePath(path), callback, options)
 end
 
+--[=[
+	Fires when an existing key in the table at `path` is reassigned to a different
+	value (not added or removed -- see [TableManager:OnKeyAdd] /
+	[TableManager:OnKeyRemove] for those).
+
+	@param path Path
+	@param callback (key: any, newValue: any, oldValue: any, metadata: ChangeMetadata) -> ()
+	@param options ListenerOptions?
+	@return Connection
+]=]
 function TableManager.OnKeyChange<T, S>(
 	self: TM_Internal<T>,
 	path: Path<S>,
@@ -1056,6 +1224,16 @@ function TableManager.OnKeyChange<T, S>(
 	return self._listenerRegistry:RegisterListener("KeyChanged", PathHelpers.ParsePath(path), callback, options)
 end
 
+--[=[
+	Fires when an element is inserted into the array at `path`, reporting the index
+	it landed at. Driven by array-aware diffing, so it reflects true insertions with
+	replay-faithful indices rather than a blanket "the array changed".
+
+	@param path Path
+	@param callback (index: number, newValue: any, metadata: ChangeMetadata) -> ()
+	@param options ListenerOptions?
+	@return Connection
+]=]
 function TableManager.OnArrayInsert<T, S>(
 	self: TM_Internal<T>,
 	path: Path<S>,
@@ -1065,6 +1243,15 @@ function TableManager.OnArrayInsert<T, S>(
 	return self._listenerRegistry:RegisterListener("ArrayInserted", PathHelpers.ParsePath(path), callback, options)
 end
 
+--[=[
+	Fires when an element is removed from the array at `path`, reporting the index
+	it was removed from and its old value.
+
+	@param path Path
+	@param callback (index: number, oldValue: any, metadata: ChangeMetadata) -> ()
+	@param options ListenerOptions?
+	@return Connection
+]=]
 function TableManager.OnArrayRemove<T, S>(
 	self: TM_Internal<T>,
 	path: Path<S>,
@@ -1074,6 +1261,15 @@ function TableManager.OnArrayRemove<T, S>(
 	return self._listenerRegistry:RegisterListener("ArrayRemoved", PathHelpers.ParsePath(path), callback, options)
 end
 
+--[=[
+	Fires when an existing array slot at `path` is overwritten in place (its index
+	kept, its value replaced), reporting the index, new value, and old value.
+
+	@param path Path
+	@param callback (index: number, newValue: any, oldValue: any, metadata: ChangeMetadata) -> ()
+	@param options ListenerOptions?
+	@return Connection
+]=]
 function TableManager.OnArraySet<T, S>(
 	self: TM_Internal<T>,
 	path: Path<S>,
@@ -1502,6 +1698,12 @@ function TableManager.Destroy<T>(self: TM_Internal<T>)
 	tm.Destroy = function() end
 end
 
+--[=[
+	Returns `true` once [TableManager:Destroy] has run on this instance, `false`
+	otherwise. Pairs with [TableManager:OnDestroy] for teardown-time checks.
+
+	@return boolean
+]=]
 function TableManager.IsDestroyed(self: TM_Internal): boolean
 	return getmetatable(self) == nil
 end
@@ -1510,9 +1712,53 @@ end
 -- container's direct children) opaque to the diff engine — no clone/freeze/
 -- walk of its internals, only identity compares. `Global*` variants register
 -- in a registry shared by every TableManager rather than just this one.
+
+--[=[
+	@within TableManager
+	@tag Static
+	@function Opaque
+	@param value T
+	@return OpaqueWrapper<T>
+	Wraps `value` so that, when written, this manager treats it as opaque: it is
+	never cloned, frozen, or walked by the diff engine -- only identity-compared.
+	The wrapper is unwrapped at write time, so the stored value is the bare inner
+	value. Useful for large immutable blobs or foreign objects you don't want the
+	diff engine to traverse. See the Schema Validation & Opaque Tables guide.
+]=]
 TableManager.Opaque = OpaqueRegistryModule.Opaque
+
+--[=[
+	@within TableManager
+	@tag Static
+	@function GlobalOpaque
+	@param value T
+	@return OpaqueWrapper<T>
+	Like [TableManager.Opaque], but registers `value` as opaque in a registry
+	shared by every TableManager rather than just this one.
+]=]
 TableManager.GlobalOpaque = OpaqueRegistryModule.GlobalOpaque
+
+--[=[
+	@within TableManager
+	@tag Static
+	@function OpaqueChildren
+	@param value T
+	@return OpaqueWrapper<T>
+	Wraps a container so that its **direct children** are treated as opaque (each
+	child is identity-compared, never cloned/frozen/walked), while the container
+	itself is still diffed normally.
+]=]
 TableManager.OpaqueChildren = OpaqueRegistryModule.OpaqueChildren
+
+--[=[
+	@within TableManager
+	@tag Static
+	@function GlobalOpaqueChildren
+	@param value T
+	@return OpaqueWrapper<T>
+	Like [TableManager.OpaqueChildren], but registers the children as opaque in a
+	registry shared by every TableManager rather than just this one.
+]=]
 TableManager.GlobalOpaqueChildren = OpaqueRegistryModule.GlobalOpaqueChildren
 
 return TableManager
