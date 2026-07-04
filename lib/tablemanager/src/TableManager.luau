@@ -43,7 +43,7 @@
 
 	end)
 	
-	-- Array operations with ancestor notifications
+	-- Array operations
 	manager:ArrayInsert("player.items", "Sword")
 	```
 
@@ -114,10 +114,27 @@ export type TM_Internal<T = { [any]: any }> = Types.TM_Internal<T>
 type ProxyManager<T> = ProxyManagerModule.ProxyManager<T>
 
 --// Constants //--
-const DEFAULT_DUPLICATE_REFERENCE_MODE: DuplicateReferenceMode = "allow"
-const DEFAULT_SIGNAL_FIRE_MODE: Types.SignalFireMode = "bindable"
-const DEFAULT_LISTENER_FIRE_MODE: ListenerRegistryModule.FireMode = "bindable"
-const DEFAULT_FLUSH_MODE: Types.FlushMode = "immediate"
+-- Accepted string values for each configurable mode, used to validate the
+-- static-default setters below.
+const VALID_FIRE_MODES = { immediate = true, deferred = true, bindable = true, coalesced = true }
+const VALID_FLUSH_MODES = { immediate = true, coalesced = true }
+const VALID_DUPLICATE_REFERENCE_MODES = { allow = true, copy = true }
+
+-- Lowercases and validates a mode string against `valid`, erroring with the
+-- allowed options if it is not recognized. `label` names the mode in messages.
+const function normalizeModeString(value: any, valid: { [string]: boolean }, label: string): string
+	assert(type(value) == "string", `{label} must be a string, got {typeof(value)}`)
+	const lowered = (value :: string):lower()
+	if not valid[lowered] then
+		const options = {}
+		for option in valid do
+			table.insert(options, `"{option}"`)
+		end
+		table.sort(options)
+		error(`Invalid {label} "{value}". Must be one of: {table.concat(options, ", ")}`, 3)
+	end
+	return lowered
+end
 
 --------------------------------------------------------------------------------
 --// Module //--
@@ -127,6 +144,126 @@ const TableManager = {}
 const TableManager_MT = { __index = TableManager }
 
 TableManager.T = T
+
+--------------------------------------------------------------------------------
+--// Static Default Config //--
+--------------------------------------------------------------------------------
+-- These class-level defaults are read once, at construction time, whenever the
+-- corresponding `TableManagerConfig` field is omitted. Changing a default only
+-- affects TableManagers created afterwards -- never existing instances.
+
+--[=[
+	@interface ConfigDefaults
+	@within TableManager
+	.ListenerFireMode ListenerFireMode?
+	.SignalFireMode SignalFireMode?
+	.FlushMode FlushMode?
+	.DuplicateReferenceMode DuplicateReferenceMode?
+	The subset of [TableManagerConfig] whose defaults can be overridden at the
+	class level via [TableManager.SetDefaults]. Every field is optional; only the
+	fields you provide are changed.
+]=]
+export type ConfigDefaults = {
+	ListenerFireMode: ListenerRegistryModule.FireMode?,
+	SignalFireMode: Types.SignalFireMode?,
+	FlushMode: Types.FlushMode?,
+	DuplicateReferenceMode: DuplicateReferenceMode?,
+}
+
+--[=[
+	@tag Static
+	@readonly
+	@prop TableManager.DefaultListenerFireMode ListenerFireMode
+	@within TableManager
+	The [ListenerFireMode] used when `TableManagerConfig.ListenerFireMode` is
+	omitted: it controls how listener callbacks (`OnChange`, `OnValueChange`,
+	`Observe`, `OnKey*`, `OnArray*`, `For*`) are scheduled when they fire.
+	Defaults to `"bindable"`.
+
+	Read at construction time only -- changing it affects only TableManagers
+	created afterwards. Read-only -- use [TableManager.SetDefaults] to change it.
+]=]
+TableManager.DefaultListenerFireMode = "bindable" :: ListenerRegistryModule.FireMode
+
+--[=[
+	@tag Static
+	@readonly
+	@prop TableManager.DefaultSignalFireMode SignalFireMode
+	@within TableManager
+	The [SignalFireMode] used when `TableManagerConfig.SignalFireMode` is omitted:
+	it controls how the public per-change Signals (`ValueChanged`, `Changed`,
+	`ArrayInserted`, etc.) are scheduled when they fire. Defaults to `"bindable"`.
+
+	Read at construction time only -- changing it affects only TableManagers
+	created afterwards. Read-only -- use [TableManager.SetDefaults] to change it.
+]=]
+TableManager.DefaultSignalFireMode = "bindable" :: Types.SignalFireMode
+
+--[=[
+	@tag Static
+	@readonly
+	@prop TableManager.DefaultFlushMode FlushMode
+	@within TableManager
+	The [FlushMode] used when `TableManagerConfig.FlushMode` is omitted: it
+	controls whether pending changes are flushed immediately or coalesced to the
+	end of the frame. Defaults to `"immediate"`.
+
+	Read at construction time only -- changing it affects only TableManagers
+	created afterwards. Read-only -- use [TableManager.SetDefaults] to change it.
+]=]
+TableManager.DefaultFlushMode = "immediate" :: Types.FlushMode
+
+--[=[
+	@tag Static
+	@readonly
+	@prop TableManager.DefaultDuplicateReferenceMode DuplicateReferenceMode
+	@within TableManager
+	The [DuplicateReferenceMode] used when
+	`TableManagerConfig.DuplicateReferenceMode` is omitted: it controls whether
+	writing the same table to more than one path shares its identity (`"allow"`)
+	or stores an independent copy (`"copy"`). Defaults to `"allow"`.
+
+	Read at construction time only -- changing it affects only TableManagers
+	created afterwards. Read-only -- use [TableManager.SetDefaults] to change it.
+]=]
+TableManager.DefaultDuplicateReferenceMode = "allow" :: DuplicateReferenceMode
+
+--[=[
+	@tag Static
+	@within TableManager
+	@function SetDefaults
+	@param defaults ConfigDefaults
+
+	Overrides the class-level construction defaults for the fields you provide,
+	mirroring the corresponding [TableManagerConfig] keys. Only the fields present
+	in `defaults` change; omitted fields keep their current value. Each value is
+	validated and an unrecognized mode string errors without changing any default.
+
+	Because the defaults are read at construction time, this affects only
+	TableManagers created afterwards -- never existing instances.
+
+	```lua
+	TableManager.SetDefaults({
+		FlushMode = "coalesced",
+		SignalFireMode = "deferred",
+	})
+	```
+]=]
+function TableManager.SetDefaults(defaults: ConfigDefaults)
+	assert(type(defaults) == "table", `SetDefaults expects a table, got {typeof(defaults)}`)
+	if defaults.ListenerFireMode ~= nil then
+		TableManager.DefaultListenerFireMode = normalizeModeString(defaults.ListenerFireMode, VALID_FIRE_MODES, "ListenerFireMode") :: ListenerRegistryModule.FireMode
+	end
+	if defaults.SignalFireMode ~= nil then
+		TableManager.DefaultSignalFireMode = normalizeModeString(defaults.SignalFireMode, VALID_FIRE_MODES, "SignalFireMode") :: Types.SignalFireMode
+	end
+	if defaults.FlushMode ~= nil then
+		TableManager.DefaultFlushMode = normalizeModeString(defaults.FlushMode, VALID_FLUSH_MODES, "FlushMode") :: Types.FlushMode
+	end
+	if defaults.DuplicateReferenceMode ~= nil then
+		TableManager.DefaultDuplicateReferenceMode = normalizeModeString(defaults.DuplicateReferenceMode, VALID_DUPLICATE_REFERENCE_MODES, "DuplicateReferenceMode") :: DuplicateReferenceMode
+	end
+end
 
 -- Write-core helpers live in Mutator.luau; local aliases keep call sites unchanged.
 const resolvePathFromPathOrProxy = MutatorModule.resolvePathFromPathOrProxy
@@ -168,7 +305,7 @@ const function validateInitialSchema<T>(self: TM_Internal<T>)
 end
 
 const function normalizeSignalFireMode(mode: Types.SignalFireMode?): Types.SignalFireMode
-	return if mode == nil then DEFAULT_SIGNAL_FIRE_MODE else (mode :: any):lower() :: Types.SignalFireMode
+	return if mode == nil then TableManager.DefaultSignalFireMode else (mode :: any):lower() :: Types.SignalFireMode
 end
 
 const function initProxyManager<T>(self: TM_Internal<T>, resolvedConfig: TableManagerConfig): ProxyManager<T>?
@@ -202,7 +339,7 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	debug.profilebegin("TM.new")
 	const self: TM_Internal<T> = (setmetatable({}, TableManager_MT) :: any) :: TM_Internal<T>
 	const resolvedConfig: TableManagerConfig = config or {} :: { [string]: any? }
-	const duplicateReferenceMode: DuplicateReferenceMode = resolvedConfig.DuplicateReferenceMode or DEFAULT_DUPLICATE_REFERENCE_MODE
+	const duplicateReferenceMode: DuplicateReferenceMode = resolvedConfig.DuplicateReferenceMode or TableManager.DefaultDuplicateReferenceMode
 	
 	assert(type(initialData) == "table", "Initial data must be a table")
 	-- Store original data
@@ -231,10 +368,10 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	self._proxyManager = initProxyManager(self, resolvedConfig)
 	self._listenerRegistry = ListenerRegistryModule.new {
 		DebugMode = false,
-		FireMode = resolvedConfig.ListenerFireMode or DEFAULT_LISTENER_FIRE_MODE,
+		FireMode = resolvedConfig.ListenerFireMode or TableManager.DefaultListenerFireMode,
 	}
 	self._signalFireMode = normalizeSignalFireMode(resolvedConfig.SignalFireMode)
-	self._flushMode = resolvedConfig.FlushMode or DEFAULT_FLUSH_MODE
+	self._flushMode = resolvedConfig.FlushMode or TableManager.DefaultFlushMode
 	self._pendingFlushRoot = nil
 	self._coalescedFlushScheduled = false
 	self._appliedListeners = {}
@@ -303,7 +440,7 @@ function TableManager.GetProxy<T, S>(
 		error("GetProxy requires proxies (Config.EnableProxies = false for this TableManager)")
 	end
 	const parsedPath = PathHelpers.ParsePath(path)
-	local current = self.Proxy
+	local current = self.Proxy :: {[any]: any}
 	local previousKey: any = nil
 	for _, key in parsedPath do
 		if not proxyManager:IsProxy(current) then
