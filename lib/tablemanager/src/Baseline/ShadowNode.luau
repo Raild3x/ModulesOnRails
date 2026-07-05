@@ -185,6 +185,39 @@ function ShadowNode.Materialize(live: table, path: PathArray, isObserved: IsObse
 end
 
 --[=[
+	Applies a known SCALAR leaf write (already applied to `live`) directly to
+	the existing node spine at `path` — the known-delta write lane's baseline
+	patch, mirroring `ApplyArrayOp`'s incremental contract. `newValue` must be
+	a non-table (a table value needs `copyForShadow`'s node semantics and
+	belongs to `Reconcile`). Returns `false` when some spine level has no
+	materialized node (the caller should fall back to `Materialize`); `true`
+	when patched, or when the slot is stored by reference (opaque/unobserved —
+	already current by definition, since the live write already happened).
+]=]
+function ShadowNode.ApplyLeafSet(live: table, path: PathArray, newValue: any): boolean
+	local node: any = REGISTRY[live]
+	local liveCursor: any = live
+	for i = 1, #path - 1 do
+		if type(node) ~= "table" then
+			return false
+		end
+		if node == liveCursor then
+			return true -- stored by reference: already current by definition.
+		end
+		node = node[path[i]]
+		liveCursor = if type(liveCursor) == "table" then liveCursor[path[i]] else nil
+	end
+	if type(node) ~= "table" then
+		return false
+	end
+	if node == liveCursor then
+		return true
+	end
+	node[path[#path]] = newValue
+	return true
+end
+
+--[=[
 	Applies a known array op (insert/remove/set, already applied to `live`)
 	directly to the EXISTING node array at `path`, instead of re-copying the
 	whole array. Returns `false` when `path` has no materialized node array yet

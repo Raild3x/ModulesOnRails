@@ -69,6 +69,20 @@ function Baseline.Materialize(manager: TableManagerLike, path: PathArray)
 end
 
 --[[
+	Post-write baseline patch for the known-delta scalar write lane
+	(`Mutator.applyWrite`'s fast lane): applies a scalar leaf write (already
+	applied to `manager.Raw`) directly to the baseline spine instead of a full
+	`Reconcile` walk + re-copy, falling back to a full `Materialize` the first
+	time `path` is tracked (no spine to patch yet). The CALLER owns the
+	trackable / opaque-ancestor gate, same contract as `SeedIfNeeded`.
+]]
+function Baseline.ApplyLeafSet(manager: TableManagerLike, path: PathArray, newValue: any)
+	if not ShadowNodeModule.ApplyLeafSet(manager.Raw, path, newValue) then
+		shadowMaterialize(manager.Raw, path, isObserved)
+	end
+end
+
+--[[
 	Post-array-op sync (Phase 4): applies a known array mutation (already
 	applied to `manager.Raw`) directly to the existing baseline array at `path`,
 	instead of re-copying the whole array via `Materialize`. Falls back to a full

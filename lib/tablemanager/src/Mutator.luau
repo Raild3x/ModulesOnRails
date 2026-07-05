@@ -23,6 +23,7 @@ const IgnoreTrieModule = require("./IgnoreTrie")
 const CoverageModule = require("./Diffing/Coverage")
 const CoalescedFlushModule = require("./Batching/CoalescedFlush")
 const BaselineModule = require("./Baseline/Baseline")
+const Diff = require("./Diffing/Diff")
 const T = require("../T")
 const TMTypes = require("./TMTypes")
 
@@ -437,6 +438,59 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 	-- a one-off diff using `oldValue` already read fresh above, instead of
 	-- going through the shadow at all.
 	const opaqueBypass = trackable and CoverageModule.PassesThroughOpaqueAncestor(self, parsedPath, ctx)
+
+	-- Known-delta fast lane: a scalar->scalar transition at a trackable,
+	-- opacity-free path in immediate flush mode IS its own complete one-node
+	-- diff — `Diff.diff(oldScalar, newScalar)` can only ever return the
+	-- added/removed/changed leaf synthesized below (or nil when equal). So
+	-- build that node directly and dispatch it through the SAME queue and
+	-- callbacks (`DispatchDiffNode`), skipping the general engine's baseline
+	-- read, live re-read, `Diff.diff`, and full `Reconcile` re-copy. The
+	-- baseline is instead patched incrementally (`ApplyLeafSet`), BEFORE
+	-- dispatch, so a re-entrant flush at an ancestor during our callbacks
+	-- already sees the new value and cannot double-report this transition.
+	-- Coalesced mode is excluded: its deferred flush owns event timing, and
+	-- a pending flush root may hold an unreported transition this lane's
+	-- live-read `oldValue` would silently absorb.
+	if
+		trackable
+		and not opaqueBypass
+		and self._flushMode == "immediate"
+		and self._pendingFlushRoot == nil
+		and type(oldValue) ~= "table"
+		and type(newValue) ~= "table"
+	then
+		if oldValue == newValue then
+			-- No transition: the general engine would diff old == new and fire
+			-- nothing. The raw write still happens (userdata with __eq can
+			-- compare equal across distinct identities, and the new identity
+			-- must land in the table exactly as before). Still seed the
+			-- baseline (first-touch only) so a later explicit `Flush` at/above
+			-- this path diffs quietly instead of misreading the
+			-- never-materialized slot.
+			BaselineModule.SeedIfNeeded(self, parsedPath, oldValue)
+			parentTable[key] = newValue
+			debug.profileend()
+			return
+		end
+		debug.profilebegin("applyWrite (scalar fast lane)")
+		parentTable[key] = newValue
+		-- RegisterSubtree and pruneDetachedValue are both no-ops for scalar
+		-- old/new values — deliberately skipped.
+		BaselineModule.ApplyLeafSet(self, parsedPath, newValue)
+		-- Shapes mirror `Diff.diff`'s scalar tail exactly (childless, no `key`
+		-- field) so `metadata.Diff` is indistinguishable from a diffed write.
+		const diffNode: Diff.DiffNode = if oldValue == nil
+			then { type = "added" :: "added", old = nil, new = newValue, children = nil }
+			elseif newValue == nil then { type = "removed" :: "removed", old = oldValue, new = nil, children = nil }
+			else { type = "changed" :: "changed", old = oldValue, new = newValue, children = nil }
+		const oldSnapshot = BatchUtilsModule.BuildOldSnapshot(self, parsedPath, oldValue)
+		self._changeDetector:DispatchDiffNode(diffNode, parsedPath :: { any }, self.Raw :: any, oldSnapshot)
+		debug.profileend()
+		debug.profileend()
+		return
+	end
+
 	if trackable and not opaqueBypass then
 		BaselineModule.SeedIfNeeded(self, parsedPath, oldValue)
 	end
