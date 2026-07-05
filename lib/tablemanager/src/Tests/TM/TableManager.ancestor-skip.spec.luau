@@ -1,10 +1,12 @@
 --!strict
 --[[
 	Specs for the ancestor-notification level skip (Phase B / spine resolution):
-	`EmitAncestorNotifications` consults `ListenerRegistry.ResolveSpine` to skip
-	ancestor levels that have no listener registered exactly there — every fire on
-	such a level is a no-op today (an ancestor notification carries `Diff == nil`,
-	so it never fires the public Signals, only exact-node listeners).
+	`EmitAncestorNotifications` consults `ListenerRegistry.PrimeAncestorSpine` to
+	skip ancestor levels that have no listener registered exactly there — every fire
+	on such a level is a no-op today (an ancestor notification carries `Diff == nil`,
+	so it never fires the public Signals, only exact-node listeners). The same
+	priming lets the surviving levels fire by node index rather than re-walking the
+	registry tree from the root (`FireListenersExact`'s fire-by-node fast path).
 
 	These pin OBSERVABLE EQUIVALENCE with the pre-skip behavior: every real
 	ancestor listener (ValueChanged AND the parent-level KeyChanged delivery) still
@@ -123,6 +125,66 @@ return function(tiniest)
 
 			expect(leafFires).is(1)
 			expect(manager:Get("a.b.v")).is(2)
+
+			manager:Destroy()
+		end)
+
+		test("listeners at several ancestor depths all fire once (fire-by-node path)", function()
+			local manager = TableManager.new { a = { b = { c = { d = { v = 1 } } } } }
+
+			-- Non-empty nodes at multiple spine levels: the primed fire-by-node path
+			-- must index each of them correctly (not just root).
+			local fires: { [string]: number } = { root = 0, a = 0, ab = 0, abc = 0 }
+			manager:OnChange({}, function()
+				fires.root += 1
+			end)
+			manager:OnChange("a", function()
+				fires.a += 1
+			end)
+			manager:OnChange("a.b", function()
+				fires.ab += 1
+			end)
+			manager:OnChange("a.b.c", function()
+				fires.abc += 1
+			end)
+
+			manager:Set("a.b.c.d.v", 2)
+
+			expect(fires.root).is(1)
+			expect(fires.a).is(1)
+			expect(fires.ab).is(1)
+			expect(fires.abc).is(1)
+
+			manager:Destroy()
+		end)
+
+		test("re-entrant write from an ancestor listener still converges (priming is per-walk)", function()
+			local manager = TableManager.new({ a = { b = { v = 1 }, flag = 0 } }, { ListenerFireMode = "immediate" })
+
+			-- An ancestor listener that writes back on the first notification. The
+			-- re-entrant write is queued (drains after this walk), and its own
+			-- ancestor walk re-primes independently — the outer walk's primed spine
+			-- must not corrupt it.
+			local flagWrites = 0
+			manager:OnChange("a", function()
+				if flagWrites == 0 then
+					flagWrites += 1
+					manager:Set("a.flag", 1)
+				end
+			end)
+
+			local flagSeen = 0
+			manager:OnValueChange("a.flag", function(newValue)
+				if newValue == 1 then
+					flagSeen += 1
+				end
+			end)
+
+			manager:Set("a.b.v", 2)
+
+			expect(manager:Get("a.b.v")).is(2)
+			expect(manager:Get("a.flag")).is(1)
+			expect(flagSeen).is(1)
 
 			manager:Destroy()
 		end)

@@ -128,10 +128,12 @@ type CD_Internal = {
 	_registries: OpaqueRegistry.Registries?,
 	_opaqueCtx: Diff.Ctx?,
 	_ignoreTrie: IgnoreTrieModule.Node?,
-	-- Optional per-level listener oracle for the ancestor walk (see
-	-- `ListenerRegistry.ResolveSpine`). Resolved at fire time so it stays correct
-	-- under re-entrant connects/disconnects; nil = fire every ancestor level.
-	_ancestorSpineResolver: ((basePath: PathArray) -> { boolean }?)?,
+	-- Optional ancestor-walk spine primer (see `ListenerRegistry.PrimeAncestorSpine`).
+	-- Called at fire time (so it stays correct under re-entrant connects/
+	-- disconnects), it primes the registry for fire-by-node and returns the
+	-- per-level skip oracle plus an "end" thunk the walk calls to unprime. nil =
+	-- fire every ancestor level, unprimed.
+	_ancestorSpineResolver: ((basePath: PathArray) -> ({ any }?, (() -> ())?))?,
 
 	_dispatch: (self: CD_Internal, job: () -> ()) -> (),
 	_emitRootNode: (self: CD_Internal, node: Diff.DiffNode?, basePath: PathArray, ancestorSnapshot: AncestorSnapshot) -> (),
@@ -199,7 +201,7 @@ function ChangeDetector.new(
 	debugMode: boolean?,
 	registries: OpaqueRegistry.Registries?,
 	ignoreTrie: IgnoreTrieModule.Node?,
-	ancestorSpineResolver: ((basePath: PathArray) -> { boolean }?)?
+	ancestorSpineResolver: ((basePath: PathArray) -> ({ any }?, (() -> ())?))?
 ): ChangeDetector
 	callbacks.OnKeyAdded = callbacks.OnKeyAdded or function() end
 	callbacks.OnKeyRemoved = callbacks.OnKeyRemoved or function() end
@@ -730,13 +732,13 @@ function ChangeDetector.EmitAncestorNotifications(
 		oldValue: any,
 		metadata: ChangeMetadata
 	) -> (),
-	-- Optional per-prefix listener oracle (`ListenerRegistry.ResolveSpine`):
-	-- `levelHasListener[k]` is true iff some listener is registered exactly at
-	-- prefix length `k-1`. When present, a level with no listener at the node(s)
-	-- it would fire on is skipped — its fires are pure no-ops (an ancestor
+	-- Optional per-prefix spine/skip oracle (`ListenerRegistry.PrimeAncestorSpine`):
+	-- `levelHasListener[k]` is the listener node at prefix length `k-1` when it has
+	-- direct listeners (truthy), else nil (falsy). A level with no listener at the
+	-- node(s) it would fire on is skipped — its fires are pure no-ops (an ancestor
 	-- notification never fires the public Signals, only exact-node listeners).
 	-- nil = fire every level (unchanged behavior / wildcard registries).
-	levelHasListener: { boolean }?
+	levelHasListener: { any }?
 )
 	debug.profilebegin("CD:EmitAncestorNotifications")
 	-- Pre-navigate rootTable once, caching the value at each depth 0..fromDepth.
@@ -838,7 +840,11 @@ function ChangeDetector._fireAncestorCallbacks(
 	}
 
 	const resolver = self._ancestorSpineResolver
-	const spine = if resolver then resolver(capturedPath) else nil
+	local spine: { any }? = nil
+	local endSpine: (() -> ())? = nil
+	if resolver then
+		spine, endSpine = resolver(capturedPath)
+	end
 
 	ChangeDetector.EmitAncestorNotifications(
 		capturedPath,
@@ -850,6 +856,13 @@ function ChangeDetector._fireAncestorCallbacks(
 		callbacks.OnValueChanged,
 		spine
 	)
+
+	-- Unprime the registry (fire-by-node window is exactly the walk above). User
+	-- callbacks fired within can't throw out (they run under pcall), so no
+	-- finalizer dance is needed.
+	if endSpine then
+		endSpine()
+	end
 end
 
 return ChangeDetector

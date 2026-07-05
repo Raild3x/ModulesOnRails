@@ -253,7 +253,8 @@ function Emitter.fireAncestorValueChangedNotifications(
 
 	const keyChangedMode = if includeKeyChanged == false then "none" else "child"
 
-	const spine = manager._listenerRegistry:ResolveSpine(basePath)
+	const registry = manager._listenerRegistry
+	const spine = registry:PrimeAncestorSpine(basePath)
 
 	ChangeDetectorModule.EmitAncestorNotifications(
 		basePath :: { any },
@@ -278,6 +279,8 @@ function Emitter.fireAncestorValueChangedNotifications(
 		end,
 		spine
 	)
+
+	registry:EndAncestorSpine()
 	debug.profileend()
 end
 

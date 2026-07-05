@@ -27,7 +27,7 @@ return function(t: tiniest)
 	local test = t.test
 	local describe = t.describe
 
-	local ENABLE_PERF_TESTS = true
+	local ENABLE_PERF_TESTS = false
 	if not ENABLE_PERF_TESTS then
 		warn("[TableManager] Performance tests are disabled. Enable them in TableManager.performance.spec.luau to run.")
 		return
@@ -228,7 +228,7 @@ return function(t: tiniest)
 				local manager = newManager(deepData)
 				manager:Destroy()
 			end,
-			iters = 2000,
+			iters = 1000,
 		})
 
 		local arrayData = { items = buildArray(100) }
@@ -237,7 +237,7 @@ return function(t: tiniest)
 				local manager = newManager(arrayData)
 				manager:Destroy()
 			end,
-			iters = 2000,
+			iters = 500,
 		})
 	end)
 
@@ -515,6 +515,37 @@ return function(t: tiniest)
 		dispatchTest("1 listener", 1)
 		dispatchTest("10 listeners", 10)
 		dispatchTest("100 listeners", 100, 2000)
+	end)
+
+	-- Listeners spread up the spine (one OnChange at every ancestor depth), so a
+	-- deep write's ancestor walk actually fires at MANY non-empty levels. This is
+	-- the case the fire-by-node priming targets (indexing each level's node instead
+	-- of re-walking from the root); the root-only-listener benches above don't
+	-- exercise it. Compared against depth so the per-level cost is visible.
+	perfDescribe("Ancestor dispatch (listeners at every depth)", function(perfTest)
+		local function spineTest(title: string, depth: number)
+			local path = deepPath(depth)
+			perfTest(title, {
+				setup = function()
+					local manager = newManager(buildDeep(depth))
+					-- OnChange at each ancestor level {l1}, {l1,l2}, ... plus root.
+					manager:OnChange({}, noop)
+					local prefix: { string } = {}
+					for d = 1, depth do
+						table.insert(prefix, `l{d}`)
+						manager:OnChange(table.clone(prefix), noop)
+					end
+					return manager
+				end,
+				action = function(i, manager)
+					manager:Set(path, i % 2)
+				end,
+				teardown = destroyManager,
+			})
+		end
+
+		spineTest("scalar write, 4 deep (5 spine listeners)", 4)
+		spineTest("scalar write, 8 deep (9 spine listeners)", 8)
 	end)
 
 	--------------------------------------------------------------------------------

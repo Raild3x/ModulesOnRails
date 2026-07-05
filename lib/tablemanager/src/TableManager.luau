@@ -388,16 +388,22 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	self.ArrayRemoved = Signal.new() :: any
 	self.ArraySet = Signal.new() :: any
 	
+	-- Ancestor-walk spine primer: skips no-listener levels AND fires the rest by
+	-- node index instead of re-walking from the root. Primed at fire time
+	-- (re-entrancy-safe) and unprimed via the returned thunk. See
+	-- `ListenerRegistry.PrimeAncestorSpine`. `endSpine` is built once and reused so
+	-- the per-write resolver allocates nothing.
+	const registry = self._listenerRegistry
+	const endSpine = function()
+		registry:EndAncestorSpine()
+	end
 	self._changeDetector = ChangeDetectorModule.new(
 		EmitterModule.makeChangeDetectorCallbacks(self :: any) :: any,
 		nil,
 		self._opaqueRegistries,
 		self._ignoreTrie,
-		-- Ancestor-walk listener oracle: lets EmitAncestorNotifications skip levels
-		-- with no listener. Resolved at fire time (re-entrancy-safe). See
-		-- `ListenerRegistry.ResolveSpine`.
 		function(basePath: PathArray)
-			return self._listenerRegistry:ResolveSpine(basePath)
+			return registry:PrimeAncestorSpine(basePath), endSpine
 		end
 	)
 

@@ -304,13 +304,21 @@ export type ListenerRegistry = {
 	-- maxDepth) — everything `CoversChangesAt`/`WantsFullDiff`/`MaxObservedDepth`
 	-- answer, in one spine walk. `maxDepth` is `math.huge` when unbounded.
 	ObserveAt: (self: ListenerRegistry, path: PathArray) -> (boolean, boolean, number),
-	-- Per-level "is any listener registered exactly here?" oracle for the ancestor
-	-- notification walk (see `ChangeDetector.EmitAncestorNotifications`). One walk
-	-- root→`basePath`; `result[k]` is true iff a node with `Count > 0` exists at
-	-- prefix length `k-1`. `nil` for a wildcard registry (a "*" branch can match a
-	-- level whose literal node is absent, so the literal spine can't authorize a
-	-- skip — callers must then fire every level).
-	ResolveSpine: (self: ListenerRegistry, basePath: PathArray) -> { boolean }?,
+	-- Primes the registry with the resolved root→`basePath` node spine for the
+	-- duration of ONE ancestor notification walk, and returns the per-level skip
+	-- oracle (see `ChangeDetector.EmitAncestorNotifications`): `result[k]` is true
+	-- iff a node with `Count > 0` exists at prefix length `k-1`. While primed,
+	-- `FireListenersExact` indexes the spine for any prefix-of-`basePath` fire
+	-- instead of re-walking from the root. `nil` for a wildcard registry (a "*"
+	-- branch can match a level whose literal node is absent, so neither the skip
+	-- nor the fire-by-node shortcut is sound — callers fire every level, unprimed).
+	-- MUST be paired with `EndAncestorSpine` after the walk. The returned array
+	-- doubles as the skip oracle: `result[k]` is the listener node at prefix length
+	-- `k-1` when it has direct listeners (truthy), or nil when it has none (falsy) —
+	-- so `not result[k]` is "skip this level".
+	PrimeAncestorSpine: (self: ListenerRegistry, basePath: PathArray) -> { any }?,
+	-- Clears the primed spine (see `PrimeAncestorSpine`). Idempotent.
+	EndAncestorSpine: (self: ListenerRegistry) -> (),
 	-- Returns the absolute path a caller should snapshot the old value at for a
 	-- change at `path`, or `nil` if no opted-in (`SnapshotOldValues`) listener
 	-- would receive a real old value for this change. The returned path is the
@@ -341,6 +349,15 @@ export type ListenerRegistry = {
 	-- wildcard path. SnapshotRootFor degrades to "snapshot the whole subtree" in
 	-- that case rather than walking wildcard branches.
 	_hasSnapshotWildcards: boolean,
+	-- Fire-by-node priming for the ancestor notification walk (see
+	-- `PrimeAncestorSpine`). `_spineNodes` is non-nil only for the duration of one
+	-- walk: `_spineNodes[k]` is the node at prefix length `k-1` of `_spineBasePath`
+	-- when it has direct listeners (`Count > 0`), else nil. `_spineLen` is
+	-- `#_spineBasePath`. Typed loosely because it also crosses into ChangeDetector
+	-- as the opaque per-level skip oracle.
+	_spineNodes: { any }?,
+	_spineBasePath: PathArray?,
+	_spineLen: number,
 }
 
 --------------------------------------------------------------------------------
@@ -681,6 +698,9 @@ function ListenerRegistry.new(config: ListenerRegistryConfig?): ListenerRegistry
 	self._destroyed = false
 	self._hasWildcards = false
 	self._hasSnapshotWildcards = false
+	self._spineNodes = nil
+	self._spineBasePath = nil
+	self._spineLen = 0
 
 	return self
 end
@@ -839,6 +859,26 @@ function ListenerRegistry.FireListenersExact(
 		end
 	end
 
+	-- Fire-by-node fast path: during an ancestor notification walk (see
+	-- `PrimeAncestorSpine`) the registry holds the resolved root→basePath node
+	-- spine, and every fire here targets a PREFIX of basePath — whose length
+	-- uniquely identifies its node. Index the spine instead of re-walking from the
+	-- root. The `#path <= _spineLen` bound + last-segment match keep this safe
+	-- against any non-prefix fire that might slip into the primed window (it falls
+	-- back to the normal walk below). Skipped for wildcard registries, which never
+	-- prime.
+	const spineNodes = self._spineNodes
+	if spineNodes ~= nil and not self._hasWildcards and #path <= self._spineLen then
+		const len = #path
+		if len == 0 or (self._spineBasePath :: PathArray)[len] == path[len] then
+			const node = spineNodes[len + 1]
+			if node ~= nil then
+				fireListenersOnNode(node :: ListenerNode, eventType, eventData, baseRelativeDepth, fireMode, debugMode)
+			end
+			return
+		end
+	end
+
 	if not self._hasWildcards then
 		-- Fast path: no wildcard listeners have ever been registered; walk directly to
 		-- the exact node without the O(depth²) collectMatchingNodes traversal.
@@ -905,35 +945,56 @@ function ListenerRegistry:CoversChangesAt(path: PathArray): boolean
 end
 
 --[=[
-	Resolves, for a change landing at `basePath`, which self/ancestor levels have
-	any listener registered AT that exact node — the cheap oracle the ancestor
-	notification walk uses to SKIP levels that provably have no listener (where a
-	fire is a pure no-op today). One walk root→`basePath`.
+	Resolves, for a change landing at `basePath`, the root→`basePath` node spine in
+	ONE walk, and PRIMES the registry with it so the ancestor notification walk can
+	both (a) skip levels with no listener and (b) fire the rest by node index
+	instead of re-walking from the root in each `FireListenersExact` (killing the
+	walk's O(depth²) getNode cost).
 
-	Returns a boolean per prefix length 0..#basePath: `result[k]` is true iff a
-	node exists at prefix length `k-1` with `Count > 0` (some listener of any event
-	type registered exactly there). Index `k` maps to prefix length `k-1`, so
-	`result[1]` is the root and `result[#basePath + 1]` is `basePath` itself.
+	Returns one array per prefix length 0..#basePath that doubles as the fire-by-
+	node spine AND the skip oracle: `result[k]` is the node at prefix length `k-1`
+	when it has direct listeners (`Count > 0`, truthy), else nil (falsy → skip).
+	Index `k` maps to prefix length `k-1`, so `result[1]` is the root and
+	`result[#basePath + 1]` is `basePath` itself. Nodes with children but no direct
+	listeners store nil: a fire there is a no-op regardless, and it lets callers
+	skip the level with a plain truthiness test.
 
-	Returns `nil` for a wildcard registry: a "*" branch can match a level whose
-	literal node is absent, so the literal spine can't authorize a skip and the
-	caller must fire every level (the pre-spine behavior).
+	Returns `nil` for a wildcard registry (does NOT prime): a "*" branch can match a
+	level whose literal node is absent, so neither the skip nor the node-index
+	shortcut is sound; the caller fires every level through the unprimed path.
+
+	MUST be paired with `EndAncestorSpine` once the walk completes. The primed
+	window is exactly the ancestor walk — every `FireListenersExact` in it targets
+	a prefix of `basePath`, and re-entrant writes are queued (never fire nested
+	during the window), so no non-prefix fire ever observes the primed spine.
 ]=]
-function ListenerRegistry:ResolveSpine(basePath: PathArray): { boolean }?
+function ListenerRegistry:PrimeAncestorSpine(basePath: PathArray): { any }?
 	if self._hasWildcards then
 		return nil
 	end
 	const n = #basePath
-	const result = table.create(n + 1)
+	const spine: { any } = table.create(n + 1)
 	local node: ListenerNode? = self._root
-	result[1] = (node :: ListenerNode).Count > 0
+	spine[1] = if (node :: ListenerNode).Count > 0 then node else nil
 	for i = 1, n do
 		if node ~= nil then
 			node = (node :: ListenerNode).Children[basePath[i]]
 		end
-		result[i + 1] = node ~= nil and node.Count > 0
+		spine[i + 1] = if node ~= nil and node.Count > 0 then node else nil
 	end
-	return result
+	self._spineNodes = spine
+	self._spineBasePath = basePath
+	self._spineLen = n
+	return spine
+end
+
+--[=[
+	Clears the spine primed by `PrimeAncestorSpine`. Idempotent; safe to call even
+	if priming was skipped (wildcard registry) or already ended.
+]=]
+function ListenerRegistry:EndAncestorSpine()
+	self._spineNodes = nil
+	self._spineBasePath = nil
 end
 
 -- KeyAdded/KeyRemoved/KeyChanged listeners are dispatched by ChangeDetector
