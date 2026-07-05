@@ -1,6 +1,6 @@
 local Ignore = require("../Ignore")
 
--- tests.luau runs from the repo root, so fixture paths are repo-relative.
+-- The runner executes from the repo root, so fixture paths are repo-relative.
 local FIXTURE_DIR = "tools/coverage/lune/core/Tests/fixtures/ignore"
 local IGNORE_FILES = { ".coverage-ignore", ".covaudit-ignore" }
 

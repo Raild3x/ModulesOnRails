@@ -1,7 +1,7 @@
 local Merge = require("../Merge")
 local Ignore = require("../Ignore")
 
--- tests.luau runs from the repo root, so fixture paths are repo-relative.
+-- The runner executes from the repo root, so fixture paths are repo-relative.
 -- The fixture map (total_slots = 15, one file src/a.luau) lays out:
 --   stmt 1 + stmt 2 on line 3 (same-line collapse pair)
 --   fn 3 "M.doThing" (public), stmt 4 inside it (fn = 3)

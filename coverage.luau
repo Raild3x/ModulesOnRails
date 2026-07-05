@@ -2,7 +2,7 @@
 -- coverage — AST-instrumented test-coverage for the ModulesOnRails packages.
 --
 -- Thin CLI: parse args, load the repo adapter, hand off to the repo-agnostic
--- orchestrator core. Mirrors tests.luau's CLI shape.
+-- orchestrator core. This is the repo's test runner (tests.luau was removed).
 --
 -- Usage:
 --   lune run coverage.luau package=<name>

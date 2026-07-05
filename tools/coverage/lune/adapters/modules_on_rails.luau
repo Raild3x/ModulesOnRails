@@ -159,7 +159,7 @@ function M.materialize(spec: PackageSpec, buildDir: string)
 end
 
 function M.luneFramework(_spec: PackageSpec, _buildDir: string): adapter.LuneFrameworkConfig
-	-- Mirrors tests.luau's configuration. Filled in for real at M2.
+	-- Snapshot config matching the repo's tiniest setup.
 	return {
 		snapshotPath = "./test/__snapshots__",
 		saveSnapshots = false,

@@ -1,9 +1,9 @@
 --!strict
 --[=[
 	Runs a package's instrumented spec suite in-process under Lune, using
-	`tiniest_for_lune` with the coverage plugin attached. Mirrors tests.luau's
-	spec collection but rooted at the materialized build dir, so each spec's own
-	relative requires resolve to the instrumented sources.
+	`tiniest_for_lune` with the coverage plugin attached. Spec collection is
+	rooted at the materialized build dir, so each spec's own relative requires
+	resolve to the instrumented sources.
 ]=]
 
 local fs = require("@lune/fs")

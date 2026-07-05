@@ -137,7 +137,7 @@ def main() -> int:
     run_setup = input("Run setup now (wally install + generate types)? (y/n): ").strip().lower()
     if run_setup == "y":
         print("Running setup...")
-        run_command([sys.executable, "scripts/setup.py", folder_name], "Setup failed.")
+        run_command([sys.executable, "scripts/setup_package_for_testing.py", folder_name], "Setup failed.")
 
     print(f"\nPackage '{formatted_name}' created successfully at {package_dir}")
     return 0

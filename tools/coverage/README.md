@@ -9,7 +9,7 @@ per-line / per-branch / per-condition coverage.
 ```sh
 lune run coverage.luau package=<name>      # one package
 lune run coverage.luau package=all         # every package with specs
-lune run coverage.luau package=last        # last package tested via tests.luau
+lune run coverage.luau package=last        # last package tested (test/last_tested_package.txt)
 ```
 
 Flags:
@@ -150,11 +150,12 @@ cd tools/coverage/engine && cargo test
 ```
 
 **Lune core modules** (`Merge`, `Ignore`, `StdoutCodec`, `CoverageJson`,
-`Report`, `Mutation`, `Recommend` specs in `lune/core/Tests/`, run through the
-repo's tiniest runner from the repo root):
+`Report`, `Mutation`, `Recommend` specs in `lune/core/Tests/`, run from the
+repo root via the self adapter — the default adapter only resolves `lib/`
+packages):
 
 ```sh
-lune run tests.luau package=tools/coverage/lune
+lune run coverage.luau package=self --adapter=./tools/coverage/lune/adapters/coverage_self
 ```
 
 **Self-coverage** — the pipeline can measure its own Lune core via the
