@@ -101,15 +101,20 @@
 
 	### Wildcards
 
-	A `"*"` segment matches any single key at that position — useful for dynamic
-	collections without re-registering on `KeyAdded`. Matched keys are exposed via
-	`metadata.WildcardMatches` (left-to-right, one entry per `"*"`).
+	A `"*"` segment matches any key at that position, so one listener covers a
+	dynamic collection without re-registering on `KeyAdded`. The matched keys
+	arrive on `metadata.WildcardMatches` (left-to-right, one entry per `"*"`).
 
 	```lua
 	manager:OnValueChange("Players.*.Health", function(new, old, metadata)
 		print(`{metadata.WildcardMatches[1]} health: {old} -> {new}`)
 	end)
 	```
+
+	The same grammar works for writes and bulk reads. See the dedicated
+	**[TM Wildcards](/api/TM%20Wildcards)** guide for the full rules (multiple
+	wildcards, `Set`/`Update`/`Increment` fan-out, `GetMatching`, and the
+	`Once`-fires-once-total caveat).
 
 	## Fire modes
 
@@ -178,6 +183,7 @@
 	### See also
 
 	- **[TM Getting Started](/api/TM%20Getting%20Started)** — creating a manager and your first listener.
+	- **[TM Wildcards](/api/TM%20Wildcards)** — `"*"` paths for listeners, writes, and bulk reads.
 	- **[TM Flushing](/api/TM%20Flushing)** — the diff cycle that decides when these callbacks run.
 	- **[TM Batching](/api/TM%20Batching)** — grouping writes so events fire once.
 	- **[TM For & Map Reactive Views](/api/TM%20For%20&%20Map%20Reactive%20Views)** — per-item reconcilers built on these listeners.

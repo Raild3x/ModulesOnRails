@@ -116,6 +116,25 @@ export type ElementAtPath<T, S> = any --ElementAtPathFn<T, S>
 
 local PathHelpers = {}
 
+-- Reserved path segment that matches any literal key at its position (e.g.
+-- {"Players", "*", "Health"}). Shared by the listener registry (wildcard
+-- listeners) and the wildcard-aware accessors (Set/Update/Increment/
+-- GetMatching), so the whole API speaks one path grammar.
+PathHelpers.WILDCARD = "*"
+
+--[=[
+	@within PathHelpers
+	@interface WildcardExpansion
+	.Path { any } -- The fully concrete path (every "*" replaced by a matched key).
+	.Value any -- The value currently at `Path` (nil when the final segment does not exist yet).
+	.WildcardMatches { any }? -- Keys matched by each "*" segment, left-to-right. nil when the path had no wildcard.
+]=]
+export type WildcardExpansion = {
+	Path: PathArray,
+	Value: any,
+	WildcardMatches: { any }?,
+}
+
 -- Memoizes `string.split(s, ".")` results: callers pass the same handful of
 -- string-literal paths over and over (every Get/Set call site), so caching
 -- the frozen array avoids re-splitting + re-allocating on every call. Safe to
@@ -247,6 +266,130 @@ function PathHelpers.ResolveAtPath(root: any, path: PathArray): any
 		current = current[key]
 	end
 	return current
+end
+
+--[=[
+	Returns the index of the first `"*"` (wildcard) segment in `path`, or nil if
+	the path contains none. A zero-allocation scan, cheap enough to run on every
+	Set/Update/Increment call.
+
+	@param path The path array to scan
+	@return The 1-based index of the first wildcard segment, or nil
+]=]
+function PathHelpers.FindFirstWildcard(path: PathArray): number?
+	for i = 1, #path do
+		if path[i] == PathHelpers.WILDCARD then
+			return i
+		end
+	end
+	return nil
+end
+
+--[=[
+	Returns true if `path` contains at least one `"*"` (wildcard) segment.
+
+	@param path The path array to scan
+	@return true if any segment is the wildcard
+]=]
+function PathHelpers.HasWildcard(path: PathArray): boolean
+	return PathHelpers.FindFirstWildcard(path) ~= nil
+end
+
+-- Recursive body of `ExpandWildcards`. `node` is the value reached so far,
+-- `concretePath` the fully-literal path taken to reach it, `matches` the keys
+-- consumed by each "*" so far. Collects into `results` (collect-then-return:
+-- callers see a complete snapshot before mutating anything).
+const function expandWildcardsInto(
+	node: any,
+	path: PathArray,
+	index: number,
+	pathLen: number,
+	concretePath: PathArray,
+	matches: { any },
+	includeMissingFinal: boolean,
+	results: { WildcardExpansion }
+)
+	if index > pathLen then
+		table.insert(results, {
+			Path = concretePath,
+			Value = node,
+			WildcardMatches = if #matches > 0 then matches else nil,
+		})
+		return
+	end
+
+	-- A branch whose remaining segments cannot resolve is silently skipped
+	-- (wildcard segments match what exists) — mirrors how wildcard listeners
+	-- only fire for paths that exist.
+	if type(node) ~= "table" then
+		return
+	end
+
+	const segment = path[index]
+	if segment == PathHelpers.WILDCARD then
+		for key, child in node do
+			expandWildcardsInto(
+				child,
+				path,
+				index + 1,
+				pathLen,
+				PathHelpers.Append(concretePath, key),
+				PathHelpers.Append(matches, key),
+				includeMissingFinal,
+				results
+			)
+		end
+	else
+		const child = node[segment]
+		-- A missing literal FINAL segment is only kept when the caller is a
+		-- writer (`includeMissingFinal`): Set("Players.*.Health", v) writes
+		-- Health onto every player, creating the key where absent — while a
+		-- reader only reports values that exist.
+		if child == nil and not (includeMissingFinal and index == pathLen) then
+			return
+		end
+		expandWildcardsInto(
+			child,
+			path,
+			index + 1,
+			pathLen,
+			PathHelpers.Append(concretePath, segment),
+			matches,
+			includeMissingFinal,
+			results
+		)
+	end
+end
+
+--[=[
+	Expands the wildcard segments of `path` against live data, returning one
+	[WildcardExpansion] per concrete path matched. At each `"*"` segment every
+	key present at that level is enumerated; multiple wildcards compose as the
+	product of their branch factors. Results are fully collected before
+	returning, so callers may mutate the tree afterwards without invalidating
+	the expansion.
+
+	Segments `1 .. startIndex - 1` are assumed literal and already validated by
+	the caller (they seed the concrete path unchanged); expansion begins at
+	`startIndex` from `node`, the value reached by that literal prefix.
+
+	@param node The value at `path[1 .. startIndex - 1]` to expand from
+	@param path The full path array (may contain "*" segments at or after `startIndex`)
+	@param startIndex The segment index to begin expansion at (1 to expand the whole path)
+	@param includeMissingFinal When true, a missing literal final segment still yields an entry (Value = nil) — for writers that create the key.
+	@return The matched expansions (empty when nothing matches)
+]=]
+function PathHelpers.ExpandWildcards(
+	node: any,
+	path: PathArray,
+	startIndex: number,
+	includeMissingFinal: boolean?
+): { WildcardExpansion }
+	const prefixLen = startIndex - 1
+	const concretePrefix = table.move(path, 1, prefixLen, 1, table.create(prefixLen))
+	const results: { WildcardExpansion } = {}
+	expandWildcardsInto(node, path, startIndex, #path, concretePrefix, {}, includeMissingFinal == true, results)
+	return results
 end
 
 --[=[

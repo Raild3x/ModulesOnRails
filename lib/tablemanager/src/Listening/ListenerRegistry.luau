@@ -442,7 +442,7 @@ end
 
 -- Reserved path segment used to register a listener that matches any literal
 -- key at that position (e.g. {"Players", "*", "Health"}).
-const WILDCARD = "*"
+const WILDCARD = PathHelpers.WILDCARD
 
 type MatchedNode = {
 	node: ListenerNode,

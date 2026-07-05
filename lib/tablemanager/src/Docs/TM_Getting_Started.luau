@@ -56,6 +56,11 @@
 	manager:ArrayInsert("Inventory", 1, "Bow")   -- insert at index 1
 	```
 
+	Paths in `Set`/`Update`/`Increment` (and the bulk reader `GetMatching`) may
+	contain `"*"` wildcard segments to address every key at that level at once —
+	e.g. `manager:Increment("Players.*.Health", 5)`. See the
+	[Wildcards](/api/TM%20Wildcards) guide for the full rules.
+
 	:::tip Prefer paths over reaching into `Raw`
 	Writing through `Set`/`ArrayInsert`/etc. is what fires listeners. Mutating
 	`manager.Raw` directly bypasses change detection — see the Proxies & Direct
@@ -64,16 +69,11 @@
 
 	### 4. Your first listener
 
-	`Observe` fires immediately with the current value and again on every change —
-	ideal for binding UI to data. On the initial fire, `metadata` is `nil`.
+	`OnValueChange` fires when the value at the specified path changes.
 
 	```lua
-	manager:Observe("Player.Health", function(health, oldHealth, metadata)
-		if metadata == nil then
-			print("initial health:", health)
-		else
-			print("health:", oldHealth, "->", health)
-		end
+	manager:OnValueChange("Player.Health", function(health, oldHealth)
+		print("health changed:", oldHealth, "->", health)
 	end)
 
 	manager:Set("Player.Health", 50) -- fires: "health: 100 -> 50"
@@ -113,27 +113,26 @@
 	proxies. It is idempotent.
 
 	```lua
-	local conn = manager:OnValueChange("Player.Health", onHealthChanged)
+	manager:OnValueChange("Player.Health", onHealthChanged)
 
 	manager:OnDestroy(function()
 		print("manager torn down")
 	end)
 
-	conn:Disconnect()
 	manager:Destroy()
 	print(TableManager.IsDestroyed(manager)) -- true
 	```
 
-	:::tip
-	Call `TableManager.IsDestroyed(manager)` rather than `manager:IsDestroyed()`.
-	`Destroy` strips the instance's metatable, so the colon form errors once a
-	manager is already destroyed -- the static form works in both states.
+	:::tip IsDestroyed
+	An alias `manager:IsDestroyed()` is provided as an alternate to `TableManager.IsDestroyed(manager)`. 
+	It is the only safe method to use after `Destroy`. All other methods will error as the metatable is removed.
 	:::
 
 	---
 	### See also
 
-	- **[TM Listeners & Fire Modes](/api/TM%20Listeners%20&%20Fire%20Modes)** — path/key/array listeners, wildcards, and scheduling.
+	- **[TM Listeners & Fire Modes](/api/TM%20Listeners%20&%20Fire%20Modes)** — path/key/array listeners and scheduling.
+	- **[TM Wildcards](/api/TM%20Wildcards)** — `"*"` paths for listeners, writes, and bulk reads.
 	- **[TM Flushing](/api/TM%20Flushing)** — the diff-and-fire cycle behind every event.
 	- **[TM Batching](/api/TM%20Batching)** — grouping many writes so events fire once.
 	- **[TM Proxies & Direct Table Access](/api/TM%20Proxies%20&%20Direct%20Table%20Access)** — the proxy view and its rules.

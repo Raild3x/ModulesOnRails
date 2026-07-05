@@ -41,6 +41,10 @@ export type Proxy<T, S> = ProxyManagerModule.Proxy<T, S>
 -- at write time; the literal value stored at the path is always the bare inner.
 export type OpaqueWrapper<T> = OpaqueRegistryModule.Wrapper<T>
 
+-- One concrete match from a wildcard ("*") path expansion; returned by
+-- `GetMatching`. See PathHelpers.WildcardExpansion.
+export type WildcardExpansion = PathHelpers.WildcardExpansion
+
 --[=[
 	@within TableManager
 	@type DuplicateReferenceMode "allow" | "copy"
@@ -186,6 +190,9 @@ export type TableManager<T = { [any]: any }> = {
 	
 	-- Helper methods
 	Get: <S>(self: TableManager<T>, path: Path<S>, suppressNilPartialPaths: boolean?) -> ValueAtPath<T, S>,
+	--- Reads every value matched by a wildcard ("*") path; one record per
+	--- concrete match. A path without wildcards yields zero-or-one records.
+	GetMatching: <S>(self: TableManager<T>, path: Path<S>) -> { WildcardExpansion },
 	GetProxy: <S>(self: TableManager<T>, path: Path<S>, suppressNilPartialPaths: boolean?) -> Proxy<T, S>,
 	Set: <S>(self: TableManager<T>, path: Path<S>, value: ValueAtPath<T, S> | OpaqueWrapper<ValueAtPath<T, S>>, buildTablesDynamically: boolean?) -> (),
 	ArrayInsert: <S>(self: TableManager<T>, arrPath: Path<S> | Proxy<T, S>, newValue: any) -> ()
@@ -197,7 +204,8 @@ export type TableManager<T = { [any]: any }> = {
 	MoveTo: <S1, S2>(self: TableManager<T>, currentPath: Path<S1>, newPath: Path<S2>) -> (),
 	CopyTo: <S1, S2>(self: TableManager<T>, currentPath: Path<S1>, newPath: Path<S2>) -> (),
 	Swap: <S1, S2>(self: TableManager<T>, a: Path<S1>, b: Path<S2>) -> (),
-	Update: <S>(self: TableManager<T>, path: Path<S>, updater: (oldValue: ValueAtPath<T, S>) -> ValueAtPath<T, S>) -> (),
+	Update: <S>(self: TableManager<T>, path: Path<S>, updater: (oldValue: ValueAtPath<T, S>, wildcardMatches: { any }?, path: { any }?) -> ValueAtPath<T, S>) -> ValueAtPath<T, S>,
+	Increment: <S>(self: TableManager<T>, path: Path<S>, delta: any) -> any,
 
 	Batch: (self: TableManager<T>, fn: () -> ()) -> (),
 	Suspend: (self: TableManager<T>) -> (),

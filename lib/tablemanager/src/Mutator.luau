@@ -353,7 +353,6 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 		if err then
 			error(err, 2)
 		end
-		debug.profileend()
 		return
 	end
 
@@ -379,7 +378,6 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 		if not self._suppressLinkFanOut then
 			PropagationModule.RegisterSubtree(self, newValue)
 		end
-		debug.profileend()
 		return
 	end
 

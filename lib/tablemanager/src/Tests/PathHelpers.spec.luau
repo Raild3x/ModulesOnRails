@@ -216,4 +216,111 @@ return function(t: tiniest)
 			expect(length).is(0)
 		end)
 	end)
+
+	describe("FindFirstWildcard / HasWildcard", function()
+		test("finds the first wildcard segment", function()
+			expect(PathHelpers.FindFirstWildcard({ "a", "*", "c", "*" })).is(2)
+		end)
+
+		test("returns nil for a wildcard-free path", function()
+			expect(PathHelpers.FindFirstWildcard({ "a", "b" })).is(nil)
+			expect(PathHelpers.HasWildcard({ "a", "b" })).is(false)
+		end)
+
+		test("a leading wildcard is index 1", function()
+			expect(PathHelpers.FindFirstWildcard({ "*" })).is(1)
+			expect(PathHelpers.HasWildcard({ "*" })).is_true()
+		end)
+
+		test("an empty path has no wildcard", function()
+			expect(PathHelpers.HasWildcard({})).is(false)
+		end)
+	end)
+
+	describe("ExpandWildcards", function()
+		test("a trailing wildcard enumerates every key at that level", function()
+			local root = { A = 1, B = 2, C = 3 }
+			local entries = PathHelpers.ExpandWildcards(root, { "*" }, 1, false)
+			expect(#entries).is(3)
+			local seen = {}
+			for _, entry in entries do
+				expect(#entry.Path).is(1)
+				expect(entry.WildcardMatches).exists()
+				expect((entry.WildcardMatches :: { any })[1]).is(entry.Path[1])
+				seen[entry.Path[1]] = entry.Value
+			end
+			expect(seen).is_shallow_equal { A = 1, B = 2, C = 3 }
+		end)
+
+		test("multiple wildcards compose as the product of branch factors", function()
+			local root = {
+				Players = {
+					A = { Stats = { Str = 1, Dex = 2 } },
+					B = { Stats = { Str = 3 } },
+				},
+			}
+			local entries = PathHelpers.ExpandWildcards(root.Players, { "Players", "*", "Stats", "*" }, 2, false)
+			expect(#entries).is(3)
+			for _, entry in entries do
+				expect(#entry.Path).is(4)
+				expect(entry.Path[1]).is("Players")
+				expect(entry.Path[3]).is("Stats")
+				expect(#(entry.WildcardMatches :: { any })).is(2)
+				-- Matches are the wildcard keys, left-to-right.
+				expect((entry.WildcardMatches :: { any })[1]).is(entry.Path[2])
+				expect((entry.WildcardMatches :: { any })[2]).is(entry.Path[4])
+			end
+		end)
+
+		test("branches where the remaining path cannot resolve are skipped", function()
+			local root = {
+				A = { Stats = { Str = 1 } },
+				B = { Stats = 5 }, -- Stats not a table
+				C = {}, -- no Stats at all
+			}
+			local entries = PathHelpers.ExpandWildcards(root, { "*", "Stats", "Str" }, 1, false)
+			expect(#entries).is(1)
+			expect(entries[1].Path).is_shallow_equal { "A", "Stats", "Str" }
+			expect(entries[1].Value).is(1)
+		end)
+
+		test("zero matches returns an empty list", function()
+			local entries = PathHelpers.ExpandWildcards({}, { "*", "Health" }, 1, false)
+			expect(#entries).is(0)
+		end)
+
+		test("includeMissingFinal keeps a missing literal final key with a nil Value", function()
+			local root = { A = { Health = 10 }, B = {} }
+			local withMissing = PathHelpers.ExpandWildcards(root, { "*", "Health" }, 1, true)
+			local withoutMissing = PathHelpers.ExpandWildcards(root, { "*", "Health" }, 1, false)
+			expect(#withMissing).is(2)
+			expect(#withoutMissing).is(1)
+			expect(withoutMissing[1].Path).is_shallow_equal { "A", "Health" }
+		end)
+
+		test("literal prefix segments seed the concrete paths unchanged", function()
+			local players = { A = { Health = 1 } }
+			local entries = PathHelpers.ExpandWildcards(players, { "Players", "*", "Health" }, 2, false)
+			expect(#entries).is(1)
+			expect(entries[1].Path).is_shallow_equal { "Players", "A", "Health" }
+			expect(entries[1].WildcardMatches).is_shallow_equal { "A" }
+		end)
+
+		test("results are a snapshot: mutating the tree afterwards does not affect them", function()
+			local root = { A = 1, B = 2 }
+			local entries = PathHelpers.ExpandWildcards(root, { "*" }, 1, false)
+			root.A = nil
+			root.B = nil
+			expect(#entries).is(2)
+		end)
+
+		test("numeric (array) keys are enumerated like any other key", function()
+			local root = { scores = { 10, 20, 30 } }
+			local entries = PathHelpers.ExpandWildcards(root.scores, { "scores", "*" }, 2, false)
+			expect(#entries).is(3)
+			for _, entry in entries do
+				expect(entry.Value).is(entry.Path[2] * 10)
+			end
+		end)
+	end)
 end

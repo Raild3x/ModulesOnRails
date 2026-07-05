@@ -219,6 +219,49 @@ manager.Proxy.Players.p789 = { Health = 100 }
 > **total** across all matching keys, not once per key, since it lives on a
 > single tree node.
 
+### Wildcard Writes & Reads
+
+The same `"*"` grammar works in `Set`, `Update`, `Increment`, and the dedicated
+reader `GetMatching`. Each `"*"` expands to every key present at that level;
+multiple wildcards compose (product of branch factors); multi-path writes are
+batched into one coherent flush.
+
+```lua
+local manager = TableManager.new({
+    Players = {
+        p123 = { Health = 95, Stats = { Str = 1, Dex = 2 } },
+        p456 = { Health = 70, Stats = { Str = 3 } },
+    }
+})
+
+-- Write to every player (creates the key where missing):
+manager:Set("Players.*.Shield", 50)
+
+-- Read-modify-write per match — everyone heals 5:
+manager:Increment("Players.*.Health", 5)
+
+-- Multiple wildcards — every stat of every player. The updater also receives
+-- the keys matched by each "*" (left-to-right) and the concrete path, so it
+-- can tell which match it is handling:
+manager:Update("Players.*.Stats.*", function(stat, matches, path)
+    -- matches[1] = playerId, matches[2] = statName
+    return stat * 2
+end)
+
+-- Read every match; WildcardMatches follows the listener convention:
+for _, match in manager:GetMatching("Players.*.Health") do
+    print(match.WildcardMatches[1], "=", match.Value) -- "p123 = 100", "p456 = 75"
+end
+
+-- Mass delete (only targets existing keys):
+manager:Set("Players.*.Shield", nil)
+```
+
+> Note: `"*"` is a reserved segment for these methods too — a literal `"*"`
+> data key can no longer be addressed through `Set`/`Update`/`Increment`.
+> Writing one table value to several matched paths is subject to
+> `DuplicateReferenceMode` (`"allow"` shares identity, `"copy"` clones).
+
 ---
 
 ## Array Operations

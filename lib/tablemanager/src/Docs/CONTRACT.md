@@ -97,6 +97,28 @@ listener that both match the same change BOTH fire. Matched keys are exposed via
 `metadata.WildcardMatches` (array, left-to-right, one entry per `"*"`); `nil` when the registered path
 had no wildcards.
 
+The same grammar applies to `Set`, `Update`, `Increment`, and `GetMatching` (`"*"` is a **reserved**
+path segment across the whole API — it cannot address a literal `"*"` data key). Governing rule:
+literal segments keep exact-path semantics (a non-table value along the literal prefix errors, as
+always); wildcard segments have match-what-exists semantics:
+
+- Each `"*"` expands to every key present at that level **at call time** (the concrete path set is
+  fully collected before the first write, so a mass delete never mutates a table mid-enumeration).
+  Multiple wildcards compose as the product of their branch factors.
+- A matched branch where the remaining path cannot resolve is silently skipped; zero total matches is
+  a no-op (`GetMatching` returns `{}`).
+- The operation then applies once per matched concrete path. More than one match is wrapped in a
+  `Batch`, so listeners observe one coherent flush; `OnApplied` carries **N concrete ops**, never a
+  wildcard path (expansion happens against local state and would not replay identically remotely).
+- `Set` with a non-nil value also creates a missing literal *final* key on each matched parent (like
+  a plain `Set`); `Set(path, nil)` and the read-modify-write forms (`Update`/`Increment`, whose
+  callback runs once per match; both return `nil` on wildcard paths) only visit existing values.
+- `buildTablesDynamically` cannot be combined with a wildcard path (there is no key to invent for
+  `"*"`).
+- A table value fanned to multiple paths is governed by `DuplicateReferenceMode`: `"allow"` (default)
+  shares one identity across all matched paths; `"copy"` deep-clones per additional path. (With
+  `EnableProxies = false` the duplicate check does not run and the value is silently shared.)
+
 ---
 
 ## 3. `metadata` (ChangeMetadata)

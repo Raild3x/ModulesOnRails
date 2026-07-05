@@ -27,6 +27,7 @@ classes = [
 	"TM Listeners & Fire Modes",
 	"TM Flushing",
 	"TM Batching",
+	"TM Wildcards",
 	"TM Proxies & Direct Table Access",
 	"TM Schema Validation",
 	"TM Opaque Values",

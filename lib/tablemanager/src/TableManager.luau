@@ -404,6 +404,60 @@ end
 --// Setter/Accessor Methods //--
 --------------------------------------------------------------------------------
 
+--[[
+	Expands a wildcard path against the live raw data. Segments before
+	`wildcardIndex` are literal and keep exact-path semantics (a non-table value
+	along the prefix errors, same as `Set`/`Get`); segments from `wildcardIndex`
+	on are expanded with match-what-exists semantics (branches that cannot
+	resolve are skipped). Returns a complete snapshot of matched concrete paths,
+	safe to iterate while mutating the tree.
+]]
+const function resolveWildcardExpansion<T>(
+	self: TM_Internal<T>,
+	parsedPath: PathArray,
+	wildcardIndex: number,
+	includeMissingFinal: boolean
+): { PathHelpers.WildcardExpansion }
+	local node: any = self.Raw
+	for i = 1, wildcardIndex - 1 do
+		const segment = parsedPath[i]
+		node = node[segment]
+		if type(node) ~= "table" then
+			error(`Path segment {segment} is not a table`)
+		end
+	end
+	return PathHelpers.ExpandWildcards(node, parsedPath, wildcardIndex, includeMissingFinal)
+end
+
+--[[
+	Fan-out core for wildcard `Update`/`Increment`: one read-modify-write per
+	matched concrete path. The value is re-read immediately before each write
+	(not taken from the expansion snapshot) so a `transform` that touches other
+	matched paths never operates on stale data. `transform` also receives the
+	keys matched by each `"*"` (left-to-right, one per wildcard) and the fully
+	concrete path. Multiple writes are batched so listeners see one coherent
+	flush.
+]]
+const function applyWildcardRMW<T>(
+	self: TM_Internal<T>,
+	entries: { PathHelpers.WildcardExpansion },
+	transform: (oldValue: any, wildcardMatches: { any }, path: { any }) -> any
+)
+	if #entries == 0 then
+		return
+	end
+	if #entries == 1 then
+		const entry = entries[1]
+		self:Set(entry.Path, transform(self:Get(entry.Path, true), entry.WildcardMatches :: { any }, entry.Path))
+		return
+	end
+	self:Batch(function()
+		for _, entry in entries do
+			self:Set(entry.Path, transform(self:Get(entry.Path, true), entry.WildcardMatches :: { any }, entry.Path))
+		end
+	end)
+end
+
 --[=[
 	@within TableManager
 	@method Get
@@ -442,6 +496,73 @@ function TableManager.Get<T, S>(self: TM_Internal<T>, path: Path<S>, suppressNil
 	end
 	debug.profileend()
 	return current
+end
+
+--[=[
+	@within TableManager
+	@method GetMatching
+
+	Reads every value matched by a path containing wildcard (`"*"`) segments,
+	returning one record per concrete match:
+
+	- `Path` -- the fully concrete path array (every `"*"` replaced by the matched key).
+	- `Value` -- the value at that path.
+	- `WildcardMatches` -- the keys matched by each `"*"`, left-to-right (the same
+	  convention as listener `metadata.WildcardMatches`).
+
+	Each `"*"` matches every key present at that level; multiple wildcards compose
+	as the product of their branch factors. Branches where the remaining path
+	cannot resolve are skipped, and only existing values are reported -- zero
+	matches returns an empty array. Entry order follows table iteration order and
+	is not deterministic for dictionary keys.
+
+	A path with no wildcards returns zero-or-one records, resolved exactly like
+	[TableManager:Get] (including the error on a non-table intermediate segment;
+	literal segments before the first `"*"` error the same way).
+
+	@param path Path
+	@return { { Path: { any }, Value: any, WildcardMatches: { any }? } } -- One record per matched concrete path.
+
+	```lua
+	local manager = TableManager.new({
+		Players = {
+			p123 = { Health = 100 },
+			p456 = { Health = 70 },
+		},
+	})
+
+	local matches = manager:GetMatching("Players.*.Health")
+	-- matches (order not guaranteed):
+	-- {
+	--   { Path = { "Players", "p123", "Health" }, Value = 100, WildcardMatches = { "p123" } },
+	--   { Path = { "Players", "p456", "Health" }, Value = 70,  WildcardMatches = { "p456" } },
+	-- }
+
+	for _, match in matches do
+		print(match.WildcardMatches[1], "has", match.Value, "health")
+	end
+
+	-- Multiple wildcards -> one WildcardMatches entry per "*", left-to-right:
+	for _, match in manager:GetMatching("Players.*.Stats.*") do
+		local playerId, statName = match.WildcardMatches[1], match.WildcardMatches[2]
+	end
+	```
+]=]
+function TableManager.GetMatching<T, S>(self: TM_Internal<T>, path: Path<S>): { PathHelpers.WildcardExpansion }
+	debug.profilebegin("TM.GetMatching")
+	const parsedPath = PathHelpers.ParsePath(path)
+	const wildcardIndex = PathHelpers.FindFirstWildcard(parsedPath)
+	if wildcardIndex == nil then
+		debug.profileend()
+		const value = self:Get(parsedPath :: any)
+		if value == nil then
+			return {}
+		end
+		return { { Path = table.clone(parsedPath), Value = value, WildcardMatches = nil } }
+	end
+	const entries = resolveWildcardExpansion(self, parsedPath, wildcardIndex, false)
+	debug.profileend()
+	return entries
 end
 
 --[=[
@@ -496,15 +617,42 @@ end
 
 	Writes `value` at `path`, firing the events for whatever changed.
 
+	```lua
+	manager:Set("player.health", 80)          -- dot-string path
+	manager:Set({ "player", "health" }, 80)   -- array path (equivalent)
+	manager:Set("player.buff", nil)           -- removing a key
+	```
+
 	An empty path (`Set({}, newTable)` / `Set("", newTable)`) replaces the entire
 	root table: its identity is swapped to `newTable`, stale proxies of the old
 	tree are pruned, and root/child change listeners fire for the diff. The new
 	root must be a table (the root cannot become a scalar or `nil`), and the root
 	cannot be replaced while a batch is open.
 
+	The path may contain wildcard (`"*"`) segments -- the same grammar the
+	listener methods accept. Each `"*"` matches every key present at that level
+	at call time (multiple wildcards compose as the product of their branch
+	factors), and the write is applied once per matched concrete path, batched
+	into one coherent flush when more than one path matches:
+
+	```lua
+	manager:Set("Players.*.Health", 100)   -- every player's Health (created where missing)
+	manager:Set("Players.*.Stats.*", 0)    -- every stat of every player
+	manager:Set("Players.*", nil)          -- mass delete: removes every player
+	```
+
+	Wildcard branches where the remaining path cannot resolve are skipped, and
+	zero matches is a no-op. Writing `nil` only targets existing values; a
+	non-nil write also creates a missing literal final key on each matched
+	parent. `buildTablesDynamically` cannot be combined with a wildcard path.
+	Note that a table value fanned to multiple paths is subject to
+	[TableManagerConfig.DuplicateReferenceMode]: under `"allow"` (the default)
+	every matched path shares the SAME table identity; use `"copy"` for
+	independent clones.
+
 	@param path Path
 	@param value any -- The value to write. May be wrapped with [TableManager.Opaque] or similar.
-	@param buildTablesDynamically boolean? -- When `true`, missing intermediate tables along `path` are created rather than erroring.
+	@param buildTablesDynamically boolean? -- When `true`, missing intermediate tables along `path` are created rather than erroring. Not allowed with wildcard paths.
 ]=]
 function TableManager.Set<T, S>(
 	self: TM_Internal<T>,
@@ -520,6 +668,39 @@ function TableManager.Set<T, S>(
 	-- Empty path replaces the entire root table (identity swap + full diff).
 	if #parsedPath == 0 then
 		applyRootSet(self, unwrappedValue)
+		debug.profileend()
+		return
+	end
+
+	-- Wildcard fan-out: expand "*" segments against the live data into N
+	-- concrete paths, then apply N ordinary writes -- batched when N > 1 so
+	-- listeners see one coherent flush. Deletes (nil) only target existing
+	-- values; non-nil writes also create a missing literal final key on every
+	-- matched parent, same as a plain Set would.
+	const wildcardIndex = PathHelpers.FindFirstWildcard(parsedPath)
+	if wildcardIndex ~= nil then
+		if buildTablesDynamically then
+			debug.profileend()
+			error(`Cannot build tables dynamically through a wildcard ("*") path segment`)
+		end
+		const entries = resolveWildcardExpansion(self, parsedPath, wildcardIndex, unwrappedValue ~= nil)
+		if #entries == 1 then
+			applyWrite(self, entries[1].Path, unwrappedValue)
+		elseif #entries > 1 then
+			-- Fanning one table value to several paths: honor the duplicate-
+			-- reference policy here, deterministically. The per-write check in
+			-- `applyWrite` only catches duplicates that already have a proxy,
+			-- which a value first written during this same fan-out does not.
+			const clonePerPath = type(unwrappedValue) == "table"
+				and self._proxyManager ~= nil
+				and self._duplicateReferenceMode == "copy"
+			self:Batch(function()
+				for i, entry in entries do
+					const valueToWrite = if clonePerPath and i > 1 then deepCloneValue(unwrappedValue) else unwrappedValue
+					applyWrite(self, entry.Path, valueToWrite)
+				end
+			end)
+		end
 		debug.profileend()
 		return
 	end
@@ -575,9 +756,28 @@ end
 	back. Equivalent to a [TableManager:Get] followed by [TableManager:Set], so it
 	fires the same change events as a plain `Set`.
 
+	The path may contain wildcard (`"*"`) segments: `updater` then runs once per
+	matched concrete path, the writes are batched into one coherent flush, and
+	the method returns `nil`. On a wildcard path each invocation receives, after
+	the current value, the keys matched by each `"*"` (left-to-right, one per
+	wildcard) and the fully concrete path -- so an `updater` can tell which match
+	it is handling:
+
+	```lua
+	manager:Update("Players.*.Stats.*", function(value, matches, path)
+		-- matches[1] = playerId, matches[2] = statName
+		-- path       = { "Players", playerId, "Stats", statName }
+		return value + 1
+	end)
+	```
+
+	`matches`/`path` are `nil` for a non-wildcard `Update`. Only existing values
+	are visited -- use [TableManager:Set] to create keys through a wildcard. See
+	[TableManager:GetMatching] for the matching rules.
+
 	@param path Path
-	@param updater (oldValue: any) -> any -- Receives the current value; returns the new value.
-	@return any -- The new value that was written.
+	@param updater (oldValue: any, wildcardMatches: { any }?, path: { any }?) -> any -- Receives the current value (and, on wildcard paths, the matched keys and concrete path); returns the new value.
+	@return any -- The new value that was written (`nil` for wildcard paths).
 
 	```lua
 	manager:Update("coins", function(current)
@@ -585,11 +785,22 @@ end
 	end)
 	```
 ]=]
-function TableManager.Update<T, S>(self: TM_Internal<T>, path: Path<S>, updater: (oldValue: ValueAtPath<T, S>) -> ValueAtPath<T, S>): ValueAtPath<T, S>
+function TableManager.Update<T, S>(
+	self: TM_Internal<T>,
+	path: Path<S>,
+	updater: (oldValue: ValueAtPath<T, S>, wildcardMatches: { any }?, path: { any }?) -> ValueAtPath<T, S>
+): ValueAtPath<T, S>
+	const parsedPath = PathHelpers.ParsePath(path)
+	const wildcardIndex = PathHelpers.FindFirstWildcard(parsedPath)
+	if wildcardIndex ~= nil then
+		const entries = resolveWildcardExpansion(self, parsedPath, wildcardIndex, false)
+		applyWildcardRMW(self, entries, updater :: any)
+		return nil :: any
+	end
 	-- TODO: update this to be more efficient at updating by reducing the need to traverse the path twice
-	const oldValue = self:Get(path)
+	const oldValue = self:Get(parsedPath :: any)
 	const newValue = updater(oldValue)
-	self:Set(path, newValue)
+	self:Set(parsedPath :: any, newValue)
 	return newValue
 end
 
@@ -601,19 +812,33 @@ end
 	an [TableManager:Update] that returns `oldValue + delta`; errors if the current
 	value is not addable.
 
+	The path may contain wildcard (`"*"`) segments: `delta` is then added to every
+	matched existing value (batched into one coherent flush) and the method
+	returns `nil`. See [TableManager:Update] and [TableManager:GetMatching].
+
 	@param path Path
 	@param delta any -- The amount to add (any value supporting `+` with the current value).
-	@return any -- The new value that was written.
+	@return any -- The new value that was written (`nil` for wildcard paths).
 
 	```lua
 	manager:Increment("coins", 50)  -- coins += 50
+	manager:Increment("Players.*.Health", 5) -- everyone heals 5
 	```
 ]=]
 function TableManager.Increment<T, S>(self: TM_Internal<T>, path: Path<S>, delta: any): any
+	const parsedPath = PathHelpers.ParsePath(path)
+	const wildcardIndex = PathHelpers.FindFirstWildcard(parsedPath)
+	if wildcardIndex ~= nil then
+		const entries = resolveWildcardExpansion(self, parsedPath, wildcardIndex, false)
+		applyWildcardRMW(self, entries, function(oldValue)
+			return oldValue + delta
+		end)
+		return nil
+	end
 	-- TODO: update this to be more efficient at updating by reducing the need to traverse the path twice
-	const oldValue = self:Get(path)
+	const oldValue = self:Get(parsedPath :: any)
 	const newValue = oldValue + delta
-	self:Set(path, newValue)
+	self:Set(parsedPath :: any, newValue)
 	return newValue
 end
 
