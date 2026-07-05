@@ -304,6 +304,13 @@ export type ListenerRegistry = {
 	-- maxDepth) — everything `CoversChangesAt`/`WantsFullDiff`/`MaxObservedDepth`
 	-- answer, in one spine walk. `maxDepth` is `math.huge` when unbounded.
 	ObserveAt: (self: ListenerRegistry, path: PathArray) -> (boolean, boolean, number),
+	-- Per-level "is any listener registered exactly here?" oracle for the ancestor
+	-- notification walk (see `ChangeDetector.EmitAncestorNotifications`). One walk
+	-- root→`basePath`; `result[k]` is true iff a node with `Count > 0` exists at
+	-- prefix length `k-1`. `nil` for a wildcard registry (a "*" branch can match a
+	-- level whose literal node is absent, so the literal spine can't authorize a
+	-- skip — callers must then fire every level).
+	ResolveSpine: (self: ListenerRegistry, basePath: PathArray) -> { boolean }?,
 	-- Returns the absolute path a caller should snapshot the old value at for a
 	-- change at `path`, or `nil` if no opted-in (`SnapshotOldValues`) listener
 	-- would receive a real old value for this change. The returned path is the
@@ -895,6 +902,38 @@ function ListenerRegistry:CoversChangesAt(path: PathArray): boolean
 		end
 	end
 	return node.Subtree > 0 -- listener at `path` or somewhere in its subtree
+end
+
+--[=[
+	Resolves, for a change landing at `basePath`, which self/ancestor levels have
+	any listener registered AT that exact node — the cheap oracle the ancestor
+	notification walk uses to SKIP levels that provably have no listener (where a
+	fire is a pure no-op today). One walk root→`basePath`.
+
+	Returns a boolean per prefix length 0..#basePath: `result[k]` is true iff a
+	node exists at prefix length `k-1` with `Count > 0` (some listener of any event
+	type registered exactly there). Index `k` maps to prefix length `k-1`, so
+	`result[1]` is the root and `result[#basePath + 1]` is `basePath` itself.
+
+	Returns `nil` for a wildcard registry: a "*" branch can match a level whose
+	literal node is absent, so the literal spine can't authorize a skip and the
+	caller must fire every level (the pre-spine behavior).
+]=]
+function ListenerRegistry:ResolveSpine(basePath: PathArray): { boolean }?
+	if self._hasWildcards then
+		return nil
+	end
+	const n = #basePath
+	const result = table.create(n + 1)
+	local node: ListenerNode? = self._root
+	result[1] = (node :: ListenerNode).Count > 0
+	for i = 1, n do
+		if node ~= nil then
+			node = (node :: ListenerNode).Children[basePath[i]]
+		end
+		result[i + 1] = node ~= nil and node.Count > 0
+	end
+	return result
 end
 
 -- KeyAdded/KeyRemoved/KeyChanged listeners are dispatched by ChangeDetector

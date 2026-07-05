@@ -128,6 +128,10 @@ type CD_Internal = {
 	_registries: OpaqueRegistry.Registries?,
 	_opaqueCtx: Diff.Ctx?,
 	_ignoreTrie: IgnoreTrieModule.Node?,
+	-- Optional per-level listener oracle for the ancestor walk (see
+	-- `ListenerRegistry.ResolveSpine`). Resolved at fire time so it stays correct
+	-- under re-entrant connects/disconnects; nil = fire every ancestor level.
+	_ancestorSpineResolver: ((basePath: PathArray) -> { boolean }?)?,
 
 	_dispatch: (self: CD_Internal, job: () -> ()) -> (),
 	_emitRootNode: (self: CD_Internal, node: Diff.DiffNode?, basePath: PathArray, ancestorSnapshot: AncestorSnapshot) -> (),
@@ -194,7 +198,8 @@ function ChangeDetector.new(
 	},
 	debugMode: boolean?,
 	registries: OpaqueRegistry.Registries?,
-	ignoreTrie: IgnoreTrieModule.Node?
+	ignoreTrie: IgnoreTrieModule.Node?,
+	ancestorSpineResolver: ((basePath: PathArray) -> { boolean }?)?
 ): ChangeDetector
 	callbacks.OnKeyAdded = callbacks.OnKeyAdded or function() end
 	callbacks.OnKeyRemoved = callbacks.OnKeyRemoved or function() end
@@ -224,6 +229,9 @@ function ChangeDetector.new(
 		-- `SetPathIgnored` calls are visible without re-handing it in. nil is
 		-- the same as an empty trie (nothing pruned).
 		_ignoreTrie = ignoreTrie,
+		-- Ancestor-walk listener oracle (see the field doc on CD_Internal). nil
+		-- for detectors built without a registry (direct-construction tests).
+		_ancestorSpineResolver = ancestorSpineResolver,
 	}, ChangeDetector_MT) :: any
 
 	return self :: ChangeDetector
@@ -721,7 +729,14 @@ function ChangeDetector.EmitAncestorNotifications(
 		newValue: any,
 		oldValue: any,
 		metadata: ChangeMetadata
-	) -> ()
+	) -> (),
+	-- Optional per-prefix listener oracle (`ListenerRegistry.ResolveSpine`):
+	-- `levelHasListener[k]` is true iff some listener is registered exactly at
+	-- prefix length `k-1`. When present, a level with no listener at the node(s)
+	-- it would fire on is skipped — its fires are pure no-ops (an ancestor
+	-- notification never fires the public Signals, only exact-node listeners).
+	-- nil = fire every level (unchanged behavior / wildcard registries).
+	levelHasListener: { boolean }?
 )
 	debug.profilebegin("CD:EmitAncestorNotifications")
 	-- Pre-navigate rootTable once, caching the value at each depth 0..fromDepth.
@@ -753,6 +768,21 @@ function ChangeDetector.EmitAncestorNotifications(
 	end
 
 	for i = fromDepth, 0, -1 do
+		-- Skip levels with no listener to hear them. currentPath is prefix length
+		-- `i` (oracle index i+1); the "parent" mode's KeyChanged fires one level up
+		-- at prefix length `i-1` (index i), so that level survives if EITHER node
+		-- carries a listener. Every fire on an empty node is a no-op today, so this
+		-- changes nothing observable — it just elides the path/eventData allocs.
+		if levelHasListener ~= nil then
+			if keyChangedMode == "parent" and i >= 1 then
+				if not levelHasListener[i + 1] and not levelHasListener[i] then
+					continue
+				end
+			elseif not levelHasListener[i + 1] then
+				continue
+			end
+		end
+
 		local currentValue: any = if cachedValues then cachedValues[i + 1] else nil
 
 		if keyChangedMode == "parent" and i >= 1 then
@@ -807,6 +837,9 @@ function ChangeDetector._fireAncestorCallbacks(
 		Snapshot = snapshot,
 	}
 
+	const resolver = self._ancestorSpineResolver
+	const spine = if resolver then resolver(capturedPath) else nil
+
 	ChangeDetector.EmitAncestorNotifications(
 		capturedPath,
 		#capturedPath - 1,
@@ -814,7 +847,8 @@ function ChangeDetector._fireAncestorCallbacks(
 		snapshot.RootTable,
 		"parent",
 		callbacks.OnKeyChanged,
-		callbacks.OnValueChanged
+		callbacks.OnValueChanged,
+		spine
 	)
 end
 

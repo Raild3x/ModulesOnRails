@@ -27,7 +27,7 @@ return function(t: tiniest)
 	local test = t.test
 	local describe = t.describe
 
-	local ENABLE_PERF_TESTS = false
+	local ENABLE_PERF_TESTS = true
 	if not ENABLE_PERF_TESTS then
 		warn("[TableManager] Performance tests are disabled. Enable them in TableManager.performance.spec.luau to run.")
 		return
@@ -36,6 +36,25 @@ return function(t: tiniest)
 	local ITERATIONS = 5000
 	local WARMUP = 100
 	local PRINT_PER_OP_AVERAGES = true
+
+	--------------------------------------------------------------------------------
+	--// Manager construction //--
+	--------------------------------------------------------------------------------
+
+	-- Every manager in this suite is built in fully-synchronous fire mode. These
+	-- benchmarks measure per-op cost, not scheduler behavior, so deferred/bindable
+	-- dispatch (the default `"bindable"`, which resolves to Deferred under Studio)
+	-- only distorts the numbers two ways: its callbacks run OUTSIDE the timed
+	-- window, and a large backlog from one bench drains into a LATER bench's timed
+	-- window (observed as 14-20x inflation on the For* rows). Immediate mode makes
+	-- every dispatch happen synchronously inside the timed region where it belongs,
+	-- and eliminates the cross-bench contamination at its source. No bench here is
+	-- specifically measuring deferral, so this applies to all of them.
+	local rawNew = TableManager.new
+	local IMMEDIATE_CONFIG = { ListenerFireMode = "immediate", SignalFireMode = "immediate" } :: any
+	local function newManager(data: any): any
+		return rawNew(data, IMMEDIATE_CONFIG)
+	end
 
 	--------------------------------------------------------------------------------
 	--// Bench helpers //--
@@ -58,6 +77,16 @@ return function(t: tiniest)
 
 		for i = 1, WARMUP do
 			action(i, ctx)
+		end
+
+		-- Backstop against cross-bench contamination: drain any residual
+		-- deferred/coalesced callback backlog (For* initial fires, prior-bench
+		-- teardown, etc.) BEFORE the timed region so it can't bleed into these
+		-- samples. Immediate fire mode (see `newManager`) removes the main source;
+		-- a few frames of yielding here mop up anything that still schedules work,
+		-- since a large deferred queue can drain across several frames.
+		for _ = 1, 3 do
+			task.wait()
 		end
 
         const times: {number} = {}
@@ -125,7 +154,7 @@ return function(t: tiniest)
 		for _, observed in { false, true } do
 			perfTest(`{titleBase} ({if observed then "observed" else "unobserved"})`, {
 				setup = function()
-					local manager = TableManager.new(buildData())
+					local manager = newManager(buildData())
 					if observed then
 						manager:OnChange({}, noop)
 					end
@@ -187,7 +216,7 @@ return function(t: tiniest)
 		local flatData = buildWide(100)
 		perfTest("flat table (100 keys)", {
 			action = function()
-				local manager = TableManager.new(flatData)
+				local manager = newManager(flatData)
 				manager:Destroy()
 			end,
 			iters = 2000,
@@ -196,7 +225,7 @@ return function(t: tiniest)
 		local deepData = buildDeep(10)
 		perfTest("deep table (10 layers)", {
 			action = function()
-				local manager = TableManager.new(deepData)
+				local manager = newManager(deepData)
 				manager:Destroy()
 			end,
 			iters = 2000,
@@ -205,7 +234,7 @@ return function(t: tiniest)
 		local arrayData = { items = buildArray(100) }
 		perfTest("array-heavy table (100 elements)", {
 			action = function()
-				local manager = TableManager.new(arrayData)
+				local manager = newManager(arrayData)
 				manager:Destroy()
 			end,
 			iters = 2000,
@@ -221,7 +250,7 @@ return function(t: tiniest)
 			local path = deepPath(depth)
 			perfTest(title, {
 				setup = function()
-					return TableManager.new(buildDeep(depth))
+					return newManager(buildDeep(depth))
 				end,
 				action = function(_i, manager)
 					manager:Get(path)
@@ -237,7 +266,7 @@ return function(t: tiniest)
 		local stringPath = table.concat(deepPath(10), ".")
 		perfTest("10 layers deep (string path, re-parsed every call)", {
 			setup = function()
-				return TableManager.new(buildDeep(10))
+				return newManager(buildDeep(10))
 			end,
 			action = function(_i, manager)
 				manager:Get(stringPath)
@@ -251,7 +280,7 @@ return function(t: tiniest)
 			local path = deepPath(depth)
 			perfTest(title, {
 				setup = function()
-					return TableManager.new(buildDeep(depth))
+					return newManager(buildDeep(depth))
 				end,
 				action = function(_i, manager)
 					manager:GetProxy(path)
@@ -277,7 +306,7 @@ return function(t: tiniest)
 		-- entirely, so an unlistened Set is NOT representative of the cost
 		-- most callers actually pay.
 		local function newObservedManager(data: any): any
-			local manager = TableManager.new(data)
+			local manager = newManager(data)
 			manager:OnChange({}, noop)
 			return manager
 		end
@@ -425,7 +454,7 @@ return function(t: tiniest)
 		local function registrationTest(methodName: string, register: (manager: any) -> any)
 			perfTest(methodName, {
 				setup = function()
-					return TableManager.new { value = 1, items = {} }
+					return newManager { value = 1, items = {} }
 				end,
 				action = function(_i, manager)
 					local connection = register(manager)
@@ -468,7 +497,7 @@ return function(t: tiniest)
 		local function dispatchTest(title: string, listenerCount: number, iters: number?)
 			perfTest(title, {
 				setup = function()
-					local manager = TableManager.new { value = 1 }
+					local manager = newManager { value = 1 }
 					for _ = 1, listenerCount do
 						manager:OnChange("value", noop)
 					end
@@ -496,7 +525,7 @@ return function(t: tiniest)
 		local forKeysData = buildWide(100)
 		perfTest("initial subscribe over 100 keys", {
 			action = function()
-				local manager = TableManager.new(forKeysData)
+				local manager = newManager(forKeysData)
 				local connection = manager:ForKeys({}, noop)
 				connection:Disconnect()
 				manager:Destroy()
@@ -506,7 +535,7 @@ return function(t: tiniest)
 
 		perfTest("incremental: array insert/remove drives reconciliation", {
 			setup = function()
-				local manager = TableManager.new { items = buildArray(100) }
+				local manager = newManager { items = buildArray(100) }
 				manager:ForKeys("items", noop)
 				return manager
 			end,
@@ -523,7 +552,7 @@ return function(t: tiniest)
 		local forValuesData = buildArray(100)
 		perfTest("initial subscribe over 100 values", {
 			action = function()
-				local manager = TableManager.new { items = forValuesData }
+				local manager = newManager { items = forValuesData }
 				local connection = manager:ForValues("items", noop)
 				connection:Disconnect()
 				manager:Destroy()
@@ -533,7 +562,7 @@ return function(t: tiniest)
 
 		perfTest("incremental: array insert/remove drives reconciliation", {
 			setup = function()
-				local manager = TableManager.new { items = buildArray(100) }
+				local manager = newManager { items = buildArray(100) }
 				manager:ForValues("items", noop)
 				return manager
 			end,
@@ -550,7 +579,7 @@ return function(t: tiniest)
 		local forPairsData = buildWide(100)
 		perfTest("initial subscribe over 100 entries", {
 			action = function()
-				local manager = TableManager.new(forPairsData)
+				local manager = newManager(forPairsData)
 				local connection = manager:ForPairs({}, noop)
 				connection:Disconnect()
 				manager:Destroy()
@@ -560,7 +589,7 @@ return function(t: tiniest)
 
 		perfTest("incremental: value change at an existing key re-runs the handler", {
 			setup = function()
-				local manager = TableManager.new(buildWide(100))
+				local manager = newManager(buildWide(100))
 				manager:ForPairs({}, noop)
 				return manager
 			end,
@@ -579,7 +608,7 @@ return function(t: tiniest)
 			local data = buildWide(100)
 			perfTest("initial build over 100 keys", {
 				action = function()
-					local source = TableManager.new(data)
+					local source = newManager(data)
 					local derived = callMap(source, transformFn)
 					derived:Destroy()
 					source:Destroy()
@@ -589,7 +618,7 @@ return function(t: tiniest)
 
 			perfTest("incremental: source value change propagates to the derived output", {
 				setup = function()
-					local source = TableManager.new(buildWide(100))
+					local source = newManager(buildWide(100))
 					local derived = callMap(source, transformFn)
 					return { source = source, derived = derived }
 				end,
@@ -629,7 +658,7 @@ return function(t: tiniest)
 	local WRITES_PER_BATCH = 20
 
 	local function setupBatchManager(): any
-		local manager = TableManager.new(buildWide(WRITES_PER_BATCH))
+		local manager = newManager(buildWide(WRITES_PER_BATCH))
 		for k = 1, WRITES_PER_BATCH do
 			manager:OnChange(`k{k}`, noop)
 		end
@@ -680,7 +709,7 @@ return function(t: tiniest)
 	perfDescribe("Method: Flush", function(perfTest)
 		perfTest("explicit Flush after a direct Raw mutation (bypass path)", {
 			setup = function()
-				local manager = TableManager.new { value = 1 }
+				local manager = newManager { value = 1 }
 				manager:OnChange("value", noop)
 				return manager
 			end,
@@ -731,7 +760,7 @@ return function(t: tiniest)
 	perfDescribe("Method: SetPathIgnored", function(perfTest)
 		perfTest("Set into an ignored subtree (diff/snapshot skipped)", {
 			setup = function()
-				local manager = TableManager.new { ignored = { value = 1 } }
+				local manager = newManager { ignored = { value = 1 } }
 				manager:OnChange("ignored", noop)
 				manager:SetPathIgnored("ignored", true)
 				return manager
@@ -744,7 +773,7 @@ return function(t: tiniest)
 
 		perfTest("Set into the equivalent tracked subtree (baseline for comparison)", {
 			setup = function()
-				local manager = TableManager.new { tracked = { value = 1 } }
+				local manager = newManager { tracked = { value = 1 } }
 				manager:OnChange("tracked", noop)
 				return manager
 			end,
@@ -762,7 +791,7 @@ return function(t: tiniest)
 	perfDescribe("Method: Extend", function(perfTest)
 		perfTest("extend a nested table into its own manager", {
 			setup = function()
-				return TableManager.new { child = { value = 1 } }
+				return newManager { child = { value = 1 } }
 			end,
 			action = function(_i, manager)
 				local extended = manager:Extend("child")
@@ -777,10 +806,10 @@ return function(t: tiniest)
 		perfTest("lookup cost with 10 co-observing managers", {
 			setup = function()
 				local shared = { value = 1 }
-				local root = TableManager.new { stats = shared }
+				local root = newManager { stats = shared }
 				local others = {}
 				for i = 1, 10 do
-					others[i] = TableManager.new { stats = shared }
+					others[i] = newManager { stats = shared }
 				end
 				return { root = root, others = others }
 			end,
@@ -801,8 +830,8 @@ return function(t: tiniest)
 		perfTest("Set on one manager propagates to a co-observing linked manager", {
 			setup = function()
 				local shared = { value = 1 }
-				local a = TableManager.new { stats = shared }
-				local b = TableManager.new { stats = shared }
+				local a = newManager { stats = shared }
+				local b = newManager { stats = shared }
 				return { a = a, b = b }
 			end,
 			action = function(i, ctx)
@@ -843,7 +872,7 @@ return function(t: tiniest)
 		local function destroyTest(title: string, listenerCount: number)
 			perfTest(title, {
 				action = function()
-					local manager = TableManager.new { value = 1, items = buildArray(10) }
+					local manager = newManager { value = 1, items = buildArray(10) }
 					for _ = 1, listenerCount do
 						manager:OnChange("value", noop)
 					end

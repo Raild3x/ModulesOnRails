@@ -392,7 +392,13 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 		EmitterModule.makeChangeDetectorCallbacks(self :: any) :: any,
 		nil,
 		self._opaqueRegistries,
-		self._ignoreTrie
+		self._ignoreTrie,
+		-- Ancestor-walk listener oracle: lets EmitAncestorNotifications skip levels
+		-- with no listener. Resolved at fire time (re-entrancy-safe). See
+		-- `ListenerRegistry.ResolveSpine`.
+		function(basePath: PathArray)
+			return self._listenerRegistry:ResolveSpine(basePath)
+		end
 	)
 
 	PropagationModule.RegisterSubtree(self, self.Raw)
