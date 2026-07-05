@@ -319,6 +319,13 @@ export type ListenerRegistry = {
 	PrimeAncestorSpine: (self: ListenerRegistry, basePath: PathArray) -> { any }?,
 	-- Clears the primed spine (see `PrimeAncestorSpine`). Idempotent.
 	EndAncestorSpine: (self: ListenerRegistry) -> (),
+	-- Fire-time O(depth) probe: true if a `FireListenersExact` at the EXACT `path`
+	-- could deliver to some listener (a node with `Count > 0` sits there, or the
+	-- registry has wildcards that might match). False means such a fire is a
+	-- guaranteed no-op, so the caller can skip building its `eventData`. Uses the
+	-- same lookup `FireListenersExact` does, so it reflects live listener state
+	-- (mid-dispatch connects included) — never elides a fire that would deliver.
+	HasListenerNodeAt: (self: ListenerRegistry, path: PathArray) -> boolean,
 	-- Returns the absolute path a caller should snapshot the old value at for a
 	-- change at `path`, or `nil` if no opted-in (`SnapshotOldValues`) listener
 	-- would receive a real old value for this change. The returned path is the
@@ -997,6 +1004,40 @@ function ListenerRegistry:EndAncestorSpine()
 	self._spineBasePath = nil
 end
 
+--[=[
+	Fire-time coverage probe for a would-be `FireListenersExact` at the EXACT `path`:
+	true iff that fire could deliver to some listener. Conservative `true` for a
+	wildcard registry (a "*" branch could match `path`, and ruling it out would
+	duplicate `collectMatchingNodes`).
+
+	Inside a primed ancestor window (see `PrimeAncestorSpine`), a prefix-of-basePath
+	`path`'s node presence is already resolved in the spine, so read it there in O(1)
+	— exactly the node `FireListenersExact`'s fire-by-node fast path would use, and
+	consistent with the walk's own skip oracle (so an ancestor fire, which only
+	reaches non-skipped levels, is never mis-elided). Otherwise (leaf DFS / no window)
+	walk to the node with the same `getNode` `FireListenersExact` uses and report
+	whether it carries any direct listener (`Count > 0`).
+
+	Lets the emit callbacks skip building an `eventData` table for a fire that would
+	no-op anyway, without ever eliding a real delivery (a listener connected
+	mid-dispatch is seen: the spine is primed AFTER the leaf DFS, and the leaf DFS
+	path reads live).
+]=]
+function ListenerRegistry:HasListenerNodeAt(path: PathArray): boolean
+	if self._hasWildcards then
+		return true
+	end
+	const spineNodes = self._spineNodes
+	if spineNodes ~= nil then
+		const len = #path
+		if len <= self._spineLen and (len == 0 or (self._spineBasePath :: PathArray)[len] == path[len]) then
+			return spineNodes[len + 1] ~= nil
+		end
+	end
+	const node = getNode(self._root, path)
+	return node ~= nil and node.Count > 0
+end
+
 -- KeyAdded/KeyRemoved/KeyChanged listeners are dispatched by ChangeDetector
 -- inspecting the diff node's own CHILDREN (one level below the listener's
 -- registration path) — unlike ValueChanged, which fires from the node's own
@@ -1172,6 +1213,15 @@ end
 	than threading event-type filtering through the aggregate counts.
 ]=]
 function ListenerRegistry:SnapshotRootFor(path: PathArray): PathArray?
+	-- No `SnapshotOldValues` listener anywhere ⇒ no change can need a snapshot.
+	-- `SnapshotSubtree` on the root aggregates every opted-in listener (a wildcard
+	-- one bumps it too, so this also subsumes the `_hasSnapshotWildcards` case),
+	-- collapsing the overwhelmingly-common no-snapshot path to one field read
+	-- before the parent-path clone + getNode walks below.
+	if self._root.SnapshotSubtree == 0 then
+		return nil
+	end
+
 	if self._hasSnapshotWildcards then
 		return path
 	end

@@ -27,7 +27,7 @@ return function(t: tiniest)
 	local test = t.test
 	local describe = t.describe
 
-	local ENABLE_PERF_TESTS = false
+	local ENABLE_PERF_TESTS = true
 	if not ENABLE_PERF_TESTS then
 		warn("[TableManager] Performance tests are disabled. Enable them in TableManager.performance.spec.luau to run.")
 		return

@@ -136,6 +136,7 @@ type CD_Internal = {
 	_ancestorSpineResolver: ((basePath: PathArray) -> ({ any }?, (() -> ())?))?,
 
 	_dispatch: (self: CD_Internal, job: () -> ()) -> (),
+	_dispatchNode: (self: CD_Internal, node: Diff.DiffNode, basePath: PathArray, ancestorSnapshot: AncestorSnapshot) -> (),
 	_emitRootNode: (self: CD_Internal, node: Diff.DiffNode?, basePath: PathArray, ancestorSnapshot: AncestorSnapshot) -> (),
 	_processDiffNode: (self: CD_Internal, node: Diff.DiffNode, nodePath: PathArray, parentPath: PathArray, nodeKey: any?, originPath: PathArray, originDiff: Diff.DiffNode, snapshot: AncestorSnapshot) -> (),
 	_fireAncestorCallbacks: (self: CD_Internal, capturedPath: PathArray, rootDiff: Diff.DiffNode, snapshot: AncestorSnapshot) -> (),
@@ -475,9 +476,7 @@ function ChangeDetector.DispatchDiffNode(
 		RootTable = rootTable,
 		OldSnapshot = oldSnapshot,
 	}
-	self:_dispatch(function()
-		self:_emitRootNode(node, basePath, ancestorSnapshot)
-	end)
+	self:_dispatchNode(node, basePath, ancestorSnapshot)
 end
 
 --[=[
@@ -505,16 +504,37 @@ end
 --// Private Methods //--
 --------------------------------------------------------------------------------
 
+-- Drains any jobs queued by re-entrant checks during the current dispatch, in
+-- FIFO order. Shared by the closure runner (`runDispatchJob`) and the prebuilt-
+-- node runner (`runEmitAndDrain`).
+const function drainQueue(self: CD_Internal)
+	while #self._dispatchQueue > 0 do
+		local queued = table.remove(self._dispatchQueue, 1) :: () -> ()
+		queued()
+	end
+end
+
 -- Runs `job` then drains `self._dispatchQueue`. A single module-level function
 -- (rather than a closure literal built fresh inside `_dispatch` on every call)
 -- so `pcall` below can call it by reference + args instead of allocating a new
 -- closure per dispatch — `job` and `self` are passed through as `pcall` args.
 const function runDispatchJob(self: CD_Internal, job: () -> ())
 	job()
-	while #self._dispatchQueue > 0 do
-		local queued = table.remove(self._dispatchQueue, 1) :: () -> ()
-		queued()
-	end
+	drainQueue(self)
+end
+
+-- Prebuilt-node twin of `runDispatchJob` for `DispatchDiffNode`: emits `node`
+-- directly (nothing to re-diff at drain time, so no closure is needed) then
+-- drains the queue. All args ride through `pcall` so the common dispatch path
+-- allocates no closure.
+const function runEmitAndDrain(
+	self: CD_Internal,
+	node: Diff.DiffNode,
+	basePath: PathArray,
+	ancestorSnapshot: AncestorSnapshot
+)
+	self:_emitRootNode(node, basePath, ancestorSnapshot)
+	drainQueue(self)
 end
 
 --[[
@@ -538,6 +558,36 @@ function ChangeDetector._dispatch(self: CD_Internal, job: () -> ())
 
 	self._dispatching = true
 	local ok, err = pcall(runDispatchJob, self, job)
+	self._dispatching = false
+	if not ok then
+		table.clear(self._dispatchQueue)
+		error(err, 3)
+	end
+end
+
+--[[
+	Prebuilt-node twin of `_dispatch` for `DispatchDiffNode`: on the common
+	(non-re-entrant) path it emits an already-built `node` directly via
+	`runEmitAndDrain` under `pcall`, allocating no closure — the whole point of the
+	fast lane. A re-entrant call (already dispatching, e.g. a listener writing back)
+	is rare, so it just delegates to `_dispatch` with a closure, reusing the one
+	queue/ordering/error protocol instead of duplicating it.
+]]
+function ChangeDetector._dispatchNode(
+	self: CD_Internal,
+	node: Diff.DiffNode,
+	basePath: PathArray,
+	ancestorSnapshot: AncestorSnapshot
+)
+	if self._dispatching then
+		self:_dispatch(function()
+			self:_emitRootNode(node, basePath, ancestorSnapshot)
+		end)
+		return
+	end
+
+	self._dispatching = true
+	local ok, err = pcall(runEmitAndDrain, self, node, basePath, ancestorSnapshot)
 	self._dispatching = false
 	if not ok then
 		table.clear(self._dispatchQueue)
@@ -604,7 +654,10 @@ function ChangeDetector._emitRootNode(self: CD_Internal, node: Diff.DiffNode?, b
 	end
 
 	-- Process all leaf changes via DFS; basePath is both the current path and
-	-- the origin. Fire ancestor callbacks for the base level afterward.
+	-- the origin. Fire ancestor callbacks for the base level afterward. The
+	-- ancestor spine is primed inside `_fireAncestorCallbacks` at fire time (so a
+	-- listener connected DURING the leaf fires is still seen); the leaf fires above
+	-- instead skip their own empty-node work via `ListenerRegistry.HasListenerNodeAt`.
 	self:_processDiffNode(node, basePath, rootParentPath, rootKey, basePath, node, ancestorSnapshot)
 	self:_fireAncestorCallbacks(basePath, node, ancestorSnapshot)
 	debug.profileend()
@@ -741,15 +794,41 @@ function ChangeDetector.EmitAncestorNotifications(
 	levelHasListener: { any }?
 )
 	debug.profilebegin("CD:EmitAncestorNotifications")
-	-- Pre-navigate rootTable once, caching the value at each depth 0..fromDepth.
+	-- Bound all per-level work to the DEEPEST level that will actually fire. With a
+	-- skip oracle, a deep write observed only by a shallow listener (e.g. a lone
+	-- root `OnChange` under a 10-level path) fires just the top couple of levels —
+	-- so navigating/allocating for every level down to `fromDepth` is wasted. Scan
+	-- the oracle once (cheap array reads, no allocs) for the deepest firing level;
+	-- everything below is bounded to it. `nil` oracle (wildcard/no-prime) keeps the
+	-- full range, since every level may fire.
+	local topDepth = fromDepth
+	if levelHasListener ~= nil then
+		topDepth = -1
+		for i = fromDepth, 0, -1 do
+			const fires = if keyChangedMode == "parent" and i >= 1
+				then levelHasListener[i + 1] or levelHasListener[i]
+				else levelHasListener[i + 1]
+			if fires then
+				topDepth = i
+				break
+			end
+		end
+		if topDepth < 0 then
+			debug.profileend()
+			return -- no level fires; nothing to navigate, build, or emit.
+		end
+	end
+
+	-- Pre-navigate rootTable once, caching the value at each depth 0..topDepth.
 	-- The original code re-navigated from the root at every ancestor level
-	-- (O(0+1+…+depth) = O(depth²) hash lookups); this reduces it to one O(depth) pass.
+	-- (O(0+1+…+depth) = O(depth²) hash lookups); this reduces it to one pass, now
+	-- bounded to the deepest firing level rather than `fromDepth`.
 	local cachedValues: { any }?
 	if rootTable ~= nil then
-		cachedValues = table.create(fromDepth + 1)
+		cachedValues = table.create(topDepth + 1)
 		local v: any = rootTable
 		cachedValues[1] = v -- depth 0 → index 1
-		for d = 1, fromDepth do
+		for d = 1, topDepth do
 			if type(v) == "table" then
 				v = (v :: any)[basePath[d]]
 			else
@@ -759,17 +838,17 @@ function ChangeDetector.EmitAncestorNotifications(
 		end
 	end
 
-	-- Build the deepest prefix once; every level's path is a bounded slice of
+	-- Build the deepest FIRING prefix once; every level's path is a bounded slice of
 	-- it. Each fired path must still be its own fresh table (Signal:Fire leaks
 	-- the reference), so a `table.move` bulk copy replaces the previous
 	-- per-element Lua loop at each level — same O(i) elements copied, but as a
 	-- single native bulk-copy call instead of an interpreted loop.
-	local prefix: PathArray = table.create(fromDepth)
-	for j = 1, fromDepth do
+	local prefix: PathArray = table.create(topDepth)
+	for j = 1, topDepth do
 		prefix[j] = basePath[j]
 	end
 
-	for i = fromDepth, 0, -1 do
+	for i = topDepth, 0, -1 do
 		-- Skip levels with no listener to hear them. currentPath is prefix length
 		-- `i` (oracle index i+1); the "parent" mode's KeyChanged fires one level up
 		-- at prefix length `i-1` (index i), so that level survives if EITHER node
@@ -788,16 +867,29 @@ function ChangeDetector.EmitAncestorNotifications(
 		local currentValue: any = if cachedValues then cachedValues[i + 1] else nil
 
 		if keyChangedMode == "parent" and i >= 1 then
-			local currentPath: PathArray = table.move(prefix, 1, i, 1, table.create(i))
-			local parentPath: PathArray = table.move(prefix, 1, i - 1, 1, table.create(i - 1))
-
-			local key = basePath[i]
-			local keyValue = nil
-			if currentValue ~= nil and type(currentValue) == "table" then
-				keyValue = (currentValue :: any)[key]
+			-- The two sub-fires target different nodes: KeyChanged at prefix `i-1`
+			-- (oracle index `i`), ValueChanged at prefix `i` (index `i+1`). A level
+			-- reached here has a listener on AT LEAST one of them, but often not both
+			-- — so build each path (and make its call) only when its own node carries
+			-- a listener, instead of building both and letting one no-op inside. With
+			-- no oracle (wildcard / unprimed) fire both, as before. This is exactly the
+			-- gate the callbacks' `HasListenerNodeAt` applies, hoisted up to also skip
+			-- the wasted path allocation.
+			const fireKey = levelHasListener == nil or levelHasListener[i]
+			const fireValue = levelHasListener == nil or levelHasListener[i + 1]
+			if fireKey then
+				local parentPath: PathArray = table.move(prefix, 1, i - 1, 1, table.create(i - 1))
+				local key = basePath[i]
+				local keyValue = nil
+				if currentValue ~= nil and type(currentValue) == "table" then
+					keyValue = (currentValue :: any)[key]
+				end
+				emitKeyChanged(parentPath, key, keyValue, nil, metadata)
 			end
-			emitKeyChanged(parentPath, key, keyValue, nil, metadata)
-			emitValueChanged(currentPath, currentValue, currentValue, metadata)
+			if fireValue then
+				local currentPath: PathArray = table.move(prefix, 1, i, 1, table.create(i))
+				emitValueChanged(currentPath, currentValue, currentValue, metadata)
+			end
 		else
 			local currentPath: PathArray = table.move(prefix, 1, i, 1, table.create(i))
 			emitValueChanged(currentPath, currentValue, currentValue, metadata)
@@ -839,6 +931,9 @@ function ChangeDetector._fireAncestorCallbacks(
 		Snapshot = snapshot,
 	}
 
+	-- Resolve the spine at fire time (NOT earlier), so an ancestor listener
+	-- connected from inside a leaf fire during this same dispatch is still picked
+	-- up by the walk below. See the ancestor-skip mid-dispatch spec.
 	const resolver = self._ancestorSpineResolver
 	local spine: { any }? = nil
 	local endSpine: (() -> ())? = nil

@@ -68,6 +68,18 @@ const function sliceOldSnapshot(metadata: ChangeMetadata?, absPath: PathArray): 
 	return value
 end
 
+-- Convenience wrapper for the Key* callbacks whose old-value path is `path`
+-- extended by `key`. Skips the `PathHelpers.Append` allocation entirely on the
+-- common path where no snapshot was built for this change (`OldSnapshot == nil`),
+-- only paying it when a `SnapshotOldValues` listener actually needs the slice.
+const function sliceOldSnapshotAtChild(metadata: ChangeMetadata?, path: PathArray, key: any): any?
+	const oldSnapshot = if metadata then metadata.Snapshot and metadata.Snapshot.OldSnapshot else nil
+	if oldSnapshot == nil then
+		return nil
+	end
+	return sliceOldSnapshot(metadata, PathHelpers.Append(path, key))
+end
+
 -- ---------------------------------------------------------------------------
 -- SignalFireMode dispatch
 -- ---------------------------------------------------------------------------
@@ -327,7 +339,8 @@ function Emitter.fireArrayOperation(
 		fireSignal(manager, manager.ArraySet, basePath, payload.Index, payload.NewValue, payload.OldValue)
 	end
 
-	if not manager._suppressLinkFanOut then
+	-- See `OnValueChanged`: no co-observed identity ⇒ no fan-out recipients.
+	if not manager._suppressLinkFanOut and manager._sharesObservers then
 		PropagationModule.FanOutArrayOp(manager, eventName, basePath, payload)
 	end
 
@@ -485,6 +498,14 @@ end
 	`TableManager.new`.
 ]]
 function Emitter.makeChangeDetectorCallbacks(manager: TableManagerLike)
+	const registry = manager._listenerRegistry
+	-- `HasListenerNodeAt(path)` gates every registry fire below: when no listener
+	-- node sits at the exact fire path, `FireListenersExact` would no-op anyway, so
+	-- building the `eventData` table + slicing the old snapshot is pure waste — skip
+	-- it. The probe reads the same live tree the fire would, so it never elides a
+	-- real delivery (mid-dispatch connects included), and stays conservative for
+	-- wildcard registries. The public Signal + fan-out below are unaffected: they
+	-- fire on their own connection state, independent of registry listeners.
 	return {
 		OnKeyAdded = function(path: PathArray, key: any, newValue: any, metadata: ChangeMetadata)
 			-- Signal before registry listeners: if a listener performs a re-entrant
@@ -493,36 +514,42 @@ function Emitter.makeChangeDetectorCallbacks(manager: TableManagerLike)
 			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
 				fireSignal(manager, manager.KeyAdded, path, key, newValue)
 			end
-			manager._listenerRegistry:FireListenersExact("KeyAdded", path, {
-				NewValue = newValue,
-				Key = key,
-				Metadata = metadata,
-			})
+			if registry:HasListenerNodeAt(path) then
+				registry:FireListenersExact("KeyAdded", path, {
+					NewValue = newValue,
+					Key = key,
+					Metadata = metadata,
+				})
+			end
 		end,
 
 		OnKeyRemoved = function(path: PathArray, key: any, oldValue: any, metadata: ChangeMetadata)
 			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
 				fireSignal(manager, manager.KeyRemoved, path, key, oldValue)
 			end
-			manager._listenerRegistry:FireListenersExact("KeyRemoved", path, {
-				OldValue = oldValue,
-				OldValueSnapshot = sliceOldSnapshot(metadata, PathHelpers.Append(path, key)),
-				Key = key,
-				Metadata = metadata,
-			})
+			if registry:HasListenerNodeAt(path) then
+				registry:FireListenersExact("KeyRemoved", path, {
+					OldValue = oldValue,
+					OldValueSnapshot = sliceOldSnapshotAtChild(metadata, path, key),
+					Key = key,
+					Metadata = metadata,
+				})
+			end
 		end,
 
 		OnKeyChanged = function(path: PathArray, key: any, newValue: any, oldValue: any, metadata: ChangeMetadata)
 			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
 				fireSignal(manager, manager.KeyChanged, path, key, newValue, oldValue)
 			end
-			manager._listenerRegistry:FireListenersExact("KeyChanged", path, {
-				NewValue = newValue,
-				OldValue = oldValue,
-				OldValueSnapshot = sliceOldSnapshot(metadata, PathHelpers.Append(path, key)),
-				Key = key,
-				Metadata = metadata,
-			})
+			if registry:HasListenerNodeAt(path) then
+				registry:FireListenersExact("KeyChanged", path, {
+					NewValue = newValue,
+					OldValue = oldValue,
+					OldValueSnapshot = sliceOldSnapshotAtChild(metadata, path, key),
+					Key = key,
+					Metadata = metadata,
+				})
+			end
 		end,
 
 		OnValueChanged = function(path: PathArray, newValue: any, oldValue: any?, metadata: ChangeMetadata)
@@ -530,17 +557,24 @@ function Emitter.makeChangeDetectorCallbacks(manager: TableManagerLike)
 			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
 				fireSignal(manager, manager.ValueChanged, path, newValue, oldValue)
 			end
-			manager._listenerRegistry:FireListenersExact("ValueChanged", path, {
-				NewValue = newValue,
-				OldValue = oldValue,
-				OldValueSnapshot = sliceOldSnapshot(metadata, path),
-				Metadata = metadata,
-			})
+			if registry:HasListenerNodeAt(path) then
+				registry:FireListenersExact("ValueChanged", path, {
+					NewValue = newValue,
+					OldValue = oldValue,
+					OldValueSnapshot = sliceOldSnapshot(metadata, path),
+					Metadata = metadata,
+				})
+			end
 			-- Cross-manager fan-out: only for leaf changes, never while replaying
 			-- fan-out. Pass the already-built diff node so recipients can replay it
 			-- without re-diffing (see Propagation.FanOutSet / TableManager._NotifyApplied).
 			if metadata.Diff and metadata.Diff.type ~= "descendantChanged" then
-				if not manager._suppressLinkFanOut then
+				-- `_sharesObservers` gates the whole fan-out: when this manager has
+				-- never co-observed a table identity with another, `collectRecipients`
+				-- is provably empty (it can only find recipients via `OBSERVERS`, whose
+				-- population is exactly what sets the flag) — so skip its per-write
+				-- allocation + O(depth) prefix walk. Mirrors `Coverage`'s short-circuit.
+				if not manager._suppressLinkFanOut and manager._sharesObservers then
 					PropagationModule.FanOutSet(manager, path, newValue, oldValue, metadata.Diff)
 				end
 				-- Independent of fan-out (must still fire while replaying a
