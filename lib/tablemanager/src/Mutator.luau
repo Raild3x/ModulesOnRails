@@ -15,6 +15,7 @@
 const PathHelpers = require("./PathHelpers")
 const BatchUtilsModule = require("./Batching/BatchUtils")
 const ProxyManagerModule = require("./ProxyManager")
+const OpaqueRegistryModule = require("./OpaqueRegistry")
 const SchemaNavigatorModule = require("./SchemaNavigator")
 const PropagationModule = require("./Propagation")
 const EmitterModule = require("./Listening/Emitter")
@@ -259,11 +260,13 @@ local function onArrayAppended<T, S>(self: TM_Internal<T>, path: PathArray<S>, i
 	end
 	const insertPath: { any } = PathHelpers.Append(path :: any, index)
 	const metadata = EmitterModule.makeSyntheticMetadata(self.Raw, insertPath, "added", index, newValue, nil)
+	-- The gate above already proved this path trackable; let the baseline
+	-- sync inside skip re-deriving it.
 	EmitterModule.fireArrayOperation(self, "ArrayInserted", path, insertPath, {
 		Index = index,
 		NewValue = newValue,
 		Metadata = metadata,
-	})
+	}, true)
 end
 
 -- ---------------------------------------------------------------------------
@@ -319,8 +322,13 @@ end
 	(`ProxyManagerModule.Unwrap`). Order: duplicate-check → validation →
 	array-append fast path → batched dirty-marking (no flush) OR
 	shadow-seed/write/flush (immediate).
+
+	`preResolvedParent` (internal, used by `applyRMW`) is the already-walked
+	parent table for `parsedPath` — the value at `parsedPath[1..#parsedPath-1]`.
+	Passing it skips the parent-chain walk below; the caller owns having
+	validated the spine.
 ]]
-function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>, newValue: any)
+function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>, newValue: any, preResolvedParent: any?)
 	const lastIdx = #parsedPath
 	const key = parsedPath[lastIdx]
 
@@ -331,12 +339,15 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 	-- on failure — matching `TableManager.Set`'s own pre-walk convention (see
 	-- the path-helper-methods error-message tests), now that `Set` short-
 	-- circuits straight into this walk instead of doing its own first.
-	local parentTable: any = self.Raw
-	for i = 1, lastIdx - 1 do
-		const segment = parsedPath[i]
-		parentTable = parentTable[segment]
-		if type(parentTable) ~= "table" then
-			error(`Path segment {segment} is not a table`)
+	local parentTable: any = preResolvedParent
+	if parentTable == nil then
+		parentTable = self.Raw
+		for i = 1, lastIdx - 1 do
+			const segment = parsedPath[i]
+			parentTable = parentTable[segment]
+			if type(parentTable) ~= "table" then
+				error(`Path segment {segment} is not a table`)
+			end
 		end
 	end
 
@@ -411,7 +422,15 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 
 	debug.profilebegin("applyWrite (immediate)")
 	const oldValue = parentTable[key]
-	const trackable = not ignored and shouldTrackChangesAt(self, parsedPath)
+	-- Trackability and the diff depth bound resolve together in one registry
+	-- walk + one signal probe (`ResolveWriteObservation`); the depth is handed
+	-- to the immediate flush below so `_doFlush` doesn't re-derive it.
+	-- `diffMaxDepth == nil` means unbounded (see `Coverage.ResolveDiffMaxDepth`).
+	local trackable = false
+	local diffMaxDepth: number? = nil
+	if not ignored then
+		trackable, diffMaxDepth = CoverageModule.ResolveWriteObservation(self, parsedPath)
+	end
 	const ctx = if trackable then self._changeDetector:GetOpaqueCtx() else nil
 	-- An opaque ancestor can't safely host a persistent shadow entry for a
 	-- descendant path (see Coverage.PassesThroughOpaqueAncestor): fall back to
@@ -433,13 +452,67 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 		const oldSnapshot = BatchUtilsModule.BuildOldSnapshot(self, parsedPath, oldValue)
 		self._changeDetector:CheckForChangesBetween(oldValue, newValue, parsedPath, self.Raw, nil, oldSnapshot)
 	elseif trackable then
-		CoalescedFlushModule.Request(self, parsedPath)
+		-- `nil` (unbounded) rides the plumbing as math.huge so `Request`/`_doFlush`
+		-- can tell "precomputed as unbounded" apart from "no hint provided".
+		CoalescedFlushModule.Request(self, parsedPath, diffMaxDepth or math.huge)
 	elseif self._appliedListeners[1] ~= nil then
 		-- Untracked, so nothing will diff this write -- but an OnApplied
 		-- subscriber still needs to see it -- ship the value directly.
 		EmitterModule.emitReplicationOp(self, "Set", parsedPath, newValue, nil, nil)
 	end
 	debug.profileend()
+end
+
+--[[
+	Shared non-wildcard read-modify-write core for `Update`/`Increment`/
+	`UpdateKey`/`IncrementKey`: walks the parent chain ONCE, reads the current
+	value, runs `transform` on it, and writes the result back through
+	`applyWrite` with the already-resolved parent (so the chain is never walked
+	twice — the old Get-then-Set shape's known inefficiency).
+
+	The read walk mirrors `TableManager.Get`'s error convention exactly (it
+	names the segment it was about to READ when the value so far is not a
+	table), because that is the error today's Get-then-Set shape surfaced
+	first. Once the read succeeds every intermediate is a table, so the write
+	can never re-error on the spine.
+
+	Returns `transform`'s raw result (pre-unwrap), matching what the public
+	methods have always returned; the unwrapped form of it is what gets written.
+]]
+function Mutator.applyRMW<T, S>(
+	self: TM_Internal<T>,
+	parsedPath: PathArray<S>,
+	transform: (oldValue: any) -> any
+): any
+	const lastIdx = #parsedPath
+
+	-- Empty path: read-modify-write the root itself (today's Get-then-Set
+	-- shape supported this as a root replacement; keep it working).
+	if lastIdx == 0 then
+		const newValue = transform(self.Raw)
+		local unwrappedValue = ProxyManagerModule.Unwrap(newValue)
+		unwrappedValue = OpaqueRegistryModule.UnwrapAndRegister(self._opaqueRegistries, unwrappedValue)
+		Mutator.applyRootSet(self, unwrappedValue)
+		return newValue
+	end
+
+	local parentTable: any = self.Raw
+	for i = 1, lastIdx - 1 do
+		const segment = parsedPath[i]
+		if type(parentTable) ~= "table" then
+			error(`Path segment {segment} is not a table`)
+		end
+		parentTable = parentTable[segment]
+	end
+	if type(parentTable) ~= "table" then
+		error(`Path segment {parsedPath[lastIdx]} is not a table`)
+	end
+
+	const newValue = transform(parentTable[parsedPath[lastIdx]])
+	local unwrappedValue = ProxyManagerModule.Unwrap(newValue)
+	unwrappedValue = OpaqueRegistryModule.UnwrapAndRegister(self._opaqueRegistries, unwrappedValue)
+	Mutator.applyWrite(self, parsedPath, unwrappedValue, parentTable)
+	return newValue
 end
 
 --[[
@@ -484,7 +557,7 @@ function Mutator.applyRootSet<T>(self: TM_Internal<T>, newRoot: any)
 	-- Seed the shadow from `oldRoot` BEFORE swapping `self.Raw` —
 	-- `Baseline.SeedIfNeeded` reads "current live" off `self.Raw`,
 	-- which is still `oldRoot` at this point.
-	const trackable = shouldTrackChangesAt(self, rootPath)
+	const trackable, diffMaxDepth = CoverageModule.ResolveWriteObservation(self, rootPath)
 	if trackable then
 		-- rootPath is always {}, so this never builds an intermediate spine
 		-- (no opaque-ancestor risk; the root itself can never be opaque).
@@ -513,7 +586,7 @@ function Mutator.applyRootSet<T>(self: TM_Internal<T>, newRoot: any)
 	-- Fire change events for the full root diff (shadow@{} vs the now-live
 	-- newRoot), then reconcile the shadow to newRoot.
 	if trackable then
-		CoalescedFlushModule.Request(self, rootPath)
+		CoalescedFlushModule.Request(self, rootPath, diffMaxDepth or math.huge)
 	elseif self._appliedListeners[1] ~= nil then
 		-- Untracked, so nothing will diff this root replacement -- but an
 		-- OnApplied subscriber still needs to see it -- ship the value directly.

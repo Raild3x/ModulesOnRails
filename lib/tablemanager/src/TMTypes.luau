@@ -434,7 +434,10 @@ export type TM_Internal<T = { [any]: any }> = TableManager<T> & {
 	-- `forceFullDepth` bypasses `Coverage.ResolveDiffMaxDepth` for this flush only
 	-- (used by `Flush` when synthesizing replication ops for an otherwise-untracked
 	-- path); it never affects the general write path's depth bound.
-	_doFlush: (self: TM_Internal<T>, path: PathArray, forceFullDepth: boolean?) -> (),
+	-- `precomputedMaxDepth` is the immediate write path's already-resolved depth
+	-- bound (`math.huge` = unbounded, so it stays distinguishable from "no hint");
+	-- omitted by every deferred/explicit caller, which must re-resolve at flush time.
+	_doFlush: (self: TM_Internal<T>, path: PathArray, forceFullDepth: boolean?, precomputedMaxDepth: number?) -> (),
 }
 
 export type TableManagerLike = TM_Internal<{[any]:any}>

@@ -1,4 +1,6 @@
 --!strict
+--!native
+--!optimize 2
 --[=[
 	@ignore
 	@class Emitter
@@ -280,13 +282,19 @@ end
 	Fires the appropriate `Array*` signal + exact-path listeners + ancestor
 	ValueChanged callbacks, and fans out to any linked managers. Must be
 	called AFTER the mutation so `manager.Raw` reflects the new state.
+
+	`knownTrackable == true` means the caller already resolved
+	`Coverage.IsTrackable(manager, basePath)` for this same op (the gated
+	direct-mutator paths), so the baseline sync at the bottom can skip
+	re-deriving it. nil/false means "unknown" — re-derive as before.
 ]]
 function Emitter.fireArrayOperation(
 	manager: TableManagerLike,
 	eventName: "ArrayInserted" | "ArrayRemoved" | "ArraySet",
 	basePath: PathArray,
 	leafPath: PathArray,
-	payload: any
+	payload: any,
+	knownTrackable: boolean?
 )
 	-- Tag metadata with explicit shift semantics for diff-tree consumers
 	-- (OriginDiff via root OnChange listeners).
@@ -340,7 +348,7 @@ function Emitter.fireArrayOperation(
 	-- gate and falls back to a full `Materialize` the first time this array is
 	-- tracked.
 	const arrayOpValue = if eventName == "ArrayRemoved" then nil else payload.NewValue
-	BaselineModule.ApplyArrayOp(manager, basePath, eventName, payload.Index, arrayOpValue)
+	BaselineModule.ApplyArrayOp(manager, basePath, eventName, payload.Index, arrayOpValue, knownTrackable)
 end
 
 --[[
@@ -350,7 +358,14 @@ end
 	for callers (ArrayDiff's batch LCS re-diff) that genuinely need all three as
 	a value passed around.
 ]]
-function Emitter.emitRemoved(manager: TableManagerLike, path: PathArray, index: number, oldValue: any, move: MoveMetadata?)
+function Emitter.emitRemoved(
+	manager: TableManagerLike,
+	path: PathArray,
+	index: number,
+	oldValue: any,
+	move: MoveMetadata?,
+	knownTrackable: boolean?
+)
 	debug.profilebegin("emitRemoved")
 	const removedPath: PathArray = PathHelpers.Append(path, index)
 	-- Array element old values are never a slice of some larger captured
@@ -366,11 +381,18 @@ function Emitter.emitRemoved(manager: TableManagerLike, path: PathArray, index: 
 		Index = index,
 		OldValue = oldValue,
 		Metadata = metadata,
-	})
+	}, knownTrackable)
 	debug.profileend()
 end
 
-function Emitter.emitInserted(manager: TableManagerLike, path: PathArray, index: number, newValue: any, move: MoveMetadata?)
+function Emitter.emitInserted(
+	manager: TableManagerLike,
+	path: PathArray,
+	index: number,
+	newValue: any,
+	move: MoveMetadata?,
+	knownTrackable: boolean?
+)
 	debug.profilebegin("emitInserted")
 	const insertedPath = PathHelpers.Append(path, index)
 	const metadata = createSyntheticMetadata(manager.Raw, insertedPath, "added", index, newValue, nil, nil)
@@ -379,7 +401,7 @@ function Emitter.emitInserted(manager: TableManagerLike, path: PathArray, index:
 		Index = index,
 		NewValue = newValue,
 		Metadata = metadata,
-	})
+	}, knownTrackable)
 	debug.profileend()
 end
 
@@ -389,7 +411,8 @@ function Emitter.emitSet(
 	index: number,
 	newValue: any,
 	oldValue: any,
-	move: MoveMetadata?
+	move: MoveMetadata?,
+	knownTrackable: boolean?
 )
 	debug.profilebegin("emitSet")
 	const setPath = PathHelpers.Append(path, index)
@@ -401,7 +424,7 @@ function Emitter.emitSet(
 		NewValue = newValue,
 		OldValue = oldValue,
 		Metadata = metadata,
-	})
+	}, knownTrackable)
 	debug.profileend()
 end
 

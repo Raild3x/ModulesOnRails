@@ -1,4 +1,6 @@
 --!strict
+--!native
+--!optimize 2
 --[=[
 	@ignore
 	@class Baseline
@@ -79,9 +81,12 @@ function Baseline.ApplyArrayOp(
 	path: PathArray,
 	opKind: "ArrayInserted" | "ArrayRemoved" | "ArraySet",
 	index: number,
-	newValue: any
+	newValue: any,
+	knownTrackable: boolean?
 )
-	if not isTrackable(manager, path) then
+	-- `knownTrackable == true` means the emitting mutator already resolved the
+	-- trackable gate for this same op; anything else re-derives it here.
+	if knownTrackable ~= true and not isTrackable(manager, path) then
 		return
 	end
 	const ctx = manager._changeDetector:GetOpaqueCtx()

@@ -1,4 +1,6 @@
 --!strict
+--!native
+--!optimize 2
 --[=[
 	@ignore
 	@class Coverage
@@ -54,10 +56,47 @@ const function hasConnectedSignal(self: TableManagerLike): boolean
 end
 
 function Coverage.IsLocallyObserved(self: TableManagerLike, path: PathArray): boolean
-	if hasConnectedSignal(self) then
+	-- Registry first: for listener-style consumers `CoversChangesAt` usually
+	-- answers true within a few hash lookups, while `hasConnectedSignal` is
+	-- seven cross-module method calls that mostly return false. Pure OR, so
+	-- the order only affects cost, never the answer.
+	if self._listenerRegistry:CoversChangesAt(path) then
 		return true
 	end
-	return self._listenerRegistry:CoversChangesAt(path)
+	return hasConnectedSignal(self)
+end
+
+--[=[
+	The write path's one-stop observation query: resolves `IsTrackable` AND
+	`ResolveDiffMaxDepth` together, paying for `hasConnectedSignal` and the
+	registry spine walk ONCE (via `ListenerRegistry.ObserveAt`) instead of the
+	two-plus walks the separate queries cost per write.
+
+	Returns `(trackable, maxDepth)` where `maxDepth` follows
+	`ResolveDiffMaxDepth`'s convention (`nil` = unbounded / full depth) and is
+	meaningless when `trackable` is false. Callers on the immediate flush path
+	forward `maxDepth` to `_doFlush` (see `CoalescedFlush.Request`); a deferred
+	flush must instead re-resolve at flush time, since listeners may have
+	been added or removed in between.
+]=]
+function Coverage.ResolveWriteObservation(self: TableManagerLike, path: PathArray): (boolean, number?)
+	-- Co-observing a shared identity alone decides both facts: tracking is
+	-- forced (the write must diff to fan out) and the depth bound must not
+	-- apply (fan-out replays `metadata.Diff`) — no registry/signal probe needed.
+	if self._sharesObservers then
+		return true, nil
+	end
+	const covers, wantsFullDiff, maxDepth = self._listenerRegistry:ObserveAt(path)
+	-- One signal probe serves both facts: trackability (a connected Signal
+	-- observes every path) and the depth bound (it makes full depth observable).
+	const signalConnected = hasConnectedSignal(self)
+	if not (covers or signalConnected) then
+		return false, nil
+	end
+	if signalConnected or wantsFullDiff or maxDepth == math.huge then
+		return true, nil
+	end
+	return true, maxDepth
 end
 
 --[=[

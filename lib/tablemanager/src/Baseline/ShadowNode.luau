@@ -1,4 +1,6 @@
 --!strict
+--!native
+--!optimize 2
 --[=[
 	@ignore
 	@class ShadowNode
@@ -120,14 +122,34 @@ end
 ]=]
 function ShadowNode.Reconcile(live: table, path: PathArray, isObserved: IsObserved?)
 	const observed = isObserved or DEFAULT_IS_OBSERVED
-	const value = PathHelpers.ResolveAtPath(live, path)
-	const copy = copyForShadow(value, observed)
-	if #path == 0 then
+	const pathLen = #path
+	if pathLen == 0 then
+		copyForShadow(live, observed)
 		return
 	end
-	const parentPath, key = PathHelpers.GetPathParentAndKey(path)
-	const parentNode = if #parentPath == 0 then REGISTRY[live] else REGISTRY[PathHelpers.ResolveAtPath(live, parentPath)]
-	if type(parentNode) == "table" then
+	-- One walk to the live parent serves both needs below (the leaf value to
+	-- copy and the parent identity to key the registry with) -- previously two
+	-- full ResolveAtPath walks plus a GetPathParentAndKey path clone.
+	local parent: any = live
+	for i = 1, pathLen - 1 do
+		if type(parent) ~= "table" then
+			break
+		end
+		parent = parent[path[i]]
+	end
+	if type(parent) ~= "table" then
+		-- Path doesn't resolve to a live parent table: nothing to copy and no
+		-- node to attach to (same net effect as the old double-resolve, where
+		-- both lookups came back nil).
+		return
+	end
+	const key = path[pathLen]
+	-- The copy must be taken even when the parent has no registry node: it
+	-- refreshes the leaf value's OWN node in place, which other slots holding
+	-- a reference to it (another manager / another path) see immediately.
+	const copy = copyForShadow(parent[key], observed)
+	const parentNode = REGISTRY[parent]
+	if parentNode ~= nil then
 		parentNode[key] = copy
 	end
 end
@@ -147,12 +169,15 @@ function ShadowNode.Materialize(live: table, path: PathArray, isObserved: IsObse
 		REGISTRY[live] = {}
 	end
 	local node = REGISTRY[live]
-	const partialPath: { any } = {}
+	-- The live cursor advances in lockstep with the node spine, so each level's
+	-- seed value is one index instead of a fresh root-to-level ResolveAtPath
+	-- walk (which made this loop O(depth^2) with a growing partialPath alloc).
+	local liveCursor: any = live
 	for i = 1, #path - 1 do
 		const segment = path[i]
-		table.insert(partialPath, segment)
+		liveCursor = if type(liveCursor) == "table" then liveCursor[segment] else nil
 		if type(node[segment]) ~= "table" then
-			node[segment] = copyForShadow(PathHelpers.ResolveAtPath(live, partialPath), observed)
+			node[segment] = copyForShadow(liveCursor, observed)
 		end
 		node = node[segment]
 	end

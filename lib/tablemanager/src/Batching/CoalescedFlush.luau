@@ -1,4 +1,6 @@
 --!strict
+--!native
+--!optimize 2
 --[=[
 	@ignore
 	@class CoalescedFlush
@@ -45,10 +47,16 @@ end
 	"immediate" mode this is exactly `self:_doFlush(path)`. In "coalesced"
 	mode it merges `path` into the pending frame-end flush root and (the first
 	time within a frame) schedules the `task.defer` that drains it.
+
+	`precomputedMaxDepth` is the writer's already-resolved diff depth bound
+	(`Coverage.ResolveWriteObservation`, with `math.huge` meaning unbounded).
+	It is forwarded only on the immediate path: a coalesced flush runs later in
+	the frame, when the listener set may have changed, so it must re-resolve
+	the bound at flush time.
 ]=]
-function CoalescedFlush.Request(self: TableManagerLike, path: PathArray)
+function CoalescedFlush.Request(self: TableManagerLike, path: PathArray, precomputedMaxDepth: number?)
 	if self._flushMode ~= "coalesced" then
-		self:_doFlush(path)
+		self:_doFlush(path, nil, precomputedMaxDepth)
 		return
 	end
 

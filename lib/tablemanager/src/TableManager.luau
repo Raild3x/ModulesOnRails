@@ -277,6 +277,7 @@ const reparentWithRollback = MutatorModule.reparentWithRollback
 const restoreReparent = MutatorModule.restoreReparent
 const deepCloneValue = MutatorModule.deepCloneValue
 const trackArrayMutation = MutatorModule.trackArrayMutation
+const applyRMW = MutatorModule.applyRMW
 
 -- Emit/notify core lives in Emitter.luau; local aliases keep call sites unchanged.
 const emitInserted = EmitterModule.emitInserted
@@ -797,11 +798,9 @@ function TableManager.Update<T, S>(
 		applyWildcardRMW(self, entries, updater :: any)
 		return nil :: any
 	end
-	-- TODO: update this to be more efficient at updating by reducing the need to traverse the path twice
-	const oldValue = self:Get(parsedPath :: any)
-	const newValue = updater(oldValue)
-	self:Set(parsedPath :: any, newValue)
-	return newValue
+	-- Single-walk read-modify-write: resolves the parent chain once for both
+	-- the read and the write (see `Mutator.applyRMW`).
+	return applyRMW(self, parsedPath, updater :: any)
 end
 
 --[=[
@@ -835,11 +834,10 @@ function TableManager.Increment<T, S>(self: TM_Internal<T>, path: Path<S>, delta
 		end)
 		return nil
 	end
-	-- TODO: update this to be more efficient at updating by reducing the need to traverse the path twice
-	const oldValue = self:Get(parsedPath :: any)
-	const newValue = oldValue + delta
-	self:Set(parsedPath :: any, newValue)
-	return newValue
+	-- Single-walk read-modify-write (see `Mutator.applyRMW`).
+	return applyRMW(self, parsedPath, function(oldValue)
+		return oldValue + delta
+	end)
 end
 
 --[=[
@@ -899,8 +897,17 @@ function TableManager.ArrayInsert<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 	end
 
 	if not inBatch then
-		-- Fire element-level and array-level listeners, ancestor callbacks, and signal.
-		emitInserted(self, parsedPath, pos, unwrappedValue)
+		-- Coverage gate, mirroring the dict write path (`applyWrite`) and the
+		-- append fast path (`onArrayAppended`): when nothing observes this
+		-- array, skip the whole emit chain (synthetic metadata, dual listener
+		-- fire, ancestor walk, baseline sync) — an `OnApplied` subscriber still
+		-- needs the op, shipped directly.
+		if CoverageModule.IsTrackable(self, parsedPath) then
+			-- Fire element-level and array-level listeners, ancestor callbacks, and signal.
+			emitInserted(self, parsedPath, pos, unwrappedValue, nil, true)
+		elseif self._appliedListeners[1] ~= nil then
+			EmitterModule.emitReplicationOp(self, "ArrayInsert", parsedPath, unwrappedValue, pos, nil)
+		end
 	end
 	debug.profileend()
 end
@@ -934,13 +941,19 @@ function TableManager.ArrayRemove<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 	shiftArrayKeys(self._proxyManager, array, index + 1, -1)
 	pruneDetachedValue(self, oldValue, nil)
 
-	if inBatch then 
+	if inBatch then
 		debug.profileend()
-		return oldValue 
+		return oldValue
 	end
 
-	-- Fire listeners EXACTLY at remove path (we handle ancestors separately)
-	emitRemoved(self, parsedPath, index, oldValue)
+	-- Coverage gate (see ArrayInsert): unobserved removes skip the emit chain
+	-- but still ship the op to any OnApplied subscriber.
+	if CoverageModule.IsTrackable(self, parsedPath) then
+		-- Fire listeners EXACTLY at remove path (we handle ancestors separately)
+		emitRemoved(self, parsedPath, index, oldValue, nil, true)
+	elseif self._appliedListeners[1] ~= nil then
+		EmitterModule.emitReplicationOp(self, "ArrayRemove", parsedPath, nil, index, nil)
+	end
 	debug.profileend()
 	return oldValue
 end
@@ -1011,6 +1024,19 @@ function TableManager.ArraySwapRemove<T, S>(self: TM_Internal<T>, pathOrProxy: P
 
 	if inBatch then return oldValue end
 
+	-- Coverage gate (see ArrayInsert): both emits below share one resolution,
+	-- and an unobserved swap-remove still ships its two ops to any OnApplied
+	-- subscriber in the same order the emit chain would have.
+	if not CoverageModule.IsTrackable(self, parsedPath) then
+		if self._appliedListeners[1] ~= nil then
+			if index ~= lastIndex then
+				EmitterModule.emitReplicationOp(self, "ArraySet", parsedPath, movedValue, index, nil)
+			end
+			EmitterModule.emitReplicationOp(self, "ArrayRemove", parsedPath, nil, lastIndex, nil)
+		end
+		return oldValue
+	end
+
 	-- moveId is typed as `string` (ArrayDiff.MoveMetadata) for downstream
 	-- consumers that may key off it; kept as an interpolated string rather than
 	-- widening that public type for this single call site.
@@ -1020,11 +1046,11 @@ function TableManager.ArraySwapRemove<T, S>(self: TM_Internal<T>, pathOrProxy: P
 
 	-- 1. Emit ArraySet for the backfill: array[index] = movedValue (no-op if index == lastIndex)
 	if index ~= lastIndex then
-		emitSet(self, parsedPath, index, movedValue, oldValue, moveInfo)
+		emitSet(self, parsedPath, index, movedValue, oldValue, moveInfo, true)
 	end
 
 	-- 2. Emit ArrayRemoved for the shrink: array[lastIndex] = nil (the actual removal)
-	emitRemoved(self, parsedPath, lastIndex, movedValue, moveInfo)
+	emitRemoved(self, parsedPath, lastIndex, movedValue, moveInfo, true)
 
 	return oldValue
 end
@@ -1080,13 +1106,12 @@ TableManager.SwapRemoveFirstValue = TableManager.ArraySwapRemoveFirstValue
 	```
 ]=]
 function TableManager.UpdateKey<T, S>(self: TM_Internal<T>, path: Path<S>, key: any, updater: (oldValue: ElementAtPath<T, S>) -> ElementAtPath<T, S>): ElementAtPath<T, S>
-	-- TODO: update this to be more efficient at updating by reducing the need to traverse the path twice
-	const parsedPath = PathHelpers.ParsePath(path)
-	table.insert(parsedPath, key)
-	const oldValue = self:Get(parsedPath)
-	const newValue = updater(oldValue)
-	self:Set(parsedPath, newValue)
-	return newValue
+	-- Append clones rather than mutating the parsed path: a dot-string parse
+	-- is a shared frozen cache entry, and a caller-supplied array must not
+	-- gain `key` as a side effect.
+	const parsedPath = PathHelpers.Append(PathHelpers.ParsePath(path), key)
+	-- Single-walk read-modify-write (see `Mutator.applyRMW`).
+	return applyRMW(self, parsedPath, updater :: any)
 end
 TableManager.ArrayUpdate = TableManager.UpdateKey
 
@@ -1105,13 +1130,12 @@ TableManager.ArrayUpdate = TableManager.UpdateKey
 	@return any -- The new value that was written.
 ]=]
 function TableManager.IncrementKey<T, S>(self: TM_Internal<T>, path: Path<S>, key: any, delta: ElementAtPath<T, S>): ElementAtPath<T, S>
-	-- TODO: update this to be more efficient at updating by reducing the need to traverse the path twice
-	const parsedPath = PathHelpers.ParsePath(path)
-	table.insert(parsedPath, key)
-	const oldValue = self:Get(parsedPath)
-	const newValue = oldValue + delta
-	self:Set(parsedPath, newValue)
-	return newValue
+	-- Append clones rather than mutating the parsed path (see `UpdateKey`).
+	const parsedPath = PathHelpers.Append(PathHelpers.ParsePath(path), key)
+	-- Single-walk read-modify-write (see `Mutator.applyRMW`).
+	return applyRMW(self, parsedPath, function(oldValue)
+		return oldValue + delta
+	end)
 end
 TableManager.ArrayIncrement = TableManager.IncrementKey
 
@@ -1188,14 +1212,27 @@ end
 	local listener covers `path`, so there's no observed depth to bound to and
 	the op stream needs to discover the whole changed subtree). It never
 	affects the general write path's depth bound.
+
+	`precomputedMaxDepth` is the depth bound the caller already resolved for
+	this same write (`Coverage.ResolveWriteObservation`, forwarded through
+	`CoalescedFlush.Request` on the immediate path only), with `math.huge`
+	standing in for "unbounded" so it stays distinguishable from "no hint".
+	Omitted by every deferred/explicit caller, which must re-resolve here.
 ]=]
-function TableManager._doFlush<T>(self: TM_Internal<T>, path: PathArray, forceFullDepth: boolean?)
+function TableManager._doFlush<T>(self: TM_Internal<T>, path: PathArray, forceFullDepth: boolean?, precomputedMaxDepth: number?)
 	const old = BaselineModule.Get(self, path)
 	const new_ = self:Get(path :: any, true)
 	const oldSnapshot = BatchUtilsModule.BuildOldSnapshot(self, path, old)
 	-- Transparent depth bound: don't diff below the deepest listener that observes
 	-- `path` (nil = unbounded when a signal/link/wildcard/ProvideDiff forces it).
-	const maxDepth = if forceFullDepth then nil else CoverageModule.ResolveDiffMaxDepth(self, path)
+	local maxDepth: number?
+	if forceFullDepth then
+		maxDepth = nil
+	elseif precomputedMaxDepth ~= nil then
+		maxDepth = if precomputedMaxDepth == math.huge then nil else precomputedMaxDepth
+	else
+		maxDepth = CoverageModule.ResolveDiffMaxDepth(self, path)
+	end
 	self._changeDetector:CheckForChangesBetween(old, new_, path, self.Raw, nil, oldSnapshot, maxDepth)
 	BaselineModule.Reconcile(self, path)
 end

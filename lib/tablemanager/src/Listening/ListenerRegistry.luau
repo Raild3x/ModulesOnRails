@@ -1,4 +1,6 @@
 --!strict
+--!native
+--!optimize 2
 --[=[
 	@ignore
 	@class ListenerRegistry
@@ -298,6 +300,10 @@ export type ListenerRegistry = {
 	-- restructures the subtree a descendant listener watches). Never under-
 	-- reports, so callers can safely skip diff work whenever this is false.
 	CoversChangesAt: (self: ListenerRegistry, path: PathArray) -> boolean,
+	-- The combined write-path observation query: (covers, wantsFullDiff,
+	-- maxDepth) — everything `CoversChangesAt`/`WantsFullDiff`/`MaxObservedDepth`
+	-- answer, in one spine walk. `maxDepth` is `math.huge` when unbounded.
+	ObserveAt: (self: ListenerRegistry, path: PathArray) -> (boolean, boolean, number),
 	-- Returns the absolute path a caller should snapshot the old value at for a
 	-- change at `path`, or `nil` if no opted-in (`SnapshotOldValues`) listener
 	-- would receive a real old value for this change. The returned path is the
@@ -942,38 +948,77 @@ const function maxReachAtOrBelow(node: ListenerNode, relDepth: number): number
 end
 
 --[=[
+	The combined per-write observation query: everything `CoversChangesAt`,
+	`WantsFullDiff`, and `MaxObservedDepth` answer, computed in ONE spine walk
+	instead of three (the write path needs all three facts for every immediate
+	`Set` — see `Coverage.ResolveWriteObservation`).
+
+	Returns, in order:
+	- `covers` — `CoversChangesAt` semantics: some listener at/above/below `path`.
+	- `wantsFullDiff` — `WantsFullDiff` semantics: a covering `ProvideDiff` opt-in.
+	- `maxDepth` — `MaxObservedDepth` semantics: deepest reach strictly below
+	  `path` (with the Key-event at-`path` floor), `math.huge` when unbounded.
+
+	Wildcard registries short-circuit to (`true`, `true`, `math.huge`): a wildcard
+	could match anywhere and its depth is not cheaply knowable, so every caller
+	must treat the path as fully observed at full depth.
+]=]
+function ListenerRegistry:ObserveAt(path: PathArray): (boolean, boolean, number)
+	if self._hasWildcards then
+		return true, true, math.huge
+	end
+	local node: ListenerNode? = self._root
+	local covers = (node :: ListenerNode).Count > 0
+	local wantsFullDiff = (node :: ListenerNode).ProvideDiffCount > 0
+	for _, segment in path do
+		node = (node :: ListenerNode).Children[segment]
+		if node == nil then
+			-- No node at this prefix, nor anywhere at/below `path`; only the
+			-- ancestor facts accumulated so far can hold.
+			return covers, wantsFullDiff, 0
+		end
+		covers = covers or node.Count > 0
+		wantsFullDiff = wantsFullDiff or node.ProvideDiffCount > 0
+	end
+	const pathNode = node :: ListenerNode
+	covers = covers or pathNode.Subtree > 0
+	wantsFullDiff = wantsFullDiff or pathNode.ProvideDiffSubtree > 0
+
+	local best = 0
+	for eventType in pathNode.Listeners do
+		if KEY_EVENT_NEEDS_CHILD_DEPTH[eventType] then
+			best = 1
+			break
+		end
+	end
+	-- `Subtree == Count` ⇒ no descendant of `pathNode` carries a listener.
+	if pathNode.Subtree ~= pathNode.Count then
+		for _, child in pathNode.Children do
+			if child.Subtree > 0 then
+				const childBest = maxReachAtOrBelow(child, 1) -- child is one level below `path`
+				if childBest > best then
+					best = childBest
+				end
+			end
+		end
+	end
+	return covers, wantsFullDiff, best
+end
+
+--[=[
 	Deepest reach (`relativeDepth + ListenDepth`) of any listener registered
 	STRICTLY BELOW `path`, PLUS at least 1 if a KeyAdded/KeyRemoved/KeyChanged
 	listener is registered exactly AT `path` (see `KEY_EVENT_NEEDS_CHILD_DEPTH` —
 	those fire from `path`'s own children, even though registered at `path`
 	itself, so they are not purely "above" the depth this query bounds).
 	`math.huge` if any covered listener is unbounded, `0` if none.
+
+	Thin wrapper over `ObserveAt`; callers that also need coverage / ProvideDiff
+	facts should call `ObserveAt` directly and pay for the walk once.
 ]=]
 function ListenerRegistry:MaxObservedDepth(path: PathArray): number
-	const node = getNode(self._root, path)
-	if node == nil then
-		return 0
-	end
-	local best = 0
-	for eventType in node.Listeners do
-		if KEY_EVENT_NEEDS_CHILD_DEPTH[eventType] then
-			best = 1
-			break
-		end
-	end
-	-- `Subtree == Count` ⇒ no descendant of `node` carries a listener.
-	if node.Subtree == node.Count then
-		return best
-	end
-	for _, child in node.Children do
-		if child.Subtree > 0 then
-			const childBest = maxReachAtOrBelow(child, 1) -- child is one level below `path`
-			if childBest > best then
-				best = childBest
-			end
-		end
-	end
-	return best
+	const _covers, _wantsFullDiff, maxDepth = self:ObserveAt(path)
+	return maxDepth
 end
 
 --[=[
@@ -981,23 +1026,14 @@ end
 	`ProvideDiff` — an opted-in ancestor of `path` (root included; ancestors
 	receive `OriginDiff`), one at `path`, or one in `path`'s subtree. When true the
 	caller must diff at full depth. Mirrors `CoversChangesAt`'s walk.
+
+	Thin wrapper over `ObserveAt` (which also makes this conservatively `true`
+	for wildcard registries — every current caller already forces a full diff
+	for those before asking).
 ]=]
 function ListenerRegistry:WantsFullDiff(path: PathArray): boolean
-	local node = self._root
-	if node.ProvideDiffCount > 0 then
-		return true -- a root opted-in listener is an ancestor of every path
-	end
-	for _, segment in path do
-		const child = node.Children[segment]
-		if child == nil then
-			return false -- no node at this prefix, nor anywhere at/below `path`
-		end
-		node = child
-		if node.ProvideDiffCount > 0 then
-			return true -- opted-in listener at an ancestor of, or at, `path`
-		end
-	end
-	return node.ProvideDiffSubtree > 0 -- opted-in listener at or below `path`
+	const _covers, wantsFullDiff = self:ObserveAt(path)
+	return wantsFullDiff
 end
 
 --[=[
