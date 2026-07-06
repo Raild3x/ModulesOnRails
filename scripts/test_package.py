@@ -69,7 +69,13 @@ def _resolve_packages(package: str) -> list[str]:
 
 
 def _ensure_setup(package: str) -> int:
-    """Run `npm run setup <name>` for any target package that needs it."""
+    """Run `npm run setup <name>` for any target package that needs it.
+
+    For the `all` selector a single package's setup failure is a warning, not
+    an abort: the other packages' suites should still run, and if the broken
+    package's tests actually needed those deps they will fail on their own.
+    """
+    continue_on_failure = package == "all"
     for name in _resolve_packages(package):
         package_dir = SRC_DIR / name
         if not package_dir.is_dir():
@@ -79,7 +85,9 @@ def _ensure_setup(package: str) -> int:
             code = subprocess.call(["npm", "run", "setup", name], shell=(sys.platform == "win32"))
             if code != 0:
                 print(f"Setup failed for '{name}' (exit {code}).", flush=True)
-                return code
+                if not continue_on_failure:
+                    return code
+                print(f"Continuing without '{name}' deps (selector 'all').", flush=True)
     return 0
 
 

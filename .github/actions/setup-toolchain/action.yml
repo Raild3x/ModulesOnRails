@@ -1,9 +1,10 @@
-name: Setup Rokit and verify Wally
+name: Setup toolchain
 description: >
-  Install the Rokit toolchain manager and verify that the wally binary is
-  accessible on PATH.  If wally was placed in .rokit/bin but not yet exported
-  to PATH, this action appends that directory to GITHUB_PATH so that all
-  subsequent steps in the calling job can invoke wally directly.
+  Install the Rokit toolchain manager (provides wally, lune, rojo, selene, ...)
+  and verify that the wally binary is accessible on PATH.  If wally was placed
+  in .rokit/bin but not yet exported to PATH, this action appends that
+  directory to GITHUB_PATH so that all subsequent steps in the calling job can
+  invoke the Rokit-managed tools directly.
 
 runs:
   using: composite

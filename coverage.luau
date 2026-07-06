@@ -31,6 +31,7 @@ type Options = {
 	mutateOps: string?,
 	mutateTimeout: number?,
 	recommend: boolean?,
+	luneOnly: boolean?,
 }
 
 local selector: string? = nil
@@ -47,6 +48,7 @@ local options: Options = {
 	mutateOps = nil,
 	mutateTimeout = nil,
 	recommend = false,
+	luneOnly = false,
 }
 local adapterPath: string? = nil
 
@@ -161,6 +163,15 @@ local FLAGS: { FlagSpec } = {
 		end,
 	},
 	{
+		match = "--lune-only",
+		usage = "--lune-only",
+		description = "Skip packages on the Roblox pipeline (they need Studio); run only Lune-pipeline packages. Intended for CI.",
+		takesValue = false,
+		apply = function()
+			options.luneOnly = true
+		end,
+	},
+	{
 		match = "--rebuild-engine",
 		usage = "--rebuild-engine",
 		description = "Force a fresh build of the Rust instrumentation engine before running, even if a cached binary exists.",
@@ -254,4 +265,7 @@ else
 	adapter = defaultAdapter
 end
 
-Orchestrator.run(adapter, selector :: string, options)
+local summary = Orchestrator.run(adapter, selector :: string, options)
+if summary.failedTests > 0 then
+	process.exit(1)
+end

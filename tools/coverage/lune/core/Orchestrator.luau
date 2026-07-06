@@ -39,6 +39,14 @@ export type Options = {
 	mutateOps: string?,
 	mutateTimeout: number?,
 	recommend: boolean?,
+	luneOnly: boolean?,
+}
+
+export type RunSummary = {
+	-- Total failing tests across every suite that ran.
+	failedTests: number,
+	-- Packages skipped because --lune-only excluded their pipeline.
+	skippedPackages: number,
 }
 
 local HITS_SCHEMA = "tm-coverage-hits/1"
@@ -263,18 +271,26 @@ local function runMutation(
 	return { totals = totals, survivors = survivorDocs }
 end
 
-function Orchestrator.run(adapter: RepoAdapter, selector: string, options: Options)
+function Orchestrator.run(adapter: RepoAdapter, selector: string, options: Options): RunSummary
 	Engine.ensure(options.rebuildEngine)
+
+	local summary: RunSummary = { failedTests = 0, skippedPackages = 0 }
 
 	local specs = adapter.resolvePackages(selector)
 	if #specs == 0 then
 		print("No auditable packages found.")
-		return
+		return summary
 	end
 
 	local jsonResults: { any } = {}
 
 	for _, spec in specs do
+		if options.luneOnly and spec.pipeline ~= "lune" then
+			print(`[coverage] skipped {spec.name} (--lune-only; {spec.pipelineReason})`)
+			summary.skippedPackages += 1
+			continue
+		end
+
 		local workDir = adapter.workDir(spec)
 		ensureDir(workDir)
 		local buildDir = workDir .. "/build"
@@ -294,6 +310,7 @@ function Orchestrator.run(adapter: RepoAdapter, selector: string, options: Optio
 			run = LuneRunner.run(spec, buildDir, { timeout = options.timeout })
 		end
 		writeHits(hitsOut, spec, env, run)
+		summary.failedTests += run.tally.fail
 
 		local rules = Ignore.load(spec.root, spec.ignoreFiles)
 		local merged = Merge.merge(mapOut, run.coverage, rules)
@@ -349,6 +366,8 @@ function Orchestrator.run(adapter: RepoAdapter, selector: string, options: Optio
 	if options.json then
 		print(serde.encode("json", jsonResults, true))
 	end
+
+	return summary
 end
 
 return Orchestrator

@@ -1,0 +1,99 @@
+# Continuous-integration checks for every PR and for pushes to main.
+# Lints the codebase, runs the Lune-pipeline package test suites, and verifies
+# that the documentation and README can be built.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# One CI run per ref; a new push supersedes the in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  # Run Selene static analysis across all source files in lib/.
+  lint:
+    name: "Selene lint"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup toolchain
+        uses: ./.github/actions/setup-toolchain
+      - name: Run Selene
+        run: selene lib
+
+  # Run the spec suites for every Lune-pipeline package via the coverage runner.
+  # Roblox-pipeline packages need Studio and are skipped (run those locally).
+  test:
+    name: "Package tests (Lune pipeline)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup toolchain
+        uses: ./.github/actions/setup-toolchain
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # The coverage runner builds tools/coverage/engine with cargo on first
+      # use; cache the build so CI only pays for it when the engine changes.
+      - name: Cache coverage engine build
+        uses: actions/cache@v4
+        with:
+          path: |
+            tools/coverage/engine/target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: coverage-engine-${{ runner.os }}-${{ hashFiles('tools/coverage/engine/Cargo.lock', 'tools/coverage/engine/src/**') }}
+          restore-keys: |
+            coverage-engine-${{ runner.os }}-
+
+      - name: Run package tests
+        run: python scripts/test_package.py all --lune-only
+
+  # Verify that the Moonwave documentation build succeeds (does not deploy).
+  docs-build:
+    name: "Can build docs"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Moonwave
+        run: npm i -g moonwave@latest
+      - name: Build docs
+        run: moonwave build
+
+  # Verify that the README generation script runs without errors.
+  read-me:
+    name: "Can generate README"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Generate README
+        run: python scripts/generate_readme.py

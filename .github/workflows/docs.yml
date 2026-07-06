@@ -1,14 +1,14 @@
 # Regenerates README.md and deploys the Moonwave documentation site to GitHub Pages.
-# Triggers automatically after 'Publish Packages' completes successfully, and can
+# Called by the 'Publish Packages' workflow after a successful publish, and can
 # also be run manually as a break-glass when docs need rebuilding without a publish.
-name: publish docs
+#
+# Always operates on main: the caller may be running in a PR-merge context where
+# github.ref_name is not a real branch, and the published docs must reflect main.
+name: Docs
 
 on:
   workflow_dispatch:
-  workflow_run:
-    workflows: ["Publish Packages"]
-    types: [completed]
-    branches: [main]
+  workflow_call:
 
 permissions:
   contents: write
@@ -18,16 +18,14 @@ env:
 
 jobs:
   # Generate README.md from wally.toml metadata and commit the result.
-  generate_readme:
+  generate-readme:
     name: Generate README
     runs-on: ubuntu-latest
-    # When triggered by workflow_run, only proceed if the upstream workflow succeeded.
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
+          ref: main
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -48,35 +46,29 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add README.md
           git commit -m "docs: regenerate README"
-          git push origin HEAD:${{ github.ref_name }}
+          git push origin HEAD:main
 
   # Build the Moonwave docs site and push the generated output to the gh-pages branch.
-  # Must run after generate_readme so moonwave picks up the updated README.
+  # Must run after generate-readme so moonwave picks up the updated README.
   build:
     name: Build and deploy docs
     runs-on: ubuntu-latest
-    needs: generate_readme
+    needs: generate-readme
     steps:
       # Fetch the branch head, not the workflow trigger SHA, so the README
-      # commit from generate_readme is included before moonwave runs.
+      # commit from generate-readme is included before moonwave runs.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
+          ref: main
       - uses: actions/setup-node@v4
         with:
           node-version: 20
       - run: npm i -g moonwave@latest
+      # checkout@v4 persists GITHUB_TOKEN credentials, so the gh-pages push
+      # inside `moonwave build --publish` authenticates without extra setup.
       - name: Build and publish docs
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git config http.https://github.com/.extraheader "AUTHORIZATION: basic $(printf 'x-access-token:%s' "${GITHUB_TOKEN}" | base64 -w0)"
-          if [ "${{ github.ref_name }}" = "main" ]; then
-            moonwave build --publish
-          else
-            echo "Non-main branch (${{ github.ref_name }}): skipping deploy, running build only."
-            moonwave build
-          fi
+          moonwave build --publish

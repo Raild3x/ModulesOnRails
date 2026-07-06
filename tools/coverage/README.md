@@ -26,6 +26,7 @@ Flags:
 | `--mutate-ops=<csv>` | only run these operators (`ror`, `lor`, `aor`, `not`, `lit`) |
 | `--mutate-timeout=<sec>` | per-mutant suite timeout (default 3x the baseline duration, min 5s) |
 | `--recommend` | end the report with a ranked list of concrete next steps |
+| `--lune-only` | skip Roblox-pipeline packages (they need Studio); used by CI |
 | `--rebuild-engine` | force a `cargo build --release` of the Rust engine |
 | `--timeout=<sec>` | tiniest safe-mode watchdog override (Lune) |
 | `--adapter=<path>` | use a different repo adapter |

@@ -9,7 +9,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
 # Local shared utilities (scripts/_common.py)
@@ -162,14 +162,44 @@ def check_src_entrypoint(pkg_dir: Path) -> Tuple[bool, str]:
     return False, "No init.luau, init.lua, or package-named entrypoint found in src/"
 
 
-def validate_packages() -> bool:
-    """Validate all packages in lib/."""
+def read_changed_packages(changed_packages_file: str) -> List[str]:
+    """Read newline-delimited package names from the given file.
+
+    Returns an empty list if the file does not exist (the detect script deletes
+    it when a PR touches no packages under lib/).
+    """
+    path = Path(changed_packages_file)
+    if not path.is_file():
+        return []
+    return [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def validate_packages(only_changed_file: Optional[str] = None) -> bool:
+    """Validate packages in lib/.
+
+    By default every package is validated. When ``only_changed_file`` is given,
+    validation is scoped to just the packages named in that file — so a PR is
+    not blocked by pre-existing structural issues in packages it never touched.
+    A package named in the file whose directory no longer exists (deleted in the
+    PR) is skipped.
+    """
     print("Checking package structure...")
-    
+
     packages = find_packages()
     if not packages:
         return False
-    
+
+    if only_changed_file is not None:
+        changed = set(read_changed_packages(only_changed_file))
+        if not changed:
+            print("No changed packages under lib/ to validate.")
+            return True
+        packages = [pkg for pkg in packages if pkg.name in changed]
+        if not packages:
+            print("Changed packages are not present in lib/ (deleted?); nothing to validate.")
+            return True
+        print(f"Scoping structure check to changed package(s): {', '.join(p.name for p in packages)}")
+
     all_valid = True
     checks = [
         ("wally.toml", check_wally_toml),
@@ -223,7 +253,7 @@ def validate_workflow_inputs() -> bool:
     """Check if workflow passes all required inputs to the publish action."""
     print("Checking workflow configuration...")
     
-    workflow_file = Path(".github/workflows/publish-package.yml")
+    workflow_file = Path(".github/workflows/publish.yml")
     
     if not workflow_file.is_file():
         print(f"✗ Workflow file not found: {workflow_file}")
@@ -250,12 +280,11 @@ def validate_version_preview(version_change: str, changed_packages_file: str) ->
         print("No semver change detected; skipping update preview.")
         return True
 
-    changed_path = Path(changed_packages_file)
-    if not changed_path.is_file():
+    if not Path(changed_packages_file).is_file():
         print(f"✗ Changed packages file not found: {changed_packages_file}")
         return False
 
-    packages = [line.strip() for line in changed_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    packages = read_changed_packages(changed_packages_file)
     if not packages:
         print("No changed packages detected; skipping update preview.")
         return True
@@ -336,11 +365,17 @@ def main():
         default="changed-packages.txt",
         help="Path to newline-delimited changed package names used for version-preview check."
     )
+    parser.add_argument(
+        "--only-changed",
+        action="store_true",
+        help="For the packages check, validate only the packages listed in "
+        "--changed-packages-file instead of every package under lib/.",
+    )
     args = parser.parse_args()
     
     try:
         if args.check == "packages":
-            result = validate_packages()
+            result = validate_packages(args.changed_packages_file if args.only_changed else None)
             return 0 if result else 1
         elif args.check == "action-inputs":
             result = validate_action_inputs()

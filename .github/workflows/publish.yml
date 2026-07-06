@@ -1,13 +1,11 @@
 # Triggered when a PR labelled major/minor/patch is merged into main, or manually
 # via workflow_dispatch.  Detects which lib/ packages changed, bumps their
-# versions, and publishes to Wally.
-#
-# README regeneration and docs deployment are handled automatically by the
-# 'publish docs' workflow, which triggers via workflow_run on completion.
+# versions, publishes to Wally, and then regenerates the README and deploys the
+# docs site by calling the reusable 'Docs' workflow.
 #
 # Job graph:
 #   resolve-version ─┐
-#                    ├─► publish
+#                    ├─► publish ─► docs
 #   detect-changes  ─┘
 name: Publish Packages
 
@@ -28,8 +26,10 @@ on:
           - patch
           - none
 
+# Serialize all publishes: every run commits version bumps to main, so two
+# concurrently merged PRs must queue, not race each other's push.
 concurrency:
-  group: publish-${{ github.event.pull_request.number || github.ref_name }}
+  group: publish-main
   cancel-in-progress: false
 
 permissions:
@@ -90,7 +90,7 @@ jobs:
     name: Detect Changed Packages
     runs-on: ubuntu-latest
     if: |
-      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_dispatch' && github.ref_name == 'main') ||
       (github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
     outputs:
       has_changes: ${{ steps.changed.outputs.has_changes }}
@@ -115,6 +115,7 @@ jobs:
           set -euo pipefail
           python scripts/workflow_actions/publish_detect_changed_packages.py \
             --event-name "${{ github.event_name }}" \
+            --event-path "$GITHUB_EVENT_PATH" \
             --repository "${{ github.repository }}" \
             --pr-number "${{ github.event.pull_request.number || 0 }}" \
             --changed-packages-file changed-packages.txt
@@ -159,8 +160,8 @@ jobs:
 
       # Install Rokit and verify the wally binary is on PATH before any
       # publish step attempts to call it.
-      - name: Setup Rokit and verify Wally
-        uses: ./.github/actions/verify-wally
+      - name: Setup toolchain
+        uses: ./.github/actions/setup-toolchain
 
       # Only download when the detect-changes job found packages to publish.
       # The artifact won't exist otherwise, and download-artifact would hard-fail.
@@ -191,3 +192,17 @@ jobs:
             echo "### ✅ Published changed packages with version change: ${{ needs.resolve-version.outputs.version_change }}" >> "$GITHUB_STEP_SUMMARY"
           fi
 
+  # Regenerate the README and deploy the docs site — but only when a publish
+  # actually happened (something changed and a real version bump was resolved).
+  # Manual docs rebuilds go through the 'Docs' workflow's own workflow_dispatch.
+  docs:
+    name: Docs
+    needs: [resolve-version, detect-changes, publish]
+    if: |
+      needs.publish.result == 'success' &&
+      needs.detect-changes.outputs.has_changes == 'true' &&
+      needs.resolve-version.outputs.version_change != 'none'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/docs.yml
+    secrets: inherit
