@@ -118,6 +118,95 @@ return function(t: tiniest)
 			manager:Destroy()
 		end)
 
+		-- The following four drive Diff's opaque-child handling, which only runs
+		-- when an opaque value sits as a CHILD inside a parent-level `diff_tables`.
+		-- Each replaces the whole parent `p` (so `p` is diffed child-by-child) with a
+		-- per-change Signal connected, which forces a FULL-depth diff (an `OnChange`
+		-- at `p` alone bounds the diff to depth 0 and never recurses into `p`'s
+		-- children). The opaque object is registered via an earlier UNOBSERVED write
+		-- so the diff's opacity context is active.
+
+		test("removing an opaque child diffs it as a single removed leaf (make_opaque_leaf removed arm)", function()
+			-- Diff.make_opaque_leaf's removed arm (Diff.luau:202, `v2 == nil`). A
+			-- listener AT the opaque leaf forces the diff to enumerate its removal.
+			local manager = TableManager.new { p = { keep = 1 } }
+			local obj = { big = true }
+			manager:Set("p", { keep = 1, thing = TableManager.Opaque(obj) }) -- unobserved: registers opacity
+
+			local removed = 0
+			manager:OnChange({ "p", "thing" }, function()
+				removed += 1
+			end)
+
+			manager:Set("p", { keep = 1 }) -- `thing` (opaque) removed within p's diff
+
+			expect(removed > 0).is_true()
+			expect(manager:Get({ "p", "thing" })).is(nil)
+
+			manager:Destroy()
+		end)
+
+		test("replacing a plain child with an opaque one diffs the new opaque side (diff_tables)", function()
+			-- Diff.diff_tables' new-side-opaque path (Diff.luau:294): child `slot`
+			-- goes plain-table -> opaque within p's diff.
+			local manager = TableManager.new { p = { slot = { plain = 1 } } }
+			local obj = { opaque = true }
+			manager:Set("blob", TableManager.Opaque(obj)) -- unobserved: registers opacity
+
+			local changed = 0
+			local conn = manager.KeyChanged:Connect(function() -- forces full-depth diff
+				changed += 1
+			end)
+
+			manager:Set("p", { slot = obj }) -- slot: {plain=1} -> opaque obj
+
+			expect(changed > 0).is_true()
+			expect(manager:Get({ "p", "slot" })).is(obj)
+
+			conn:Disconnect()
+			manager:Destroy()
+		end)
+
+		test("adding a container that nests an opaque child does not deep-walk it (make_addition_tree)", function()
+			-- Diff.make_addition_tree's opaque-child branch (Diff.luau:185).
+			local manager = TableManager.new { p = { keep = 1 } }
+			local obj = { instance = true }
+			manager:Set("blob", TableManager.Opaque(obj)) -- unobserved: registers opacity
+
+			local added = 0
+			local conn = manager.KeyAdded:Connect(function() -- forces full-depth diff
+				added += 1
+			end)
+
+			manager:Set("p", { keep = 1, box = { thing = obj } }) -- `box` added, nests the opaque
+
+			expect(added > 0).is_true()
+			expect(manager:Get({ "p", "box", "thing" })).is(obj)
+
+			conn:Disconnect()
+			manager:Destroy()
+		end)
+
+		test("removing a container that nests an opaque child does not deep-walk it (make_removal_tree)", function()
+			-- Diff.make_removal_tree's opaque-child branch (Diff.luau:166). A listener
+			-- inside the removed container forces the diff to enumerate its subtree.
+			local manager = TableManager.new { p = { keep = 1 } }
+			local obj = { instance = true }
+			manager:Set("p", { keep = 1, box = { thing = TableManager.Opaque(obj) } }) -- unobserved
+
+			local removed = 0
+			manager:OnChange({ "p", "box" }, function()
+				removed += 1
+			end)
+
+			manager:Set("p", { keep = 1 }) -- `box` (nesting the opaque) removed within p's diff
+
+			expect(removed > 0).is_true()
+			expect(manager:Get({ "p", "box" })).is(nil)
+
+			manager:Destroy()
+		end)
+
 		test("control: replacing a non-opaque object DOES flood descendant events", function()
 			local manager = TableManager.new { player = {} }
 			manager:Set("player", { hp = 100, stats = { str = 1, dex = 2 } })

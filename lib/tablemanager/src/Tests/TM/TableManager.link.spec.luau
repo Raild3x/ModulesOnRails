@@ -278,6 +278,107 @@ return function(t: tiniest)
 		end)
 	end)
 
+	describe("Implicit sharing — fan-out edge cases", function()
+		test("fan-out from an origin that has opaque registrations still re-fires the recipient", function()
+			-- `_NotifyApplied`'s Set fast path (TableManager.luau:1687): when the
+			-- ORIGIN carries opacity (`OriginHasNoOpacity` is false), the recipient
+			-- can't reuse the origin's diff node and falls back to
+			-- CheckForChangesBetween — which must still fire correctly.
+			local shared = { value = 1 }
+			local a = TableManager.new(shared)
+			local b = TableManager.new(shared)
+
+			-- Give `a` an opaque registration so its fanned ops report opacity.
+			a:Set("blob", TableManager.Opaque({ big = true }))
+
+			local bSeen
+			b:OnValueChange("value", function(newValue)
+				bSeen = newValue
+			end)
+
+			a:Set("value", 2)
+
+			expect(b.Raw.value).is(2)
+			expect(bSeen).is(2)
+
+			a:Destroy()
+			b:Destroy()
+		end)
+
+		test("a link recipient with only an OnApplied subscriber still receives the fanned op", function()
+			-- `_NotifyApplied`'s not-locally-observed branch (TableManager.luau:1699):
+			-- the recipient has no path listener but does have OnApplied, so the op
+			-- is shipped onward rather than dropped.
+			local shared = { value = 1 }
+			local a = TableManager.new(shared)
+			local b = TableManager.new(shared)
+
+			local appliedOps: { any } = {}
+			b:OnApplied(function(op)
+				table.insert(appliedOps, op)
+			end)
+			-- b has NO OnValueChange/OnChange on "value".
+
+			a:Set("value", 2)
+
+			-- A Set op reached b's OnApplied. The value rides either NewValue or
+			-- (when the origin shipped a diff) Diff.new.
+			local sawSet = false
+			for _, op in appliedOps do
+				if op.Kind == "Set" then
+					local shipped = if op.Diff ~= nil then op.Diff.new else op.NewValue
+					if shipped == 2 then
+						sawSet = true
+					end
+				end
+			end
+			expect(sawSet).is_true()
+			expect(b.Raw.value).is(2)
+
+			a:Destroy()
+			b:Destroy()
+		end)
+
+		test("a co-observer that diverged is dropped when introspected from the still-holding side", function()
+			-- getCoObservers' live-path recheck (Propagation.luau:338): after `b`
+			-- replaces the shared reference, `a` (which still holds it) must not
+			-- report `b` as linked — the stale weak observer entry is filtered by
+			-- `pathOfTableIn` returning nil.
+			local sharedNode = { x = 1 }
+			local a = TableManager.new { B = sharedNode }
+			local b = TableManager.new { B = sharedNode }
+			expect(a:IsLinkedWith(b)).is_true()
+
+			-- `b` diverges; `a` still holds `sharedNode`.
+			b:Set("B", { x = 99 })
+
+			expect(a:IsLinkedWith(b)).never_is_true()
+			expect(#a:GetLinkedManagers()).is(0)
+
+			a:Destroy()
+			b:Destroy()
+		end)
+
+		test("GetLinkedManagers reports a doubly-shared co-observer exactly once", function()
+			-- getCoObservers' dedup (Propagation.luau:336, `not seen[otherTM]` goes
+			-- false) and the DFS `visited` guard (Propagation.luau:325): `inner` is
+			-- reachable via two keys in `a`, so `b` is encountered twice and must be
+			-- collapsed to one entry.
+			local inner = { x = 1 }
+			local a = TableManager.new { outer = inner, alias = inner }
+			local b = TableManager.new { ref = inner }
+
+			expect(a:IsLinkedWith(b)).is_true()
+
+			local managers = a:GetLinkedManagers()
+			expect(#managers).is(1)
+			expect(managers[1]).is(b)
+
+			a:Destroy()
+			b:Destroy()
+		end)
+	end)
+
 	describe("Linked-manager introspection (GetLinkedManagers / IsLinkedWith)", function()
 		test("IsLinkedWith and GetLinkedManagers report co-observing managers", function()
 			local shared = { value = 1 }

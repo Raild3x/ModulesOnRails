@@ -163,10 +163,11 @@ function BatchFlush.Suspend(self: TableManagerLike)
 	if self._appliedListeners[1] ~= nil then
 		require("../Listening/Emitter").fireApplied(self, { Kind = "BatchBegin", Path = {} })
 	end
-	-- Capture the pre-batch snapshot BEFORE suspending ChangeDetector so that
-	-- CheckForChangesBetween at flush time can diff old-vs-current correctly.
-	-- `CaptureSnapshot` inside `ChangeDetector` returns a sentinel (O(1)) so no
-	-- snapshot/diff work is done during the window.
+	-- Capture the pre-batch snapshot BEFORE suspending ChangeDetector (below), so
+	-- this call runs while detection is still live and takes a REAL snapshot of the
+	-- current root that CheckForChangesBetween can diff old-vs-current against at
+	-- flush time. (While suspended, `ChangeDetector.CaptureSnapshot` instead returns
+	-- an O(1) sentinel, so no snapshot work happens for the rest of the window.)
 	self._batch = {
 		StartSnapshot = self._changeDetector:CaptureSnapshot(self.Raw, {}),
 		TrackedPaths = {},

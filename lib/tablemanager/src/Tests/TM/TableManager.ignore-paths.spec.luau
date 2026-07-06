@@ -107,6 +107,50 @@ return function(t: tiniest)
 			manager:Destroy()
 		end)
 
+		test("an array append onto an ignored path updates state without firing", function()
+			-- applyWrite's append fast path (Mutator.luau:386, `not ignored`): the
+			-- appended value still lands but no ArrayInserted event fires.
+			local manager = TableManager.new({ log = {} }, { IgnoredPaths = { { "log" } } })
+
+			local inserted = 0
+			manager:OnArrayInsert("log", function()
+				inserted += 1
+			end)
+
+			-- key == #log + 1 makes this the append fast path.
+			manager:Set({ "log", 1 }, "entry")
+
+			expect(inserted).is(0)
+			expect(manager:Get({ "log", 1 })).is("entry")
+
+			manager:Destroy()
+		end)
+
+		test("ignoring the root (empty) path suppresses every write", function()
+			-- IgnoreTrie's root short-circuit (IgnoreTrie.luau:50): marking the empty
+			-- path ignored makes IsPathIgnored return true for every query.
+			local manager = TableManager.new({ a = 1, b = { c = 2 } }, { IgnoredPaths = { {} } })
+
+			local fired = 0
+			manager:OnChange({}, function()
+				fired += 1
+			end)
+			local signalFired = 0
+			manager.ValueChanged:Connect(function()
+				signalFired += 1
+			end)
+
+			manager:Set("a", 99)
+			manager:Set({ "b", "c" }, 88)
+
+			expect(fired).is(0)
+			expect(signalFired).is(0)
+			expect(manager:Get("a")).is(99)
+			expect(manager:Get({ "b", "c" })).is(88)
+
+			manager:Destroy()
+		end)
+
 		test("ignoring the exact path of a value still allows reads to see writes", function()
 			local manager = TableManager.new { x = 1 }
 			manager:SetPathIgnored({ "x" }, true)

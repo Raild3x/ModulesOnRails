@@ -59,6 +59,49 @@ return function(t: tiniest)
 
 			manager:Destroy()
 		end)
+
+		test("rejects moving to the root", function()
+			-- The `#targetPath == 0` operand: root as the *destination*.
+			local manager = TableManager.new {
+				a = { value = 1 },
+			}
+
+			expect(function()
+				manager:MoveTo({ "a" }, {})
+			end).fails_with("MoveTo cannot move the root table")
+
+			manager:Destroy()
+		end)
+
+		test("rolls back the reparent when the batched write fails", function()
+			-- A schema that types `boxes.b` as a number makes the inner
+			-- `Set(target, sourceTable)` throw, so MoveTo must restore the source
+			-- proxy/value and leave neither path in a partial state.
+			local manager = TableManager.new({
+				boxes = { a = { x = 1 }, b = 2 },
+			}, {
+				Schema = T.interface {
+					boxes = T.interface {
+						a = T.interface { x = T.number },
+						b = T.number,
+					},
+				},
+			})
+
+			local heldA = manager.Proxy.boxes.a
+
+			expect(function()
+				manager:MoveTo({ "boxes", "a" }, { "boxes", "b" })
+			end).fails()
+
+			-- Source untouched, destination untouched, proxy still valid.
+			expect(manager:Get({ "boxes", "a", "x" })).is(1)
+			expect(manager:Get({ "boxes", "b" })).is(2)
+			expect(manager.Proxy.boxes.a).is(heldA)
+			expect(heldA.x).is(1)
+
+			manager:Destroy()
+		end)
 	end)
 
 	describe("Method: CopyTo", function()
@@ -103,6 +146,42 @@ return function(t: tiniest)
 			expect(function()
 				manager:CopyTo({ "a" }, {})
 			end).fails_with("CopyTo cannot set the root table")
+
+			manager:Destroy()
+		end)
+
+		test("rejects a destination parent that is not a table", function()
+			-- getParentOriginalAtPath (Mutator.luau:75): the destination's parent
+			-- resolves to a scalar, so the copy is refused before any mutation.
+			local manager = TableManager.new {
+				a = { value = 1 },
+				b = 2,
+			}
+
+			expect(function()
+				manager:CopyTo({ "a" }, { "b", "deep" })
+			end).fails_with("CopyTo destination parent must be a table")
+
+			manager:Destroy()
+		end)
+
+		test("deep-copies a value with shared inner references, preserving the sharing", function()
+			-- deepCloneValue's memo (Mutator.luau:90) must return the same clone
+			-- when it revisits a table reached by two paths (a diamond), rather
+			-- than duplicating it or looping forever.
+			local shared = { tag = "S" }
+			local manager = TableManager.new {
+				src = { left = shared, right = shared },
+			}
+
+			manager:CopyTo({ "src" }, { "dst" })
+
+			-- The copy is independent of the source...
+			expect(manager.Raw.dst).never_is(manager.Raw.src)
+			expect(manager.Raw.dst.left).never_is(shared)
+			expect(manager.Raw.dst.left.tag).is("S")
+			-- ...but the internal sharing is preserved (one clone, two slots).
+			expect(manager.Raw.dst.left).is(manager.Raw.dst.right)
 
 			manager:Destroy()
 		end)
@@ -179,6 +258,62 @@ return function(t: tiniest)
 			expect(function()
 				manager:Swap({ "a" }, { "a", "child" })
 			end).fails_with("Swap cannot swap ancestor/descendant paths")
+
+			manager:Destroy()
+		end)
+
+		test("rejects ancestor/descendant paths when the descendant is the first argument", function()
+			-- The reversed operand: IsPrefixPath(pathB, pathA) rather than
+			-- IsPrefixPath(pathA, pathB).
+			local manager = TableManager.new {
+				a = { child = { value = 1 } },
+			}
+
+			expect(function()
+				manager:Swap({ "a", "child" }, { "a" })
+			end).fails_with("Swap cannot swap ancestor/descendant paths")
+
+			manager:Destroy()
+		end)
+
+		test("rejects the root as the second argument", function()
+			-- The `#pathB == 0` operand: root as the *second* path.
+			local manager = TableManager.new {
+				a = 1,
+			}
+
+			expect(function()
+				manager:Swap({ "a" }, {})
+			end).fails_with("Swap cannot target the root table")
+
+			manager:Destroy()
+		end)
+
+		test("rolls back both reparents when the batched write fails", function()
+			-- Schema types `boxes.a` as an interface and `boxes.b` as a number.
+			-- Swap sets `boxes.a = valueB (a number)`, which the schema rejects,
+			-- so both reparents must be restored and neither path mutated.
+			local manager = TableManager.new({
+				boxes = { a = { x = 1 }, b = 2 },
+			}, {
+				Schema = T.interface {
+					boxes = T.interface {
+						a = T.interface { x = T.number },
+						b = T.number,
+					},
+				},
+			})
+
+			local heldA = manager.Proxy.boxes.a
+
+			expect(function()
+				manager:Swap({ "boxes", "a" }, { "boxes", "b" })
+			end).fails()
+
+			expect(manager:Get({ "boxes", "a", "x" })).is(1)
+			expect(manager:Get({ "boxes", "b" })).is(2)
+			expect(manager.Proxy.boxes.a).is(heldA)
+			expect(heldA.x).is(1)
 
 			manager:Destroy()
 		end)
@@ -350,6 +485,59 @@ return function(t: tiniest)
 
 			expect(fired).is(1)
 			expect(manager:Get("score")).is(10)
+
+			manager:Destroy()
+		end)
+
+		test("an empty path read-modify-writes the whole root", function()
+			-- applyRMW's `lastIdx == 0` branch (Mutator.luau:545): the updater
+			-- receives the live root and its return replaces it.
+			local manager = TableManager.new {
+				a = 1,
+				b = 2,
+			}
+
+			local seenRoot: any = nil
+			manager:Update({}, function(root)
+				seenRoot = root
+				return { c = 3 }
+			end)
+
+			expect(seenRoot.a).is(1)
+			expect(manager:Get("a")).is(nil)
+			expect(manager:Get("b")).is(nil)
+			expect(manager:Get("c")).is(3)
+
+			manager:Destroy()
+		end)
+
+		test("errors when an intermediate path segment is not a table", function()
+			-- applyRMW spine walk (Mutator.luau:556): a scalar sits mid-path.
+			local manager = TableManager.new {
+				a = 1,
+			}
+
+			expect(function()
+				manager:Update({ "a", "b", "c" }, function(old)
+					return old
+				end)
+			end).fails_with("Path segment b is not a table")
+
+			manager:Destroy()
+		end)
+
+		test("errors when the parent path segment is not a table", function()
+			-- applyRMW spine tail check (Mutator.luau:561): the direct parent is
+			-- a scalar.
+			local manager = TableManager.new {
+				a = 1,
+			}
+
+			expect(function()
+				manager:Update({ "a", "b" }, function(old)
+					return old
+				end)
+			end).fails_with("Path segment b is not a table")
 
 			manager:Destroy()
 		end)

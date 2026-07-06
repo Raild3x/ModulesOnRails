@@ -144,6 +144,46 @@ return function(t: tiniest)
 
 			manager:Destroy()
 		end)
+
+		test("returns nil for a non-positive index", function()
+			-- The `index < 1` operand of the bounds guard (TableManager.luau:1022).
+			local manager = TableManager.new {
+				items = { "A", "B" },
+			}
+
+			expect(manager:ArraySwapRemove({ "items" }, 0)).is(nil)
+			expect(manager:ArraySwapRemove({ "items" }, -1)).is(nil)
+			expect(manager.Proxy.items[1]).is("A")
+			expect(manager.Proxy.items[2]).is("B")
+
+			manager:Destroy()
+		end)
+
+		test("swap-removing the last element with only OnApplied ships one ArrayRemove and no backfill", function()
+			-- The untracked-with-OnApplied branch (TableManager.luau:1044): when the
+			-- removed index IS the last one, no backfill ArraySet is emitted.
+			local manager = TableManager.new {
+				items = { "A", "B", "C" },
+			}
+
+			local removes = 0
+			local sets = 0
+			manager:OnApplied(function(op)
+				if op.Kind == "ArrayRemove" then
+					removes += 1
+				elseif op.Kind == "ArraySet" then
+					sets += 1
+				end
+			end)
+
+			local removed = manager:ArraySwapRemove({ "items" }, 3) -- the last element
+			expect(removed).is("C")
+			expect(removes).is(1)
+			expect(sets).is(0) -- no backfill because index == lastIndex
+			expect(manager.Proxy.items[3]).is(nil)
+
+			manager:Destroy()
+		end)
 	end)
 
 	describe("Method: ArraySwapRemoveFirstValue", function()

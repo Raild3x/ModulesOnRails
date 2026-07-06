@@ -95,6 +95,87 @@ return function(t: tiniest)
 			manager:Destroy()
 		end)
 
+		test("'coalesced' merges repeated ArraySet fires, preserving the first old value", function()
+			-- getOldValueArgIndex's ArraySet arm (Emitter.luau:101, arg 4). Each
+			-- ArraySwapRemove synchronously fires an ArraySet (the backfill), so two
+			-- swap-removes in one frame produce two ArraySet fires that coalesce to a
+			-- single frame-end fire carrying the FIRST fire's old value.
+			local manager = TableManager.new({ items = { "A", "B", "C", "D", "E" } }, {
+				SignalFireMode = "coalesced",
+			})
+
+			local fireCount = 0
+			local lastOld: any = nil
+			local conn = manager.ArraySet:Connect(function(_basePath, _index, _newValue, oldValue)
+				fireCount += 1
+				lastOld = oldValue
+			end)
+
+			manager:ArraySwapRemove("items", 1) -- backfill index 1 with "E" (ArraySet old = "A")
+			manager:ArraySwapRemove("items", 1) -- backfill index 1 with "D" (ArraySet old = "E")
+			expect(fireCount).is(0) -- signal fires are coalesced to frame-end
+
+			task.wait()
+			expect(fireCount).is(1) -- two ArraySet fires collapsed into one
+			expect(lastOld).is("A") -- the first fire's old value is preserved
+
+			conn:Disconnect()
+			manager:Destroy()
+		end)
+
+		test("'coalesced' preserves the first old value when merging repeated KeyRemoved fires", function()
+			-- getOldValueArgIndex's KeyRemoved arm (Emitter.luau:97, arg 3): two key
+			-- removals in one frame collapse to one fire preserving the first old value.
+			local manager = TableManager.new({ dict = { a = 1, b = 2 } }, {
+				SignalFireMode = "coalesced",
+			})
+
+			local fireCount = 0
+			local lastOld: any = nil
+			local conn = manager.KeyRemoved:Connect(function(_path, _key, oldValue)
+				fireCount += 1
+				lastOld = oldValue
+			end)
+
+			manager:Set({ "dict", "a" }, nil :: any)
+			manager:Set({ "dict", "b" }, nil :: any)
+			expect(fireCount).is(0)
+
+			task.wait()
+			expect(fireCount).is(1) -- two KeyRemoved fires collapsed
+			expect(lastOld).is(1) -- old value from the first removal preserved
+
+			conn:Disconnect()
+			manager:Destroy()
+		end)
+
+		test("'coalesced' preserves the first old value when merging repeated ArrayRemoved fires", function()
+			-- getOldValueArgIndex's ArrayRemoved arm (Emitter.luau:99, arg 3): two
+			-- array removals in one frame collapse to one fire preserving the first
+			-- removed element's old value.
+			local manager = TableManager.new({ list = { 10, 20, 30, 40 } }, {
+				SignalFireMode = "coalesced",
+			})
+
+			local fireCount = 0
+			local lastOld: any = nil
+			local conn = manager.ArrayRemoved:Connect(function(_basePath, _index, oldValue)
+				fireCount += 1
+				lastOld = oldValue
+			end)
+
+			manager:ArrayRemove("list", 1) -- removes 10
+			manager:ArrayRemove("list", 1) -- removes 20 (now at index 1)
+			expect(fireCount).is(0)
+
+			task.wait()
+			expect(fireCount).is(1) -- two ArrayRemoved fires collapsed
+			expect(lastOld).is(10) -- old value from the first removal preserved
+
+			conn:Disconnect()
+			manager:Destroy()
+		end)
+
 		test("'immediate' delivers the signal synchronously", function()
 			local manager = TableManager.new({ player = { health = 100 } }, {
 				SignalFireMode = "immediate",

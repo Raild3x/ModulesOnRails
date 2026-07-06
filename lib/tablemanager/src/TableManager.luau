@@ -737,11 +737,14 @@ function TableManager.Set<T, S>(
 		const nextValue = parent[parsedPath[i]]
 		if type(nextValue) ~= "table" then
 			if not shouldBuild then
+				-- Reaching here always means `unwrappedValue == nil`: the fast path
+				-- above routes every non-nil write (when dynamic build is off) into
+				-- `applyWrite`, which raises the "Path segment X is not a table"
+				-- error itself, and `shouldBuild` is only false for a non-nil value
+				-- when build is off. So this is the "set a nonexistent path to nil"
+				-- case, which is already a no-op.
 				debug.profileend()
-				if unwrappedValue == nil then
-					return -- Silently return if we are setting a non existent path to nil since it is already nil.
-				end
-				error(`Path segment {parsedPath[i]} is not a table`)
+				return
 			end
 
 			-- Build intermediate tables for the remainder of the path, then apply the write.
@@ -1732,7 +1735,7 @@ end
 --[=[
 	@within TableManager
 	@method Extend
-	@unreleased
+	@private
 	@param target Proxy | Path
 	@return TableManager
 
@@ -1815,6 +1818,7 @@ end
 
 --[=[
 	@within TableManager
+	@unreleased
 	@method ForKeys
 	@param path Path
 	@param handler (itemJanitor: Janitor, key: any, metadata: ChangeMetadata?) -> ()
@@ -1841,6 +1845,7 @@ end
 
 --[=[
 	@within TableManager
+	@unreleased
 	@method ForValues
 	@param path Path
 	@param handler (itemJanitor: Janitor, value: any, metadata: ChangeMetadata?) -> ()
@@ -1865,6 +1870,7 @@ end
 
 --[=[
 	@within TableManager
+	@unreleased
 	@method ForPairs
 	@param path Path
 	@param handler (itemJanitor: Janitor, key: any, value: any, metadata: ChangeMetadata?) -> ()
@@ -1894,6 +1900,7 @@ end
 --[=[
 	@within TableManager
 	@method MapKeys
+	@private
 	@unreleased
 	@param path Path
 	@param transform (entryJanitor: Janitor, key: any, value: any) -> any
@@ -1927,6 +1934,7 @@ end
 --[=[
 	@within TableManager
 	@method MapValues
+	@private
 	@unreleased
 	@param path Path
 	@param transform (entryJanitor: Janitor, value: any, key: any) -> any
@@ -1966,6 +1974,7 @@ end
 --[=[
 	@within TableManager
 	@method MapPairs
+	@private
 	@unreleased
 	@param path Path
 	@param transform (entryJanitor: Janitor, key: any, value: any) -> (any, any)
@@ -2026,12 +2035,12 @@ end
 ]=]
 function TableManager.PromiseValue<T, S>(self: TM_Internal<T>, path: Path<S>, predicate: ((value: ValueAtPath<T, S>?) -> boolean)?): Promise<ValueAtPath<T, S>>
 	const parsedPath = PathHelpers.ParsePath(path)
+	if predicate and predicate(self:Get(parsedPath)) then
+		return Promise.resolve(self:Get(parsedPath))
+	end
+
 	const prom = Promise.new(function(resolve, reject, onCancel)
 		local connection: Connection
-		-- `OnValueChange` (not `Observe`) so we only settle on an actual change:
-		-- `Observe` fires the initial callback synchronously with the CURRENT value
-		-- before `connection` is assigned, which both crashes (`connection` is nil)
-		-- and contradicts the documented "resolves when the value first changes".
 		connection = self:OnValueChange(parsedPath, function(newValue)
 			if predicate == nil or predicate(newValue) then
 				connection:Disconnect()

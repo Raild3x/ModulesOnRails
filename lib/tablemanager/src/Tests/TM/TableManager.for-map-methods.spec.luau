@@ -71,6 +71,28 @@ return function(t: tiniest)
 
 			manager:Destroy()
 		end)
+
+		test("tears down every live item when the whole source is replaced by a non-table", function()
+			-- reconcile's removal pass (ForMap.luau:121, `type(current) ~= "table"`):
+			-- the tracked source is scalarized while items are live, so every item
+			-- must be destroyed rather than key-compared against a non-table.
+			local manager = TableManager.new { inv = { sword = 1, shield = 1 } }
+			local destroyed: { [string]: boolean } = {}
+
+			manager:ForKeys("inv", function(itemJanitor, key)
+				itemJanitor:Add(function()
+					destroyed[key] = true
+				end)
+			end)
+
+			-- Replace the populated `inv` table with a scalar in one write.
+			manager:Set("inv", 5 :: any)
+
+			expect(destroyed.sword).is_true()
+			expect(destroyed.shield).is_true()
+
+			manager:Destroy()
+		end)
 	end)
 
 	describe("Method: ForValues", function()

@@ -405,6 +405,81 @@ return function(t: tiniest)
 
 			registry:Destroy()
 		end)
+
+		test("the Once cleanup sweep keeps a co-located regular listener and its bucket", function()
+			-- The sweep after a Once fire must skip non-Once entries (the
+			-- `listeners[i].Once` operand goes false) and keep the bucket alive
+			-- because a survivor remains (`next(listeners) == nil` goes false).
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
+
+			local regularFires = 0
+			local onceFires = 0
+			local regConn =
+				registry:RegisterListener("ValueChanged", { "player", "health" }, function()
+					regularFires += 1
+				end)
+			registry:RegisterListener("ValueChanged", { "player", "health" }, function()
+				onceFires += 1
+			end, { Once = true })
+
+			local eventData: any = {
+				NewValue = 50,
+				OldValue = 100,
+				Metadata = {
+					Diff = { type = "changed" },
+					OriginPath = { "player", "health" },
+					OriginDiff = { type = "changed" },
+				},
+			}
+
+			fireAndFlush(registry, "ValueChanged", { "player", "health" }, eventData)
+			fireAndFlush(registry, "ValueChanged", { "player", "health" }, eventData)
+
+			expect(onceFires).is(1) -- Once removed after the first fire
+			expect(regularFires).is(2) -- survivor kept firing (bucket not deleted)
+			expect(regConn.Connected).is_true()
+
+			registry:Destroy()
+		end)
+
+		test("the Once cleanup sweep decrements SnapshotOldValues and ProvideDiff counts", function()
+			-- A Once listener that also opted into ProvideDiff + SnapshotOldValues must,
+			-- when swept, decrement both aggregate counts (the `listeners[i].SnapshotOldValues`
+			-- and `listeners[i].ProvideDiff` operands go true), restoring the node to
+			-- "no opted-in coverage".
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
+
+			-- A surviving regular listener keeps the bucket alive so the sweep runs
+			-- its per-entry decrements rather than wholesale-clearing the node.
+			registry:RegisterListener("ValueChanged", { "player", "health" }, function() end)
+			registry:RegisterListener("ValueChanged", { "player", "health" }, function() end, {
+				Once = true,
+				ProvideDiff = true,
+				SnapshotOldValues = true,
+			})
+
+			-- Before the fire, both opt-ins are active at this node.
+			expect(registry:SnapshotRootFor { "player", "health" }).exists()
+			expect(registry:WantsFullDiff { "player", "health" }).is_true()
+
+			fireAndFlush(registry, "ValueChanged", { "player", "health" }, {
+				NewValue = 50,
+				OldValue = 100,
+				OldValueSnapshot = 100,
+				Metadata = {
+					Diff = { type = "changed" },
+					OriginPath = { "player", "health" },
+					OriginDiff = { type = "changed" },
+				},
+			})
+
+			-- After the Once listener auto-disconnects and is swept, the counts are
+			-- back to zero (the surviving regular listener opted into neither).
+			expect(registry:SnapshotRootFor { "player", "health" }).never_exists()
+			expect(registry:WantsFullDiff { "player", "health" }).never_is_true()
+
+			registry:Destroy()
+		end)
 	end)
 
 	describe("Event Data Handling", function()
@@ -1117,6 +1192,143 @@ return function(t: tiniest)
 			expect(received).is(rawOld)
 
 			registry:Destroy()
+		end)
+
+		test("two opted-in listeners on the same node share ONE lazily-built snapshot clone", function()
+			-- The snapshot-substituted eventData clone is built once per node/event
+			-- (`snapshotEventData == nil` goes false on the second opted-in listener),
+			-- so both listeners receive the very same object.
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
+
+			local snapshotOld: any = { health = 100 }
+			local firstReceived: any = nil
+			local secondReceived: any = nil
+
+			registry:RegisterListener("ValueChanged", { "player" }, function(_, oldValue)
+				firstReceived = oldValue
+			end, { SnapshotOldValues = true })
+			registry:RegisterListener("ValueChanged", { "player" }, function(_, oldValue)
+				secondReceived = oldValue
+			end, { SnapshotOldValues = true })
+
+			fireAndFlush(registry, "ValueChanged", { "player" }, {
+				NewValue = { health = 50 },
+				OldValue = { health = 100 },
+				OldValueSnapshot = snapshotOld,
+				Metadata = {
+					Diff = { type = "changed" },
+					OriginPath = { "player" },
+					OriginDiff = { type = "changed" },
+				},
+			})
+
+			expect(firstReceived).is(snapshotOld)
+			expect(secondReceived).is(snapshotOld)
+			expect(firstReceived).is(secondReceived) -- the reused clone, not two copies
+
+			registry:Destroy()
+		end)
+
+		test("SnapshotRootFor returns the change path itself once a wildcard opted-in listener exists", function()
+			-- Registering a SnapshotOldValues listener at a wildcard path trips the
+			-- `_hasSnapshotWildcards` latch (the `segment == WILDCARD` operand goes
+			-- true), so SnapshotRootFor conservatively returns the change path.
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
+
+			registry:RegisterListener("ValueChanged", { "Players", "*" }, function() end, {
+				SnapshotOldValues = true,
+			})
+
+			local result = registry:SnapshotRootFor { "Players", "p1" }
+			expect(result).exists()
+			local r = result :: { any }
+			expect(#r).is(2)
+			expect(r[1]).is("Players")
+			expect(r[2]).is("p1")
+
+			registry:Destroy()
+		end)
+
+		test("SnapshotRootFor returns nil for a change on a branch with no opted-in coverage", function()
+			-- An opted-in listener exists on one branch, but the queried change is on
+			-- an unrelated branch: `getNode(path)` is nil, so SnapshotRootFor bails.
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
+
+			registry:RegisterListener("ValueChanged", { "a", "x" }, function() end, {
+				SnapshotOldValues = true,
+			})
+
+			expect(registry:SnapshotRootFor { "b" }).never_exists()
+
+			registry:Destroy()
+		end)
+
+		test("SnapshotRootFor descends past a sibling branch that has only non-opted listeners", function()
+			-- Under {"a"}, branch x is opted in and branch y is NOT: the descent must
+			-- skip y (its `SnapshotSubtree > 0` operand is false) and follow x alone.
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
+
+			registry:RegisterListener("ValueChanged", { "a", "x" }, function() end, {
+				SnapshotOldValues = true,
+			})
+			registry:RegisterListener("ValueChanged", { "a", "y" }, function() end) -- NOT opted in
+
+			local result = registry:SnapshotRootFor { "a" }
+			expect(result).exists()
+			local r = result :: { any }
+			expect(#r).is(2)
+			expect(r[1]).is("a")
+			expect(r[2]).is("x")
+
+			registry:Destroy()
+		end)
+	end)
+
+	describe("Coalesced listener lifecycle", function()
+		test("a coalesced listener disconnected before its deferred flush never runs", function()
+			-- flushCoalescedListener (ListenerRegistry.luau:441) skips a listener that
+			-- disconnected between the fire (which scheduled the defer) and the flush.
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "coalesced" }
+
+			local fired = 0
+			local conn = registry:RegisterListener("ValueChanged", { "player", "health" }, function()
+				fired += 1
+			end)
+
+			registry:FireListenersExact("ValueChanged", { "player", "health" }, {
+				NewValue = 50,
+				OldValue = 100,
+				Metadata = {
+					Diff = { type = "changed" },
+					OriginPath = { "player", "health" },
+					OriginDiff = { type = "changed" },
+				},
+			})
+
+			-- Disconnect before the deferred flush ticks.
+			conn:Disconnect()
+			task.wait()
+
+			expect(fired).is(0)
+
+			registry:Destroy()
+		end)
+
+		test("Destroy is idempotent", function()
+			-- The `self._destroyed` guard makes a second Destroy a no-op.
+			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "immediate" }
+
+			registry:RegisterListener("ValueChanged", { "player", "health" }, function() end)
+
+			local ok1 = pcall(function()
+				registry:Destroy()
+			end)
+			local ok2 = pcall(function()
+				registry:Destroy()
+			end)
+
+			expect(ok1).is_true()
+			expect(ok2).is_true()
 		end)
 	end)
 end

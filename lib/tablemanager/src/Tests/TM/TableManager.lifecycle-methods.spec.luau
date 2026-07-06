@@ -148,6 +148,21 @@ return function(t: tiniest)
 			manager:Destroy()
 		end)
 
+		test("resolves synchronously when the current value already satisfies the predicate", function()
+			-- PromiseValue's fast path (TableManager.luau:2035): the value already
+			-- passes, so the promise resolves immediately without registering a
+			-- listener.
+			local manager = TableManager.new { hp = 0 }
+
+			local prom = manager:PromiseValue("hp", function(value)
+				return value <= 0
+			end)
+
+			expect(prom:getStatus()).is("Resolved")
+
+			manager:Destroy()
+		end)
+
 		test("resolves only once the predicate is satisfied", function()
 			local manager = TableManager.new { player = { health = 100 } }
 

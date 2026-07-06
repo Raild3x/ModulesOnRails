@@ -57,6 +57,34 @@ return function(t: tiniest)
 			manager:Destroy()
 		end)
 
+		test("a manager destroyed before its deferred flush ticks fires nothing and does not error", function()
+			-- The deferred drain closure's `self._Destroyed` guard
+			-- (CoalescedFlush.luau:81): a coalesced Set schedules the flush, then
+			-- Destroy runs synchronously before frame-end, so the closure must
+			-- abort instead of flushing a torn-down manager.
+			const manager = TableManager.new({
+				player = { hp = 100 },
+			}, {
+				FlushMode = "coalesced",
+			})
+
+			local fired = 0
+			manager:OnValueChange("player.hp", function()
+				fired += 1
+			end)
+
+			manager:Set("player.hp", 90)
+			expect(fired).is(0) -- deferred
+
+			const ok = pcall(function()
+				manager:Destroy()
+			end)
+			task.wait() -- let the scheduled defer run (and bail on _Destroyed)
+
+			expect(ok).is_true()
+			expect(fired).is(0) -- the pending flush was abandoned
+		end)
+
 		test("sibling deep writes in a frame collapse the pending root to their common ancestor; each leaf still fires once", function()
 			const manager = TableManager.new({
 				a = { b = { x = 1 }, c = { y = 2 } },

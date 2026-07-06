@@ -94,6 +94,35 @@ return function(t: tiniest)
 			expect(ctx.hasOpaqueChildren(container)).is(true)
 		end)
 
+		test("re-registering the same value under a kind does not double-count", function()
+			-- The idempotent `== nil` guards (OpaqueRegistry.luau:208/213/218): a
+			-- second registration of an already-marked value must NOT bump the count.
+			local registries = OpaqueRegistry.NewRegistries()
+
+			-- Per-manager OpaqueChildren (line 208).
+			local container = { items = {} }
+			OpaqueRegistry.UnwrapAndRegister(registries, OpaqueRegistry.OpaqueChildren(container))
+			OpaqueRegistry.UnwrapAndRegister(registries, OpaqueRegistry.OpaqueChildren(container))
+			expect(registries.Count).is(1)
+
+			-- GlobalOpaque (line 213) — measured as a delta since the global count is
+			-- process-wide.
+			local g = { tag = "double-global-opaque" }
+			local beforeG = OpaqueRegistry.GlobalCount()
+			OpaqueRegistry.UnwrapAndRegister(registries, OpaqueRegistry.GlobalOpaque(g))
+			OpaqueRegistry.UnwrapAndRegister(registries, OpaqueRegistry.GlobalOpaque(g))
+			expect(OpaqueRegistry.GlobalCount()).is(beforeG + 1)
+
+			-- GlobalOpaqueChildren (line 218).
+			local gc = { tag = "double-global-opaque-children" }
+			local beforeGC = OpaqueRegistry.GlobalCount()
+			OpaqueRegistry.UnwrapAndRegister(registries, OpaqueRegistry.GlobalOpaqueChildren(gc))
+			OpaqueRegistry.UnwrapAndRegister(registries, OpaqueRegistry.GlobalOpaqueChildren(gc))
+			expect(OpaqueRegistry.GlobalCount()).is(beforeGC + 1)
+
+			expect(registries.OpaqueChildren[container]).is(true)
+		end)
+
 		test("a non-wrapper value passes through untouched and unregistered", function()
 			local registries = OpaqueRegistry.NewRegistries()
 			local obj = { x = 1 }

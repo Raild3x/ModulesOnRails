@@ -34,6 +34,33 @@ return function(t: tiniest)
 			manager:Destroy()
 		end)
 
+		test("a batched numeric-key write into a non-array (sparse) table is not tracked as an array", function()
+			-- applyWrite's batched-numeric classification (Mutator.luau:406, `isArray`):
+			-- a numeric key written into a sparse/dict-shaped table must NOT be tracked
+			-- for the LCS array re-diff, so it surfaces as an ordinary key change.
+			local manager = TableManager.new {
+				sparse = { [5] = "x" }, -- no index 1 => not array-shaped
+			}
+
+			local keyChanges = 0
+			local arrayInserts = 0
+			manager:OnKeyChange("sparse", function()
+				keyChanges += 1
+			end)
+			manager.ArrayInserted:Connect(function()
+				arrayInserts += 1
+			end)
+
+			manager:Batch(function()
+				manager:Set({ "sparse", 7 }, "y")
+			end)
+
+			expect(manager:Get({ "sparse", 7 })).is("y")
+			expect(arrayInserts).is(0) -- not misdiffed as an array op
+
+			manager:Destroy()
+		end)
+
 		test("with no net change fires nothing", function()
 			local manager = TableManager.new {
 				x = 1,
