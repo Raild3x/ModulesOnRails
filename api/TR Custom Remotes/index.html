@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en" dir="ltr" class="plugin-moonwave plugin-id-moonwave" data-has-hydrated="false">
+<head>
+<meta charset="UTF-8">
+<meta name="generator" content="Docusaurus v3.10.1">
+<title data-rh="true">TR Custom Remotes | ModulesOnRails</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:url" content="https://raild3x.github.io/ModulesOnRails/api/TR Custom Remotes"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docusaurus_tag" content="default"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docsearch:docusaurus_tag" content="default"><meta data-rh="true" property="og:title" content="TR Custom Remotes | ModulesOnRails"><meta data-rh="true" name="description" content="Sometimes you need to send an *event* or call a *function* alongside replicated
+data — a &quot;you were hit&quot; signal, a &quot;buy this item&quot; request, and so on. Rather than
+managing your own `RemoteEvent`s, TableReplicator lets you attach custom remotes
+directly to a replicator. They&#x27;re addressed per-replicator and (optionally) ordered
+with that replicator&#x27;s data ops.
+
+:::note Two proxies, one convention
+The server talks to clients through `replicator.Client`; the client talks to the
+server through `replicator.Server`. So the side you&#x27;re **sending to** is the proxy
+you use. A remote registered as `&quot;Hit&quot;` is fired on the server via
+`replicator.Client.Hit` and listened to on the client via `replicator.Server.Hit`.
+:::
+
+---
+## Declaring remotes
+
+The quickest way is the `Client` field on `ServerReplicator.new`. Use the sentinel
+helpers for signals, and a plain function for a callable:
+
+```lua
+local replicator = ServerReplicator.new({
+	Namespace = &quot;Combat&quot;,
+	Targets = player,
+	Client = {
+		Hit = ServerReplicator.createRemoteEvent(),          -- a signal
+		Whiff = ServerReplicator.createUnreliableEvent(),    -- an unreliable signal
+		GetLoadout = function(self, player, slot)            -- a function
+			return loadouts[player][slot]
+		end,
+	},
+})
+```
+
+:::caution **Client** declarations are ordered
+Remotes declared in the `Client` table are registered as their **ordered** variants:
+a signal there behaves like `RegisterOrderedRemoteSignal`, and a function like
+`RegisterOrderedRemoteFunction`. That means their delivery is interleaved with data
+ops in frame order (see [TR Performance &amp; Ordering](/api/TR%20Performance%20&amp;%20Ordering)),
+and clients must call `InvokeAsync` — not `Invoke` — on such functions.
+If you want the **unordered** variants, register them explicitly instead (next
+section). `createUnreliableEvent()` is always unreliable regardless.
+:::
+
+### Registering explicitly
+
+Every remote can also be registered after construction. This is the only way to get
+the unordered reliable variants:
+
+```lua
+replicator:RegisterRemoteSignal(&quot;Hit&quot;)             -- reliable, unordered
+replicator:RegisterRemoteUnreliableSignal(&quot;Whiff&quot;) -- unreliable
+replicator:RegisterOrderedRemoteSignal(&quot;Combo&quot;)    -- reliable, ordered with data
+
+replicator:RegisterRemoteFunction(&quot;GetScore&quot;, function(self, player) return 42 end)
+replicator:RegisterOrderedRemoteFunction(&quot;Buy&quot;, function(self, player, itemId) ... end)
+```
+
+Here&#x27;s the full picture — how a remote is declared, what it is, and how the client
+calls it:
+
+| Register with | Kind | Client uses |
+| --- | --- | --- |
+| `RegisterRemoteSignal` | reliable signal | `Connect` / `Fire` |
+| `RegisterRemoteUnreliableSignal` | unreliable signal | `Connect` / `Fire` |
+| `RegisterOrderedRemoteSignal` *(or a signal in `Client`)* | ordered signal | `Connect` / `Fire` |
+| `RegisterRemoteFunction` | unordered function | `Invoke` (yields) |
+| `RegisterOrderedRemoteFunction` *(or a function in `Client`)* | ordered function | `InvokeAsync` (Promise) |
+
+---
+## Signals
+
+Signals are two-way: the server can fire to clients, and clients can fire back.
+
+**Server → client.** Fire through `replicator.Client[name]`:
+
+```lua
+replicator.Client.Hit:Fire(player, &quot;headshot&quot;)   -- one active player
+replicator.Client.Hit:FireAll(&quot;headshot&quot;)         -- all active players
+replicator.Client.Hit:FireExcept(player, &quot;...&quot;)   -- all except one (or a list)
+replicator.Client.Hit:FirePredicate(function(plr)
+	return plr.Team == redTeam
+end, &quot;...&quot;)                                        -- a filtered audience
+```
+
+**Client → server.** Listen and fire through `replicator.Server[name]`:
+
+```lua
+-- On the client
+replicator.Server.Hit:Connect(function(hitType)
+	print(&quot;Hit:&quot;, hitType)
+end)
+replicator.Server.Hit:Fire(&quot;blocked&quot;)        -- fire back to the server
+replicator.Server.Hit:FireUnreliable(&quot;...&quot;)  -- force unreliable delivery
+
+-- On the server, receive client fires:
+replicator.Client.Hit:Connect(function(player, ...) end)
+replicator.Client.Hit:Wait()                 -- yields until any client fires
+```
+
+
+## Functions
+
+A function is registered on the server and called from the client. Which client
+method to use depends on whether it&#x27;s ordered:
+
+```lua
+-- Unordered function -&gt; client Invoke (yields for the result)
+replicator:RegisterRemoteFunction(&quot;GetScore&quot;, function(self, player)
+	return scores[player]
+end)
+local score = replicator.Server.GetScore:Invoke()
+
+-- Ordered function -&gt; client InvokeAsync (returns a Promise; response arrives
+-- after any data ops the server queued in the same frame)
+replicator:RegisterOrderedRemoteFunction(&quot;Buy&quot;, function(self, player, itemId)
+	return purchase(player, itemId)
+end)
+replicator.Server.Buy:InvokeAsync(&quot;sword&quot;):andThen(function(ok) end)
+```
+
+The server-side handler always receives `(self, player, ...)` — `self` is the
+replicator and `player` is the caller.
+
+:::tip Wrong-method warnings
+Calling `Invoke` on a signal, `Connect` on a function, or `Invoke` on an *ordered*
+function all emit a warning naming the correct method — a handy signal you&#x27;ve mixed
+up a remote&#x27;s kind.
+:::
+
+---
+### See also
+
+- **[TR Getting Started](/api/TR%20Getting%20Started)** — the `Client` config field in context.
+- **[TR Performance &amp; Ordering](/api/TR%20Performance%20&amp;%20Ordering)** — what &quot;ordered&quot; delivery guarantees and costs."><meta data-rh="true" property="og:description" content="Sometimes you need to send an *event* or call a *function* alongside replicated
+data — a &quot;you were hit&quot; signal, a &quot;buy this item&quot; request, and so on. Rather than
+managing your own `RemoteEvent`s, TableReplicator lets you attach custom remotes
+directly to a replicator. They&#x27;re addressed per-replicator and (optionally) ordered
+with that replicator&#x27;s data ops.
+
+:::note Two proxies, one convention
+The server talks to clients through `replicator.Client`; the client talks to the
+server through `replicator.Server`. So the side you&#x27;re **sending to** is the proxy
+you use. A remote registered as `&quot;Hit&quot;` is fired on the server via
+`replicator.Client.Hit` and listened to on the client via `replicator.Server.Hit`.
+:::
+
+---
+## Declaring remotes
+
+The quickest way is the `Client` field on `ServerReplicator.new`. Use the sentinel
+helpers for signals, and a plain function for a callable:
+
+```lua
+local replicator = ServerReplicator.new({
+	Namespace = &quot;Combat&quot;,
+	Targets = player,
+	Client = {
+		Hit = ServerReplicator.createRemoteEvent(),          -- a signal
+		Whiff = ServerReplicator.createUnreliableEvent(),    -- an unreliable signal
+		GetLoadout = function(self, player, slot)            -- a function
+			return loadouts[player][slot]
+		end,
+	},
+})
+```
+
+:::caution **Client** declarations are ordered
+Remotes declared in the `Client` table are registered as their **ordered** variants:
+a signal there behaves like `RegisterOrderedRemoteSignal`, and a function like
+`RegisterOrderedRemoteFunction`. That means their delivery is interleaved with data
+ops in frame order (see [TR Performance &amp; Ordering](/api/TR%20Performance%20&amp;%20Ordering)),
+and clients must call `InvokeAsync` — not `Invoke` — on such functions.
+If you want the **unordered** variants, register them explicitly instead (next
+section). `createUnreliableEvent()` is always unreliable regardless.
+:::
+
+### Registering explicitly
+
+Every remote can also be registered after construction. This is the only way to get
+the unordered reliable variants:
+
+```lua
+replicator:RegisterRemoteSignal(&quot;Hit&quot;)             -- reliable, unordered
+replicator:RegisterRemoteUnreliableSignal(&quot;Whiff&quot;) -- unreliable
+replicator:RegisterOrderedRemoteSignal(&quot;Combo&quot;)    -- reliable, ordered with data
+
+replicator:RegisterRemoteFunction(&quot;GetScore&quot;, function(self, player) return 42 end)
+replicator:RegisterOrderedRemoteFunction(&quot;Buy&quot;, function(self, player, itemId) ... end)
+```
+
+Here&#x27;s the full picture — how a remote is declared, what it is, and how the client
+calls it:
+
+| Register with | Kind | Client uses |
+| --- | --- | --- |
+| `RegisterRemoteSignal` | reliable signal | `Connect` / `Fire` |
+| `RegisterRemoteUnreliableSignal` | unreliable signal | `Connect` / `Fire` |
+| `RegisterOrderedRemoteSignal` *(or a signal in `Client`)* | ordered signal | `Connect` / `Fire` |
+| `RegisterRemoteFunction` | unordered function | `Invoke` (yields) |
+| `RegisterOrderedRemoteFunction` *(or a function in `Client`)* | ordered function | `InvokeAsync` (Promise) |
+
+---
+## Signals
+
+Signals are two-way: the server can fire to clients, and clients can fire back.
+
+**Server → client.** Fire through `replicator.Client[name]`:
+
+```lua
+replicator.Client.Hit:Fire(player, &quot;headshot&quot;)   -- one active player
+replicator.Client.Hit:FireAll(&quot;headshot&quot;)         -- all active players
+replicator.Client.Hit:FireExcept(player, &quot;...&quot;)   -- all except one (or a list)
+replicator.Client.Hit:FirePredicate(function(plr)
+	return plr.Team == redTeam
+end, &quot;...&quot;)                                        -- a filtered audience
+```
+
+**Client → server.** Listen and fire through `replicator.Server[name]`:
+
+```lua
+-- On the client
+replicator.Server.Hit:Connect(function(hitType)
+	print(&quot;Hit:&quot;, hitType)
+end)
+replicator.Server.Hit:Fire(&quot;blocked&quot;)        -- fire back to the server
+replicator.Server.Hit:FireUnreliable(&quot;...&quot;)  -- force unreliable delivery
+
+-- On the server, receive client fires:
+replicator.Client.Hit:Connect(function(player, ...) end)
+replicator.Client.Hit:Wait()                 -- yields until any client fires
+```
+
+
+## Functions
+
+A function is registered on the server and called from the client. Which client
+method to use depends on whether it&#x27;s ordered:
+
+```lua
+-- Unordered function -&gt; client Invoke (yields for the result)
+replicator:RegisterRemoteFunction(&quot;GetScore&quot;, function(self, player)
+	return scores[player]
+end)
+local score = replicator.Server.GetScore:Invoke()
+
+-- Ordered function -&gt; client InvokeAsync (returns a Promise; response arrives
+-- after any data ops the server queued in the same frame)
+replicator:RegisterOrderedRemoteFunction(&quot;Buy&quot;, function(self, player, itemId)
+	return purchase(player, itemId)
+end)
+replicator.Server.Buy:InvokeAsync(&quot;sword&quot;):andThen(function(ok) end)
+```
+
+The server-side handler always receives `(self, player, ...)` — `self` is the
+replicator and `player` is the caller.
+
+:::tip Wrong-method warnings
+Calling `Invoke` on a signal, `Connect` on a function, or `Invoke` on an *ordered*
+function all emit a warning naming the correct method — a handy signal you&#x27;ve mixed
+up a remote&#x27;s kind.
+:::
+
+---
+### See also
+
+- **[TR Getting Started](/api/TR%20Getting%20Started)** — the `Client` config field in context.
+- **[TR Performance &amp; Ordering](/api/TR%20Performance%20&amp;%20Ordering)** — what &quot;ordered&quot; delivery guarantees and costs."><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/TR Custom Remotes"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/TR Custom Remotes" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/TR Custom Remotes" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.e8e96400.css">
+<script src="/ModulesOnRails/assets/js/runtime~main.668e8339.js" defer="defer"></script>
+<script src="/ModulesOnRails/assets/js/main.d4575191.js" defer="defer"></script>
+</head>
+<body>
+<svg style="display: none;"><defs>
+<symbol id="theme-svg-external-link" viewBox="0 0 24 24"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"/></symbol>
+</defs></svg>
+<script>!function(){var t=function(){try{return new URLSearchParams(window.location.search).get("docusaurus-theme")}catch(t){}}()||function(){try{return window.localStorage.getItem("theme")}catch(t){}}();document.documentElement.setAttribute("data-theme",t||(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")),document.documentElement.setAttribute("data-theme-choice",t||"system")}(),function(){try{const c=new URLSearchParams(window.location.search).entries();for(var[t,e]of c)if(t.startsWith("docusaurus-data-")){var a=t.replace("docusaurus-data-","data-");document.documentElement.setAttribute(a,e)}}catch(t){}}()</script><div id="__docusaurus"><div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#__docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="theme-layout-navbar navbar navbar--fixed-top"><div class="navbar__inner"><div class="theme-layout-navbar-left navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="theme-layout-navbar-right navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_nPIU"><use href="#theme-svg-external-link"></use></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="system mode" aria-label="Switch between dark and light mode (currently system mode)"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP systemToggleIcon_QzmC"><path fill="currentColor" d="m12 21c4.971 0 9-4.029 9-9s-4.029-9-9-9-9 4.029-9 9 4.029 9 9 9zm4.95-13.95c1.313 1.313 2.05 3.093 2.05 4.95s-0.738 3.637-2.05 4.95c-1.313 1.313-3.093 2.05-4.95 2.05v-14c1.857 0 3.637 0.737 4.95 2.05z"></path></svg></button></div><div class="navbarSearchContainer_Bca1"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input id="search_input_react" type="search" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="__docusaurus_skipToContent_fallback" class="theme-layout-main main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject"><span title="​Base​Object" class="linkLabel_WmDU">​Base​Object</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Roam"><span title="​Roam" class="linkLabel_WmDU">​Roam</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/TableManager"><span title="TableManager" class="categoryLinkLabel_W154">TableManager</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" href="/ModulesOnRails/api/TableReplicator"><span title="TableReplicator" class="categoryLinkLabel_W154">TableReplicator</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TableReplicator"><span title="​Table​Replicator" class="linkLabel_WmDU">​Table​Replicator</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/ServerReplicator"><span title="​Server​Replicator" class="linkLabel_WmDU">​Server​Replicator</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/ClientReplicator"><span title="​Client​Replicator" class="linkLabel_WmDU">​Client​Replicator</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-2 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" tabindex="0" href="/ModulesOnRails/api/TR Getting Started"><span title="[Guides]" class="categoryLinkLabel_W154">[Guides]</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TR Getting Started"><span title="​T​R ​Getting ​Started" class="linkLabel_WmDU">​T​R ​Getting ​Started</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TR Discovery &amp; Targeting"><span title="​T​R ​Discovery &amp; ​Targeting" class="linkLabel_WmDU">​T​R ​Discovery &amp; ​Targeting</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TR Namespaces &amp; Tokens"><span title="​T​R ​Namespaces &amp; ​Tokens" class="linkLabel_WmDU">​T​R ​Namespaces &amp; ​Tokens</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TR Parent-Child Guide"><span title="​T​R ​Parent-​Child ​Guide" class="linkLabel_WmDU">​T​R ​Parent-​Child ​Guide</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" tabindex="0" href="/ModulesOnRails/api/TR Custom Remotes"><span title="​T​R ​Custom ​Remotes" class="linkLabel_WmDU">​T​R ​Custom ​Remotes</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TR Performance &amp; Ordering"><span title="​T​R ​Performance &amp; ​Ordering" class="linkLabel_WmDU">​T​R ​Performance &amp; ​Ordering</span></a></li></ul></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/NetWire"><span title="NetWire" class="categoryLinkLabel_W154">NetWire</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Component"><span title="Instance Component Systems" class="categoryLinkLabel_W154">Instance Component Systems</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/DropletManager"><span title="DropletManager" class="categoryLinkLabel_W154">DropletManager</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/AdjustableTimer"><span title="AdjustableTimer [Unreleased]" class="categoryLinkLabel_W154">AdjustableTimer [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/PlayerProfileManager"><span title="PlayerDataManagement [Unreleased]" class="categoryLinkLabel_W154">PlayerDataManagement [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/CmdrHandler"><span title="Admin Commands [Cmdr]" class="categoryLinkLabel_W154">Admin Commands [Cmdr]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Queue"><span title="Data Structures" class="categoryLinkLabel_W154">Data Structures</span></a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BufferCodec"><span title="​Buffer​Codec" class="linkLabel_WmDU">​Buffer​Codec</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ObjectCache"><span title="​Object​Cache" class="linkLabel_WmDU">​Object​Cache</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ProbabilityDistributor"><span title="​Probability​Distributor" class="linkLabel_WmDU">​Probability​Distributor</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PromValue"><span title="​Prom​Value" class="linkLabel_WmDU">​Prom​Value</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/T"><span title="​T" class="linkLabel_WmDU">​T</span></a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">T</span><span style="display:inline-block">R</span><span style="display:inline-block"></span><span style="display:inline-block">Custom</span><span style="display:inline-block"></span><span style="display:inline-block">Remotes</span></h1><div class="luaClassTags_EipM"></div><div>
+<p>
+  Sometimes you need to send an <em>event</em> or call a <em>function</em> alongside replicated
+  data — a "you were hit" signal, a "buy this item" request, and so on. Rather than
+  managing your own <code>RemoteEvent</code>s, TableReplicator lets you attach custom remotes
+  directly to a replicator. They're addressed per-replicator and (optionally) ordered
+  with that replicator's data ops.
+</p>
+
+  
+    
+    
+      <div class="admonition admonition-note alert alert--secondary">
+        <div class="admonition-heading">
+          <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="16" viewBox="0 0 14 16">
+                <path d="M6.3 5.69a.942.942 0 0 1-.28-.7c0-.28.09-.52.28-.7.19-.18.42-.28.7-.28.28 0 .52.09.7.28.18.19.28.42.28.7 0 .28-.09.52-.28.7a1 1 0 0 1-.7.3c-.28 0-.52-.11-.7-.3zM8 7.99c-.02-.25-.11-.48-.31-.69-.2-.19-.42-.3-.69-.31H6c-.27.02-.48.13-.69.31-.2.2-.3.44-.31.69h1v3c.02.27.11.5.31.69.2.2.42.31.69.31h1c.27 0 .48-.11.69-.31.2-.19.3-.42.31-.69H8V7.98v.01zM7 2.3c-3.14 0-5.7 2.54-5.7 5.68 0 3.14 2.56 5.7 5.7 5.7s5.7-2.55 5.7-5.7c0-3.15-2.56-5.69-5.7-5.69v.01zM7 .98c3.86 0 7 3.14 7 7s-3.14 7-7 7-7-3.12-7-7 3.14-7 7-7z"></path>
+              </svg></span><span class="admonition-title">Two proxies, one convention</span></h5>
+        </div>
+        <div class="admonition-content">
+          <p>
+            The server talks to clients through <code>replicator.Client</code>; the client talks to the
+            server through <code>replicator.Server</code>. So the side you're <strong>sending to</strong> is the proxy
+            you use. A remote registered as <code>"Hit"</code> is fired on the server via
+            <code>replicator.Client.Hit</code> and listened to on the client via <code>replicator.Server.Hit</code>.
+          </p>
+        </div>
+      </div>
+    
+  
+
+<hr>
+<h2>Declaring remotes</h2>
+<p>
+  The quickest way is the <code>Client</code> field on <code>ServerReplicator.new</code>. Use the sentinel
+  helpers for signals, and a plain function for a callable:
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> replicator <span class="token operator">=</span> ServerReplicator<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">{</span>
+	Namespace <span class="token operator">=</span> <span class="token string">"Combat"</span><span class="token punctuation">,</span>
+	Targets <span class="token operator">=</span> player<span class="token punctuation">,</span>
+	Client <span class="token operator">=</span> <span class="token punctuation">{</span>
+		Hit <span class="token operator">=</span> ServerReplicator<span class="token punctuation">.</span><span class="token function">createRemoteEvent</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">,</span>          <span class="token comment">-- a signal</span>
+		Whiff <span class="token operator">=</span> ServerReplicator<span class="token punctuation">.</span><span class="token function">createUnreliableEvent</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">,</span>    <span class="token comment">-- an unreliable signal</span>
+		GetLoadout <span class="token operator">=</span> <span class="token keyword">function</span><span class="token punctuation">(</span>self<span class="token punctuation">,</span> player<span class="token punctuation">,</span> slot<span class="token punctuation">)</span>            <span class="token comment">-- a function</span>
+			<span class="token keyword">return</span> loadouts<span class="token punctuation">[</span>player<span class="token punctuation">]</span><span class="token punctuation">[</span>slot<span class="token punctuation">]</span>
+		<span class="token keyword">end</span><span class="token punctuation">,</span>
+	<span class="token punctuation">}</span><span class="token punctuation">,</span>
+<span class="token punctuation">}</span><span class="token punctuation">)</span>
+</code></pre>
+
+  
+    
+    
+      <div class="admonition admonition-caution alert alert--warning">
+        <div class="admonition-heading">
+          <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+                <path d="M8.893 1.5c-.183-.31-.52-.5-.887-.5s-.703.19-.886.5L.138 13.499a.98.98 0 0 0 0 1.001c.193.31.53.501.886.501h13.964c.367 0 .704-.19.877-.5a1.03 1.03 0 0 0 .01-1.002L8.893 1.5zm.133 11.497H6.987v-2.003h2.039v2.003zm0-3.004H6.987V5.987h2.039v4.006z"></path>
+              </svg></span><span class="admonition-title"><strong>Client</strong> declarations are ordered</span></h5>
+        </div>
+        <div class="admonition-content">
+          <p>
+            Remotes declared in the <code>Client</code> table are registered as their <strong>ordered</strong> variants:
+            a signal there behaves like <code>RegisterOrderedRemoteSignal</code>, and a function like
+            <code>RegisterOrderedRemoteFunction</code>. That means their delivery is interleaved with data
+            ops in frame order (see <a href="/ModulesOnRails/api/TR%20Performance%20&#x26;%20Ordering">TR Performance &#x26; Ordering</a>),
+            and clients must call <code>InvokeAsync</code> — not <code>Invoke</code> — on such functions.
+            If you want the <strong>unordered</strong> variants, register them explicitly instead (next
+            section). <code>createUnreliableEvent()</code> is always unreliable regardless.
+          </p>
+        </div>
+      </div>
+    
+  
+
+<h3>Registering explicitly</h3>
+<p>
+  Every remote can also be registered after construction. This is the only way to get
+  the unordered reliable variants:
+</p>
+<pre class="language-lua"><code class="language-lua">replicator<span class="token punctuation">:</span><span class="token function">RegisterRemoteSignal</span><span class="token punctuation">(</span><span class="token string">"Hit"</span><span class="token punctuation">)</span>             <span class="token comment">-- reliable, unordered</span>
+replicator<span class="token punctuation">:</span><span class="token function">RegisterRemoteUnreliableSignal</span><span class="token punctuation">(</span><span class="token string">"Whiff"</span><span class="token punctuation">)</span> <span class="token comment">-- unreliable</span>
+replicator<span class="token punctuation">:</span><span class="token function">RegisterOrderedRemoteSignal</span><span class="token punctuation">(</span><span class="token string">"Combo"</span><span class="token punctuation">)</span>    <span class="token comment">-- reliable, ordered with data</span>
+
+replicator<span class="token punctuation">:</span><span class="token function">RegisterRemoteFunction</span><span class="token punctuation">(</span><span class="token string">"GetScore"</span><span class="token punctuation">,</span> <span class="token keyword">function</span><span class="token punctuation">(</span>self<span class="token punctuation">,</span> player<span class="token punctuation">)</span> <span class="token keyword">return</span> <span class="token number">42</span> <span class="token keyword">end</span><span class="token punctuation">)</span>
+replicator<span class="token punctuation">:</span><span class="token function">RegisterOrderedRemoteFunction</span><span class="token punctuation">(</span><span class="token string">"Buy"</span><span class="token punctuation">,</span> <span class="token keyword">function</span><span class="token punctuation">(</span>self<span class="token punctuation">,</span> player<span class="token punctuation">,</span> itemId<span class="token punctuation">)</span> <span class="token punctuation">...</span> <span class="token keyword">end</span><span class="token punctuation">)</span>
+</code></pre>
+<p>
+  Here's the full picture — how a remote is declared, what it is, and how the client
+  calls it:
+</p>
+<table>
+  <thead>
+    <tr>
+      <th>Register with</th>
+      <th>Kind</th>
+      <th>Client uses</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>RegisterRemoteSignal</code></td>
+      <td>reliable signal</td>
+      <td><code>Connect</code> / <code>Fire</code></td>
+    </tr>
+    <tr>
+      <td><code>RegisterRemoteUnreliableSignal</code></td>
+      <td>unreliable signal</td>
+      <td><code>Connect</code> / <code>Fire</code></td>
+    </tr>
+    <tr>
+      <td><code>RegisterOrderedRemoteSignal</code> <em>(or a signal in <code>Client</code>)</em></td>
+      <td>ordered signal</td>
+      <td><code>Connect</code> / <code>Fire</code></td>
+    </tr>
+    <tr>
+      <td><code>RegisterRemoteFunction</code></td>
+      <td>unordered function</td>
+      <td><code>Invoke</code> (yields)</td>
+    </tr>
+    <tr>
+      <td><code>RegisterOrderedRemoteFunction</code> <em>(or a function in <code>Client</code>)</em></td>
+      <td>ordered function</td>
+      <td><code>InvokeAsync</code> (Promise)</td>
+    </tr>
+  </tbody>
+</table>
+<hr>
+<h2>Signals</h2>
+<p>Signals are two-way: the server can fire to clients, and clients can fire back.</p>
+<p><strong>Server → client.</strong> Fire through <code>replicator.Client[name]</code>:</p>
+<pre class="language-lua"><code class="language-lua">replicator<span class="token punctuation">.</span>Client<span class="token punctuation">.</span>Hit<span class="token punctuation">:</span><span class="token function">Fire</span><span class="token punctuation">(</span>player<span class="token punctuation">,</span> <span class="token string">"headshot"</span><span class="token punctuation">)</span>   <span class="token comment">-- one active player</span>
+replicator<span class="token punctuation">.</span>Client<span class="token punctuation">.</span>Hit<span class="token punctuation">:</span><span class="token function">FireAll</span><span class="token punctuation">(</span><span class="token string">"headshot"</span><span class="token punctuation">)</span>         <span class="token comment">-- all active players</span>
+replicator<span class="token punctuation">.</span>Client<span class="token punctuation">.</span>Hit<span class="token punctuation">:</span><span class="token function">FireExcept</span><span class="token punctuation">(</span>player<span class="token punctuation">,</span> <span class="token string">"..."</span><span class="token punctuation">)</span>   <span class="token comment">-- all except one (or a list)</span>
+replicator<span class="token punctuation">.</span>Client<span class="token punctuation">.</span>Hit<span class="token punctuation">:</span><span class="token function">FirePredicate</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span>plr<span class="token punctuation">)</span>
+	<span class="token keyword">return</span> plr<span class="token punctuation">.</span>Team <span class="token operator">==</span> redTeam
+<span class="token keyword">end</span><span class="token punctuation">,</span> <span class="token string">"..."</span><span class="token punctuation">)</span>                                        <span class="token comment">-- a filtered audience</span>
+</code></pre>
+<p><strong>Client → server.</strong> Listen and fire through <code>replicator.Server[name]</code>:</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- On the client</span>
+replicator<span class="token punctuation">.</span>Server<span class="token punctuation">.</span>Hit<span class="token punctuation">:</span><span class="token function">Connect</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span>hitType<span class="token punctuation">)</span>
+	<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Hit:"</span><span class="token punctuation">,</span> hitType<span class="token punctuation">)</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+replicator<span class="token punctuation">.</span>Server<span class="token punctuation">.</span>Hit<span class="token punctuation">:</span><span class="token function">Fire</span><span class="token punctuation">(</span><span class="token string">"blocked"</span><span class="token punctuation">)</span>        <span class="token comment">-- fire back to the server</span>
+replicator<span class="token punctuation">.</span>Server<span class="token punctuation">.</span>Hit<span class="token punctuation">:</span><span class="token function">FireUnreliable</span><span class="token punctuation">(</span><span class="token string">"..."</span><span class="token punctuation">)</span>  <span class="token comment">-- force unreliable delivery</span>
+
+<span class="token comment">-- On the server, receive client fires:</span>
+replicator<span class="token punctuation">.</span>Client<span class="token punctuation">.</span>Hit<span class="token punctuation">:</span><span class="token function">Connect</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span>player<span class="token punctuation">,</span> <span class="token punctuation">...</span><span class="token punctuation">)</span> <span class="token keyword">end</span><span class="token punctuation">)</span>
+replicator<span class="token punctuation">.</span>Client<span class="token punctuation">.</span>Hit<span class="token punctuation">:</span><span class="token function">Wait</span><span class="token punctuation">(</span><span class="token punctuation">)</span>                 <span class="token comment">-- yields until any client fires</span>
+</code></pre>
+<h2>Functions</h2>
+<p>
+  A function is registered on the server and called from the client. Which client
+  method to use depends on whether it's ordered:
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- Unordered function -> client Invoke (yields for the result)</span>
+replicator<span class="token punctuation">:</span><span class="token function">RegisterRemoteFunction</span><span class="token punctuation">(</span><span class="token string">"GetScore"</span><span class="token punctuation">,</span> <span class="token keyword">function</span><span class="token punctuation">(</span>self<span class="token punctuation">,</span> player<span class="token punctuation">)</span>
+	<span class="token keyword">return</span> scores<span class="token punctuation">[</span>player<span class="token punctuation">]</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+<span class="token keyword">local</span> score <span class="token operator">=</span> replicator<span class="token punctuation">.</span>Server<span class="token punctuation">.</span>GetScore<span class="token punctuation">:</span><span class="token function">Invoke</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+
+<span class="token comment">-- Ordered function -> client InvokeAsync (returns a Promise; response arrives</span>
+<span class="token comment">-- after any data ops the server queued in the same frame)</span>
+replicator<span class="token punctuation">:</span><span class="token function">RegisterOrderedRemoteFunction</span><span class="token punctuation">(</span><span class="token string">"Buy"</span><span class="token punctuation">,</span> <span class="token keyword">function</span><span class="token punctuation">(</span>self<span class="token punctuation">,</span> player<span class="token punctuation">,</span> itemId<span class="token punctuation">)</span>
+	<span class="token keyword">return</span> <span class="token function">purchase</span><span class="token punctuation">(</span>player<span class="token punctuation">,</span> itemId<span class="token punctuation">)</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+replicator<span class="token punctuation">.</span>Server<span class="token punctuation">.</span>Buy<span class="token punctuation">:</span><span class="token function">InvokeAsync</span><span class="token punctuation">(</span><span class="token string">"sword"</span><span class="token punctuation">)</span><span class="token punctuation">:</span><span class="token function">andThen</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span>ok<span class="token punctuation">)</span> <span class="token keyword">end</span><span class="token punctuation">)</span>
+</code></pre>
+<p>
+  The server-side handler always receives <code>(self, player, ...)</code> — <code>self</code> is the
+  replicator and <code>player</code> is the caller.
+</p>
+
+  
+    
+    
+      <div class="admonition admonition-success alert alert--success">
+        <div class="admonition-heading">
+          <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="16" viewBox="0 0 12 16">
+                <path d="M6.5 0C3.48 0 1 2.19 1 5c0 .92.55 2.25 1 3 1.34 2.25 1.78 2.78 2 4v1h5v-1c.22-1.22.66-1.75 2-4 .45-.75 1-2.08 1-3 0-2.81-2.48-5-5.5-5zm3.64 7.48c-.25.44-.47.8-.67 1.11-.86 1.41-1.25 2.06-1.45 3.23-.02.05-.02.11-.02.17H5c0-.06 0-.13-.02-.17-.2-1.17-.59-1.83-1.45-3.23-.2-.31-.42-.67-.67-1.11C2.44 6.78 2 5.65 2 5c0-2.2 2.02-4 4.5-4 1.22 0 2.36.42 3.22 1.19C10.55 2.94 11 3.94 11 5c0 .66-.44 1.78-.86 2.48zM4 14h5c-.23 1.14-1.3 2-2.5 2s-2.27-.86-2.5-2z"></path>
+              </svg></span><span class="admonition-title">Wrong-method warnings</span></h5>
+        </div>
+        <div class="admonition-content">
+          <p>
+            Calling <code>Invoke</code> on a signal, <code>Connect</code> on a function, or <code>Invoke</code> on an <em>ordered</em>
+            function all emit a warning naming the correct method — a handy signal you've mixed
+            up a remote's kind.
+          </p>
+        </div>
+      </div>
+    
+  
+
+<hr>
+<h3>See also</h3>
+<ul>
+  <li><strong><a href="/ModulesOnRails/api/TR%20Getting%20Started">TR Getting Started</a></strong> — the <code>Client</code> config field in context.</li>
+  <li><strong><a href="/ModulesOnRails/api/TR%20Performance%20&#x26;%20Ordering">TR Performance &#x26; Ordering</a></strong> — what "ordered" delivery guarantees and costs.</li>
+</ul>
+</div></header></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
+    &quot;functions&quot;: [],
+    &quot;properties&quot;: [],
+    &quot;types&quot;: [],
+    &quot;name&quot;: &quot;TR Custom Remotes&quot;,
+    &quot;desc&quot;: &quot;Sometimes you need to send an *event* or call a *function* alongside replicated\ndata — a \&quot;you were hit\&quot; signal, a \&quot;buy this item\&quot; request, and so on. Rather than\nmanaging your own `RemoteEvent`s, TableReplicator lets you attach custom remotes\ndirectly to a replicator. They&#x27;re addressed per-replicator and (optionally) ordered\nwith that replicator&#x27;s data ops.\n\n:::note Two proxies, one convention\nThe server talks to clients through `replicator.Client`; the client talks to the\nserver through `replicator.Server`. So the side you&#x27;re **sending to** is the proxy\nyou use. A remote registered as `\&quot;Hit\&quot;` is fired on the server via\n`replicator.Client.Hit` and listened to on the client via `replicator.Server.Hit`.\n:::\n\n---\n## Declaring remotes\n\nThe quickest way is the `Client` field on `ServerReplicator.new`. Use the sentinel\nhelpers for signals, and a plain function for a callable:\n\n```lua\nlocal replicator = ServerReplicator.new({\n\tNamespace = \&quot;Combat\&quot;,\n\tTargets = player,\n\tClient = {\n\t\tHit = ServerReplicator.createRemoteEvent(),          -- a signal\n\t\tWhiff = ServerReplicator.createUnreliableEvent(),    -- an unreliable signal\n\t\tGetLoadout = function(self, player, slot)            -- a function\n\t\t\treturn loadouts[player][slot]\n\t\tend,\n\t},\n})\n```\n\n:::caution **Client** declarations are ordered\nRemotes declared in the `Client` table are registered as their **ordered** variants:\na signal there behaves like `RegisterOrderedRemoteSignal`, and a function like\n`RegisterOrderedRemoteFunction`. That means their delivery is interleaved with data\nops in frame order (see [TR Performance &amp; Ordering](/api/TR%20Performance%20&amp;%20Ordering)),\nand clients must call `InvokeAsync` — not `Invoke` — on such functions.\nIf you want the **unordered** variants, register them explicitly instead (next\nsection). `createUnreliableEvent()` is always unreliable regardless.\n:::\n\n### Registering explicitly\n\nEvery remote can also be registered after construction. This is the only way to get\nthe unordered reliable variants:\n\n```lua\nreplicator:RegisterRemoteSignal(\&quot;Hit\&quot;)             -- reliable, unordered\nreplicator:RegisterRemoteUnreliableSignal(\&quot;Whiff\&quot;) -- unreliable\nreplicator:RegisterOrderedRemoteSignal(\&quot;Combo\&quot;)    -- reliable, ordered with data\n\nreplicator:RegisterRemoteFunction(\&quot;GetScore\&quot;, function(self, player) return 42 end)\nreplicator:RegisterOrderedRemoteFunction(\&quot;Buy\&quot;, function(self, player, itemId) ... end)\n```\n\nHere&#x27;s the full picture — how a remote is declared, what it is, and how the client\ncalls it:\n\n| Register with | Kind | Client uses |\n| --- | --- | --- |\n| `RegisterRemoteSignal` | reliable signal | `Connect` / `Fire` |\n| `RegisterRemoteUnreliableSignal` | unreliable signal | `Connect` / `Fire` |\n| `RegisterOrderedRemoteSignal` *(or a signal in `Client`)* | ordered signal | `Connect` / `Fire` |\n| `RegisterRemoteFunction` | unordered function | `Invoke` (yields) |\n| `RegisterOrderedRemoteFunction` *(or a function in `Client`)* | ordered function | `InvokeAsync` (Promise) |\n\n---\n## Signals\n\nSignals are two-way: the server can fire to clients, and clients can fire back.\n\n**Server → client.** Fire through `replicator.Client[name]`:\n\n```lua\nreplicator.Client.Hit:Fire(player, \&quot;headshot\&quot;)   -- one active player\nreplicator.Client.Hit:FireAll(\&quot;headshot\&quot;)         -- all active players\nreplicator.Client.Hit:FireExcept(player, \&quot;...\&quot;)   -- all except one (or a list)\nreplicator.Client.Hit:FirePredicate(function(plr)\n\treturn plr.Team == redTeam\nend, \&quot;...\&quot;)                                        -- a filtered audience\n```\n\n**Client → server.** Listen and fire through `replicator.Server[name]`:\n\n```lua\n-- On the client\nreplicator.Server.Hit:Connect(function(hitType)\n\tprint(\&quot;Hit:\&quot;, hitType)\nend)\nreplicator.Server.Hit:Fire(\&quot;blocked\&quot;)        -- fire back to the server\nreplicator.Server.Hit:FireUnreliable(\&quot;...\&quot;)  -- force unreliable delivery\n\n-- On the server, receive client fires:\nreplicator.Client.Hit:Connect(function(player, ...) end)\nreplicator.Client.Hit:Wait()                 -- yields until any client fires\n```\n\n\n## Functions\n\nA function is registered on the server and called from the client. Which client\nmethod to use depends on whether it&#x27;s ordered:\n\n```lua\n-- Unordered function -&gt; client Invoke (yields for the result)\nreplicator:RegisterRemoteFunction(\&quot;GetScore\&quot;, function(self, player)\n\treturn scores[player]\nend)\nlocal score = replicator.Server.GetScore:Invoke()\n\n-- Ordered function -&gt; client InvokeAsync (returns a Promise; response arrives\n-- after any data ops the server queued in the same frame)\nreplicator:RegisterOrderedRemoteFunction(\&quot;Buy\&quot;, function(self, player, itemId)\n\treturn purchase(player, itemId)\nend)\nreplicator.Server.Buy:InvokeAsync(\&quot;sword\&quot;):andThen(function(ok) end)\n```\n\nThe server-side handler always receives `(self, player, ...)` — `self` is the\nreplicator and `player` is the caller.\n\n:::tip Wrong-method warnings\nCalling `Invoke` on a signal, `Connect` on a function, or `Invoke` on an *ordered*\nfunction all emit a warning naming the correct method — a handy signal you&#x27;ve mixed\nup a remote&#x27;s kind.\n:::\n\n---\n### See also\n\n- **[TR Getting Started](/api/TR%20Getting%20Started)** — the `Client` config field in context.\n- **[TR Performance &amp; Ordering](/api/TR%20Performance%20&amp;%20Ordering)** — what \&quot;ordered\&quot; delivery guarantees and costs.&quot;,
+    &quot;source&quot;: {
+        &quot;line&quot;: 139,
+        &quot;path&quot;: &quot;lib/tablereplicator/src/Docs/TR_Custom_Remotes.luau&quot;
+    }
+}</pre></details></div></div></div></main></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
+</body>
+</html>

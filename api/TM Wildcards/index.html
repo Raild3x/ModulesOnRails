@@ -1,0 +1,664 @@
+<!doctype html>
+<html lang="en" dir="ltr" class="plugin-moonwave plugin-id-moonwave" data-has-hydrated="false">
+<head>
+<meta charset="UTF-8">
+<meta name="generator" content="Docusaurus v3.10.1">
+<title data-rh="true">TM Wildcards | ModulesOnRails</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:url" content="https://raild3x.github.io/ModulesOnRails/api/TM Wildcards"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docusaurus_tag" content="default"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docsearch:docusaurus_tag" content="default"><meta data-rh="true" property="og:title" content="TM Wildcards | ModulesOnRails"><meta data-rh="true" name="description" content="A `&quot;*&quot;` segment in a path is a **wildcard**: it matches every key present at
+that position. One path grammar covers the whole API — the same `&quot;*&quot;` works
+when you listen ([OnValueChange](/api/TableManager#OnValueChange) and friends),
+write ([Set](/api/TableManager#Set), [Update](/api/TableManager#Update),
+[Increment](/api/TableManager#Increment)), and read in bulk
+([GetMatching](/api/TableManager#GetMatching)).
+
+```lua
+local manager = TableManager.new({
+	Players = {
+		p123 = { Health = 100, Stats = { Str = 1, Dex = 2 } },
+		p456 = { Health = 70,  Stats = { Str = 3 } },
+	},
+})
+
+manager:OnValueChange(&quot;Players.*.Health&quot;, function(new, old, metadata)
+	print(`{metadata.WildcardMatches[1]} health: {old} -&gt; {new}`)
+end)
+
+manager:Increment(&quot;Players.*.Health&quot;, 5) -- everyone heals 5, one listener covers all
+```
+
+Paths may be dot-strings (`&quot;Players.*.Health&quot;`) or arrays
+(`{ &quot;Players&quot;, &quot;*&quot;, &quot;Health&quot; }`) — `&quot;*&quot;` is the wildcard in both forms.
+
+## The governing rule
+
+**Literal segments keep exact-path semantics; wildcard segments match what
+exists.** A literal segment must resolve (a non-table value along a literal
+prefix errors, exactly as a non-wildcard call would). A `&quot;*&quot;` segment instead
+expands to every key at that level *at call time* — and a branch where the
+remaining path cannot resolve is silently skipped rather than erroring, so a
+heterogeneous collection is safe to sweep.
+
+```lua
+local manager = TableManager.new({
+	Players = {
+		A = { Stats = { Str = 1 } },
+		B = { Stats = 5 },  -- Stats is not a table
+		C = {},             -- no Stats at all
+	},
+})
+
+manager:Set(&quot;Players.*.Stats.Str&quot;, 9)
+-- only A matches: B&#x27;s Stats is not a table, C has no Stats -&gt; both skipped
+```
+
+Because matches are collected *before* any write happens, a mass mutation
+never trips over its own edits (deleting every key while iterating is safe).
+
+## Multiple wildcards
+
+A path may contain any number of `&quot;*&quot;` segments. They compose as the **product
+of their branch factors**: `&quot;Players.*.Stats.*&quot;` visits every stat of every
+player.
+
+```lua
+-- Players = { A = { Stats = { Str, Dex } }, B = { Stats = { Str } } }
+manager:Update(&quot;Players.*.Stats.*&quot;, function(value)
+	return value * 2
+end)
+-- 3 concrete writes: A.Stats.Str, A.Stats.Dex, B.Stats.Str
+```
+
+`WildcardMatches` (below) carries one entry per `&quot;*&quot;`, left-to-right — so the
+first `&quot;*&quot;` is `WildcardMatches[1]`, the second is `WildcardMatches[2]`, and so
+on.
+
+## Listening
+
+Every path listener accepts wildcards, so one registration covers a dynamic
+collection without re-subscribing when keys come and go. The keys a fire
+matched are on `metadata.WildcardMatches`:
+
+```lua
+manager:OnValueChange(&quot;Players.*.Health&quot;, function(new, old, metadata)
+	local playerId = metadata.WildcardMatches[1]
+	print(`{playerId}: {old} -&gt; {new}`)
+end)
+
+manager:OnKeyAdd(&quot;Rooms.*.Occupants&quot;, function(key, value, metadata)
+	local roomId = metadata.WildcardMatches[1]
+	print(`{key} entered room {roomId}`)
+end)
+```
+
+A literal listener and a wildcard listener that both match the same change
+**both** fire. `WildcardMatches` is `nil` for a listener registered without any
+wildcards.
+
+:::caution `Once` on a wildcard path
+A listener registered with `Once = true` on a wildcard path fires once
+**total** across all matching keys (it lives on a single tree node), not once
+per key.
+:::
+
+## Writing
+
+[Set](/api/TableManager#Set), [Update](/api/TableManager#Update), and
+[Increment](/api/TableManager#Increment) fan out across every matched path.
+When more than one path matches, the writes are wrapped in a single
+[Batch](/api/TableManager#Batch) so listeners observe one coherent flush.
+
+```lua
+-- Write the same value everywhere (creates the final key where missing):
+manager:Set(&quot;Players.*.Shield&quot;, 50)
+
+-- Remove a key from every match (only visits keys that exist):
+manager:Set(&quot;Players.*.Shield&quot;, nil)
+
+-- Delete every member of a collection:
+manager:Set(&quot;Players.*&quot;, nil)
+
+-- Read-modify-write per match:
+manager:Increment(&quot;Players.*.Health&quot;, 5)
+```
+
+`Update`&#x27;s callback also receives, after the current value, the keys matched
+by each `&quot;*&quot;` and the fully concrete path — so it can tell which match it is
+handling:
+
+```lua
+manager:Update(&quot;Players.*.Stats.*&quot;, function(value, matches, path)
+	-- matches[1] = playerId, matches[2] = statName
+	-- path       = { &quot;Players&quot;, playerId, &quot;Stats&quot;, statName }
+	return value + 1
+end)
+```
+
+A few write-specific rules:
+
+- **Missing final key.** A non-`nil` `Set` creates a missing *final* key on
+  each matched parent (just like a plain `Set`). A `nil` write, and the
+  read-modify-write forms (`Update`/`Increment`), only visit keys that already
+  exist.
+- **Zero matches is a no-op** — no writes, no events.
+- **`buildTablesDynamically`** cannot be combined with a wildcard path (there
+  is no key to invent for `&quot;*&quot;`).
+- **Return value.** `Update`/`Increment` return `nil` on a wildcard path
+  (there is no single result); use `GetMatching` afterward if you need the new
+  values.
+
+:::caution Sharing a table value across matches
+Writing one **table** value to several matched paths is governed by
+[DuplicateReferenceMode](/api/TableManager#DuplicateReferenceMode): under
+`&quot;allow&quot;` (the default) every matched path shares the SAME table identity;
+use `&quot;copy&quot;` to give each match an independent clone.
+
+```lua
+manager:Set(&quot;Players.*.Loadout&quot;, { Weapon = &quot;Sword&quot; })
+-- &quot;allow&quot;: Players.A.Loadout == Players.B.Loadout (one shared table)
+-- &quot;copy&quot;:  each player gets its own { Weapon = &quot;Sword&quot; }
+```
+:::
+
+## Reading in bulk
+
+`Get` returns a single value and does **not** interpret wildcards. To read
+every match, use [GetMatching](/api/TableManager#GetMatching), which returns
+one record per concrete match:
+
+```lua
+local matches = manager:GetMatching(&quot;Players.*.Health&quot;)
+-- {
+--   { Path = { &quot;Players&quot;, &quot;p123&quot;, &quot;Health&quot; }, Value = 100, WildcardMatches = { &quot;p123&quot; } },
+--   { Path = { &quot;Players&quot;, &quot;p456&quot;, &quot;Health&quot; }, Value = 70,  WildcardMatches = { &quot;p456&quot; } },
+-- }
+
+for _, match in matches do
+	print(match.WildcardMatches[1], &quot;has&quot;, match.Value, &quot;health&quot;)
+end
+```
+
+Each record carries the concrete `Path`, the `Value`, and `WildcardMatches`
+(the same convention as listeners). Entry order follows table iteration order
+and is not deterministic for dictionary keys. A path with no wildcards returns
+zero-or-one records, resolved exactly like `Get`.
+
+## Replication
+
+Wildcard expansion happens against **local** state, so a wildcard write is
+never shipped as a wildcard: [OnApplied](/api/TableManager#OnApplied) (and
+replication) sees N concrete ops — one per matched path — never a `&quot;*&quot;` path.
+A remote peer therefore replays the exact keys that changed on the origin, not
+a re-expansion against its own (possibly different) data.
+
+## `&quot;*&quot;` is reserved
+
+Because `&quot;*&quot;` is a wildcard everywhere the path grammar is interpreted, a
+literal `&quot;*&quot;` **data key** cannot be addressed through `Set`/`Update`/
+`Increment`/`GetMatching` or the listener methods. This is virtually never a
+real key, but if you must work with one, reach past the path grammar:
+
+- **Write:** `manager.Proxy.parent[&quot;*&quot;] = value` — the proxy writes the literal
+  key and still fires change events.
+- **Read:** `manager.Proxy.parent[&quot;*&quot;]`, `manager.Raw.parent[&quot;*&quot;]`, or
+  `manager:Get({ &quot;parent&quot;, &quot;*&quot; })` (`Get` treats `&quot;*&quot;` literally).
+- **Listen:** there is no escape — a literal `&quot;*&quot;` key cannot be observed
+  distinctly from a wildcard.
+
+---
+### See also
+
+- **[TM Listeners &amp; Fire Modes](/api/TM%20Listeners%20&amp;%20Fire%20Modes)** — the full listener surface these wildcards plug into.
+- **[TM Batching](/api/TM%20Batching)** — the batch window a multi-match write flushes through.
+- **[TM Proxies &amp; Direct Table Access](/api/TM%20Proxies%20&amp;%20Direct%20Table%20Access)** — the proxy escape hatch for reserved keys."><meta data-rh="true" property="og:description" content="A `&quot;*&quot;` segment in a path is a **wildcard**: it matches every key present at
+that position. One path grammar covers the whole API — the same `&quot;*&quot;` works
+when you listen ([OnValueChange](/api/TableManager#OnValueChange) and friends),
+write ([Set](/api/TableManager#Set), [Update](/api/TableManager#Update),
+[Increment](/api/TableManager#Increment)), and read in bulk
+([GetMatching](/api/TableManager#GetMatching)).
+
+```lua
+local manager = TableManager.new({
+	Players = {
+		p123 = { Health = 100, Stats = { Str = 1, Dex = 2 } },
+		p456 = { Health = 70,  Stats = { Str = 3 } },
+	},
+})
+
+manager:OnValueChange(&quot;Players.*.Health&quot;, function(new, old, metadata)
+	print(`{metadata.WildcardMatches[1]} health: {old} -&gt; {new}`)
+end)
+
+manager:Increment(&quot;Players.*.Health&quot;, 5) -- everyone heals 5, one listener covers all
+```
+
+Paths may be dot-strings (`&quot;Players.*.Health&quot;`) or arrays
+(`{ &quot;Players&quot;, &quot;*&quot;, &quot;Health&quot; }`) — `&quot;*&quot;` is the wildcard in both forms.
+
+## The governing rule
+
+**Literal segments keep exact-path semantics; wildcard segments match what
+exists.** A literal segment must resolve (a non-table value along a literal
+prefix errors, exactly as a non-wildcard call would). A `&quot;*&quot;` segment instead
+expands to every key at that level *at call time* — and a branch where the
+remaining path cannot resolve is silently skipped rather than erroring, so a
+heterogeneous collection is safe to sweep.
+
+```lua
+local manager = TableManager.new({
+	Players = {
+		A = { Stats = { Str = 1 } },
+		B = { Stats = 5 },  -- Stats is not a table
+		C = {},             -- no Stats at all
+	},
+})
+
+manager:Set(&quot;Players.*.Stats.Str&quot;, 9)
+-- only A matches: B&#x27;s Stats is not a table, C has no Stats -&gt; both skipped
+```
+
+Because matches are collected *before* any write happens, a mass mutation
+never trips over its own edits (deleting every key while iterating is safe).
+
+## Multiple wildcards
+
+A path may contain any number of `&quot;*&quot;` segments. They compose as the **product
+of their branch factors**: `&quot;Players.*.Stats.*&quot;` visits every stat of every
+player.
+
+```lua
+-- Players = { A = { Stats = { Str, Dex } }, B = { Stats = { Str } } }
+manager:Update(&quot;Players.*.Stats.*&quot;, function(value)
+	return value * 2
+end)
+-- 3 concrete writes: A.Stats.Str, A.Stats.Dex, B.Stats.Str
+```
+
+`WildcardMatches` (below) carries one entry per `&quot;*&quot;`, left-to-right — so the
+first `&quot;*&quot;` is `WildcardMatches[1]`, the second is `WildcardMatches[2]`, and so
+on.
+
+## Listening
+
+Every path listener accepts wildcards, so one registration covers a dynamic
+collection without re-subscribing when keys come and go. The keys a fire
+matched are on `metadata.WildcardMatches`:
+
+```lua
+manager:OnValueChange(&quot;Players.*.Health&quot;, function(new, old, metadata)
+	local playerId = metadata.WildcardMatches[1]
+	print(`{playerId}: {old} -&gt; {new}`)
+end)
+
+manager:OnKeyAdd(&quot;Rooms.*.Occupants&quot;, function(key, value, metadata)
+	local roomId = metadata.WildcardMatches[1]
+	print(`{key} entered room {roomId}`)
+end)
+```
+
+A literal listener and a wildcard listener that both match the same change
+**both** fire. `WildcardMatches` is `nil` for a listener registered without any
+wildcards.
+
+:::caution `Once` on a wildcard path
+A listener registered with `Once = true` on a wildcard path fires once
+**total** across all matching keys (it lives on a single tree node), not once
+per key.
+:::
+
+## Writing
+
+[Set](/api/TableManager#Set), [Update](/api/TableManager#Update), and
+[Increment](/api/TableManager#Increment) fan out across every matched path.
+When more than one path matches, the writes are wrapped in a single
+[Batch](/api/TableManager#Batch) so listeners observe one coherent flush.
+
+```lua
+-- Write the same value everywhere (creates the final key where missing):
+manager:Set(&quot;Players.*.Shield&quot;, 50)
+
+-- Remove a key from every match (only visits keys that exist):
+manager:Set(&quot;Players.*.Shield&quot;, nil)
+
+-- Delete every member of a collection:
+manager:Set(&quot;Players.*&quot;, nil)
+
+-- Read-modify-write per match:
+manager:Increment(&quot;Players.*.Health&quot;, 5)
+```
+
+`Update`&#x27;s callback also receives, after the current value, the keys matched
+by each `&quot;*&quot;` and the fully concrete path — so it can tell which match it is
+handling:
+
+```lua
+manager:Update(&quot;Players.*.Stats.*&quot;, function(value, matches, path)
+	-- matches[1] = playerId, matches[2] = statName
+	-- path       = { &quot;Players&quot;, playerId, &quot;Stats&quot;, statName }
+	return value + 1
+end)
+```
+
+A few write-specific rules:
+
+- **Missing final key.** A non-`nil` `Set` creates a missing *final* key on
+  each matched parent (just like a plain `Set`). A `nil` write, and the
+  read-modify-write forms (`Update`/`Increment`), only visit keys that already
+  exist.
+- **Zero matches is a no-op** — no writes, no events.
+- **`buildTablesDynamically`** cannot be combined with a wildcard path (there
+  is no key to invent for `&quot;*&quot;`).
+- **Return value.** `Update`/`Increment` return `nil` on a wildcard path
+  (there is no single result); use `GetMatching` afterward if you need the new
+  values.
+
+:::caution Sharing a table value across matches
+Writing one **table** value to several matched paths is governed by
+[DuplicateReferenceMode](/api/TableManager#DuplicateReferenceMode): under
+`&quot;allow&quot;` (the default) every matched path shares the SAME table identity;
+use `&quot;copy&quot;` to give each match an independent clone.
+
+```lua
+manager:Set(&quot;Players.*.Loadout&quot;, { Weapon = &quot;Sword&quot; })
+-- &quot;allow&quot;: Players.A.Loadout == Players.B.Loadout (one shared table)
+-- &quot;copy&quot;:  each player gets its own { Weapon = &quot;Sword&quot; }
+```
+:::
+
+## Reading in bulk
+
+`Get` returns a single value and does **not** interpret wildcards. To read
+every match, use [GetMatching](/api/TableManager#GetMatching), which returns
+one record per concrete match:
+
+```lua
+local matches = manager:GetMatching(&quot;Players.*.Health&quot;)
+-- {
+--   { Path = { &quot;Players&quot;, &quot;p123&quot;, &quot;Health&quot; }, Value = 100, WildcardMatches = { &quot;p123&quot; } },
+--   { Path = { &quot;Players&quot;, &quot;p456&quot;, &quot;Health&quot; }, Value = 70,  WildcardMatches = { &quot;p456&quot; } },
+-- }
+
+for _, match in matches do
+	print(match.WildcardMatches[1], &quot;has&quot;, match.Value, &quot;health&quot;)
+end
+```
+
+Each record carries the concrete `Path`, the `Value`, and `WildcardMatches`
+(the same convention as listeners). Entry order follows table iteration order
+and is not deterministic for dictionary keys. A path with no wildcards returns
+zero-or-one records, resolved exactly like `Get`.
+
+## Replication
+
+Wildcard expansion happens against **local** state, so a wildcard write is
+never shipped as a wildcard: [OnApplied](/api/TableManager#OnApplied) (and
+replication) sees N concrete ops — one per matched path — never a `&quot;*&quot;` path.
+A remote peer therefore replays the exact keys that changed on the origin, not
+a re-expansion against its own (possibly different) data.
+
+## `&quot;*&quot;` is reserved
+
+Because `&quot;*&quot;` is a wildcard everywhere the path grammar is interpreted, a
+literal `&quot;*&quot;` **data key** cannot be addressed through `Set`/`Update`/
+`Increment`/`GetMatching` or the listener methods. This is virtually never a
+real key, but if you must work with one, reach past the path grammar:
+
+- **Write:** `manager.Proxy.parent[&quot;*&quot;] = value` — the proxy writes the literal
+  key and still fires change events.
+- **Read:** `manager.Proxy.parent[&quot;*&quot;]`, `manager.Raw.parent[&quot;*&quot;]`, or
+  `manager:Get({ &quot;parent&quot;, &quot;*&quot; })` (`Get` treats `&quot;*&quot;` literally).
+- **Listen:** there is no escape — a literal `&quot;*&quot;` key cannot be observed
+  distinctly from a wildcard.
+
+---
+### See also
+
+- **[TM Listeners &amp; Fire Modes](/api/TM%20Listeners%20&amp;%20Fire%20Modes)** — the full listener surface these wildcards plug into.
+- **[TM Batching](/api/TM%20Batching)** — the batch window a multi-match write flushes through.
+- **[TM Proxies &amp; Direct Table Access](/api/TM%20Proxies%20&amp;%20Direct%20Table%20Access)** — the proxy escape hatch for reserved keys."><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/TM Wildcards"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/TM Wildcards" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/TM Wildcards" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.e8e96400.css">
+<script src="/ModulesOnRails/assets/js/runtime~main.668e8339.js" defer="defer"></script>
+<script src="/ModulesOnRails/assets/js/main.d4575191.js" defer="defer"></script>
+</head>
+<body>
+<svg style="display: none;"><defs>
+<symbol id="theme-svg-external-link" viewBox="0 0 24 24"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"/></symbol>
+</defs></svg>
+<script>!function(){var t=function(){try{return new URLSearchParams(window.location.search).get("docusaurus-theme")}catch(t){}}()||function(){try{return window.localStorage.getItem("theme")}catch(t){}}();document.documentElement.setAttribute("data-theme",t||(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")),document.documentElement.setAttribute("data-theme-choice",t||"system")}(),function(){try{const c=new URLSearchParams(window.location.search).entries();for(var[t,e]of c)if(t.startsWith("docusaurus-data-")){var a=t.replace("docusaurus-data-","data-");document.documentElement.setAttribute(a,e)}}catch(t){}}()</script><div id="__docusaurus"><div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#__docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="theme-layout-navbar navbar navbar--fixed-top"><div class="navbar__inner"><div class="theme-layout-navbar-left navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="theme-layout-navbar-right navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_nPIU"><use href="#theme-svg-external-link"></use></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="system mode" aria-label="Switch between dark and light mode (currently system mode)"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP systemToggleIcon_QzmC"><path fill="currentColor" d="m12 21c4.971 0 9-4.029 9-9s-4.029-9-9-9-9 4.029-9 9 4.029 9 9 9zm4.95-13.95c1.313 1.313 2.05 3.093 2.05 4.95s-0.738 3.637-2.05 4.95c-1.313 1.313-3.093 2.05-4.95 2.05v-14c1.857 0 3.637 0.737 4.95 2.05z"></path></svg></button></div><div class="navbarSearchContainer_Bca1"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input id="search_input_react" type="search" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="__docusaurus_skipToContent_fallback" class="theme-layout-main main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject"><span title="​Base​Object" class="linkLabel_WmDU">​Base​Object</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Roam"><span title="​Roam" class="linkLabel_WmDU">​Roam</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" href="/ModulesOnRails/api/TableManager"><span title="TableManager" class="categoryLinkLabel_W154">TableManager</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TableManager"><span title="​Table​Manager" class="linkLabel_WmDU">​Table​Manager</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-2 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" tabindex="0" href="/ModulesOnRails/api/TM Getting Started"><span title="[Guides]" class="categoryLinkLabel_W154">[Guides]</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Getting Started"><span title="​T​M ​Getting ​Started" class="linkLabel_WmDU">​T​M ​Getting ​Started</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Listeners &amp; Fire Modes"><span title="​T​M ​Listeners &amp; ​Fire ​Modes" class="linkLabel_WmDU">​T​M ​Listeners &amp; ​Fire ​Modes</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Flushing"><span title="​T​M ​Flushing" class="linkLabel_WmDU">​T​M ​Flushing</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Batching"><span title="​T​M ​Batching" class="linkLabel_WmDU">​T​M ​Batching</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" tabindex="0" href="/ModulesOnRails/api/TM Wildcards"><span title="​T​M ​Wildcards" class="linkLabel_WmDU">​T​M ​Wildcards</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Proxies &amp; Direct Table Access"><span title="​T​M ​Proxies &amp; ​Direct ​Table ​Access" class="linkLabel_WmDU">​T​M ​Proxies &amp; ​Direct ​Table ​Access</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Schema Validation"><span title="​T​M ​Schema ​Validation" class="linkLabel_WmDU">​T​M ​Schema ​Validation</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Opaque Values"><span title="​T​M ​Opaque ​Values" class="linkLabel_WmDU">​T​M ​Opaque ​Values</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Reactive State Wrappers"><span title="​T​M ​Reactive ​State ​Wrappers" class="linkLabel_WmDU">​T​M ​Reactive ​State ​Wrappers</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM For &amp; Map Views [Unreleased]"><span title="​T​M ​For &amp; ​Map ​Views [​Unreleased]" class="linkLabel_WmDU">​T​M ​For &amp; ​Map ​Views [​Unreleased]</span></a></li></ul></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/TableReplicator"><span title="TableReplicator" class="categoryLinkLabel_W154">TableReplicator</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/NetWire"><span title="NetWire" class="categoryLinkLabel_W154">NetWire</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Component"><span title="Instance Component Systems" class="categoryLinkLabel_W154">Instance Component Systems</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/DropletManager"><span title="DropletManager" class="categoryLinkLabel_W154">DropletManager</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/AdjustableTimer"><span title="AdjustableTimer [Unreleased]" class="categoryLinkLabel_W154">AdjustableTimer [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/PlayerProfileManager"><span title="PlayerDataManagement [Unreleased]" class="categoryLinkLabel_W154">PlayerDataManagement [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/CmdrHandler"><span title="Admin Commands [Cmdr]" class="categoryLinkLabel_W154">Admin Commands [Cmdr]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Queue"><span title="Data Structures" class="categoryLinkLabel_W154">Data Structures</span></a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BufferCodec"><span title="​Buffer​Codec" class="linkLabel_WmDU">​Buffer​Codec</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ObjectCache"><span title="​Object​Cache" class="linkLabel_WmDU">​Object​Cache</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ProbabilityDistributor"><span title="​Probability​Distributor" class="linkLabel_WmDU">​Probability​Distributor</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PromValue"><span title="​Prom​Value" class="linkLabel_WmDU">​Prom​Value</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/T"><span title="​T" class="linkLabel_WmDU">​T</span></a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">T</span><span style="display:inline-block">M</span><span style="display:inline-block"></span><span style="display:inline-block">Wildcards</span></h1><div class="luaClassTags_EipM"></div><div>
+<p>
+  A <code>"*"</code> segment in a path is a <strong>wildcard</strong>: it matches every key present at
+  that position. One path grammar covers the whole API — the same <code>"*"</code> works
+  when you listen (<a href="/ModulesOnRails/api/TableManager#OnValueChange">OnValueChange</a> and friends),
+  write (<a href="/ModulesOnRails/api/TableManager#Set">Set</a>, <a href="/ModulesOnRails/api/TableManager#Update">Update</a>,
+  <a href="/ModulesOnRails/api/TableManager#Increment">Increment</a>), and read in bulk
+  (<a href="/ModulesOnRails/api/TableManager#GetMatching">GetMatching</a>).
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> manager <span class="token operator">=</span> TableManager<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">{</span>
+	Players <span class="token operator">=</span> <span class="token punctuation">{</span>
+		p123 <span class="token operator">=</span> <span class="token punctuation">{</span> Health <span class="token operator">=</span> <span class="token number">100</span><span class="token punctuation">,</span> Stats <span class="token operator">=</span> <span class="token punctuation">{</span> Str <span class="token operator">=</span> <span class="token number">1</span><span class="token punctuation">,</span> Dex <span class="token operator">=</span> <span class="token number">2</span> <span class="token punctuation">}</span> <span class="token punctuation">}</span><span class="token punctuation">,</span>
+		p456 <span class="token operator">=</span> <span class="token punctuation">{</span> Health <span class="token operator">=</span> <span class="token number">70</span><span class="token punctuation">,</span>  Stats <span class="token operator">=</span> <span class="token punctuation">{</span> Str <span class="token operator">=</span> <span class="token number">3</span> <span class="token punctuation">}</span> <span class="token punctuation">}</span><span class="token punctuation">,</span>
+	<span class="token punctuation">}</span><span class="token punctuation">,</span>
+<span class="token punctuation">}</span><span class="token punctuation">)</span>
+
+manager<span class="token punctuation">:</span><span class="token function">OnValueChange</span><span class="token punctuation">(</span><span class="token string">"Players.*.Health"</span><span class="token punctuation">,</span> <span class="token keyword">function</span><span class="token punctuation">(</span>new<span class="token punctuation">,</span> old<span class="token punctuation">,</span> metadata<span class="token punctuation">)</span>
+	<span class="token function">print</span><span class="token punctuation">(</span>`<span class="token punctuation">{</span>metadata<span class="token punctuation">.</span>WildcardMatches<span class="token punctuation">[</span><span class="token number">1</span><span class="token punctuation">]</span><span class="token punctuation">}</span> health<span class="token punctuation">:</span> <span class="token punctuation">{</span>old<span class="token punctuation">}</span> <span class="token operator">-</span><span class="token operator">></span> <span class="token punctuation">{</span>new<span class="token punctuation">}</span>`<span class="token punctuation">)</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+
+manager<span class="token punctuation">:</span><span class="token function">Increment</span><span class="token punctuation">(</span><span class="token string">"Players.*.Health"</span><span class="token punctuation">,</span> <span class="token number">5</span><span class="token punctuation">)</span> <span class="token comment">-- everyone heals 5, one listener covers all</span>
+</code></pre>
+<p>
+  Paths may be dot-strings (<code>"Players.*.Health"</code>) or arrays
+  (<code>{ "Players", "*", "Health" }</code>) — <code>"*"</code> is the wildcard in both forms.
+</p>
+<h2>The governing rule</h2>
+<p>
+  <strong>Literal segments keep exact-path semantics; wildcard segments match what
+exists.</strong> A literal segment must resolve (a non-table value along a literal
+  prefix errors, exactly as a non-wildcard call would). A <code>"*"</code> segment instead
+  expands to every key at that level <em>at call time</em> — and a branch where the
+  remaining path cannot resolve is silently skipped rather than erroring, so a
+  heterogeneous collection is safe to sweep.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> manager <span class="token operator">=</span> TableManager<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">{</span>
+	Players <span class="token operator">=</span> <span class="token punctuation">{</span>
+		A <span class="token operator">=</span> <span class="token punctuation">{</span> Stats <span class="token operator">=</span> <span class="token punctuation">{</span> Str <span class="token operator">=</span> <span class="token number">1</span> <span class="token punctuation">}</span> <span class="token punctuation">}</span><span class="token punctuation">,</span>
+		B <span class="token operator">=</span> <span class="token punctuation">{</span> Stats <span class="token operator">=</span> <span class="token number">5</span> <span class="token punctuation">}</span><span class="token punctuation">,</span>  <span class="token comment">-- Stats is not a table</span>
+		C <span class="token operator">=</span> <span class="token punctuation">{</span><span class="token punctuation">}</span><span class="token punctuation">,</span>             <span class="token comment">-- no Stats at all</span>
+	<span class="token punctuation">}</span><span class="token punctuation">,</span>
+<span class="token punctuation">}</span><span class="token punctuation">)</span>
+
+manager<span class="token punctuation">:</span><span class="token function">Set</span><span class="token punctuation">(</span><span class="token string">"Players.*.Stats.Str"</span><span class="token punctuation">,</span> <span class="token number">9</span><span class="token punctuation">)</span>
+<span class="token comment">-- only A matches: B's Stats is not a table, C has no Stats -> both skipped</span>
+</code></pre>
+<p>
+  Because matches are collected <em>before</em> any write happens, a mass mutation
+  never trips over its own edits (deleting every key while iterating is safe).
+</p>
+<h2>Multiple wildcards</h2>
+<p>
+  A path may contain any number of <code>"*"</code> segments. They compose as the <strong>product
+of their branch factors</strong>: <code>"Players.*.Stats.*"</code> visits every stat of every
+  player.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- Players = { A = { Stats = { Str, Dex } }, B = { Stats = { Str } } }</span>
+manager<span class="token punctuation">:</span><span class="token function">Update</span><span class="token punctuation">(</span><span class="token string">"Players.*.Stats.*"</span><span class="token punctuation">,</span> <span class="token keyword">function</span><span class="token punctuation">(</span>value<span class="token punctuation">)</span>
+	<span class="token keyword">return</span> value <span class="token operator">*</span> <span class="token number">2</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+<span class="token comment">-- 3 concrete writes: A.Stats.Str, A.Stats.Dex, B.Stats.Str</span>
+</code></pre>
+<p>
+  <code>WildcardMatches</code> (below) carries one entry per <code>"*"</code>, left-to-right — so the
+  first <code>"*"</code> is <code>WildcardMatches[1]</code>, the second is <code>WildcardMatches[2]</code>, and so
+  on.
+</p>
+<h2>Listening</h2>
+<p>
+  Every path listener accepts wildcards, so one registration covers a dynamic
+  collection without re-subscribing when keys come and go. The keys a fire
+  matched are on <code>metadata.WildcardMatches</code>:
+</p>
+<pre class="language-lua"><code class="language-lua">manager<span class="token punctuation">:</span><span class="token function">OnValueChange</span><span class="token punctuation">(</span><span class="token string">"Players.*.Health"</span><span class="token punctuation">,</span> <span class="token keyword">function</span><span class="token punctuation">(</span>new<span class="token punctuation">,</span> old<span class="token punctuation">,</span> metadata<span class="token punctuation">)</span>
+	<span class="token keyword">local</span> playerId <span class="token operator">=</span> metadata<span class="token punctuation">.</span>WildcardMatches<span class="token punctuation">[</span><span class="token number">1</span><span class="token punctuation">]</span>
+	<span class="token function">print</span><span class="token punctuation">(</span>`<span class="token punctuation">{</span>playerId<span class="token punctuation">}</span><span class="token punctuation">:</span> <span class="token punctuation">{</span>old<span class="token punctuation">}</span> <span class="token operator">-</span><span class="token operator">></span> <span class="token punctuation">{</span>new<span class="token punctuation">}</span>`<span class="token punctuation">)</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+
+manager<span class="token punctuation">:</span><span class="token function">OnKeyAdd</span><span class="token punctuation">(</span><span class="token string">"Rooms.*.Occupants"</span><span class="token punctuation">,</span> <span class="token keyword">function</span><span class="token punctuation">(</span>key<span class="token punctuation">,</span> value<span class="token punctuation">,</span> metadata<span class="token punctuation">)</span>
+	<span class="token keyword">local</span> roomId <span class="token operator">=</span> metadata<span class="token punctuation">.</span>WildcardMatches<span class="token punctuation">[</span><span class="token number">1</span><span class="token punctuation">]</span>
+	<span class="token function">print</span><span class="token punctuation">(</span>`<span class="token punctuation">{</span>key<span class="token punctuation">}</span> entered <span class="token function">room</span> <span class="token punctuation">{</span>roomId<span class="token punctuation">}</span>`<span class="token punctuation">)</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+</code></pre>
+<p>
+  A literal listener and a wildcard listener that both match the same change
+  <strong>both</strong> fire. <code>WildcardMatches</code> is <code>nil</code> for a listener registered without any
+  wildcards.
+</p>
+
+  
+    
+    
+      <div class="admonition admonition-caution alert alert--warning">
+        <div class="admonition-heading">
+          <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+                <path d="M8.893 1.5c-.183-.31-.52-.5-.887-.5s-.703.19-.886.5L.138 13.499a.98.98 0 0 0 0 1.001c.193.31.53.501.886.501h13.964c.367 0 .704-.19.877-.5a1.03 1.03 0 0 0 .01-1.002L8.893 1.5zm.133 11.497H6.987v-2.003h2.039v2.003zm0-3.004H6.987V5.987h2.039v4.006z"></path>
+              </svg></span><span class="admonition-title"><code>Once</code> on a wildcard path</span></h5>
+        </div>
+        <div class="admonition-content">
+          <p>
+            A listener registered with <code>Once = true</code> on a wildcard path fires once
+            <strong>total</strong> across all matching keys (it lives on a single tree node), not once
+            per key.
+          </p>
+        </div>
+      </div>
+    
+  
+
+<h2>Writing</h2>
+<p>
+  <a href="/ModulesOnRails/api/TableManager#Set">Set</a>, <a href="/ModulesOnRails/api/TableManager#Update">Update</a>, and
+  <a href="/ModulesOnRails/api/TableManager#Increment">Increment</a> fan out across every matched path.
+  When more than one path matches, the writes are wrapped in a single
+  <a href="/ModulesOnRails/api/TableManager#Batch">Batch</a> so listeners observe one coherent flush.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- Write the same value everywhere (creates the final key where missing):</span>
+manager<span class="token punctuation">:</span><span class="token function">Set</span><span class="token punctuation">(</span><span class="token string">"Players.*.Shield"</span><span class="token punctuation">,</span> <span class="token number">50</span><span class="token punctuation">)</span>
+
+<span class="token comment">-- Remove a key from every match (only visits keys that exist):</span>
+manager<span class="token punctuation">:</span><span class="token function">Set</span><span class="token punctuation">(</span><span class="token string">"Players.*.Shield"</span><span class="token punctuation">,</span> <span class="token keyword">nil</span><span class="token punctuation">)</span>
+
+<span class="token comment">-- Delete every member of a collection:</span>
+manager<span class="token punctuation">:</span><span class="token function">Set</span><span class="token punctuation">(</span><span class="token string">"Players.*"</span><span class="token punctuation">,</span> <span class="token keyword">nil</span><span class="token punctuation">)</span>
+
+<span class="token comment">-- Read-modify-write per match:</span>
+manager<span class="token punctuation">:</span><span class="token function">Increment</span><span class="token punctuation">(</span><span class="token string">"Players.*.Health"</span><span class="token punctuation">,</span> <span class="token number">5</span><span class="token punctuation">)</span>
+</code></pre>
+<p>
+  <code>Update</code>'s callback also receives, after the current value, the keys matched
+  by each <code>"*"</code> and the fully concrete path — so it can tell which match it is
+  handling:
+</p>
+<pre class="language-lua"><code class="language-lua">manager<span class="token punctuation">:</span><span class="token function">Update</span><span class="token punctuation">(</span><span class="token string">"Players.*.Stats.*"</span><span class="token punctuation">,</span> <span class="token keyword">function</span><span class="token punctuation">(</span>value<span class="token punctuation">,</span> matches<span class="token punctuation">,</span> path<span class="token punctuation">)</span>
+	<span class="token comment">-- matches[1] = playerId, matches[2] = statName</span>
+	<span class="token comment">-- path       = { "Players", playerId, "Stats", statName }</span>
+	<span class="token keyword">return</span> value <span class="token operator">+</span> <span class="token number">1</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+</code></pre>
+<p>A few write-specific rules:</p>
+<ul>
+  <li>
+    <strong>Missing final key.</strong> A non-<code>nil</code> <code>Set</code> creates a missing <em>final</em> key on
+    each matched parent (just like a plain <code>Set</code>). A <code>nil</code> write, and the
+    read-modify-write forms (<code>Update</code>/<code>Increment</code>), only visit keys that already
+    exist.
+  </li>
+  <li><strong>Zero matches is a no-op</strong> — no writes, no events.</li>
+  <li>
+    <strong><code>buildTablesDynamically</code></strong> cannot be combined with a wildcard path (there
+    is no key to invent for <code>"*"</code>).
+  </li>
+  <li>
+    <strong>Return value.</strong> <code>Update</code>/<code>Increment</code> return <code>nil</code> on a wildcard path
+    (there is no single result); use <code>GetMatching</code> afterward if you need the new
+    values.
+  </li>
+</ul>
+<p>
+  :::caution Sharing a table value across matches
+  Writing one <strong>table</strong> value to several matched paths is governed by
+  <a href="/ModulesOnRails/api/TableManager#DuplicateReferenceMode">DuplicateReferenceMode</a>: under
+  <code>"allow"</code> (the default) every matched path shares the SAME table identity;
+  use <code>"copy"</code> to give each match an independent clone.
+</p>
+<pre class="language-lua"><code class="language-lua">manager<span class="token punctuation">:</span><span class="token function">Set</span><span class="token punctuation">(</span><span class="token string">"Players.*.Loadout"</span><span class="token punctuation">,</span> <span class="token punctuation">{</span> Weapon <span class="token operator">=</span> <span class="token string">"Sword"</span> <span class="token punctuation">}</span><span class="token punctuation">)</span>
+<span class="token comment">-- "allow": Players.A.Loadout == Players.B.Loadout (one shared table)</span>
+<span class="token comment">-- "copy":  each player gets its own { Weapon = "Sword" }</span>
+</code></pre>
+<p>:::</p>
+<h2>Reading in bulk</h2>
+<p>
+  <code>Get</code> returns a single value and does <strong>not</strong> interpret wildcards. To read
+  every match, use <a href="/ModulesOnRails/api/TableManager#GetMatching">GetMatching</a>, which returns
+  one record per concrete match:
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> matches <span class="token operator">=</span> manager<span class="token punctuation">:</span><span class="token function">GetMatching</span><span class="token punctuation">(</span><span class="token string">"Players.*.Health"</span><span class="token punctuation">)</span>
+<span class="token comment">-- {</span>
+<span class="token comment">--   { Path = { "Players", "p123", "Health" }, Value = 100, WildcardMatches = { "p123" } },</span>
+<span class="token comment">--   { Path = { "Players", "p456", "Health" }, Value = 70,  WildcardMatches = { "p456" } },</span>
+<span class="token comment">-- }</span>
+
+<span class="token keyword">for</span> _<span class="token punctuation">,</span> match <span class="token keyword">in</span> matches <span class="token keyword">do</span>
+	<span class="token function">print</span><span class="token punctuation">(</span>match<span class="token punctuation">.</span>WildcardMatches<span class="token punctuation">[</span><span class="token number">1</span><span class="token punctuation">]</span><span class="token punctuation">,</span> <span class="token string">"has"</span><span class="token punctuation">,</span> match<span class="token punctuation">.</span>Value<span class="token punctuation">,</span> <span class="token string">"health"</span><span class="token punctuation">)</span>
+<span class="token keyword">end</span>
+</code></pre>
+<p>
+  Each record carries the concrete <code>Path</code>, the <code>Value</code>, and <code>WildcardMatches</code>
+  (the same convention as listeners). Entry order follows table iteration order
+  and is not deterministic for dictionary keys. A path with no wildcards returns
+  zero-or-one records, resolved exactly like <code>Get</code>.
+</p>
+<h2>Replication</h2>
+<p>
+  Wildcard expansion happens against <strong>local</strong> state, so a wildcard write is
+  never shipped as a wildcard: <a href="/ModulesOnRails/api/TableManager#OnApplied">OnApplied</a> (and
+  replication) sees N concrete ops — one per matched path — never a <code>"*"</code> path.
+  A remote peer therefore replays the exact keys that changed on the origin, not
+  a re-expansion against its own (possibly different) data.
+</p>
+<h2><code>"*"</code> is reserved</h2>
+<p>
+  Because <code>"*"</code> is a wildcard everywhere the path grammar is interpreted, a
+  literal <code>"*"</code> <strong>data key</strong> cannot be addressed through <code>Set</code>/<code>Update</code>/
+  <code>Increment</code>/<code>GetMatching</code> or the listener methods. This is virtually never a
+  real key, but if you must work with one, reach past the path grammar:
+</p>
+<ul>
+  <li>
+    <strong>Write:</strong> <code>manager.Proxy.parent["*"] = value</code> — the proxy writes the literal
+    key and still fires change events.
+  </li>
+  <li>
+    <strong>Read:</strong> <code>manager.Proxy.parent["*"]</code>, <code>manager.Raw.parent["*"]</code>, or
+    <code>manager:Get({ "parent", "*" })</code> (<code>Get</code> treats <code>"*"</code> literally).
+  </li>
+  <li>
+    <strong>Listen:</strong> there is no escape — a literal <code>"*"</code> key cannot be observed
+    distinctly from a wildcard.
+  </li>
+</ul>
+<hr>
+<h3>See also</h3>
+<ul>
+  <li><strong><a href="/ModulesOnRails/api/TM%20Listeners%20&#x26;%20Fire%20Modes">TM Listeners &#x26; Fire Modes</a></strong> — the full listener surface these wildcards plug into.</li>
+  <li><strong><a href="/ModulesOnRails/api/TM%20Batching">TM Batching</a></strong> — the batch window a multi-match write flushes through.</li>
+  <li><strong><a href="/ModulesOnRails/api/TM%20Proxies%20&#x26;%20Direct%20Table%20Access">TM Proxies &#x26; Direct Table Access</a></strong> — the proxy escape hatch for reserved keys.</li>
+</ul>
+</div></header></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
+    &quot;functions&quot;: [],
+    &quot;properties&quot;: [],
+    &quot;types&quot;: [],
+    &quot;name&quot;: &quot;TM Wildcards&quot;,
+    &quot;desc&quot;: &quot;A `\&quot;*\&quot;` segment in a path is a **wildcard**: it matches every key present at\nthat position. One path grammar covers the whole API — the same `\&quot;*\&quot;` works\nwhen you listen ([OnValueChange](/api/TableManager#OnValueChange) and friends),\nwrite ([Set](/api/TableManager#Set), [Update](/api/TableManager#Update),\n[Increment](/api/TableManager#Increment)), and read in bulk\n([GetMatching](/api/TableManager#GetMatching)).\n\n```lua\nlocal manager = TableManager.new({\n\tPlayers = {\n\t\tp123 = { Health = 100, Stats = { Str = 1, Dex = 2 } },\n\t\tp456 = { Health = 70,  Stats = { Str = 3 } },\n\t},\n})\n\nmanager:OnValueChange(\&quot;Players.*.Health\&quot;, function(new, old, metadata)\n\tprint(`{metadata.WildcardMatches[1]} health: {old} -&gt; {new}`)\nend)\n\nmanager:Increment(\&quot;Players.*.Health\&quot;, 5) -- everyone heals 5, one listener covers all\n```\n\nPaths may be dot-strings (`\&quot;Players.*.Health\&quot;`) or arrays\n(`{ \&quot;Players\&quot;, \&quot;*\&quot;, \&quot;Health\&quot; }`) — `\&quot;*\&quot;` is the wildcard in both forms.\n\n## The governing rule\n\n**Literal segments keep exact-path semantics; wildcard segments match what\nexists.** A literal segment must resolve (a non-table value along a literal\nprefix errors, exactly as a non-wildcard call would). A `\&quot;*\&quot;` segment instead\nexpands to every key at that level *at call time* — and a branch where the\nremaining path cannot resolve is silently skipped rather than erroring, so a\nheterogeneous collection is safe to sweep.\n\n```lua\nlocal manager = TableManager.new({\n\tPlayers = {\n\t\tA = { Stats = { Str = 1 } },\n\t\tB = { Stats = 5 },  -- Stats is not a table\n\t\tC = {},             -- no Stats at all\n\t},\n})\n\nmanager:Set(\&quot;Players.*.Stats.Str\&quot;, 9)\n-- only A matches: B&#x27;s Stats is not a table, C has no Stats -&gt; both skipped\n```\n\nBecause matches are collected *before* any write happens, a mass mutation\nnever trips over its own edits (deleting every key while iterating is safe).\n\n## Multiple wildcards\n\nA path may contain any number of `\&quot;*\&quot;` segments. They compose as the **product\nof their branch factors**: `\&quot;Players.*.Stats.*\&quot;` visits every stat of every\nplayer.\n\n```lua\n-- Players = { A = { Stats = { Str, Dex } }, B = { Stats = { Str } } }\nmanager:Update(\&quot;Players.*.Stats.*\&quot;, function(value)\n\treturn value * 2\nend)\n-- 3 concrete writes: A.Stats.Str, A.Stats.Dex, B.Stats.Str\n```\n\n`WildcardMatches` (below) carries one entry per `\&quot;*\&quot;`, left-to-right — so the\nfirst `\&quot;*\&quot;` is `WildcardMatches[1]`, the second is `WildcardMatches[2]`, and so\non.\n\n## Listening\n\nEvery path listener accepts wildcards, so one registration covers a dynamic\ncollection without re-subscribing when keys come and go. The keys a fire\nmatched are on `metadata.WildcardMatches`:\n\n```lua\nmanager:OnValueChange(\&quot;Players.*.Health\&quot;, function(new, old, metadata)\n\tlocal playerId = metadata.WildcardMatches[1]\n\tprint(`{playerId}: {old} -&gt; {new}`)\nend)\n\nmanager:OnKeyAdd(\&quot;Rooms.*.Occupants\&quot;, function(key, value, metadata)\n\tlocal roomId = metadata.WildcardMatches[1]\n\tprint(`{key} entered room {roomId}`)\nend)\n```\n\nA literal listener and a wildcard listener that both match the same change\n**both** fire. `WildcardMatches` is `nil` for a listener registered without any\nwildcards.\n\n:::caution `Once` on a wildcard path\nA listener registered with `Once = true` on a wildcard path fires once\n**total** across all matching keys (it lives on a single tree node), not once\nper key.\n:::\n\n## Writing\n\n[Set](/api/TableManager#Set), [Update](/api/TableManager#Update), and\n[Increment](/api/TableManager#Increment) fan out across every matched path.\nWhen more than one path matches, the writes are wrapped in a single\n[Batch](/api/TableManager#Batch) so listeners observe one coherent flush.\n\n```lua\n-- Write the same value everywhere (creates the final key where missing):\nmanager:Set(\&quot;Players.*.Shield\&quot;, 50)\n\n-- Remove a key from every match (only visits keys that exist):\nmanager:Set(\&quot;Players.*.Shield\&quot;, nil)\n\n-- Delete every member of a collection:\nmanager:Set(\&quot;Players.*\&quot;, nil)\n\n-- Read-modify-write per match:\nmanager:Increment(\&quot;Players.*.Health\&quot;, 5)\n```\n\n`Update`&#x27;s callback also receives, after the current value, the keys matched\nby each `\&quot;*\&quot;` and the fully concrete path — so it can tell which match it is\nhandling:\n\n```lua\nmanager:Update(\&quot;Players.*.Stats.*\&quot;, function(value, matches, path)\n\t-- matches[1] = playerId, matches[2] = statName\n\t-- path       = { \&quot;Players\&quot;, playerId, \&quot;Stats\&quot;, statName }\n\treturn value + 1\nend)\n```\n\nA few write-specific rules:\n\n- **Missing final key.** A non-`nil` `Set` creates a missing *final* key on\n  each matched parent (just like a plain `Set`). A `nil` write, and the\n  read-modify-write forms (`Update`/`Increment`), only visit keys that already\n  exist.\n- **Zero matches is a no-op** — no writes, no events.\n- **`buildTablesDynamically`** cannot be combined with a wildcard path (there\n  is no key to invent for `\&quot;*\&quot;`).\n- **Return value.** `Update`/`Increment` return `nil` on a wildcard path\n  (there is no single result); use `GetMatching` afterward if you need the new\n  values.\n\n:::caution Sharing a table value across matches\nWriting one **table** value to several matched paths is governed by\n[DuplicateReferenceMode](/api/TableManager#DuplicateReferenceMode): under\n`\&quot;allow\&quot;` (the default) every matched path shares the SAME table identity;\nuse `\&quot;copy\&quot;` to give each match an independent clone.\n\n```lua\nmanager:Set(\&quot;Players.*.Loadout\&quot;, { Weapon = \&quot;Sword\&quot; })\n-- \&quot;allow\&quot;: Players.A.Loadout == Players.B.Loadout (one shared table)\n-- \&quot;copy\&quot;:  each player gets its own { Weapon = \&quot;Sword\&quot; }\n```\n:::\n\n## Reading in bulk\n\n`Get` returns a single value and does **not** interpret wildcards. To read\nevery match, use [GetMatching](/api/TableManager#GetMatching), which returns\none record per concrete match:\n\n```lua\nlocal matches = manager:GetMatching(\&quot;Players.*.Health\&quot;)\n-- {\n--   { Path = { \&quot;Players\&quot;, \&quot;p123\&quot;, \&quot;Health\&quot; }, Value = 100, WildcardMatches = { \&quot;p123\&quot; } },\n--   { Path = { \&quot;Players\&quot;, \&quot;p456\&quot;, \&quot;Health\&quot; }, Value = 70,  WildcardMatches = { \&quot;p456\&quot; } },\n-- }\n\nfor _, match in matches do\n\tprint(match.WildcardMatches[1], \&quot;has\&quot;, match.Value, \&quot;health\&quot;)\nend\n```\n\nEach record carries the concrete `Path`, the `Value`, and `WildcardMatches`\n(the same convention as listeners). Entry order follows table iteration order\nand is not deterministic for dictionary keys. A path with no wildcards returns\nzero-or-one records, resolved exactly like `Get`.\n\n## Replication\n\nWildcard expansion happens against **local** state, so a wildcard write is\nnever shipped as a wildcard: [OnApplied](/api/TableManager#OnApplied) (and\nreplication) sees N concrete ops — one per matched path — never a `\&quot;*\&quot;` path.\nA remote peer therefore replays the exact keys that changed on the origin, not\na re-expansion against its own (possibly different) data.\n\n## `\&quot;*\&quot;` is reserved\n\nBecause `\&quot;*\&quot;` is a wildcard everywhere the path grammar is interpreted, a\nliteral `\&quot;*\&quot;` **data key** cannot be addressed through `Set`/`Update`/\n`Increment`/`GetMatching` or the listener methods. This is virtually never a\nreal key, but if you must work with one, reach past the path grammar:\n\n- **Write:** `manager.Proxy.parent[\&quot;*\&quot;] = value` — the proxy writes the literal\n  key and still fires change events.\n- **Read:** `manager.Proxy.parent[\&quot;*\&quot;]`, `manager.Raw.parent[\&quot;*\&quot;]`, or\n  `manager:Get({ \&quot;parent\&quot;, \&quot;*\&quot; })` (`Get` treats `\&quot;*\&quot;` literally).\n- **Listen:** there is no escape — a literal `\&quot;*\&quot;` key cannot be observed\n  distinctly from a wildcard.\n\n---\n### See also\n\n- **[TM Listeners &amp; Fire Modes](/api/TM%20Listeners%20&amp;%20Fire%20Modes)** — the full listener surface these wildcards plug into.\n- **[TM Batching](/api/TM%20Batching)** — the batch window a multi-match write flushes through.\n- **[TM Proxies &amp; Direct Table Access](/api/TM%20Proxies%20&amp;%20Direct%20Table%20Access)** — the proxy escape hatch for reserved keys.&quot;,
+    &quot;source&quot;: {
+        &quot;line&quot;: 211,
+        &quot;path&quot;: &quot;lib/tablemanager/src/Docs/TM_Wildcards.luau&quot;
+    }
+}</pre></details></div></div></div></main></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
+</body>
+</html>

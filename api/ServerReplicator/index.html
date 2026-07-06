@@ -1,0 +1,1503 @@
+<!doctype html>
+<html lang="en" dir="ltr" class="plugin-moonwave plugin-id-moonwave" data-has-hydrated="false">
+<head>
+<meta charset="UTF-8">
+<meta name="generator" content="Docusaurus v3.10.1">
+<title data-rh="true">ServerReplicator | ModulesOnRails</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:url" content="https://raild3x.github.io/ModulesOnRails/api/ServerReplicator"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docusaurus_tag" content="default"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docsearch:docusaurus_tag" content="default"><meta data-rh="true" property="og:title" content="ServerReplicator | ModulesOnRails"><meta data-rh="true" name="description" content="Wraps a `TableManager` and replicates it to one or more clients. Every write
+made through `.Manager` is automatically queued and sent at the end of the
+current frame.
+
+```lua
+Players.PlayerAdded:Connect(function(player)
+	local replicator = ServerReplicator.new({
+		Namespace = &quot;PlayerData&quot;,
+		Data = { Coins = 0 },
+		Targets = player,
+		Tags = { UserId = player.UserId },
+	})
+
+	replicator.Manager:Set(&quot;Coins&quot;, 100) -- replicated automatically
+
+	player.Destroying:Connect(function()
+		replicator:Destroy()
+	end)
+end)
+```
+
+:::caution Always destroy when done
+Call `replicator:Destroy()` when a replicator is no longer needed. The replicator
+also listens to its manager&#x27;s `OnDestroy` and tears itself down, so destroying
+the manager is sufficient when the manager&#x27;s lifetime drives cleanup.
+:::
+
+### Going further
+- **Namespace collision safety** — See `TOKEN` for exclusive namespace ownership
+  in large codebases.
+- **Hierarchy** — Pass `Parent` instead of `ReplicationTargets` to create a child
+  replicator that inherits its ancestor&#x27;s targets. Use `SetParent` to reparent later.
+- **Custom remotes** — Declare signals and functions in `config.Client` to send
+  events alongside data. See `RegisterRemoteSignal`, `RegisterOrderedRemoteSignal`,
+  `RegisterRemoteFunction`, and `RegisterOrderedRemoteFunction`.
+- **Flush control** — `Coalesced = true` deduplicates redundant same-key ops per
+  frame. `ImmediateFlush = true` sends this replicator&#x27;s ops synchronously
+  (before the caller&#x27;s next line) instead of batching to frame end.
+- **Sentinels** — `ServerReplicator.All` and `ServerReplicator.None` are
+  pre-built top-level replicators useful as parents."><meta data-rh="true" property="og:description" content="Wraps a `TableManager` and replicates it to one or more clients. Every write
+made through `.Manager` is automatically queued and sent at the end of the
+current frame.
+
+```lua
+Players.PlayerAdded:Connect(function(player)
+	local replicator = ServerReplicator.new({
+		Namespace = &quot;PlayerData&quot;,
+		Data = { Coins = 0 },
+		Targets = player,
+		Tags = { UserId = player.UserId },
+	})
+
+	replicator.Manager:Set(&quot;Coins&quot;, 100) -- replicated automatically
+
+	player.Destroying:Connect(function()
+		replicator:Destroy()
+	end)
+end)
+```
+
+:::caution Always destroy when done
+Call `replicator:Destroy()` when a replicator is no longer needed. The replicator
+also listens to its manager&#x27;s `OnDestroy` and tears itself down, so destroying
+the manager is sufficient when the manager&#x27;s lifetime drives cleanup.
+:::
+
+### Going further
+- **Namespace collision safety** — See `TOKEN` for exclusive namespace ownership
+  in large codebases.
+- **Hierarchy** — Pass `Parent` instead of `ReplicationTargets` to create a child
+  replicator that inherits its ancestor&#x27;s targets. Use `SetParent` to reparent later.
+- **Custom remotes** — Declare signals and functions in `config.Client` to send
+  events alongside data. See `RegisterRemoteSignal`, `RegisterOrderedRemoteSignal`,
+  `RegisterRemoteFunction`, and `RegisterOrderedRemoteFunction`.
+- **Flush control** — `Coalesced = true` deduplicates redundant same-key ops per
+  frame. `ImmediateFlush = true` sends this replicator&#x27;s ops synchronously
+  (before the caller&#x27;s next line) instead of batching to frame end.
+- **Sentinels** — `ServerReplicator.All` and `ServerReplicator.None` are
+  pre-built top-level replicators useful as parents."><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/ServerReplicator"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/ServerReplicator" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/ServerReplicator" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.e8e96400.css">
+<script src="/ModulesOnRails/assets/js/runtime~main.668e8339.js" defer="defer"></script>
+<script src="/ModulesOnRails/assets/js/main.d4575191.js" defer="defer"></script>
+</head>
+<body>
+<svg style="display: none;"><defs>
+<symbol id="theme-svg-external-link" viewBox="0 0 24 24"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"/></symbol>
+</defs></svg>
+<script>!function(){var t=function(){try{return new URLSearchParams(window.location.search).get("docusaurus-theme")}catch(t){}}()||function(){try{return window.localStorage.getItem("theme")}catch(t){}}();document.documentElement.setAttribute("data-theme",t||(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")),document.documentElement.setAttribute("data-theme-choice",t||"system")}(),function(){try{const c=new URLSearchParams(window.location.search).entries();for(var[t,e]of c)if(t.startsWith("docusaurus-data-")){var a=t.replace("docusaurus-data-","data-");document.documentElement.setAttribute(a,e)}}catch(t){}}()</script><div id="__docusaurus"><div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#__docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="theme-layout-navbar navbar navbar--fixed-top"><div class="navbar__inner"><div class="theme-layout-navbar-left navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="theme-layout-navbar-right navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_nPIU"><use href="#theme-svg-external-link"></use></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="system mode" aria-label="Switch between dark and light mode (currently system mode)"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP systemToggleIcon_QzmC"><path fill="currentColor" d="m12 21c4.971 0 9-4.029 9-9s-4.029-9-9-9-9 4.029-9 9 4.029 9 9 9zm4.95-13.95c1.313 1.313 2.05 3.093 2.05 4.95s-0.738 3.637-2.05 4.95c-1.313 1.313-3.093 2.05-4.95 2.05v-14c1.857 0 3.637 0.737 4.95 2.05z"></path></svg></button></div><div class="navbarSearchContainer_Bca1"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input id="search_input_react" type="search" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="__docusaurus_skipToContent_fallback" class="theme-layout-main main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject"><span title="​Base​Object" class="linkLabel_WmDU">​Base​Object</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Roam"><span title="​Roam" class="linkLabel_WmDU">​Roam</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/TableManager"><span title="TableManager" class="categoryLinkLabel_W154">TableManager</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" href="/ModulesOnRails/api/TableReplicator"><span title="TableReplicator" class="categoryLinkLabel_W154">TableReplicator</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TableReplicator"><span title="​Table​Replicator" class="linkLabel_WmDU">​Table​Replicator</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" tabindex="0" href="/ModulesOnRails/api/ServerReplicator"><span title="​Server​Replicator" class="linkLabel_WmDU">​Server​Replicator</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/ClientReplicator"><span title="​Client​Replicator" class="linkLabel_WmDU">​Client​Replicator</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-2 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" tabindex="0" href="/ModulesOnRails/api/TR Getting Started"><span title="[Guides]" class="categoryLinkLabel_W154">[Guides]</span></a></div></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/NetWire"><span title="NetWire" class="categoryLinkLabel_W154">NetWire</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Component"><span title="Instance Component Systems" class="categoryLinkLabel_W154">Instance Component Systems</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/DropletManager"><span title="DropletManager" class="categoryLinkLabel_W154">DropletManager</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/AdjustableTimer"><span title="AdjustableTimer [Unreleased]" class="categoryLinkLabel_W154">AdjustableTimer [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/PlayerProfileManager"><span title="PlayerDataManagement [Unreleased]" class="categoryLinkLabel_W154">PlayerDataManagement [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/CmdrHandler"><span title="Admin Commands [Cmdr]" class="categoryLinkLabel_W154">Admin Commands [Cmdr]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Queue"><span title="Data Structures" class="categoryLinkLabel_W154">Data Structures</span></a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BufferCodec"><span title="​Buffer​Codec" class="linkLabel_WmDU">​Buffer​Codec</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ObjectCache"><span title="​Object​Cache" class="linkLabel_WmDU">​Object​Cache</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ProbabilityDistributor"><span title="​Probability​Distributor" class="linkLabel_WmDU">​Probability​Distributor</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PromValue"><span title="​Prom​Value" class="linkLabel_WmDU">​Prom​Value</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/T"><span title="​T" class="linkLabel_WmDU">​T</span></a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><div class="tocCollapsible_ETCw theme-doc-toc-mobile tocMobile_oUs_"><button type="button" class="clean-btn tocCollapsibleButton_TO0P">On this page</button></div><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">Server</span><span style="display:inline-block">Replicator</span></h1><div class="luaClassTags_EipM"><span class="badge_Ba2I" style="color:#00CC67"><span class="badgeTooltip_cWXP">This item only works when running on the server.</span><span class="badgeToolTipTail_H9D_"><svg fill="#00CC67" xmlns="http://www.w3.org/2000/svg" version="1.1" x="0px" y="0px" viewBox="0 0 90 90" role="img" aria-label="This item only works when running on the server."><polygon points="6.125,72.421 58.544,88.523 58.544,24.372 6.125,8.269 "></polygon><polygon points="79.818,15.77 79.868,15.755 29.615,1.453 10.328,6.318 60.102,21.609 "></polygon><path d="M61.643,78.738l22.232-6.582V17.801l-22.232,6.584V78.738z M73.811,69.257c-1.174,0-2.125-1.19-2.125-2.659  c0-1.468,0.951-2.658,2.125-2.658c1.172,0,2.123,1.19,2.123,2.658C75.934,68.066,74.982,69.257,73.811,69.257z M64.898,32.121  l16.336-4.41v7.117l-16.336,4.409V32.121z M64.898,41.292l16.336-4.41v7.116l-16.336,4.409V41.292z M64.898,50.463l16.336-4.411  v7.116l-16.336,4.411V50.463z"></path><polygon points="83.875,74.893 61.643,81.477 61.643,88.547 83.875,81.963 "></polygon></svg> <!-- -->Server</span></span></div><div>
+<p>
+  Wraps a <code>TableManager</code> and replicates it to one or more clients. Every write
+  made through <code>.Manager</code> is automatically queued and sent at the end of the
+  current frame.
+</p>
+<pre class="language-lua"><code class="language-lua">Players<span class="token punctuation">.</span>PlayerAdded<span class="token punctuation">:</span><span class="token function">Connect</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span>player<span class="token punctuation">)</span>
+	<span class="token keyword">local</span> replicator <span class="token operator">=</span> ServerReplicator<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">{</span>
+		Namespace <span class="token operator">=</span> <span class="token string">"PlayerData"</span><span class="token punctuation">,</span>
+		Data <span class="token operator">=</span> <span class="token punctuation">{</span> Coins <span class="token operator">=</span> <span class="token number">0</span> <span class="token punctuation">}</span><span class="token punctuation">,</span>
+		Targets <span class="token operator">=</span> player<span class="token punctuation">,</span>
+		Tags <span class="token operator">=</span> <span class="token punctuation">{</span> UserId <span class="token operator">=</span> player<span class="token punctuation">.</span>UserId <span class="token punctuation">}</span><span class="token punctuation">,</span>
+	<span class="token punctuation">}</span><span class="token punctuation">)</span>
+
+	replicator<span class="token punctuation">.</span>Manager<span class="token punctuation">:</span><span class="token function">Set</span><span class="token punctuation">(</span><span class="token string">"Coins"</span><span class="token punctuation">,</span> <span class="token number">100</span><span class="token punctuation">)</span> <span class="token comment">-- replicated automatically</span>
+
+	player<span class="token punctuation">.</span>Destroying<span class="token punctuation">:</span><span class="token function">Connect</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+		replicator<span class="token punctuation">:</span><span class="token function">Destroy</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+	<span class="token keyword">end</span><span class="token punctuation">)</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+</code></pre>
+
+  
+    
+    
+      <div class="admonition admonition-caution alert alert--warning">
+        <div class="admonition-heading">
+          <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+                <path d="M8.893 1.5c-.183-.31-.52-.5-.887-.5s-.703.19-.886.5L.138 13.499a.98.98 0 0 0 0 1.001c.193.31.53.501.886.501h13.964c.367 0 .704-.19.877-.5a1.03 1.03 0 0 0 .01-1.002L8.893 1.5zm.133 11.497H6.987v-2.003h2.039v2.003zm0-3.004H6.987V5.987h2.039v4.006z"></path>
+              </svg></span><span class="admonition-title">Always destroy when done</span></h5>
+        </div>
+        <div class="admonition-content">
+          <p>
+            Call <code>replicator:Destroy()</code> when a replicator is no longer needed. The replicator
+            also listens to its manager's <code>OnDestroy</code> and tears itself down, so destroying
+            the manager is sufficient when the manager's lifetime drives cleanup.
+          </p>
+        </div>
+      </div>
+    
+  
+
+<h3>Going further</h3>
+<ul>
+  <li>
+    <strong>Namespace collision safety</strong> — See <code>TOKEN</code> for exclusive namespace ownership
+    in large codebases.
+  </li>
+  <li>
+    <strong>Hierarchy</strong> — Pass <code>Parent</code> instead of <code>ReplicationTargets</code> to create a child
+    replicator that inherits its ancestor's targets. Use <code>SetParent</code> to reparent later.
+  </li>
+  <li>
+    <strong>Custom remotes</strong> — Declare signals and functions in <code>config.Client</code> to send
+    events alongside data. See <code>RegisterRemoteSignal</code>, <code>RegisterOrderedRemoteSignal</code>,
+    <code>RegisterRemoteFunction</code>, and <code>RegisterOrderedRemoteFunction</code>.
+  </li>
+  <li>
+    <strong>Flush control</strong> — <code>Coalesced = true</code> deduplicates redundant same-key ops per
+    frame. <code>ImmediateFlush = true</code> sends this replicator's ops synchronously
+    (before the caller's next line) instead of batching to frame end.
+  </li>
+  <li>
+    <strong>Sentinels</strong> — <code>ServerReplicator.All</code> and <code>ServerReplicator.None</code> are
+    pre-built top-level replicators useful as parents.
+  </li>
+</ul>
+</div></header><h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="properties">Properties<a href="#properties" class="hash-link" aria-label="Direct link to Properties" title="Direct link to Properties" translate="no">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="StrictValueChecks"><code style="text-decoration:none">StrictValueChecks</code><a href="#StrictValueChecks" class="hash-link" aria-label="Direct link to StrictValueChecks" title="Direct link to StrictValueChecks" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Server/ServerReplicator.luau#L105"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->.<!-- -->StrictValueChecks<!-- -->:<!-- --> </code> <code class="blue_P4bS">boolean</code></div><div>
+<p>
+  When <code>true</code>, every value written through a replicator's <code>.Manager</code> is
+  recursively scanned before it is queued, and a warning naming the exact path
+  is emitted if it contains anything a <code>RemoteEvent</code> can't serialize (a function,
+  thread, <code>RBXScriptSignal</code>, or <code>RBXScriptConnection</code>). When <code>false</code>, only the
+  written value's own top-level type is checked (an O(1) test that still catches
+  the common <code>Manager:Set(path, someFunction)</code> mistake). Defaults to
+  <code>RunService:IsStudio()</code> -- deep scanning in Studio, cheap checks in production.
+</p>
+<p>
+  Either way the offending value is dropped in isolation and arrives as nil on
+  clients (see <code>ValueGuard</code> / <code>BufferCodec</code>); these checks only surface <em>where</em>
+  the bad value came from. Read-only -- use <code>SetStrictValueChecks</code> to change it.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="TOKEN"><code style="text-decoration:none">TOKEN</code><a href="#TOKEN" class="hash-link" aria-label="Direct link to TOKEN" title="Direct link to TOKEN" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Server/ServerReplicator.luau#L303"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->.<!-- -->TOKEN<!-- -->:<!-- --> </code> <code class="purple_ieR2">(</code><code>name<!-- -->: </code><code class="blue_P4bS">string</code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableReplicator#ReplicationToken">ReplicationToken</a></code></div><div>
+<p>
+  Registers <code>name</code> in the namespace-ownership ledger and returns a
+  <code>ReplicationToken</code> that exclusively owns that name for its lifetime.
+</p>
+<p>
+  Using a token prevents any other system from accidentally creating a
+  replicator with the same namespace string. Call this once per name
+  (usually at the top of a module), store the result, and pass it as the
+  <code>Namespace</code> (or <code>Token</code>) field when creating replicators.
+</p>
+<p>
+  To release the name, call <code>ServerReplicator.TOKEN.destroy(token)</code> after all
+  replicators using it have been destroyed.
+</p>
+<p>
+  <strong>You do not need a token</strong> for simple cases — a plain string <code>Namespace</code>
+  is fully supported and costs nothing extra:
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- Simple (no collision guard):</span>
+ServerReplicator<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">{</span> Namespace <span class="token operator">=</span> <span class="token string">"PlayerData"</span><span class="token punctuation">,</span> <span class="token punctuation">...</span> <span class="token punctuation">}</span><span class="token punctuation">)</span>
+
+<span class="token comment">-- Opt-in collision safety:</span>
+<span class="token keyword">local</span> PlayerToken <span class="token operator">=</span> ServerReplicator<span class="token punctuation">.</span><span class="token function">TOKEN</span><span class="token punctuation">(</span><span class="token string">"PlayerData"</span><span class="token punctuation">)</span>
+ServerReplicator<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">{</span> Namespace <span class="token operator">=</span> PlayerToken<span class="token punctuation">,</span> <span class="token punctuation">...</span> <span class="token punctuation">}</span><span class="token punctuation">)</span>
+</code></pre>
+
+  
+    
+    
+      <div class="admonition admonition-caution alert alert--warning">
+        <div class="admonition-heading">
+          <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+                <path d="M8.893 1.5c-.183-.31-.52-.5-.887-.5s-.703.19-.886.5L.138 13.499a.98.98 0 0 0 0 1.001c.193.31.53.501.886.501h13.964c.367 0 .704-.19.877-.5a1.03 1.03 0 0 0 .01-1.002L8.893 1.5zm.133 11.497H6.987v-2.003h2.039v2.003zm0-3.004H6.987V5.987h2.039v4.006z"></path>
+              </svg></span><span class="admonition-title">One owner per name</span></h5>
+        </div>
+        <div class="admonition-content">
+          <p>
+            <code>TOKEN("name")</code> errors if the name is already owned by another live token
+            <strong>or</strong> if any raw-string replicators with that name already exist. Claim the
+            token at module load before creating any replicators with that name.
+          </p>
+        </div>
+      </div>
+    
+  
+
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="createRemoteEvent"><code style="text-decoration:none">createRemoteEvent</code><a href="#createRemoteEvent" class="hash-link" aria-label="Direct link to createRemoteEvent" title="Direct link to createRemoteEvent" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Server/ServerReplicator.luau#L343"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->.<!-- -->createRemoteEvent<!-- -->:<!-- --> </code> <code class="purple_ieR2">(</code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="blue_P4bS">sentinel</code></div><div>
+<p>
+  Returns a sentinel value for use in <code>config.Client</code> to declare a reliable
+  custom signal. The sentinel is detected by <code>ServerReplicator.new</code> and
+  replaced with a real <code>ServerCustomRemote</code>.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> r <span class="token operator">=</span> ServerReplicator<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">{</span>
+	Namespace <span class="token operator">=</span> <span class="token string">"MyReplicator"</span><span class="token punctuation">,</span>
+	ReplicationTargets <span class="token operator">=</span> player<span class="token punctuation">,</span>
+	Client <span class="token operator">=</span> <span class="token punctuation">{</span>
+		Hit <span class="token operator">=</span> ServerReplicator<span class="token punctuation">.</span><span class="token function">createRemoteEvent</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">,</span>
+		GetScore <span class="token operator">=</span> <span class="token keyword">function</span><span class="token punctuation">(</span>self<span class="token punctuation">,</span> player<span class="token punctuation">)</span> <span class="token keyword">return</span> <span class="token number">42</span> <span class="token keyword">end</span><span class="token punctuation">,</span>
+	<span class="token punctuation">}</span><span class="token punctuation">,</span>
+<span class="token punctuation">}</span><span class="token punctuation">)</span>
+r<span class="token punctuation">.</span>Client<span class="token punctuation">.</span>Hit<span class="token punctuation">:</span><span class="token function">FireAll</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="createUnreliableEvent"><code style="text-decoration:none">createUnreliableEvent</code><a href="#createUnreliableEvent" class="hash-link" aria-label="Direct link to createUnreliableEvent" title="Direct link to createUnreliableEvent" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Server/ServerReplicator.luau#L354"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->.<!-- -->createUnreliableEvent<!-- -->:<!-- --> </code> <code class="purple_ieR2">(</code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="blue_P4bS">sentinel</code></div><div>
+<p>
+  Like <code>createRemoteEvent</code> but uses an <code>UnreliableRemoteEvent</code> so fire-and-forget
+  semantics apply (no ordering or delivery guarantee).
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="All"><code style="text-decoration:none">All</code><a href="#All" class="hash-link" aria-label="Direct link to All" title="Direct link to All" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Server/ServerReplicator.luau#L1100"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->.<!-- -->All<!-- -->:<!-- --> </code> <code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerReplicator">ServerReplicator</a></code></div><div>
+<p>
+  A top-level replicator that replicates to every current and future
+  player. Useful as a <code>Parent</code> for children that should always be visible
+  to everyone, but may be moved later. Do not modify it directly — only parent to it.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="None"><code style="text-decoration:none">None</code><a href="#None" class="hash-link" aria-label="Direct link to None" title="Direct link to None" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Server/ServerReplicator.luau#L1113"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->.<!-- -->None<!-- -->:<!-- --> </code> <code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerReplicator">ServerReplicator</a></code></div><div>
+<p>
+  A top-level replicator that replicates to nobody. Useful as a <code>Parent</code>
+  for children that should not replicate yet and are waiting for a proper
+  parent. Do not modify it directly — only parent to it.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="ReplicatorCreated"><code style="text-decoration:none">ReplicatorCreated</code><a href="#ReplicatorCreated" class="hash-link" aria-label="Direct link to ReplicatorCreated" title="Direct link to ReplicatorCreated" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseReplicator.luau#L142"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->.<!-- -->ReplicatorCreated<!-- -->:<!-- --> </code> <code class="blue_P4bS">Signal</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerReplicator">ServerReplicator</a></code><code class="op_lSLc">&gt;</code></div><div>
+<p>Signal that fires whenever a new replicator is created, regardless of token.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="Id"><code style="text-decoration:none">Id</code><a href="#Id" class="hash-link" aria-label="Direct link to Id" title="Direct link to Id" translate="no">​</a></h3><span class="badge_Ba2I" style="color:#e74c3c"><span class="badgeTooltip_cWXP">This item is read only and cannot be modified.</span><span class="badgeToolTipTail_H9D_"><svg xmlns="http://www.w3.org/2000/svg" height="300px" width="300px" fill="#e74c3c" x="0px" y="0px" viewBox="0 0 96 96"><path d="M70.354,15.662h-7.496H25.566c-3.282,0-5.19-0.776-5.728-1.169v-1.456c0.538-0.393,2.445-1.168,5.728-1.168h46.479V8H25.566  c-4.776,0-9.594,1.468-9.594,4.747v61.458C15.972,86.645,20.328,88,37.495,88h42.535V15.662H70.354z"></path></svg> <!-- -->Read Only</span></span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/Types.luau#L222"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->.<!-- -->Id<!-- -->:<!-- --> </code> <code class="blue_P4bS">number</code></div><div>
+<p>The unique Id of this replicator.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="Manager"><code style="text-decoration:none">Manager</code><a href="#Manager" class="hash-link" aria-label="Direct link to Manager" title="Direct link to Manager" translate="no">​</a></h3><span class="badge_Ba2I" style="color:#e74c3c"><span class="badgeTooltip_cWXP">This item is read only and cannot be modified.</span><span class="badgeToolTipTail_H9D_"><svg xmlns="http://www.w3.org/2000/svg" height="300px" width="300px" fill="#e74c3c" x="0px" y="0px" viewBox="0 0 96 96"><path d="M70.354,15.662h-7.496H25.566c-3.282,0-5.19-0.776-5.728-1.169v-1.456c0.538-0.393,2.445-1.168,5.728-1.168h46.479V8H25.566  c-4.776,0-9.594,1.468-9.594,4.747v61.458C15.972,86.645,20.328,88,37.495,88h42.535V15.662H70.354z"></path></svg> <!-- -->Read Only</span></span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/Types.luau#L232"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->.<!-- -->Manager<!-- -->:<!-- --> </code> <code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableManager">TableManager</a></code></div><div>
+<p>The TableManager that this replicator is managing.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="Namespace"><code style="text-decoration:none">Namespace</code><a href="#Namespace" class="hash-link" aria-label="Direct link to Namespace" title="Direct link to Namespace" translate="no">​</a></h3><span class="badge_Ba2I" style="color:#e74c3c"><span class="badgeTooltip_cWXP">This item is read only and cannot be modified.</span><span class="badgeToolTipTail_H9D_"><svg xmlns="http://www.w3.org/2000/svg" height="300px" width="300px" fill="#e74c3c" x="0px" y="0px" viewBox="0 0 96 96"><path d="M70.354,15.662h-7.496H25.566c-3.282,0-5.19-0.776-5.728-1.169v-1.456c0.538-0.393,2.445-1.168,5.728-1.168h46.479V8H25.566  c-4.776,0-9.594,1.468-9.594,4.747v61.458C15.972,86.645,20.328,88,37.495,88h42.535V15.662H70.354z"></path></svg> <!-- -->Read Only</span></span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/Types.luau#L243"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->.<!-- -->Namespace<!-- -->:<!-- --> </code> <code class="blue_P4bS">string?</code></div><div>
+<p>
+  The namespace string of this replicator, or <code>nil</code> if anonymous.
+  Matches any <code>string</code> or <code>ReplicationToken</code> <code>SearchCondition</code> when non-nil.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="Token"><code style="text-decoration:none">Token</code><a href="#Token" class="hash-link" aria-label="Direct link to Token" title="Direct link to Token" translate="no">​</a></h3><span class="badge_Ba2I" style="color:#e74c3c"><span class="badgeTooltip_cWXP">This item is read only and cannot be modified.</span><span class="badgeToolTipTail_H9D_"><svg xmlns="http://www.w3.org/2000/svg" height="300px" width="300px" fill="#e74c3c" x="0px" y="0px" viewBox="0 0 96 96"><path d="M70.354,15.662h-7.496H25.566c-3.282,0-5.19-0.776-5.728-1.169v-1.456c0.538-0.393,2.445-1.168,5.728-1.168h46.479V8H25.566  c-4.776,0-9.594,1.468-9.594,4.747v61.458C15.972,86.645,20.328,88,37.495,88h42.535V15.662H70.354z"></path></svg> <!-- -->Read Only</span></span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/Types.luau#L256"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->.<!-- -->Token<!-- -->:<!-- --> </code> <code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableReplicator#ReplicationToken">ReplicationToken?</a></code></div><div>
+<p>
+  The token handle for this replicator, or <code>nil</code> if anonymous or created with
+  a raw-string namespace. Present when the namespace was claimed with
+  <code>ServerReplicator.TOKEN()</code> or when a raw string resolves to the same cached
+  handle. Prefer <code>.Namespace</code> for string comparisons.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="Tags"><code style="text-decoration:none">Tags</code><a href="#Tags" class="hash-link" aria-label="Direct link to Tags" title="Direct link to Tags" translate="no">​</a></h3><span class="badge_Ba2I" style="color:#e74c3c"><span class="badgeTooltip_cWXP">This item is read only and cannot be modified.</span><span class="badgeToolTipTail_H9D_"><svg xmlns="http://www.w3.org/2000/svg" height="300px" width="300px" fill="#e74c3c" x="0px" y="0px" viewBox="0 0 96 96"><path d="M70.354,15.662h-7.496H25.566c-3.282,0-5.19-0.776-5.728-1.169v-1.456c0.538-0.393,2.445-1.168,5.728-1.168h46.479V8H25.566  c-4.776,0-9.594,1.468-9.594,4.747v61.458C15.972,86.645,20.328,88,37.495,88h42.535V15.662H70.354z"></path></svg> <!-- -->Read Only</span></span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/Types.luau#L266"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->.<!-- -->Tags<!-- -->:<!-- --> </code> <code class="purple_ieR2">{</code><span><code>[</code><code class="blue_P4bS">string</code><code>]</code></span><code>: </code><code class="blue_P4bS">any</code><code class="purple_ieR2">}</code></div><div>
+<p>The tags of this replicator.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="ChildAdded"><code style="text-decoration:none">ChildAdded</code><a href="#ChildAdded" class="hash-link" aria-label="Direct link to ChildAdded" title="Direct link to ChildAdded" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#ff5252;color:#ff5252">Event</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/Types.luau#L277"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->.<!-- -->ChildAdded<!-- -->:<!-- --> </code> <code class="blue_P4bS">Signal</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerReplicator">ServerReplicator</a></code><code class="op_lSLc">&gt;</code></div><div>
+<p>Fired when a child replicator is added to this replicator.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="ChildRemoved"><code style="text-decoration:none">ChildRemoved</code><a href="#ChildRemoved" class="hash-link" aria-label="Direct link to ChildRemoved" title="Direct link to ChildRemoved" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#ff5252;color:#ff5252">Event</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/Types.luau#L287"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->.<!-- -->ChildRemoved<!-- -->:<!-- --> </code> <code class="blue_P4bS">Signal</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerReplicator">ServerReplicator</a></code><code class="op_lSLc">&gt;</code></div><div>
+<p>Fired when a child replicator is removed from this replicator.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="ParentChanged"><code style="text-decoration:none">ParentChanged</code><a href="#ParentChanged" class="hash-link" aria-label="Direct link to ParentChanged" title="Direct link to ParentChanged" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#ff5252;color:#ff5252">Event</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/Types.luau#L298"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->.<!-- -->ParentChanged<!-- -->:<!-- --> </code> <code class="blue_P4bS">Signal</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerReplicator">ServerReplicator,</a></code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerReplicator">ServerReplicator</a></code><code class="op_lSLc">&gt;</code></div><div>
+<p>
+  Fired when this replicator's parent is changed.
+  Passed arguments are <code>(newParent, oldParent)</code>.
+</p>
+</div><h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="functions">Functions<a href="#functions" class="hash-link" aria-label="Direct link to Functions" title="Direct link to Functions" translate="no">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="SetStrictValueChecks"><code style="text-decoration:none">SetStrictValueChecks</code><a href="#SetStrictValueChecks" class="hash-link" aria-label="Direct link to SetStrictValueChecks" title="Direct link to SetStrictValueChecks" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Server/ServerReplicator.luau#L115"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->.</code><code class="green_DgR4">SetStrictValueChecks</code><code>(</code><code>enabled<!-- -->: </code><code class="blue_P4bS">boolean</code><code>) → </code><code>(</code><code>)</code></div><div>
+<p>
+  Overrides <code>StrictValueChecks</code>, toggling the recursive write-time scan of
+  replicated values going forward.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="new"><code style="text-decoration:none">new</code><a href="#new" class="hash-link" aria-label="Direct link to new" title="Direct link to new" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Server/ServerReplicator.luau#L412"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->.</code><code class="green_DgR4">new</code><code>(</code><code>) → </code><code>(</code><code>)</code></div><div>
+<p>Creates a new <code>ServerReplicator</code>.</p>
+<p>
+  Exactly one of <code>Parent</code> or <code>ReplicationTargets</code> must be given: a top-level
+  replicator is created with <code>ReplicationTargets</code> (pass <code>{}</code> to start with
+  none), and a child replicator is created with <code>Parent</code> and inherits its
+  top-level ancestor's targets.
+</p>
+<p>Config table fields:</p>
+<ul>
+  <li>
+    <code>Namespace</code> - Optional string or <code>ReplicationToken</code> identifying the
+    replicator's class. Pass a plain string for simple cases, or a token
+    from <code>ServerReplicator.TOKEN()</code> for opt-in collision safety. Omit for
+    anonymous replicators (reachable only by Id, tags, or predicate).
+  </li>
+  <li><code>Data</code> - A <code>TableManager</code> instance or a raw table to replicate. Defaults to <code>{}</code>.</li>
+  <li>
+    <code>Targets</code> - A <code>Player</code>, list of <code>Player</code>s, or <code>"all"</code>. Only valid
+    for top-level replicators; pass <code>{}</code> to start with no targets.
+  </li>
+  <li><code>Parent</code> - A parent <code>ServerReplicator</code>. Only valid for child replicators.</li>
+  <li>
+    <code>Tags</code> - Optional <code>{ [string]: any }</code> metadata table used for filtering in
+    <code>ForEach</code>/<code>GetAll</code>/<code>GetFirst</code>.
+  </li>
+  <li>
+    <code>Coalesced</code> - If true, only the latest op per key is sent at frame end,
+    dropping intermediate writes. Defaults to false.
+  </li>
+  <li>
+    <code>ImmediateFlush</code> - If true, this replicator's ops are flushed to the wire
+    synchronously (before the caller's next line) instead of at frame end, so a
+    write lands before any external <code>RemoteEvent</code> fired in the same frame. Only
+    this replicator is flushed; others keep their normal frame batching. Because
+    each write sends immediately, N separate non-batched <code>Set</code>s produce N
+    messages -- wrap bulk writes in <code>manager:Batch(...)</code> to coalesce them into a
+    single immediate send at the end of the batch.
+  </li>
+  <li>
+    <code>Client</code> - Table declaring custom remotes. Values can be
+    <code>ServerReplicator.createRemoteEvent()</code>, <code>ServerReplicator.createUnreliableEvent()</code>,
+    or plain functions (registered as remote functions). See <code>RegisterRemoteSignal</code>.
+  </li>
+</ul>
+
+  
+    
+    
+      <div class="admonition admonition-caution alert alert--warning">
+        <div class="admonition-heading">
+          <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+                <path d="M8.893 1.5c-.183-.31-.52-.5-.887-.5s-.703.19-.886.5L.138 13.499a.98.98 0 0 0 0 1.001c.193.31.53.501.886.501h13.964c.367 0 .704-.19.877-.5a1.03 1.03 0 0 0 .01-1.002L8.893 1.5zm.133 11.497H6.987v-2.003h2.039v2.003zm0-3.004H6.987V5.987h2.039v4.006z"></path>
+              </svg></span><span class="admonition-title">Namespace collision guard</span></h5>
+        </div>
+        <div class="admonition-content">
+          <p>
+            If you call <code>ServerReplicator.TOKEN("name")</code> to claim a namespace, any
+            attempt to create a replicator with that name as a raw string will throw.
+            Pass the token object directly instead of the string. Conversely, if raw-
+            string replicators already exist for a name, <code>TOKEN()</code> will refuse to claim
+            it until they are all destroyed.
+          </p>
+        </div>
+      </div>
+    
+  
+
+
+  
+    
+    
+      <div class="admonition admonition-caution alert alert--warning">
+        <div class="admonition-heading">
+          <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+                <path d="M8.893 1.5c-.183-.31-.52-.5-.887-.5s-.703.19-.886.5L.138 13.499a.98.98 0 0 0 0 1.001c.193.31.53.501.886.501h13.964c.367 0 .704-.19.877-.5a1.03 1.03 0 0 0 .01-1.002L8.893 1.5zm.133 11.497H6.987v-2.003h2.039v2.003zm0-3.004H6.987V5.987h2.039v4.006z"></path>
+              </svg></span><span class="admonition-title">Conflicting Configurations</span></h5>
+        </div>
+        <div class="admonition-content">
+          <p>The following configurations are invalid and will throw an error:</p>
+          <ul>
+            <li><code>Targets</code> and <code>Parent</code> cannot both be specified.</li>
+            <li><code>Coalesced</code> and <code>ImmediateFlush</code> cannot both be true.</li>
+          </ul>
+        </div>
+      </div>
+    
+  
+
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="FlushNow"><code style="text-decoration:none">FlushNow</code><a href="#FlushNow" class="hash-link" aria-label="Direct link to FlushNow" title="Direct link to FlushNow" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Server/ServerReplicator.luau#L1082"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->.</code><code class="green_DgR4">FlushNow</code><code>(</code><code>) → </code><code>(</code><code>)</code></div><div>
+<p>
+  Immediately flushes all pending data ops to active players without waiting
+  for the end-of-frame deferred flush. Use this when you need data changes to
+  arrive before (or alongside) an external <code>RemoteEvent</code> fired in the same frame.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="SetListenerFireMode"><code style="text-decoration:none">SetListenerFireMode</code><a href="#SetListenerFireMode" class="hash-link" aria-label="Direct link to SetListenerFireMode" title="Direct link to SetListenerFireMode" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseReplicator.luau#L166"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->.</code><code class="green_DgR4">SetListenerFireMode</code><code>(</code><code>mode<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableReplicator#FireMode">FireMode</a></code><code>)   → </code><code>(</code><code>)</code></div><div>
+<p>
+  Overrides <code>ListenerFireMode</code>, the scheduling used for <code>ReplicatorCreated</code>,
+  <code>ForEach</code>, and <code>OnNew</code> listeners going forward.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="GetFromId"><code style="text-decoration:none">GetFromId</code><a href="#GetFromId" class="hash-link" aria-label="Direct link to GetFromId" title="Direct link to GetFromId" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseReplicator.luau#L215"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->.</code><code class="green_DgR4">GetFromId</code><code>(</code><code>id<!-- -->: </code><code class="blue_P4bS">Id</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerReplicator">ServerReplicator?</a></code></div><div>
+<p>Returns the replicator with the given Id, if one currently exists.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="PromiseFromId"><code style="text-decoration:none">PromiseFromId</code><a href="#PromiseFromId" class="hash-link" aria-label="Direct link to PromiseFromId" title="Direct link to PromiseFromId" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseReplicator.luau#L235"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->.</code><code class="green_DgR4">PromiseFromId</code><code>(</code><code>id<!-- -->: </code><code class="blue_P4bS">Id</code><code>) → </code><code class="blue_P4bS">Promise</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerReplicator">ServerReplicator</a></code><code class="op_lSLc">&gt;</code></div><div>
+<p>Returns a promise that resolves with the replicator with the given Id, if one currently exists or is created in the future.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="GetAll"><code style="text-decoration:none">GetAll</code><a href="#GetAll" class="hash-link" aria-label="Direct link to GetAll" title="Direct link to GetAll" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseReplicator.luau#L263"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->.</code><code class="green_DgR4">GetAll</code><code>(</code><code>condition<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableReplicator#SearchCondition">SearchCondition?</a></code><code>) → </code><code class="purple_ieR2">{</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerReplicator">ServerReplicator</a></code><code class="purple_ieR2">}</code></div><div>
+<p>Returns every currently-loaded replicator matching <code>condition</code> (no condition = all).</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="ForEach"><code style="text-decoration:none">ForEach</code><a href="#ForEach" class="hash-link" aria-label="Direct link to ForEach" title="Direct link to ForEach" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseReplicator.luau#L302"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->.</code><code class="green_DgR4">ForEach</code><code>(</code><div class="inset_uKQm"><div><code>condition<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableReplicator#SearchCondition">SearchCondition?</a></code><code>,</code></div><div><code>fn<!-- -->: </code><code class="purple_ieR2">(</code><code>replicator<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerReplicator">ServerReplicator</a></code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code></div></div><code>) → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code></div><div>
+<p>
+  Runs <code>fn</code> for every existing replicator matching <code>condition</code>, and again for
+  every future one. Returns a disconnect function that stops future invocations.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> disconnect <span class="token operator">=</span> ServerReplicator<span class="token punctuation">.</span><span class="token function">ForEach</span><span class="token punctuation">(</span><span class="token string">"PlayerData"</span><span class="token punctuation">,</span> <span class="token keyword">function</span><span class="token punctuation">(</span>replicator<span class="token punctuation">)</span>
+	<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"replicator"</span><span class="token punctuation">,</span> replicator<span class="token punctuation">.</span>Id<span class="token punctuation">,</span> <span class="token string">"for"</span><span class="token punctuation">,</span> replicator<span class="token punctuation">.</span>Tags<span class="token punctuation">.</span>UserId<span class="token punctuation">)</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+<span class="token comment">-- later:</span>
+<span class="token function">disconnect</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="PromiseFirst"><code style="text-decoration:none">PromiseFirst</code><a href="#PromiseFirst" class="hash-link" aria-label="Direct link to PromiseFirst" title="Direct link to PromiseFirst" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseReplicator.luau#L356"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->.</code><code class="green_DgR4">PromiseFirst</code><code>(</code><code>condition<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableReplicator#SearchCondition">SearchCondition?</a></code><code>) → </code><code class="blue_P4bS">Promise</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerReplicator">ServerReplicator</a></code><code class="op_lSLc">&gt;</code></div><div>
+<p>Resolves with the first existing-or-future replicator matching <code>condition</code>.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="GetFirst"><code style="text-decoration:none">GetFirst</code><a href="#GetFirst" class="hash-link" aria-label="Direct link to GetFirst" title="Direct link to GetFirst" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseReplicator.luau#L388"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->.</code><code class="green_DgR4">GetFirst</code><code>(</code><code>condition<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableReplicator#SearchCondition">SearchCondition?</a></code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerReplicator">ServerReplicator?</a></code></div><div>
+<p>Returns the first replicator matching <code>condition</code>, or nil if none exists.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="OnNew"><code style="text-decoration:none">OnNew</code><a href="#OnNew" class="hash-link" aria-label="Direct link to OnNew" title="Direct link to OnNew" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#00a1e4;color:#00a1e4">Static</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseReplicator.luau#L423"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->.</code><code class="green_DgR4">OnNew</code><code>(</code><div class="inset_uKQm"><div><code>condition<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableReplicator#SearchCondition">SearchCondition</a></code><code>,</code></div><div><code>fn<!-- -->: </code><code class="purple_ieR2">(</code><code>replicator<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerReplicator">ServerReplicator</a></code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code></div></div><code>) → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code></div><div>
+<p>
+  Listens for <em>new</em> replicators matching <code>condition</code>. <code>condition</code> accepts the
+  same forms as <code>GetAll</code>/<code>ForEach</code>: a namespace string, a <code>ReplicationToken</code>,
+  a tags table, or a custom predicate. Returns a disconnect function.
+</p>
+
+  
+    
+    
+      <div class="admonition admonition-caution alert alert--warning">
+        <div class="admonition-heading">
+          <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+                <path d="M8.893 1.5c-.183-.31-.52-.5-.887-.5s-.703.19-.886.5L.138 13.499a.98.98 0 0 0 0 1.001c.193.31.53.501.886.501h13.964c.367 0 .704-.19.877-.5a1.03 1.03 0 0 0 .01-1.002L8.893 1.5zm.133 11.497H6.987v-2.003h2.039v2.003zm0-3.004H6.987V5.987h2.039v4.006z"></path>
+              </svg></span><span class="admonition-title">Prefer ForEach</span></h5>
+        </div>
+        <div class="admonition-content">
+          <p>
+            <code>OnNew</code> only fires for replicators created <strong>after</strong> this call. Use <code>ForEach</code>
+            to also handle any already-existing matches (it runs the callback for those
+            immediately, then subscribes for future ones).
+          </p>
+        </div>
+      </div>
+    
+  
+
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="SetTargets"><code style="text-decoration:none">SetTargets</code><a href="#SetTargets" class="hash-link" aria-label="Direct link to SetTargets" title="Direct link to SetTargets" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#ff5252;color:#ff5252">TopLevel</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Server/ServerReplicator.luau#L637"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->:</code><code class="green_DgR4">SetTargets</code><code>(</code><code>targets<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableReplicator#ReplicationTargets">ReplicationTargets</a></code><code>) → </code><code>(</code><code>)</code></div><div>
+<p>Overwrites this top-level replicator's replication targets.</p>
+<pre class="language-lua"><code class="language-lua">replicator<span class="token punctuation">:</span><span class="token function">SetTargets</span><span class="token punctuation">(</span><span class="token string">"all"</span><span class="token punctuation">)</span>              <span class="token comment">-- replicate to everyone</span>
+replicator<span class="token punctuation">:</span><span class="token function">SetTargets</span><span class="token punctuation">(</span>player<span class="token punctuation">)</span>             <span class="token comment">-- single player</span>
+replicator<span class="token punctuation">:</span><span class="token function">SetTargets</span><span class="token punctuation">(</span><span class="token punctuation">{</span> player1<span class="token punctuation">,</span> player2 <span class="token punctuation">}</span><span class="token punctuation">)</span> <span class="token comment">-- explicit list</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="AddTarget"><code style="text-decoration:none">AddTarget</code><a href="#AddTarget" class="hash-link" aria-label="Direct link to AddTarget" title="Direct link to AddTarget" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#ff5252;color:#ff5252">TopLevel</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Server/ServerReplicator.luau#L682"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->:</code><code class="green_DgR4">AddTarget</code><code>(</code><code>target<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="op_lSLc"> | </code><code class="purple_ieR2">{</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="purple_ieR2">}</code><code>) → </code><code>(</code><code>)</code></div><div>
+<p>Adds a player (or list of players) to this top-level replicator's targets.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="RemoveTarget"><code style="text-decoration:none">RemoveTarget</code><a href="#RemoveTarget" class="hash-link" aria-label="Direct link to RemoveTarget" title="Direct link to RemoveTarget" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#ff5252;color:#ff5252">TopLevel</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Server/ServerReplicator.luau#L701"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->:</code><code class="green_DgR4">RemoveTarget</code><code>(</code><code>target<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="op_lSLc"> | </code><code class="purple_ieR2">{</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="purple_ieR2">}</code><code>) → </code><code>(</code><code>)</code></div><div>
+<p>Removes a player (or list of players) from this top-level replicator's targets.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="GetTargets"><code style="text-decoration:none">GetTargets</code><a href="#GetTargets" class="hash-link" aria-label="Direct link to GetTargets" title="Direct link to GetTargets" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Server/ServerReplicator.luau#L716"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->:</code><code class="green_DgR4">GetTargets</code><code>(</code><code>) → </code><code class="purple_ieR2">{</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="purple_ieR2">}</code></div><div>
+<p>Returns a list of players this top-level replicator is currently replicating to.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="IsReplicatingTo"><code style="text-decoration:none">IsReplicatingTo</code><a href="#IsReplicatingTo" class="hash-link" aria-label="Direct link to IsReplicatingTo" title="Direct link to IsReplicatingTo" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Server/ServerReplicator.luau#L728"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->:</code><code class="green_DgR4">IsReplicatingTo</code><code>(</code><code>player<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
+<p>Returns whether this replicator is currently replicating to the given player.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="SetParent"><code style="text-decoration:none">SetParent</code><a href="#SetParent" class="hash-link" aria-label="Direct link to SetParent" title="Direct link to SetParent" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Server/ServerReplicator.luau#L748"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->:</code><code class="green_DgR4">SetParent</code><code>(</code><code>newParent<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerReplicator">ServerReplicator</a></code><code>) → </code><code>(</code><code>)</code></div><div>
+<p>
+  Re-parents this replicator under <code>newParent</code>, moving its entire subtree.
+  Cannot be called on a top-level replicator; cannot create cycles.
+</p>
+<p>
+  If the move crosses scope boundaries (different top-level ancestors), players
+  only in the old scope receive a <code>Destroy</code>, players only in the new scope
+  receive a fresh snapshot, and players in both receive a <code>SetParent</code>.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="RegisterRemoteSignal"><code style="text-decoration:none">RegisterRemoteSignal</code><a href="#RegisterRemoteSignal" class="hash-link" aria-label="Direct link to RegisterRemoteSignal" title="Direct link to RegisterRemoteSignal" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Server/ServerReplicator.luau#L838"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->:</code><code class="green_DgR4">RegisterRemoteSignal</code><code>(</code><code>name<!-- -->: </code><code class="blue_P4bS">string</code><code>) → </code><code class="blue_P4bS">ServerCustomRemote</code></div><div>
+<p>
+  Registers a reliable custom signal on this replicator. After registration,
+  <code>replicator.Client[name]</code> returns a <code>ServerCustomRemote</code> with <code>Fire</code>,
+  <code>FireAll</code>, <code>FireExcept</code>, <code>FirePredicate</code>, <code>Connect</code>, <code>Once</code>, and <code>Wait</code>.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- Server</span>
+<span class="token keyword">local</span> hitSignal <span class="token operator">=</span> replicator<span class="token punctuation">:</span><span class="token function">RegisterRemoteSignal</span><span class="token punctuation">(</span><span class="token string">"Hit"</span><span class="token punctuation">)</span>
+hitSignal<span class="token punctuation">:</span><span class="token function">FireAll</span><span class="token punctuation">(</span><span class="token string">"headshot"</span><span class="token punctuation">)</span>
+
+<span class="token comment">-- Client</span>
+replicator<span class="token punctuation">.</span>Server<span class="token punctuation">.</span>Hit<span class="token punctuation">:</span><span class="token function">Connect</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span>hitType<span class="token punctuation">)</span>
+	<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Hit:"</span><span class="token punctuation">,</span> hitType<span class="token punctuation">)</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="RegisterRemoteUnreliableSignal"><code style="text-decoration:none">RegisterRemoteUnreliableSignal</code><a href="#RegisterRemoteUnreliableSignal" class="hash-link" aria-label="Direct link to RegisterRemoteUnreliableSignal" title="Direct link to RegisterRemoteUnreliableSignal" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Server/ServerReplicator.luau#L857"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->:</code><code class="green_DgR4">RegisterRemoteUnreliableSignal</code><code>(</code><code>name<!-- -->: </code><code class="blue_P4bS">string</code><code>) → </code><code class="blue_P4bS">ServerCustomRemote</code></div><div>
+<p>Like <code>RegisterRemoteSignal</code> but uses an <code>UnreliableRemoteEvent</code> for delivery.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="RegisterRemoteFunction"><code style="text-decoration:none">RegisterRemoteFunction</code><a href="#RegisterRemoteFunction" class="hash-link" aria-label="Direct link to RegisterRemoteFunction" title="Direct link to RegisterRemoteFunction" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Server/ServerReplicator.luau#L877"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->:</code><code class="green_DgR4">RegisterRemoteFunction</code><code>(</code><div class="inset_uKQm"><div><code>name<!-- -->: </code><code class="blue_P4bS">string</code><code>,</code></div><div><code>fn<!-- -->: </code><code class="purple_ieR2">(</code><div class="inset_uKQm"><code>self<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerReplicator">ServerReplicator</a></code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code>player<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code class="blue_P4bS">...any</code></div><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="blue_P4bS">...any</code></div></div><code>) → </code><code>(</code><code>)</code></div><div>
+<p>
+  Registers a client→server function. Clients invoke it via
+  <code>replicator.Server[name](...)</code> which yields until the server returns.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="RegisterOrderedRemoteSignal"><code style="text-decoration:none">RegisterOrderedRemoteSignal</code><a href="#RegisterOrderedRemoteSignal" class="hash-link" aria-label="Direct link to RegisterOrderedRemoteSignal" title="Direct link to RegisterOrderedRemoteSignal" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Server/ServerReplicator.luau#L897"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->:</code><code class="green_DgR4">RegisterOrderedRemoteSignal</code><code>(</code><code>name<!-- -->: </code><code class="blue_P4bS">string</code><code>) → </code><code class="blue_P4bS">ServerCustomRemote</code></div><div>
+<p>
+  Like <code>RegisterRemoteSignal</code> but delivers fires through the frame buffer,
+  so they arrive at the client in the same ordered sequence as data ops
+  enqueued in the same frame. Clients connect to it the same way:
+  <code>replicator.Server[name]:Connect(...)</code>.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="RegisterOrderedRemoteFunction"><code style="text-decoration:none">RegisterOrderedRemoteFunction</code><a href="#RegisterOrderedRemoteFunction" class="hash-link" aria-label="Direct link to RegisterOrderedRemoteFunction" title="Direct link to RegisterOrderedRemoteFunction" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Server/ServerReplicator.luau#L919"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->:</code><code class="green_DgR4">RegisterOrderedRemoteFunction</code><code>(</code><div class="inset_uKQm"><div><code>name<!-- -->: </code><code class="blue_P4bS">string</code><code>,</code></div><div><code>fn<!-- -->: </code><code class="purple_ieR2">(</code><div class="inset_uKQm"><code>self<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerReplicator">ServerReplicator</a></code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code>player<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/Player" target="_blank" rel="noopener noreferrer">Player<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code class="blue_P4bS">...any</code></div><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="blue_P4bS">...any</code></div></div><code>) → </code><code>(</code><code>)</code></div><div>
+<p>
+  Like <code>RegisterRemoteFunction</code> but the server's response is delivered
+  through the frame buffer so it arrives at the client in the same ordered
+  sequence as data ops. The client must call <code>InvokeAsync(...)</code> (returns a
+  Promise) instead of the blocking <code>Invoke(...)</code>.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="GetRemoteSignal"><code style="text-decoration:none">GetRemoteSignal</code><a href="#GetRemoteSignal" class="hash-link" aria-label="Direct link to GetRemoteSignal" title="Direct link to GetRemoteSignal" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Server/ServerReplicator.luau#L936"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->:</code><code class="green_DgR4">GetRemoteSignal</code><code>(</code><code>name<!-- -->: </code><code class="blue_P4bS">string</code><code>) → </code><code class="blue_P4bS">ServerCustomRemote</code></div><div>
+<p>Returns an already-registered custom signal by name.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="Destroy"><code style="text-decoration:none">Destroy</code><a href="#Destroy" class="hash-link" aria-label="Direct link to Destroy" title="Direct link to Destroy" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Server/ServerReplicator.luau#L953"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->:</code><code class="green_DgR4">Destroy</code><code>(</code><code>) → </code><code>(</code><code>)</code></div><div>
+<p>
+  Destroys the replicator and orphans any children to <code>ServerReplicator.None</code>.
+  This is synchronous and immediate; any queued ops for this replicator are
+  dropped, and all active players with the replicator have it destroyed on their end.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="IsTopLevel"><code style="text-decoration:none">IsTopLevel</code><a href="#IsTopLevel" class="hash-link" aria-label="Direct link to IsTopLevel" title="Direct link to IsTopLevel" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseReplicator.luau#L603"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->:</code><code class="green_DgR4">IsTopLevel</code><code>(</code><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
+<p>
+  Returns true if this replicator has no parent. Only top-level replicators
+  can have their replication targets set directly.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="GetParent"><code style="text-decoration:none">GetParent</code><a href="#GetParent" class="hash-link" aria-label="Direct link to GetParent" title="Direct link to GetParent" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseReplicator.luau#L623"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->:</code><code class="green_DgR4">GetParent</code><code>(</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerReplicator">ServerReplicator?</a></code></div><div>
+<p>Gets the parent replicator, or nil if this is a top-level replicator.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="GetChildren"><code style="text-decoration:none">GetChildren</code><a href="#GetChildren" class="hash-link" aria-label="Direct link to GetChildren" title="Direct link to GetChildren" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseReplicator.luau#L639"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->:</code><code class="green_DgR4">GetChildren</code><code>(</code><code>) → </code><code class="purple_ieR2">{</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerReplicator">ServerReplicator</a></code><code class="purple_ieR2">}</code></div><div>
+<p>Gets the immediate children of this replicator.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="GetDescendants"><code style="text-decoration:none">GetDescendants</code><a href="#GetDescendants" class="hash-link" aria-label="Direct link to GetDescendants" title="Direct link to GetDescendants" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseReplicator.luau#L655"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->:</code><code class="green_DgR4">GetDescendants</code><code>(</code><code>) → </code><code class="purple_ieR2">{</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerReplicator">ServerReplicator</a></code><code class="purple_ieR2">}</code></div><div>
+<p>Gets all descendants of this replicator, recursively.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="FindFirstChild"><code style="text-decoration:none">FindFirstChild</code><a href="#FindFirstChild" class="hash-link" aria-label="Direct link to FindFirstChild" title="Direct link to FindFirstChild" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseReplicator.luau#L681"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->:</code><code class="green_DgR4">FindFirstChild</code><code>(</code><div class="inset_uKQm"><div><code>condition<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableReplicator#SearchCondition">SearchCondition?</a></code><code>,</code><span class="inlineDescription_G7Er">-- <span>
+<p>optional predicate, token name, or tag set</p>
+</span></span></div><div><code>recursive<!-- -->: </code><code class="blue_P4bS">boolean?</code><span class="inlineDescription_G7Er">-- <span>
+<p>whether to search recursively (default false)</p>
+</span></span></div></div><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerReplicator">ServerReplicator?</a></code></div><div>
+<p>Finds the first child of this replicator that matches <code>condition</code>, or nil if none.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="PromiseFirstChild"><code style="text-decoration:none">PromiseFirstChild</code><a href="#PromiseFirstChild" class="hash-link" aria-label="Direct link to PromiseFirstChild" title="Direct link to PromiseFirstChild" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseReplicator.luau#L723"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->:</code><code class="green_DgR4">PromiseFirstChild</code><code>(</code><code>condition<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/TableReplicator#SearchCondition">SearchCondition?</a></code><code>) → </code><code class="blue_P4bS">Promise</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/ServerReplicator">ServerReplicator</a></code><code class="op_lSLc">&gt;</code></div><div>
+<p>
+  Returns a Promise that resolves with the first child matching <code>condition</code>.
+  Resolves immediately if a matching child already exists; otherwise waits for
+  one to be added.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="HasTags"><code style="text-decoration:none">HasTags</code><a href="#HasTags" class="hash-link" aria-label="Direct link to HasTags" title="Direct link to HasTags" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseReplicator.luau#L757"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->:</code><code class="green_DgR4">HasTags</code><code>(</code><code>tags<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/AdjustableTimerManager#Tags">Tags</a></code><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
+<p>
+  Returns true if every key/value in <code>tags</code> is present on this replicator.
+  <code>IsSupersetOfTags</code> is an alias for this method.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="IsSupersetOfTags"><code style="text-decoration:none">IsSupersetOfTags</code><a href="#IsSupersetOfTags" class="hash-link" aria-label="Direct link to IsSupersetOfTags" title="Direct link to IsSupersetOfTags" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseReplicator.luau#L781"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->:</code><code class="green_DgR4">IsSupersetOfTags</code><code>(</code><code>tags<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/AdjustableTimerManager#Tags">Tags</a></code><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
+<p>Alias for <code>HasTags</code>.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="IsSubsetOfTags"><code style="text-decoration:none">IsSubsetOfTags</code><a href="#IsSubsetOfTags" class="hash-link" aria-label="Direct link to IsSubsetOfTags" title="Direct link to IsSubsetOfTags" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/BaseReplicator.luau#L798"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>ServerReplicator<!-- -->:</code><code class="green_DgR4">IsSubsetOfTags</code><code>(</code><code>tags<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/AdjustableTimerManager#Tags">Tags</a></code><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
+<p>
+  Returns true if every key/value on this replicator is present in <code>tags</code>.
+  The inverse of <code>HasTags</code>: this replicator's tags must be a subset of <code>tags</code>.
+</p>
+</div></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
+    &quot;functions&quot;: [
+        {
+            &quot;name&quot;: &quot;SetStrictValueChecks&quot;,
+            &quot;desc&quot;: &quot;Overrides `StrictValueChecks`, toggling the recursive write-time scan of\nreplicated values going forward.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;enabled&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;boolean&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;tags&quot;: [
+                &quot;Static&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 115,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Server/ServerReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;new&quot;,
+            &quot;desc&quot;: &quot;Creates a new `ServerReplicator`.\n\nExactly one of `Parent` or `ReplicationTargets` must be given: a top-level\nreplicator is created with `ReplicationTargets` (pass `{}` to start with\nnone), and a child replicator is created with `Parent` and inherits its\ntop-level ancestor&#x27;s targets.\n\nConfig table fields:\n- `Namespace` - Optional string or `ReplicationToken` identifying the\n  replicator&#x27;s class. Pass a plain string for simple cases, or a token\n  from `ServerReplicator.TOKEN()` for opt-in collision safety. Omit for\n  anonymous replicators (reachable only by Id, tags, or predicate).\n- `Data` - A `TableManager` instance or a raw table to replicate. Defaults to `{}`.\n- `Targets` - A `Player`, list of `Player`s, or `\&quot;all\&quot;`. Only valid\n  for top-level replicators; pass `{}` to start with no targets.\n- `Parent` - A parent `ServerReplicator`. Only valid for child replicators.\n- `Tags` - Optional `{ [string]: any }` metadata table used for filtering in\n  `ForEach`/`GetAll`/`GetFirst`.\n- `Coalesced` - If true, only the latest op per key is sent at frame end,\n  dropping intermediate writes. Defaults to false.\n- `ImmediateFlush` - If true, this replicator&#x27;s ops are flushed to the wire\n  synchronously (before the caller&#x27;s next line) instead of at frame end, so a\n  write lands before any external `RemoteEvent` fired in the same frame. Only\n  this replicator is flushed; others keep their normal frame batching. Because\n  each write sends immediately, N separate non-batched `Set`s produce N\n  messages -- wrap bulk writes in `manager:Batch(...)` to coalesce them into a\n  single immediate send at the end of the batch.\n- `Client` - Table declaring custom remotes. Values can be\n  `ServerReplicator.createRemoteEvent()`, `ServerReplicator.createUnreliableEvent()`,\n  or plain functions (registered as remote functions). See `RegisterRemoteSignal`.\n\n:::caution Namespace collision guard\nIf you call `ServerReplicator.TOKEN(\&quot;name\&quot;)` to claim a namespace, any\nattempt to create a replicator with that name as a raw string will throw.\nPass the token object directly instead of the string. Conversely, if raw-\nstring replicators already exist for a name, `TOKEN()` will refuse to claim\nit until they are all destroyed.\n:::\n\n:::caution Conflicting Configurations\nThe following configurations are invalid and will throw an error:\n- `Targets` and `Parent` cannot both be specified.\n- `Coalesced` and `ImmediateFlush` cannot both be true.\n:::&quot;,
+            &quot;params&quot;: [],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;tags&quot;: [
+                &quot;Static&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 412,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Server/ServerReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;_FlushIfImmediate&quot;,
+            &quot;desc&quot;: &quot;Flushes this replicator&#x27;s queued ops to the wire now if it&#x27;s an ImmediateFlush\nreplicator and no manager batch window is currently open. Called from the\nsignal paths (custom-remote fires, ordered-fn responses) after `QueueSignal`,\nmirroring the data path&#x27;s synchronous flush. The batch guard keeps a signal\nfired inside a `manager:Batch(...)` buffered until the whole window ships at\nBatchEnd (see the OnApplied handler), so an ordered signal never jumps ahead\nof data queued before it.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;self&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;SR_Internal&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;ignore&quot;: true,
+            &quot;source&quot;: {
+                &quot;line&quot;: 568,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Server/ServerReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;_SendSnapshotTo&quot;,
+            &quot;desc&quot;: &quot;Sends `replicator`&#x27;s subtree to `player` and marks them active in `replicator`&#x27;s scope.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;self&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;SR_Internal&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;player&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Player&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;ignore&quot;: true,
+            &quot;source&quot;: {
+                &quot;line&quot;: 582,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Server/ServerReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;_AddTarget&quot;,
+            &quot;desc&quot;: &quot;Adds `player` to this replicator&#x27;s scope, sending a snapshot if they have\nalready bootstrapped. Does nothing if the player is already targeted.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;self&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;SR_Internal&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;player&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Player&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;ignore&quot;: true,
+            &quot;source&quot;: {
+                &quot;line&quot;: 594,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Server/ServerReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;_RemoveTarget&quot;,
+            &quot;desc&quot;: &quot;Removes `player` from this replicator&#x27;s scope, sending a `Destroy` if they\nwere active. Does nothing if the player is not targeted.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;self&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;SR_Internal&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;player&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Player&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;ignore&quot;: true,
+            &quot;source&quot;: {
+                &quot;line&quot;: 612,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Server/ServerReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;SetTargets&quot;,
+            &quot;desc&quot;: &quot;Overwrites this top-level replicator&#x27;s replication targets.\n\n```lua\nreplicator:SetTargets(\&quot;all\&quot;)              -- replicate to everyone\nreplicator:SetTargets(player)             -- single player\nreplicator:SetTargets({ player1, player2 }) -- explicit list\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;targets&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;ReplicationTargets&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;tags&quot;: [
+                &quot;TopLevel&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 637,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Server/ServerReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;AddTarget&quot;,
+            &quot;desc&quot;: &quot;Adds a player (or list of players) to this top-level replicator&#x27;s targets.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;target&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Player | { Player }&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;tags&quot;: [
+                &quot;TopLevel&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 682,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Server/ServerReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;RemoveTarget&quot;,
+            &quot;desc&quot;: &quot;Removes a player (or list of players) from this top-level replicator&#x27;s targets.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;target&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Player | { Player }&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;tags&quot;: [
+                &quot;TopLevel&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 701,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Server/ServerReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetTargets&quot;,
+            &quot;desc&quot;: &quot;Returns a list of players this top-level replicator is currently replicating to.&quot;,
+            &quot;params&quot;: [],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{ Player }&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 716,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Server/ServerReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;IsReplicatingTo&quot;,
+            &quot;desc&quot;: &quot;Returns whether this replicator is currently replicating to the given player.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;player&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Player&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;boolean&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 728,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Server/ServerReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;SetParent&quot;,
+            &quot;desc&quot;: &quot;Re-parents this replicator under `newParent`, moving its entire subtree.\nCannot be called on a top-level replicator; cannot create cycles.\n\nIf the move crosses scope boundaries (different top-level ancestors), players\nonly in the old scope receive a `Destroy`, players only in the new scope\nreceive a fresh snapshot, and players in both receive a `SetParent`.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;newParent&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;ServerReplicator&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 748,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Server/ServerReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;RegisterRemoteSignal&quot;,
+            &quot;desc&quot;: &quot;Registers a reliable custom signal on this replicator. After registration,\n`replicator.Client[name]` returns a `ServerCustomRemote` with `Fire`,\n`FireAll`, `FireExcept`, `FirePredicate`, `Connect`, `Once`, and `Wait`.\n\n```lua\n-- Server\nlocal hitSignal = replicator:RegisterRemoteSignal(\&quot;Hit\&quot;)\nhitSignal:FireAll(\&quot;headshot\&quot;)\n\n-- Client\nreplicator.Server.Hit:Connect(function(hitType)\n\tprint(\&quot;Hit:\&quot;, hitType)\nend)\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;name&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;ServerCustomRemote&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 838,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Server/ServerReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;RegisterRemoteUnreliableSignal&quot;,
+            &quot;desc&quot;: &quot;Like `RegisterRemoteSignal` but uses an `UnreliableRemoteEvent` for delivery.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;name&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;ServerCustomRemote&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 857,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Server/ServerReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;RegisterRemoteFunction&quot;,
+            &quot;desc&quot;: &quot;Registers a client→server function. Clients invoke it via\n`replicator.Server[name](...)` which yields until the server returns.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;name&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;fn&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;(self: ServerReplicator, player: Player, ...any) -&gt; ...any&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 877,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Server/ServerReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;RegisterOrderedRemoteSignal&quot;,
+            &quot;desc&quot;: &quot;Like `RegisterRemoteSignal` but delivers fires through the frame buffer,\nso they arrive at the client in the same ordered sequence as data ops\nenqueued in the same frame. Clients connect to it the same way:\n`replicator.Server[name]:Connect(...)`.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;name&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;ServerCustomRemote&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 897,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Server/ServerReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;RegisterOrderedRemoteFunction&quot;,
+            &quot;desc&quot;: &quot;Like `RegisterRemoteFunction` but the server&#x27;s response is delivered\nthrough the frame buffer so it arrives at the client in the same ordered\nsequence as data ops. The client must call `InvokeAsync(...)` (returns a\nPromise) instead of the blocking `Invoke(...)`.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;name&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;fn&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;(self: ServerReplicator, player: Player, ...any) -&gt; ...any&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 919,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Server/ServerReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetRemoteSignal&quot;,
+            &quot;desc&quot;: &quot;Returns an already-registered custom signal by name.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;name&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;ServerCustomRemote&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 936,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Server/ServerReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;Destroy&quot;,
+            &quot;desc&quot;: &quot;Destroys the replicator and orphans any children to `ServerReplicator.None`.\nThis is synchronous and immediate; any queued ops for this replicator are \ndropped, and all active players with the replicator have it destroyed on their end.&quot;,
+            &quot;params&quot;: [],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 953,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Server/ServerReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;FlushNow&quot;,
+            &quot;desc&quot;: &quot;Immediately flushes all pending data ops to active players without waiting\nfor the end-of-frame deferred flush. Use this when you need data changes to\narrive before (or alongside) an external `RemoteEvent` fired in the same frame.&quot;,
+            &quot;params&quot;: [],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;tags&quot;: [
+                &quot;Static&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 1082,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Server/ServerReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;SetListenerFireMode&quot;,
+            &quot;desc&quot;: &quot;Overrides `ListenerFireMode`, the scheduling used for `ReplicatorCreated`,\n`ForEach`, and `OnNew` listeners going forward.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;mode&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;FireMode&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;tags&quot;: [
+                &quot;Static&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 166,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetFromId&quot;,
+            &quot;desc&quot;: &quot;Returns the replicator with the given Id, if one currently exists.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;id&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Id&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;ServerReplicator?&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;tags&quot;: [
+                &quot;Static&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 215,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;PromiseFromId&quot;,
+            &quot;desc&quot;: &quot;Returns a promise that resolves with the replicator with the given Id, if one currently exists or is created in the future.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;id&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Id&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Promise&lt;ServerReplicator&gt;&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;tags&quot;: [
+                &quot;Static&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 235,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetAll&quot;,
+            &quot;desc&quot;: &quot;Returns every currently-loaded replicator matching `condition` (no condition = all).&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;condition&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;SearchCondition?&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{ ServerReplicator }&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;tags&quot;: [
+                &quot;Static&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 263,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;ForEach&quot;,
+            &quot;desc&quot;: &quot;Runs `fn` for every existing replicator matching `condition`, and again for\nevery future one. Returns a disconnect function that stops future invocations.\n\n```lua\nlocal disconnect = ServerReplicator.ForEach(\&quot;PlayerData\&quot;, function(replicator)\n\tprint(\&quot;replicator\&quot;, replicator.Id, \&quot;for\&quot;, replicator.Tags.UserId)\nend)\n-- later:\ndisconnect()\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;condition&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;SearchCondition?&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;fn&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;(replicator: ServerReplicator) -&gt; ()&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;() -&gt; ()&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;tags&quot;: [
+                &quot;Static&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 302,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;PromiseFirst&quot;,
+            &quot;desc&quot;: &quot;Resolves with the first existing-or-future replicator matching `condition`.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;condition&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;SearchCondition?&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Promise&lt;ServerReplicator&gt;&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;tags&quot;: [
+                &quot;Static&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 356,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetFirst&quot;,
+            &quot;desc&quot;: &quot;Returns the first replicator matching `condition`, or nil if none exists.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;condition&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;SearchCondition?&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;ServerReplicator?&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;tags&quot;: [
+                &quot;Static&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 388,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;OnNew&quot;,
+            &quot;desc&quot;: &quot;Listens for *new* replicators matching `condition`. `condition` accepts the\nsame forms as `GetAll`/`ForEach`: a namespace string, a `ReplicationToken`,\na tags table, or a custom predicate. Returns a disconnect function.\n\n:::caution Prefer ForEach\n`OnNew` only fires for replicators created **after** this call. Use `ForEach`\nto also handle any already-existing matches (it runs the callback for those\nimmediately, then subscribes for future ones).\n:::&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;condition&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;SearchCondition&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;fn&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;(replicator: ServerReplicator) -&gt; ()&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;() -&gt; ()&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;tags&quot;: [
+                &quot;Static&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 423,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;IsTopLevel&quot;,
+            &quot;desc&quot;: &quot;Returns true if this replicator has no parent. Only top-level replicators\ncan have their replication targets set directly.&quot;,
+            &quot;params&quot;: [],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;boolean&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 603,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetParent&quot;,
+            &quot;desc&quot;: &quot;Gets the parent replicator, or nil if this is a top-level replicator.&quot;,
+            &quot;params&quot;: [],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;ServerReplicator?&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 623,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetChildren&quot;,
+            &quot;desc&quot;: &quot;Gets the immediate children of this replicator.&quot;,
+            &quot;params&quot;: [],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{ ServerReplicator }&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 639,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetDescendants&quot;,
+            &quot;desc&quot;: &quot;Gets all descendants of this replicator, recursively.&quot;,
+            &quot;params&quot;: [],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{ ServerReplicator }&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 655,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;FindFirstChild&quot;,
+            &quot;desc&quot;: &quot;Finds the first child of this replicator that matches `condition`, or nil if none.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;condition&quot;,
+                    &quot;desc&quot;: &quot;optional predicate, token name, or tag set&quot;,
+                    &quot;lua_type&quot;: &quot;SearchCondition?&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;recursive&quot;,
+                    &quot;desc&quot;: &quot;whether to search recursively (default false)&quot;,
+                    &quot;lua_type&quot;: &quot;boolean?&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;ServerReplicator?&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 681,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;PromiseFirstChild&quot;,
+            &quot;desc&quot;: &quot;Returns a Promise that resolves with the first child matching `condition`.\nResolves immediately if a matching child already exists; otherwise waits for\none to be added.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;condition&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;SearchCondition?&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Promise&lt;ServerReplicator&gt;&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 723,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;HasTags&quot;,
+            &quot;desc&quot;: &quot;Returns true if every key/value in `tags` is present on this replicator.\n`IsSupersetOfTags` is an alias for this method.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;tags&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Tags&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;boolean&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 757,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;IsSupersetOfTags&quot;,
+            &quot;desc&quot;: &quot;Alias for `HasTags`.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;tags&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Tags&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;boolean&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 781,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;IsSubsetOfTags&quot;,
+            &quot;desc&quot;: &quot;Returns true if every key/value on this replicator is present in `tags`.\nThe inverse of `HasTags`: this replicator&#x27;s tags must be a subset of `tags`.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;tags&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Tags&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;boolean&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;method&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 798,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseReplicator.luau&quot;
+            }
+        }
+    ],
+    &quot;properties&quot;: [
+        {
+            &quot;name&quot;: &quot;StrictValueChecks&quot;,
+            &quot;desc&quot;: &quot;When `true`, every value written through a replicator&#x27;s `.Manager` is\nrecursively scanned before it is queued, and a warning naming the exact path\nis emitted if it contains anything a `RemoteEvent` can&#x27;t serialize (a function,\nthread, `RBXScriptSignal`, or `RBXScriptConnection`). When `false`, only the\nwritten value&#x27;s own top-level type is checked (an O(1) test that still catches\nthe common `Manager:Set(path, someFunction)` mistake). Defaults to\n`RunService:IsStudio()` -- deep scanning in Studio, cheap checks in production.\n\nEither way the offending value is dropped in isolation and arrives as nil on\nclients (see `ValueGuard` / `BufferCodec`); these checks only surface *where*\nthe bad value came from. Read-only -- use `SetStrictValueChecks` to change it.&quot;,
+            &quot;lua_type&quot;: &quot;boolean&quot;,
+            &quot;tags&quot;: [
+                &quot;Static&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 105,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Server/ServerReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;TOKEN&quot;,
+            &quot;desc&quot;: &quot;Registers `name` in the namespace-ownership ledger and returns a\n`ReplicationToken` that exclusively owns that name for its lifetime.\n\nUsing a token prevents any other system from accidentally creating a\nreplicator with the same namespace string. Call this once per name\n(usually at the top of a module), store the result, and pass it as the\n`Namespace` (or `Token`) field when creating replicators.\n\nTo release the name, call `ServerReplicator.TOKEN.destroy(token)` after all\nreplicators using it have been destroyed.\n\n**You do not need a token** for simple cases — a plain string `Namespace`\nis fully supported and costs nothing extra:\n```lua\n-- Simple (no collision guard):\nServerReplicator.new({ Namespace = \&quot;PlayerData\&quot;, ... })\n\n-- Opt-in collision safety:\nlocal PlayerToken = ServerReplicator.TOKEN(\&quot;PlayerData\&quot;)\nServerReplicator.new({ Namespace = PlayerToken, ... })\n```\n\n:::caution One owner per name\n`TOKEN(\&quot;name\&quot;)` errors if the name is already owned by another live token\n**or** if any raw-string replicators with that name already exist. Claim the\ntoken at module load before creating any replicators with that name.\n:::&quot;,
+            &quot;lua_type&quot;: &quot;(name: string) -&gt; ReplicationToken&quot;,
+            &quot;tags&quot;: [
+                &quot;Static&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 303,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Server/ServerReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;createRemoteEvent&quot;,
+            &quot;desc&quot;: &quot;Returns a sentinel value for use in `config.Client` to declare a reliable\ncustom signal. The sentinel is detected by `ServerReplicator.new` and\nreplaced with a real `ServerCustomRemote`.\n\n```lua\nlocal r = ServerReplicator.new({\n\tNamespace = \&quot;MyReplicator\&quot;,\n\tReplicationTargets = player,\n\tClient = {\n\t\tHit = ServerReplicator.createRemoteEvent(),\n\t\tGetScore = function(self, player) return 42 end,\n\t},\n})\nr.Client.Hit:FireAll()\n```&quot;,
+            &quot;lua_type&quot;: &quot;() -&gt; sentinel&quot;,
+            &quot;tags&quot;: [
+                &quot;Static&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 343,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Server/ServerReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;createUnreliableEvent&quot;,
+            &quot;desc&quot;: &quot;Like `createRemoteEvent` but uses an `UnreliableRemoteEvent` so fire-and-forget\nsemantics apply (no ordering or delivery guarantee).&quot;,
+            &quot;lua_type&quot;: &quot;() -&gt; sentinel&quot;,
+            &quot;tags&quot;: [
+                &quot;Static&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 354,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Server/ServerReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;All&quot;,
+            &quot;desc&quot;: &quot;A top-level replicator that replicates to every current and future\nplayer. Useful as a `Parent` for children that should always be visible\nto everyone, but may be moved later. Do not modify it directly — only parent to it.&quot;,
+            &quot;lua_type&quot;: &quot;ServerReplicator&quot;,
+            &quot;tags&quot;: [
+                &quot;Static&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 1100,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Server/ServerReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;None&quot;,
+            &quot;desc&quot;: &quot;A top-level replicator that replicates to nobody. Useful as a `Parent`\nfor children that should not replicate yet and are waiting for a proper\nparent. Do not modify it directly — only parent to it.&quot;,
+            &quot;lua_type&quot;: &quot;ServerReplicator&quot;,
+            &quot;tags&quot;: [
+                &quot;Static&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 1113,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Server/ServerReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;ReplicatorCreated&quot;,
+            &quot;desc&quot;: &quot;Signal that fires whenever a new replicator is created, regardless of token.&quot;,
+            &quot;lua_type&quot;: &quot;Signal&lt;ServerReplicator&gt;&quot;,
+            &quot;tags&quot;: [
+                &quot;Static&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 142,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/BaseReplicator.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;Id&quot;,
+            &quot;desc&quot;: &quot;The unique Id of this replicator.&quot;,
+            &quot;lua_type&quot;: &quot;number&quot;,
+            &quot;readonly&quot;: true,
+            &quot;source&quot;: {
+                &quot;line&quot;: 222,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/Types.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;Manager&quot;,
+            &quot;desc&quot;: &quot;The TableManager that this replicator is managing.&quot;,
+            &quot;lua_type&quot;: &quot;TableManager&quot;,
+            &quot;readonly&quot;: true,
+            &quot;source&quot;: {
+                &quot;line&quot;: 232,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/Types.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;Namespace&quot;,
+            &quot;desc&quot;: &quot;The namespace string of this replicator, or `nil` if anonymous.\nMatches any `string` or `ReplicationToken` `SearchCondition` when non-nil.&quot;,
+            &quot;lua_type&quot;: &quot;string?&quot;,
+            &quot;readonly&quot;: true,
+            &quot;source&quot;: {
+                &quot;line&quot;: 243,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/Types.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;Token&quot;,
+            &quot;desc&quot;: &quot;The token handle for this replicator, or `nil` if anonymous or created with\na raw-string namespace. Present when the namespace was claimed with\n`ServerReplicator.TOKEN()` or when a raw string resolves to the same cached\nhandle. Prefer `.Namespace` for string comparisons.&quot;,
+            &quot;lua_type&quot;: &quot;ReplicationToken?&quot;,
+            &quot;readonly&quot;: true,
+            &quot;source&quot;: {
+                &quot;line&quot;: 256,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/Types.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;Tags&quot;,
+            &quot;desc&quot;: &quot;The tags of this replicator.&quot;,
+            &quot;lua_type&quot;: &quot;{ [string]: any }&quot;,
+            &quot;readonly&quot;: true,
+            &quot;source&quot;: {
+                &quot;line&quot;: 266,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/Types.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;ChildAdded&quot;,
+            &quot;desc&quot;: &quot;Fired when a child replicator is added to this replicator.&quot;,
+            &quot;lua_type&quot;: &quot;Signal&lt;ServerReplicator&gt;&quot;,
+            &quot;tags&quot;: [
+                &quot;Event&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 277,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/Types.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;ChildRemoved&quot;,
+            &quot;desc&quot;: &quot;Fired when a child replicator is removed from this replicator.&quot;,
+            &quot;lua_type&quot;: &quot;Signal&lt;ServerReplicator&gt;&quot;,
+            &quot;tags&quot;: [
+                &quot;Event&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 287,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/Types.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;ParentChanged&quot;,
+            &quot;desc&quot;: &quot;Fired when this replicator&#x27;s parent is changed.\nPassed arguments are `(newParent, oldParent)`.&quot;,
+            &quot;lua_type&quot;: &quot;Signal&lt;ServerReplicator, ServerReplicator&gt;&quot;,
+            &quot;tags&quot;: [
+                &quot;Event&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 298,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/Types.luau&quot;
+            }
+        }
+    ],
+    &quot;types&quot;: [],
+    &quot;name&quot;: &quot;ServerReplicator&quot;,
+    &quot;desc&quot;: &quot;Wraps a `TableManager` and replicates it to one or more clients. Every write\nmade through `.Manager` is automatically queued and sent at the end of the\ncurrent frame.\n\n```lua\nPlayers.PlayerAdded:Connect(function(player)\n\tlocal replicator = ServerReplicator.new({\n\t\tNamespace = \&quot;PlayerData\&quot;,\n\t\tData = { Coins = 0 },\n\t\tTargets = player,\n\t\tTags = { UserId = player.UserId },\n\t})\n\n\treplicator.Manager:Set(\&quot;Coins\&quot;, 100) -- replicated automatically\n\n\tplayer.Destroying:Connect(function()\n\t\treplicator:Destroy()\n\tend)\nend)\n```\n\n:::caution Always destroy when done\nCall `replicator:Destroy()` when a replicator is no longer needed. The replicator\nalso listens to its manager&#x27;s `OnDestroy` and tears itself down, so destroying\nthe manager is sufficient when the manager&#x27;s lifetime drives cleanup.\n:::\n\n### Going further\n- **Namespace collision safety** — See `TOKEN` for exclusive namespace ownership\n  in large codebases.\n- **Hierarchy** — Pass `Parent` instead of `ReplicationTargets` to create a child\n  replicator that inherits its ancestor&#x27;s targets. Use `SetParent` to reparent later.\n- **Custom remotes** — Declare signals and functions in `config.Client` to send\n  events alongside data. See `RegisterRemoteSignal`, `RegisterOrderedRemoteSignal`,\n  `RegisterRemoteFunction`, and `RegisterOrderedRemoteFunction`.\n- **Flush control** — `Coalesced = true` deduplicates redundant same-key ops per\n  frame. `ImmediateFlush = true` sends this replicator&#x27;s ops synchronously\n  (before the caller&#x27;s next line) instead of batching to frame end.\n- **Sentinels** — `ServerReplicator.All` and `ServerReplicator.None` are\n  pre-built top-level replicators useful as parents.&quot;,
+    &quot;realm&quot;: [
+        &quot;Server&quot;
+    ],
+    &quot;source&quot;: {
+        &quot;line&quot;: 49,
+        &quot;path&quot;: &quot;lib/tablereplicator/src/Server/ServerReplicator.luau&quot;
+    }
+}</pre></details></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#properties" class="table-of-contents__link toc-highlight">Properties</a><ul><li><a href="#Static" class="table-of-contents__link toc-highlight">Static</a><ul><li><a href="#All" class="table-of-contents__link toc-highlight">All</a></li><li><a href="#createRemoteEvent" class="table-of-contents__link toc-highlight">createRemoteEvent</a></li><li><a href="#createUnreliableEvent" class="table-of-contents__link toc-highlight">createUnreliableEvent</a></li><li><a href="#None" class="table-of-contents__link toc-highlight">None</a></li><li><a href="#ReplicatorCreated" class="table-of-contents__link toc-highlight">ReplicatorCreated</a></li><li><a href="#StrictValueChecks" class="table-of-contents__link toc-highlight">StrictValueChecks</a></li><li><a href="#TOKEN" class="table-of-contents__link toc-highlight">TOKEN</a></li></ul></li><li><a href="#ChildAdded" class="table-of-contents__link toc-highlight">ChildAdded</a></li><li><a href="#ChildRemoved" class="table-of-contents__link toc-highlight">ChildRemoved</a></li><li><a href="#Id" class="table-of-contents__link toc-highlight">Id</a></li><li><a href="#Manager" class="table-of-contents__link toc-highlight">Manager</a></li><li><a href="#Namespace" class="table-of-contents__link toc-highlight">Namespace</a></li><li><a href="#ParentChanged" class="table-of-contents__link toc-highlight">ParentChanged</a></li><li><a href="#Tags" class="table-of-contents__link toc-highlight">Tags</a></li><li><a href="#Token" class="table-of-contents__link toc-highlight">Token</a></li></ul></li><li><a href="#functions" class="table-of-contents__link toc-highlight">Functions</a><ul><li><a href="#Static" class="table-of-contents__link toc-highlight">Static</a><ul><li><a href="#FlushNow" class="table-of-contents__link toc-highlight">.FlushNow</a></li><li><a href="#ForEach" class="table-of-contents__link toc-highlight">.ForEach</a></li><li><a href="#GetAll" class="table-of-contents__link toc-highlight">.GetAll</a></li><li><a href="#GetFirst" class="table-of-contents__link toc-highlight">.GetFirst</a></li><li><a href="#GetFromId" class="table-of-contents__link toc-highlight">.GetFromId</a></li><li><a href="#new" class="table-of-contents__link toc-highlight">.new</a></li><li><a href="#OnNew" class="table-of-contents__link toc-highlight">.OnNew</a></li><li><a href="#PromiseFirst" class="table-of-contents__link toc-highlight">.PromiseFirst</a></li><li><a href="#PromiseFromId" class="table-of-contents__link toc-highlight">.PromiseFromId</a></li><li><a href="#SetListenerFireMode" class="table-of-contents__link toc-highlight">.SetListenerFireMode</a></li><li><a href="#SetStrictValueChecks" class="table-of-contents__link toc-highlight">.SetStrictValueChecks</a></li></ul></li><li><a href="#AddTarget" class="table-of-contents__link toc-highlight">:AddTarget</a></li><li><a href="#Destroy" class="table-of-contents__link toc-highlight">:Destroy</a></li><li><a href="#FindFirstChild" class="table-of-contents__link toc-highlight">:FindFirstChild</a></li><li><a href="#GetChildren" class="table-of-contents__link toc-highlight">:GetChildren</a></li><li><a href="#GetDescendants" class="table-of-contents__link toc-highlight">:GetDescendants</a></li><li><a href="#GetParent" class="table-of-contents__link toc-highlight">:GetParent</a></li><li><a href="#GetRemoteSignal" class="table-of-contents__link toc-highlight">:GetRemoteSignal</a></li><li><a href="#GetTargets" class="table-of-contents__link toc-highlight">:GetTargets</a></li><li><a href="#HasTags" class="table-of-contents__link toc-highlight">:HasTags</a></li><li><a href="#IsReplicatingTo" class="table-of-contents__link toc-highlight">:IsReplicatingTo</a></li><li><a href="#IsSubsetOfTags" class="table-of-contents__link toc-highlight">:IsSubsetOfTags</a></li><li><a href="#IsSupersetOfTags" class="table-of-contents__link toc-highlight">:IsSupersetOfTags</a></li><li><a href="#IsTopLevel" class="table-of-contents__link toc-highlight">:IsTopLevel</a></li><li><a href="#PromiseFirstChild" class="table-of-contents__link toc-highlight">:PromiseFirstChild</a></li><li><a href="#RegisterOrderedRemoteFunction" class="table-of-contents__link toc-highlight">:RegisterOrderedRemoteFunction</a></li><li><a href="#RegisterOrderedRemoteSignal" class="table-of-contents__link toc-highlight">:RegisterOrderedRemoteSignal</a></li><li><a href="#RegisterRemoteFunction" class="table-of-contents__link toc-highlight">:RegisterRemoteFunction</a></li><li><a href="#RegisterRemoteSignal" class="table-of-contents__link toc-highlight">:RegisterRemoteSignal</a></li><li><a href="#RegisterRemoteUnreliableSignal" class="table-of-contents__link toc-highlight">:RegisterRemoteUnreliableSignal</a></li><li><a href="#RemoveTarget" class="table-of-contents__link toc-highlight">:RemoveTarget</a></li><li><a href="#SetParent" class="table-of-contents__link toc-highlight">:SetParent</a></li><li><a href="#SetTargets" class="table-of-contents__link toc-highlight">:SetTargets</a></li></ul></li></ul></div></div></div></div></main></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
+</body>
+</html>

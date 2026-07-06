@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en" dir="ltr" class="plugin-moonwave plugin-id-moonwave" data-has-hydrated="false">
+<head>
+<meta charset="UTF-8">
+<meta name="generator" content="Docusaurus v3.10.1">
+<title data-rh="true">TR Performance &amp; Ordering | ModulesOnRails</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:url" content="https://raild3x.github.io/ModulesOnRails/api/TR Performance &amp; Ordering"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docusaurus_tag" content="default"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docsearch:docusaurus_tag" content="default"><meta data-rh="true" property="og:title" content="TR Performance &amp; Ordering | ModulesOnRails"><meta data-rh="true" name="description" content="By default TableReplicator already does the right thing: writes are batched per
+frame and applied in a consistent order on every client. This guide explains those
+guarantees and the few knobs you can turn when a replicator has unusual needs.
+
+### Per-frame batching (the default)
+
+When you mutate `.Manager`, the write isn&#x27;t sent immediately. It&#x27;s queued and flushed
+once per frame, so a burst of writes across many replicators collapses into **at most
+one message per player per frame**. On the client, a whole flush is applied inside a
+single `TableManager` batch, so listeners see one coalesced update rather than a
+storm of intermediate ones.
+
+You rarely need to change this. The options below are for the cases where you do.
+
+### `Coalesced` — drop redundant writes
+
+If a replicator writes the same key many times per frame and only the final value
+matters, set `Coalesced = true`. Intermediate writes to a key are dropped and only
+the latest is sent:
+
+```lua
+local replicator = ServerReplicator.new({
+	Data = { MousePosition = Vector3.zero },
+	Targets = &quot;all&quot;,
+	Coalesced = true, -- only the last MousePosition of the frame is sent
+})
+```
+
+Best for high-churn, latest-value-wins data (cursor positions, live sliders). Avoid
+it when every intermediate value is meaningful.
+
+### `ImmediateFlush` — send each op right away
+
+Set `ImmediateFlush = true` to send each op as it happens instead of waiting for the
+per-frame flush. The main use is guaranteeing a data change lands *before* an external
+`RemoteEvent` you fire in the same frame:
+
+```lua
+local replicator = ServerReplicator.new({
+	Data = { State = &quot;Idle&quot; },
+	Targets = &quot;all&quot;,
+	ImmediateFlush = true,
+})
+```
+
+:::caution Mutually exclusive
+`Coalesced` and `ImmediateFlush` cannot both be `true` — that combination throws at
+construction. Immediate flushing also gives up the batching win, so reach for it only
+when ordering against external events actually matters.
+:::
+
+If you only need a one-off flush rather than a permanent mode, call the static
+`ServerReplicator.FlushNow()` to drain all pending ops immediately.
+
+### Ordering guarantees
+
+Every replicator&#x27;s data ops funnel through a single server-wide ordering point, so:
+
+- **Global order is preserved.** Ops from *different* replicators and different
+  `TableManager`s replay on the client in the exact order the server produced them —
+  not merely per-replicator order.
+- **Audience is captured at write time, re-checked at flush.** A player added
+  mid-frame never double-applies an op already baked into their snapshot; a player
+  removed mid-frame never receives an op for a replicator they were just dropped from.
+- **Ordered remotes interleave with data.** Signals and functions registered as
+  *ordered* variants (see [TR Custom Remotes](/api/TR%20Custom%20Remotes)) travel
+  through the same buffer, so an
+  ordered signal fired after a `Set` arrives after that `Set` is applied.
+
+### Discovery listener scheduling (`FireMode`)
+
+Discovery callbacks (`ForEach`, `OnNew`, and the `ReplicatorCreated` signal) are
+scheduled according to a global fire mode. The default, `&quot;bindable&quot;`, mirrors
+Roblox&#x27;s `BindableEvent` behavior. You can change it for listeners registered
+afterward:
+
+```lua
+ServerReplicator.SetListenerFireMode(&quot;immediate&quot;) -- run on a fresh thread at once
+ServerReplicator.SetListenerFireMode(&quot;deferred&quot;)  -- run at the end of the resumption cycle
+ServerReplicator.SetListenerFireMode(&quot;bindable&quot;)  -- default, matches BindableEvent
+
+print(ServerReplicator.ListenerFireMode) -- read-only current mode
+```
+
+`&quot;immediate&quot;` gives the lowest latency but runs callbacks re-entrantly;
+`&quot;deferred&quot;` is safest if a callback might create or destroy replicators. The setting
+is shared across `ServerReplicator` and `ClientReplicator`.
+
+:::info Going deeper
+For the full internal picture — the frame buffer, the double `task.defer`, the wire
+format, and table de-duplication — see `ARCHITECTURE.md` in the TableReplicator
+source. This guide covers only the user-facing tuning knobs.
+:::
+
+---
+### See also
+
+- **[TR Getting Started](/api/TR%20Getting%20Started)** — where `Coalesced` and `ImmediateFlush` live in the config.
+- **[TR Custom Remotes](/api/TR%20Custom%20Remotes)** — ordered vs unordered signals and functions.
+- **[TR Discovery &amp; Targeting](/api/TR%20Discovery%20&amp;%20Targeting)** — the listeners that `FireMode` schedules."><meta data-rh="true" property="og:description" content="By default TableReplicator already does the right thing: writes are batched per
+frame and applied in a consistent order on every client. This guide explains those
+guarantees and the few knobs you can turn when a replicator has unusual needs.
+
+### Per-frame batching (the default)
+
+When you mutate `.Manager`, the write isn&#x27;t sent immediately. It&#x27;s queued and flushed
+once per frame, so a burst of writes across many replicators collapses into **at most
+one message per player per frame**. On the client, a whole flush is applied inside a
+single `TableManager` batch, so listeners see one coalesced update rather than a
+storm of intermediate ones.
+
+You rarely need to change this. The options below are for the cases where you do.
+
+### `Coalesced` — drop redundant writes
+
+If a replicator writes the same key many times per frame and only the final value
+matters, set `Coalesced = true`. Intermediate writes to a key are dropped and only
+the latest is sent:
+
+```lua
+local replicator = ServerReplicator.new({
+	Data = { MousePosition = Vector3.zero },
+	Targets = &quot;all&quot;,
+	Coalesced = true, -- only the last MousePosition of the frame is sent
+})
+```
+
+Best for high-churn, latest-value-wins data (cursor positions, live sliders). Avoid
+it when every intermediate value is meaningful.
+
+### `ImmediateFlush` — send each op right away
+
+Set `ImmediateFlush = true` to send each op as it happens instead of waiting for the
+per-frame flush. The main use is guaranteeing a data change lands *before* an external
+`RemoteEvent` you fire in the same frame:
+
+```lua
+local replicator = ServerReplicator.new({
+	Data = { State = &quot;Idle&quot; },
+	Targets = &quot;all&quot;,
+	ImmediateFlush = true,
+})
+```
+
+:::caution Mutually exclusive
+`Coalesced` and `ImmediateFlush` cannot both be `true` — that combination throws at
+construction. Immediate flushing also gives up the batching win, so reach for it only
+when ordering against external events actually matters.
+:::
+
+If you only need a one-off flush rather than a permanent mode, call the static
+`ServerReplicator.FlushNow()` to drain all pending ops immediately.
+
+### Ordering guarantees
+
+Every replicator&#x27;s data ops funnel through a single server-wide ordering point, so:
+
+- **Global order is preserved.** Ops from *different* replicators and different
+  `TableManager`s replay on the client in the exact order the server produced them —
+  not merely per-replicator order.
+- **Audience is captured at write time, re-checked at flush.** A player added
+  mid-frame never double-applies an op already baked into their snapshot; a player
+  removed mid-frame never receives an op for a replicator they were just dropped from.
+- **Ordered remotes interleave with data.** Signals and functions registered as
+  *ordered* variants (see [TR Custom Remotes](/api/TR%20Custom%20Remotes)) travel
+  through the same buffer, so an
+  ordered signal fired after a `Set` arrives after that `Set` is applied.
+
+### Discovery listener scheduling (`FireMode`)
+
+Discovery callbacks (`ForEach`, `OnNew`, and the `ReplicatorCreated` signal) are
+scheduled according to a global fire mode. The default, `&quot;bindable&quot;`, mirrors
+Roblox&#x27;s `BindableEvent` behavior. You can change it for listeners registered
+afterward:
+
+```lua
+ServerReplicator.SetListenerFireMode(&quot;immediate&quot;) -- run on a fresh thread at once
+ServerReplicator.SetListenerFireMode(&quot;deferred&quot;)  -- run at the end of the resumption cycle
+ServerReplicator.SetListenerFireMode(&quot;bindable&quot;)  -- default, matches BindableEvent
+
+print(ServerReplicator.ListenerFireMode) -- read-only current mode
+```
+
+`&quot;immediate&quot;` gives the lowest latency but runs callbacks re-entrantly;
+`&quot;deferred&quot;` is safest if a callback might create or destroy replicators. The setting
+is shared across `ServerReplicator` and `ClientReplicator`.
+
+:::info Going deeper
+For the full internal picture — the frame buffer, the double `task.defer`, the wire
+format, and table de-duplication — see `ARCHITECTURE.md` in the TableReplicator
+source. This guide covers only the user-facing tuning knobs.
+:::
+
+---
+### See also
+
+- **[TR Getting Started](/api/TR%20Getting%20Started)** — where `Coalesced` and `ImmediateFlush` live in the config.
+- **[TR Custom Remotes](/api/TR%20Custom%20Remotes)** — ordered vs unordered signals and functions.
+- **[TR Discovery &amp; Targeting](/api/TR%20Discovery%20&amp;%20Targeting)** — the listeners that `FireMode` schedules."><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/TR Performance &amp; Ordering"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/TR Performance &amp; Ordering" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/TR Performance &amp; Ordering" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.e8e96400.css">
+<script src="/ModulesOnRails/assets/js/runtime~main.668e8339.js" defer="defer"></script>
+<script src="/ModulesOnRails/assets/js/main.d4575191.js" defer="defer"></script>
+</head>
+<body>
+<svg style="display: none;"><defs>
+<symbol id="theme-svg-external-link" viewBox="0 0 24 24"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"/></symbol>
+</defs></svg>
+<script>!function(){var t=function(){try{return new URLSearchParams(window.location.search).get("docusaurus-theme")}catch(t){}}()||function(){try{return window.localStorage.getItem("theme")}catch(t){}}();document.documentElement.setAttribute("data-theme",t||(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")),document.documentElement.setAttribute("data-theme-choice",t||"system")}(),function(){try{const c=new URLSearchParams(window.location.search).entries();for(var[t,e]of c)if(t.startsWith("docusaurus-data-")){var a=t.replace("docusaurus-data-","data-");document.documentElement.setAttribute(a,e)}}catch(t){}}()</script><div id="__docusaurus"><div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#__docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="theme-layout-navbar navbar navbar--fixed-top"><div class="navbar__inner"><div class="theme-layout-navbar-left navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="theme-layout-navbar-right navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_nPIU"><use href="#theme-svg-external-link"></use></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="system mode" aria-label="Switch between dark and light mode (currently system mode)"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP systemToggleIcon_QzmC"><path fill="currentColor" d="m12 21c4.971 0 9-4.029 9-9s-4.029-9-9-9-9 4.029-9 9 4.029 9 9 9zm4.95-13.95c1.313 1.313 2.05 3.093 2.05 4.95s-0.738 3.637-2.05 4.95c-1.313 1.313-3.093 2.05-4.95 2.05v-14c1.857 0 3.637 0.737 4.95 2.05z"></path></svg></button></div><div class="navbarSearchContainer_Bca1"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input id="search_input_react" type="search" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="__docusaurus_skipToContent_fallback" class="theme-layout-main main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject"><span title="​Base​Object" class="linkLabel_WmDU">​Base​Object</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Roam"><span title="​Roam" class="linkLabel_WmDU">​Roam</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/TableManager"><span title="TableManager" class="categoryLinkLabel_W154">TableManager</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" href="/ModulesOnRails/api/TableReplicator"><span title="TableReplicator" class="categoryLinkLabel_W154">TableReplicator</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TableReplicator"><span title="​Table​Replicator" class="linkLabel_WmDU">​Table​Replicator</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/ServerReplicator"><span title="​Server​Replicator" class="linkLabel_WmDU">​Server​Replicator</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/ClientReplicator"><span title="​Client​Replicator" class="linkLabel_WmDU">​Client​Replicator</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-2 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" tabindex="0" href="/ModulesOnRails/api/TR Getting Started"><span title="[Guides]" class="categoryLinkLabel_W154">[Guides]</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TR Getting Started"><span title="​T​R ​Getting ​Started" class="linkLabel_WmDU">​T​R ​Getting ​Started</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TR Discovery &amp; Targeting"><span title="​T​R ​Discovery &amp; ​Targeting" class="linkLabel_WmDU">​T​R ​Discovery &amp; ​Targeting</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TR Namespaces &amp; Tokens"><span title="​T​R ​Namespaces &amp; ​Tokens" class="linkLabel_WmDU">​T​R ​Namespaces &amp; ​Tokens</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TR Parent-Child Guide"><span title="​T​R ​Parent-​Child ​Guide" class="linkLabel_WmDU">​T​R ​Parent-​Child ​Guide</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TR Custom Remotes"><span title="​T​R ​Custom ​Remotes" class="linkLabel_WmDU">​T​R ​Custom ​Remotes</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" tabindex="0" href="/ModulesOnRails/api/TR Performance &amp; Ordering"><span title="​T​R ​Performance &amp; ​Ordering" class="linkLabel_WmDU">​T​R ​Performance &amp; ​Ordering</span></a></li></ul></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/NetWire"><span title="NetWire" class="categoryLinkLabel_W154">NetWire</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Component"><span title="Instance Component Systems" class="categoryLinkLabel_W154">Instance Component Systems</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/DropletManager"><span title="DropletManager" class="categoryLinkLabel_W154">DropletManager</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/AdjustableTimer"><span title="AdjustableTimer [Unreleased]" class="categoryLinkLabel_W154">AdjustableTimer [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/PlayerProfileManager"><span title="PlayerDataManagement [Unreleased]" class="categoryLinkLabel_W154">PlayerDataManagement [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/CmdrHandler"><span title="Admin Commands [Cmdr]" class="categoryLinkLabel_W154">Admin Commands [Cmdr]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Queue"><span title="Data Structures" class="categoryLinkLabel_W154">Data Structures</span></a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BufferCodec"><span title="​Buffer​Codec" class="linkLabel_WmDU">​Buffer​Codec</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ObjectCache"><span title="​Object​Cache" class="linkLabel_WmDU">​Object​Cache</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ProbabilityDistributor"><span title="​Probability​Distributor" class="linkLabel_WmDU">​Probability​Distributor</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PromValue"><span title="​Prom​Value" class="linkLabel_WmDU">​Prom​Value</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/T"><span title="​T" class="linkLabel_WmDU">​T</span></a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">T</span><span style="display:inline-block">R</span><span style="display:inline-block"></span><span style="display:inline-block">Performance</span><span style="display:inline-block">&amp;</span><span style="display:inline-block"></span><span style="display:inline-block">Ordering</span></h1><div class="luaClassTags_EipM"></div><div>
+<p>
+  By default TableReplicator already does the right thing: writes are batched per
+  frame and applied in a consistent order on every client. This guide explains those
+  guarantees and the few knobs you can turn when a replicator has unusual needs.
+</p>
+<h3>Per-frame batching (the default)</h3>
+<p>
+  When you mutate <code>.Manager</code>, the write isn't sent immediately. It's queued and flushed
+  once per frame, so a burst of writes across many replicators collapses into <strong>at most
+one message per player per frame</strong>. On the client, a whole flush is applied inside a
+  single <code>TableManager</code> batch, so listeners see one coalesced update rather than a
+  storm of intermediate ones.
+</p>
+<p>You rarely need to change this. The options below are for the cases where you do.</p>
+<h3><code>Coalesced</code> — drop redundant writes</h3>
+<p>
+  If a replicator writes the same key many times per frame and only the final value
+  matters, set <code>Coalesced = true</code>. Intermediate writes to a key are dropped and only
+  the latest is sent:
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> replicator <span class="token operator">=</span> ServerReplicator<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">{</span>
+	Data <span class="token operator">=</span> <span class="token punctuation">{</span> MousePosition <span class="token operator">=</span> Vector3<span class="token punctuation">.</span>zero <span class="token punctuation">}</span><span class="token punctuation">,</span>
+	Targets <span class="token operator">=</span> <span class="token string">"all"</span><span class="token punctuation">,</span>
+	Coalesced <span class="token operator">=</span> <span class="token keyword">true</span><span class="token punctuation">,</span> <span class="token comment">-- only the last MousePosition of the frame is sent</span>
+<span class="token punctuation">}</span><span class="token punctuation">)</span>
+</code></pre>
+<p>
+  Best for high-churn, latest-value-wins data (cursor positions, live sliders). Avoid
+  it when every intermediate value is meaningful.
+</p>
+<h3><code>ImmediateFlush</code> — send each op right away</h3>
+<p>
+  Set <code>ImmediateFlush = true</code> to send each op as it happens instead of waiting for the
+  per-frame flush. The main use is guaranteeing a data change lands <em>before</em> an external
+  <code>RemoteEvent</code> you fire in the same frame:
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> replicator <span class="token operator">=</span> ServerReplicator<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">{</span>
+	Data <span class="token operator">=</span> <span class="token punctuation">{</span> State <span class="token operator">=</span> <span class="token string">"Idle"</span> <span class="token punctuation">}</span><span class="token punctuation">,</span>
+	Targets <span class="token operator">=</span> <span class="token string">"all"</span><span class="token punctuation">,</span>
+	ImmediateFlush <span class="token operator">=</span> <span class="token keyword">true</span><span class="token punctuation">,</span>
+<span class="token punctuation">}</span><span class="token punctuation">)</span>
+</code></pre>
+
+  
+    
+    
+      <div class="admonition admonition-caution alert alert--warning">
+        <div class="admonition-heading">
+          <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+                <path d="M8.893 1.5c-.183-.31-.52-.5-.887-.5s-.703.19-.886.5L.138 13.499a.98.98 0 0 0 0 1.001c.193.31.53.501.886.501h13.964c.367 0 .704-.19.877-.5a1.03 1.03 0 0 0 .01-1.002L8.893 1.5zm.133 11.497H6.987v-2.003h2.039v2.003zm0-3.004H6.987V5.987h2.039v4.006z"></path>
+              </svg></span><span class="admonition-title">Mutually exclusive</span></h5>
+        </div>
+        <div class="admonition-content">
+          <p>
+            <code>Coalesced</code> and <code>ImmediateFlush</code> cannot both be <code>true</code> — that combination throws at
+            construction. Immediate flushing also gives up the batching win, so reach for it only
+            when ordering against external events actually matters.
+          </p>
+        </div>
+      </div>
+    
+  
+
+<p>
+  If you only need a one-off flush rather than a permanent mode, call the static
+  <code>ServerReplicator.FlushNow()</code> to drain all pending ops immediately.
+</p>
+<h3>Ordering guarantees</h3>
+<p>Every replicator's data ops funnel through a single server-wide ordering point, so:</p>
+<ul>
+  <li>
+    <strong>Global order is preserved.</strong> Ops from <em>different</em> replicators and different
+    <code>TableManager</code>s replay on the client in the exact order the server produced them —
+    not merely per-replicator order.
+  </li>
+  <li>
+    <strong>Audience is captured at write time, re-checked at flush.</strong> A player added
+    mid-frame never double-applies an op already baked into their snapshot; a player
+    removed mid-frame never receives an op for a replicator they were just dropped from.
+  </li>
+  <li>
+    <strong>Ordered remotes interleave with data.</strong> Signals and functions registered as
+    <em>ordered</em> variants (see <a href="/ModulesOnRails/api/TR%20Custom%20Remotes">TR Custom Remotes</a>) travel
+    through the same buffer, so an
+    ordered signal fired after a <code>Set</code> arrives after that <code>Set</code> is applied.
+  </li>
+</ul>
+<h3>Discovery listener scheduling (<code>FireMode</code>)</h3>
+<p>
+  Discovery callbacks (<code>ForEach</code>, <code>OnNew</code>, and the <code>ReplicatorCreated</code> signal) are
+  scheduled according to a global fire mode. The default, <code>"bindable"</code>, mirrors
+  Roblox's <code>BindableEvent</code> behavior. You can change it for listeners registered
+  afterward:
+</p>
+<pre class="language-lua"><code class="language-lua">ServerReplicator<span class="token punctuation">.</span><span class="token function">SetListenerFireMode</span><span class="token punctuation">(</span><span class="token string">"immediate"</span><span class="token punctuation">)</span> <span class="token comment">-- run on a fresh thread at once</span>
+ServerReplicator<span class="token punctuation">.</span><span class="token function">SetListenerFireMode</span><span class="token punctuation">(</span><span class="token string">"deferred"</span><span class="token punctuation">)</span>  <span class="token comment">-- run at the end of the resumption cycle</span>
+ServerReplicator<span class="token punctuation">.</span><span class="token function">SetListenerFireMode</span><span class="token punctuation">(</span><span class="token string">"bindable"</span><span class="token punctuation">)</span>  <span class="token comment">-- default, matches BindableEvent</span>
+
+<span class="token function">print</span><span class="token punctuation">(</span>ServerReplicator<span class="token punctuation">.</span>ListenerFireMode<span class="token punctuation">)</span> <span class="token comment">-- read-only current mode</span>
+</code></pre>
+<p>
+  <code>"immediate"</code> gives the lowest latency but runs callbacks re-entrantly;
+  <code>"deferred"</code> is safest if a callback might create or destroy replicators. The setting
+  is shared across <code>ServerReplicator</code> and <code>ClientReplicator</code>.
+</p>
+
+  
+    
+    
+      <div class="admonition admonition-info alert alert--info">
+        <div class="admonition-heading">
+          <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="16" viewBox="0 0 14 16">
+                <path d="M7 2.3c3.14 0 5.7 2.56 5.7 5.7s-2.56 5.7-5.7 5.7A5.71 5.71 0 0 1 1.3 8c0-3.14 2.56-5.7 5.7-5.7zM7 1C3.14 1 0 4.14 0 8s3.14 7 7 7 7-3.14 7-7-3.14-7-7-7zm1 3H6v5h2V4zm0 6H6v2h2v-2z"></path>
+              </svg></span><span class="admonition-title">Going deeper</span></h5>
+        </div>
+        <div class="admonition-content">
+          <p>
+            For the full internal picture — the frame buffer, the double <code>task.defer</code>, the wire
+            format, and table de-duplication — see <code>ARCHITECTURE.md</code> in the TableReplicator
+            source. This guide covers only the user-facing tuning knobs.
+          </p>
+        </div>
+      </div>
+    
+  
+
+<hr>
+<h3>See also</h3>
+<ul>
+  <li><strong><a href="/ModulesOnRails/api/TR%20Getting%20Started">TR Getting Started</a></strong> — where <code>Coalesced</code> and <code>ImmediateFlush</code> live in the config.</li>
+  <li><strong><a href="/ModulesOnRails/api/TR%20Custom%20Remotes">TR Custom Remotes</a></strong> — ordered vs unordered signals and functions.</li>
+  <li><strong><a href="/ModulesOnRails/api/TR%20Discovery%20&#x26;%20Targeting">TR Discovery &#x26; Targeting</a></strong> — the listeners that <code>FireMode</code> schedules.</li>
+</ul>
+</div></header></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
+    &quot;functions&quot;: [],
+    &quot;properties&quot;: [],
+    &quot;types&quot;: [],
+    &quot;name&quot;: &quot;TR Performance &amp; Ordering&quot;,
+    &quot;desc&quot;: &quot;By default TableReplicator already does the right thing: writes are batched per\nframe and applied in a consistent order on every client. This guide explains those\nguarantees and the few knobs you can turn when a replicator has unusual needs.\n\n### Per-frame batching (the default)\n\nWhen you mutate `.Manager`, the write isn&#x27;t sent immediately. It&#x27;s queued and flushed\nonce per frame, so a burst of writes across many replicators collapses into **at most\none message per player per frame**. On the client, a whole flush is applied inside a\nsingle `TableManager` batch, so listeners see one coalesced update rather than a\nstorm of intermediate ones.\n\nYou rarely need to change this. The options below are for the cases where you do.\n\n### `Coalesced` — drop redundant writes\n\nIf a replicator writes the same key many times per frame and only the final value\nmatters, set `Coalesced = true`. Intermediate writes to a key are dropped and only\nthe latest is sent:\n\n```lua\nlocal replicator = ServerReplicator.new({\n\tData = { MousePosition = Vector3.zero },\n\tTargets = \&quot;all\&quot;,\n\tCoalesced = true, -- only the last MousePosition of the frame is sent\n})\n```\n\nBest for high-churn, latest-value-wins data (cursor positions, live sliders). Avoid\nit when every intermediate value is meaningful.\n\n### `ImmediateFlush` — send each op right away\n\nSet `ImmediateFlush = true` to send each op as it happens instead of waiting for the\nper-frame flush. The main use is guaranteeing a data change lands *before* an external\n`RemoteEvent` you fire in the same frame:\n\n```lua\nlocal replicator = ServerReplicator.new({\n\tData = { State = \&quot;Idle\&quot; },\n\tTargets = \&quot;all\&quot;,\n\tImmediateFlush = true,\n})\n```\n\n:::caution Mutually exclusive\n`Coalesced` and `ImmediateFlush` cannot both be `true` — that combination throws at\nconstruction. Immediate flushing also gives up the batching win, so reach for it only\nwhen ordering against external events actually matters.\n:::\n\nIf you only need a one-off flush rather than a permanent mode, call the static\n`ServerReplicator.FlushNow()` to drain all pending ops immediately.\n\n### Ordering guarantees\n\nEvery replicator&#x27;s data ops funnel through a single server-wide ordering point, so:\n\n- **Global order is preserved.** Ops from *different* replicators and different\n  `TableManager`s replay on the client in the exact order the server produced them —\n  not merely per-replicator order.\n- **Audience is captured at write time, re-checked at flush.** A player added\n  mid-frame never double-applies an op already baked into their snapshot; a player\n  removed mid-frame never receives an op for a replicator they were just dropped from.\n- **Ordered remotes interleave with data.** Signals and functions registered as\n  *ordered* variants (see [TR Custom Remotes](/api/TR%20Custom%20Remotes)) travel\n  through the same buffer, so an\n  ordered signal fired after a `Set` arrives after that `Set` is applied.\n\n### Discovery listener scheduling (`FireMode`)\n\nDiscovery callbacks (`ForEach`, `OnNew`, and the `ReplicatorCreated` signal) are\nscheduled according to a global fire mode. The default, `\&quot;bindable\&quot;`, mirrors\nRoblox&#x27;s `BindableEvent` behavior. You can change it for listeners registered\nafterward:\n\n```lua\nServerReplicator.SetListenerFireMode(\&quot;immediate\&quot;) -- run on a fresh thread at once\nServerReplicator.SetListenerFireMode(\&quot;deferred\&quot;)  -- run at the end of the resumption cycle\nServerReplicator.SetListenerFireMode(\&quot;bindable\&quot;)  -- default, matches BindableEvent\n\nprint(ServerReplicator.ListenerFireMode) -- read-only current mode\n```\n\n`\&quot;immediate\&quot;` gives the lowest latency but runs callbacks re-entrantly;\n`\&quot;deferred\&quot;` is safest if a callback might create or destroy replicators. The setting\nis shared across `ServerReplicator` and `ClientReplicator`.\n\n:::info Going deeper\nFor the full internal picture — the frame buffer, the double `task.defer`, the wire\nformat, and table de-duplication — see `ARCHITECTURE.md` in the TableReplicator\nsource. This guide covers only the user-facing tuning knobs.\n:::\n\n---\n### See also\n\n- **[TR Getting Started](/api/TR%20Getting%20Started)** — where `Coalesced` and `ImmediateFlush` live in the config.\n- **[TR Custom Remotes](/api/TR%20Custom%20Remotes)** — ordered vs unordered signals and functions.\n- **[TR Discovery &amp; Targeting](/api/TR%20Discovery%20&amp;%20Targeting)** — the listeners that `FireMode` schedules.&quot;,
+    &quot;source&quot;: {
+        &quot;line&quot;: 105,
+        &quot;path&quot;: &quot;lib/tablereplicator/src/Docs/TR_Performance_And_Ordering.luau&quot;
+    }
+}</pre></details></div></div></div></main></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
+</body>
+</html>

@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en" dir="ltr" class="plugin-moonwave plugin-id-moonwave" data-has-hydrated="false">
+<head>
+<meta charset="UTF-8">
+<meta name="generator" content="Docusaurus v3.10.1">
+<title data-rh="true">TM Proxies &amp; Direct Table Access | ModulesOnRails</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:url" content="https://raild3x.github.io/ModulesOnRails/api/TM Proxies &amp; Direct Table Access"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docusaurus_tag" content="default"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docsearch:docusaurus_tag" content="default"><meta data-rh="true" property="og:title" content="TM Proxies &amp; Direct Table Access | ModulesOnRails"><meta data-rh="true" name="description" content="A **proxy** is a live, write-through view of a table inside a
+[TableManager](/api/TableManager). Reading through it returns nested proxies;
+writing through it routes back into the manager exactly as `Set` would, firing
+all the normal events. This guide covers what proxies can and can&#x27;t do, and how
+to safely work with the raw data underneath.
+
+## Getting a proxy
+
+`manager.Proxy` is the root proxy; `manager:GetProxy(path)` returns the proxy
+for a nested table (or the raw value if the path isn&#x27;t a table).
+
+```lua
+local manager = TableManager.new({ Player = { Health = 100 } })
+
+manager.Proxy.Player.Health = 80        -- fires ValueChanged, like Set
+print(manager.Proxy.Player.Health)      -- 80
+```
+
+## What works
+
+Proxies are userdata backed by metamethods, so most table syntax works
+transparently:
+
+- `#proxy` — length, via `__len`.
+- `for k, v in proxy do` — generic iteration, via `__iter`.
+- `proxy.key` / `proxy.key = value` — indexing and assignment.
+- `proxy1 == proxy2` — two proxies wrapping the same underlying table are equal.
+- `tostring(proxy)` — readable identification.
+
+```lua
+local manager = TableManager.new({ Items = { &quot;a&quot;, &quot;b&quot;, &quot;c&quot; } })
+
+print(#manager.Proxy.Items)             -- 3
+for i, item in manager.Proxy.Items do   -- generic for, NOT ipairs
+	print(i, item)
+end
+```
+
+## What doesn&#x27;t work
+
+Because a proxy is userdata, not a table, some operations that expect a real
+table fail:
+
+- **`pairs`/`ipairs`** — use generic `for k, v in proxy do` instead.
+- **`table.*` functions** (`table.insert`, `table.remove`, …) — use the
+  manager&#x27;s array methods (`ArrayInsert`, `ArrayRemove`, …), which also fire
+  events.
+- **`proxy == originalTable`** — a proxy and its raw table have different
+  identities; `__eq` only applies proxy-to-proxy. Compare against the raw value
+  from `Get` instead (see below).
+- **`rawget`/`rawset`** — these bypass the metamethods.
+- **Proxies as table keys** — a proxy and its original are distinct keys. Pick
+  one and use it consistently as a key.
+
+```lua
+-- Bad:
+table.insert(manager.Proxy.Items, &quot;d&quot;)     -- no-op; Items is a proxy
+if manager.Proxy == manager.Raw then end   -- always false
+
+-- Good:
+manager:ArrayInsert(&quot;Items&quot;, &quot;d&quot;)          -- fires ArrayInserted
+if manager:Get(&quot;Items&quot;) == someRawTable then end -- Get returns the raw value
+```
+
+## Multi-location references and DuplicateReferenceMode
+
+Writing the same table to a second path is a supported feature. Which of two
+behaviors you get is set by
+[`DuplicateReferenceMode`](/api/TableManager#DuplicateReferenceMode):
+
+- `&quot;allow&quot;` (default) — both paths **share identity**; a write through one is
+  visible at the other, and each location fires its own events. A shared table
+  has a single proxy reporting one &quot;primary anchor&quot; (whichever path created it
+  first).
+- `&quot;copy&quot;` — the second write stores an **independent deep clone**, so the two
+  paths diverge.
+
+```lua
+local a = TableManager.new(data, { DuplicateReferenceMode = &quot;copy&quot; })
+```
+
+## Opting out of proxies
+
+Pass `EnableProxies = false` to skip building the proxy graph entirely. Then
+`manager.Proxy` is `nil` and `GetProxy` errors — read with `Get` and write with
+`Set`/the array methods.
+
+```lua
+local manager = TableManager.new(data, { EnableProxies = false })
+manager:Set(&quot;Player.Health&quot;, 80) -- proxies unavailable; Set still works
+```
+
+## Bypassing the manager
+
+If external code mutates `manager.Raw` (or a table you hold a reference to)
+directly, the manager doesn&#x27;t see it and no events fire. The supported recovery
+is `Flush(path)`, which diffs that branch and fires whatever changed — see the
+Flushing guide. Prefer writing through the API so this never comes up.
+
+---
+### See also
+
+- **[TM Flushing](/api/TM%20Flushing)** — `Flush` for surfacing bypassed writes.
+- **[TM Opaque Values](/api/TM%20Opaque%20Values)** — marking tables so the diff engine leaves them alone.
+- **[TM Getting Started](/api/TM%20Getting%20Started)** — reading and writing basics."><meta data-rh="true" property="og:description" content="A **proxy** is a live, write-through view of a table inside a
+[TableManager](/api/TableManager). Reading through it returns nested proxies;
+writing through it routes back into the manager exactly as `Set` would, firing
+all the normal events. This guide covers what proxies can and can&#x27;t do, and how
+to safely work with the raw data underneath.
+
+## Getting a proxy
+
+`manager.Proxy` is the root proxy; `manager:GetProxy(path)` returns the proxy
+for a nested table (or the raw value if the path isn&#x27;t a table).
+
+```lua
+local manager = TableManager.new({ Player = { Health = 100 } })
+
+manager.Proxy.Player.Health = 80        -- fires ValueChanged, like Set
+print(manager.Proxy.Player.Health)      -- 80
+```
+
+## What works
+
+Proxies are userdata backed by metamethods, so most table syntax works
+transparently:
+
+- `#proxy` — length, via `__len`.
+- `for k, v in proxy do` — generic iteration, via `__iter`.
+- `proxy.key` / `proxy.key = value` — indexing and assignment.
+- `proxy1 == proxy2` — two proxies wrapping the same underlying table are equal.
+- `tostring(proxy)` — readable identification.
+
+```lua
+local manager = TableManager.new({ Items = { &quot;a&quot;, &quot;b&quot;, &quot;c&quot; } })
+
+print(#manager.Proxy.Items)             -- 3
+for i, item in manager.Proxy.Items do   -- generic for, NOT ipairs
+	print(i, item)
+end
+```
+
+## What doesn&#x27;t work
+
+Because a proxy is userdata, not a table, some operations that expect a real
+table fail:
+
+- **`pairs`/`ipairs`** — use generic `for k, v in proxy do` instead.
+- **`table.*` functions** (`table.insert`, `table.remove`, …) — use the
+  manager&#x27;s array methods (`ArrayInsert`, `ArrayRemove`, …), which also fire
+  events.
+- **`proxy == originalTable`** — a proxy and its raw table have different
+  identities; `__eq` only applies proxy-to-proxy. Compare against the raw value
+  from `Get` instead (see below).
+- **`rawget`/`rawset`** — these bypass the metamethods.
+- **Proxies as table keys** — a proxy and its original are distinct keys. Pick
+  one and use it consistently as a key.
+
+```lua
+-- Bad:
+table.insert(manager.Proxy.Items, &quot;d&quot;)     -- no-op; Items is a proxy
+if manager.Proxy == manager.Raw then end   -- always false
+
+-- Good:
+manager:ArrayInsert(&quot;Items&quot;, &quot;d&quot;)          -- fires ArrayInserted
+if manager:Get(&quot;Items&quot;) == someRawTable then end -- Get returns the raw value
+```
+
+## Multi-location references and DuplicateReferenceMode
+
+Writing the same table to a second path is a supported feature. Which of two
+behaviors you get is set by
+[`DuplicateReferenceMode`](/api/TableManager#DuplicateReferenceMode):
+
+- `&quot;allow&quot;` (default) — both paths **share identity**; a write through one is
+  visible at the other, and each location fires its own events. A shared table
+  has a single proxy reporting one &quot;primary anchor&quot; (whichever path created it
+  first).
+- `&quot;copy&quot;` — the second write stores an **independent deep clone**, so the two
+  paths diverge.
+
+```lua
+local a = TableManager.new(data, { DuplicateReferenceMode = &quot;copy&quot; })
+```
+
+## Opting out of proxies
+
+Pass `EnableProxies = false` to skip building the proxy graph entirely. Then
+`manager.Proxy` is `nil` and `GetProxy` errors — read with `Get` and write with
+`Set`/the array methods.
+
+```lua
+local manager = TableManager.new(data, { EnableProxies = false })
+manager:Set(&quot;Player.Health&quot;, 80) -- proxies unavailable; Set still works
+```
+
+## Bypassing the manager
+
+If external code mutates `manager.Raw` (or a table you hold a reference to)
+directly, the manager doesn&#x27;t see it and no events fire. The supported recovery
+is `Flush(path)`, which diffs that branch and fires whatever changed — see the
+Flushing guide. Prefer writing through the API so this never comes up.
+
+---
+### See also
+
+- **[TM Flushing](/api/TM%20Flushing)** — `Flush` for surfacing bypassed writes.
+- **[TM Opaque Values](/api/TM%20Opaque%20Values)** — marking tables so the diff engine leaves them alone.
+- **[TM Getting Started](/api/TM%20Getting%20Started)** — reading and writing basics."><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/TM Proxies &amp; Direct Table Access"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/TM Proxies &amp; Direct Table Access" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/TM Proxies &amp; Direct Table Access" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.e8e96400.css">
+<script src="/ModulesOnRails/assets/js/runtime~main.668e8339.js" defer="defer"></script>
+<script src="/ModulesOnRails/assets/js/main.d4575191.js" defer="defer"></script>
+</head>
+<body>
+<svg style="display: none;"><defs>
+<symbol id="theme-svg-external-link" viewBox="0 0 24 24"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"/></symbol>
+</defs></svg>
+<script>!function(){var t=function(){try{return new URLSearchParams(window.location.search).get("docusaurus-theme")}catch(t){}}()||function(){try{return window.localStorage.getItem("theme")}catch(t){}}();document.documentElement.setAttribute("data-theme",t||(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")),document.documentElement.setAttribute("data-theme-choice",t||"system")}(),function(){try{const c=new URLSearchParams(window.location.search).entries();for(var[t,e]of c)if(t.startsWith("docusaurus-data-")){var a=t.replace("docusaurus-data-","data-");document.documentElement.setAttribute(a,e)}}catch(t){}}()</script><div id="__docusaurus"><div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#__docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="theme-layout-navbar navbar navbar--fixed-top"><div class="navbar__inner"><div class="theme-layout-navbar-left navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="theme-layout-navbar-right navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_nPIU"><use href="#theme-svg-external-link"></use></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="system mode" aria-label="Switch between dark and light mode (currently system mode)"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP systemToggleIcon_QzmC"><path fill="currentColor" d="m12 21c4.971 0 9-4.029 9-9s-4.029-9-9-9-9 4.029-9 9 4.029 9 9 9zm4.95-13.95c1.313 1.313 2.05 3.093 2.05 4.95s-0.738 3.637-2.05 4.95c-1.313 1.313-3.093 2.05-4.95 2.05v-14c1.857 0 3.637 0.737 4.95 2.05z"></path></svg></button></div><div class="navbarSearchContainer_Bca1"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input id="search_input_react" type="search" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="__docusaurus_skipToContent_fallback" class="theme-layout-main main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject"><span title="​Base​Object" class="linkLabel_WmDU">​Base​Object</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Roam"><span title="​Roam" class="linkLabel_WmDU">​Roam</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" href="/ModulesOnRails/api/TableManager"><span title="TableManager" class="categoryLinkLabel_W154">TableManager</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TableManager"><span title="​Table​Manager" class="linkLabel_WmDU">​Table​Manager</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-2 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" tabindex="0" href="/ModulesOnRails/api/TM Getting Started"><span title="[Guides]" class="categoryLinkLabel_W154">[Guides]</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Getting Started"><span title="​T​M ​Getting ​Started" class="linkLabel_WmDU">​T​M ​Getting ​Started</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Listeners &amp; Fire Modes"><span title="​T​M ​Listeners &amp; ​Fire ​Modes" class="linkLabel_WmDU">​T​M ​Listeners &amp; ​Fire ​Modes</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Flushing"><span title="​T​M ​Flushing" class="linkLabel_WmDU">​T​M ​Flushing</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Batching"><span title="​T​M ​Batching" class="linkLabel_WmDU">​T​M ​Batching</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Wildcards"><span title="​T​M ​Wildcards" class="linkLabel_WmDU">​T​M ​Wildcards</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" tabindex="0" href="/ModulesOnRails/api/TM Proxies &amp; Direct Table Access"><span title="​T​M ​Proxies &amp; ​Direct ​Table ​Access" class="linkLabel_WmDU">​T​M ​Proxies &amp; ​Direct ​Table ​Access</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Schema Validation"><span title="​T​M ​Schema ​Validation" class="linkLabel_WmDU">​T​M ​Schema ​Validation</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Opaque Values"><span title="​T​M ​Opaque ​Values" class="linkLabel_WmDU">​T​M ​Opaque ​Values</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Reactive State Wrappers"><span title="​T​M ​Reactive ​State ​Wrappers" class="linkLabel_WmDU">​T​M ​Reactive ​State ​Wrappers</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM For &amp; Map Views [Unreleased]"><span title="​T​M ​For &amp; ​Map ​Views [​Unreleased]" class="linkLabel_WmDU">​T​M ​For &amp; ​Map ​Views [​Unreleased]</span></a></li></ul></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/TableReplicator"><span title="TableReplicator" class="categoryLinkLabel_W154">TableReplicator</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/NetWire"><span title="NetWire" class="categoryLinkLabel_W154">NetWire</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Component"><span title="Instance Component Systems" class="categoryLinkLabel_W154">Instance Component Systems</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/DropletManager"><span title="DropletManager" class="categoryLinkLabel_W154">DropletManager</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/AdjustableTimer"><span title="AdjustableTimer [Unreleased]" class="categoryLinkLabel_W154">AdjustableTimer [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/PlayerProfileManager"><span title="PlayerDataManagement [Unreleased]" class="categoryLinkLabel_W154">PlayerDataManagement [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/CmdrHandler"><span title="Admin Commands [Cmdr]" class="categoryLinkLabel_W154">Admin Commands [Cmdr]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Queue"><span title="Data Structures" class="categoryLinkLabel_W154">Data Structures</span></a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BufferCodec"><span title="​Buffer​Codec" class="linkLabel_WmDU">​Buffer​Codec</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ObjectCache"><span title="​Object​Cache" class="linkLabel_WmDU">​Object​Cache</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ProbabilityDistributor"><span title="​Probability​Distributor" class="linkLabel_WmDU">​Probability​Distributor</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PromValue"><span title="​Prom​Value" class="linkLabel_WmDU">​Prom​Value</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/T"><span title="​T" class="linkLabel_WmDU">​T</span></a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">T</span><span style="display:inline-block">M</span><span style="display:inline-block"></span><span style="display:inline-block">Proxies</span><span style="display:inline-block">&amp;</span><span style="display:inline-block"></span><span style="display:inline-block">Direct</span><span style="display:inline-block"></span><span style="display:inline-block">Table</span><span style="display:inline-block"></span><span style="display:inline-block">Access</span></h1><div class="luaClassTags_EipM"></div><div>
+<p>
+  A <strong>proxy</strong> is a live, write-through view of a table inside a
+  <a href="/ModulesOnRails/api/TableManager">TableManager</a>. Reading through it returns nested proxies;
+  writing through it routes back into the manager exactly as <code>Set</code> would, firing
+  all the normal events. This guide covers what proxies can and can't do, and how
+  to safely work with the raw data underneath.
+</p>
+<h2>Getting a proxy</h2>
+<p>
+  <code>manager.Proxy</code> is the root proxy; <code>manager:GetProxy(path)</code> returns the proxy
+  for a nested table (or the raw value if the path isn't a table).
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> manager <span class="token operator">=</span> TableManager<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">{</span> Player <span class="token operator">=</span> <span class="token punctuation">{</span> Health <span class="token operator">=</span> <span class="token number">100</span> <span class="token punctuation">}</span> <span class="token punctuation">}</span><span class="token punctuation">)</span>
+
+manager<span class="token punctuation">.</span>Proxy<span class="token punctuation">.</span>Player<span class="token punctuation">.</span>Health <span class="token operator">=</span> <span class="token number">80</span>        <span class="token comment">-- fires ValueChanged, like Set</span>
+<span class="token function">print</span><span class="token punctuation">(</span>manager<span class="token punctuation">.</span>Proxy<span class="token punctuation">.</span>Player<span class="token punctuation">.</span>Health<span class="token punctuation">)</span>      <span class="token comment">-- 80</span>
+</code></pre>
+<h2>What works</h2>
+<p>
+  Proxies are userdata backed by metamethods, so most table syntax works
+  transparently:
+</p>
+<ul>
+  <li><code>#proxy</code> — length, via <code>__len</code>.</li>
+  <li><code>for k, v in proxy do</code> — generic iteration, via <code>__iter</code>.</li>
+  <li><code>proxy.key</code> / <code>proxy.key = value</code> — indexing and assignment.</li>
+  <li><code>proxy1 == proxy2</code> — two proxies wrapping the same underlying table are equal.</li>
+  <li><code>tostring(proxy)</code> — readable identification.</li>
+</ul>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> manager <span class="token operator">=</span> TableManager<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">{</span> Items <span class="token operator">=</span> <span class="token punctuation">{</span> <span class="token string">"a"</span><span class="token punctuation">,</span> <span class="token string">"b"</span><span class="token punctuation">,</span> <span class="token string">"c"</span> <span class="token punctuation">}</span> <span class="token punctuation">}</span><span class="token punctuation">)</span>
+
+<span class="token function">print</span><span class="token punctuation">(</span><span class="token operator">#</span>manager<span class="token punctuation">.</span>Proxy<span class="token punctuation">.</span>Items<span class="token punctuation">)</span>             <span class="token comment">-- 3</span>
+<span class="token keyword">for</span> i<span class="token punctuation">,</span> item <span class="token keyword">in</span> manager<span class="token punctuation">.</span>Proxy<span class="token punctuation">.</span>Items <span class="token keyword">do</span>   <span class="token comment">-- generic for, NOT ipairs</span>
+	<span class="token function">print</span><span class="token punctuation">(</span>i<span class="token punctuation">,</span> item<span class="token punctuation">)</span>
+<span class="token keyword">end</span>
+</code></pre>
+<h2>What doesn't work</h2>
+<p>
+  Because a proxy is userdata, not a table, some operations that expect a real
+  table fail:
+</p>
+<ul>
+  <li><strong><code>pairs</code>/<code>ipairs</code></strong> — use generic <code>for k, v in proxy do</code> instead.</li>
+  <li>
+    <strong><code>table.*</code> functions</strong> (<code>table.insert</code>, <code>table.remove</code>, …) — use the
+    manager's array methods (<code>ArrayInsert</code>, <code>ArrayRemove</code>, …), which also fire
+    events.
+  </li>
+  <li>
+    <strong><code>proxy == originalTable</code></strong> — a proxy and its raw table have different
+    identities; <code>__eq</code> only applies proxy-to-proxy. Compare against the raw value
+    from <code>Get</code> instead (see below).
+  </li>
+  <li><strong><code>rawget</code>/<code>rawset</code></strong> — these bypass the metamethods.</li>
+  <li>
+    <strong>Proxies as table keys</strong> — a proxy and its original are distinct keys. Pick
+    one and use it consistently as a key.
+  </li>
+</ul>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- Bad:</span>
+table<span class="token punctuation">.</span><span class="token function">insert</span><span class="token punctuation">(</span>manager<span class="token punctuation">.</span>Proxy<span class="token punctuation">.</span>Items<span class="token punctuation">,</span> <span class="token string">"d"</span><span class="token punctuation">)</span>     <span class="token comment">-- no-op; Items is a proxy</span>
+<span class="token keyword">if</span> manager<span class="token punctuation">.</span>Proxy <span class="token operator">==</span> manager<span class="token punctuation">.</span>Raw <span class="token keyword">then</span> <span class="token keyword">end</span>   <span class="token comment">-- always false</span>
+
+<span class="token comment">-- Good:</span>
+manager<span class="token punctuation">:</span><span class="token function">ArrayInsert</span><span class="token punctuation">(</span><span class="token string">"Items"</span><span class="token punctuation">,</span> <span class="token string">"d"</span><span class="token punctuation">)</span>          <span class="token comment">-- fires ArrayInserted</span>
+<span class="token keyword">if</span> manager<span class="token punctuation">:</span><span class="token function">Get</span><span class="token punctuation">(</span><span class="token string">"Items"</span><span class="token punctuation">)</span> <span class="token operator">==</span> someRawTable <span class="token keyword">then</span> <span class="token keyword">end</span> <span class="token comment">-- Get returns the raw value</span>
+</code></pre>
+<h2>Multi-location references and DuplicateReferenceMode</h2>
+<p>
+  Writing the same table to a second path is a supported feature. Which of two
+  behaviors you get is set by
+  <a href="/ModulesOnRails/api/TableManager#DuplicateReferenceMode"><code>DuplicateReferenceMode</code></a>:
+</p>
+<ul>
+  <li>
+    <code>"allow"</code> (default) — both paths <strong>share identity</strong>; a write through one is
+    visible at the other, and each location fires its own events. A shared table
+    has a single proxy reporting one "primary anchor" (whichever path created it
+    first).
+  </li>
+  <li>
+    <code>"copy"</code> — the second write stores an <strong>independent deep clone</strong>, so the two
+    paths diverge.
+  </li>
+</ul>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> a <span class="token operator">=</span> TableManager<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span>data<span class="token punctuation">,</span> <span class="token punctuation">{</span> DuplicateReferenceMode <span class="token operator">=</span> <span class="token string">"copy"</span> <span class="token punctuation">}</span><span class="token punctuation">)</span>
+</code></pre>
+<h2>Opting out of proxies</h2>
+<p>
+  Pass <code>EnableProxies = false</code> to skip building the proxy graph entirely. Then
+  <code>manager.Proxy</code> is <code>nil</code> and <code>GetProxy</code> errors — read with <code>Get</code> and write with
+  <code>Set</code>/the array methods.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> manager <span class="token operator">=</span> TableManager<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span>data<span class="token punctuation">,</span> <span class="token punctuation">{</span> EnableProxies <span class="token operator">=</span> <span class="token keyword">false</span> <span class="token punctuation">}</span><span class="token punctuation">)</span>
+manager<span class="token punctuation">:</span><span class="token function">Set</span><span class="token punctuation">(</span><span class="token string">"Player.Health"</span><span class="token punctuation">,</span> <span class="token number">80</span><span class="token punctuation">)</span> <span class="token comment">-- proxies unavailable; Set still works</span>
+</code></pre>
+<h2>Bypassing the manager</h2>
+<p>
+  If external code mutates <code>manager.Raw</code> (or a table you hold a reference to)
+  directly, the manager doesn't see it and no events fire. The supported recovery
+  is <code>Flush(path)</code>, which diffs that branch and fires whatever changed — see the
+  Flushing guide. Prefer writing through the API so this never comes up.
+</p>
+<hr>
+<h3>See also</h3>
+<ul>
+  <li><strong><a href="/ModulesOnRails/api/TM%20Flushing">TM Flushing</a></strong> — <code>Flush</code> for surfacing bypassed writes.</li>
+  <li><strong><a href="/ModulesOnRails/api/TM%20Opaque%20Values">TM Opaque Values</a></strong> — marking tables so the diff engine leaves them alone.</li>
+  <li><strong><a href="/ModulesOnRails/api/TM%20Getting%20Started">TM Getting Started</a></strong> — reading and writing basics.</li>
+</ul>
+</div></header></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
+    &quot;functions&quot;: [],
+    &quot;properties&quot;: [],
+    &quot;types&quot;: [],
+    &quot;name&quot;: &quot;TM Proxies &amp; Direct Table Access&quot;,
+    &quot;desc&quot;: &quot;A **proxy** is a live, write-through view of a table inside a\n[TableManager](/api/TableManager). Reading through it returns nested proxies;\nwriting through it routes back into the manager exactly as `Set` would, firing\nall the normal events. This guide covers what proxies can and can&#x27;t do, and how\nto safely work with the raw data underneath.\n\n## Getting a proxy\n\n`manager.Proxy` is the root proxy; `manager:GetProxy(path)` returns the proxy\nfor a nested table (or the raw value if the path isn&#x27;t a table).\n\n```lua\nlocal manager = TableManager.new({ Player = { Health = 100 } })\n\nmanager.Proxy.Player.Health = 80        -- fires ValueChanged, like Set\nprint(manager.Proxy.Player.Health)      -- 80\n```\n\n## What works\n\nProxies are userdata backed by metamethods, so most table syntax works\ntransparently:\n\n- `#proxy` — length, via `__len`.\n- `for k, v in proxy do` — generic iteration, via `__iter`.\n- `proxy.key` / `proxy.key = value` — indexing and assignment.\n- `proxy1 == proxy2` — two proxies wrapping the same underlying table are equal.\n- `tostring(proxy)` — readable identification.\n\n```lua\nlocal manager = TableManager.new({ Items = { \&quot;a\&quot;, \&quot;b\&quot;, \&quot;c\&quot; } })\n\nprint(#manager.Proxy.Items)             -- 3\nfor i, item in manager.Proxy.Items do   -- generic for, NOT ipairs\n\tprint(i, item)\nend\n```\n\n## What doesn&#x27;t work\n\nBecause a proxy is userdata, not a table, some operations that expect a real\ntable fail:\n\n- **`pairs`/`ipairs`** — use generic `for k, v in proxy do` instead.\n- **`table.*` functions** (`table.insert`, `table.remove`, …) — use the\n  manager&#x27;s array methods (`ArrayInsert`, `ArrayRemove`, …), which also fire\n  events.\n- **`proxy == originalTable`** — a proxy and its raw table have different\n  identities; `__eq` only applies proxy-to-proxy. Compare against the raw value\n  from `Get` instead (see below).\n- **`rawget`/`rawset`** — these bypass the metamethods.\n- **Proxies as table keys** — a proxy and its original are distinct keys. Pick\n  one and use it consistently as a key.\n\n```lua\n-- Bad:\ntable.insert(manager.Proxy.Items, \&quot;d\&quot;)     -- no-op; Items is a proxy\nif manager.Proxy == manager.Raw then end   -- always false\n\n-- Good:\nmanager:ArrayInsert(\&quot;Items\&quot;, \&quot;d\&quot;)          -- fires ArrayInserted\nif manager:Get(\&quot;Items\&quot;) == someRawTable then end -- Get returns the raw value\n```\n\n## Multi-location references and DuplicateReferenceMode\n\nWriting the same table to a second path is a supported feature. Which of two\nbehaviors you get is set by\n[`DuplicateReferenceMode`](/api/TableManager#DuplicateReferenceMode):\n\n- `\&quot;allow\&quot;` (default) — both paths **share identity**; a write through one is\n  visible at the other, and each location fires its own events. A shared table\n  has a single proxy reporting one \&quot;primary anchor\&quot; (whichever path created it\n  first).\n- `\&quot;copy\&quot;` — the second write stores an **independent deep clone**, so the two\n  paths diverge.\n\n```lua\nlocal a = TableManager.new(data, { DuplicateReferenceMode = \&quot;copy\&quot; })\n```\n\n## Opting out of proxies\n\nPass `EnableProxies = false` to skip building the proxy graph entirely. Then\n`manager.Proxy` is `nil` and `GetProxy` errors — read with `Get` and write with\n`Set`/the array methods.\n\n```lua\nlocal manager = TableManager.new(data, { EnableProxies = false })\nmanager:Set(\&quot;Player.Health\&quot;, 80) -- proxies unavailable; Set still works\n```\n\n## Bypassing the manager\n\nIf external code mutates `manager.Raw` (or a table you hold a reference to)\ndirectly, the manager doesn&#x27;t see it and no events fire. The supported recovery\nis `Flush(path)`, which diffs that branch and fires whatever changed — see the\nFlushing guide. Prefer writing through the API so this never comes up.\n\n---\n### See also\n\n- **[TM Flushing](/api/TM%20Flushing)** — `Flush` for surfacing bypassed writes.\n- **[TM Opaque Values](/api/TM%20Opaque%20Values)** — marking tables so the diff engine leaves them alone.\n- **[TM Getting Started](/api/TM%20Getting%20Started)** — reading and writing basics.&quot;,
+    &quot;source&quot;: {
+        &quot;line&quot;: 110,
+        &quot;path&quot;: &quot;lib/tablemanager/src/Docs/TM_Proxies_And_Direct_Table_Access.luau&quot;
+    }
+}</pre></details></div></div></div></main></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
+</body>
+</html>

@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="en" dir="ltr" class="plugin-moonwave plugin-id-moonwave" data-has-hydrated="false">
+<head>
+<meta charset="UTF-8">
+<meta name="generator" content="Docusaurus v3.10.1">
+<title data-rh="true">TR Discovery &amp; Targeting | ModulesOnRails</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:url" content="https://raild3x.github.io/ModulesOnRails/api/TR Discovery &amp; Targeting"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docusaurus_tag" content="default"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docsearch:docusaurus_tag" content="default"><meta data-rh="true" property="og:title" content="TR Discovery &amp; Targeting | ModulesOnRails"><meta data-rh="true" name="description" content="Two related questions come up constantly with TableReplicator:
+
+- **Discovery** — &quot;how does the client (or another server system) find the
+  replicator it cares about?&quot;
+- **Targeting** — &quot;which players does a top-level replicator send its data to?&quot;
+
+This guide covers both.
+
+---
+## Discovery
+
+Every discovery API takes an optional `SearchCondition`. A condition can be one of
+four things:
+
+| Condition | Matches |
+| --- | --- |
+| a **string** | replicators whose `Namespace` equals the string |
+| a **`ReplicationToken`** | replicators whose namespace equals the token&#x27;s name |
+| a **tags table** `{ k = v }` | replicators whose tags are a **superset** of the given pairs |
+| a **predicate** `(replicator) -&gt; boolean` | whatever you decide |
+| omitted (`nil`) | every replicator |
+
+:::note Anonymous replicators
+A replicator created without a `Namespace` never matches a string or token
+condition. Reach it by `Id`, tags, or a predicate instead. See
+[TR Namespaces &amp; Tokens](/api/TR%20Namespaces%20&amp;%20Tokens).
+:::
+
+### `ForEach` vs `OnNew`
+
+Both run a callback as replicators appear, and both return a disconnect function.
+The difference is whether already-existing replicators are included:
+
+```lua
+-- ForEach: runs for existing matches immediately, then for every future one.
+local disconnect = ClientReplicator.ForEach(&quot;PlayerData&quot;, function(replicator)
+	replicator.Manager:Observe(&quot;Coins&quot;, function(coins)
+		print(&quot;Coins:&quot;, coins)
+	end)
+end)
+
+-- OnNew: runs ONLY for replicators created after this call.
+ClientReplicator.OnNew(&quot;PlayerData&quot;, function(replicator)
+	print(&quot;A new PlayerData replicator appeared:&quot;, replicator.Id)
+end)
+
+-- Stop receiving callbacks:
+disconnect()
+```
+
+:::tip Prefer `ForEach`
+`ForEach` is almost always what you want — `OnNew` silently misses replicators that
+already exist (including everything in the initial client snapshot). Only reach for
+`OnNew` when you specifically want *future-only* matches.
+:::
+
+Conditions work the same across the board — here filtering by tag on the client so a
+callback only runs for the local player&#x27;s replicator:
+
+```lua
+local localPlayer = game:GetService(&quot;Players&quot;).LocalPlayer
+
+ClientReplicator.ForEach({ UserId = localPlayer.UserId }, function(replicator)
+	-- only fires for a replicator tagged with this UserId
+end)
+```
+
+### One-shot lookups
+
+When you want a single replicator rather than a running subscription:
+
+```lua
+-- Synchronous — nil if nothing matches right now.
+local rep = ClientReplicator.GetFirst(&quot;PlayerData&quot;)
+local byId = ClientReplicator.GetFromId(42)
+local all = ClientReplicator.GetAll({ Team = &quot;Red&quot; }) -- every current match
+
+-- Promise-based — resolves as soon as a match exists (now or later).
+ClientReplicator.PromiseFirst(&quot;PlayerData&quot;):andThen(function(replicator)
+	print(&quot;Got it:&quot;, replicator.Id)
+end)
+ClientReplicator.PromiseFromId(42):andThen(function(replicator) end)
+```
+
+All of these are static methods available on both [ServerReplicator](/api/ServerReplicator)
+and [ClientReplicator](/api/ClientReplicator). There is also a `ReplicatorCreated`
+signal that fires for every
+new replicator regardless of condition, if you want the raw stream.
+
+---
+## Targeting
+
+Targeting decides which players a **top-level** replicator replicates to. (Child
+replicators inherit their top-level ancestor&#x27;s targets — see
+[TR Parent-Child Guide](/api/TR%20Parent-Child%20Guide).) Set the initial audience
+with the `Targets` field, then
+adjust it live:
+
+```lua
+local replicator = ServerReplicator.new({
+	Namespace = &quot;Match&quot;,
+	Data = { Score = 0 },
+	Targets = {}, -- start with nobody; add players as they join the match
+})
+
+replicator:AddTarget(player)            -- add one player (or a { Player } list)
+replicator:RemoveTarget(player)         -- remove one player (or a list)
+replicator:SetTargets({ p1, p2 })       -- overwrite the whole target list
+replicator:SetTargets(&quot;all&quot;)            -- replicate to every current &amp; future player
+
+local players = replicator:GetTargets() -- { Player } currently targeted
+local isSeen  = replicator:IsReplicatingTo(player) -- boolean
+```
+
+When you add a player who has already bootstrapped (called `RequestData`), they
+immediately receive a snapshot of the replicator&#x27;s whole subtree. Removing an active
+player sends them a destroy for it.
+
+:::caution Top-level only
+`SetTargets`, `AddTarget`, and `RemoveTarget` throw on a child replicator — its
+audience is whatever its top-level ancestor targets. Reparent it instead
+(see [TR Parent-Child Guide](/api/TR%20Parent-Child%20Guide)).
+:::
+
+---
+### See also
+
+- **[TR Getting Started](/api/TR%20Getting%20Started)** — the basic create/listen flow.
+- **[TR Namespaces &amp; Tokens](/api/TR%20Namespaces%20&amp;%20Tokens)** — string namespaces vs anonymous vs tokens.
+- **[TR Parent-Child Guide](/api/TR%20Parent-Child%20Guide)** — how children inherit targeting."><meta data-rh="true" property="og:description" content="Two related questions come up constantly with TableReplicator:
+
+- **Discovery** — &quot;how does the client (or another server system) find the
+  replicator it cares about?&quot;
+- **Targeting** — &quot;which players does a top-level replicator send its data to?&quot;
+
+This guide covers both.
+
+---
+## Discovery
+
+Every discovery API takes an optional `SearchCondition`. A condition can be one of
+four things:
+
+| Condition | Matches |
+| --- | --- |
+| a **string** | replicators whose `Namespace` equals the string |
+| a **`ReplicationToken`** | replicators whose namespace equals the token&#x27;s name |
+| a **tags table** `{ k = v }` | replicators whose tags are a **superset** of the given pairs |
+| a **predicate** `(replicator) -&gt; boolean` | whatever you decide |
+| omitted (`nil`) | every replicator |
+
+:::note Anonymous replicators
+A replicator created without a `Namespace` never matches a string or token
+condition. Reach it by `Id`, tags, or a predicate instead. See
+[TR Namespaces &amp; Tokens](/api/TR%20Namespaces%20&amp;%20Tokens).
+:::
+
+### `ForEach` vs `OnNew`
+
+Both run a callback as replicators appear, and both return a disconnect function.
+The difference is whether already-existing replicators are included:
+
+```lua
+-- ForEach: runs for existing matches immediately, then for every future one.
+local disconnect = ClientReplicator.ForEach(&quot;PlayerData&quot;, function(replicator)
+	replicator.Manager:Observe(&quot;Coins&quot;, function(coins)
+		print(&quot;Coins:&quot;, coins)
+	end)
+end)
+
+-- OnNew: runs ONLY for replicators created after this call.
+ClientReplicator.OnNew(&quot;PlayerData&quot;, function(replicator)
+	print(&quot;A new PlayerData replicator appeared:&quot;, replicator.Id)
+end)
+
+-- Stop receiving callbacks:
+disconnect()
+```
+
+:::tip Prefer `ForEach`
+`ForEach` is almost always what you want — `OnNew` silently misses replicators that
+already exist (including everything in the initial client snapshot). Only reach for
+`OnNew` when you specifically want *future-only* matches.
+:::
+
+Conditions work the same across the board — here filtering by tag on the client so a
+callback only runs for the local player&#x27;s replicator:
+
+```lua
+local localPlayer = game:GetService(&quot;Players&quot;).LocalPlayer
+
+ClientReplicator.ForEach({ UserId = localPlayer.UserId }, function(replicator)
+	-- only fires for a replicator tagged with this UserId
+end)
+```
+
+### One-shot lookups
+
+When you want a single replicator rather than a running subscription:
+
+```lua
+-- Synchronous — nil if nothing matches right now.
+local rep = ClientReplicator.GetFirst(&quot;PlayerData&quot;)
+local byId = ClientReplicator.GetFromId(42)
+local all = ClientReplicator.GetAll({ Team = &quot;Red&quot; }) -- every current match
+
+-- Promise-based — resolves as soon as a match exists (now or later).
+ClientReplicator.PromiseFirst(&quot;PlayerData&quot;):andThen(function(replicator)
+	print(&quot;Got it:&quot;, replicator.Id)
+end)
+ClientReplicator.PromiseFromId(42):andThen(function(replicator) end)
+```
+
+All of these are static methods available on both [ServerReplicator](/api/ServerReplicator)
+and [ClientReplicator](/api/ClientReplicator). There is also a `ReplicatorCreated`
+signal that fires for every
+new replicator regardless of condition, if you want the raw stream.
+
+---
+## Targeting
+
+Targeting decides which players a **top-level** replicator replicates to. (Child
+replicators inherit their top-level ancestor&#x27;s targets — see
+[TR Parent-Child Guide](/api/TR%20Parent-Child%20Guide).) Set the initial audience
+with the `Targets` field, then
+adjust it live:
+
+```lua
+local replicator = ServerReplicator.new({
+	Namespace = &quot;Match&quot;,
+	Data = { Score = 0 },
+	Targets = {}, -- start with nobody; add players as they join the match
+})
+
+replicator:AddTarget(player)            -- add one player (or a { Player } list)
+replicator:RemoveTarget(player)         -- remove one player (or a list)
+replicator:SetTargets({ p1, p2 })       -- overwrite the whole target list
+replicator:SetTargets(&quot;all&quot;)            -- replicate to every current &amp; future player
+
+local players = replicator:GetTargets() -- { Player } currently targeted
+local isSeen  = replicator:IsReplicatingTo(player) -- boolean
+```
+
+When you add a player who has already bootstrapped (called `RequestData`), they
+immediately receive a snapshot of the replicator&#x27;s whole subtree. Removing an active
+player sends them a destroy for it.
+
+:::caution Top-level only
+`SetTargets`, `AddTarget`, and `RemoveTarget` throw on a child replicator — its
+audience is whatever its top-level ancestor targets. Reparent it instead
+(see [TR Parent-Child Guide](/api/TR%20Parent-Child%20Guide)).
+:::
+
+---
+### See also
+
+- **[TR Getting Started](/api/TR%20Getting%20Started)** — the basic create/listen flow.
+- **[TR Namespaces &amp; Tokens](/api/TR%20Namespaces%20&amp;%20Tokens)** — string namespaces vs anonymous vs tokens.
+- **[TR Parent-Child Guide](/api/TR%20Parent-Child%20Guide)** — how children inherit targeting."><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/TR Discovery &amp; Targeting"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/TR Discovery &amp; Targeting" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/TR Discovery &amp; Targeting" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.e8e96400.css">
+<script src="/ModulesOnRails/assets/js/runtime~main.668e8339.js" defer="defer"></script>
+<script src="/ModulesOnRails/assets/js/main.d4575191.js" defer="defer"></script>
+</head>
+<body>
+<svg style="display: none;"><defs>
+<symbol id="theme-svg-external-link" viewBox="0 0 24 24"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"/></symbol>
+</defs></svg>
+<script>!function(){var t=function(){try{return new URLSearchParams(window.location.search).get("docusaurus-theme")}catch(t){}}()||function(){try{return window.localStorage.getItem("theme")}catch(t){}}();document.documentElement.setAttribute("data-theme",t||(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")),document.documentElement.setAttribute("data-theme-choice",t||"system")}(),function(){try{const c=new URLSearchParams(window.location.search).entries();for(var[t,e]of c)if(t.startsWith("docusaurus-data-")){var a=t.replace("docusaurus-data-","data-");document.documentElement.setAttribute(a,e)}}catch(t){}}()</script><div id="__docusaurus"><div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#__docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="theme-layout-navbar navbar navbar--fixed-top"><div class="navbar__inner"><div class="theme-layout-navbar-left navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="theme-layout-navbar-right navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_nPIU"><use href="#theme-svg-external-link"></use></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="system mode" aria-label="Switch between dark and light mode (currently system mode)"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP systemToggleIcon_QzmC"><path fill="currentColor" d="m12 21c4.971 0 9-4.029 9-9s-4.029-9-9-9-9 4.029-9 9 4.029 9 9 9zm4.95-13.95c1.313 1.313 2.05 3.093 2.05 4.95s-0.738 3.637-2.05 4.95c-1.313 1.313-3.093 2.05-4.95 2.05v-14c1.857 0 3.637 0.737 4.95 2.05z"></path></svg></button></div><div class="navbarSearchContainer_Bca1"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input id="search_input_react" type="search" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="__docusaurus_skipToContent_fallback" class="theme-layout-main main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject"><span title="​Base​Object" class="linkLabel_WmDU">​Base​Object</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Roam"><span title="​Roam" class="linkLabel_WmDU">​Roam</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/TableManager"><span title="TableManager" class="categoryLinkLabel_W154">TableManager</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" href="/ModulesOnRails/api/TableReplicator"><span title="TableReplicator" class="categoryLinkLabel_W154">TableReplicator</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TableReplicator"><span title="​Table​Replicator" class="linkLabel_WmDU">​Table​Replicator</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/ServerReplicator"><span title="​Server​Replicator" class="linkLabel_WmDU">​Server​Replicator</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/ClientReplicator"><span title="​Client​Replicator" class="linkLabel_WmDU">​Client​Replicator</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-2 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" tabindex="0" href="/ModulesOnRails/api/TR Getting Started"><span title="[Guides]" class="categoryLinkLabel_W154">[Guides]</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TR Getting Started"><span title="​T​R ​Getting ​Started" class="linkLabel_WmDU">​T​R ​Getting ​Started</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" tabindex="0" href="/ModulesOnRails/api/TR Discovery &amp; Targeting"><span title="​T​R ​Discovery &amp; ​Targeting" class="linkLabel_WmDU">​T​R ​Discovery &amp; ​Targeting</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TR Namespaces &amp; Tokens"><span title="​T​R ​Namespaces &amp; ​Tokens" class="linkLabel_WmDU">​T​R ​Namespaces &amp; ​Tokens</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TR Parent-Child Guide"><span title="​T​R ​Parent-​Child ​Guide" class="linkLabel_WmDU">​T​R ​Parent-​Child ​Guide</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TR Custom Remotes"><span title="​T​R ​Custom ​Remotes" class="linkLabel_WmDU">​T​R ​Custom ​Remotes</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TR Performance &amp; Ordering"><span title="​T​R ​Performance &amp; ​Ordering" class="linkLabel_WmDU">​T​R ​Performance &amp; ​Ordering</span></a></li></ul></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/NetWire"><span title="NetWire" class="categoryLinkLabel_W154">NetWire</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Component"><span title="Instance Component Systems" class="categoryLinkLabel_W154">Instance Component Systems</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/DropletManager"><span title="DropletManager" class="categoryLinkLabel_W154">DropletManager</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/AdjustableTimer"><span title="AdjustableTimer [Unreleased]" class="categoryLinkLabel_W154">AdjustableTimer [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/PlayerProfileManager"><span title="PlayerDataManagement [Unreleased]" class="categoryLinkLabel_W154">PlayerDataManagement [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/CmdrHandler"><span title="Admin Commands [Cmdr]" class="categoryLinkLabel_W154">Admin Commands [Cmdr]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Queue"><span title="Data Structures" class="categoryLinkLabel_W154">Data Structures</span></a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BufferCodec"><span title="​Buffer​Codec" class="linkLabel_WmDU">​Buffer​Codec</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ObjectCache"><span title="​Object​Cache" class="linkLabel_WmDU">​Object​Cache</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ProbabilityDistributor"><span title="​Probability​Distributor" class="linkLabel_WmDU">​Probability​Distributor</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PromValue"><span title="​Prom​Value" class="linkLabel_WmDU">​Prom​Value</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/T"><span title="​T" class="linkLabel_WmDU">​T</span></a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">T</span><span style="display:inline-block">R</span><span style="display:inline-block"></span><span style="display:inline-block">Discovery</span><span style="display:inline-block">&amp;</span><span style="display:inline-block"></span><span style="display:inline-block">Targeting</span></h1><div class="luaClassTags_EipM"></div><div>
+<p>Two related questions come up constantly with TableReplicator:</p>
+<ul>
+  <li>
+    <strong>Discovery</strong> — "how does the client (or another server system) find the
+    replicator it cares about?"
+  </li>
+  <li><strong>Targeting</strong> — "which players does a top-level replicator send its data to?"</li>
+</ul>
+<p>This guide covers both.</p>
+<hr>
+<h2>Discovery</h2>
+<p>
+  Every discovery API takes an optional <code>SearchCondition</code>. A condition can be one of
+  four things:
+</p>
+<table>
+  <thead>
+    <tr>
+      <th>Condition</th>
+      <th>Matches</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>a <strong>string</strong></td>
+      <td>replicators whose <code>Namespace</code> equals the string</td>
+    </tr>
+    <tr>
+      <td>a <strong><code>ReplicationToken</code></strong></td>
+      <td>replicators whose namespace equals the token's name</td>
+    </tr>
+    <tr>
+      <td>a <strong>tags table</strong> <code>{ k = v }</code></td>
+      <td>replicators whose tags are a <strong>superset</strong> of the given pairs</td>
+    </tr>
+    <tr>
+      <td>a <strong>predicate</strong> <code>(replicator) -> boolean</code></td>
+      <td>whatever you decide</td>
+    </tr>
+    <tr>
+      <td>omitted (<code>nil</code>)</td>
+      <td>every replicator</td>
+    </tr>
+  </tbody>
+</table>
+
+  
+    
+    
+      <div class="admonition admonition-note alert alert--secondary">
+        <div class="admonition-heading">
+          <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="16" viewBox="0 0 14 16">
+                <path d="M6.3 5.69a.942.942 0 0 1-.28-.7c0-.28.09-.52.28-.7.19-.18.42-.28.7-.28.28 0 .52.09.7.28.18.19.28.42.28.7 0 .28-.09.52-.28.7a1 1 0 0 1-.7.3c-.28 0-.52-.11-.7-.3zM8 7.99c-.02-.25-.11-.48-.31-.69-.2-.19-.42-.3-.69-.31H6c-.27.02-.48.13-.69.31-.2.2-.3.44-.31.69h1v3c.02.27.11.5.31.69.2.2.42.31.69.31h1c.27 0 .48-.11.69-.31.2-.19.3-.42.31-.69H8V7.98v.01zM7 2.3c-3.14 0-5.7 2.54-5.7 5.68 0 3.14 2.56 5.7 5.7 5.7s5.7-2.55 5.7-5.7c0-3.15-2.56-5.69-5.7-5.69v.01zM7 .98c3.86 0 7 3.14 7 7s-3.14 7-7 7-7-3.12-7-7 3.14-7 7-7z"></path>
+              </svg></span><span class="admonition-title">Anonymous replicators</span></h5>
+        </div>
+        <div class="admonition-content">
+          <p>
+            A replicator created without a <code>Namespace</code> never matches a string or token
+            condition. Reach it by <code>Id</code>, tags, or a predicate instead. See
+            <a href="/ModulesOnRails/api/TR%20Namespaces%20&#x26;%20Tokens">TR Namespaces &#x26; Tokens</a>.
+          </p>
+        </div>
+      </div>
+    
+  
+
+<h3><code>ForEach</code> vs <code>OnNew</code></h3>
+<p>
+  Both run a callback as replicators appear, and both return a disconnect function.
+  The difference is whether already-existing replicators are included:
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- ForEach: runs for existing matches immediately, then for every future one.</span>
+<span class="token keyword">local</span> disconnect <span class="token operator">=</span> ClientReplicator<span class="token punctuation">.</span><span class="token function">ForEach</span><span class="token punctuation">(</span><span class="token string">"PlayerData"</span><span class="token punctuation">,</span> <span class="token keyword">function</span><span class="token punctuation">(</span>replicator<span class="token punctuation">)</span>
+	replicator<span class="token punctuation">.</span>Manager<span class="token punctuation">:</span><span class="token function">Observe</span><span class="token punctuation">(</span><span class="token string">"Coins"</span><span class="token punctuation">,</span> <span class="token keyword">function</span><span class="token punctuation">(</span>coins<span class="token punctuation">)</span>
+		<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Coins:"</span><span class="token punctuation">,</span> coins<span class="token punctuation">)</span>
+	<span class="token keyword">end</span><span class="token punctuation">)</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+
+<span class="token comment">-- OnNew: runs ONLY for replicators created after this call.</span>
+ClientReplicator<span class="token punctuation">.</span><span class="token function">OnNew</span><span class="token punctuation">(</span><span class="token string">"PlayerData"</span><span class="token punctuation">,</span> <span class="token keyword">function</span><span class="token punctuation">(</span>replicator<span class="token punctuation">)</span>
+	<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"A new PlayerData replicator appeared:"</span><span class="token punctuation">,</span> replicator<span class="token punctuation">.</span>Id<span class="token punctuation">)</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+
+<span class="token comment">-- Stop receiving callbacks:</span>
+<span class="token function">disconnect</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+</code></pre>
+
+  
+    
+    
+      <div class="admonition admonition-success alert alert--success">
+        <div class="admonition-heading">
+          <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="16" viewBox="0 0 12 16">
+                <path d="M6.5 0C3.48 0 1 2.19 1 5c0 .92.55 2.25 1 3 1.34 2.25 1.78 2.78 2 4v1h5v-1c.22-1.22.66-1.75 2-4 .45-.75 1-2.08 1-3 0-2.81-2.48-5-5.5-5zm3.64 7.48c-.25.44-.47.8-.67 1.11-.86 1.41-1.25 2.06-1.45 3.23-.02.05-.02.11-.02.17H5c0-.06 0-.13-.02-.17-.2-1.17-.59-1.83-1.45-3.23-.2-.31-.42-.67-.67-1.11C2.44 6.78 2 5.65 2 5c0-2.2 2.02-4 4.5-4 1.22 0 2.36.42 3.22 1.19C10.55 2.94 11 3.94 11 5c0 .66-.44 1.78-.86 2.48zM4 14h5c-.23 1.14-1.3 2-2.5 2s-2.27-.86-2.5-2z"></path>
+              </svg></span><span class="admonition-title">Prefer <code>ForEach</code></span></h5>
+        </div>
+        <div class="admonition-content">
+          <p>
+            <code>ForEach</code> is almost always what you want — <code>OnNew</code> silently misses replicators that
+            already exist (including everything in the initial client snapshot). Only reach for
+            <code>OnNew</code> when you specifically want <em>future-only</em> matches.
+          </p>
+        </div>
+      </div>
+    
+  
+
+<p>
+  Conditions work the same across the board — here filtering by tag on the client so a
+  callback only runs for the local player's replicator:
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> localPlayer <span class="token operator">=</span> game<span class="token punctuation">:</span><span class="token function">GetService</span><span class="token punctuation">(</span><span class="token string">"Players"</span><span class="token punctuation">)</span><span class="token punctuation">.</span>LocalPlayer
+
+ClientReplicator<span class="token punctuation">.</span><span class="token function">ForEach</span><span class="token punctuation">(</span><span class="token punctuation">{</span> UserId <span class="token operator">=</span> localPlayer<span class="token punctuation">.</span>UserId <span class="token punctuation">}</span><span class="token punctuation">,</span> <span class="token keyword">function</span><span class="token punctuation">(</span>replicator<span class="token punctuation">)</span>
+	<span class="token comment">-- only fires for a replicator tagged with this UserId</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+</code></pre>
+<h3>One-shot lookups</h3>
+<p>When you want a single replicator rather than a running subscription:</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- Synchronous — nil if nothing matches right now.</span>
+<span class="token keyword">local</span> rep <span class="token operator">=</span> ClientReplicator<span class="token punctuation">.</span><span class="token function">GetFirst</span><span class="token punctuation">(</span><span class="token string">"PlayerData"</span><span class="token punctuation">)</span>
+<span class="token keyword">local</span> byId <span class="token operator">=</span> ClientReplicator<span class="token punctuation">.</span><span class="token function">GetFromId</span><span class="token punctuation">(</span><span class="token number">42</span><span class="token punctuation">)</span>
+<span class="token keyword">local</span> all <span class="token operator">=</span> ClientReplicator<span class="token punctuation">.</span><span class="token function">GetAll</span><span class="token punctuation">(</span><span class="token punctuation">{</span> Team <span class="token operator">=</span> <span class="token string">"Red"</span> <span class="token punctuation">}</span><span class="token punctuation">)</span> <span class="token comment">-- every current match</span>
+
+<span class="token comment">-- Promise-based — resolves as soon as a match exists (now or later).</span>
+ClientReplicator<span class="token punctuation">.</span><span class="token function">PromiseFirst</span><span class="token punctuation">(</span><span class="token string">"PlayerData"</span><span class="token punctuation">)</span><span class="token punctuation">:</span><span class="token function">andThen</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span>replicator<span class="token punctuation">)</span>
+	<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"Got it:"</span><span class="token punctuation">,</span> replicator<span class="token punctuation">.</span>Id<span class="token punctuation">)</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+ClientReplicator<span class="token punctuation">.</span><span class="token function">PromiseFromId</span><span class="token punctuation">(</span><span class="token number">42</span><span class="token punctuation">)</span><span class="token punctuation">:</span><span class="token function">andThen</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span>replicator<span class="token punctuation">)</span> <span class="token keyword">end</span><span class="token punctuation">)</span>
+</code></pre>
+<p>
+  All of these are static methods available on both <a href="/ModulesOnRails/api/ServerReplicator">ServerReplicator</a>
+  and <a href="/ModulesOnRails/api/ClientReplicator">ClientReplicator</a>. There is also a <code>ReplicatorCreated</code>
+  signal that fires for every
+  new replicator regardless of condition, if you want the raw stream.
+</p>
+<hr>
+<h2>Targeting</h2>
+<p>
+  Targeting decides which players a <strong>top-level</strong> replicator replicates to. (Child
+  replicators inherit their top-level ancestor's targets — see
+  <a href="/ModulesOnRails/api/TR%20Parent-Child%20Guide">TR Parent-Child Guide</a>.) Set the initial audience
+  with the <code>Targets</code> field, then
+  adjust it live:
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> replicator <span class="token operator">=</span> ServerReplicator<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">{</span>
+	Namespace <span class="token operator">=</span> <span class="token string">"Match"</span><span class="token punctuation">,</span>
+	Data <span class="token operator">=</span> <span class="token punctuation">{</span> Score <span class="token operator">=</span> <span class="token number">0</span> <span class="token punctuation">}</span><span class="token punctuation">,</span>
+	Targets <span class="token operator">=</span> <span class="token punctuation">{</span><span class="token punctuation">}</span><span class="token punctuation">,</span> <span class="token comment">-- start with nobody; add players as they join the match</span>
+<span class="token punctuation">}</span><span class="token punctuation">)</span>
+
+replicator<span class="token punctuation">:</span><span class="token function">AddTarget</span><span class="token punctuation">(</span>player<span class="token punctuation">)</span>            <span class="token comment">-- add one player (or a { Player } list)</span>
+replicator<span class="token punctuation">:</span><span class="token function">RemoveTarget</span><span class="token punctuation">(</span>player<span class="token punctuation">)</span>         <span class="token comment">-- remove one player (or a list)</span>
+replicator<span class="token punctuation">:</span><span class="token function">SetTargets</span><span class="token punctuation">(</span><span class="token punctuation">{</span> p1<span class="token punctuation">,</span> p2 <span class="token punctuation">}</span><span class="token punctuation">)</span>       <span class="token comment">-- overwrite the whole target list</span>
+replicator<span class="token punctuation">:</span><span class="token function">SetTargets</span><span class="token punctuation">(</span><span class="token string">"all"</span><span class="token punctuation">)</span>            <span class="token comment">-- replicate to every current &#x26; future player</span>
+
+<span class="token keyword">local</span> players <span class="token operator">=</span> replicator<span class="token punctuation">:</span><span class="token function">GetTargets</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token comment">-- { Player } currently targeted</span>
+<span class="token keyword">local</span> isSeen  <span class="token operator">=</span> replicator<span class="token punctuation">:</span><span class="token function">IsReplicatingTo</span><span class="token punctuation">(</span>player<span class="token punctuation">)</span> <span class="token comment">-- boolean</span>
+</code></pre>
+<p>
+  When you add a player who has already bootstrapped (called <code>RequestData</code>), they
+  immediately receive a snapshot of the replicator's whole subtree. Removing an active
+  player sends them a destroy for it.
+</p>
+
+  
+    
+    
+      <div class="admonition admonition-caution alert alert--warning">
+        <div class="admonition-heading">
+          <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+                <path d="M8.893 1.5c-.183-.31-.52-.5-.887-.5s-.703.19-.886.5L.138 13.499a.98.98 0 0 0 0 1.001c.193.31.53.501.886.501h13.964c.367 0 .704-.19.877-.5a1.03 1.03 0 0 0 .01-1.002L8.893 1.5zm.133 11.497H6.987v-2.003h2.039v2.003zm0-3.004H6.987V5.987h2.039v4.006z"></path>
+              </svg></span><span class="admonition-title">Top-level only</span></h5>
+        </div>
+        <div class="admonition-content">
+          <p>
+            <code>SetTargets</code>, <code>AddTarget</code>, and <code>RemoveTarget</code> throw on a child replicator — its
+            audience is whatever its top-level ancestor targets. Reparent it instead
+            (see <a href="/ModulesOnRails/api/TR%20Parent-Child%20Guide">TR Parent-Child Guide</a>).
+          </p>
+        </div>
+      </div>
+    
+  
+
+<hr>
+<h3>See also</h3>
+<ul>
+  <li><strong><a href="/ModulesOnRails/api/TR%20Getting%20Started">TR Getting Started</a></strong> — the basic create/listen flow.</li>
+  <li><strong><a href="/ModulesOnRails/api/TR%20Namespaces%20&#x26;%20Tokens">TR Namespaces &#x26; Tokens</a></strong> — string namespaces vs anonymous vs tokens.</li>
+  <li><strong><a href="/ModulesOnRails/api/TR%20Parent-Child%20Guide">TR Parent-Child Guide</a></strong> — how children inherit targeting.</li>
+</ul>
+</div></header></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
+    &quot;functions&quot;: [],
+    &quot;properties&quot;: [],
+    &quot;types&quot;: [],
+    &quot;name&quot;: &quot;TR Discovery &amp; Targeting&quot;,
+    &quot;desc&quot;: &quot;Two related questions come up constantly with TableReplicator:\n\n- **Discovery** — \&quot;how does the client (or another server system) find the\n  replicator it cares about?\&quot;\n- **Targeting** — \&quot;which players does a top-level replicator send its data to?\&quot;\n\nThis guide covers both.\n\n---\n## Discovery\n\nEvery discovery API takes an optional `SearchCondition`. A condition can be one of\nfour things:\n\n| Condition | Matches |\n| --- | --- |\n| a **string** | replicators whose `Namespace` equals the string |\n| a **`ReplicationToken`** | replicators whose namespace equals the token&#x27;s name |\n| a **tags table** `{ k = v }` | replicators whose tags are a **superset** of the given pairs |\n| a **predicate** `(replicator) -&gt; boolean` | whatever you decide |\n| omitted (`nil`) | every replicator |\n\n:::note Anonymous replicators\nA replicator created without a `Namespace` never matches a string or token\ncondition. Reach it by `Id`, tags, or a predicate instead. See\n[TR Namespaces &amp; Tokens](/api/TR%20Namespaces%20&amp;%20Tokens).\n:::\n\n### `ForEach` vs `OnNew`\n\nBoth run a callback as replicators appear, and both return a disconnect function.\nThe difference is whether already-existing replicators are included:\n\n```lua\n-- ForEach: runs for existing matches immediately, then for every future one.\nlocal disconnect = ClientReplicator.ForEach(\&quot;PlayerData\&quot;, function(replicator)\n\treplicator.Manager:Observe(\&quot;Coins\&quot;, function(coins)\n\t\tprint(\&quot;Coins:\&quot;, coins)\n\tend)\nend)\n\n-- OnNew: runs ONLY for replicators created after this call.\nClientReplicator.OnNew(\&quot;PlayerData\&quot;, function(replicator)\n\tprint(\&quot;A new PlayerData replicator appeared:\&quot;, replicator.Id)\nend)\n\n-- Stop receiving callbacks:\ndisconnect()\n```\n\n:::tip Prefer `ForEach`\n`ForEach` is almost always what you want — `OnNew` silently misses replicators that\nalready exist (including everything in the initial client snapshot). Only reach for\n`OnNew` when you specifically want *future-only* matches.\n:::\n\nConditions work the same across the board — here filtering by tag on the client so a\ncallback only runs for the local player&#x27;s replicator:\n\n```lua\nlocal localPlayer = game:GetService(\&quot;Players\&quot;).LocalPlayer\n\nClientReplicator.ForEach({ UserId = localPlayer.UserId }, function(replicator)\n\t-- only fires for a replicator tagged with this UserId\nend)\n```\n\n### One-shot lookups\n\nWhen you want a single replicator rather than a running subscription:\n\n```lua\n-- Synchronous — nil if nothing matches right now.\nlocal rep = ClientReplicator.GetFirst(\&quot;PlayerData\&quot;)\nlocal byId = ClientReplicator.GetFromId(42)\nlocal all = ClientReplicator.GetAll({ Team = \&quot;Red\&quot; }) -- every current match\n\n-- Promise-based — resolves as soon as a match exists (now or later).\nClientReplicator.PromiseFirst(\&quot;PlayerData\&quot;):andThen(function(replicator)\n\tprint(\&quot;Got it:\&quot;, replicator.Id)\nend)\nClientReplicator.PromiseFromId(42):andThen(function(replicator) end)\n```\n\nAll of these are static methods available on both [ServerReplicator](/api/ServerReplicator)\nand [ClientReplicator](/api/ClientReplicator). There is also a `ReplicatorCreated`\nsignal that fires for every\nnew replicator regardless of condition, if you want the raw stream.\n\n---\n## Targeting\n\nTargeting decides which players a **top-level** replicator replicates to. (Child\nreplicators inherit their top-level ancestor&#x27;s targets — see\n[TR Parent-Child Guide](/api/TR%20Parent-Child%20Guide).) Set the initial audience\nwith the `Targets` field, then\nadjust it live:\n\n```lua\nlocal replicator = ServerReplicator.new({\n\tNamespace = \&quot;Match\&quot;,\n\tData = { Score = 0 },\n\tTargets = {}, -- start with nobody; add players as they join the match\n})\n\nreplicator:AddTarget(player)            -- add one player (or a { Player } list)\nreplicator:RemoveTarget(player)         -- remove one player (or a list)\nreplicator:SetTargets({ p1, p2 })       -- overwrite the whole target list\nreplicator:SetTargets(\&quot;all\&quot;)            -- replicate to every current &amp; future player\n\nlocal players = replicator:GetTargets() -- { Player } currently targeted\nlocal isSeen  = replicator:IsReplicatingTo(player) -- boolean\n```\n\nWhen you add a player who has already bootstrapped (called `RequestData`), they\nimmediately receive a snapshot of the replicator&#x27;s whole subtree. Removing an active\nplayer sends them a destroy for it.\n\n:::caution Top-level only\n`SetTargets`, `AddTarget`, and `RemoveTarget` throw on a child replicator — its\naudience is whatever its top-level ancestor targets. Reparent it instead\n(see [TR Parent-Child Guide](/api/TR%20Parent-Child%20Guide)).\n:::\n\n---\n### See also\n\n- **[TR Getting Started](/api/TR%20Getting%20Started)** — the basic create/listen flow.\n- **[TR Namespaces &amp; Tokens](/api/TR%20Namespaces%20&amp;%20Tokens)** — string namespaces vs anonymous vs tokens.\n- **[TR Parent-Child Guide](/api/TR%20Parent-Child%20Guide)** — how children inherit targeting.&quot;,
+    &quot;source&quot;: {
+        &quot;line&quot;: 135,
+        &quot;path&quot;: &quot;lib/tablereplicator/src/Docs/TR_Discovery_And_Targeting.luau&quot;
+    }
+}</pre></details></div></div></div></main></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
+</body>
+</html>

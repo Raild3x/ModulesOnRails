@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en" dir="ltr" class="plugin-moonwave plugin-id-moonwave" data-has-hydrated="false">
+<head>
+<meta charset="UTF-8">
+<meta name="generator" content="Docusaurus v3.10.1">
+<title data-rh="true">BufferCodec | ModulesOnRails</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:url" content="https://raild3x.github.io/ModulesOnRails/api/BufferCodec"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docusaurus_tag" content="default"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docsearch:docusaurus_tag" content="default"><meta data-rh="true" property="og:title" content="BufferCodec | ModulesOnRails"><meta data-rh="true" name="description" content="Compact binary value codec over Luau buffers — the byte-level layer of the replication
+wire (Wire.luau is the message layer on top). Every value starts with a one-byte tag, and
+the common cases bit-pack their payload into the tag byte itself so they cost zero extra
+bytes: integers 0..127 and -32..-1, string lengths 0..31, array/map sizes 0..15. Larger
+values fall through to explicit-width tags, with numbers stored in the smallest integer
+width that holds them (or f32 when it round-trips losslessly, f64 otherwise).
+
+Strings of length &gt;= 2 are interned per message: the first occurrence writes the bytes,
+repeats write a 2-3 byte back-reference. Repeated dictionary keys (arrays of uniform
+records in a snapshot) collapse to almost nothing. Reader and writer must apply the same
+interning rule (INTERN_MIN_LENGTH / INTERN_MAX_COUNT) or references desync.
+
+Instances cannot live inside a buffer — only the engine can serialize an instance ref,
+and only as a remote argument. The writer therefore collects them into a side list
+(deduplicated) and stores a 1-based index in the buffer; `export` returns the list so the
+message layer can ship it as a second remote argument, and the reader resolves indices
+against the received list. A ref the engine can not resolve on the client (streamed
+out, server-only) decodes as nil.
+
+Any value the buffer has no tag for (Roblox datatypes without a dedicated tag — Ray,
+Region3, UDim2, EnumItem, … — as well as anything else) rides that same side list rather
+than being rejected: the codec hands the raw value to the remote to serialize natively,
+exactly like an Instance ref. The buffer stores only the index. This keeps unsupported
+data flowing (at native remote cost) instead of erroring out the whole message.
+
+A value a RemoteEvent genuinely can&#x27;t serialize (function, thread, RBXScriptSignal,
+RBXScriptConnection — see NON_REPLICABLE_TYPES) can&#x27;t ride the side list either: sending
+it would throw at FireClient and take the whole batched message down. The writer instead
+warns and encodes nil in its place, so that one bad value is dropped in isolation while
+every unrelated op sharing the frame still delivers.
+
+Directly-tagged value types (bit-packed into the buffer): nil, boolean, number, string,
+table, Vector3, Vector2, CFrame, Color3. Instances and everything else ride the side list."><meta data-rh="true" property="og:description" content="Compact binary value codec over Luau buffers — the byte-level layer of the replication
+wire (Wire.luau is the message layer on top). Every value starts with a one-byte tag, and
+the common cases bit-pack their payload into the tag byte itself so they cost zero extra
+bytes: integers 0..127 and -32..-1, string lengths 0..31, array/map sizes 0..15. Larger
+values fall through to explicit-width tags, with numbers stored in the smallest integer
+width that holds them (or f32 when it round-trips losslessly, f64 otherwise).
+
+Strings of length &gt;= 2 are interned per message: the first occurrence writes the bytes,
+repeats write a 2-3 byte back-reference. Repeated dictionary keys (arrays of uniform
+records in a snapshot) collapse to almost nothing. Reader and writer must apply the same
+interning rule (INTERN_MIN_LENGTH / INTERN_MAX_COUNT) or references desync.
+
+Instances cannot live inside a buffer — only the engine can serialize an instance ref,
+and only as a remote argument. The writer therefore collects them into a side list
+(deduplicated) and stores a 1-based index in the buffer; `export` returns the list so the
+message layer can ship it as a second remote argument, and the reader resolves indices
+against the received list. A ref the engine can not resolve on the client (streamed
+out, server-only) decodes as nil.
+
+Any value the buffer has no tag for (Roblox datatypes without a dedicated tag — Ray,
+Region3, UDim2, EnumItem, … — as well as anything else) rides that same side list rather
+than being rejected: the codec hands the raw value to the remote to serialize natively,
+exactly like an Instance ref. The buffer stores only the index. This keeps unsupported
+data flowing (at native remote cost) instead of erroring out the whole message.
+
+A value a RemoteEvent genuinely can&#x27;t serialize (function, thread, RBXScriptSignal,
+RBXScriptConnection — see NON_REPLICABLE_TYPES) can&#x27;t ride the side list either: sending
+it would throw at FireClient and take the whole batched message down. The writer instead
+warns and encodes nil in its place, so that one bad value is dropped in isolation while
+every unrelated op sharing the frame still delivers.
+
+Directly-tagged value types (bit-packed into the buffer): nil, boolean, number, string,
+table, Vector3, Vector2, CFrame, Color3. Instances and everything else ride the side list."><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/BufferCodec"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/BufferCodec" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/BufferCodec" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.e8e96400.css">
+<script src="/ModulesOnRails/assets/js/runtime~main.668e8339.js" defer="defer"></script>
+<script src="/ModulesOnRails/assets/js/main.d4575191.js" defer="defer"></script>
+</head>
+<body>
+<svg style="display: none;"><defs>
+<symbol id="theme-svg-external-link" viewBox="0 0 24 24"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"/></symbol>
+</defs></svg>
+<script>!function(){var t=function(){try{return new URLSearchParams(window.location.search).get("docusaurus-theme")}catch(t){}}()||function(){try{return window.localStorage.getItem("theme")}catch(t){}}();document.documentElement.setAttribute("data-theme",t||(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")),document.documentElement.setAttribute("data-theme-choice",t||"system")}(),function(){try{const c=new URLSearchParams(window.location.search).entries();for(var[t,e]of c)if(t.startsWith("docusaurus-data-")){var a=t.replace("docusaurus-data-","data-");document.documentElement.setAttribute(a,e)}}catch(t){}}()</script><div id="__docusaurus"><div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#__docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="theme-layout-navbar navbar navbar--fixed-top"><div class="navbar__inner"><div class="theme-layout-navbar-left navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="theme-layout-navbar-right navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_nPIU"><use href="#theme-svg-external-link"></use></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="system mode" aria-label="Switch between dark and light mode (currently system mode)"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP systemToggleIcon_QzmC"><path fill="currentColor" d="m12 21c4.971 0 9-4.029 9-9s-4.029-9-9-9-9 4.029-9 9 4.029 9 9 9zm4.95-13.95c1.313 1.313 2.05 3.093 2.05 4.95s-0.738 3.637-2.05 4.95c-1.313 1.313-3.093 2.05-4.95 2.05v-14c1.857 0 3.637 0.737 4.95 2.05z"></path></svg></button></div><div class="navbarSearchContainer_Bca1"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input id="search_input_react" type="search" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="__docusaurus_skipToContent_fallback" class="theme-layout-main main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject"><span title="​Base​Object" class="linkLabel_WmDU">​Base​Object</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Roam"><span title="​Roam" class="linkLabel_WmDU">​Roam</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/TableManager"><span title="TableManager" class="categoryLinkLabel_W154">TableManager</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/TableReplicator"><span title="TableReplicator" class="categoryLinkLabel_W154">TableReplicator</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/NetWire"><span title="NetWire" class="categoryLinkLabel_W154">NetWire</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Component"><span title="Instance Component Systems" class="categoryLinkLabel_W154">Instance Component Systems</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/DropletManager"><span title="DropletManager" class="categoryLinkLabel_W154">DropletManager</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/AdjustableTimer"><span title="AdjustableTimer [Unreleased]" class="categoryLinkLabel_W154">AdjustableTimer [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/PlayerProfileManager"><span title="PlayerDataManagement [Unreleased]" class="categoryLinkLabel_W154">PlayerDataManagement [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/CmdrHandler"><span title="Admin Commands [Cmdr]" class="categoryLinkLabel_W154">Admin Commands [Cmdr]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Queue"><span title="Data Structures" class="categoryLinkLabel_W154">Data Structures</span></a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" href="/ModulesOnRails/api/BufferCodec"><span title="​Buffer​Codec" class="linkLabel_WmDU">​Buffer​Codec</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ObjectCache"><span title="​Object​Cache" class="linkLabel_WmDU">​Object​Cache</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ProbabilityDistributor"><span title="​Probability​Distributor" class="linkLabel_WmDU">​Probability​Distributor</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PromValue"><span title="​Prom​Value" class="linkLabel_WmDU">​Prom​Value</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/T"><span title="​T" class="linkLabel_WmDU">​T</span></a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><div class="tocCollapsible_ETCw theme-doc-toc-mobile tocMobile_oUs_"><button type="button" class="clean-btn tocCollapsibleButton_TO0P">On this page</button></div><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">Buffer</span><span style="display:inline-block">Codec</span></h1><div class="luaClassTags_EipM"></div><div>
+<p>
+  Compact binary value codec over Luau buffers — the byte-level layer of the replication
+  wire (Wire.luau is the message layer on top). Every value starts with a one-byte tag, and
+  the common cases bit-pack their payload into the tag byte itself so they cost zero extra
+  bytes: integers 0..127 and -32..-1, string lengths 0..31, array/map sizes 0..15. Larger
+  values fall through to explicit-width tags, with numbers stored in the smallest integer
+  width that holds them (or f32 when it round-trips losslessly, f64 otherwise).
+</p>
+<p>
+  Strings of length >= 2 are interned per message: the first occurrence writes the bytes,
+  repeats write a 2-3 byte back-reference. Repeated dictionary keys (arrays of uniform
+  records in a snapshot) collapse to almost nothing. Reader and writer must apply the same
+  interning rule (INTERN_MIN_LENGTH / INTERN_MAX_COUNT) or references desync.
+</p>
+<p>
+  Instances cannot live inside a buffer — only the engine can serialize an instance ref,
+  and only as a remote argument. The writer therefore collects them into a side list
+  (deduplicated) and stores a 1-based index in the buffer; <code>export</code> returns the list so the
+  message layer can ship it as a second remote argument, and the reader resolves indices
+  against the received list. A ref the engine can not resolve on the client (streamed
+  out, server-only) decodes as nil.
+</p>
+<p>
+  Any value the buffer has no tag for (Roblox datatypes without a dedicated tag — Ray,
+  Region3, UDim2, EnumItem, … — as well as anything else) rides that same side list rather
+  than being rejected: the codec hands the raw value to the remote to serialize natively,
+  exactly like an Instance ref. The buffer stores only the index. This keeps unsupported
+  data flowing (at native remote cost) instead of erroring out the whole message.
+</p>
+<p>
+  A value a RemoteEvent genuinely can't serialize (function, thread, RBXScriptSignal,
+  RBXScriptConnection — see NON_REPLICABLE_TYPES) can't ride the side list either: sending
+  it would throw at FireClient and take the whole batched message down. The writer instead
+  warns and encodes nil in its place, so that one bad value is dropped in isolation while
+  every unrelated op sharing the frame still delivers.
+</p>
+<p>
+  Directly-tagged value types (bit-packed into the buffer): nil, boolean, number, string,
+  table, Vector3, Vector2, CFrame, Color3. Instances and everything else ride the side list.
+</p>
+</div></header><h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="functions">Functions<a href="#functions" class="hash-link" aria-label="Direct link to Functions" title="Direct link to Functions" translate="no">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="newWriter"><code style="text-decoration:none">newWriter</code><a href="#newWriter" class="hash-link" aria-label="Direct link to newWriter" title="Direct link to newWriter" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/Serialization/BufferCodec.luau#L271"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BufferCodec<!-- -->.</code><code class="green_DgR4">newWriter</code><code>(</code><code>) → </code><code class="blue_P4bS">Writer</code></div><div>
+<p>Creates a new writer used for encoding values into a binary buffer.</p>
+<p>
+  The writer maintains temporary state while encoding, including string
+  interning tables and deduplicated instance references.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> writer <span class="token operator">=</span> BufferCodec<span class="token punctuation">.</span><span class="token function">newWriter</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+
+BufferCodec<span class="token punctuation">.</span><span class="token function">writeValue</span><span class="token punctuation">(</span>writer<span class="token punctuation">,</span> <span class="token punctuation">{</span>
+	Name <span class="token operator">=</span> <span class="token string">"Player"</span><span class="token punctuation">,</span>
+	Health <span class="token operator">=</span> <span class="token number">100</span><span class="token punctuation">,</span>
+<span class="token punctuation">}</span><span class="token punctuation">)</span>
+
+<span class="token keyword">local</span> buffer<span class="token punctuation">,</span> instances <span class="token operator">=</span> BufferCodec<span class="token punctuation">.</span><span class="token function">export</span><span class="token punctuation">(</span>writer<span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="export"><code style="text-decoration:none">export</code><a href="#export" class="hash-link" aria-label="Direct link to export" title="Direct link to export" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/Serialization/BufferCodec.luau#L314"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BufferCodec<!-- -->.</code><code class="green_DgR4">export</code><code>(</code><code>writer<!-- -->: </code><code class="blue_P4bS">Writer</code><code>) → </code><code>(</code><div class="inset_uKQm"><div><code class="blue_P4bS">buffer</code><code>,</code></div><div><code class="purple_ieR2">{</code><code class="blue_P4bS">any</code><code class="purple_ieR2">}</code><code class="blue_P4bS">?</code></div></div><code>)</code></div><div>
+<p>Finalizes a writer.</p>
+<p>
+  Returns a tightly-sized buffer containing the encoded bytes and an
+  optional side list of raw values (Instances and any untagged types) which
+  must accompany the buffer when transmitting over a RemoteEvent.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> buffer<span class="token punctuation">,</span> instances <span class="token operator">=</span> BufferCodec<span class="token punctuation">.</span><span class="token function">export</span><span class="token punctuation">(</span>writer<span class="token punctuation">)</span>
+
+RemoteEvent<span class="token punctuation">:</span><span class="token function">FireClient</span><span class="token punctuation">(</span>player<span class="token punctuation">,</span> buffer<span class="token punctuation">,</span> instances<span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="newReader"><code style="text-decoration:none">newReader</code><a href="#newReader" class="hash-link" aria-label="Direct link to newReader" title="Direct link to newReader" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/Serialization/BufferCodec.luau#L339"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BufferCodec<!-- -->.</code><code class="green_DgR4">newReader</code><code>(</code><div class="inset_uKQm"><div><code>buffer<!-- -->: </code><code class="blue_P4bS">buffer</code><code>,</code></div><div><code>instances<!-- -->: </code><code class="purple_ieR2">{</code><code class="blue_P4bS">any</code><code class="purple_ieR2">}</code><code class="blue_P4bS">?</code></div></div><code>) → </code><code class="blue_P4bS">Reader</code></div><div>
+<p>Creates a reader for decoding values from an encoded buffer.</p>
+<p>
+  The supplied side list should be the same list returned by
+  <code>export</code> on the writing side.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> reader <span class="token operator">=</span> BufferCodec<span class="token punctuation">.</span><span class="token function">newReader</span><span class="token punctuation">(</span>buffer<span class="token punctuation">,</span> instances<span class="token punctuation">)</span>
+
+<span class="token keyword">local</span> value <span class="token operator">=</span> BufferCodec<span class="token punctuation">.</span><span class="token function">readValue</span><span class="token punctuation">(</span>reader<span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="writeValue"><code style="text-decoration:none">writeValue</code><a href="#writeValue" class="hash-link" aria-label="Direct link to writeValue" title="Direct link to writeValue" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/Serialization/BufferCodec.luau#L579"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BufferCodec<!-- -->.</code><code class="green_DgR4">writeValue</code><code>(</code><div class="inset_uKQm"><div><code>writer<!-- -->: </code><code class="blue_P4bS">Writer</code><code>,</code></div><div><code>value<!-- -->: </code><code class="blue_P4bS">any</code></div></div><code>) → </code><code>(</code><code>)</code></div><div>
+<p>Encodes any Luau value.</p>
+<p>Directly tagged into the buffer:</p>
+<p>
+  • nil
+  • boolean
+  • number
+  • string
+  • table
+  • Vector2
+  • Vector3
+  • CFrame
+  • Color3
+</p>
+<p>
+  Instances and any other type (Roblox datatypes without a dedicated tag, etc.)
+  ride the side list as raw values and are serialized natively by the remote.
+</p>
+<p>
+  A value the remote can't serialize at all (function, thread, RBXScriptSignal,
+  RBXScriptConnection) is dropped in isolation: the writer warns and encodes nil
+  so the rest of the message still delivers.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="readValue"><code style="text-decoration:none">readValue</code><a href="#readValue" class="hash-link" aria-label="Direct link to readValue" title="Direct link to readValue" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/tablereplicator/src/Shared/Serialization/BufferCodec.luau#L657"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>BufferCodec<!-- -->.</code><code class="green_DgR4">readValue</code><code>(</code><code>reader<!-- -->: </code><code class="blue_P4bS">Reader</code><code>) → </code><code class="blue_P4bS">any</code></div><div>
+<p>Reads the next encoded value from the stream.</p>
+<p>Returns the decoded Luau value.</p>
+</div></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
+    &quot;functions&quot;: [
+        {
+            &quot;name&quot;: &quot;newWriter&quot;,
+            &quot;desc&quot;: &quot;Creates a new writer used for encoding values into a binary buffer.\n\nThe writer maintains temporary state while encoding, including string\ninterning tables and deduplicated instance references.\n\n```lua\nlocal writer = BufferCodec.newWriter()\n\nBufferCodec.writeValue(writer, {\n\tName = \&quot;Player\&quot;,\n\tHealth = 100,\n})\n\nlocal buffer, instances = BufferCodec.export(writer)\n```&quot;,
+            &quot;params&quot;: [],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Writer&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 271,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/Serialization/BufferCodec.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;export&quot;,
+            &quot;desc&quot;: &quot;Finalizes a writer.\n\nReturns a tightly-sized buffer containing the encoded bytes and an\noptional side list of raw values (Instances and any untagged types) which\nmust accompany the buffer when transmitting over a RemoteEvent.\n\n```lua\nlocal buffer, instances = BufferCodec.export(writer)\n\nRemoteEvent:FireClient(player, buffer, instances)\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;writer&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Writer&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;buffer&quot;
+                },
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{any}?&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 314,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/Serialization/BufferCodec.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;newReader&quot;,
+            &quot;desc&quot;: &quot;Creates a reader for decoding values from an encoded buffer.\n\nThe supplied side list should be the same list returned by\n`export` on the writing side.\n\n```lua\nlocal reader = BufferCodec.newReader(buffer, instances)\n\nlocal value = BufferCodec.readValue(reader)\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;buffer&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;buffer&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;instances&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{any}?&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Reader&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 339,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/Serialization/BufferCodec.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;writeValue&quot;,
+            &quot;desc&quot;: &quot;Encodes any Luau value.\n\nDirectly tagged into the buffer:\n\n• nil\n• boolean\n• number\n• string\n• table\n• Vector2\n• Vector3\n• CFrame\n• Color3\n\nInstances and any other type (Roblox datatypes without a dedicated tag, etc.)\nride the side list as raw values and are serialized natively by the remote.\n\nA value the remote can&#x27;t serialize at all (function, thread, RBXScriptSignal,\nRBXScriptConnection) is dropped in isolation: the writer warns and encodes nil\nso the rest of the message still delivers.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;writer&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Writer&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;value&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;any&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 579,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/Serialization/BufferCodec.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;readValue&quot;,
+            &quot;desc&quot;: &quot;Reads the next encoded value from the stream.\n\nReturns the decoded Luau value.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;reader&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Reader&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;any&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 657,
+                &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/Serialization/BufferCodec.luau&quot;
+            }
+        }
+    ],
+    &quot;properties&quot;: [],
+    &quot;types&quot;: [],
+    &quot;name&quot;: &quot;BufferCodec&quot;,
+    &quot;desc&quot;: &quot;Compact binary value codec over Luau buffers — the byte-level layer of the replication\nwire (Wire.luau is the message layer on top). Every value starts with a one-byte tag, and\nthe common cases bit-pack their payload into the tag byte itself so they cost zero extra\nbytes: integers 0..127 and -32..-1, string lengths 0..31, array/map sizes 0..15. Larger\nvalues fall through to explicit-width tags, with numbers stored in the smallest integer\nwidth that holds them (or f32 when it round-trips losslessly, f64 otherwise).\n\nStrings of length &gt;= 2 are interned per message: the first occurrence writes the bytes,\nrepeats write a 2-3 byte back-reference. Repeated dictionary keys (arrays of uniform\nrecords in a snapshot) collapse to almost nothing. Reader and writer must apply the same\ninterning rule (INTERN_MIN_LENGTH / INTERN_MAX_COUNT) or references desync.\n\nInstances cannot live inside a buffer — only the engine can serialize an instance ref,\nand only as a remote argument. The writer therefore collects them into a side list\n(deduplicated) and stores a 1-based index in the buffer; `export` returns the list so the\nmessage layer can ship it as a second remote argument, and the reader resolves indices\nagainst the received list. A ref the engine can not resolve on the client (streamed\nout, server-only) decodes as nil.\n\nAny value the buffer has no tag for (Roblox datatypes without a dedicated tag — Ray,\nRegion3, UDim2, EnumItem, … — as well as anything else) rides that same side list rather\nthan being rejected: the codec hands the raw value to the remote to serialize natively,\nexactly like an Instance ref. The buffer stores only the index. This keeps unsupported\ndata flowing (at native remote cost) instead of erroring out the whole message.\n\nA value a RemoteEvent genuinely can&#x27;t serialize (function, thread, RBXScriptSignal,\nRBXScriptConnection — see NON_REPLICABLE_TYPES) can&#x27;t ride the side list either: sending\nit would throw at FireClient and take the whole batched message down. The writer instead\nwarns and encodes nil in its place, so that one bad value is dropped in isolation while\nevery unrelated op sharing the frame still delivers.\n\nDirectly-tagged value types (bit-packed into the buffer): nil, boolean, number, string,\ntable, Vector3, Vector2, CFrame, Color3. Instances and everything else ride the side list.&quot;,
+    &quot;source&quot;: {
+        &quot;line&quot;: 40,
+        &quot;path&quot;: &quot;lib/tablereplicator/src/Shared/Serialization/BufferCodec.luau&quot;
+    }
+}</pre></details></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#functions" class="table-of-contents__link toc-highlight">Functions</a><ul><li><a href="#export" class="table-of-contents__link toc-highlight">.export</a></li><li><a href="#newReader" class="table-of-contents__link toc-highlight">.newReader</a></li><li><a href="#newWriter" class="table-of-contents__link toc-highlight">.newWriter</a></li><li><a href="#readValue" class="table-of-contents__link toc-highlight">.readValue</a></li><li><a href="#writeValue" class="table-of-contents__link toc-highlight">.writeValue</a></li></ul></li></ul></div></div></div></div></main></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
+</body>
+</html>

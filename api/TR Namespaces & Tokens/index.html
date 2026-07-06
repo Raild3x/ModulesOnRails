@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en" dir="ltr" class="plugin-moonwave plugin-id-moonwave" data-has-hydrated="false">
+<head>
+<meta charset="UTF-8">
+<meta name="generator" content="Docusaurus v3.10.1">
+<title data-rh="true">TR Namespaces &amp; Tokens | ModulesOnRails</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:url" content="https://raild3x.github.io/ModulesOnRails/api/TR Namespaces &amp; Tokens"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docusaurus_tag" content="default"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docsearch:docusaurus_tag" content="default"><meta data-rh="true" property="og:title" content="TR Namespaces &amp; Tokens | ModulesOnRails"><meta data-rh="true" name="description" content="A **namespace** is an optional string that identifies a replicator&#x27;s &quot;class&quot; so it
+can be discovered by name. Tokens layer opt-in collision safety on top of that.
+
+### Namespaces are optional
+
+Pass `Namespace` when you want to find the replicator by string later:
+
+```lua
+-- Named — discoverable by its namespace string.
+ServerReplicator.new({ Namespace = &quot;Inventory&quot;, Data = ..., Targets = {} })
+
+ClientReplicator.ForEach(&quot;Inventory&quot;, function(replicator) ... end)
+```
+
+Omit it for an **anonymous** replicator. Anonymous replicators still work fully —
+they&#x27;re just intentionally unreachable by string search. Find them by `Id`, by tags,
+or with a predicate instead:
+
+```lua
+-- Anonymous — reachable only by Id, tags, or predicate.
+local rep = ServerReplicator.new({
+	Data = ...,
+	Targets = {},
+	Tags = { Kind = &quot;Ephemeral&quot; },
+})
+
+ClientReplicator.ForEach({ Kind = &quot;Ephemeral&quot; }, function(replicator) ... end)
+```
+
+See [TR Discovery &amp; Targeting](/api/TR%20Discovery%20&amp;%20Targeting) for the full
+set of search conditions.
+
+### Opt-in collision safety with `TOKEN`
+
+In a large codebase, two unrelated modules might accidentally pick the same
+namespace string. A `ReplicationToken` claims a name **exclusively** so that can&#x27;t
+happen silently. Claim it once (usually at the top of a module), store it, and pass
+it as the `Namespace`:
+
+```lua
+local PlayerToken = ServerReplicator.TOKEN(&quot;PlayerData&quot;)
+
+ServerReplicator.new({ Namespace = PlayerToken, Data = ..., Targets = {} })
+
+-- Release the name once every replicator using it is destroyed:
+ServerReplicator.TOKEN.destroy(PlayerToken)
+```
+
+`TOKEN` also exposes `TOKEN.new(name)` (identical to calling `TOKEN(name)`) and
+`TOKEN.get(name)` to fetch an already-registered token.
+
+:::caution Collision rules
+The ownership ledger enforces these — each throws rather than failing silently:
+
+- `TOKEN(&quot;Name&quot;)` throws if `&quot;Name&quot;` is already owned by another token.
+- `TOKEN(&quot;Name&quot;)` throws if live replicators already use `&quot;Name&quot;` as a raw string.
+- Passing the raw string `&quot;Name&quot;` as a `Namespace` throws once a token owns it —
+  pass the **token object** instead.
+- `TOKEN.destroy(token)` throws if any replicator using that token is still alive.
+
+Because of the second rule, claim your token at module load, **before** any
+replicator with that name is created.
+:::
+
+### When should I use a token?
+
+| Situation | Recommendation |
+| --- | --- |
+| Small project, or a namespace only ever used in one place | A plain string is fine — tokens add nothing. |
+| Shared library, or a name used across several modules | Use a `TOKEN` so accidental reuse fails loudly. |
+| Discovery on the client | Either works — a token matches the same string a raw namespace would. |
+
+Tokens are purely a **server-side** authoring safeguard; on the wire and on the
+client a token is just its name string.
+
+---
+### See also
+
+- **[TR Getting Started](/api/TR%20Getting%20Started)** — where `Namespace` fits in the config table.
+- **[TR Discovery &amp; Targeting](/api/TR%20Discovery%20&amp;%20Targeting)** — matching by namespace, token, tags, or predicate."><meta data-rh="true" property="og:description" content="A **namespace** is an optional string that identifies a replicator&#x27;s &quot;class&quot; so it
+can be discovered by name. Tokens layer opt-in collision safety on top of that.
+
+### Namespaces are optional
+
+Pass `Namespace` when you want to find the replicator by string later:
+
+```lua
+-- Named — discoverable by its namespace string.
+ServerReplicator.new({ Namespace = &quot;Inventory&quot;, Data = ..., Targets = {} })
+
+ClientReplicator.ForEach(&quot;Inventory&quot;, function(replicator) ... end)
+```
+
+Omit it for an **anonymous** replicator. Anonymous replicators still work fully —
+they&#x27;re just intentionally unreachable by string search. Find them by `Id`, by tags,
+or with a predicate instead:
+
+```lua
+-- Anonymous — reachable only by Id, tags, or predicate.
+local rep = ServerReplicator.new({
+	Data = ...,
+	Targets = {},
+	Tags = { Kind = &quot;Ephemeral&quot; },
+})
+
+ClientReplicator.ForEach({ Kind = &quot;Ephemeral&quot; }, function(replicator) ... end)
+```
+
+See [TR Discovery &amp; Targeting](/api/TR%20Discovery%20&amp;%20Targeting) for the full
+set of search conditions.
+
+### Opt-in collision safety with `TOKEN`
+
+In a large codebase, two unrelated modules might accidentally pick the same
+namespace string. A `ReplicationToken` claims a name **exclusively** so that can&#x27;t
+happen silently. Claim it once (usually at the top of a module), store it, and pass
+it as the `Namespace`:
+
+```lua
+local PlayerToken = ServerReplicator.TOKEN(&quot;PlayerData&quot;)
+
+ServerReplicator.new({ Namespace = PlayerToken, Data = ..., Targets = {} })
+
+-- Release the name once every replicator using it is destroyed:
+ServerReplicator.TOKEN.destroy(PlayerToken)
+```
+
+`TOKEN` also exposes `TOKEN.new(name)` (identical to calling `TOKEN(name)`) and
+`TOKEN.get(name)` to fetch an already-registered token.
+
+:::caution Collision rules
+The ownership ledger enforces these — each throws rather than failing silently:
+
+- `TOKEN(&quot;Name&quot;)` throws if `&quot;Name&quot;` is already owned by another token.
+- `TOKEN(&quot;Name&quot;)` throws if live replicators already use `&quot;Name&quot;` as a raw string.
+- Passing the raw string `&quot;Name&quot;` as a `Namespace` throws once a token owns it —
+  pass the **token object** instead.
+- `TOKEN.destroy(token)` throws if any replicator using that token is still alive.
+
+Because of the second rule, claim your token at module load, **before** any
+replicator with that name is created.
+:::
+
+### When should I use a token?
+
+| Situation | Recommendation |
+| --- | --- |
+| Small project, or a namespace only ever used in one place | A plain string is fine — tokens add nothing. |
+| Shared library, or a name used across several modules | Use a `TOKEN` so accidental reuse fails loudly. |
+| Discovery on the client | Either works — a token matches the same string a raw namespace would. |
+
+Tokens are purely a **server-side** authoring safeguard; on the wire and on the
+client a token is just its name string.
+
+---
+### See also
+
+- **[TR Getting Started](/api/TR%20Getting%20Started)** — where `Namespace` fits in the config table.
+- **[TR Discovery &amp; Targeting](/api/TR%20Discovery%20&amp;%20Targeting)** — matching by namespace, token, tags, or predicate."><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/TR Namespaces &amp; Tokens"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/TR Namespaces &amp; Tokens" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/TR Namespaces &amp; Tokens" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.e8e96400.css">
+<script src="/ModulesOnRails/assets/js/runtime~main.668e8339.js" defer="defer"></script>
+<script src="/ModulesOnRails/assets/js/main.d4575191.js" defer="defer"></script>
+</head>
+<body>
+<svg style="display: none;"><defs>
+<symbol id="theme-svg-external-link" viewBox="0 0 24 24"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"/></symbol>
+</defs></svg>
+<script>!function(){var t=function(){try{return new URLSearchParams(window.location.search).get("docusaurus-theme")}catch(t){}}()||function(){try{return window.localStorage.getItem("theme")}catch(t){}}();document.documentElement.setAttribute("data-theme",t||(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")),document.documentElement.setAttribute("data-theme-choice",t||"system")}(),function(){try{const c=new URLSearchParams(window.location.search).entries();for(var[t,e]of c)if(t.startsWith("docusaurus-data-")){var a=t.replace("docusaurus-data-","data-");document.documentElement.setAttribute(a,e)}}catch(t){}}()</script><div id="__docusaurus"><div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#__docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="theme-layout-navbar navbar navbar--fixed-top"><div class="navbar__inner"><div class="theme-layout-navbar-left navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="theme-layout-navbar-right navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_nPIU"><use href="#theme-svg-external-link"></use></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="system mode" aria-label="Switch between dark and light mode (currently system mode)"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP systemToggleIcon_QzmC"><path fill="currentColor" d="m12 21c4.971 0 9-4.029 9-9s-4.029-9-9-9-9 4.029-9 9 4.029 9 9 9zm4.95-13.95c1.313 1.313 2.05 3.093 2.05 4.95s-0.738 3.637-2.05 4.95c-1.313 1.313-3.093 2.05-4.95 2.05v-14c1.857 0 3.637 0.737 4.95 2.05z"></path></svg></button></div><div class="navbarSearchContainer_Bca1"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input id="search_input_react" type="search" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="__docusaurus_skipToContent_fallback" class="theme-layout-main main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject"><span title="​Base​Object" class="linkLabel_WmDU">​Base​Object</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Roam"><span title="​Roam" class="linkLabel_WmDU">​Roam</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/TableManager"><span title="TableManager" class="categoryLinkLabel_W154">TableManager</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" href="/ModulesOnRails/api/TableReplicator"><span title="TableReplicator" class="categoryLinkLabel_W154">TableReplicator</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TableReplicator"><span title="​Table​Replicator" class="linkLabel_WmDU">​Table​Replicator</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/ServerReplicator"><span title="​Server​Replicator" class="linkLabel_WmDU">​Server​Replicator</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/ClientReplicator"><span title="​Client​Replicator" class="linkLabel_WmDU">​Client​Replicator</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-2 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" tabindex="0" href="/ModulesOnRails/api/TR Getting Started"><span title="[Guides]" class="categoryLinkLabel_W154">[Guides]</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TR Getting Started"><span title="​T​R ​Getting ​Started" class="linkLabel_WmDU">​T​R ​Getting ​Started</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TR Discovery &amp; Targeting"><span title="​T​R ​Discovery &amp; ​Targeting" class="linkLabel_WmDU">​T​R ​Discovery &amp; ​Targeting</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" tabindex="0" href="/ModulesOnRails/api/TR Namespaces &amp; Tokens"><span title="​T​R ​Namespaces &amp; ​Tokens" class="linkLabel_WmDU">​T​R ​Namespaces &amp; ​Tokens</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TR Parent-Child Guide"><span title="​T​R ​Parent-​Child ​Guide" class="linkLabel_WmDU">​T​R ​Parent-​Child ​Guide</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TR Custom Remotes"><span title="​T​R ​Custom ​Remotes" class="linkLabel_WmDU">​T​R ​Custom ​Remotes</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TR Performance &amp; Ordering"><span title="​T​R ​Performance &amp; ​Ordering" class="linkLabel_WmDU">​T​R ​Performance &amp; ​Ordering</span></a></li></ul></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/NetWire"><span title="NetWire" class="categoryLinkLabel_W154">NetWire</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Component"><span title="Instance Component Systems" class="categoryLinkLabel_W154">Instance Component Systems</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/DropletManager"><span title="DropletManager" class="categoryLinkLabel_W154">DropletManager</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/AdjustableTimer"><span title="AdjustableTimer [Unreleased]" class="categoryLinkLabel_W154">AdjustableTimer [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/PlayerProfileManager"><span title="PlayerDataManagement [Unreleased]" class="categoryLinkLabel_W154">PlayerDataManagement [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/CmdrHandler"><span title="Admin Commands [Cmdr]" class="categoryLinkLabel_W154">Admin Commands [Cmdr]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Queue"><span title="Data Structures" class="categoryLinkLabel_W154">Data Structures</span></a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BufferCodec"><span title="​Buffer​Codec" class="linkLabel_WmDU">​Buffer​Codec</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ObjectCache"><span title="​Object​Cache" class="linkLabel_WmDU">​Object​Cache</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ProbabilityDistributor"><span title="​Probability​Distributor" class="linkLabel_WmDU">​Probability​Distributor</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PromValue"><span title="​Prom​Value" class="linkLabel_WmDU">​Prom​Value</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/T"><span title="​T" class="linkLabel_WmDU">​T</span></a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">T</span><span style="display:inline-block">R</span><span style="display:inline-block"></span><span style="display:inline-block">Namespaces</span><span style="display:inline-block">&amp;</span><span style="display:inline-block"></span><span style="display:inline-block">Tokens</span></h1><div class="luaClassTags_EipM"></div><div>
+<p>
+  A <strong>namespace</strong> is an optional string that identifies a replicator's "class" so it
+  can be discovered by name. Tokens layer opt-in collision safety on top of that.
+</p>
+<h3>Namespaces are optional</h3>
+<p>Pass <code>Namespace</code> when you want to find the replicator by string later:</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- Named — discoverable by its namespace string.</span>
+ServerReplicator<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">{</span> Namespace <span class="token operator">=</span> <span class="token string">"Inventory"</span><span class="token punctuation">,</span> Data <span class="token operator">=</span> <span class="token punctuation">...</span><span class="token punctuation">,</span> Targets <span class="token operator">=</span> <span class="token punctuation">{</span><span class="token punctuation">}</span> <span class="token punctuation">}</span><span class="token punctuation">)</span>
+
+ClientReplicator<span class="token punctuation">.</span><span class="token function">ForEach</span><span class="token punctuation">(</span><span class="token string">"Inventory"</span><span class="token punctuation">,</span> <span class="token keyword">function</span><span class="token punctuation">(</span>replicator<span class="token punctuation">)</span> <span class="token punctuation">...</span> <span class="token keyword">end</span><span class="token punctuation">)</span>
+</code></pre>
+<p>
+  Omit it for an <strong>anonymous</strong> replicator. Anonymous replicators still work fully —
+  they're just intentionally unreachable by string search. Find them by <code>Id</code>, by tags,
+  or with a predicate instead:
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- Anonymous — reachable only by Id, tags, or predicate.</span>
+<span class="token keyword">local</span> rep <span class="token operator">=</span> ServerReplicator<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">{</span>
+	Data <span class="token operator">=</span> <span class="token punctuation">...</span><span class="token punctuation">,</span>
+	Targets <span class="token operator">=</span> <span class="token punctuation">{</span><span class="token punctuation">}</span><span class="token punctuation">,</span>
+	Tags <span class="token operator">=</span> <span class="token punctuation">{</span> Kind <span class="token operator">=</span> <span class="token string">"Ephemeral"</span> <span class="token punctuation">}</span><span class="token punctuation">,</span>
+<span class="token punctuation">}</span><span class="token punctuation">)</span>
+
+ClientReplicator<span class="token punctuation">.</span><span class="token function">ForEach</span><span class="token punctuation">(</span><span class="token punctuation">{</span> Kind <span class="token operator">=</span> <span class="token string">"Ephemeral"</span> <span class="token punctuation">}</span><span class="token punctuation">,</span> <span class="token keyword">function</span><span class="token punctuation">(</span>replicator<span class="token punctuation">)</span> <span class="token punctuation">...</span> <span class="token keyword">end</span><span class="token punctuation">)</span>
+</code></pre>
+<p>
+  See <a href="/ModulesOnRails/api/TR%20Discovery%20&#x26;%20Targeting">TR Discovery &#x26; Targeting</a> for the full
+  set of search conditions.
+</p>
+<h3>Opt-in collision safety with <code>TOKEN</code></h3>
+<p>
+  In a large codebase, two unrelated modules might accidentally pick the same
+  namespace string. A <code>ReplicationToken</code> claims a name <strong>exclusively</strong> so that can't
+  happen silently. Claim it once (usually at the top of a module), store it, and pass
+  it as the <code>Namespace</code>:
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> PlayerToken <span class="token operator">=</span> ServerReplicator<span class="token punctuation">.</span><span class="token function">TOKEN</span><span class="token punctuation">(</span><span class="token string">"PlayerData"</span><span class="token punctuation">)</span>
+
+ServerReplicator<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">{</span> Namespace <span class="token operator">=</span> PlayerToken<span class="token punctuation">,</span> Data <span class="token operator">=</span> <span class="token punctuation">...</span><span class="token punctuation">,</span> Targets <span class="token operator">=</span> <span class="token punctuation">{</span><span class="token punctuation">}</span> <span class="token punctuation">}</span><span class="token punctuation">)</span>
+
+<span class="token comment">-- Release the name once every replicator using it is destroyed:</span>
+ServerReplicator<span class="token punctuation">.</span>TOKEN<span class="token punctuation">.</span><span class="token function">destroy</span><span class="token punctuation">(</span>PlayerToken<span class="token punctuation">)</span>
+</code></pre>
+<p>
+  <code>TOKEN</code> also exposes <code>TOKEN.new(name)</code> (identical to calling <code>TOKEN(name)</code>) and
+  <code>TOKEN.get(name)</code> to fetch an already-registered token.
+</p>
+<p>
+  :::caution Collision rules
+  The ownership ledger enforces these — each throws rather than failing silently:
+</p>
+<ul>
+  <li><code>TOKEN("Name")</code> throws if <code>"Name"</code> is already owned by another token.</li>
+  <li><code>TOKEN("Name")</code> throws if live replicators already use <code>"Name"</code> as a raw string.</li>
+  <li>
+    Passing the raw string <code>"Name"</code> as a <code>Namespace</code> throws once a token owns it —
+    pass the <strong>token object</strong> instead.
+  </li>
+  <li><code>TOKEN.destroy(token)</code> throws if any replicator using that token is still alive.</li>
+</ul>
+<p>
+  Because of the second rule, claim your token at module load, <strong>before</strong> any
+  replicator with that name is created.
+  :::
+</p>
+<h3>When should I use a token?</h3>
+<table>
+  <thead>
+    <tr>
+      <th>Situation</th>
+      <th>Recommendation</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Small project, or a namespace only ever used in one place</td>
+      <td>A plain string is fine — tokens add nothing.</td>
+    </tr>
+    <tr>
+      <td>Shared library, or a name used across several modules</td>
+      <td>Use a <code>TOKEN</code> so accidental reuse fails loudly.</td>
+    </tr>
+    <tr>
+      <td>Discovery on the client</td>
+      <td>Either works — a token matches the same string a raw namespace would.</td>
+    </tr>
+  </tbody>
+</table>
+<p>
+  Tokens are purely a <strong>server-side</strong> authoring safeguard; on the wire and on the
+  client a token is just its name string.
+</p>
+<hr>
+<h3>See also</h3>
+<ul>
+  <li><strong><a href="/ModulesOnRails/api/TR%20Getting%20Started">TR Getting Started</a></strong> — where <code>Namespace</code> fits in the config table.</li>
+  <li><strong><a href="/ModulesOnRails/api/TR%20Discovery%20&#x26;%20Targeting">TR Discovery &#x26; Targeting</a></strong> — matching by namespace, token, tags, or predicate.</li>
+</ul>
+</div></header></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
+    &quot;functions&quot;: [],
+    &quot;properties&quot;: [],
+    &quot;types&quot;: [],
+    &quot;name&quot;: &quot;TR Namespaces &amp; Tokens&quot;,
+    &quot;desc&quot;: &quot;A **namespace** is an optional string that identifies a replicator&#x27;s \&quot;class\&quot; so it\ncan be discovered by name. Tokens layer opt-in collision safety on top of that.\n\n### Namespaces are optional\n\nPass `Namespace` when you want to find the replicator by string later:\n\n```lua\n-- Named — discoverable by its namespace string.\nServerReplicator.new({ Namespace = \&quot;Inventory\&quot;, Data = ..., Targets = {} })\n\nClientReplicator.ForEach(\&quot;Inventory\&quot;, function(replicator) ... end)\n```\n\nOmit it for an **anonymous** replicator. Anonymous replicators still work fully —\nthey&#x27;re just intentionally unreachable by string search. Find them by `Id`, by tags,\nor with a predicate instead:\n\n```lua\n-- Anonymous — reachable only by Id, tags, or predicate.\nlocal rep = ServerReplicator.new({\n\tData = ...,\n\tTargets = {},\n\tTags = { Kind = \&quot;Ephemeral\&quot; },\n})\n\nClientReplicator.ForEach({ Kind = \&quot;Ephemeral\&quot; }, function(replicator) ... end)\n```\n\nSee [TR Discovery &amp; Targeting](/api/TR%20Discovery%20&amp;%20Targeting) for the full\nset of search conditions.\n\n### Opt-in collision safety with `TOKEN`\n\nIn a large codebase, two unrelated modules might accidentally pick the same\nnamespace string. A `ReplicationToken` claims a name **exclusively** so that can&#x27;t\nhappen silently. Claim it once (usually at the top of a module), store it, and pass\nit as the `Namespace`:\n\n```lua\nlocal PlayerToken = ServerReplicator.TOKEN(\&quot;PlayerData\&quot;)\n\nServerReplicator.new({ Namespace = PlayerToken, Data = ..., Targets = {} })\n\n-- Release the name once every replicator using it is destroyed:\nServerReplicator.TOKEN.destroy(PlayerToken)\n```\n\n`TOKEN` also exposes `TOKEN.new(name)` (identical to calling `TOKEN(name)`) and\n`TOKEN.get(name)` to fetch an already-registered token.\n\n:::caution Collision rules\nThe ownership ledger enforces these — each throws rather than failing silently:\n\n- `TOKEN(\&quot;Name\&quot;)` throws if `\&quot;Name\&quot;` is already owned by another token.\n- `TOKEN(\&quot;Name\&quot;)` throws if live replicators already use `\&quot;Name\&quot;` as a raw string.\n- Passing the raw string `\&quot;Name\&quot;` as a `Namespace` throws once a token owns it —\n  pass the **token object** instead.\n- `TOKEN.destroy(token)` throws if any replicator using that token is still alive.\n\nBecause of the second rule, claim your token at module load, **before** any\nreplicator with that name is created.\n:::\n\n### When should I use a token?\n\n| Situation | Recommendation |\n| --- | --- |\n| Small project, or a namespace only ever used in one place | A plain string is fine — tokens add nothing. |\n| Shared library, or a name used across several modules | Use a `TOKEN` so accidental reuse fails loudly. |\n| Discovery on the client | Either works — a token matches the same string a raw namespace would. |\n\nTokens are purely a **server-side** authoring safeguard; on the wire and on the\nclient a token is just its name string.\n\n---\n### See also\n\n- **[TR Getting Started](/api/TR%20Getting%20Started)** — where `Namespace` fits in the config table.\n- **[TR Discovery &amp; Targeting](/api/TR%20Discovery%20&amp;%20Targeting)** — matching by namespace, token, tags, or predicate.&quot;,
+    &quot;source&quot;: {
+        &quot;line&quot;: 85,
+        &quot;path&quot;: &quot;lib/tablereplicator/src/Docs/TR_Namespaces_And_Tokens.luau&quot;
+    }
+}</pre></details></div></div></div></main></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
+</body>
+</html>

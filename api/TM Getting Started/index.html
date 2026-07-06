@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="en" dir="ltr" class="plugin-moonwave plugin-id-moonwave" data-has-hydrated="false">
+<head>
+<meta charset="UTF-8">
+<meta name="generator" content="Docusaurus v3.10.1">
+<title data-rh="true">TM Getting Started | ModulesOnRails</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:url" content="https://raild3x.github.io/ModulesOnRails/api/TM Getting Started"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docusaurus_tag" content="default"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docsearch:docusaurus_tag" content="default"><meta data-rh="true" property="og:title" content="TM Getting Started | ModulesOnRails"><meta data-rh="true" name="description" content="[TableManager](/api/TableManager) wraps a nested Luau table and lets you
+observe and mutate it by path: reads and writes go through the manager, and
+listeners fire for exactly the changes they care about — a single field, a
+whole subtree, an array, or the entire structure.
+
+This guide walks through the minimal end-to-end setup. For deeper topics see
+the other guides linked at the bottom of the page.
+
+### 1. Require the module and create a manager
+
+`TableManager.new(initialData, config?)` takes your initial table and an
+optional [config](/api/TableManager#TableManagerConfig). The data is managed
+in place — `manager.Raw` is the very table you passed in.
+
+```lua
+local TableManager = require(Packages.TableManager)
+
+local manager = TableManager.new({
+	Player = { Name = &quot;Alice&quot;, Health = 100 },
+	Inventory = { &quot;Sword&quot;, &quot;Shield&quot; },
+})
+```
+
+:::tip Type Inference
+`TableManager.new` is generic and infers the type of your initial data.
+This allows for autocompletion and type checking for certain methods and properties.
+Due to a bug within Luau, some of this functionality is currently disabled until the bug is fixed.
+:::
+
+### 2. Reading data
+
+Use `Get` with a dot-string or an array path. An empty path returns the root
+(the same table as `manager.Raw`).
+
+```lua
+manager:Get(&quot;Player.Health&quot;)          -- 100
+manager:Get({ &quot;Player&quot;, &quot;Name&quot; })     -- &quot;Alice&quot;
+manager:Get(&quot;Inventory&quot;)              -- { &quot;Sword&quot;, &quot;Shield&quot; }
+```
+
+### 3. Writing data
+
+`Set` writes a value at a path; `Update` and `Increment` are convenience
+wrappers over it. Array contents have their own methods — `ArrayInsert`,
+`ArrayRemove`, and friends (see the For &amp; Map and Listeners guides).
+
+```lua
+manager:Set(&quot;Player.Health&quot;, 80)
+manager:Update(&quot;Player.Health&quot;, function(hp) return hp - 10 end)
+manager:Increment(&quot;Player.Health&quot;, 5)
+
+manager:ArrayInsert(&quot;Inventory&quot;, &quot;Potion&quot;)   -- append
+manager:ArrayInsert(&quot;Inventory&quot;, 1, &quot;Bow&quot;)   -- insert at index 1
+```
+
+Paths in `Set`/`Update`/`Increment` (and the bulk reader `GetMatching`) may
+contain `&quot;*&quot;` wildcard segments to address every key at that level at once —
+e.g. `manager:Increment(&quot;Players.*.Health&quot;, 5)`. See the
+[Wildcards](/api/TM%20Wildcards) guide for the full rules.
+
+:::tip Prefer paths over reaching into `Raw`
+Writing through `Set`/`ArrayInsert`/etc. is what fires listeners. Mutating
+`manager.Raw` directly bypasses change detection — see the Proxies &amp; Direct
+Table Access guide for when that is and isn&#x27;t safe.
+:::
+
+### 4. Your first listener
+
+`OnValueChange` fires when the value at the specified path changes.
+
+```lua
+manager:OnValueChange(&quot;Player.Health&quot;, function(health, oldHealth)
+	print(&quot;health changed:&quot;, oldHealth, &quot;-&gt;&quot;, health)
+end)
+
+manager:Set(&quot;Player.Health&quot;, 50) -- fires: &quot;health: 100 -&gt; 50&quot;
+```
+
+Every listener returns a `Connection` — hold onto it and call `:Disconnect()`
+when you no longer need it. The full listener surface (path listeners, key and
+array listeners, wildcards, and the global Signals) is covered in the Listeners
+&amp; Fire Modes guide.
+
+### 5. Cleanup
+
+Call `Destroy` when a manager is no longer needed. It disconnects every
+listener and signal, tears down owned `For*`/`Map*` subscriptions, and releases
+proxies. It is idempotent.
+
+```lua
+manager:OnValueChange(&quot;Player.Health&quot;, onHealthChanged)
+
+manager:OnDestroy(function()
+	print(&quot;manager torn down&quot;)
+end)
+
+manager:Destroy()
+print(TableManager.IsDestroyed(manager)) -- true
+```
+
+:::tip IsDestroyed
+An alias `manager:IsDestroyed()` is provided as an alternate to `TableManager.IsDestroyed(manager)`. 
+It is the only safe method to use after `Destroy`. All other methods will error as the metatable is removed.
+:::
+
+---
+### The config table at a glance
+
+`TableManager.new`&#x27;s second argument is a
+[TableManagerConfig](/api/TableManager#TableManagerConfig):
+
+| Field | Purpose | Default |
+| --- | --- | --- |
+| `Schema` | Validates the initial data&#x27;s shape with a [`T`](/api/TableManager#T) check. See the Schema Validation guide. | `nil` (no validation) |
+| `OnValidationFailed` | Observes schema failures before the constructor errors. | `nil` |
+| `ListenerFireMode` | How listener callbacks are scheduled. See the Listeners &amp; Fire Modes guide. | `&quot;bindable&quot;` |
+| `SignalFireMode` | How the per-change Signals are scheduled. See the Listeners &amp; Fire Modes guide. | `&quot;bindable&quot;` |
+| `FlushMode` | Whether writes diff/fire immediately or coalesce to frame-end. See the Flushing guide. | `&quot;immediate&quot;` |
+| `DuplicateReferenceMode` | Whether a table written to a second path shares identity or is cloned. See the Proxies guide. | `&quot;allow&quot;` |
+| `EnableProxies` | Whether `Proxy`/`GetProxy` are available on this manager. | `true` |
+| `IgnoredPaths` | Paths (and descendants) that skip all diff/event work. | `{}` |
+| `FrozenTablesAreOpaque` | Whether shallowly frozen tables are also treated as opaque. See the Opaque Values guide. | `false` |
+
+The mode defaults can be changed process-wide with
+[`TableManager.SetDefaults`](/api/TableManager#SetDefaults) so you don&#x27;t have
+to repeat them in every `new` call.
+
+
+---
+### See also
+
+- **[TM Listeners &amp; Fire Modes](/api/TM%20Listeners%20&amp;%20Fire%20Modes)** — path/key/array listeners and scheduling.
+- **[TM Wildcards](/api/TM%20Wildcards)** — `&quot;*&quot;` paths for listeners, writes, and bulk reads.
+- **[TM Flushing](/api/TM%20Flushing)** — the diff-and-fire cycle behind every event.
+- **[TM Batching](/api/TM%20Batching)** — grouping many writes so events fire once.
+- **[TM Proxies &amp; Direct Table Access](/api/TM%20Proxies%20&amp;%20Direct%20Table%20Access)** — the proxy view and its rules.
+- **[TM Schema Validation](/api/TM%20Schema%20Validation)** — validating data shape at construction.
+- **[TM Opaque Values](/api/TM%20Opaque%20Values)** — telling the diff engine to skip certain values.
+- **[TM For &amp; Map Reactive Views](/api/TM%20For%20&amp;%20Map%20Reactive%20Views)** — per-item reconcilers and derived managers."><meta data-rh="true" property="og:description" content="[TableManager](/api/TableManager) wraps a nested Luau table and lets you
+observe and mutate it by path: reads and writes go through the manager, and
+listeners fire for exactly the changes they care about — a single field, a
+whole subtree, an array, or the entire structure.
+
+This guide walks through the minimal end-to-end setup. For deeper topics see
+the other guides linked at the bottom of the page.
+
+### 1. Require the module and create a manager
+
+`TableManager.new(initialData, config?)` takes your initial table and an
+optional [config](/api/TableManager#TableManagerConfig). The data is managed
+in place — `manager.Raw` is the very table you passed in.
+
+```lua
+local TableManager = require(Packages.TableManager)
+
+local manager = TableManager.new({
+	Player = { Name = &quot;Alice&quot;, Health = 100 },
+	Inventory = { &quot;Sword&quot;, &quot;Shield&quot; },
+})
+```
+
+:::tip Type Inference
+`TableManager.new` is generic and infers the type of your initial data.
+This allows for autocompletion and type checking for certain methods and properties.
+Due to a bug within Luau, some of this functionality is currently disabled until the bug is fixed.
+:::
+
+### 2. Reading data
+
+Use `Get` with a dot-string or an array path. An empty path returns the root
+(the same table as `manager.Raw`).
+
+```lua
+manager:Get(&quot;Player.Health&quot;)          -- 100
+manager:Get({ &quot;Player&quot;, &quot;Name&quot; })     -- &quot;Alice&quot;
+manager:Get(&quot;Inventory&quot;)              -- { &quot;Sword&quot;, &quot;Shield&quot; }
+```
+
+### 3. Writing data
+
+`Set` writes a value at a path; `Update` and `Increment` are convenience
+wrappers over it. Array contents have their own methods — `ArrayInsert`,
+`ArrayRemove`, and friends (see the For &amp; Map and Listeners guides).
+
+```lua
+manager:Set(&quot;Player.Health&quot;, 80)
+manager:Update(&quot;Player.Health&quot;, function(hp) return hp - 10 end)
+manager:Increment(&quot;Player.Health&quot;, 5)
+
+manager:ArrayInsert(&quot;Inventory&quot;, &quot;Potion&quot;)   -- append
+manager:ArrayInsert(&quot;Inventory&quot;, 1, &quot;Bow&quot;)   -- insert at index 1
+```
+
+Paths in `Set`/`Update`/`Increment` (and the bulk reader `GetMatching`) may
+contain `&quot;*&quot;` wildcard segments to address every key at that level at once —
+e.g. `manager:Increment(&quot;Players.*.Health&quot;, 5)`. See the
+[Wildcards](/api/TM%20Wildcards) guide for the full rules.
+
+:::tip Prefer paths over reaching into `Raw`
+Writing through `Set`/`ArrayInsert`/etc. is what fires listeners. Mutating
+`manager.Raw` directly bypasses change detection — see the Proxies &amp; Direct
+Table Access guide for when that is and isn&#x27;t safe.
+:::
+
+### 4. Your first listener
+
+`OnValueChange` fires when the value at the specified path changes.
+
+```lua
+manager:OnValueChange(&quot;Player.Health&quot;, function(health, oldHealth)
+	print(&quot;health changed:&quot;, oldHealth, &quot;-&gt;&quot;, health)
+end)
+
+manager:Set(&quot;Player.Health&quot;, 50) -- fires: &quot;health: 100 -&gt; 50&quot;
+```
+
+Every listener returns a `Connection` — hold onto it and call `:Disconnect()`
+when you no longer need it. The full listener surface (path listeners, key and
+array listeners, wildcards, and the global Signals) is covered in the Listeners
+&amp; Fire Modes guide.
+
+### 5. Cleanup
+
+Call `Destroy` when a manager is no longer needed. It disconnects every
+listener and signal, tears down owned `For*`/`Map*` subscriptions, and releases
+proxies. It is idempotent.
+
+```lua
+manager:OnValueChange(&quot;Player.Health&quot;, onHealthChanged)
+
+manager:OnDestroy(function()
+	print(&quot;manager torn down&quot;)
+end)
+
+manager:Destroy()
+print(TableManager.IsDestroyed(manager)) -- true
+```
+
+:::tip IsDestroyed
+An alias `manager:IsDestroyed()` is provided as an alternate to `TableManager.IsDestroyed(manager)`. 
+It is the only safe method to use after `Destroy`. All other methods will error as the metatable is removed.
+:::
+
+---
+### The config table at a glance
+
+`TableManager.new`&#x27;s second argument is a
+[TableManagerConfig](/api/TableManager#TableManagerConfig):
+
+| Field | Purpose | Default |
+| --- | --- | --- |
+| `Schema` | Validates the initial data&#x27;s shape with a [`T`](/api/TableManager#T) check. See the Schema Validation guide. | `nil` (no validation) |
+| `OnValidationFailed` | Observes schema failures before the constructor errors. | `nil` |
+| `ListenerFireMode` | How listener callbacks are scheduled. See the Listeners &amp; Fire Modes guide. | `&quot;bindable&quot;` |
+| `SignalFireMode` | How the per-change Signals are scheduled. See the Listeners &amp; Fire Modes guide. | `&quot;bindable&quot;` |
+| `FlushMode` | Whether writes diff/fire immediately or coalesce to frame-end. See the Flushing guide. | `&quot;immediate&quot;` |
+| `DuplicateReferenceMode` | Whether a table written to a second path shares identity or is cloned. See the Proxies guide. | `&quot;allow&quot;` |
+| `EnableProxies` | Whether `Proxy`/`GetProxy` are available on this manager. | `true` |
+| `IgnoredPaths` | Paths (and descendants) that skip all diff/event work. | `{}` |
+| `FrozenTablesAreOpaque` | Whether shallowly frozen tables are also treated as opaque. See the Opaque Values guide. | `false` |
+
+The mode defaults can be changed process-wide with
+[`TableManager.SetDefaults`](/api/TableManager#SetDefaults) so you don&#x27;t have
+to repeat them in every `new` call.
+
+
+---
+### See also
+
+- **[TM Listeners &amp; Fire Modes](/api/TM%20Listeners%20&amp;%20Fire%20Modes)** — path/key/array listeners and scheduling.
+- **[TM Wildcards](/api/TM%20Wildcards)** — `&quot;*&quot;` paths for listeners, writes, and bulk reads.
+- **[TM Flushing](/api/TM%20Flushing)** — the diff-and-fire cycle behind every event.
+- **[TM Batching](/api/TM%20Batching)** — grouping many writes so events fire once.
+- **[TM Proxies &amp; Direct Table Access](/api/TM%20Proxies%20&amp;%20Direct%20Table%20Access)** — the proxy view and its rules.
+- **[TM Schema Validation](/api/TM%20Schema%20Validation)** — validating data shape at construction.
+- **[TM Opaque Values](/api/TM%20Opaque%20Values)** — telling the diff engine to skip certain values.
+- **[TM For &amp; Map Reactive Views](/api/TM%20For%20&amp;%20Map%20Reactive%20Views)** — per-item reconcilers and derived managers."><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/TM Getting Started"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/TM Getting Started" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/TM Getting Started" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.e8e96400.css">
+<script src="/ModulesOnRails/assets/js/runtime~main.668e8339.js" defer="defer"></script>
+<script src="/ModulesOnRails/assets/js/main.d4575191.js" defer="defer"></script>
+</head>
+<body>
+<svg style="display: none;"><defs>
+<symbol id="theme-svg-external-link" viewBox="0 0 24 24"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"/></symbol>
+</defs></svg>
+<script>!function(){var t=function(){try{return new URLSearchParams(window.location.search).get("docusaurus-theme")}catch(t){}}()||function(){try{return window.localStorage.getItem("theme")}catch(t){}}();document.documentElement.setAttribute("data-theme",t||(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")),document.documentElement.setAttribute("data-theme-choice",t||"system")}(),function(){try{const c=new URLSearchParams(window.location.search).entries();for(var[t,e]of c)if(t.startsWith("docusaurus-data-")){var a=t.replace("docusaurus-data-","data-");document.documentElement.setAttribute(a,e)}}catch(t){}}()</script><div id="__docusaurus"><div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#__docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="theme-layout-navbar navbar navbar--fixed-top"><div class="navbar__inner"><div class="theme-layout-navbar-left navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="theme-layout-navbar-right navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_nPIU"><use href="#theme-svg-external-link"></use></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="system mode" aria-label="Switch between dark and light mode (currently system mode)"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP systemToggleIcon_QzmC"><path fill="currentColor" d="m12 21c4.971 0 9-4.029 9-9s-4.029-9-9-9-9 4.029-9 9 4.029 9 9 9zm4.95-13.95c1.313 1.313 2.05 3.093 2.05 4.95s-0.738 3.637-2.05 4.95c-1.313 1.313-3.093 2.05-4.95 2.05v-14c1.857 0 3.637 0.737 4.95 2.05z"></path></svg></button></div><div class="navbarSearchContainer_Bca1"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input id="search_input_react" type="search" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="__docusaurus_skipToContent_fallback" class="theme-layout-main main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject"><span title="​Base​Object" class="linkLabel_WmDU">​Base​Object</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Roam"><span title="​Roam" class="linkLabel_WmDU">​Roam</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" href="/ModulesOnRails/api/TableManager"><span title="TableManager" class="categoryLinkLabel_W154">TableManager</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TableManager"><span title="​Table​Manager" class="linkLabel_WmDU">​Table​Manager</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-2 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" tabindex="0" href="/ModulesOnRails/api/TM Getting Started"><span title="[Guides]" class="categoryLinkLabel_W154">[Guides]</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" tabindex="0" href="/ModulesOnRails/api/TM Getting Started"><span title="​T​M ​Getting ​Started" class="linkLabel_WmDU">​T​M ​Getting ​Started</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Listeners &amp; Fire Modes"><span title="​T​M ​Listeners &amp; ​Fire ​Modes" class="linkLabel_WmDU">​T​M ​Listeners &amp; ​Fire ​Modes</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Flushing"><span title="​T​M ​Flushing" class="linkLabel_WmDU">​T​M ​Flushing</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Batching"><span title="​T​M ​Batching" class="linkLabel_WmDU">​T​M ​Batching</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Wildcards"><span title="​T​M ​Wildcards" class="linkLabel_WmDU">​T​M ​Wildcards</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Proxies &amp; Direct Table Access"><span title="​T​M ​Proxies &amp; ​Direct ​Table ​Access" class="linkLabel_WmDU">​T​M ​Proxies &amp; ​Direct ​Table ​Access</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Schema Validation"><span title="​T​M ​Schema ​Validation" class="linkLabel_WmDU">​T​M ​Schema ​Validation</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Opaque Values"><span title="​T​M ​Opaque ​Values" class="linkLabel_WmDU">​T​M ​Opaque ​Values</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Reactive State Wrappers"><span title="​T​M ​Reactive ​State ​Wrappers" class="linkLabel_WmDU">​T​M ​Reactive ​State ​Wrappers</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM For &amp; Map Views [Unreleased]"><span title="​T​M ​For &amp; ​Map ​Views [​Unreleased]" class="linkLabel_WmDU">​T​M ​For &amp; ​Map ​Views [​Unreleased]</span></a></li></ul></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/TableReplicator"><span title="TableReplicator" class="categoryLinkLabel_W154">TableReplicator</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/NetWire"><span title="NetWire" class="categoryLinkLabel_W154">NetWire</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Component"><span title="Instance Component Systems" class="categoryLinkLabel_W154">Instance Component Systems</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/DropletManager"><span title="DropletManager" class="categoryLinkLabel_W154">DropletManager</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/AdjustableTimer"><span title="AdjustableTimer [Unreleased]" class="categoryLinkLabel_W154">AdjustableTimer [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/PlayerProfileManager"><span title="PlayerDataManagement [Unreleased]" class="categoryLinkLabel_W154">PlayerDataManagement [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/CmdrHandler"><span title="Admin Commands [Cmdr]" class="categoryLinkLabel_W154">Admin Commands [Cmdr]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Queue"><span title="Data Structures" class="categoryLinkLabel_W154">Data Structures</span></a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BufferCodec"><span title="​Buffer​Codec" class="linkLabel_WmDU">​Buffer​Codec</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ObjectCache"><span title="​Object​Cache" class="linkLabel_WmDU">​Object​Cache</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ProbabilityDistributor"><span title="​Probability​Distributor" class="linkLabel_WmDU">​Probability​Distributor</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PromValue"><span title="​Prom​Value" class="linkLabel_WmDU">​Prom​Value</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/T"><span title="​T" class="linkLabel_WmDU">​T</span></a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">T</span><span style="display:inline-block">M</span><span style="display:inline-block"></span><span style="display:inline-block">Getting</span><span style="display:inline-block"></span><span style="display:inline-block">Started</span></h1><div class="luaClassTags_EipM"></div><div>
+<p>
+  <a href="/ModulesOnRails/api/TableManager">TableManager</a> wraps a nested Luau table and lets you
+  observe and mutate it by path: reads and writes go through the manager, and
+  listeners fire for exactly the changes they care about — a single field, a
+  whole subtree, an array, or the entire structure.
+</p>
+<p>
+  This guide walks through the minimal end-to-end setup. For deeper topics see
+  the other guides linked at the bottom of the page.
+</p>
+<h3>1. Require the module and create a manager</h3>
+<p>
+  <code>TableManager.new(initialData, config?)</code> takes your initial table and an
+  optional <a href="/ModulesOnRails/api/TableManager#TableManagerConfig">config</a>. The data is managed
+  in place — <code>manager.Raw</code> is the very table you passed in.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> TableManager <span class="token operator">=</span> <span class="token function">require</span><span class="token punctuation">(</span>Packages<span class="token punctuation">.</span>TableManager<span class="token punctuation">)</span>
+
+<span class="token keyword">local</span> manager <span class="token operator">=</span> TableManager<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">{</span>
+	Player <span class="token operator">=</span> <span class="token punctuation">{</span> Name <span class="token operator">=</span> <span class="token string">"Alice"</span><span class="token punctuation">,</span> Health <span class="token operator">=</span> <span class="token number">100</span> <span class="token punctuation">}</span><span class="token punctuation">,</span>
+	Inventory <span class="token operator">=</span> <span class="token punctuation">{</span> <span class="token string">"Sword"</span><span class="token punctuation">,</span> <span class="token string">"Shield"</span> <span class="token punctuation">}</span><span class="token punctuation">,</span>
+<span class="token punctuation">}</span><span class="token punctuation">)</span>
+</code></pre>
+
+  
+    
+    
+      <div class="admonition admonition-success alert alert--success">
+        <div class="admonition-heading">
+          <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="16" viewBox="0 0 12 16">
+                <path d="M6.5 0C3.48 0 1 2.19 1 5c0 .92.55 2.25 1 3 1.34 2.25 1.78 2.78 2 4v1h5v-1c.22-1.22.66-1.75 2-4 .45-.75 1-2.08 1-3 0-2.81-2.48-5-5.5-5zm3.64 7.48c-.25.44-.47.8-.67 1.11-.86 1.41-1.25 2.06-1.45 3.23-.02.05-.02.11-.02.17H5c0-.06 0-.13-.02-.17-.2-1.17-.59-1.83-1.45-3.23-.2-.31-.42-.67-.67-1.11C2.44 6.78 2 5.65 2 5c0-2.2 2.02-4 4.5-4 1.22 0 2.36.42 3.22 1.19C10.55 2.94 11 3.94 11 5c0 .66-.44 1.78-.86 2.48zM4 14h5c-.23 1.14-1.3 2-2.5 2s-2.27-.86-2.5-2z"></path>
+              </svg></span><span class="admonition-title">Type Inference</span></h5>
+        </div>
+        <div class="admonition-content">
+          <p>
+            <code>TableManager.new</code> is generic and infers the type of your initial data.
+            This allows for autocompletion and type checking for certain methods and properties.
+            Due to a bug within Luau, some of this functionality is currently disabled until the bug is fixed.
+          </p>
+        </div>
+      </div>
+    
+  
+
+<h3>2. Reading data</h3>
+<p>
+  Use <code>Get</code> with a dot-string or an array path. An empty path returns the root
+  (the same table as <code>manager.Raw</code>).
+</p>
+<pre class="language-lua"><code class="language-lua">manager<span class="token punctuation">:</span><span class="token function">Get</span><span class="token punctuation">(</span><span class="token string">"Player.Health"</span><span class="token punctuation">)</span>          <span class="token comment">-- 100</span>
+manager<span class="token punctuation">:</span><span class="token function">Get</span><span class="token punctuation">(</span><span class="token punctuation">{</span> <span class="token string">"Player"</span><span class="token punctuation">,</span> <span class="token string">"Name"</span> <span class="token punctuation">}</span><span class="token punctuation">)</span>     <span class="token comment">-- "Alice"</span>
+manager<span class="token punctuation">:</span><span class="token function">Get</span><span class="token punctuation">(</span><span class="token string">"Inventory"</span><span class="token punctuation">)</span>              <span class="token comment">-- { "Sword", "Shield" }</span>
+</code></pre>
+<h3>3. Writing data</h3>
+<p>
+  <code>Set</code> writes a value at a path; <code>Update</code> and <code>Increment</code> are convenience
+  wrappers over it. Array contents have their own methods — <code>ArrayInsert</code>,
+  <code>ArrayRemove</code>, and friends (see the For &#x26; Map and Listeners guides).
+</p>
+<pre class="language-lua"><code class="language-lua">manager<span class="token punctuation">:</span><span class="token function">Set</span><span class="token punctuation">(</span><span class="token string">"Player.Health"</span><span class="token punctuation">,</span> <span class="token number">80</span><span class="token punctuation">)</span>
+manager<span class="token punctuation">:</span><span class="token function">Update</span><span class="token punctuation">(</span><span class="token string">"Player.Health"</span><span class="token punctuation">,</span> <span class="token keyword">function</span><span class="token punctuation">(</span>hp<span class="token punctuation">)</span> <span class="token keyword">return</span> hp <span class="token operator">-</span> <span class="token number">10</span> <span class="token keyword">end</span><span class="token punctuation">)</span>
+manager<span class="token punctuation">:</span><span class="token function">Increment</span><span class="token punctuation">(</span><span class="token string">"Player.Health"</span><span class="token punctuation">,</span> <span class="token number">5</span><span class="token punctuation">)</span>
+
+manager<span class="token punctuation">:</span><span class="token function">ArrayInsert</span><span class="token punctuation">(</span><span class="token string">"Inventory"</span><span class="token punctuation">,</span> <span class="token string">"Potion"</span><span class="token punctuation">)</span>   <span class="token comment">-- append</span>
+manager<span class="token punctuation">:</span><span class="token function">ArrayInsert</span><span class="token punctuation">(</span><span class="token string">"Inventory"</span><span class="token punctuation">,</span> <span class="token number">1</span><span class="token punctuation">,</span> <span class="token string">"Bow"</span><span class="token punctuation">)</span>   <span class="token comment">-- insert at index 1</span>
+</code></pre>
+<p>
+  Paths in <code>Set</code>/<code>Update</code>/<code>Increment</code> (and the bulk reader <code>GetMatching</code>) may
+  contain <code>"*"</code> wildcard segments to address every key at that level at once —
+  e.g. <code>manager:Increment("Players.*.Health", 5)</code>. See the
+  <a href="/ModulesOnRails/api/TM%20Wildcards">Wildcards</a> guide for the full rules.
+</p>
+
+  
+    
+    
+      <div class="admonition admonition-success alert alert--success">
+        <div class="admonition-heading">
+          <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="16" viewBox="0 0 12 16">
+                <path d="M6.5 0C3.48 0 1 2.19 1 5c0 .92.55 2.25 1 3 1.34 2.25 1.78 2.78 2 4v1h5v-1c.22-1.22.66-1.75 2-4 .45-.75 1-2.08 1-3 0-2.81-2.48-5-5.5-5zm3.64 7.48c-.25.44-.47.8-.67 1.11-.86 1.41-1.25 2.06-1.45 3.23-.02.05-.02.11-.02.17H5c0-.06 0-.13-.02-.17-.2-1.17-.59-1.83-1.45-3.23-.2-.31-.42-.67-.67-1.11C2.44 6.78 2 5.65 2 5c0-2.2 2.02-4 4.5-4 1.22 0 2.36.42 3.22 1.19C10.55 2.94 11 3.94 11 5c0 .66-.44 1.78-.86 2.48zM4 14h5c-.23 1.14-1.3 2-2.5 2s-2.27-.86-2.5-2z"></path>
+              </svg></span><span class="admonition-title">Prefer paths over reaching into <code>Raw</code></span></h5>
+        </div>
+        <div class="admonition-content">
+          <p>
+            Writing through <code>Set</code>/<code>ArrayInsert</code>/etc. is what fires listeners. Mutating
+            <code>manager.Raw</code> directly bypasses change detection — see the Proxies &#x26; Direct
+            Table Access guide for when that is and isn't safe.
+          </p>
+        </div>
+      </div>
+    
+  
+
+<h3>4. Your first listener</h3>
+<p><code>OnValueChange</code> fires when the value at the specified path changes.</p>
+<pre class="language-lua"><code class="language-lua">manager<span class="token punctuation">:</span><span class="token function">OnValueChange</span><span class="token punctuation">(</span><span class="token string">"Player.Health"</span><span class="token punctuation">,</span> <span class="token keyword">function</span><span class="token punctuation">(</span>health<span class="token punctuation">,</span> oldHealth<span class="token punctuation">)</span>
+	<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"health changed:"</span><span class="token punctuation">,</span> oldHealth<span class="token punctuation">,</span> <span class="token string">"->"</span><span class="token punctuation">,</span> health<span class="token punctuation">)</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+
+manager<span class="token punctuation">:</span><span class="token function">Set</span><span class="token punctuation">(</span><span class="token string">"Player.Health"</span><span class="token punctuation">,</span> <span class="token number">50</span><span class="token punctuation">)</span> <span class="token comment">-- fires: "health: 100 -> 50"</span>
+</code></pre>
+<p>
+  Every listener returns a <code>Connection</code> — hold onto it and call <code>:Disconnect()</code>
+  when you no longer need it. The full listener surface (path listeners, key and
+  array listeners, wildcards, and the global Signals) is covered in the Listeners
+  &#x26; Fire Modes guide.
+</p>
+<h3>5. Cleanup</h3>
+<p>
+  Call <code>Destroy</code> when a manager is no longer needed. It disconnects every
+  listener and signal, tears down owned <code>For*</code>/<code>Map*</code> subscriptions, and releases
+  proxies. It is idempotent.
+</p>
+<pre class="language-lua"><code class="language-lua">manager<span class="token punctuation">:</span><span class="token function">OnValueChange</span><span class="token punctuation">(</span><span class="token string">"Player.Health"</span><span class="token punctuation">,</span> onHealthChanged<span class="token punctuation">)</span>
+
+manager<span class="token punctuation">:</span><span class="token function">OnDestroy</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+	<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"manager torn down"</span><span class="token punctuation">)</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+
+manager<span class="token punctuation">:</span><span class="token function">Destroy</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span>TableManager<span class="token punctuation">.</span><span class="token function">IsDestroyed</span><span class="token punctuation">(</span>manager<span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token comment">-- true</span>
+</code></pre>
+
+  
+    
+    
+      <div class="admonition admonition-success alert alert--success">
+        <div class="admonition-heading">
+          <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="16" viewBox="0 0 12 16">
+                <path d="M6.5 0C3.48 0 1 2.19 1 5c0 .92.55 2.25 1 3 1.34 2.25 1.78 2.78 2 4v1h5v-1c.22-1.22.66-1.75 2-4 .45-.75 1-2.08 1-3 0-2.81-2.48-5-5.5-5zm3.64 7.48c-.25.44-.47.8-.67 1.11-.86 1.41-1.25 2.06-1.45 3.23-.02.05-.02.11-.02.17H5c0-.06 0-.13-.02-.17-.2-1.17-.59-1.83-1.45-3.23-.2-.31-.42-.67-.67-1.11C2.44 6.78 2 5.65 2 5c0-2.2 2.02-4 4.5-4 1.22 0 2.36.42 3.22 1.19C10.55 2.94 11 3.94 11 5c0 .66-.44 1.78-.86 2.48zM4 14h5c-.23 1.14-1.3 2-2.5 2s-2.27-.86-2.5-2z"></path>
+              </svg></span><span class="admonition-title">IsDestroyed</span></h5>
+        </div>
+        <div class="admonition-content">
+          <p>
+            An alias <code>manager:IsDestroyed()</code> is provided as an alternate to <code>TableManager.IsDestroyed(manager)</code>.
+            It is the only safe method to use after <code>Destroy</code>. All other methods will error as the metatable is removed.
+          </p>
+        </div>
+      </div>
+    
+  
+
+<hr>
+<h3>The config table at a glance</h3>
+<p>
+  <code>TableManager.new</code>'s second argument is a
+  <a href="/ModulesOnRails/api/TableManager#TableManagerConfig">TableManagerConfig</a>:
+</p>
+<table>
+  <thead>
+    <tr>
+      <th>Field</th>
+      <th>Purpose</th>
+      <th>Default</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>Schema</code></td>
+      <td>Validates the initial data's shape with a <a href="/ModulesOnRails/api/TableManager#T"><code>T</code></a> check. See the Schema Validation guide.</td>
+      <td><code>nil</code> (no validation)</td>
+    </tr>
+    <tr>
+      <td><code>OnValidationFailed</code></td>
+      <td>Observes schema failures before the constructor errors.</td>
+      <td><code>nil</code></td>
+    </tr>
+    <tr>
+      <td><code>ListenerFireMode</code></td>
+      <td>How listener callbacks are scheduled. See the Listeners &#x26; Fire Modes guide.</td>
+      <td><code>"bindable"</code></td>
+    </tr>
+    <tr>
+      <td><code>SignalFireMode</code></td>
+      <td>How the per-change Signals are scheduled. See the Listeners &#x26; Fire Modes guide.</td>
+      <td><code>"bindable"</code></td>
+    </tr>
+    <tr>
+      <td><code>FlushMode</code></td>
+      <td>Whether writes diff/fire immediately or coalesce to frame-end. See the Flushing guide.</td>
+      <td><code>"immediate"</code></td>
+    </tr>
+    <tr>
+      <td><code>DuplicateReferenceMode</code></td>
+      <td>Whether a table written to a second path shares identity or is cloned. See the Proxies guide.</td>
+      <td><code>"allow"</code></td>
+    </tr>
+    <tr>
+      <td><code>EnableProxies</code></td>
+      <td>Whether <code>Proxy</code>/<code>GetProxy</code> are available on this manager.</td>
+      <td><code>true</code></td>
+    </tr>
+    <tr>
+      <td><code>IgnoredPaths</code></td>
+      <td>Paths (and descendants) that skip all diff/event work.</td>
+      <td><code>{}</code></td>
+    </tr>
+    <tr>
+      <td><code>FrozenTablesAreOpaque</code></td>
+      <td>Whether shallowly frozen tables are also treated as opaque. See the Opaque Values guide.</td>
+      <td><code>false</code></td>
+    </tr>
+  </tbody>
+</table>
+<p>
+  The mode defaults can be changed process-wide with
+  <a href="/ModulesOnRails/api/TableManager#SetDefaults"><code>TableManager.SetDefaults</code></a> so you don't have
+  to repeat them in every <code>new</code> call.
+</p>
+<hr>
+<h3>See also</h3>
+<ul>
+  <li><strong><a href="/ModulesOnRails/api/TM%20Listeners%20&#x26;%20Fire%20Modes">TM Listeners &#x26; Fire Modes</a></strong> — path/key/array listeners and scheduling.</li>
+  <li><strong><a href="/ModulesOnRails/api/TM%20Wildcards">TM Wildcards</a></strong> — <code>"*"</code> paths for listeners, writes, and bulk reads.</li>
+  <li><strong><a href="/ModulesOnRails/api/TM%20Flushing">TM Flushing</a></strong> — the diff-and-fire cycle behind every event.</li>
+  <li><strong><a href="/ModulesOnRails/api/TM%20Batching">TM Batching</a></strong> — grouping many writes so events fire once.</li>
+  <li><strong><a href="/ModulesOnRails/api/TM%20Proxies%20&#x26;%20Direct%20Table%20Access">TM Proxies &#x26; Direct Table Access</a></strong> — the proxy view and its rules.</li>
+  <li><strong><a href="/ModulesOnRails/api/TM%20Schema%20Validation">TM Schema Validation</a></strong> — validating data shape at construction.</li>
+  <li><strong><a href="/ModulesOnRails/api/TM%20Opaque%20Values">TM Opaque Values</a></strong> — telling the diff engine to skip certain values.</li>
+  <li><strong><a href="/ModulesOnRails/api/TM%20For%20&#x26;%20Map%20Reactive%20Views">TM For &#x26; Map Reactive Views</a></strong> — per-item reconcilers and derived managers.</li>
+</ul>
+</div></header></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
+    &quot;functions&quot;: [],
+    &quot;properties&quot;: [],
+    &quot;types&quot;: [],
+    &quot;name&quot;: &quot;TM Getting Started&quot;,
+    &quot;desc&quot;: &quot;[TableManager](/api/TableManager) wraps a nested Luau table and lets you\nobserve and mutate it by path: reads and writes go through the manager, and\nlisteners fire for exactly the changes they care about — a single field, a\nwhole subtree, an array, or the entire structure.\n\nThis guide walks through the minimal end-to-end setup. For deeper topics see\nthe other guides linked at the bottom of the page.\n\n### 1. Require the module and create a manager\n\n`TableManager.new(initialData, config?)` takes your initial table and an\noptional [config](/api/TableManager#TableManagerConfig). The data is managed\nin place — `manager.Raw` is the very table you passed in.\n\n```lua\nlocal TableManager = require(Packages.TableManager)\n\nlocal manager = TableManager.new({\n\tPlayer = { Name = \&quot;Alice\&quot;, Health = 100 },\n\tInventory = { \&quot;Sword\&quot;, \&quot;Shield\&quot; },\n})\n```\n\n:::tip Type Inference\n`TableManager.new` is generic and infers the type of your initial data.\nThis allows for autocompletion and type checking for certain methods and properties.\nDue to a bug within Luau, some of this functionality is currently disabled until the bug is fixed.\n:::\n\n### 2. Reading data\n\nUse `Get` with a dot-string or an array path. An empty path returns the root\n(the same table as `manager.Raw`).\n\n```lua\nmanager:Get(\&quot;Player.Health\&quot;)          -- 100\nmanager:Get({ \&quot;Player\&quot;, \&quot;Name\&quot; })     -- \&quot;Alice\&quot;\nmanager:Get(\&quot;Inventory\&quot;)              -- { \&quot;Sword\&quot;, \&quot;Shield\&quot; }\n```\n\n### 3. Writing data\n\n`Set` writes a value at a path; `Update` and `Increment` are convenience\nwrappers over it. Array contents have their own methods — `ArrayInsert`,\n`ArrayRemove`, and friends (see the For &amp; Map and Listeners guides).\n\n```lua\nmanager:Set(\&quot;Player.Health\&quot;, 80)\nmanager:Update(\&quot;Player.Health\&quot;, function(hp) return hp - 10 end)\nmanager:Increment(\&quot;Player.Health\&quot;, 5)\n\nmanager:ArrayInsert(\&quot;Inventory\&quot;, \&quot;Potion\&quot;)   -- append\nmanager:ArrayInsert(\&quot;Inventory\&quot;, 1, \&quot;Bow\&quot;)   -- insert at index 1\n```\n\nPaths in `Set`/`Update`/`Increment` (and the bulk reader `GetMatching`) may\ncontain `\&quot;*\&quot;` wildcard segments to address every key at that level at once —\ne.g. `manager:Increment(\&quot;Players.*.Health\&quot;, 5)`. See the\n[Wildcards](/api/TM%20Wildcards) guide for the full rules.\n\n:::tip Prefer paths over reaching into `Raw`\nWriting through `Set`/`ArrayInsert`/etc. is what fires listeners. Mutating\n`manager.Raw` directly bypasses change detection — see the Proxies &amp; Direct\nTable Access guide for when that is and isn&#x27;t safe.\n:::\n\n### 4. Your first listener\n\n`OnValueChange` fires when the value at the specified path changes.\n\n```lua\nmanager:OnValueChange(\&quot;Player.Health\&quot;, function(health, oldHealth)\n\tprint(\&quot;health changed:\&quot;, oldHealth, \&quot;-&gt;\&quot;, health)\nend)\n\nmanager:Set(\&quot;Player.Health\&quot;, 50) -- fires: \&quot;health: 100 -&gt; 50\&quot;\n```\n\nEvery listener returns a `Connection` — hold onto it and call `:Disconnect()`\nwhen you no longer need it. The full listener surface (path listeners, key and\narray listeners, wildcards, and the global Signals) is covered in the Listeners\n&amp; Fire Modes guide.\n\n### 5. Cleanup\n\nCall `Destroy` when a manager is no longer needed. It disconnects every\nlistener and signal, tears down owned `For*`/`Map*` subscriptions, and releases\nproxies. It is idempotent.\n\n```lua\nmanager:OnValueChange(\&quot;Player.Health\&quot;, onHealthChanged)\n\nmanager:OnDestroy(function()\n\tprint(\&quot;manager torn down\&quot;)\nend)\n\nmanager:Destroy()\nprint(TableManager.IsDestroyed(manager)) -- true\n```\n\n:::tip IsDestroyed\nAn alias `manager:IsDestroyed()` is provided as an alternate to `TableManager.IsDestroyed(manager)`. \nIt is the only safe method to use after `Destroy`. All other methods will error as the metatable is removed.\n:::\n\n---\n### The config table at a glance\n\n`TableManager.new`&#x27;s second argument is a\n[TableManagerConfig](/api/TableManager#TableManagerConfig):\n\n| Field | Purpose | Default |\n| --- | --- | --- |\n| `Schema` | Validates the initial data&#x27;s shape with a [`T`](/api/TableManager#T) check. See the Schema Validation guide. | `nil` (no validation) |\n| `OnValidationFailed` | Observes schema failures before the constructor errors. | `nil` |\n| `ListenerFireMode` | How listener callbacks are scheduled. See the Listeners &amp; Fire Modes guide. | `\&quot;bindable\&quot;` |\n| `SignalFireMode` | How the per-change Signals are scheduled. See the Listeners &amp; Fire Modes guide. | `\&quot;bindable\&quot;` |\n| `FlushMode` | Whether writes diff/fire immediately or coalesce to frame-end. See the Flushing guide. | `\&quot;immediate\&quot;` |\n| `DuplicateReferenceMode` | Whether a table written to a second path shares identity or is cloned. See the Proxies guide. | `\&quot;allow\&quot;` |\n| `EnableProxies` | Whether `Proxy`/`GetProxy` are available on this manager. | `true` |\n| `IgnoredPaths` | Paths (and descendants) that skip all diff/event work. | `{}` |\n| `FrozenTablesAreOpaque` | Whether shallowly frozen tables are also treated as opaque. See the Opaque Values guide. | `false` |\n\nThe mode defaults can be changed process-wide with\n[`TableManager.SetDefaults`](/api/TableManager#SetDefaults) so you don&#x27;t have\nto repeat them in every `new` call.\n\n\n---\n### See also\n\n- **[TM Listeners &amp; Fire Modes](/api/TM%20Listeners%20&amp;%20Fire%20Modes)** — path/key/array listeners and scheduling.\n- **[TM Wildcards](/api/TM%20Wildcards)** — `\&quot;*\&quot;` paths for listeners, writes, and bulk reads.\n- **[TM Flushing](/api/TM%20Flushing)** — the diff-and-fire cycle behind every event.\n- **[TM Batching](/api/TM%20Batching)** — grouping many writes so events fire once.\n- **[TM Proxies &amp; Direct Table Access](/api/TM%20Proxies%20&amp;%20Direct%20Table%20Access)** — the proxy view and its rules.\n- **[TM Schema Validation](/api/TM%20Schema%20Validation)** — validating data shape at construction.\n- **[TM Opaque Values](/api/TM%20Opaque%20Values)** — telling the diff engine to skip certain values.\n- **[TM For &amp; Map Reactive Views](/api/TM%20For%20&amp;%20Map%20Reactive%20Views)** — per-item reconcilers and derived managers.&quot;,
+    &quot;source&quot;: {
+        &quot;line&quot;: 144,
+        &quot;path&quot;: &quot;lib/tablemanager/src/Docs/TM_Getting_Started.luau&quot;
+    }
+}</pre></details></div></div></div></main></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
+</body>
+</html>

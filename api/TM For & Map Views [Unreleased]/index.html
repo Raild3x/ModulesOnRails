@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en" dir="ltr" class="plugin-moonwave plugin-id-moonwave" data-has-hydrated="false">
+<head>
+<meta charset="UTF-8">
+<meta name="generator" content="Docusaurus v3.10.1">
+<title data-rh="true">TM For &amp; Map Views [Unreleased] | ModulesOnRails</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:url" content="https://raild3x.github.io/ModulesOnRails/api/TM For &amp; Map Views [Unreleased]"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docusaurus_tag" content="default"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docsearch:docusaurus_tag" content="default"><meta data-rh="true" property="og:title" content="TM For &amp; Map Views [Unreleased] | ModulesOnRails"><meta data-rh="true" name="description" content=":::note UNRELEASED
+The `For*` and `Map*` methods are marked `@unreleased.
+Their API may change before they are stabilized.
+:::
+
+The `For*` and `Map*` methods turn a collection inside a
+[TableManager](/api/TableManager) into a reactive view: a per-item reconciler
+that runs setup as items appear and teardown as they leave, or a derived
+manager whose contents are computed from a source. This guide covers both.
+
+## The reconciler model
+
+Each `For*` method calls your handler once per item and hands it a per-item
+[Janitor](/api/Janitor). Everything you add to that Janitor is cleaned up
+automatically when the item leaves the collection (removed, replaced, or the
+subscription disconnects). You never manually track which items came and went.
+
+All `For*` methods return a `Connection`; disconnect it (or destroy the
+manager) to tear down every item&#x27;s Janitor at once.
+
+## ForKeys / ForValues / ForPairs
+
+The three differ in what counts as &quot;the same item&quot;, i.e. when the handler
+re-runs versus stays put:
+
+- **`ForKeys(path, handler, options?)`** — reconciles by KEY. The handler runs
+  once per key and is NOT re-run when the value at an existing key changes. The
+  Janitor is destroyed when the key is removed.
+- **`ForValues(path, handler, options?)`** — reconciles by VALUE (as a
+  multiset). The handler runs once per value occurrence and is NOT re-run when
+  that value moves between keys/indices (e.g. an `ArraySwapRemove`).
+- **`ForPairs(path, handler, options?)`** — reconciles by KEY AND VALUE. The
+  handler re-runs (tearing down the previous Janitor first) whenever either the
+  key or the value changes.
+
+```lua
+local manager = TableManager.new({
+	Enemies = { goblin = { hp = 10 }, orc = { hp = 20 } },
+})
+
+manager:ForKeys(&quot;Enemies&quot;, function(itemJanitor, key)
+	local model = spawnEnemyModel(key)
+	itemJanitor:Add(model) -- destroyed automatically when `key` is removed
+end)
+```
+
+### ForOptions
+
+Both `For*` and their handlers accept a [ForOptions](/api/TableManager#ForOptions):
+
+- `FireForExisting` — defaults to `true`: run the handler for items already
+  present when you subscribe. Set `false` to react only to future items.
+- `Defer` — defer the initial fire (a non-immediate `ListenerFireMode` defers
+  it anyway).
+
+The handler&#x27;s last argument is the same `ChangeMetadata` as a listener — `nil`
+on the initial fire.
+
+## MapKeys / MapValues / MapPairs
+
+Where `For*` runs side effects, `Map*` produces a **new, live TableManager**
+derived from the source:
+
+- **`MapKeys(path, transform)`** — output keyed by `transform(janitor, key,
+  value)`, values passed through unchanged. `transform` re-runs only when a
+  source key is added/removed.
+- **`MapValues(path, transform)`** — output keyed by the source key, each entry
+  recomputed via `transform(janitor, value, key)` when its value changes.
+- **`MapPairs(path, transform)`** — `transform(janitor, key, value)` returns
+  `(outputKey, outputValue)`; the entry recomputes when the source key or value
+  changes. On an output-key collision, the last write wins.
+
+```lua
+-- A view of enemy display names keyed by id:
+local names = manager:MapValues(&quot;Enemies&quot;, function(_janitor, enemy, id)
+	return `{id} ({enemy.hp} HP)`
+end)
+
+names:Observe(&quot;goblin&quot;, function(label)
+	print(label)
+end)
+```
+
+The returned manager **owns** the source subscription: destroying it
+disconnects from the source and tears down every entry&#x27;s Janitor. Destroying
+the SOURCE does not cascade-destroy the derived manager — their lifecycles are
+independent.
+
+:::info Unreleased
+The `Map*` methods are marked `@unreleased`. The API described here may change
+before they are stabilized.
+:::
+
+---
+### See also
+
+- **[TM Listeners &amp; Fire Modes](/api/TM%20Listeners%20&amp;%20Fire%20Modes)** — the listeners these reconcilers are built on.
+- **[TM Getting Started](/api/TM%20Getting%20Started)** — creating and reading a manager.
+- **[TM Flushing](/api/TM%20Flushing)** — how initial fires interact with deferred scheduling."><meta data-rh="true" property="og:description" content=":::note UNRELEASED
+The `For*` and `Map*` methods are marked `@unreleased.
+Their API may change before they are stabilized.
+:::
+
+The `For*` and `Map*` methods turn a collection inside a
+[TableManager](/api/TableManager) into a reactive view: a per-item reconciler
+that runs setup as items appear and teardown as they leave, or a derived
+manager whose contents are computed from a source. This guide covers both.
+
+## The reconciler model
+
+Each `For*` method calls your handler once per item and hands it a per-item
+[Janitor](/api/Janitor). Everything you add to that Janitor is cleaned up
+automatically when the item leaves the collection (removed, replaced, or the
+subscription disconnects). You never manually track which items came and went.
+
+All `For*` methods return a `Connection`; disconnect it (or destroy the
+manager) to tear down every item&#x27;s Janitor at once.
+
+## ForKeys / ForValues / ForPairs
+
+The three differ in what counts as &quot;the same item&quot;, i.e. when the handler
+re-runs versus stays put:
+
+- **`ForKeys(path, handler, options?)`** — reconciles by KEY. The handler runs
+  once per key and is NOT re-run when the value at an existing key changes. The
+  Janitor is destroyed when the key is removed.
+- **`ForValues(path, handler, options?)`** — reconciles by VALUE (as a
+  multiset). The handler runs once per value occurrence and is NOT re-run when
+  that value moves between keys/indices (e.g. an `ArraySwapRemove`).
+- **`ForPairs(path, handler, options?)`** — reconciles by KEY AND VALUE. The
+  handler re-runs (tearing down the previous Janitor first) whenever either the
+  key or the value changes.
+
+```lua
+local manager = TableManager.new({
+	Enemies = { goblin = { hp = 10 }, orc = { hp = 20 } },
+})
+
+manager:ForKeys(&quot;Enemies&quot;, function(itemJanitor, key)
+	local model = spawnEnemyModel(key)
+	itemJanitor:Add(model) -- destroyed automatically when `key` is removed
+end)
+```
+
+### ForOptions
+
+Both `For*` and their handlers accept a [ForOptions](/api/TableManager#ForOptions):
+
+- `FireForExisting` — defaults to `true`: run the handler for items already
+  present when you subscribe. Set `false` to react only to future items.
+- `Defer` — defer the initial fire (a non-immediate `ListenerFireMode` defers
+  it anyway).
+
+The handler&#x27;s last argument is the same `ChangeMetadata` as a listener — `nil`
+on the initial fire.
+
+## MapKeys / MapValues / MapPairs
+
+Where `For*` runs side effects, `Map*` produces a **new, live TableManager**
+derived from the source:
+
+- **`MapKeys(path, transform)`** — output keyed by `transform(janitor, key,
+  value)`, values passed through unchanged. `transform` re-runs only when a
+  source key is added/removed.
+- **`MapValues(path, transform)`** — output keyed by the source key, each entry
+  recomputed via `transform(janitor, value, key)` when its value changes.
+- **`MapPairs(path, transform)`** — `transform(janitor, key, value)` returns
+  `(outputKey, outputValue)`; the entry recomputes when the source key or value
+  changes. On an output-key collision, the last write wins.
+
+```lua
+-- A view of enemy display names keyed by id:
+local names = manager:MapValues(&quot;Enemies&quot;, function(_janitor, enemy, id)
+	return `{id} ({enemy.hp} HP)`
+end)
+
+names:Observe(&quot;goblin&quot;, function(label)
+	print(label)
+end)
+```
+
+The returned manager **owns** the source subscription: destroying it
+disconnects from the source and tears down every entry&#x27;s Janitor. Destroying
+the SOURCE does not cascade-destroy the derived manager — their lifecycles are
+independent.
+
+:::info Unreleased
+The `Map*` methods are marked `@unreleased`. The API described here may change
+before they are stabilized.
+:::
+
+---
+### See also
+
+- **[TM Listeners &amp; Fire Modes](/api/TM%20Listeners%20&amp;%20Fire%20Modes)** — the listeners these reconcilers are built on.
+- **[TM Getting Started](/api/TM%20Getting%20Started)** — creating and reading a manager.
+- **[TM Flushing](/api/TM%20Flushing)** — how initial fires interact with deferred scheduling."><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/TM For &amp; Map Views [Unreleased]"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/TM For &amp; Map Views [Unreleased]" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/TM For &amp; Map Views [Unreleased]" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.e8e96400.css">
+<script src="/ModulesOnRails/assets/js/runtime~main.668e8339.js" defer="defer"></script>
+<script src="/ModulesOnRails/assets/js/main.d4575191.js" defer="defer"></script>
+</head>
+<body>
+<svg style="display: none;"><defs>
+<symbol id="theme-svg-external-link" viewBox="0 0 24 24"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"/></symbol>
+</defs></svg>
+<script>!function(){var t=function(){try{return new URLSearchParams(window.location.search).get("docusaurus-theme")}catch(t){}}()||function(){try{return window.localStorage.getItem("theme")}catch(t){}}();document.documentElement.setAttribute("data-theme",t||(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")),document.documentElement.setAttribute("data-theme-choice",t||"system")}(),function(){try{const c=new URLSearchParams(window.location.search).entries();for(var[t,e]of c)if(t.startsWith("docusaurus-data-")){var a=t.replace("docusaurus-data-","data-");document.documentElement.setAttribute(a,e)}}catch(t){}}()</script><div id="__docusaurus"><div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#__docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="theme-layout-navbar navbar navbar--fixed-top"><div class="navbar__inner"><div class="theme-layout-navbar-left navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="theme-layout-navbar-right navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_nPIU"><use href="#theme-svg-external-link"></use></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="system mode" aria-label="Switch between dark and light mode (currently system mode)"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP systemToggleIcon_QzmC"><path fill="currentColor" d="m12 21c4.971 0 9-4.029 9-9s-4.029-9-9-9-9 4.029-9 9 4.029 9 9 9zm4.95-13.95c1.313 1.313 2.05 3.093 2.05 4.95s-0.738 3.637-2.05 4.95c-1.313 1.313-3.093 2.05-4.95 2.05v-14c1.857 0 3.637 0.737 4.95 2.05z"></path></svg></button></div><div class="navbarSearchContainer_Bca1"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input id="search_input_react" type="search" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="__docusaurus_skipToContent_fallback" class="theme-layout-main main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject"><span title="​Base​Object" class="linkLabel_WmDU">​Base​Object</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Roam"><span title="​Roam" class="linkLabel_WmDU">​Roam</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" href="/ModulesOnRails/api/TableManager"><span title="TableManager" class="categoryLinkLabel_W154">TableManager</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TableManager"><span title="​Table​Manager" class="linkLabel_WmDU">​Table​Manager</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-2 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" tabindex="0" href="/ModulesOnRails/api/TM Getting Started"><span title="[Guides]" class="categoryLinkLabel_W154">[Guides]</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Getting Started"><span title="​T​M ​Getting ​Started" class="linkLabel_WmDU">​T​M ​Getting ​Started</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Listeners &amp; Fire Modes"><span title="​T​M ​Listeners &amp; ​Fire ​Modes" class="linkLabel_WmDU">​T​M ​Listeners &amp; ​Fire ​Modes</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Flushing"><span title="​T​M ​Flushing" class="linkLabel_WmDU">​T​M ​Flushing</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Batching"><span title="​T​M ​Batching" class="linkLabel_WmDU">​T​M ​Batching</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Wildcards"><span title="​T​M ​Wildcards" class="linkLabel_WmDU">​T​M ​Wildcards</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Proxies &amp; Direct Table Access"><span title="​T​M ​Proxies &amp; ​Direct ​Table ​Access" class="linkLabel_WmDU">​T​M ​Proxies &amp; ​Direct ​Table ​Access</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Schema Validation"><span title="​T​M ​Schema ​Validation" class="linkLabel_WmDU">​T​M ​Schema ​Validation</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Opaque Values"><span title="​T​M ​Opaque ​Values" class="linkLabel_WmDU">​T​M ​Opaque ​Values</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Reactive State Wrappers"><span title="​T​M ​Reactive ​State ​Wrappers" class="linkLabel_WmDU">​T​M ​Reactive ​State ​Wrappers</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" tabindex="0" href="/ModulesOnRails/api/TM For &amp; Map Views [Unreleased]"><span title="​T​M ​For &amp; ​Map ​Views [​Unreleased]" class="linkLabel_WmDU">​T​M ​For &amp; ​Map ​Views [​Unreleased]</span></a></li></ul></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/TableReplicator"><span title="TableReplicator" class="categoryLinkLabel_W154">TableReplicator</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/NetWire"><span title="NetWire" class="categoryLinkLabel_W154">NetWire</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Component"><span title="Instance Component Systems" class="categoryLinkLabel_W154">Instance Component Systems</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/DropletManager"><span title="DropletManager" class="categoryLinkLabel_W154">DropletManager</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/AdjustableTimer"><span title="AdjustableTimer [Unreleased]" class="categoryLinkLabel_W154">AdjustableTimer [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/PlayerProfileManager"><span title="PlayerDataManagement [Unreleased]" class="categoryLinkLabel_W154">PlayerDataManagement [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/CmdrHandler"><span title="Admin Commands [Cmdr]" class="categoryLinkLabel_W154">Admin Commands [Cmdr]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Queue"><span title="Data Structures" class="categoryLinkLabel_W154">Data Structures</span></a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BufferCodec"><span title="​Buffer​Codec" class="linkLabel_WmDU">​Buffer​Codec</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ObjectCache"><span title="​Object​Cache" class="linkLabel_WmDU">​Object​Cache</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ProbabilityDistributor"><span title="​Probability​Distributor" class="linkLabel_WmDU">​Probability​Distributor</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PromValue"><span title="​Prom​Value" class="linkLabel_WmDU">​Prom​Value</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/T"><span title="​T" class="linkLabel_WmDU">​T</span></a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">T</span><span style="display:inline-block">M</span><span style="display:inline-block"></span><span style="display:inline-block">For</span><span style="display:inline-block">&amp;</span><span style="display:inline-block"></span><span style="display:inline-block">Map</span><span style="display:inline-block"></span><span style="display:inline-block">Views</span><span style="display:inline-block">[</span><span style="display:inline-block">Unreleased]</span></h1><div class="luaClassTags_EipM"></div><div>
+
+  
+    
+    
+      <div class="admonition admonition-note alert alert--secondary">
+        <div class="admonition-heading">
+          <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="16" viewBox="0 0 14 16">
+                <path d="M6.3 5.69a.942.942 0 0 1-.28-.7c0-.28.09-.52.28-.7.19-.18.42-.28.7-.28.28 0 .52.09.7.28.18.19.28.42.28.7 0 .28-.09.52-.28.7a1 1 0 0 1-.7.3c-.28 0-.52-.11-.7-.3zM8 7.99c-.02-.25-.11-.48-.31-.69-.2-.19-.42-.3-.69-.31H6c-.27.02-.48.13-.69.31-.2.2-.3.44-.31.69h1v3c.02.27.11.5.31.69.2.2.42.31.69.31h1c.27 0 .48-.11.69-.31.2-.19.3-.42.31-.69H8V7.98v.01zM7 2.3c-3.14 0-5.7 2.54-5.7 5.68 0 3.14 2.56 5.7 5.7 5.7s5.7-2.55 5.7-5.7c0-3.15-2.56-5.69-5.7-5.69v.01zM7 .98c3.86 0 7 3.14 7 7s-3.14 7-7 7-7-3.12-7-7 3.14-7 7-7z"></path>
+              </svg></span><span class="admonition-title">UNRELEASED</span></h5>
+        </div>
+        <div class="admonition-content">
+          <p>
+            The <code>For*</code> and <code>Map*</code> methods are marked `@unreleased.
+            Their API may change before they are stabilized.
+          </p>
+        </div>
+      </div>
+    
+  
+
+<p>
+  The <code>For*</code> and <code>Map*</code> methods turn a collection inside a
+  <a href="/ModulesOnRails/api/TableManager">TableManager</a> into a reactive view: a per-item reconciler
+  that runs setup as items appear and teardown as they leave, or a derived
+  manager whose contents are computed from a source. This guide covers both.
+</p>
+<h2>The reconciler model</h2>
+<p>
+  Each <code>For*</code> method calls your handler once per item and hands it a per-item
+  <a href="/ModulesOnRails/api/Janitor">Janitor</a>. Everything you add to that Janitor is cleaned up
+  automatically when the item leaves the collection (removed, replaced, or the
+  subscription disconnects). You never manually track which items came and went.
+</p>
+<p>
+  All <code>For*</code> methods return a <code>Connection</code>; disconnect it (or destroy the
+  manager) to tear down every item's Janitor at once.
+</p>
+<h2>ForKeys / ForValues / ForPairs</h2>
+<p>
+  The three differ in what counts as "the same item", i.e. when the handler
+  re-runs versus stays put:
+</p>
+<ul>
+  <li>
+    <strong><code>ForKeys(path, handler, options?)</code></strong> — reconciles by KEY. The handler runs
+    once per key and is NOT re-run when the value at an existing key changes. The
+    Janitor is destroyed when the key is removed.
+  </li>
+  <li>
+    <strong><code>ForValues(path, handler, options?)</code></strong> — reconciles by VALUE (as a
+    multiset). The handler runs once per value occurrence and is NOT re-run when
+    that value moves between keys/indices (e.g. an <code>ArraySwapRemove</code>).
+  </li>
+  <li>
+    <strong><code>ForPairs(path, handler, options?)</code></strong> — reconciles by KEY AND VALUE. The
+    handler re-runs (tearing down the previous Janitor first) whenever either the
+    key or the value changes.
+  </li>
+</ul>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> manager <span class="token operator">=</span> TableManager<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">{</span>
+	Enemies <span class="token operator">=</span> <span class="token punctuation">{</span> goblin <span class="token operator">=</span> <span class="token punctuation">{</span> hp <span class="token operator">=</span> <span class="token number">10</span> <span class="token punctuation">}</span><span class="token punctuation">,</span> orc <span class="token operator">=</span> <span class="token punctuation">{</span> hp <span class="token operator">=</span> <span class="token number">20</span> <span class="token punctuation">}</span> <span class="token punctuation">}</span><span class="token punctuation">,</span>
+<span class="token punctuation">}</span><span class="token punctuation">)</span>
+
+manager<span class="token punctuation">:</span><span class="token function">ForKeys</span><span class="token punctuation">(</span><span class="token string">"Enemies"</span><span class="token punctuation">,</span> <span class="token keyword">function</span><span class="token punctuation">(</span>itemJanitor<span class="token punctuation">,</span> key<span class="token punctuation">)</span>
+	<span class="token keyword">local</span> model <span class="token operator">=</span> <span class="token function">spawnEnemyModel</span><span class="token punctuation">(</span>key<span class="token punctuation">)</span>
+	itemJanitor<span class="token punctuation">:</span><span class="token function">Add</span><span class="token punctuation">(</span>model<span class="token punctuation">)</span> <span class="token comment">-- destroyed automatically when `key` is removed</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+</code></pre>
+<h3>ForOptions</h3>
+<p>Both <code>For*</code> and their handlers accept a <a href="/ModulesOnRails/api/TableManager#ForOptions">ForOptions</a>:</p>
+<ul>
+  <li>
+    <code>FireForExisting</code> — defaults to <code>true</code>: run the handler for items already
+    present when you subscribe. Set <code>false</code> to react only to future items.
+  </li>
+  <li>
+    <code>Defer</code> — defer the initial fire (a non-immediate <code>ListenerFireMode</code> defers
+    it anyway).
+  </li>
+</ul>
+<p>
+  The handler's last argument is the same <code>ChangeMetadata</code> as a listener — <code>nil</code>
+  on the initial fire.
+</p>
+<h2>MapKeys / MapValues / MapPairs</h2>
+<p>
+  Where <code>For*</code> runs side effects, <code>Map*</code> produces a <strong>new, live TableManager</strong>
+  derived from the source:
+</p>
+<ul>
+  <li>
+    <strong><code>MapKeys(path, transform)</code></strong> — output keyed by <code>transform(janitor, key, value)</code>, values passed through unchanged. <code>transform</code> re-runs only when a
+    source key is added/removed.
+  </li>
+  <li>
+    <strong><code>MapValues(path, transform)</code></strong> — output keyed by the source key, each entry
+    recomputed via <code>transform(janitor, value, key)</code> when its value changes.
+  </li>
+  <li>
+    <strong><code>MapPairs(path, transform)</code></strong> — <code>transform(janitor, key, value)</code> returns
+    <code>(outputKey, outputValue)</code>; the entry recomputes when the source key or value
+    changes. On an output-key collision, the last write wins.
+  </li>
+</ul>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- A view of enemy display names keyed by id:</span>
+<span class="token keyword">local</span> names <span class="token operator">=</span> manager<span class="token punctuation">:</span><span class="token function">MapValues</span><span class="token punctuation">(</span><span class="token string">"Enemies"</span><span class="token punctuation">,</span> <span class="token keyword">function</span><span class="token punctuation">(</span>_janitor<span class="token punctuation">,</span> enemy<span class="token punctuation">,</span> id<span class="token punctuation">)</span>
+	<span class="token keyword">return</span> `<span class="token punctuation">{</span>id<span class="token punctuation">}</span> <span class="token punctuation">(</span><span class="token punctuation">{</span>enemy<span class="token punctuation">.</span>hp<span class="token punctuation">}</span> HP<span class="token punctuation">)</span>`
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+
+names<span class="token punctuation">:</span><span class="token function">Observe</span><span class="token punctuation">(</span><span class="token string">"goblin"</span><span class="token punctuation">,</span> <span class="token keyword">function</span><span class="token punctuation">(</span>label<span class="token punctuation">)</span>
+	<span class="token function">print</span><span class="token punctuation">(</span>label<span class="token punctuation">)</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+</code></pre>
+<p>
+  The returned manager <strong>owns</strong> the source subscription: destroying it
+  disconnects from the source and tears down every entry's Janitor. Destroying
+  the SOURCE does not cascade-destroy the derived manager — their lifecycles are
+  independent.
+</p>
+
+  
+    
+    
+      <div class="admonition admonition-info alert alert--info">
+        <div class="admonition-heading">
+          <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="16" viewBox="0 0 14 16">
+                <path d="M7 2.3c3.14 0 5.7 2.56 5.7 5.7s-2.56 5.7-5.7 5.7A5.71 5.71 0 0 1 1.3 8c0-3.14 2.56-5.7 5.7-5.7zM7 1C3.14 1 0 4.14 0 8s3.14 7 7 7 7-3.14 7-7-3.14-7-7-7zm1 3H6v5h2V4zm0 6H6v2h2v-2z"></path>
+              </svg></span><span class="admonition-title">Unreleased</span></h5>
+        </div>
+        <div class="admonition-content">
+          <p>
+            The <code>Map*</code> methods are marked <code>@unreleased</code>. The API described here may change
+            before they are stabilized.
+          </p>
+        </div>
+      </div>
+    
+  
+
+<hr>
+<h3>See also</h3>
+<ul>
+  <li><strong><a href="/ModulesOnRails/api/TM%20Listeners%20&#x26;%20Fire%20Modes">TM Listeners &#x26; Fire Modes</a></strong> — the listeners these reconcilers are built on.</li>
+  <li><strong><a href="/ModulesOnRails/api/TM%20Getting%20Started">TM Getting Started</a></strong> — creating and reading a manager.</li>
+  <li><strong><a href="/ModulesOnRails/api/TM%20Flushing">TM Flushing</a></strong> — how initial fires interact with deferred scheduling.</li>
+</ul>
+</div></header></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
+    &quot;functions&quot;: [],
+    &quot;properties&quot;: [],
+    &quot;types&quot;: [],
+    &quot;name&quot;: &quot;TM For &amp; Map Views [Unreleased]&quot;,
+    &quot;desc&quot;: &quot;:::note UNRELEASED\nThe `For*` and `Map*` methods are marked `@unreleased.\nTheir API may change before they are stabilized.\n:::\n\nThe `For*` and `Map*` methods turn a collection inside a\n[TableManager](/api/TableManager) into a reactive view: a per-item reconciler\nthat runs setup as items appear and teardown as they leave, or a derived\nmanager whose contents are computed from a source. This guide covers both.\n\n## The reconciler model\n\nEach `For*` method calls your handler once per item and hands it a per-item\n[Janitor](/api/Janitor). Everything you add to that Janitor is cleaned up\nautomatically when the item leaves the collection (removed, replaced, or the\nsubscription disconnects). You never manually track which items came and went.\n\nAll `For*` methods return a `Connection`; disconnect it (or destroy the\nmanager) to tear down every item&#x27;s Janitor at once.\n\n## ForKeys / ForValues / ForPairs\n\nThe three differ in what counts as \&quot;the same item\&quot;, i.e. when the handler\nre-runs versus stays put:\n\n- **`ForKeys(path, handler, options?)`** — reconciles by KEY. The handler runs\n  once per key and is NOT re-run when the value at an existing key changes. The\n  Janitor is destroyed when the key is removed.\n- **`ForValues(path, handler, options?)`** — reconciles by VALUE (as a\n  multiset). The handler runs once per value occurrence and is NOT re-run when\n  that value moves between keys/indices (e.g. an `ArraySwapRemove`).\n- **`ForPairs(path, handler, options?)`** — reconciles by KEY AND VALUE. The\n  handler re-runs (tearing down the previous Janitor first) whenever either the\n  key or the value changes.\n\n```lua\nlocal manager = TableManager.new({\n\tEnemies = { goblin = { hp = 10 }, orc = { hp = 20 } },\n})\n\nmanager:ForKeys(\&quot;Enemies\&quot;, function(itemJanitor, key)\n\tlocal model = spawnEnemyModel(key)\n\titemJanitor:Add(model) -- destroyed automatically when `key` is removed\nend)\n```\n\n### ForOptions\n\nBoth `For*` and their handlers accept a [ForOptions](/api/TableManager#ForOptions):\n\n- `FireForExisting` — defaults to `true`: run the handler for items already\n  present when you subscribe. Set `false` to react only to future items.\n- `Defer` — defer the initial fire (a non-immediate `ListenerFireMode` defers\n  it anyway).\n\nThe handler&#x27;s last argument is the same `ChangeMetadata` as a listener — `nil`\non the initial fire.\n\n## MapKeys / MapValues / MapPairs\n\nWhere `For*` runs side effects, `Map*` produces a **new, live TableManager**\nderived from the source:\n\n- **`MapKeys(path, transform)`** — output keyed by `transform(janitor, key,\n  value)`, values passed through unchanged. `transform` re-runs only when a\n  source key is added/removed.\n- **`MapValues(path, transform)`** — output keyed by the source key, each entry\n  recomputed via `transform(janitor, value, key)` when its value changes.\n- **`MapPairs(path, transform)`** — `transform(janitor, key, value)` returns\n  `(outputKey, outputValue)`; the entry recomputes when the source key or value\n  changes. On an output-key collision, the last write wins.\n\n```lua\n-- A view of enemy display names keyed by id:\nlocal names = manager:MapValues(\&quot;Enemies\&quot;, function(_janitor, enemy, id)\n\treturn `{id} ({enemy.hp} HP)`\nend)\n\nnames:Observe(\&quot;goblin\&quot;, function(label)\n\tprint(label)\nend)\n```\n\nThe returned manager **owns** the source subscription: destroying it\ndisconnects from the source and tears down every entry&#x27;s Janitor. Destroying\nthe SOURCE does not cascade-destroy the derived manager — their lifecycles are\nindependent.\n\n:::info Unreleased\nThe `Map*` methods are marked `@unreleased`. The API described here may change\nbefore they are stabilized.\n:::\n\n---\n### See also\n\n- **[TM Listeners &amp; Fire Modes](/api/TM%20Listeners%20&amp;%20Fire%20Modes)** — the listeners these reconcilers are built on.\n- **[TM Getting Started](/api/TM%20Getting%20Started)** — creating and reading a manager.\n- **[TM Flushing](/api/TM%20Flushing)** — how initial fires interact with deferred scheduling.&quot;,
+    &quot;source&quot;: {
+        &quot;line&quot;: 104,
+        &quot;path&quot;: &quot;lib/tablemanager/src/Docs/TM_For_And_Map_Reactive_Views.luau&quot;
+    }
+}</pre></details></div></div></div></main></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
+</body>
+</html>
