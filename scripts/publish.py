@@ -45,6 +45,34 @@ def find_exported_types(src_file: Path) -> list[tuple[str, str]]:
     return results
 
 
+def strip_type_param_defaults(type_params: str) -> str:
+    """Return *type_params* with generic defaults removed, e.g. ``<T = string, U>`` -> ``<T, U>``.
+
+    Luau permits defaults only where a generic is declared; a usage site must
+    pass bare arguments. The passthrough alias keeps defaults on its left-hand
+    side but needs them stripped on the right-hand side.
+    """
+    if not type_params:
+        return ""
+    inner = type_params.strip()[1:-1]
+    names: list[str] = []
+    current: list[str] = []
+    depth = 0
+    for char in inner + ",":
+        if char == "," and depth == 0:
+            param = "".join(current).strip()
+            if param:
+                names.append(param.split("=", 1)[0].strip())
+            current = []
+            continue
+        if char in "<{(":
+            depth += 1
+        elif char in ">})":
+            depth -= 1
+        current.append(char)
+    return f"<{', '.join(names)}>"
+
+
 def generate_passthrough_init(module_stem: str, exported_types: list[tuple[str, str]]) -> str:
     """Return the text of a passthrough init.luau that re-exports *module_stem*.
 
@@ -56,12 +84,13 @@ def generate_passthrough_init(module_stem: str, exported_types: list[tuple[str, 
     """
     lines = [
         "--!strict",
-        "-- AUTO-GENERATED passthrough -- temporary, do not commit.",
+        "-- AUTO-GENERATED passthrough file --.",
         f"local Module = require(script.{module_stem})",
         "",
     ]
     for type_name, type_params in exported_types:
-        lines.append(f"export type {type_name}{type_params} = Module.{type_name}{type_params}")
+        usage_params = strip_type_param_defaults(type_params)
+        lines.append(f"export type {type_name}{type_params} = Module.{type_name}{usage_params}")
     if exported_types:
         lines.append("")
     lines.append("return Module")

@@ -2,7 +2,7 @@
 name = "raild3x/tablereplicator"
 description = "Replicates a TableManager instance from server to client with minimal effort."
 authors = ["Logan Hunt (Raildex)"]
-version = "0.2.7"
+version = "1.0.0"
 license = "MIT"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
@@ -19,4 +19,3 @@ Signal = "howmanysmall/better-signal@2.1.0"
 Janitor = "howmanysmall/janitor@^1.16.0"
 Promise = "howmanysmall/typed-promise@^4.0.6"
 TableManager = "raild3x/tablemanager@^1"
-
