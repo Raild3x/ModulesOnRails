@@ -41,6 +41,11 @@ function PlaceTree.build(config: Config): { [string]: any }
 
 	local srcTree: { [string]: any } = { ["$className"] = "Folder" }
 	for _, entry in fs.readDir(LIB_ROOT) do
+		-- Skip non-directory entries (e.g. lib/MoonwaveSeparator.luau). Stat-ing a
+		-- `<file>/src` path raises ENOTDIR on Linux (returns false on Windows).
+		if not fs.isDir(`{LIB_ROOT}/{entry}`) then
+			continue
+		end
 		if fs.isDir(`{LIB_ROOT}/{entry}/src`) then
 			if override ~= nil and entry == override.package then
 				srcTree[entry] = { ["$path"] = override.path }
