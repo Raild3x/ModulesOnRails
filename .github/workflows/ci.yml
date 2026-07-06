@@ -15,6 +15,7 @@ concurrency:
 
 permissions:
   contents: read
+  pull-requests: read # publish_detect_changed_packages.py reads PR files via the API
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -32,14 +33,18 @@ jobs:
       - name: Run Selene
         run: selene lib
 
-  # Run the spec suites for every Lune-pipeline package via the coverage runner.
-  # Roblox-pipeline packages need Studio and are skipped (run those locally).
+  # Run the spec suites for the Lune-pipeline packages this PR changed, via the
+  # coverage runner. Only changed packages are set up and tested; if the PR
+  # touches no lib/ package the test step is skipped. Roblox-pipeline packages
+  # are handled by the test-roblox job.
   test:
     name: "Package tests (Lune pipeline)"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so push-event diffs resolve
 
       - name: Setup toolchain
         uses: ./.github/actions/setup-toolchain
@@ -65,8 +70,31 @@ jobs:
           restore-keys: |
             coverage-engine-${{ runner.os }}-
 
-      - name: Run package tests
-        run: python scripts/test_package.py all --lune-only
+      - name: Detect changed packages
+        id: changes
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          python scripts/workflow_actions/publish_detect_changed_packages.py \
+            --event-name "${{ github.event_name }}" \
+            --event-path "$GITHUB_EVENT_PATH" \
+            --repository "${{ github.repository }}" \
+            --pr-number "${{ github.event.pull_request.number || 0 }}" \
+            --changed-packages-file changed-packages.txt
+
+      - name: Run package tests (changed packages)
+        if: steps.changes.outputs.has_changes == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          while read -r pkg; do
+            [ -z "$pkg" ] && continue
+            echo "::group::Lune tests — $pkg"
+            python scripts/test_package.py "$pkg" --lune-only
+            echo "::endgroup::"
+          done < changed-packages.txt
 
   # Run coverage for the Roblox-pipeline packages (datamodel/`const`) on real
   # Roblox via Open Cloud — the packages the Lune job skips. Needs the ROBLOX_*
@@ -96,6 +124,8 @@ jobs:
       - name: Checkout repository
         if: steps.guard.outputs.run == 'true'
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so push-event diffs resolve
 
       - name: Setup toolchain
         if: steps.guard.outputs.run == 'true'
@@ -123,9 +153,32 @@ jobs:
           restore-keys: |
             coverage-engine-${{ runner.os }}-
 
-      - name: Run Roblox package tests (Open Cloud)
+      - name: Detect changed packages
+        id: changes
         if: steps.guard.outputs.run == 'true'
-        run: python scripts/test_package.py all --roblox-only --roblox-runner=opencloud
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          python scripts/workflow_actions/publish_detect_changed_packages.py \
+            --event-name "${{ github.event_name }}" \
+            --event-path "$GITHUB_EVENT_PATH" \
+            --repository "${{ github.repository }}" \
+            --pr-number "${{ github.event.pull_request.number || 0 }}" \
+            --changed-packages-file changed-packages.txt
+
+      - name: Run Roblox package tests (Open Cloud, changed packages)
+        if: steps.guard.outputs.run == 'true' && steps.changes.outputs.has_changes == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          while read -r pkg; do
+            [ -z "$pkg" ] && continue
+            echo "::group::Open Cloud tests — $pkg"
+            python scripts/test_package.py "$pkg" --roblox-only --roblox-runner=opencloud
+            echo "::endgroup::"
+          done < changed-packages.txt
 
   # Verify that the Moonwave documentation build succeeds (does not deploy).
   docs-build:

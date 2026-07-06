@@ -169,6 +169,12 @@ function M.resolvePackages(selector: string): { PackageSpec }
 	if selector == "all" then
 		local names: { string } = {}
 		for _, entry in fs.readDir(LIB_ROOT) do
+			-- Skip non-directory entries (e.g. lib/MoonwaveSeparator.luau). Building
+			-- a `<file>/src` path and stat-ing it raises ENOTDIR on Linux (on Windows
+			-- it just returns false), so guard before touching the child path.
+			if not fs.isDir(`{LIB_ROOT}/{entry}`) then
+				continue
+			end
 			local srcPath = `{LIB_ROOT}/{entry}/src`
 			if fs.isDir(srcPath) and hasSpecs(srcPath) then
 				table.insert(names, entry)
