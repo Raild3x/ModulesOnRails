@@ -6,6 +6,7 @@
 	path, and **global Signals** that fire for any path. This guide covers both, how
 	their scheduling is controlled, and (for advanced cases) the metadata they carry.
 
+	---
 	## Path listeners
 
 	Path listeners are registered at a path and return a `Connection` you can
@@ -72,22 +73,7 @@
 	manager:ArrayRemove("Queue", 1) -- "removed a from index 1"
 	```
 
-	## Global Signals
-
-	Every manager also exposes Signals that fire for **any** path, carrying the
-	path as their first argument:
-
-	`ValueChanged(path, newValue, oldValue)`, `KeyAdded(path, key, newValue)`,
-	`KeyRemoved(path, key, oldValue)`, `KeyChanged(path, key, newValue, oldValue)`,
-	`ArrayInserted(path, index, newValue)`, `ArrayRemoved(path, index, oldValue)`,
-	`ArraySet(path, index, newValue, oldValue)`.
-
-	```lua
-	manager.ValueChanged:Connect(function(path, newValue, oldValue)
-		print(`{table.concat(path, ".")}: {oldValue} -> {newValue}`)
-	end)
-	```
-
+	---
 	## Listener options
 
 	Every path listener accepts an optional `ListenerOptions` table:
@@ -98,6 +84,54 @@
 	  that depth).
 	- `Once` — auto-disconnect after the first fire. On a wildcard path this is
 	  once **total** across all matching keys, not once per key.
+
+	### Controlling reach with ListenDepth
+
+	"Depth" is how many levels *below* the registered path a change happened. A
+	change AT the path is depth `0`; a change to one of its direct children is
+	depth `1`; a grandchild is depth `2`, and so on. `ListenDepth` caps how far
+	down the tree a change can be and still notify the listener.
+
+	```lua
+	local manager = TableManager.new({
+		Game = { World = { Weather = { Rain = 0 } } },
+	})
+	```
+
+	Registering at `"Game.World"`, the same edit reaches the listener differently
+	depending on `ListenDepth`:
+
+	| `ListenDepth` | `World` replaced (depth 0) | `Weather` replaced (depth 1) | `Rain` changed (depth 2) |
+	| --- | --- | --- | --- |
+	| `nil` (default) | fires | fires | fires |
+	| `0` | fires | — | — |
+	| `1` | fires | fires | — |
+
+	```lua
+	-- Only care about the World subtree's immediate shape, not deep leaf edits:
+	manager:OnChange("Game.World", function()
+		print("World or one of its direct children changed")
+	end, { ListenDepth = 1 })
+
+	manager:Set("Game.World.Weather", {}) -- fires (depth 1)
+	manager:Set("Game.World.Weather.Rain", 5) -- does NOT fire (depth 2)
+	```
+
+	`ListenDepthStyle` decides whether the number is a ceiling or an exact match.
+	`"<="` (default) fires at-or-within the depth; `"=="` fires ONLY for changes
+	at exactly that depth — e.g. `ListenDepth = 1, ListenDepthStyle = "=="` fires
+	for a direct child but not for the path itself or a grandchild.
+
+	This is also what separates the two value listeners: `OnChange` is an
+	unbounded `ListenDepth = nil`, while `OnValueChange` is exactly
+	`ListenDepth = 0, ListenDepthStyle = "=="` — fire only when the path itself is
+	reassigned.
+
+	:::info Depth is measured from `OriginPath`
+	The level compared against `ListenDepth` is
+	`#metadata.OriginPath - #registeredPath` (clamped at ≥ 0) — the distance from
+	your listener's path down to where the assignment actually happened.
+	:::
 
 	### Wildcards
 
@@ -116,6 +150,7 @@
 	wildcards, `Set`/`Update`/`Increment` fan-out, `GetMatching`, and the
 	`Once`-fires-once-total caveat).
 
+	---
 	## Fire modes
 
 	Two independent settings control *how* callbacks are scheduled when they fire.
@@ -152,6 +187,7 @@
 	instances keep the mode they were built with.
 	:::
 
+	---
 	## Listener metadata (power users)
 
 	:::info Optional
@@ -176,6 +212,23 @@
 		else
 			print("descendant changed, originating at", table.concat(metadata.OriginPath, "."))
 		end
+	end)
+	```
+
+	---
+	## Global Signals
+
+	Every manager also exposes Signals that fire for **any** path, carrying the
+	path as their first argument:
+
+	`ValueChanged(path, newValue, oldValue)`, `KeyAdded(path, key, newValue)`,
+	`KeyRemoved(path, key, oldValue)`, `KeyChanged(path, key, newValue, oldValue)`,
+	`ArrayInserted(path, index, newValue)`, `ArrayRemoved(path, index, oldValue)`,
+	`ArraySet(path, index, newValue, oldValue)`.
+
+	```lua
+	manager.ValueChanged:Connect(function(path, newValue, oldValue)
+		print(`{table.concat(path, ".")}: {oldValue} -> {newValue}`)
 	end)
 	```
 

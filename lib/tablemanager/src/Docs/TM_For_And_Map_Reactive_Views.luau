@@ -1,5 +1,10 @@
 --[=[
-	@class TM For & Map Reactive Views
+	@class TM For & Map Views [Unreleased]
+
+	:::note UNRELEASED
+	The `For*` and `Map*` methods are marked `@unreleased.
+	Their API may change before they are stabilized.
+	:::
 
 	The `For*` and `Map*` methods turn a collection inside a
 	[TableManager](/api/TableManager) into a reactive view: a per-item reconciler

@@ -84,6 +84,28 @@
 	array listeners, wildcards, and the global Signals) is covered in the Listeners
 	& Fire Modes guide.
 
+	### 5. Cleanup
+
+	Call `Destroy` when a manager is no longer needed. It disconnects every
+	listener and signal, tears down owned `For*`/`Map*` subscriptions, and releases
+	proxies. It is idempotent.
+
+	```lua
+	manager:OnValueChange("Player.Health", onHealthChanged)
+
+	manager:OnDestroy(function()
+		print("manager torn down")
+	end)
+
+	manager:Destroy()
+	print(TableManager.IsDestroyed(manager)) -- true
+	```
+
+	:::tip IsDestroyed
+	An alias `manager:IsDestroyed()` is provided as an alternate to `TableManager.IsDestroyed(manager)`. 
+	It is the only safe method to use after `Destroy`. All other methods will error as the metatable is removed.
+	:::
+
 	---
 	### The config table at a glance
 
@@ -106,27 +128,6 @@
 	[`TableManager.SetDefaults`](/api/TableManager#SetDefaults) so you don't have
 	to repeat them in every `new` call.
 
-	### 5. Cleanup
-
-	Call `Destroy` when a manager is no longer needed. It disconnects every
-	listener and signal, tears down owned `For*`/`Map*` subscriptions, and releases
-	proxies. It is idempotent.
-
-	```lua
-	manager:OnValueChange("Player.Health", onHealthChanged)
-
-	manager:OnDestroy(function()
-		print("manager torn down")
-	end)
-
-	manager:Destroy()
-	print(TableManager.IsDestroyed(manager)) -- true
-	```
-
-	:::tip IsDestroyed
-	An alias `manager:IsDestroyed()` is provided as an alternate to `TableManager.IsDestroyed(manager)`. 
-	It is the only safe method to use after `Destroy`. All other methods will error as the metatable is removed.
-	:::
 
 	---
 	### See also

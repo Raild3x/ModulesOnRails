@@ -64,7 +64,9 @@
 	[`TableManager.SetDefaults`](/api/TableManager#SetDefaults) (which only affects
 	managers created afterwards).
 
-	## Flushing external mutations
+	---
+	## More info
+	### Flushing external mutations
 
 	Because change detection is a diff and not an assignment hook, code that mutates
 	the underlying table **without going through the manager** is invisible until the
@@ -82,7 +84,7 @@
 	unavoidable bypasses — but prefer writing through `Set`/`ArrayInsert`/the proxy
 	so the flush happens for you (see the Proxies & Direct Table Access guide).
 
-	## Flushing is free when nothing is watching
+	### Flushing is free when nothing is watching
 
 	A flush is a **no-op when nothing observes `path`** — no listener covers it, no
 	Signal is connected, no linked manager shares it, and no `OnApplied` subscriber
@@ -90,7 +92,7 @@
 	watching, so defensive `Flush` calls and writes to unobserved branches stay
 	cheap.
 
-	## Flushing and batching
+	### Flushing and batching
 
 	A batch is just **deferred flushing**: `Suspend` stops flushes from happening,
 	and `Resume` performs a single flush over everything that changed in the window.
