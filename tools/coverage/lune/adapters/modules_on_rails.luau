@@ -14,6 +14,7 @@
 local fs = require("@lune/fs")
 
 local adapter = require("../adapter")
+local PlaceTree = require("../../../ci/PlaceTree")
 
 type PackageSpec = adapter.PackageSpec
 type Pipeline = adapter.Pipeline
@@ -77,6 +78,43 @@ local function hasSpecs(srcPath: string): boolean
 	return found
 end
 
+-- -- setup detection ----------------------------------------------------------
+
+-- Wally sections whose entries mean the package has external dependencies that
+-- must be resolved into `_Index/` before it can build/run. Mirrors the same
+-- check in scripts/test_package.py so the two stay consistent.
+local DEP_SECTIONS: { [string]: boolean } = {
+	["[dependencies]"] = true,
+	["[server-dependencies]"] = true,
+	["[dev-dependencies]"] = true,
+}
+
+local function hasWallyDependencies(root: string): boolean
+	local wallyPath = `{root}/wally.toml`
+	if not fs.isFile(wallyPath) then
+		return false
+	end
+	local inDepSection = false
+	for rawLine in fs.readFile(wallyPath):gmatch("[^\r\n]+") do
+		local line = rawLine:gsub("#.*", ""):gsub("^%s+", ""):gsub("%s+$", "")
+		if line == "" then
+			continue
+		end
+		if line:sub(1, 1) == "[" then
+			inDepSection = DEP_SECTIONS[line] == true
+		elseif inDepSection and line:find("=", 1, true) ~= nil then
+			return true
+		end
+	end
+	return false
+end
+
+-- A package can't be measured if it declares Wally deps but its `_Index/` folder
+-- hasn't been resolved yet (i.e. `npm run setup <name>` hasn't run, or failed).
+local function needsSetup(root: string): boolean
+	return hasWallyDependencies(root) and not fs.isDir(`{root}/_Index`)
+end
+
 -- -- pipeline classification --------------------------------------------------
 
 -- Returns (pipeline, reason). Studio is forced by datamodel usage OR by `const`
@@ -111,7 +149,7 @@ local function buildSpec(name: string): PackageSpec
 	local srcPath = `{root}/src`
 	assert(fs.isDir(srcPath), `package has no src directory: {srcPath}`)
 	local pipeline: Pipeline, reason: string = classify(srcPath)
-	return {
+	local spec: PackageSpec = {
 		name = name,
 		root = root,
 		sourceRoot = "src",
@@ -121,6 +159,10 @@ local function buildSpec(name: string): PackageSpec
 		pipelineReason = reason,
 		ignoreFiles = IGNORE_FILES,
 	}
+	if needsSetup(root) then
+		spec.skipReason = `dependencies not installed — run \`npm run setup {name}\``
+	end
+	return spec
 end
 
 function M.resolvePackages(selector: string): { PackageSpec }
@@ -297,39 +339,15 @@ function M.robloxScaffold(
 	_buildDir: string,
 	runOptions: adapter.RobloxRunOptions?
 ): adapter.RobloxScaffold
-	-- Project file lives at <workDir>/place.project.json; $path values are
-	-- relative to it. Mount every lib package explicitly, pointing the target
-	-- package at the instrumented build. Explicit children avoid rojo's
-	-- unreliable $path+override merge.
-	--
-	-- Packages are normally isolated, so a package + its own vendored deps would
-	-- suffice. But tablereplicator currently depends on tablemanager via a
-	-- relative cross-package require (an exception, pending tablemanager's next
-	-- wally release). Mounting all of lib -- exactly what the repo's own Studio
-	-- test runner does (root default.project.json maps lib -> ReplicatedStorage.src)
-	-- -- resolves that transparently and is harmless for isolated packages, whose
-	-- extra siblings are inert (only required if referenced).
-	local srcTree: { [string]: any } = { ["$className"] = "Folder" }
-	for _, entry in fs.readDir(LIB_ROOT) do
-		if fs.isDir(`{LIB_ROOT}/{entry}/src`) then
-			if entry == spec.name then
-				srcTree[entry] = { ["$path"] = "build" }
-			else
-				srcTree[entry] = { ["$path"] = `../../{LIB_ROOT}/{entry}` }
-			end
-		end
-	end
-	local projectTree = {
-		["$className"] = "DataModel",
-		ReplicatedStorage = {
-			["$className"] = "ReplicatedStorage",
-			src = srcTree,
-			test = {
-				["$className"] = "Folder",
-				tiniest = { ["$path"] = "../../test/tiniest" },
-			},
-		},
-	}
+	-- Project file lives at <workDir>/place.project.json (workDir is .coverage/<pkg>,
+	-- two levels below the repo root), so $path values are relative to it. The
+	-- shared PlaceTree helper mounts every lib package; the `override` points the
+	-- package under test at its instrumented `build/` copy instead of its real
+	-- source. See tools/ci/PlaceTree for why all of lib is mounted.
+	local projectTree = PlaceTree.build({
+		repoPrefix = "../../",
+		override = { package = spec.name, path = "build" },
+	})
 	local perTest = if runOptions ~= nil then runOptions.perTest == true else false
 	return {
 		projectTree = projectTree,

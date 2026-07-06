@@ -14,6 +14,8 @@ local adapterMod = require("../adapter")
 local Engine = require("./Engine")
 local LuneRunner = require("./LuneRunner")
 local RobloxRunner = require("./RobloxRunner")
+local OpenCloudRunner = require("./OpenCloudRunner")
+local OpenCloud = require("../../../ci/OpenCloud")
 local Merge = require("./Merge")
 local Mutation = require("./Mutation")
 local Recommend = require("./Recommend")
@@ -40,6 +42,14 @@ export type Options = {
 	mutateTimeout: number?,
 	recommend: boolean?,
 	luneOnly: boolean?,
+	-- Skip Lune-pipeline packages; run only Roblox-pipeline ones (mirror of
+	-- luneOnly). Intended for the CI job that runs on real Roblox via Open Cloud.
+	robloxOnly: boolean?,
+	-- Which transport to use for Roblox-pipeline packages: "opencloud" (real
+	-- Roblox via Open Cloud) or "studio" (local Studio via run-in-roblox). When
+	-- nil, defaults to "opencloud" if an Open Cloud API key is configured, else
+	-- "studio".
+	robloxRunner: string?,
 }
 
 export type RunSummary = {
@@ -285,8 +295,18 @@ function Orchestrator.run(adapter: RepoAdapter, selector: string, options: Optio
 	local jsonResults: { any } = {}
 
 	for _, spec in specs do
+		if spec.skipReason ~= nil then
+			print(`[coverage] skipped {spec.name} ({spec.skipReason})`)
+			summary.skippedPackages += 1
+			continue
+		end
 		if options.luneOnly and spec.pipeline ~= "lune" then
 			print(`[coverage] skipped {spec.name} (--lune-only; {spec.pipelineReason})`)
+			summary.skippedPackages += 1
+			continue
+		end
+		if options.robloxOnly and spec.pipeline ~= "roblox" then
+			print(`[coverage] skipped {spec.name} (--roblox-only; {spec.pipelineReason})`)
 			summary.skippedPackages += 1
 			continue
 		end
@@ -303,8 +323,17 @@ function Orchestrator.run(adapter: RepoAdapter, selector: string, options: Optio
 		local env: string
 		local run: LuneRunner.RunOutput
 		if spec.pipeline == "roblox" then
-			env = "roblox-edit"
-			run = RobloxRunner.run(adapter, spec, buildDir, workDir, { perTest = options.perTest })
+			local runner = options.robloxRunner
+			if runner == nil then
+				runner = if OpenCloud.isConfigured() then "opencloud" else "studio"
+			end
+			if runner == "opencloud" then
+				env = "roblox-opencloud"
+				run = OpenCloudRunner.run(adapter, spec, buildDir, workDir, { perTest = options.perTest })
+			else
+				env = "roblox-edit"
+				run = RobloxRunner.run(adapter, spec, buildDir, workDir, { perTest = options.perTest })
+			end
 		else
 			env = "lune"
 			run = LuneRunner.run(spec, buildDir, { timeout = options.timeout })

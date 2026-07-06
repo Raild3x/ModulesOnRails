@@ -32,6 +32,8 @@ type Options = {
 	mutateTimeout: number?,
 	recommend: boolean?,
 	luneOnly: boolean?,
+	robloxOnly: boolean?,
+	robloxRunner: string?,
 }
 
 local selector: string? = nil
@@ -49,6 +51,8 @@ local options: Options = {
 	mutateTimeout = nil,
 	recommend = false,
 	luneOnly = false,
+	robloxOnly = false,
+	robloxRunner = nil,
 }
 local adapterPath: string? = nil
 
@@ -169,6 +173,28 @@ local FLAGS: { FlagSpec } = {
 		takesValue = false,
 		apply = function()
 			options.luneOnly = true
+		end,
+	},
+	{
+		match = "--roblox-only",
+		usage = "--roblox-only",
+		description = "Skip Lune-pipeline packages; run only Roblox-pipeline ones (mirror of --lune-only). Intended for the CI job that runs on real Roblox via Open Cloud.",
+		takesValue = false,
+		apply = function()
+			options.robloxOnly = true
+		end,
+	},
+	{
+		match = "--roblox-runner=",
+		usage = "--roblox-runner=<opencloud|studio>",
+		description = "Transport for Roblox-pipeline packages: 'opencloud' (real Roblox via Open Cloud; needs ROBLOX_API_KEY/ROBLOX_UNIVERSE_ID/ROBLOX_PLACE_ID) or 'studio' (local Studio via run-in-roblox). Default: opencloud when ROBLOX_API_KEY is set, else studio.",
+		takesValue = true,
+		apply = function(value)
+			if value ~= "opencloud" and value ~= "studio" then
+				print(("Invalid value for --roblox-runner=<opencloud|studio>: got %s"):format(value or "<none>"))
+				process.exit(1)
+			end
+			options.robloxRunner = value
 		end,
 	},
 	{

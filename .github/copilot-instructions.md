@@ -52,7 +52,7 @@ Publishing will generate an `init.luau` re-export automatically. Non-pure-Luau p
 - tiniest has no `.is_false()` or `.throws()` matchers — the real names are `.never_is_true()` for false and `.fails()` / `.fails_with(message)` for errors. The full matcher list is documented at the top of `test/tiniest/tiniest_expect.luau`.
 - Create tests in `.spec.luau` files inside the package's `src/` tree (commonly `src/Tests/`). The runner discovers a package as testable by the presence of `*.spec.luau` under `src/`.
 - Use `lune run coverage.luau package=<package_name>` to run tests and generate coverage reports for a specific package.
-- Pipeline selection is automatic: pure-Luau packages run in Lune (fast); packages that touch the datamodel **or use `const`** (Lune 0.10.4 cannot parse `const`) run in Roblox Studio via `run-in-roblox` (slow — expect a Studio launch).
+- Pipeline selection is automatic: pure-Luau packages run in Lune (fast); packages that touch the datamodel **or use `const`** (Lune 0.10.4 cannot parse `const`) run on real Roblox. The Roblox transport is either local Studio via `run-in-roblox` (default; expect a Studio launch) or headless **Open Cloud** for CI — choose with `--roblox-runner=studio|opencloud` (defaults to `opencloud` when `ROBLOX_API_KEY` is set). A standalone, coverage-free real-Roblox test run is available via `lune run tools/ci/run_tests.luau`.
 - TestEz artifacts (`test/testez/`, `testez.toml`, `testez.yml`, `TestEz Companion.rbxl`, `scripts/Archive/runTestEZ.py`) are legacy. Never add TestEz tests.
 
 ## Debugging Rules

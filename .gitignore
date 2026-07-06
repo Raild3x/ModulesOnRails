@@ -16,6 +16,8 @@ last_tested_package.txt
 
 # Coverage system work dir + Rust build artifacts
 .coverage/
+# Standalone Open Cloud test-runner work dir (built place + project file)
+.ci/
 tools/coverage/engine/target/
 Cargo.lock
 

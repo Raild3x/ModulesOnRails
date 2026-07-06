@@ -26,7 +26,9 @@ Flags:
 | `--mutate-ops=<csv>` | only run these operators (`ror`, `lor`, `aor`, `not`, `lit`) |
 | `--mutate-timeout=<sec>` | per-mutant suite timeout (default 3x the baseline duration, min 5s) |
 | `--recommend` | end the report with a ranked list of concrete next steps |
-| `--lune-only` | skip Roblox-pipeline packages (they need Studio); used by CI |
+| `--lune-only` | skip Roblox-pipeline packages; run only Lune ones (used by the fast CI job) |
+| `--roblox-only` | skip Lune-pipeline packages; run only Roblox ones (used by the Open Cloud CI job) |
+| `--roblox-runner=<opencloud\|studio>` | transport for Roblox-pipeline packages (default: `opencloud` if `ROBLOX_API_KEY` set, else `studio`) |
 | `--rebuild-engine` | force a `cargo build --release` of the Rust engine |
 | `--timeout=<sec>` | tiniest safe-mode watchdog override (Lune) |
 | `--adapter=<path>` | use a different repo adapter |
@@ -102,9 +104,12 @@ Seven phases, three hosts:
    plugin that attributes hits to each test via an `after_test` delta scan. The
    `_for_lune`/`_for_roblox` wrappers accept an extra `plugins` option.
 4. **Run** — pure-Luau packages run in **Lune**; packages using the datamodel or
-   `const` (which Lune 0.10.4 can't parse) run in **Roblox Studio** via
-   `run-in-roblox`, with coverage marshalled back through a stdout sentinel
-   protocol.
+   `const` (which Lune 0.10.4 can't parse) run on **real Roblox**, with coverage
+   marshalled back through a stdout/log sentinel protocol. Two interchangeable
+   Roblox transports: local **Studio** via `run-in-roblox`, or headless
+   **Open Cloud** (for CI) via the driver in `tools/ci/OpenCloud.luau`. Pick one
+   with `--roblox-runner=studio|opencloud`; the default is `opencloud` when
+   `ROBLOX_API_KEY` is set, else `studio`.
 5. **Analysis + reporting** — `Merge` joins hits onto the map; `Report` prints the
    ranked console report; `CoverageJson` writes the versioned `coverage.json`.
 

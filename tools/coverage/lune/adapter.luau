@@ -32,6 +32,9 @@ export type PackageSpec = {
 	pipelineReason: string,
 	-- Suppression files to read at analysis time, most-specific first.
 	ignoreFiles: { string },
+	-- When set, the orchestrator skips this package with this reason instead of
+	-- running it (e.g. its Wally deps aren't installed, so it can't build/run).
+	skipReason: string?,
 }
 
 --[=[

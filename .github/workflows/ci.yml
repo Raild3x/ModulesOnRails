@@ -68,6 +68,65 @@ jobs:
       - name: Run package tests
         run: python scripts/test_package.py all --lune-only
 
+  # Run coverage for the Roblox-pipeline packages (datamodel/`const`) on real
+  # Roblox via Open Cloud — the packages the Lune job skips. Needs the ROBLOX_*
+  # repo secrets; skips cleanly (stays green) when they are absent, e.g. on pull
+  # requests from forks. Packages whose Wally deps can't be resolved are skipped
+  # with a warning rather than failing the job.
+  test-roblox:
+    name: "Package tests (Roblox / Open Cloud)"
+    runs-on: ubuntu-latest
+    env:
+      ROBLOX_API_KEY: ${{ secrets.ROBLOX_API_KEY }}
+      ROBLOX_UNIVERSE_ID: ${{ secrets.ROBLOX_UNIVERSE_ID }}
+      ROBLOX_PLACE_ID: ${{ secrets.ROBLOX_PLACE_ID }}
+    steps:
+      # secrets can't be referenced in a job-level `if`, so gate the real steps on
+      # a guard step that checks whether the credentials are present.
+      - name: Check Open Cloud credentials
+        id: guard
+        run: |
+          if [ -z "$ROBLOX_API_KEY" ] || [ -z "$ROBLOX_UNIVERSE_ID" ] || [ -z "$ROBLOX_PLACE_ID" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Open Cloud secrets not configured; skipping Roblox tests."
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout repository
+        if: steps.guard.outputs.run == 'true'
+        uses: actions/checkout@v4
+
+      - name: Setup toolchain
+        if: steps.guard.outputs.run == 'true'
+        uses: ./.github/actions/setup-toolchain
+
+      - name: Setup Python
+        if: steps.guard.outputs.run == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Setup Rust
+        if: steps.guard.outputs.run == 'true'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache coverage engine build
+        if: steps.guard.outputs.run == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            tools/coverage/engine/target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: coverage-engine-${{ runner.os }}-${{ hashFiles('tools/coverage/engine/Cargo.lock', 'tools/coverage/engine/src/**') }}
+          restore-keys: |
+            coverage-engine-${{ runner.os }}-
+
+      - name: Run Roblox package tests (Open Cloud)
+        if: steps.guard.outputs.run == 'true'
+        run: python scripts/test_package.py all --roblox-only --roblox-runner=opencloud
+
   # Verify that the Moonwave documentation build succeeds (does not deploy).
   docs-build:
     name: "Can build docs"

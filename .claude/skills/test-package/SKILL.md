@@ -38,10 +38,17 @@ If requires/types are broken on a fresh checkout, run `npm run setup` first
 
 The adapter picks the pipeline automatically per package:
 - **Lune** (fast, in-process): pure-Luau packages.
-- **Roblox Studio** via `run-in-roblox` (slow, one Studio launch): packages
-  that touch the datamodel (`game`, `Instance.new`, ...) **or contain `const`**
-  — Lune 0.10.4 cannot parse `const`. This is expected behavior, not a hang;
-  give it time or check the printed pipeline reason.
+- **Real Roblox** (slow): packages that touch the datamodel (`game`,
+  `Instance.new`, ...) **or contain `const`** — Lune 0.10.4 cannot parse `const`.
+  This is expected behavior, not a hang; give it time or check the printed
+  pipeline reason. The transport is either local **Studio** via `run-in-roblox`
+  (one Studio launch) or headless **Open Cloud** (for CI, no Studio) — select
+  with `--roblox-runner=studio|opencloud`. Default: `opencloud` when
+  `ROBLOX_API_KEY` is set (plus `ROBLOX_UNIVERSE_ID`/`ROBLOX_PLACE_ID`), else
+  `studio`.
+
+For a coverage-free "do the specs pass on real Roblox?" run (all packages, one
+Open Cloud task), use `lune run tools/ci/run_tests.luau`.
 
 ## Output
 
