@@ -1,10 +1,13 @@
 {
   "scripts": {
     "readme": "python scripts/generate_readme.py",
+    "test": "python scripts/test_package.py",
     "setup": "python scripts/setup_package_for_testing.py",
     "clear": "python scripts/clear_packages.py",
     "publish": "python scripts/publish.py",
-    "newpackage": "python scripts/new_package.py"
+    "newpackage": "python scripts/new_package.py",
+    "docs": "npm run clear && moonwave dev",
+    "docs:build": "npm run clear && moonwave build"
   },
   "devDependencies": {
     "caniuse-lite": "^1.0.30001757"

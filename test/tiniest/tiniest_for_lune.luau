@@ -6,6 +6,7 @@ local tiniest_time = require("./tiniest_time")
 local tiniest_snapshot = require("./tiniest_snapshot")
 local tiniest_pretty = require("./tiniest_pretty")
 local tiniest_context = require("./tiniest_context")
+local tiniest_plugin = require("./tiniest_plugin")
 local tiniest = require("./tiniest")
 
 local require: any = require
@@ -15,6 +16,9 @@ local luau = require("@lune/luau")
 export type Options = {
 	snapshot_path: string?,
 	save_snapshots: boolean?,
+	-- Extra tiniest plugins (e.g. coverage). Inserted just before the pretty
+	-- printer so their after_run decoration is visible to add_line_items.
+	plugins: { tiniest_plugin.Plugin }?,
 	pretty: nil | {
 		disable_colour: boolean?,
 		disable_emoji: boolean?,
@@ -24,6 +28,7 @@ export type Options = {
 		},
 		format: ("flat" | "tree")?,
 		trim_duplicate_trace: boolean?,
+		hide_passed_tests: boolean?,
 	},
 }
 
@@ -91,6 +96,14 @@ function tiniest_for_lune.configure(options: Options)
 	}
 	self.snapshot = tiniest_snapshot.snapshot
 
+	local extra_plugins = options.plugins or {}
+
+	-- Pretty printer sees the annotation/line-item plugins, including any extras
+	-- so their add_line_items/add_annotations hooks fire.
+	local pretty_plugins: { any } = { tiniest_time :: any, tiniest_snapshot }
+	for _, p in extra_plugins do
+		table.insert(pretty_plugins, p)
+	end
 	local tiniest_pretty = tiniest_pretty.configure {
 		disable_colour = options.pretty and options.pretty.disable_colour,
 		disable_emoji = options.pretty and options.pretty.disable_emoji,
@@ -98,12 +111,20 @@ function tiniest_for_lune.configure(options: Options)
 		disable_output = options.pretty and options.pretty.disable_output,
 		format = options.pretty and options.pretty.format,
 		trim_duplicate_trace = options.pretty and options.pretty.trim_duplicate_trace,
-		plugins = { tiniest_time :: any, tiniest_snapshot },
+		hide_passed_tests = options.pretty and options.pretty.hide_passed_tests,
+		plugins = pretty_plugins,
 	}
 	self.format_run = tiniest_pretty.format_run
 
+	-- Extras run before the pretty printer so their after_run decoration is set
+	-- before pretty's after_run triggers format_run.
+	local main_plugins: { any } = { tiniest_time :: any, tiniest_snapshot, tiniest_context :: any }
+	for _, p in extra_plugins do
+		table.insert(main_plugins, p)
+	end
+	table.insert(main_plugins, tiniest_pretty)
 	local tiniest = tiniest.configure {
-		plugins = { tiniest_time :: any, tiniest_snapshot, tiniest_context :: any, tiniest_pretty },
+		plugins = main_plugins,
 	}
 	self.describe = tiniest.describe
 	self.FOCUS = tiniest.FOCUS

@@ -178,6 +178,7 @@ def main():
     readme_content += f"\n---\n\n*Last Modified: {date.today().strftime('%B %d, %Y')}*\n"
     readme_file.write_text(readme_content, encoding="utf-8")
 
+    print(readme_content)
     print("\nREADME.md has been generated successfully.")
     return 0
 

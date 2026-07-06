@@ -1,0 +1,1047 @@
+--!strict
+--[[
+	Coverage for every public `ServerReplicator` method: `Token`, `new`'s
+	validation, targeting (`SetTargets`/`AddTarget`/`RemoveTarget`/
+	`GetTargets`/`IsReplicatingTo`), hierarchy (`SetParent`), and `Destroy`.
+
+	No real RemoteEvent traffic is exercised here -- server-side behavior is
+	asserted by spying on `ServerReplicator._Transport` directly (a test-only
+	escape hatch, not part of the public API). `Player` targets are stood in
+	for with plain tables (`:: any`-cast): every targeting code path here
+	only ever uses a player value as an opaque dictionary key, never a real
+	`Player` API, so a real `Players` connection isn't needed to exercise it.
+]]
+
+return function(t: tiniest)
+	local FlatCodec = require("../Shared/Serialization/FlatCodec")
+	local BaseReplicator = require("../Shared/BaseReplicator")
+	local ServerReplicator = require("../Server/ServerReplicator")
+	local FakeManager = require("./Helpers/FakeManager")
+	local SpecUtils = require("./Helpers/SpecUtils")
+
+	local describe = t.describe
+	local test = t.test
+	local expect = t.expect
+
+	local uniqueToken = SpecUtils.uniqueToken
+	local spyOnTransport = SpecUtils.spyOnTransport
+
+	--------------------------------------------------------------------------------
+
+	describe("ServerReplicator.Token", function()
+		test("creates a fresh token for an unused name", function()
+			local token = ServerReplicator.Token("ServerReplicator.Token.Fresh")
+			expect(token).never_is(nil)
+		end)
+
+		test("errors if the same name is registered twice", function()
+			ServerReplicator.Token("DuplicateTokenTest")
+			expect(function()
+				ServerReplicator.Token("DuplicateTokenTest")
+			end).fails()
+		end)
+
+		test(".new(name) is equivalent to calling the token table directly", function()
+			local viaCall = ServerReplicator.Token("TokenNewVsCall.Call")
+			local viaNew = ServerReplicator.Token.new("TokenNewVsCall.New")
+			expect(SpecUtils.getTokenName(viaCall)).is("TokenNewVsCall.Call")
+			expect(SpecUtils.getTokenName(viaNew)).is("TokenNewVsCall.New")
+		end)
+
+		test(".get(name) returns the same token object .new() registered", function()
+			local registered = ServerReplicator.Token.new("TokenGetRoundTrip")
+			local fetched = ServerReplicator.Token.get("TokenGetRoundTrip")
+			expect(fetched).is(registered)
+		end)
+
+		test(".get(name) returns nil for a name that was never registered", function()
+			expect(ServerReplicator.Token.get("NeverRegisteredTokenName")).is(nil)
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("ServerReplicator.new", function()
+		test("requires exactly one of Parent / ReplicationTargets", function()
+			local token = uniqueToken("ParentXorTargets")
+			expect(function()
+				ServerReplicator.new({ Namespace = token, Data = FakeManager.new() })
+			end).fails()
+
+			local parent = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} })
+			expect(function()
+				ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), Parent = parent, ReplicationTargets = {} })
+			end).fails()
+			parent:Destroy()
+		end)
+
+		test("a plain Data table is wrapped in a real TableManager", function()
+			local replicator =
+				ServerReplicator.new({ Namespace = uniqueToken("NewPlainData"), Data = { Coins = 5 }, ReplicationTargets = {} })
+			expect(replicator.Manager.Raw.Coins).is(5)
+			replicator:Destroy()
+		end)
+
+		test("an existing TableManager passed as Data is used directly, not re-wrapped", function()
+			local FakeManagerInstance = FakeManager.new({ Tag = "original" })
+			local replicator =
+				ServerReplicator.new({ Namespace = uniqueToken("NewExistingManager"), Data = FakeManagerInstance, ReplicationTargets = {} })
+			expect(replicator.Manager).is(FakeManagerInstance)
+			replicator:Destroy()
+		end)
+
+		test("Tags default to an empty table when omitted", function()
+			local replicator =
+				ServerReplicator.new({ Namespace = uniqueToken("NewDefaultTags"), Data = FakeManager.new(), ReplicationTargets = {} })
+			-- `IsSubsetOfTags({})` is only true if the replicator's OWN tags
+			-- are themselves empty -- unlike `IsSupersetOfTags({})`, which is
+			-- trivially true no matter what tags the replicator actually has.
+			expect(replicator:IsSubsetOfTags({})).is_true()
+			replicator:Destroy()
+		end)
+
+		test("a child automatically inherits its parent's replication scope", function()
+			local player = { Name = "P" } :: any
+			local parent =
+				ServerReplicator.new({ Namespace = uniqueToken("NewScopeInheritParent"), Data = FakeManager.new(), ReplicationTargets = { player } })
+			local child = ServerReplicator.new({ Namespace = uniqueToken("NewScopeInheritChild"), Data = FakeManager.new(), Parent = parent })
+			expect(child:IsReplicatingTo(player)).is_true()
+			child:Destroy()
+			parent:Destroy()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("ServerReplicator.SetTargets", function()
+		test("explicit list drives IsReplicatingTo/GetTargets", function()
+			local token = uniqueToken("SetTargets")
+			local playerA = { Name = "A" } :: any
+			local playerB = { Name = "B" } :: any
+
+			local replicator = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), ReplicationTargets = { playerA } })
+			expect(replicator:IsReplicatingTo(playerA)).is_true()
+			expect(replicator:IsReplicatingTo(playerB)).is(false)
+
+			replicator:SetTargets({ playerB })
+			expect(replicator:IsReplicatingTo(playerA)).is(false)
+			expect(replicator:IsReplicatingTo(playerB)).is_true()
+
+			replicator:Destroy()
+		end)
+
+		test("switching to a smaller list removes everyone not in the new set", function()
+			local playerA = { Name = "A" } :: any
+			local playerB = { Name = "B" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("SetTargetsShrink"),
+				Data = FakeManager.new(),
+				ReplicationTargets = { playerA, playerB },
+			})
+			replicator:SetTargets({ playerA })
+			expect(replicator:IsReplicatingTo(playerA)).is_true()
+			expect(replicator:IsReplicatingTo(playerB)).is(false)
+			replicator:Destroy()
+		end)
+
+		test('SetTargets("all") replicates to every bootstrapped player', function()
+			local player = { Name = "AllModePlayer" } :: any
+			;(ServerReplicator :: any)._Transport.PlayerRequestedData:Fire(player)
+
+			local replicator = ServerReplicator.new({ Namespace = uniqueToken("SetTargetsAll"), Data = FakeManager.new(), ReplicationTargets = {} })
+			replicator:SetTargets("all" :: any)
+			expect(replicator:IsReplicatingTo(player)).is_true()
+
+			replicator:Destroy()
+		end)
+
+		test('SetTargets("all") a second time is a no-op (does not re-send)', function()
+			local replicator = ServerReplicator.new({ Namespace = uniqueToken("SetTargetsAllTwice"), Data = FakeManager.new(), ReplicationTargets = "all" :: any })
+
+			local calls, restore = spyOnTransport()
+			replicator:SetTargets("all" :: any)
+			restore()
+
+			expect(#calls).is(0)
+			replicator:Destroy()
+		end)
+
+		test("errors when called on a non-top-level replicator", function()
+			local top = ServerReplicator.new({ Namespace = uniqueToken("SetTargetsNonTopTop"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local child = ServerReplicator.new({ Namespace = uniqueToken("SetTargetsNonTopChild"), Data = FakeManager.new(), Parent = top })
+			expect(function()
+				child:SetTargets({})
+			end).fails()
+			child:Destroy()
+			top:Destroy()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("ServerReplicator.AddTarget", function()
+		test("sends a snapshot to an already-bootstrapped player", function()
+			local token = uniqueToken("AddTargetBootstrapped")
+			local player = { Name = "Bootstrapped" } :: any
+			local replicator = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} })
+
+			-- Simulate the player having already completed the request-data
+			-- handshake for some OTHER scope at some earlier point.
+			;(ServerReplicator :: any)._Transport.PlayerRequestedData:Fire(player)
+
+			local calls, restore = spyOnTransport()
+			-- `AddTarget` distinguishes a single Player from a list via
+			-- `typeof() == "Instance"`; the fake player stand-in is a plain
+			-- table, so it must be wrapped to take the list branch correctly.
+			replicator:AddTarget({ player })
+			restore()
+
+			expect(replicator:IsReplicatingTo(player)).is_true()
+			expect(#calls).is(1)
+			expect(calls[1].Player).is(player)
+			expect(calls[1].Message.Items[1].Op).is(FlatCodec.Op.Create)
+
+			replicator:Destroy()
+		end)
+
+		test("a not-yet-bootstrapped player is queued pending without sending anything yet", function()
+			local replicator = ServerReplicator.new({ Namespace = uniqueToken("AddTargetPending"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local player = { Name = "NeverBootstrapped" } :: any
+
+			local calls, restore = spyOnTransport()
+			replicator:AddTarget({ player })
+			restore()
+
+			expect(#calls).is(0)
+			expect(replicator:IsReplicatingTo(player)).is_true()
+			replicator:Destroy()
+		end)
+
+		test("adds every player in a list at once", function()
+			local playerA = { Name = "A" } :: any
+			local playerB = { Name = "B" } :: any
+			local replicator = ServerReplicator.new({ Namespace = uniqueToken("AddTargetMultiple"), Data = FakeManager.new(), ReplicationTargets = {} })
+			replicator:AddTarget({ playerA, playerB })
+			expect(replicator:IsReplicatingTo(playerA)).is_true()
+			expect(replicator:IsReplicatingTo(playerB)).is_true()
+			replicator:Destroy()
+		end)
+
+		test("is a no-op once the scope is already replicating to everyone", function()
+			local replicator =
+				ServerReplicator.new({ Namespace = uniqueToken("AddTargetAllNoOp"), Data = FakeManager.new(), ReplicationTargets = "all" :: any })
+			local player = { Name = "Irrelevant" } :: any
+
+			local calls, restore = spyOnTransport()
+			replicator:AddTarget({ player })
+			restore()
+
+			expect(#calls).is(0)
+			replicator:Destroy()
+		end)
+
+		test("errors when called on a non-top-level replicator", function()
+			local top = ServerReplicator.new({ Namespace = uniqueToken("AddTargetNonTopTop"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local child = ServerReplicator.new({ Namespace = uniqueToken("AddTargetNonTopChild"), Data = FakeManager.new(), Parent = top })
+			expect(function()
+				child:AddTarget({ { Name = "X" } :: any })
+			end).fails()
+			child:Destroy()
+			top:Destroy()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("ServerReplicator.RemoveTarget", function()
+		test("sends a Destroy to a currently-active player", function()
+			local token = uniqueToken("RemoveTargetActive")
+			local player = { Name = "Active" } :: any
+			local replicator = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), ReplicationTargets = { player } })
+			-- Not yet bootstrapped, so the player is only Pending; force them
+			-- Active the same way the request-data handshake would.
+			;(replicator :: any)._Scope:Activate(player)
+
+			local calls, restore = spyOnTransport()
+			-- Same `typeof() == "Instance"` wrapping requirement as AddTarget above.
+			replicator:RemoveTarget({ player })
+			restore()
+
+			expect(replicator:IsReplicatingTo(player)).is(false)
+			expect(#calls).is(1)
+			expect(calls[1].Message.Items[1].Op).is(FlatCodec.Op.Destroy)
+
+			replicator:Destroy()
+		end)
+
+		test("a pending (not yet active) player is dropped without sending anything", function()
+			local player = { Name = "Pending" } :: any
+			local replicator = ServerReplicator.new({ Namespace = uniqueToken("RemoveTargetPending"), Data = FakeManager.new(), ReplicationTargets = { player } })
+
+			local calls, restore = spyOnTransport()
+			replicator:RemoveTarget({ player })
+			restore()
+
+			expect(#calls).is(0)
+			expect(replicator:IsReplicatingTo(player)).is(false)
+			replicator:Destroy()
+		end)
+
+		test("removing a player that was never targeted is a safe no-op", function()
+			local replicator = ServerReplicator.new({ Namespace = uniqueToken("RemoveTargetUntracked"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local player = { Name = "NeverTargeted" } :: any
+			expect(function()
+				replicator:RemoveTarget({ player })
+			end).never_fails()
+			replicator:Destroy()
+		end)
+
+		test("removes every player in a list at once", function()
+			local playerA = { Name = "A" } :: any
+			local playerB = { Name = "B" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("RemoveTargetMultiple"),
+				Data = FakeManager.new(),
+				ReplicationTargets = { playerA, playerB },
+			})
+			replicator:RemoveTarget({ playerA, playerB })
+			expect(replicator:IsReplicatingTo(playerA)).is(false)
+			expect(replicator:IsReplicatingTo(playerB)).is(false)
+			replicator:Destroy()
+		end)
+
+		test("errors when called on a non-top-level replicator", function()
+			local top = ServerReplicator.new({ Namespace = uniqueToken("RemoveTargetNonTopTop"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local child = ServerReplicator.new({ Namespace = uniqueToken("RemoveTargetNonTopChild"), Data = FakeManager.new(), Parent = top })
+			expect(function()
+				child:RemoveTarget({ { Name = "X" } :: any })
+			end).fails()
+			child:Destroy()
+			top:Destroy()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("ServerReplicator.GetTargets", function()
+		test("returns the explicit list passed at construction, even while still pending", function()
+			local playerA = { Name = "A" } :: any
+			local playerB = { Name = "B" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("GetTargetsExplicit"),
+				Data = FakeManager.new(),
+				ReplicationTargets = { playerA, playerB },
+			})
+			local targets = replicator:GetTargets()
+			expect(table.find(targets, playerA) ~= nil).is_true()
+			expect(table.find(targets, playerB) ~= nil).is_true()
+			replicator:Destroy()
+		end)
+
+		test("returns an empty list for ReplicationTargets = {}", function()
+			local replicator = ServerReplicator.new({ Namespace = uniqueToken("GetTargetsEmpty"), Data = FakeManager.new(), ReplicationTargets = {} })
+			expect(#replicator:GetTargets()).is(0)
+			replicator:Destroy()
+		end)
+
+		test("reflects membership after AddTarget", function()
+			local replicator = ServerReplicator.new({ Namespace = uniqueToken("GetTargetsAfterAdd"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local player = { Name = "Added" } :: any
+			replicator:AddTarget({ player })
+			expect(table.find(replicator:GetTargets(), player) ~= nil).is_true()
+			replicator:Destroy()
+		end)
+
+		test("reflects membership after RemoveTarget", function()
+			local player = { Name = "Removed" } :: any
+			local replicator =
+				ServerReplicator.new({ Namespace = uniqueToken("GetTargetsAfterRemove"), Data = FakeManager.new(), ReplicationTargets = { player } })
+			replicator:RemoveTarget({ player })
+			expect(table.find(replicator:GetTargets(), player) ~= nil).never_is_true()
+			replicator:Destroy()
+		end)
+
+		test("does not error in \"all\" mode", function()
+			local replicator =
+				ServerReplicator.new({ Namespace = uniqueToken("GetTargetsAllMode"), Data = FakeManager.new(), ReplicationTargets = "all" :: any })
+			expect(function()
+				replicator:GetTargets()
+			end).never_fails()
+			replicator:Destroy()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("ServerReplicator.IsReplicatingTo", function()
+		test("true for an active target", function()
+			local player = { Name = "Active" } :: any
+			local replicator =
+				ServerReplicator.new({ Namespace = uniqueToken("IsReplicatingToActive"), Data = FakeManager.new(), ReplicationTargets = { player } })
+			;(replicator :: any)._Scope:Activate(player)
+			expect(replicator:IsReplicatingTo(player)).is_true()
+			replicator:Destroy()
+		end)
+
+		test("false for a player that was never targeted", function()
+			local replicator = ServerReplicator.new({ Namespace = uniqueToken("IsReplicatingToNever"), Data = FakeManager.new(), ReplicationTargets = {} })
+			expect(replicator:IsReplicatingTo({ Name = "Stranger" } :: any)).is(false)
+			replicator:Destroy()
+		end)
+
+		test("true for a pending (not yet active) target", function()
+			local player = { Name = "Pending" } :: any
+			local replicator =
+				ServerReplicator.new({ Namespace = uniqueToken("IsReplicatingToPending"), Data = FakeManager.new(), ReplicationTargets = { player } })
+			expect(replicator:IsReplicatingTo(player)).is_true()
+			replicator:Destroy()
+		end)
+
+		test("false after RemoveTarget", function()
+			local player = { Name = "Removed" } :: any
+			local replicator =
+				ServerReplicator.new({ Namespace = uniqueToken("IsReplicatingToRemoved"), Data = FakeManager.new(), ReplicationTargets = { player } })
+			replicator:RemoveTarget({ player })
+			expect(replicator:IsReplicatingTo(player)).is(false)
+			replicator:Destroy()
+		end)
+
+		test("true for any player at all once the scope replicates to everyone", function()
+			local replicator =
+				ServerReplicator.new({ Namespace = uniqueToken("IsReplicatingToAllMode"), Data = FakeManager.new(), ReplicationTargets = "all" :: any })
+			expect(replicator:IsReplicatingTo({ Name = "AnyoneAtAll" } :: any)).is_true()
+			replicator:Destroy()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("ServerReplicator.SetParent", function()
+		test("within the same scope sends a SetParent item", function()
+			local token = uniqueToken("SetParentSameScope")
+			local player = { Name = "P" } :: any
+			local top = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), ReplicationTargets = { player } })
+			;(top :: any)._Scope:Activate(player)
+			local childA = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), Parent = top })
+			local childB = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), Parent = top })
+
+			local calls, restore = spyOnTransport()
+			childA:SetParent(childB)
+			restore()
+
+			expect(childA:GetParent()).is(childB)
+			expect(#calls).is(1)
+			expect(calls[1].Message.Items[1].Op).is(FlatCodec.Op.SetParent)
+			expect(calls[1].Message.Items[1].ParentId).is(childB.Id)
+
+			childA:Destroy()
+			childB:Destroy()
+			top:Destroy()
+		end)
+
+		test("errors when the new parent is a descendant of self", function()
+			local token = uniqueToken("SetParentCircular")
+			local top = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), ReplicationTargets = {} })
+			local child = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), Parent = top })
+			local grandchild = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), Parent = child })
+
+			expect(function()
+				child:SetParent(grandchild)
+			end).fails()
+
+			grandchild:Destroy()
+			child:Destroy()
+			top:Destroy()
+		end)
+
+		test("across scopes reconciles Create/Destroy/SetParent per player", function()
+			local token = uniqueToken("SetParentCrossScope")
+			local onlyOld = { Name = "OnlyOld" } :: any
+			local onlyNew = { Name = "OnlyNew" } :: any
+			local both = { Name = "Both" } :: any
+
+			local oldTop = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), ReplicationTargets = { onlyOld, both } })
+			local newTop = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), ReplicationTargets = { onlyNew, both } })
+			;(oldTop :: any)._Scope:Activate(onlyOld)
+			;(oldTop :: any)._Scope:Activate(both)
+			;(newTop :: any)._Scope:Activate(onlyNew)
+			;(newTop :: any)._Scope:Activate(both)
+
+			local moved = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), Parent = oldTop })
+
+			local calls, restore = spyOnTransport()
+			moved:SetParent(newTop)
+			restore()
+
+			local byPlayer: { [any]: any } = {}
+			for _, call in calls do
+				byPlayer[call.Player] = call.Message.Items[1]
+			end
+
+			expect(byPlayer[onlyOld].Op).is(FlatCodec.Op.Destroy)
+			expect(byPlayer[both].Op).is(FlatCodec.Op.SetParent)
+			expect(byPlayer[onlyNew].Op).is(FlatCodec.Op.Create)
+			expect(moved:GetParent()).is(newTop)
+
+			moved:Destroy()
+			oldTop:Destroy()
+			newTop:Destroy()
+		end)
+
+		test("is a no-op when the new parent is already the current parent", function()
+			local top = ServerReplicator.new({ Namespace = uniqueToken("SetParentNoOpTop"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local child = ServerReplicator.new({ Namespace = uniqueToken("SetParentNoOpChild"), Data = FakeManager.new(), Parent = top })
+
+			local calls, restore = spyOnTransport()
+			child:SetParent(top)
+			restore()
+
+			expect(#calls).is(0)
+			child:Destroy()
+			top:Destroy()
+		end)
+
+		test("errors when called on a top-level replicator", function()
+			local top = ServerReplicator.new({ Namespace = uniqueToken("SetParentTopLevelError"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local otherTop = ServerReplicator.new({ Namespace = uniqueToken("SetParentTopLevelErrorOther"), Data = FakeManager.new(), ReplicationTargets = {} })
+			expect(function()
+				top:SetParent(otherTop)
+			end).fails()
+			top:Destroy()
+			otherTop:Destroy()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("ServerReplicator.Destroy", function()
+		test("sends a Destroy item to active players and drops from discovery", function()
+			local token = uniqueToken("DestroyTest")
+			local player = { Name = "P" } :: any
+			local replicator = ServerReplicator.new({ Namespace = token, Data = FakeManager.new(), ReplicationTargets = { player } })
+			;(replicator :: any)._Scope:Activate(player)
+			local id = replicator.Id
+
+			local calls, restore = spyOnTransport()
+			replicator:Destroy()
+			restore()
+
+			expect(#calls).is(1)
+			expect(calls[1].Message.Items[1].Op).is(FlatCodec.Op.Destroy)
+			expect(BaseReplicator.GetFromId(id)).is(nil)
+		end)
+
+		test("sends a Destroy item to every active player, not just one", function()
+			local playerA = { Name = "A" } :: any
+			local playerB = { Name = "B" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("DestroyMultiplePlayers"),
+				Data = FakeManager.new(),
+				ReplicationTargets = { playerA, playerB },
+			})
+			;(replicator :: any)._Scope:Activate(playerA)
+			;(replicator :: any)._Scope:Activate(playerB)
+
+			local calls, restore = spyOnTransport()
+			replicator:Destroy()
+			restore()
+
+			expect(#calls).is(2)
+		end)
+
+		test("drops any data ops queued earlier this frame for that replicator", function()
+			local player = { Name = "P" } :: any
+			local replicator =
+				ServerReplicator.new({ Namespace = uniqueToken("DestroyDropsQueuedOps"), Data = { x = 0 }, ReplicationTargets = { player } })
+			;(replicator :: any)._Scope:Activate(player)
+
+			replicator.Manager:Set("x", 1) -- queued, not yet flushed
+
+			local calls, restore = spyOnTransport()
+			replicator:Destroy() -- synchronous Destroy item + drops the queued op
+			;(ServerReplicator :: any)._FrameCoordinator:Flush() -- would resurrect the op if not dropped
+			restore()
+
+			expect(#calls).is(1)
+			expect(calls[1].Message.Items[1].Op).is(FlatCodec.Op.Destroy)
+		end)
+
+		test("does not affect an unrelated replicator", function()
+			local a = ServerReplicator.new({ Namespace = uniqueToken("DestroyUnrelatedA"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local b = ServerReplicator.new({ Namespace = uniqueToken("DestroyUnrelatedB"), Data = FakeManager.new(), ReplicationTargets = {} })
+			a:Destroy()
+			expect(BaseReplicator.GetFromId(b.Id)).is(b)
+			b:Destroy()
+		end)
+
+		test("a pending (never-activated) target receives nothing, since it was never sent anything", function()
+			local player = { Name = "NeverActivated" } :: any
+			local replicator =
+				ServerReplicator.new({ Namespace = uniqueToken("DestroyPendingOnly"), Data = FakeManager.new(), ReplicationTargets = { player } })
+
+			local calls, restore = spyOnTransport()
+			replicator:Destroy()
+			restore()
+
+			expect(#calls).is(0)
+		end)
+
+		test("destroying a parent reparents its children to ServerReplicator.None server-side", function()
+			local parent = ServerReplicator.new({ Namespace = uniqueToken("DestroyReparentsToNone"), Data = FakeManager.new(), ReplicationTargets = {} })
+			local child = ServerReplicator.new({ Namespace = uniqueToken("DestroyReparentsToNoneChild"), Data = FakeManager.new(), Parent = parent })
+			parent:Destroy()
+			expect(BaseReplicator.GetFromId(child.Id)).is(child)
+			expect(child:GetParent()).is(ServerReplicator.None)
+			expect(child:IsTopLevel()).is(false)
+			child:Destroy()
+		end)
+
+		test("destroying a parent with an active-player child sends the child's Destroy before the parent's", function()
+			local player = { Name = "P" } :: any
+			local parent = ServerReplicator.new({ Namespace = uniqueToken("DestroyOrderParent"), Data = FakeManager.new(), ReplicationTargets = { player } })
+			;(parent :: any)._Scope:Activate(player)
+			local child = ServerReplicator.new({ Namespace = uniqueToken("DestroyOrderChild"), Data = FakeManager.new(), Parent = parent })
+			local parentId = parent.Id
+			local childId = child.Id
+
+			local calls, restore = spyOnTransport()
+			parent:Destroy()
+			restore()
+
+			local childMsgIdx: number? = nil
+			local parentMsgIdx: number? = nil
+			for i, call in calls do
+				local item = call.Message.Items[1] :: any
+				if item.Op == FlatCodec.Op.Destroy then
+					if item.Id == childId then
+						childMsgIdx = i
+					elseif item.Id == parentId then
+						parentMsgIdx = i
+					end
+				end
+			end
+
+			expect(childMsgIdx).never_is(nil)
+			expect(parentMsgIdx).never_is(nil)
+			expect((childMsgIdx :: number) < (parentMsgIdx :: number)).is_true()
+		end)
+
+		test("destroying a parent with multiple active-player children sends a Destroy for each child", function()
+			local player = { Name = "P" } :: any
+			local parent = ServerReplicator.new({ Namespace = uniqueToken("DestroyMultiChildParent"), Data = FakeManager.new(), ReplicationTargets = { player } })
+			;(parent :: any)._Scope:Activate(player)
+			local childA = ServerReplicator.new({ Namespace = uniqueToken("DestroyMultiChildA"), Data = FakeManager.new(), Parent = parent })
+			local childB = ServerReplicator.new({ Namespace = uniqueToken("DestroyMultiChildB"), Data = FakeManager.new(), Parent = parent })
+
+			local calls, restore = spyOnTransport()
+			parent:Destroy()
+			restore()
+
+			local destroyIds: { [number]: boolean } = {}
+			for _, call in calls do
+				local item = call.Message.Items[1] :: any
+				if item.Op == FlatCodec.Op.Destroy then
+					destroyIds[item.Id] = true
+				end
+			end
+
+			expect(destroyIds[childA.Id]).is_true()
+			expect(destroyIds[childB.Id]).is_true()
+			expect(destroyIds[parent.Id]).is_true()
+		end)
+
+		test("destroying a childless replicator still works (no-op children loop)", function()
+			local replicator = ServerReplicator.new({ Namespace = uniqueToken("DestroyNoChildrenNoop"), Data = FakeManager.new(), ReplicationTargets = {} })
+			expect(function()
+				replicator:Destroy()
+			end).never_fails()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("ServerReplicator.FlushNow", function()
+		test("drains queued data ops to active players immediately", function()
+			local player = { Name = "P" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("FlushNowBasic"),
+				Data = { Coins = 0 },
+				ReplicationTargets = { player },
+			})
+			;(replicator :: any)._Scope:Activate(player)
+
+			replicator.Manager:Set("Coins", 42) -- queued, not yet flushed
+
+			local calls, restore = spyOnTransport()
+			ServerReplicator.FlushNow()
+			restore()
+
+			expect(#calls).is(1)
+			local item = calls[1].Message.Items[1] :: any
+			expect(item.Op).is(FlatCodec.Op.Ops)
+			expect(item.Id).is(replicator.Id)
+			replicator:Destroy()
+		end)
+
+		test("is safe to call with nothing queued", function()
+			expect(function()
+				ServerReplicator.FlushNow()
+			end).never_fails()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("write-time value checks", function()
+		-- These paths `warn` on the server; the offending value is still queued and
+		-- the BufferCodec encode guard nils it on the wire, asserted here end-to-end.
+		test("(strict on) a top-level non-serializable value arrives as nil on the wire", function()
+			local player = { Name = "P" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("StrictTopLevel"),
+				Data = { Value = 0 },
+				ReplicationTargets = { player },
+			})
+			;(replicator :: any)._Scope:Activate(player)
+
+			replicator.Manager:Set("Value", function() end) -- deep scan warns; still queued
+
+			local calls, restore = spyOnTransport()
+			ServerReplicator.FlushNow()
+			restore()
+
+			expect(#calls).is(1)
+			local ops = (calls[1].Message.Items[1] :: any).Ops
+			expect(ops[1].Value).is(nil)
+			replicator:Destroy()
+		end)
+
+		test("(strict on) a non-serializable value nested in an inserted element is dropped, siblings kept", function()
+			local player = { Name = "P" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("StrictNested"),
+				Data = { Items = {} },
+				ReplicationTargets = { player },
+			})
+			;(replicator :: any)._Scope:Activate(player)
+
+			-- ArrayInsert ships the whole element table as one op value, so the deep
+			-- scan builds a real sub-path (Items -> OnUse) into it before warning.
+			replicator.Manager:ArrayInsert("Items", { Name = "Sword", OnUse = function() end })
+
+			local calls, restore = spyOnTransport()
+			ServerReplicator.FlushNow()
+			restore()
+
+			local element = ((calls[1].Message.Items[1] :: any).Ops[1] :: any).Value
+			expect(element.Name).is("Sword")
+			expect(element.OnUse).is(nil)
+			replicator:Destroy()
+		end)
+
+		test("(strict off) only the value's own type is checked; it is still nil'd on the wire", function()
+			ServerReplicator.SetStrictValueChecks(false)
+
+			local player = { Name = "P" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("StrictOff"),
+				Data = { Value = 0 },
+				ReplicationTargets = { player },
+			})
+			;(replicator :: any)._Scope:Activate(player)
+
+			replicator.Manager:Set("Value", function() end) -- shallow (top-level) check warns
+
+			local calls, restore = spyOnTransport()
+			ServerReplicator.FlushNow()
+			restore()
+
+			local value = ((calls[1].Message.Items[1] :: any).Ops[1] :: any).Value
+			replicator:Destroy()
+			ServerReplicator.SetStrictValueChecks(true) -- restore the Studio default before asserting
+
+			expect(value).is(nil)
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("request-data handshake and inbound-signal guards", function()
+		local function bootstrap(player: any)
+			(ServerReplicator :: any)._Transport.PlayerRequestedData:Fire(player)
+		end
+
+		test("a second RequestData from the same player is ignored", function()
+			local player = { Name = "DoubleRequest" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("DoubleRequestData"),
+				Data = FakeManager.new(),
+				ReplicationTargets = { player },
+			})
+
+			local calls, restore = spyOnTransport()
+			bootstrap(player) -- first: sends the snapshot
+			bootstrap(player) -- second: early-out, nothing re-sent
+			restore()
+
+			expect(#calls).is(1)
+			replicator:Destroy()
+		end)
+
+		test("an inbound signal from a never-bootstrapped player is dropped", function()
+			local stranger = { Name = "NeverBootstrapped" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("SignalGuardNotBootstrapped"),
+				Data = FakeManager.new(),
+				ReplicationTargets = {},
+			})
+			local remote = replicator:RegisterRemoteSignal("Hit") :: any
+
+			local fired = false
+			remote:Connect(function()
+				fired = true
+			end)
+			;(ServerReplicator :: any)._Transport.SignalReceived:Fire(stranger, replicator.Id, "Hit")
+
+			expect(fired).is(false)
+			replicator:Destroy()
+		end)
+
+		test("an inbound signal for an unknown replicator id is dropped without error", function()
+			local player = { Name = "UnknownIdSender" } :: any
+			bootstrap(player)
+			expect(function()
+				(ServerReplicator :: any)._Transport.SignalReceived:Fire(player, 999999999, "Hit")
+			end).never_fails()
+		end)
+
+		test("an inbound signal naming an unregistered remote is dropped without error", function()
+			local player = { Name = "UnregisteredNameSender" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("SignalGuardUnregisteredName"),
+				Data = FakeManager.new(),
+				ReplicationTargets = { player },
+			})
+			bootstrap(player)
+			expect(function()
+				(ServerReplicator :: any)._Transport.SignalReceived:Fire(player, replicator.Id, "NeverRegistered")
+			end).never_fails()
+			replicator:Destroy()
+		end)
+
+		test("PlayerRemoving deactivates the player everywhere and re-arms the handshake", function()
+			local player = { Name = "Leaver" } :: any
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("PlayerRemovingCleanup"),
+				Data = FakeManager.new(),
+				ReplicationTargets = { player },
+			})
+			bootstrap(player)
+			expect((replicator :: any)._Scope:IsActive(player)).is(true)
+
+			-- While bootstrapped, a repeat request is ignored entirely.
+			local callsBefore, restoreBefore = spyOnTransport()
+			bootstrap(player)
+			restoreBefore()
+			expect(#callsBefore).is(0)
+
+			;(ServerReplicator :: any)._Transport.PlayerRemoving:Fire(player)
+
+			expect((replicator :: any)._Scope:IsActive(player)).is(false)
+
+			-- The bootstrap flag was cleared too: a fresh request is handled
+			-- again (ServerReplicator.All's "all" scope always has a snapshot).
+			local callsAfter, restoreAfter = spyOnTransport()
+			bootstrap(player)
+			restoreAfter()
+			expect(#callsAfter > 0).is_true()
+
+			replicator:Destroy()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("manager lifetime coupling", function()
+		test("destroying the backing TableManager destroys the replicator", function()
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("ManagerDestroyCascades"),
+				Data = { x = 1 }, -- plain table: wrapped in a real TableManager
+				ReplicationTargets = {},
+			})
+			local id = replicator.Id
+			replicator.Manager:Destroy()
+			expect(BaseReplicator.GetFromId(id)).is(nil)
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("TokenCache introspection", function()
+		local TokenCache = require("../Shared/TokenCache")
+
+		test("isTokenInUse accepts a token, its name, and reports unknown names false", function()
+			local token = uniqueToken("TokenInUse")
+			expect(TokenCache.isTokenInUse(token)).is(true)
+			expect(TokenCache.isTokenInUse(SpecUtils.getTokenName(token))).is(true)
+			expect(TokenCache.isTokenInUse("NameThatWasNeverRegistered")).is(false)
+		end)
+
+		test("tostring renders a token as ReplicationToken<name>", function()
+			local token = uniqueToken("TokenToString")
+			expect(tostring(token)).is(`ReplicationToken<{SpecUtils.getTokenName(token)}>`)
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("snapshot Remotes map", function()
+		test("the Create item advertises every remote kind registered before bootstrap", function()
+			local FakeIntermediary = require("./Helpers/FakeIntermediary")
+			local intermediary = FakeIntermediary.new()
+			local client = intermediary:Connect()
+
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("RemotesMapAllKinds"),
+				Data = FakeManager.new(),
+				ReplicationTargets = { client.Player },
+			})
+			replicator:RegisterRemoteSignal("PlainSig")
+			replicator:RegisterRemoteUnreliableSignal("FastSig")
+			replicator:RegisterOrderedRemoteSignal("OrderedSig")
+			replicator:RegisterRemoteFunction("PlainFn", function()
+				return 0
+			end)
+			replicator:RegisterOrderedRemoteFunction("OrderedFn", function()
+				return 0
+			end)
+
+			client:RequestData()
+
+			local mirrored = client:GetFromId(replicator.Id) :: any
+			expect(mirrored._RemoteTypes.PlainSig).is("Signal")
+			expect(mirrored._RemoteTypes.FastSig).is("Unreliable")
+			expect(mirrored._RemoteTypes.OrderedSig).is("OrderedSignal")
+			expect(mirrored._RemoteTypes.PlainFn).is("Function")
+			expect(mirrored._RemoteTypes.OrderedFn).is("OrderedFunction")
+
+			replicator:Destroy()
+			intermediary:Destroy()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("SetParent across scopes with pending targets", function()
+		test("a pending (never-activated) target of the new scope receives nothing on reparent", function()
+			local activePlayer = { Name = "Active" } :: any
+			local pendingPlayer = { Name = "PendingOnly" } :: any
+
+			local oldTop = ServerReplicator.new({
+				Namespace = uniqueToken("PendingReparentOldTop"),
+				Data = FakeManager.new(),
+				ReplicationTargets = { activePlayer },
+			})
+			;(oldTop :: any)._Scope:Activate(activePlayer)
+			local child = ServerReplicator.new({
+				Namespace = uniqueToken("PendingReparentChild"),
+				Data = FakeManager.new(),
+				Parent = oldTop,
+			})
+			-- newTop targets a player who never completed the handshake: pending,
+			-- targeted, but NOT active.
+			local newTop = ServerReplicator.new({
+				Namespace = uniqueToken("PendingReparentNewTop"),
+				Data = FakeManager.new(),
+				ReplicationTargets = { pendingPlayer },
+			})
+			;(newTop :: any)._Scope:AddPending(pendingPlayer)
+
+			local calls, restore = spyOnTransport()
+			child:SetParent(newTop)
+			restore()
+
+			for _, call in calls do
+				expect(call.Player == pendingPlayer).is(false)
+			end
+
+			child:Destroy()
+			oldTop:Destroy()
+			newTop:Destroy()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("config validation fallbacks", function()
+		test("a Namespace that is neither a token nor a non-empty string yields an anonymous replicator", function()
+			local numeric = ServerReplicator.new({
+				Namespace = 123 :: any,
+				Data = FakeManager.new(),
+				ReplicationTargets = {},
+			})
+			expect(numeric.Namespace).is(nil)
+			numeric:Destroy()
+
+			local empty = ServerReplicator.new({
+				Namespace = "" :: any,
+				Data = FakeManager.new(),
+				ReplicationTargets = {},
+			})
+			expect(empty.Namespace).is(nil)
+			empty:Destroy()
+		end)
+
+		test("a config.Client value that is neither a sentinel nor a function warns and registers nothing", function()
+			local replicator = ServerReplicator.new({
+				Namespace = uniqueToken("ClientDeclInvalid"),
+				Data = FakeManager.new(),
+				ReplicationTargets = {},
+				Client = { Bad = 5 :: any },
+			})
+			expect((replicator :: any)._RemoteSignals.Bad).is(nil)
+			expect((replicator :: any)._RemoteFunctions.Bad).is(nil)
+			replicator:Destroy()
+		end)
+	end)
+
+	--------------------------------------------------------------------------------
+
+	describe("frame buffer isolation between replicators", function()
+		test("destroying one replicator preserves another's queued ops in the same frame", function()
+			local player = { Name = "P" } :: any
+			local doomed = ServerReplicator.new({
+				Namespace = uniqueToken("QueuedIsolationDoomed"),
+				Data = { x = 0 },
+				ReplicationTargets = { player },
+			})
+			local survivor = ServerReplicator.new({
+				Namespace = uniqueToken("QueuedIsolationSurvivor"),
+				Data = { y = 0 },
+				ReplicationTargets = { player },
+			})
+			;(doomed :: any)._Scope:Activate(player)
+			;(survivor :: any)._Scope:Activate(player)
+
+			doomed.Manager:Set("x", 1)
+			survivor.Manager:Set("y", 2)
+
+			local calls, restore = spyOnTransport()
+			doomed:Destroy() -- drops only its own queued op
+			;(ServerReplicator :: any)._FrameCoordinator:Flush()
+			restore()
+
+			-- One Destroy item for `doomed` plus one Ops message for `survivor`.
+			local sawSurvivorOps = false
+			for _, call in calls do
+				local item = call.Message.Items[1] :: any
+				if item.Op == FlatCodec.Op.Ops then
+					expect(item.Id).is(survivor.Id)
+					sawSurvivorOps = true
+				end
+			end
+			expect(sawSurvivorOps).is_true()
+			survivor:Destroy()
+		end)
+	end)
+end

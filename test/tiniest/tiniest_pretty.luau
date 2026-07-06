@@ -35,6 +35,7 @@ export type Options = {
 	},
 	format: ("flat" | "tree")?,
 	trim_duplicate_trace: boolean?,
+	hide_passed_tests: boolean?,
 }
 
 local tiniest_pretty = {}
@@ -239,6 +240,26 @@ function tiniest_pretty.configure(options: Options)
 		end
 	end
 
+	-- Drops passing leaves and any group left with no children as a result, so a group only
+	-- survives pruning if it has at least one failing descendant. Mutates node.children in place.
+	local function prune_passed(node: TreeNode): TreeNode?
+		if node.pretty ~= nil then
+			return if node.pretty.result.status == "pass" then nil else node
+		end
+		local kept_children = {}
+		for _, child in node.children do
+			local pruned = prune_passed(child)
+			if pruned ~= nil then
+				table.insert(kept_children, pruned)
+			end
+		end
+		if #kept_children == 0 then
+			return nil
+		end
+		node.children = kept_children
+		return node
+	end
+
 	local function render_tree(node: TreeNode, depth: number, lines: { string }): ()
 		local indent_str = string.rep(TREE_INDENT_UNIT, depth)
 		local status = node.status :: "pass" | "fail"
@@ -405,11 +426,17 @@ function tiniest_pretty.configure(options: Options)
 		if format == "tree" then
 			local root = build_tree(pretty_results)
 			for _, top_level_node in root.children do
-				aggregate_tree(top_level_node)
-				render_tree(top_level_node, 0, lines)
+				local node = if options.hide_passed_tests then prune_passed(top_level_node) else top_level_node
+				if node ~= nil then
+					aggregate_tree(node)
+					render_tree(node, 0, lines)
+				end
 			end
 		else
 			for _, pretty in pretty_results do
+				if options.hide_passed_tests and pretty.result.status == "pass" then
+					continue
+				end
 				table.insert(lines, `{pretty.icon} {pretty.crumbs}{pretty.annotations}`)
 			end
 		end

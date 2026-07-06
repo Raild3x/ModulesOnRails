@@ -67,13 +67,14 @@ local tiniest = require("./tiniest/tiniest_for_roblox").configure {
 }
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local PACKAGE_TO_TEST = "delaunay" -- Change this to the name of the package you want to test
-local folderToSearch = ReplicatedStorage.src:FindFirstChild(PACKAGE_TO_TEST)
-assert(folderToSearch, "Failed to find package")
-local tests = tiniest.collect_tests_from_hierarchy(folderToSearch.src["2dConstrained_New"])
-tiniest.run_tests(tests, {
-	timeout_diagnostics = "on_error",
-	safe_mode = true,
+local PACKAGE_TO_TEST = "tablereplicator" -- Change this to the name of the package you want to test
+local tests = tiniest.collect_tests_from_hierarchy(ReplicatedStorage.src:FindFirstChild(PACKAGE_TO_TEST), {
+	ignore = function(obj: Instance)
+		if obj.Name == "_Index" then
+			return true, true -- ignore this instance and its descendants
+		end
+		return false, false -- do not ignore
+	end,
 })
 
 task.wait(1) -- wait a moment to make it easier to identify the run in the microprofiler

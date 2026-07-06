@@ -1,0 +1,78 @@
+{
+  "schema": "tm-coverage-map/1",
+  "engine_version": "0.1.0",
+  "package": "minimal_pkg",
+  "package_dir": "<fixture>",
+  "generated_at": "0",
+  "options": {
+    "conditions": false
+  },
+  "total_slots": 5,
+  "files": [
+    {
+      "path": "src/b.luau",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "original_lines": 10,
+      "probes": [
+        {
+          "id": 1,
+          "kind": "stmt",
+          "line": 2,
+          "col": 1,
+          "end_line": 2,
+          "byte": 10,
+          "first_on_line": true,
+          "site": "stmt:src/b.luau:2:1"
+        },
+        {
+          "id": 2,
+          "kind": "fn",
+          "line": 4,
+          "col": 1,
+          "end_line": 5,
+          "byte": 30,
+          "first_on_line": true,
+          "site": "fn:src/b.luau:4:1",
+          "name": "B.known",
+          "params": [],
+          "is_private": false
+        },
+        {
+          "id": 3,
+          "kind": "fn",
+          "line": 6,
+          "col": 1,
+          "end_line": 7,
+          "byte": 60,
+          "first_on_line": true,
+          "site": "fn:src/b.luau:6:1",
+          "params": [],
+          "is_private": true
+        },
+        {
+          "id": 4,
+          "kind": "fn",
+          "line": 8,
+          "col": 1,
+          "end_line": 9,
+          "byte": 90,
+          "first_on_line": true,
+          "site": "fn:src/b.luau:8:1",
+          "name": "B.other",
+          "params": [],
+          "is_private": false
+        },
+        {
+          "id": 5,
+          "kind": "arm",
+          "line": 10,
+          "col": 1,
+          "end_line": 10,
+          "byte": 120,
+          "first_on_line": true,
+          "site": "arm:src/b.luau:10:1"
+        }
+      ]
+    }
+  ]
+}

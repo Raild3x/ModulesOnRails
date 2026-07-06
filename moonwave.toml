@@ -1,5 +1,9 @@
 gitSourceBranch = "main"
 
+apiCategories = [
+	"Static",
+]
+
 [docusaurus]
 url = "https://raild3x.github.io"
 baseUrl = "/ModulesOnRails"
@@ -14,11 +18,37 @@ classes = ["Roam"]
 
 [[classOrder]]
 section = "TableManager"
-classes = ["TableManager", "TableState"]
+classes = ["TableManager"]
+
+[[classOrder.items]]
+section = "[Guides]"
+classes = [
+	"TM Getting Started",
+	"TM Listeners & Fire Modes",
+	"TM Flushing",
+	"TM Batching",
+	"TM Wildcards",
+	"TM Proxies & Direct Table Access",
+	"TM Schema Validation",
+	"TM Opaque Values",
+	"TM Reactive State Wrappers",
+	"TM For & Map Views [Unreleased]",
+]
 
 [[classOrder]]
 section = "TableReplicator"
-classes = ["TableReplicator", "ServerTableReplicator", "ClientTableReplicator", "TableReplicatorSingleton", "BaseTableReplicator"]
+classes = ["TableReplicator", "ServerReplicator", "ClientReplicator"]
+
+[[classOrder.items]]
+section = "[Guides]"
+classes = [
+	"TR Getting Started",
+	"TR Discovery & Targeting",
+	"TR Namespaces & Tokens",
+	"TR Parent-Child Guide",
+	"TR Custom Remotes",
+	"TR Performance & Ordering",
+]
 
 [[classOrder]]
 section = "NetWire"

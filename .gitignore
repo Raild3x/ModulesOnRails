@@ -1,19 +1,12 @@
 
 *.rbxl
 *.rbxl.lock
-
-src/baseobject/*
-!src/baseobject/baseobject
-
-src/tablemanager/*
-
-
-src/tablereplicator/*
-!src/tablereplicator/tablereplicator
+*.pyc
 
 lib/*/*
 !lib/*/src
 !lib/*/README.md
+!lib/*/CLAUDE.md
 
 last_tested_package.txt
 
@@ -21,6 +14,17 @@ last_tested_package.txt
 **/build
 **/sourcemap.json
 
+# Coverage system work dir + Rust build artifacts
+.coverage/
+# Standalone Open Cloud test-runner work dir (built place + project file)
+.ci/
+tools/coverage/engine/target/
+Cargo.lock
+
 !**/wally.toml
 !**/default.project.json
+!**/README.md
 node_modules
+.claude/settings.local.json
+
+**/__pycache__

@@ -1,8 +1,8 @@
 [package]
 name = "raild3x/tablemanager"
-description = "A class for managing and observing data in a table. Includes some additional classes for extending functionality."
+description = "A Luau library for managing tables."
 authors = ["Logan Hunt (Raildex)"]
-version = "0.2.2"
+version = "1.0.1"
 license = "MIT"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
@@ -14,8 +14,7 @@ formattedName = "TableManager"
 docsLink = "TableManager"
 
 [dependencies]
-Promise = "evaera/promise@^4.0.0"
-Fusion = "elttob/fusion@0.3.0"
-Signal = "lucasmzreal/fastsignal@^10.2.1"
-BaseObject = "raild3x/baseobject@^0.1"
+T = "raild3x/t@^1"
+Signal = "howmanysmall/better-signal@2.1.0"
 Janitor = "howmanysmall/janitor@^1.16.0"
+Promise = "howmanysmall/typed-promise@^4.0.6"
