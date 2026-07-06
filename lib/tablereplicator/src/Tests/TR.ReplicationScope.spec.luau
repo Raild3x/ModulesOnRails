@@ -172,6 +172,13 @@ return function(t: tiniest)
 	--------------------------------------------------------------------------------
 
 	describe("Transport lifecycles", function()
+		-- Studio edit mode reports both realms, so ClientTransport's IsClient()
+		-- gate connects synchronously and client APIs (FireServer, InvokeServer)
+		-- are legal. Open Cloud tasks run server-only: nothing connects and
+		-- those APIs would throw, so the client-realm tests below are only
+		-- registered when a client realm actually exists.
+		local IS_CLIENT = game:GetService("RunService"):IsClient()
+
 		test("a second ServerTransport reuses the existing remote objects and tears down cleanly", function()
 			-- The module-level ServerReplicator transport already created the
 			-- remotes, so this constructor takes every find-existing branch.
@@ -211,40 +218,42 @@ return function(t: tiniest)
 			transport:Destroy()
 		end)
 
-		test("ClientTransport.FireSignal fires both the reliable and unreliable channels", function()
-			-- In edit mode the datamodel is both client and server, so FireServer
-			-- is legal; the loopback (if any) is dropped by the server handshake
-			-- guards, making this safe to fire for real.
-			local transport = ClientTransport.new()
-			expect(function()
-				transport:FireSignal(999999901, "CoverageSig", false, "payload")
-			end).never_fails()
-			expect(function()
-				transport:FireSignal(999999901, "CoverageSig", true, "payload")
-			end).never_fails()
-			transport:Destroy()
-		end)
+		if IS_CLIENT then
+			test("ClientTransport.FireSignal fires both the reliable and unreliable channels", function()
+				-- In edit mode the datamodel is both client and server, so FireServer
+				-- is legal; the loopback (if any) is dropped by the server handshake
+				-- guards, making this safe to fire for real.
+				local transport = ClientTransport.new()
+				expect(function()
+					transport:FireSignal(999999901, "CoverageSig", false, "payload")
+				end).never_fails()
+				expect(function()
+					transport:FireSignal(999999901, "CoverageSig", true, "payload")
+				end).never_fails()
+				transport:Destroy()
+			end)
 
-		test("ClientTransport.InvokeFunction reaches InvokeServer without a synchronous error", function()
-			local transport = ClientTransport.new()
-			expect(function()
-				-- InvokeServer yields for a response that may never come in edit
-				-- mode; spawning keeps the test itself from blocking on it.
-				task.spawn(function()
-					transport:InvokeFunction(999999902, "CoverageFn")
-				end)
-			end).never_fails()
-			transport:Destroy()
-		end)
+			test("ClientTransport.InvokeFunction reaches InvokeServer without a synchronous error", function()
+				local transport = ClientTransport.new()
+				expect(function()
+					-- InvokeServer yields for a response that may never come in edit
+					-- mode; spawning keeps the test itself from blocking on it.
+					task.spawn(function()
+						transport:InvokeFunction(999999902, "CoverageFn")
+					end)
+				end).never_fails()
+				transport:Destroy()
+			end)
+		end
 
 		test("a RequestData issued before the remote connects is sent on connect", function()
-			-- The constructor connects synchronously in specs (the remotes always
-			-- exist), so rewind a fresh transport to the not-yet-connected state a
-			-- real client sits in while the remotes are still replicating.
+			-- On a client the constructor connects synchronously (the remotes
+			-- always exist in specs), so rewind a fresh transport to the
+			-- not-yet-connected state a real client sits in while the remotes
+			-- are still replicating. Server-only runtimes are already there.
 			local transport = ClientTransport.new()
 			local t: any = transport
 			local remote = t._remote
-			expect(remote).never_is(nil)
 			t._remote = nil
 			t._connected = false
 			t._requested = false
@@ -253,9 +262,14 @@ return function(t: tiniest)
 			expect(t._requested).is(true)
 			promise:cancel()
 
-			-- Connecting must flush the queued request to the server.
-			t:_connect(remote)
-			expect(t._connected).is(true)
+			if IS_CLIENT then
+				-- Connecting must flush the queued request to the server.
+				-- _connect wires OnClientEvent and calls FireServer, so it can
+				-- only run where a client realm exists.
+				expect(remote).never_is(nil)
+				t:_connect(remote)
+				expect(t._connected).is(true)
+			end
 
 			-- Once the data-complete marker has been seen, RequestData resolves
 			-- immediately instead of waiting on the signal again.
@@ -266,12 +280,14 @@ return function(t: tiniest)
 			transport:Destroy()
 		end)
 
-		test("a non-RequestData message on the reliable channel is ignored by the server", function()
-			local transport = ClientTransport.new()
-			expect(function()
-				(transport :: any)._remote:FireServer("NotARealRequestKind")
-			end).never_fails()
-			transport:Destroy()
-		end)
+		if IS_CLIENT then
+			test("a non-RequestData message on the reliable channel is ignored by the server", function()
+				local transport = ClientTransport.new()
+				expect(function()
+					(transport :: any)._remote:FireServer("NotARealRequestKind")
+				end).never_fails()
+				transport:Destroy()
+			end)
+		end
 	end)
 end

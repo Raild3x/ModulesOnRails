@@ -5,6 +5,11 @@ description: Run tests and coverage for a package in this repo. Use when asked t
 
 # Running tests for a package
 
+Loading Bash Secrets for Roblox API keys: 
+```sh
+bash / git-bash:   set -a && source .ci/secrets.env && set +a
+```
+
 The test runner IS the coverage tool. Always run from the repo root:
 
 ```sh
