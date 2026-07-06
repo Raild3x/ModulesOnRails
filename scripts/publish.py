@@ -98,13 +98,20 @@ def generate_passthrough_init(module_stem: str, exported_types: list[tuple[str, 
     return "\n".join(lines)
 
 
-def stash_spec_files(src_dir: Path, stash_dir: Path) -> tuple[list[tuple[Path, Path]], list[Path]]:
-    """Move every ``*.spec.luau`` / ``*.spec.lua`` under *src_dir* into *stash_dir*.
+def is_unpublished_file(name: str) -> bool:
+    """Return True for files that must never ship in the published package."""
+    lowered = name.lower()
+    return lowered.endswith(".spec.luau") or lowered.endswith(".spec.lua") or lowered == "claude.md"
 
-    Spec files are test-only and must not ship in the published package. Each
-    file is moved to the same relative path under *stash_dir* so it can be
-    restored afterwards. Directories left empty by the move (e.g. ``Tests/``
-    folders that contained only specs) are removed as well.
+
+def stash_unpublished_files(package_dir: Path, stash_dir: Path) -> tuple[list[tuple[Path, Path]], list[Path]]:
+    """Move every spec file and ``CLAUDE.md`` under *package_dir* into *stash_dir*.
+
+    Spec files are test-only and ``CLAUDE.md`` is agent-only context; neither
+    must ship in the published package. Each file is moved to the same relative
+    path under *stash_dir* so it can be restored afterwards. Directories left
+    empty by the move (e.g. ``Tests/`` folders that contained only specs) are
+    removed as well.
 
     Returns:
         A ``(moved, removed_dirs)`` pair: ``moved`` is a list of
@@ -112,9 +119,9 @@ def stash_spec_files(src_dir: Path, stash_dir: Path) -> tuple[list[tuple[Path, P
         directories deleted because stashing emptied them.
     """
     moved: list[tuple[Path, Path]] = []
-    for entry in sorted(src_dir.rglob("*")):
-        if entry.is_file() and (entry.name.lower().endswith(".spec.luau") or entry.name.lower().endswith(".spec.lua")):
-            stashed = stash_dir / entry.relative_to(src_dir)
+    for entry in sorted(package_dir.rglob("*")):
+        if entry.is_file() and is_unpublished_file(entry.name):
+            stashed = stash_dir / entry.relative_to(package_dir)
             stashed.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(entry), str(stashed))
             moved.append((entry, stashed))
@@ -122,15 +129,15 @@ def stash_spec_files(src_dir: Path, stash_dir: Path) -> tuple[list[tuple[Path, P
     # Prune directories emptied by the move, deepest first so parents that
     # only contained now-empty children are removed too.
     removed_dirs: list[Path] = []
-    for directory in sorted((d for d in src_dir.rglob("*") if d.is_dir()), reverse=True):
+    for directory in sorted((d for d in package_dir.rglob("*") if d.is_dir()), reverse=True):
         if not any(directory.iterdir()):
             directory.rmdir()
             removed_dirs.append(directory)
     return moved, removed_dirs
 
 
-def restore_spec_files(moved: list[tuple[Path, Path]], removed_dirs: list[Path]):
-    """Undo :func:`stash_spec_files`: recreate pruned dirs and move specs back."""
+def restore_unpublished_files(moved: list[tuple[Path, Path]], removed_dirs: list[Path]):
+    """Undo :func:`stash_unpublished_files`: recreate pruned dirs and move files back."""
     for directory in reversed(removed_dirs):
         directory.mkdir(parents=True, exist_ok=True)
     for original, stashed in moved:
@@ -272,15 +279,15 @@ def main():
     src_dir = package_dir / "src"
     temp_init: Optional[Path] = None
     publish_success: Optional[bool] = None
-    spec_stash_dir = Path(tempfile.mkdtemp(prefix=f"wally-spec-stash-{package_name}-"))
-    stashed_specs: list[tuple[Path, Path]] = []
+    stash_dir = Path(tempfile.mkdtemp(prefix=f"wally-publish-stash-{package_name}-"))
+    stashed_files: list[tuple[Path, Path]] = []
     stashed_dirs: list[Path] = []
     try:
-        # Spec files are test-only; keep them out of the published package.
-        if src_dir.is_dir():
-            stashed_specs, stashed_dirs = stash_spec_files(src_dir, spec_stash_dir)
-            if stashed_specs:
-                print(f"Stashed {len(stashed_specs)} spec file(s) out of src/ for publish.")
+        # Spec files are test-only and CLAUDE.md is agent-only context; keep
+        # both out of the published package.
+        stashed_files, stashed_dirs = stash_unpublished_files(package_dir, stash_dir)
+        if stashed_files:
+            print(f"Stashed {len(stashed_files)} spec/CLAUDE.md file(s) out of the package for publish.")
 
         if src_dir.is_dir() and not (src_dir / "init.luau").is_file() and not (src_dir / "init.lua").is_file():
             candidate: Optional[Path] = None
@@ -315,10 +322,10 @@ def main():
         if default_project.is_file():
             default_project.unlink()
             print("default.project.json deleted.")
-        restore_spec_files(stashed_specs, stashed_dirs)
-        if stashed_specs:
-            print(f"Restored {len(stashed_specs)} spec file(s) to src/.")
-        shutil.rmtree(spec_stash_dir, ignore_errors=True)
+        restore_unpublished_files(stashed_files, stashed_dirs)
+        if stashed_files:
+            print(f"Restored {len(stashed_files)} stashed file(s) to the package.")
+        shutil.rmtree(stash_dir, ignore_errors=True)
 
     if publish_success:
         print("Package published successfully.")
