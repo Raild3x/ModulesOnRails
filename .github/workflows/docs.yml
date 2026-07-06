@@ -64,11 +64,17 @@ jobs:
         with:
           node-version: 20
       - run: npm i -g moonwave@latest
-      # checkout@v4 persists GITHUB_TOKEN credentials, so the gh-pages push
-      # inside `moonwave build --publish` authenticates without extra setup.
+      # moonwave's gh-pages publish step clones the repo into its own cache dir
+      # (~/.cache/moonwave/...) rather than reusing this checkout, so the
+      # credential actions/checkout persists locally in ./.git/config doesn't
+      # carry over. Configure it globally so any clone/push in this job authenticates.
+      - name: Configure git credentials
+        run: |
+          set -euo pipefail
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
       - name: Build and publish docs
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           moonwave build --publish
