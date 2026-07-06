@@ -25,7 +25,11 @@ with the user before running with `--publish`/`--yes`.
    module and re-exports every `export type`. This file is marked
    "AUTO-GENERATED ... do not commit" and is removed after — if one lingers in
    the working tree after a failed publish, delete it.
-3. Cleans installed wally deps from the package dir (keeps src, `wally.toml`,
+3. **Temporarily stashes all `*.spec.luau` / `*.spec.lua` files** out of
+   `src/` (and prunes `Tests/` dirs emptied by that) so specs never ship in
+   the published package; they are restored to the repo afterwards, even on
+   failure.
+4. Cleans installed wally deps from the package dir (keeps src, `wally.toml`,
    `default.project.json`, `README.md`), runs `wally publish`, then restores.
 
 ## After publishing
