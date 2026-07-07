@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en" dir="ltr" class="plugin-moonwave plugin-id-moonwave" data-has-hydrated="false">
+<head>
+<meta charset="UTF-8">
+<meta name="generator" content="Docusaurus v3.10.1">
+<title data-rh="true">TM Performance | ModulesOnRails</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:url" content="https://raild3x.github.io/ModulesOnRails/api/TM Performance"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docusaurus_tag" content="default"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docsearch:docusaurus_tag" content="default"><meta data-rh="true" property="og:title" content="TM Performance | ModulesOnRails"><meta data-rh="true" name="description" content="[TableManager](/api/TableManager) does a lot of work to turn a raw table
+mutation into precise, replay-faithful events — but it is built so that work
+only happens where it earns its keep. This guide explains the optimizations you
+get **for free** and the handful of habits that let you lean on them, so you can
+reason about cost instead of guessing.
+
+The one-line model: TableManager pays for change detection **in proportion to
+what is actually observed**, not to how much data you store or how often you
+write it.
+
+## What you get for free
+
+### Unobserved writes are (almost) free
+
+Change detection is a diff, gated by a coverage check. If nothing observes a
+path — no listener covers it, no global Signal is connected, no linked manager
+shares it, no `OnApplied` subscriber exists — the whole diff/emit chain is
+skipped and the write is just a table assignment plus a little bookkeeping.
+
+```lua
+local manager = TableManager.new(bigData)
+manager:Set(&quot;Telemetry.Frame&quot;, frameId) -- nobody listening here: no diff runs
+```
+
+This is why defensive `Flush` calls and writes to &quot;cold&quot; branches stay cheap,
+and why you don&#x27;t need to prune listeners you never registered. (See the
+[Flushing](/api/TM%20Flushing) guide — a flush is a no-op when nothing watches.)
+
+### Diffs stop at the deepest listener
+
+When a path *is* observed, the diff is still **depth-bounded**: it descends only
+as deep as the deepest listener that could fire. A listener at `Player` does not
+force a walk of every leaf under `Player` — only down to the levels something
+actually watches.
+
+### Big or foreign values can opt out entirely
+
+A value marked **opaque** (or a deeply frozen table) is compared by identity
+only — never cloned, frozen, or walked. This turns the per-diff cost of a large
+immutable blob or a foreign object from O(n) into O(1). See the
+[Opaque Values](/api/TM%20Opaque%20Values) guide.
+
+### Shared baseline, patched in place
+
+The &quot;last emitted&quot; baseline every diff compares against is a **shared,
+identity-keyed** store: managers that co-observe the same live table share one
+baseline instead of each keeping a copy. And common writes patch that baseline
+incrementally — a scalar field set or a single array insert/remove updates the
+baseline spine directly rather than re-copying the surrounding subtree.
+
+### Hot write paths avoid redundant work
+
+- A plain non-nil `Set` (no dynamic table-building) resolves the parent chain
+  **once**, not twice.
+- `Update`, `Increment`, `UpdateKey`, and `IncrementKey` are single-walk
+  read-modify-writes — they don&#x27;t re-navigate the path between the read and the
+  write.
+- A scalar-to-scalar `Set` in immediate mode takes a fast lane that synthesizes
+  its one-node diff directly, skipping the general diff engine.
+
+### Many changes can collapse into one flush
+
+Both explicit [batching](/api/TM%20Batching) and `FlushMode = &quot;coalesced&quot;`
+merge many writes into a single diff/fire. Repeated fires of the *same* Signal
+within a tick can also coalesce into one. N writes under a subtree then cost one
+flush, not N.
+
+## How to leverage it
+
+A short checklist, most-impactful first:
+
+1. **Write through the API.** `Set`/`ArrayInsert`/the proxy are what let the
+   coverage gate and incremental baseline patching kick in. Bypassing them and
+   later calling `Flush` forces a full re-diff of the branch.
+2. **Don&#x27;t over-subscribe.** Register listeners at the shallowest path and depth
+   that meets your need; every extra deep listener widens the diff bound. Prefer
+   one `OnChange` at a subtree over many leaf listeners when you only need &quot;did
+   anything here change&quot;.
+3. **Batch bulk edits.** Wrap loops of writes in `Batch` (or use `coalesced`
+   flush for high-frequency, frame-driven updates) so listeners fire once.
+4. **Mark big/foreign values opaque.** Anything large-and-immutable or
+   foreign-and-un-walkable should be `Opaque` / `GlobalOpaque`.
+5. **Ignore paths you never observe but write hot.** `IgnoredPaths` (or
+   `SetPathIgnored`) skips all diff/event work for a branch while keeping the
+   value live in `Raw`/`Get`.
+6. **Reuse literal string paths; use arrays for dynamic ones.** A repeated
+   *literal* string path is parsed once and cached; a string assembled per call
+   (`&quot;Player.&quot; .. field`) re-splits every time — pass an array for those. See
+   the string-vs-array notes in [Getting Started](/api/TM%20Getting%20Started).
+
+:::tip Measure, don&#x27;t assume
+These optimizations mean the expensive cases are the observable, deep, large
+ones. If a workload feels slow, look first at *what is being observed* (listener
+breadth/depth) and *what is being walked* (large transparent tables), not at the
+raw write count.
+:::
+
+---
+### See also
+
+- **[TM Flushing](/api/TM%20Flushing)** — the diff→fire→reconcile cycle and the &quot;free when nothing watches&quot; rule.
+- **[TM Batching](/api/TM%20Batching)** — collapsing many writes into one flush.
+- **[TM Opaque Values](/api/TM%20Opaque%20Values)** — opting large/foreign values out of the diff.
+- **[TM Getting Started](/api/TM%20Getting%20Started)** — string vs. array paths and the path cache."><meta data-rh="true" property="og:description" content="[TableManager](/api/TableManager) does a lot of work to turn a raw table
+mutation into precise, replay-faithful events — but it is built so that work
+only happens where it earns its keep. This guide explains the optimizations you
+get **for free** and the handful of habits that let you lean on them, so you can
+reason about cost instead of guessing.
+
+The one-line model: TableManager pays for change detection **in proportion to
+what is actually observed**, not to how much data you store or how often you
+write it.
+
+## What you get for free
+
+### Unobserved writes are (almost) free
+
+Change detection is a diff, gated by a coverage check. If nothing observes a
+path — no listener covers it, no global Signal is connected, no linked manager
+shares it, no `OnApplied` subscriber exists — the whole diff/emit chain is
+skipped and the write is just a table assignment plus a little bookkeeping.
+
+```lua
+local manager = TableManager.new(bigData)
+manager:Set(&quot;Telemetry.Frame&quot;, frameId) -- nobody listening here: no diff runs
+```
+
+This is why defensive `Flush` calls and writes to &quot;cold&quot; branches stay cheap,
+and why you don&#x27;t need to prune listeners you never registered. (See the
+[Flushing](/api/TM%20Flushing) guide — a flush is a no-op when nothing watches.)
+
+### Diffs stop at the deepest listener
+
+When a path *is* observed, the diff is still **depth-bounded**: it descends only
+as deep as the deepest listener that could fire. A listener at `Player` does not
+force a walk of every leaf under `Player` — only down to the levels something
+actually watches.
+
+### Big or foreign values can opt out entirely
+
+A value marked **opaque** (or a deeply frozen table) is compared by identity
+only — never cloned, frozen, or walked. This turns the per-diff cost of a large
+immutable blob or a foreign object from O(n) into O(1). See the
+[Opaque Values](/api/TM%20Opaque%20Values) guide.
+
+### Shared baseline, patched in place
+
+The &quot;last emitted&quot; baseline every diff compares against is a **shared,
+identity-keyed** store: managers that co-observe the same live table share one
+baseline instead of each keeping a copy. And common writes patch that baseline
+incrementally — a scalar field set or a single array insert/remove updates the
+baseline spine directly rather than re-copying the surrounding subtree.
+
+### Hot write paths avoid redundant work
+
+- A plain non-nil `Set` (no dynamic table-building) resolves the parent chain
+  **once**, not twice.
+- `Update`, `Increment`, `UpdateKey`, and `IncrementKey` are single-walk
+  read-modify-writes — they don&#x27;t re-navigate the path between the read and the
+  write.
+- A scalar-to-scalar `Set` in immediate mode takes a fast lane that synthesizes
+  its one-node diff directly, skipping the general diff engine.
+
+### Many changes can collapse into one flush
+
+Both explicit [batching](/api/TM%20Batching) and `FlushMode = &quot;coalesced&quot;`
+merge many writes into a single diff/fire. Repeated fires of the *same* Signal
+within a tick can also coalesce into one. N writes under a subtree then cost one
+flush, not N.
+
+## How to leverage it
+
+A short checklist, most-impactful first:
+
+1. **Write through the API.** `Set`/`ArrayInsert`/the proxy are what let the
+   coverage gate and incremental baseline patching kick in. Bypassing them and
+   later calling `Flush` forces a full re-diff of the branch.
+2. **Don&#x27;t over-subscribe.** Register listeners at the shallowest path and depth
+   that meets your need; every extra deep listener widens the diff bound. Prefer
+   one `OnChange` at a subtree over many leaf listeners when you only need &quot;did
+   anything here change&quot;.
+3. **Batch bulk edits.** Wrap loops of writes in `Batch` (or use `coalesced`
+   flush for high-frequency, frame-driven updates) so listeners fire once.
+4. **Mark big/foreign values opaque.** Anything large-and-immutable or
+   foreign-and-un-walkable should be `Opaque` / `GlobalOpaque`.
+5. **Ignore paths you never observe but write hot.** `IgnoredPaths` (or
+   `SetPathIgnored`) skips all diff/event work for a branch while keeping the
+   value live in `Raw`/`Get`.
+6. **Reuse literal string paths; use arrays for dynamic ones.** A repeated
+   *literal* string path is parsed once and cached; a string assembled per call
+   (`&quot;Player.&quot; .. field`) re-splits every time — pass an array for those. See
+   the string-vs-array notes in [Getting Started](/api/TM%20Getting%20Started).
+
+:::tip Measure, don&#x27;t assume
+These optimizations mean the expensive cases are the observable, deep, large
+ones. If a workload feels slow, look first at *what is being observed* (listener
+breadth/depth) and *what is being walked* (large transparent tables), not at the
+raw write count.
+:::
+
+---
+### See also
+
+- **[TM Flushing](/api/TM%20Flushing)** — the diff→fire→reconcile cycle and the &quot;free when nothing watches&quot; rule.
+- **[TM Batching](/api/TM%20Batching)** — collapsing many writes into one flush.
+- **[TM Opaque Values](/api/TM%20Opaque%20Values)** — opting large/foreign values out of the diff.
+- **[TM Getting Started](/api/TM%20Getting%20Started)** — string vs. array paths and the path cache."><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/TM Performance"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/TM Performance" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/TM Performance" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.e8e96400.css">
+<script src="/ModulesOnRails/assets/js/runtime~main.8d252d09.js" defer="defer"></script>
+<script src="/ModulesOnRails/assets/js/main.251c9e9a.js" defer="defer"></script>
+</head>
+<body>
+<svg style="display: none;"><defs>
+<symbol id="theme-svg-external-link" viewBox="0 0 24 24"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"/></symbol>
+</defs></svg>
+<script>!function(){var t=function(){try{return new URLSearchParams(window.location.search).get("docusaurus-theme")}catch(t){}}()||function(){try{return window.localStorage.getItem("theme")}catch(t){}}();document.documentElement.setAttribute("data-theme",t||(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")),document.documentElement.setAttribute("data-theme-choice",t||"system")}(),function(){try{const c=new URLSearchParams(window.location.search).entries();for(var[t,e]of c)if(t.startsWith("docusaurus-data-")){var a=t.replace("docusaurus-data-","data-");document.documentElement.setAttribute(a,e)}}catch(t){}}()</script><div id="__docusaurus"><div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#__docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="theme-layout-navbar navbar navbar--fixed-top"><div class="navbar__inner"><div class="theme-layout-navbar-left navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="theme-layout-navbar-right navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_nPIU"><use href="#theme-svg-external-link"></use></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="system mode" aria-label="Switch between dark and light mode (currently system mode)"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP systemToggleIcon_QzmC"><path fill="currentColor" d="m12 21c4.971 0 9-4.029 9-9s-4.029-9-9-9-9 4.029-9 9 4.029 9 9 9zm4.95-13.95c1.313 1.313 2.05 3.093 2.05 4.95s-0.738 3.637-2.05 4.95c-1.313 1.313-3.093 2.05-4.95 2.05v-14c1.857 0 3.637 0.737 4.95 2.05z"></path></svg></button></div><div class="navbarSearchContainer_Bca1"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input id="search_input_react" type="search" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="__docusaurus_skipToContent_fallback" class="theme-layout-main main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject"><span title="​Base​Object" class="linkLabel_WmDU">​Base​Object</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Roam"><span title="​Roam" class="linkLabel_WmDU">​Roam</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" href="/ModulesOnRails/api/TableManager"><span title="TableManager" class="categoryLinkLabel_W154">TableManager</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TableManager"><span title="​Table​Manager" class="linkLabel_WmDU">​Table​Manager</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-2 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" tabindex="0" href="/ModulesOnRails/api/TM Getting Started"><span title="[Guides]" class="categoryLinkLabel_W154">[Guides]</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Getting Started"><span title="​T​M ​Getting ​Started" class="linkLabel_WmDU">​T​M ​Getting ​Started</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Listeners &amp; Fire Modes"><span title="​T​M ​Listeners &amp; ​Fire ​Modes" class="linkLabel_WmDU">​T​M ​Listeners &amp; ​Fire ​Modes</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Flushing"><span title="​T​M ​Flushing" class="linkLabel_WmDU">​T​M ​Flushing</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Batching"><span title="​T​M ​Batching" class="linkLabel_WmDU">​T​M ​Batching</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Wildcards"><span title="​T​M ​Wildcards" class="linkLabel_WmDU">​T​M ​Wildcards</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Proxies &amp; Direct Table Access"><span title="​T​M ​Proxies &amp; ​Direct ​Table ​Access" class="linkLabel_WmDU">​T​M ​Proxies &amp; ​Direct ​Table ​Access</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Schema Validation"><span title="​T​M ​Schema ​Validation" class="linkLabel_WmDU">​T​M ​Schema ​Validation</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Opaque Values"><span title="​T​M ​Opaque ​Values" class="linkLabel_WmDU">​T​M ​Opaque ​Values</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" tabindex="0" href="/ModulesOnRails/api/TM Performance"><span title="​T​M ​Performance" class="linkLabel_WmDU">​T​M ​Performance</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Reactive State Wrappers"><span title="​T​M ​Reactive ​State ​Wrappers" class="linkLabel_WmDU">​T​M ​Reactive ​State ​Wrappers</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM For &amp; Map Views [Unreleased]"><span title="​T​M ​For &amp; ​Map ​Views [​Unreleased]" class="linkLabel_WmDU">​T​M ​For &amp; ​Map ​Views [​Unreleased]</span></a></li></ul></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/TableReplicator"><span title="TableReplicator" class="categoryLinkLabel_W154">TableReplicator</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/NetWire"><span title="NetWire" class="categoryLinkLabel_W154">NetWire</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Component"><span title="Instance Component Systems" class="categoryLinkLabel_W154">Instance Component Systems</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/DropletManager"><span title="DropletManager" class="categoryLinkLabel_W154">DropletManager</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/AdjustableTimer"><span title="AdjustableTimer [Unreleased]" class="categoryLinkLabel_W154">AdjustableTimer [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/PlayerProfileManager"><span title="PlayerDataManagement [Unreleased]" class="categoryLinkLabel_W154">PlayerDataManagement [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/CmdrHandler"><span title="Admin Commands [Cmdr]" class="categoryLinkLabel_W154">Admin Commands [Cmdr]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Queue"><span title="Data Structures" class="categoryLinkLabel_W154">Data Structures</span></a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BufferCodec"><span title="​Buffer​Codec" class="linkLabel_WmDU">​Buffer​Codec</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ObjectCache"><span title="​Object​Cache" class="linkLabel_WmDU">​Object​Cache</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ProbabilityDistributor"><span title="​Probability​Distributor" class="linkLabel_WmDU">​Probability​Distributor</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PromValue"><span title="​Prom​Value" class="linkLabel_WmDU">​Prom​Value</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/T"><span title="​T" class="linkLabel_WmDU">​T</span></a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">T</span><span style="display:inline-block">M</span><span style="display:inline-block"></span><span style="display:inline-block">Performance</span></h1><div class="luaClassTags_EipM"></div><div>
+<p>
+  <a href="/ModulesOnRails/api/TableManager">TableManager</a> does a lot of work to turn a raw table
+  mutation into precise, replay-faithful events — but it is built so that work
+  only happens where it earns its keep. This guide explains the optimizations you
+  get <strong>for free</strong> and the handful of habits that let you lean on them, so you can
+  reason about cost instead of guessing.
+</p>
+<p>
+  The one-line model: TableManager pays for change detection <strong>in proportion to
+what is actually observed</strong>, not to how much data you store or how often you
+  write it.
+</p>
+<h2>What you get for free</h2>
+<h3>Unobserved writes are (almost) free</h3>
+<p>
+  Change detection is a diff, gated by a coverage check. If nothing observes a
+  path — no listener covers it, no global Signal is connected, no linked manager
+  shares it, no <code>OnApplied</code> subscriber exists — the whole diff/emit chain is
+  skipped and the write is just a table assignment plus a little bookkeeping.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> manager <span class="token operator">=</span> TableManager<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span>bigData<span class="token punctuation">)</span>
+manager<span class="token punctuation">:</span><span class="token function">Set</span><span class="token punctuation">(</span><span class="token string">"Telemetry.Frame"</span><span class="token punctuation">,</span> frameId<span class="token punctuation">)</span> <span class="token comment">-- nobody listening here: no diff runs</span>
+</code></pre>
+<p>
+  This is why defensive <code>Flush</code> calls and writes to "cold" branches stay cheap,
+  and why you don't need to prune listeners you never registered. (See the
+  <a href="/ModulesOnRails/api/TM%20Flushing">Flushing</a> guide — a flush is a no-op when nothing watches.)
+</p>
+<h3>Diffs stop at the deepest listener</h3>
+<p>
+  When a path <em>is</em> observed, the diff is still <strong>depth-bounded</strong>: it descends only
+  as deep as the deepest listener that could fire. A listener at <code>Player</code> does not
+  force a walk of every leaf under <code>Player</code> — only down to the levels something
+  actually watches.
+</p>
+<h3>Big or foreign values can opt out entirely</h3>
+<p>
+  A value marked <strong>opaque</strong> (or a deeply frozen table) is compared by identity
+  only — never cloned, frozen, or walked. This turns the per-diff cost of a large
+  immutable blob or a foreign object from O(n) into O(1). See the
+  <a href="/ModulesOnRails/api/TM%20Opaque%20Values">Opaque Values</a> guide.
+</p>
+<h3>Shared baseline, patched in place</h3>
+<p>
+  The "last emitted" baseline every diff compares against is a <strong>shared,
+identity-keyed</strong> store: managers that co-observe the same live table share one
+  baseline instead of each keeping a copy. And common writes patch that baseline
+  incrementally — a scalar field set or a single array insert/remove updates the
+  baseline spine directly rather than re-copying the surrounding subtree.
+</p>
+<h3>Hot write paths avoid redundant work</h3>
+<ul>
+  <li>
+    A plain non-nil <code>Set</code> (no dynamic table-building) resolves the parent chain
+    <strong>once</strong>, not twice.
+  </li>
+  <li>
+    <code>Update</code>, <code>Increment</code>, <code>UpdateKey</code>, and <code>IncrementKey</code> are single-walk
+    read-modify-writes — they don't re-navigate the path between the read and the
+    write.
+  </li>
+  <li>
+    A scalar-to-scalar <code>Set</code> in immediate mode takes a fast lane that synthesizes
+    its one-node diff directly, skipping the general diff engine.
+  </li>
+</ul>
+<h3>Many changes can collapse into one flush</h3>
+<p>
+  Both explicit <a href="/ModulesOnRails/api/TM%20Batching">batching</a> and <code>FlushMode = "coalesced"</code>
+  merge many writes into a single diff/fire. Repeated fires of the <em>same</em> Signal
+  within a tick can also coalesce into one. N writes under a subtree then cost one
+  flush, not N.
+</p>
+<h2>How to leverage it</h2>
+<p>A short checklist, most-impactful first:</p>
+<ol>
+  <li>
+    <strong>Write through the API.</strong> <code>Set</code>/<code>ArrayInsert</code>/the proxy are what let the
+    coverage gate and incremental baseline patching kick in. Bypassing them and
+    later calling <code>Flush</code> forces a full re-diff of the branch.
+  </li>
+  <li>
+    <strong>Don't over-subscribe.</strong> Register listeners at the shallowest path and depth
+    that meets your need; every extra deep listener widens the diff bound. Prefer
+    one <code>OnChange</code> at a subtree over many leaf listeners when you only need "did
+    anything here change".
+  </li>
+  <li>
+    <strong>Batch bulk edits.</strong> Wrap loops of writes in <code>Batch</code> (or use <code>coalesced</code>
+    flush for high-frequency, frame-driven updates) so listeners fire once.
+  </li>
+  <li>
+    <strong>Mark big/foreign values opaque.</strong> Anything large-and-immutable or
+    foreign-and-un-walkable should be <code>Opaque</code> / <code>GlobalOpaque</code>.
+  </li>
+  <li>
+    <strong>Ignore paths you never observe but write hot.</strong> <code>IgnoredPaths</code> (or
+    <code>SetPathIgnored</code>) skips all diff/event work for a branch while keeping the
+    value live in <code>Raw</code>/<code>Get</code>.
+  </li>
+  <li>
+    <strong>Reuse literal string paths; use arrays for dynamic ones.</strong> A repeated
+    <em>literal</em> string path is parsed once and cached; a string assembled per call
+    (<code>"Player." .. field</code>) re-splits every time — pass an array for those. See
+    the string-vs-array notes in <a href="/ModulesOnRails/api/TM%20Getting%20Started">Getting Started</a>.
+  </li>
+</ol>
+
+  
+    
+    
+      <div class="admonition admonition-success alert alert--success">
+        <div class="admonition-heading">
+          <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="16" viewBox="0 0 12 16">
+                <path d="M6.5 0C3.48 0 1 2.19 1 5c0 .92.55 2.25 1 3 1.34 2.25 1.78 2.78 2 4v1h5v-1c.22-1.22.66-1.75 2-4 .45-.75 1-2.08 1-3 0-2.81-2.48-5-5.5-5zm3.64 7.48c-.25.44-.47.8-.67 1.11-.86 1.41-1.25 2.06-1.45 3.23-.02.05-.02.11-.02.17H5c0-.06 0-.13-.02-.17-.2-1.17-.59-1.83-1.45-3.23-.2-.31-.42-.67-.67-1.11C2.44 6.78 2 5.65 2 5c0-2.2 2.02-4 4.5-4 1.22 0 2.36.42 3.22 1.19C10.55 2.94 11 3.94 11 5c0 .66-.44 1.78-.86 2.48zM4 14h5c-.23 1.14-1.3 2-2.5 2s-2.27-.86-2.5-2z"></path>
+              </svg></span><span class="admonition-title">Measure, don't assume</span></h5>
+        </div>
+        <div class="admonition-content">
+          <p>
+            These optimizations mean the expensive cases are the observable, deep, large
+            ones. If a workload feels slow, look first at <em>what is being observed</em> (listener
+            breadth/depth) and <em>what is being walked</em> (large transparent tables), not at the
+            raw write count.
+          </p>
+        </div>
+      </div>
+    
+  
+
+<hr>
+<h3>See also</h3>
+<ul>
+  <li><strong><a href="/ModulesOnRails/api/TM%20Flushing">TM Flushing</a></strong> — the diff→fire→reconcile cycle and the "free when nothing watches" rule.</li>
+  <li><strong><a href="/ModulesOnRails/api/TM%20Batching">TM Batching</a></strong> — collapsing many writes into one flush.</li>
+  <li><strong><a href="/ModulesOnRails/api/TM%20Opaque%20Values">TM Opaque Values</a></strong> — opting large/foreign values out of the diff.</li>
+  <li><strong><a href="/ModulesOnRails/api/TM%20Getting%20Started">TM Getting Started</a></strong> — string vs. array paths and the path cache.</li>
+</ul>
+</div></header></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
+    &quot;functions&quot;: [],
+    &quot;properties&quot;: [],
+    &quot;types&quot;: [],
+    &quot;name&quot;: &quot;TM Performance&quot;,
+    &quot;desc&quot;: &quot;[TableManager](/api/TableManager) does a lot of work to turn a raw table\nmutation into precise, replay-faithful events — but it is built so that work\nonly happens where it earns its keep. This guide explains the optimizations you\nget **for free** and the handful of habits that let you lean on them, so you can\nreason about cost instead of guessing.\n\nThe one-line model: TableManager pays for change detection **in proportion to\nwhat is actually observed**, not to how much data you store or how often you\nwrite it.\n\n## What you get for free\n\n### Unobserved writes are (almost) free\n\nChange detection is a diff, gated by a coverage check. If nothing observes a\npath — no listener covers it, no global Signal is connected, no linked manager\nshares it, no `OnApplied` subscriber exists — the whole diff/emit chain is\nskipped and the write is just a table assignment plus a little bookkeeping.\n\n```lua\nlocal manager = TableManager.new(bigData)\nmanager:Set(\&quot;Telemetry.Frame\&quot;, frameId) -- nobody listening here: no diff runs\n```\n\nThis is why defensive `Flush` calls and writes to \&quot;cold\&quot; branches stay cheap,\nand why you don&#x27;t need to prune listeners you never registered. (See the\n[Flushing](/api/TM%20Flushing) guide — a flush is a no-op when nothing watches.)\n\n### Diffs stop at the deepest listener\n\nWhen a path *is* observed, the diff is still **depth-bounded**: it descends only\nas deep as the deepest listener that could fire. A listener at `Player` does not\nforce a walk of every leaf under `Player` — only down to the levels something\nactually watches.\n\n### Big or foreign values can opt out entirely\n\nA value marked **opaque** (or a deeply frozen table) is compared by identity\nonly — never cloned, frozen, or walked. This turns the per-diff cost of a large\nimmutable blob or a foreign object from O(n) into O(1). See the\n[Opaque Values](/api/TM%20Opaque%20Values) guide.\n\n### Shared baseline, patched in place\n\nThe \&quot;last emitted\&quot; baseline every diff compares against is a **shared,\nidentity-keyed** store: managers that co-observe the same live table share one\nbaseline instead of each keeping a copy. And common writes patch that baseline\nincrementally — a scalar field set or a single array insert/remove updates the\nbaseline spine directly rather than re-copying the surrounding subtree.\n\n### Hot write paths avoid redundant work\n\n- A plain non-nil `Set` (no dynamic table-building) resolves the parent chain\n  **once**, not twice.\n- `Update`, `Increment`, `UpdateKey`, and `IncrementKey` are single-walk\n  read-modify-writes — they don&#x27;t re-navigate the path between the read and the\n  write.\n- A scalar-to-scalar `Set` in immediate mode takes a fast lane that synthesizes\n  its one-node diff directly, skipping the general diff engine.\n\n### Many changes can collapse into one flush\n\nBoth explicit [batching](/api/TM%20Batching) and `FlushMode = \&quot;coalesced\&quot;`\nmerge many writes into a single diff/fire. Repeated fires of the *same* Signal\nwithin a tick can also coalesce into one. N writes under a subtree then cost one\nflush, not N.\n\n## How to leverage it\n\nA short checklist, most-impactful first:\n\n1. **Write through the API.** `Set`/`ArrayInsert`/the proxy are what let the\n   coverage gate and incremental baseline patching kick in. Bypassing them and\n   later calling `Flush` forces a full re-diff of the branch.\n2. **Don&#x27;t over-subscribe.** Register listeners at the shallowest path and depth\n   that meets your need; every extra deep listener widens the diff bound. Prefer\n   one `OnChange` at a subtree over many leaf listeners when you only need \&quot;did\n   anything here change\&quot;.\n3. **Batch bulk edits.** Wrap loops of writes in `Batch` (or use `coalesced`\n   flush for high-frequency, frame-driven updates) so listeners fire once.\n4. **Mark big/foreign values opaque.** Anything large-and-immutable or\n   foreign-and-un-walkable should be `Opaque` / `GlobalOpaque`.\n5. **Ignore paths you never observe but write hot.** `IgnoredPaths` (or\n   `SetPathIgnored`) skips all diff/event work for a branch while keeping the\n   value live in `Raw`/`Get`.\n6. **Reuse literal string paths; use arrays for dynamic ones.** A repeated\n   *literal* string path is parsed once and cached; a string assembled per call\n   (`\&quot;Player.\&quot; .. field`) re-splits every time — pass an array for those. See\n   the string-vs-array notes in [Getting Started](/api/TM%20Getting%20Started).\n\n:::tip Measure, don&#x27;t assume\nThese optimizations mean the expensive cases are the observable, deep, large\nones. If a workload feels slow, look first at *what is being observed* (listener\nbreadth/depth) and *what is being walked* (large transparent tables), not at the\nraw write count.\n:::\n\n---\n### See also\n\n- **[TM Flushing](/api/TM%20Flushing)** — the diff→fire→reconcile cycle and the \&quot;free when nothing watches\&quot; rule.\n- **[TM Batching](/api/TM%20Batching)** — collapsing many writes into one flush.\n- **[TM Opaque Values](/api/TM%20Opaque%20Values)** — opting large/foreign values out of the diff.\n- **[TM Getting Started](/api/TM%20Getting%20Started)** — string vs. array paths and the path cache.&quot;,
+    &quot;source&quot;: {
+        &quot;line&quot;: 109,
+        &quot;path&quot;: &quot;lib/tablemanager/src/Docs/TM_Performance.luau&quot;
+    }
+}</pre></details></div></div></div></main></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
+</body>
+</html>

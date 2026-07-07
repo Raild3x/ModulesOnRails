@@ -21,23 +21,94 @@ Wrap a value at write time with one of the constructors:
 - `GlobalOpaque` / `GlobalOpaqueChildren` — same, but registered in a registry
   shared by every manager rather than just this one.
 
-```lua
-local manager = TableManager.new({
-	Enemies = TableManager.OpaqueChildren({}), -- each enemy table is a leaf
-})
+The wrapper is unwrapped at write time, so what actually lands in the table is
+the bare inner value — the wrapper only carries the &quot;treat this as opaque&quot;
+instruction. Marking is by value **reference**, so it survives array shifts,
+`MoveTo`, and `Swap`. A change to an opaque value&#x27;s internals fires nothing;
+replacing the reference fires a single change event at its own slot.
 
-manager:Set(&quot;BigBlob&quot;, TableManager.Opaque(hugeImmutableTable))
+### `Opaque` — one indivisible leaf
+
+Reach for `Opaque` when a single value should be compared by identity only.
+
+```lua
+local manager = TableManager.new({})
+
+-- A large immutable blob: skip the per-diff clone/walk of thousands of entries.
+manager:Set(&quot;WorldSnapshot&quot;, TableManager.Opaque(hugeReadOnlyTable))
+
+-- A foreign object the diff engine should never traverse.
+manager:Set(&quot;Model&quot;, TableManager.Opaque(workspace.Rig))          -- a Roblox Instance
+manager:Set(&quot;Profile&quot;, TableManager.Opaque(profileStore.Data))    -- ProfileStore-owned data
+
+-- Replacing the reference still fires ONE change at &quot;WorldSnapshot&quot;;
+-- mutating the blob&#x27;s internals fires nothing (identity is unchanged).
+manager:Set(&quot;WorldSnapshot&quot;, nextSnapshot)
 ```
 
-A change to an opaque value&#x27;s internals fires nothing; replacing the reference
-fires a single change event at its own slot. Marking is by value reference, so it
-survives array shifts, `MoveTo`, and `Swap`.
+### `OpaqueChildren` — a collection of leaves
 
-:::note Opacity is per-viewer
-The same live table can be opaque to one manager and transparent to another —
-e.g. an Inventory manager treats a `Sword` table as an opaque leaf while a
-dedicated Sword manager observes it transparently. Opacity is also the boundary
-for implicit cross-manager sharing: an opaque value never propagates.
+When a container holds many entries that are each individually indivisible,
+mark the *container* once so every current AND future direct child is opaque —
+you don&#x27;t have to wrap each element on insert.
+
+```lua
+local manager = TableManager.new({
+	Enemies = TableManager.OpaqueChildren({}),  -- each enemy table is a leaf
+})
+
+-- No per-element wrapping needed: later inserts are opaque automatically.
+manager:ArrayInsert(&quot;Enemies&quot;, { Id = 1, Hp = 100, Ai = {} })
+manager:ArrayInsert(&quot;Enemies&quot;, { Id = 2, Hp = 100, Ai = {} })
+
+-- The container itself is still diffed: add/remove of an enemy fires
+-- ArrayInserted/ArrayRemoved. Only each enemy&#x27;s *internals* are hidden.
+manager:OnArrayInsert(&quot;Enemies&quot;, function(index, enemy)
+	print(&quot;spawned enemy&quot;, enemy.Id)
+end)
+```
+
+### `GlobalOpaque` / `GlobalOpaqueChildren` — shared across every manager
+
+Use the global variants for reference data that is opaque everywhere, so you
+mark it once instead of per manager. Ideal for shared, immutable lookup tables.
+
+```lua
+local ItemDefs = require(ReplicatedStorage.ItemDefinitions)
+TableManager.GlobalOpaque(ItemDefs) -- mark once, at startup
+
+-- Every manager that stores ItemDefs now treats it as an opaque leaf:
+local a = TableManager.new({ Defs = ItemDefs })
+local b = TableManager.new({ Cache = { Defs = ItemDefs } })
+```
+
+### Per-viewer opacity
+
+Opacity is a property of *the viewer*, not the value: the same live table can be
+opaque to one manager and transparent to another. This lets one system hold a
+coarse view while another observes the detail.
+
+```lua
+local sword = { Name = &quot;Sword&quot;, Enchant = { Level = 1 } }
+
+-- The inventory only cares that a sword is present/absent — treat it as a leaf.
+local inventory = TableManager.new({ Items = TableManager.OpaqueChildren({}) })
+inventory:ArrayInsert(&quot;Items&quot;, sword)
+
+-- A dedicated manager rooted at the SAME table observes its internals fully.
+local swordManager = TableManager.new(sword)
+swordManager:OnValueChange(&quot;Enchant.Level&quot;, function(lvl)
+	print(&quot;enchant now&quot;, lvl)
+end)
+
+swordManager:Set(&quot;Enchant.Level&quot;, 2) -- swordManager fires; inventory stays silent
+```
+
+:::note Opacity is the sharing boundary
+Opacity is also the boundary for implicit cross-manager sharing: an opaque value
+never propagates. In the example above, mutating the sword through
+`swordManager` does not fan out to `inventory`, precisely because `inventory`
+holds it opaquely.
 :::
 
 ## Frozen tables
@@ -52,18 +123,40 @@ frozen tables, treating the freeze as an opt-in immutability assertion the way
 local manager = TableManager.new(data, { FrozenTablesAreOpaque = true })
 ```
 
-## When to use opacity
+## How to best leverage opacity
 
-Reach for opacity when a value is large and immutable (skip the clone/walk cost
-on every diff), when it&#x27;s a foreign object the diff engine shouldn&#x27;t traverse, or
-when you deliberately want to hide a shared table&#x27;s internals from one manager
-while another observes them.
+Opacity is a performance-and-scoping tool. It pays off most when:
+
+- **The value is large and immutable.** Skipping the per-diff clone/walk of a
+  big blob turns an O(n) cost into an O(1) identity compare. Use `Opaque` (or a
+  deeply frozen table).
+- **The value is foreign.** Roblox `Instance`s, `ProfileStore` data, userdata, or
+  any object with custom `__eq`/`__index` should not be traversed by the diff
+  engine — `Opaque` keeps it out.
+- **You have a collection of self-contained items.** Mark the container with
+  `OpaqueChildren` once so every element is a leaf; you still get add/remove
+  events for the collection, just not spurious &quot;a field deep inside item 37
+  changed&quot; churn.
+- **You want to scope observation.** Give a coarse view an opaque handle and a
+  detailed view a transparent one (the per-viewer pattern above), which also
+  stops the two from implicitly sharing.
+- **The data is shared and read-only.** Mark it once with `GlobalOpaque` instead
+  of per manager.
+
+When **not** to use it: a value you actually want to observe through this
+manager. Making it opaque hides exactly the changes you&#x27;d otherwise get events
+for — reach for [Ignored Paths](/api/TableManager#TableManagerConfig) instead if
+the goal is &quot;don&#x27;t fire for writes here&quot;, or just leave it transparent.
+
+See the [Performance](/api/TM%20Performance) guide for how opacity fits with the
+other diff-cost optimizations.
 
 ---
 ### See also
 
 - **[TM Proxies &amp; Direct Table Access](/api/TM%20Proxies%20&amp;%20Direct%20Table%20Access)** — how reads/writes flow, and duplicate references.
 - **[TM Flushing](/api/TM%20Flushing)** — the diff cycle opacity opts out of.
+- **[TM Performance](/api/TM%20Performance)** — opacity alongside the other internal optimizations.
 - **[TM Schema Validation](/api/TM%20Schema%20Validation)** — the other construction-time data control."><meta data-rh="true" property="og:description" content="By default a [TableManager](/api/TableManager) walks into every table to detect
 nested changes. Marking a value **opaque** tells the diff engine to treat it as
 an indivisible leaf: it is never cloned, frozen, or walked — only its identity is
@@ -82,23 +175,94 @@ Wrap a value at write time with one of the constructors:
 - `GlobalOpaque` / `GlobalOpaqueChildren` — same, but registered in a registry
   shared by every manager rather than just this one.
 
-```lua
-local manager = TableManager.new({
-	Enemies = TableManager.OpaqueChildren({}), -- each enemy table is a leaf
-})
+The wrapper is unwrapped at write time, so what actually lands in the table is
+the bare inner value — the wrapper only carries the &quot;treat this as opaque&quot;
+instruction. Marking is by value **reference**, so it survives array shifts,
+`MoveTo`, and `Swap`. A change to an opaque value&#x27;s internals fires nothing;
+replacing the reference fires a single change event at its own slot.
 
-manager:Set(&quot;BigBlob&quot;, TableManager.Opaque(hugeImmutableTable))
+### `Opaque` — one indivisible leaf
+
+Reach for `Opaque` when a single value should be compared by identity only.
+
+```lua
+local manager = TableManager.new({})
+
+-- A large immutable blob: skip the per-diff clone/walk of thousands of entries.
+manager:Set(&quot;WorldSnapshot&quot;, TableManager.Opaque(hugeReadOnlyTable))
+
+-- A foreign object the diff engine should never traverse.
+manager:Set(&quot;Model&quot;, TableManager.Opaque(workspace.Rig))          -- a Roblox Instance
+manager:Set(&quot;Profile&quot;, TableManager.Opaque(profileStore.Data))    -- ProfileStore-owned data
+
+-- Replacing the reference still fires ONE change at &quot;WorldSnapshot&quot;;
+-- mutating the blob&#x27;s internals fires nothing (identity is unchanged).
+manager:Set(&quot;WorldSnapshot&quot;, nextSnapshot)
 ```
 
-A change to an opaque value&#x27;s internals fires nothing; replacing the reference
-fires a single change event at its own slot. Marking is by value reference, so it
-survives array shifts, `MoveTo`, and `Swap`.
+### `OpaqueChildren` — a collection of leaves
 
-:::note Opacity is per-viewer
-The same live table can be opaque to one manager and transparent to another —
-e.g. an Inventory manager treats a `Sword` table as an opaque leaf while a
-dedicated Sword manager observes it transparently. Opacity is also the boundary
-for implicit cross-manager sharing: an opaque value never propagates.
+When a container holds many entries that are each individually indivisible,
+mark the *container* once so every current AND future direct child is opaque —
+you don&#x27;t have to wrap each element on insert.
+
+```lua
+local manager = TableManager.new({
+	Enemies = TableManager.OpaqueChildren({}),  -- each enemy table is a leaf
+})
+
+-- No per-element wrapping needed: later inserts are opaque automatically.
+manager:ArrayInsert(&quot;Enemies&quot;, { Id = 1, Hp = 100, Ai = {} })
+manager:ArrayInsert(&quot;Enemies&quot;, { Id = 2, Hp = 100, Ai = {} })
+
+-- The container itself is still diffed: add/remove of an enemy fires
+-- ArrayInserted/ArrayRemoved. Only each enemy&#x27;s *internals* are hidden.
+manager:OnArrayInsert(&quot;Enemies&quot;, function(index, enemy)
+	print(&quot;spawned enemy&quot;, enemy.Id)
+end)
+```
+
+### `GlobalOpaque` / `GlobalOpaqueChildren` — shared across every manager
+
+Use the global variants for reference data that is opaque everywhere, so you
+mark it once instead of per manager. Ideal for shared, immutable lookup tables.
+
+```lua
+local ItemDefs = require(ReplicatedStorage.ItemDefinitions)
+TableManager.GlobalOpaque(ItemDefs) -- mark once, at startup
+
+-- Every manager that stores ItemDefs now treats it as an opaque leaf:
+local a = TableManager.new({ Defs = ItemDefs })
+local b = TableManager.new({ Cache = { Defs = ItemDefs } })
+```
+
+### Per-viewer opacity
+
+Opacity is a property of *the viewer*, not the value: the same live table can be
+opaque to one manager and transparent to another. This lets one system hold a
+coarse view while another observes the detail.
+
+```lua
+local sword = { Name = &quot;Sword&quot;, Enchant = { Level = 1 } }
+
+-- The inventory only cares that a sword is present/absent — treat it as a leaf.
+local inventory = TableManager.new({ Items = TableManager.OpaqueChildren({}) })
+inventory:ArrayInsert(&quot;Items&quot;, sword)
+
+-- A dedicated manager rooted at the SAME table observes its internals fully.
+local swordManager = TableManager.new(sword)
+swordManager:OnValueChange(&quot;Enchant.Level&quot;, function(lvl)
+	print(&quot;enchant now&quot;, lvl)
+end)
+
+swordManager:Set(&quot;Enchant.Level&quot;, 2) -- swordManager fires; inventory stays silent
+```
+
+:::note Opacity is the sharing boundary
+Opacity is also the boundary for implicit cross-manager sharing: an opaque value
+never propagates. In the example above, mutating the sword through
+`swordManager` does not fan out to `inventory`, precisely because `inventory`
+holds it opaquely.
 :::
 
 ## Frozen tables
@@ -113,27 +277,49 @@ frozen tables, treating the freeze as an opt-in immutability assertion the way
 local manager = TableManager.new(data, { FrozenTablesAreOpaque = true })
 ```
 
-## When to use opacity
+## How to best leverage opacity
 
-Reach for opacity when a value is large and immutable (skip the clone/walk cost
-on every diff), when it&#x27;s a foreign object the diff engine shouldn&#x27;t traverse, or
-when you deliberately want to hide a shared table&#x27;s internals from one manager
-while another observes them.
+Opacity is a performance-and-scoping tool. It pays off most when:
+
+- **The value is large and immutable.** Skipping the per-diff clone/walk of a
+  big blob turns an O(n) cost into an O(1) identity compare. Use `Opaque` (or a
+  deeply frozen table).
+- **The value is foreign.** Roblox `Instance`s, `ProfileStore` data, userdata, or
+  any object with custom `__eq`/`__index` should not be traversed by the diff
+  engine — `Opaque` keeps it out.
+- **You have a collection of self-contained items.** Mark the container with
+  `OpaqueChildren` once so every element is a leaf; you still get add/remove
+  events for the collection, just not spurious &quot;a field deep inside item 37
+  changed&quot; churn.
+- **You want to scope observation.** Give a coarse view an opaque handle and a
+  detailed view a transparent one (the per-viewer pattern above), which also
+  stops the two from implicitly sharing.
+- **The data is shared and read-only.** Mark it once with `GlobalOpaque` instead
+  of per manager.
+
+When **not** to use it: a value you actually want to observe through this
+manager. Making it opaque hides exactly the changes you&#x27;d otherwise get events
+for — reach for [Ignored Paths](/api/TableManager#TableManagerConfig) instead if
+the goal is &quot;don&#x27;t fire for writes here&quot;, or just leave it transparent.
+
+See the [Performance](/api/TM%20Performance) guide for how opacity fits with the
+other diff-cost optimizations.
 
 ---
 ### See also
 
 - **[TM Proxies &amp; Direct Table Access](/api/TM%20Proxies%20&amp;%20Direct%20Table%20Access)** — how reads/writes flow, and duplicate references.
 - **[TM Flushing](/api/TM%20Flushing)** — the diff cycle opacity opts out of.
+- **[TM Performance](/api/TM%20Performance)** — opacity alongside the other internal optimizations.
 - **[TM Schema Validation](/api/TM%20Schema%20Validation)** — the other construction-time data control."><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/TM Opaque Values"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/TM Opaque Values" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/TM Opaque Values" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.e8e96400.css">
-<script src="/ModulesOnRails/assets/js/runtime~main.668e8339.js" defer="defer"></script>
-<script src="/ModulesOnRails/assets/js/main.d4575191.js" defer="defer"></script>
+<script src="/ModulesOnRails/assets/js/runtime~main.8d252d09.js" defer="defer"></script>
+<script src="/ModulesOnRails/assets/js/main.251c9e9a.js" defer="defer"></script>
 </head>
 <body>
 <svg style="display: none;"><defs>
 <symbol id="theme-svg-external-link" viewBox="0 0 24 24"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"/></symbol>
 </defs></svg>
-<script>!function(){var t=function(){try{return new URLSearchParams(window.location.search).get("docusaurus-theme")}catch(t){}}()||function(){try{return window.localStorage.getItem("theme")}catch(t){}}();document.documentElement.setAttribute("data-theme",t||(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")),document.documentElement.setAttribute("data-theme-choice",t||"system")}(),function(){try{const c=new URLSearchParams(window.location.search).entries();for(var[t,e]of c)if(t.startsWith("docusaurus-data-")){var a=t.replace("docusaurus-data-","data-");document.documentElement.setAttribute(a,e)}}catch(t){}}()</script><div id="__docusaurus"><div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#__docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="theme-layout-navbar navbar navbar--fixed-top"><div class="navbar__inner"><div class="theme-layout-navbar-left navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="theme-layout-navbar-right navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_nPIU"><use href="#theme-svg-external-link"></use></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="system mode" aria-label="Switch between dark and light mode (currently system mode)"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP systemToggleIcon_QzmC"><path fill="currentColor" d="m12 21c4.971 0 9-4.029 9-9s-4.029-9-9-9-9 4.029-9 9 4.029 9 9 9zm4.95-13.95c1.313 1.313 2.05 3.093 2.05 4.95s-0.738 3.637-2.05 4.95c-1.313 1.313-3.093 2.05-4.95 2.05v-14c1.857 0 3.637 0.737 4.95 2.05z"></path></svg></button></div><div class="navbarSearchContainer_Bca1"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input id="search_input_react" type="search" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="__docusaurus_skipToContent_fallback" class="theme-layout-main main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject"><span title="​Base​Object" class="linkLabel_WmDU">​Base​Object</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Roam"><span title="​Roam" class="linkLabel_WmDU">​Roam</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" href="/ModulesOnRails/api/TableManager"><span title="TableManager" class="categoryLinkLabel_W154">TableManager</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TableManager"><span title="​Table​Manager" class="linkLabel_WmDU">​Table​Manager</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-2 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" tabindex="0" href="/ModulesOnRails/api/TM Getting Started"><span title="[Guides]" class="categoryLinkLabel_W154">[Guides]</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Getting Started"><span title="​T​M ​Getting ​Started" class="linkLabel_WmDU">​T​M ​Getting ​Started</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Listeners &amp; Fire Modes"><span title="​T​M ​Listeners &amp; ​Fire ​Modes" class="linkLabel_WmDU">​T​M ​Listeners &amp; ​Fire ​Modes</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Flushing"><span title="​T​M ​Flushing" class="linkLabel_WmDU">​T​M ​Flushing</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Batching"><span title="​T​M ​Batching" class="linkLabel_WmDU">​T​M ​Batching</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Wildcards"><span title="​T​M ​Wildcards" class="linkLabel_WmDU">​T​M ​Wildcards</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Proxies &amp; Direct Table Access"><span title="​T​M ​Proxies &amp; ​Direct ​Table ​Access" class="linkLabel_WmDU">​T​M ​Proxies &amp; ​Direct ​Table ​Access</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Schema Validation"><span title="​T​M ​Schema ​Validation" class="linkLabel_WmDU">​T​M ​Schema ​Validation</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" tabindex="0" href="/ModulesOnRails/api/TM Opaque Values"><span title="​T​M ​Opaque ​Values" class="linkLabel_WmDU">​T​M ​Opaque ​Values</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Reactive State Wrappers"><span title="​T​M ​Reactive ​State ​Wrappers" class="linkLabel_WmDU">​T​M ​Reactive ​State ​Wrappers</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM For &amp; Map Views [Unreleased]"><span title="​T​M ​For &amp; ​Map ​Views [​Unreleased]" class="linkLabel_WmDU">​T​M ​For &amp; ​Map ​Views [​Unreleased]</span></a></li></ul></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/TableReplicator"><span title="TableReplicator" class="categoryLinkLabel_W154">TableReplicator</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/NetWire"><span title="NetWire" class="categoryLinkLabel_W154">NetWire</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Component"><span title="Instance Component Systems" class="categoryLinkLabel_W154">Instance Component Systems</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/DropletManager"><span title="DropletManager" class="categoryLinkLabel_W154">DropletManager</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/AdjustableTimer"><span title="AdjustableTimer [Unreleased]" class="categoryLinkLabel_W154">AdjustableTimer [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/PlayerProfileManager"><span title="PlayerDataManagement [Unreleased]" class="categoryLinkLabel_W154">PlayerDataManagement [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/CmdrHandler"><span title="Admin Commands [Cmdr]" class="categoryLinkLabel_W154">Admin Commands [Cmdr]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Queue"><span title="Data Structures" class="categoryLinkLabel_W154">Data Structures</span></a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BufferCodec"><span title="​Buffer​Codec" class="linkLabel_WmDU">​Buffer​Codec</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ObjectCache"><span title="​Object​Cache" class="linkLabel_WmDU">​Object​Cache</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ProbabilityDistributor"><span title="​Probability​Distributor" class="linkLabel_WmDU">​Probability​Distributor</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PromValue"><span title="​Prom​Value" class="linkLabel_WmDU">​Prom​Value</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/T"><span title="​T" class="linkLabel_WmDU">​T</span></a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">T</span><span style="display:inline-block">M</span><span style="display:inline-block"></span><span style="display:inline-block">Opaque</span><span style="display:inline-block"></span><span style="display:inline-block">Values</span></h1><div class="luaClassTags_EipM"></div><div>
+<script>!function(){var t=function(){try{return new URLSearchParams(window.location.search).get("docusaurus-theme")}catch(t){}}()||function(){try{return window.localStorage.getItem("theme")}catch(t){}}();document.documentElement.setAttribute("data-theme",t||(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")),document.documentElement.setAttribute("data-theme-choice",t||"system")}(),function(){try{const c=new URLSearchParams(window.location.search).entries();for(var[t,e]of c)if(t.startsWith("docusaurus-data-")){var a=t.replace("docusaurus-data-","data-");document.documentElement.setAttribute(a,e)}}catch(t){}}()</script><div id="__docusaurus"><div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#__docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="theme-layout-navbar navbar navbar--fixed-top"><div class="navbar__inner"><div class="theme-layout-navbar-left navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="theme-layout-navbar-right navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_nPIU"><use href="#theme-svg-external-link"></use></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="system mode" aria-label="Switch between dark and light mode (currently system mode)"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP systemToggleIcon_QzmC"><path fill="currentColor" d="m12 21c4.971 0 9-4.029 9-9s-4.029-9-9-9-9 4.029-9 9 4.029 9 9 9zm4.95-13.95c1.313 1.313 2.05 3.093 2.05 4.95s-0.738 3.637-2.05 4.95c-1.313 1.313-3.093 2.05-4.95 2.05v-14c1.857 0 3.637 0.737 4.95 2.05z"></path></svg></button></div><div class="navbarSearchContainer_Bca1"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input id="search_input_react" type="search" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="__docusaurus_skipToContent_fallback" class="theme-layout-main main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject"><span title="​Base​Object" class="linkLabel_WmDU">​Base​Object</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Roam"><span title="​Roam" class="linkLabel_WmDU">​Roam</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" href="/ModulesOnRails/api/TableManager"><span title="TableManager" class="categoryLinkLabel_W154">TableManager</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TableManager"><span title="​Table​Manager" class="linkLabel_WmDU">​Table​Manager</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-2 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" tabindex="0" href="/ModulesOnRails/api/TM Getting Started"><span title="[Guides]" class="categoryLinkLabel_W154">[Guides]</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Getting Started"><span title="​T​M ​Getting ​Started" class="linkLabel_WmDU">​T​M ​Getting ​Started</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Listeners &amp; Fire Modes"><span title="​T​M ​Listeners &amp; ​Fire ​Modes" class="linkLabel_WmDU">​T​M ​Listeners &amp; ​Fire ​Modes</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Flushing"><span title="​T​M ​Flushing" class="linkLabel_WmDU">​T​M ​Flushing</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Batching"><span title="​T​M ​Batching" class="linkLabel_WmDU">​T​M ​Batching</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Wildcards"><span title="​T​M ​Wildcards" class="linkLabel_WmDU">​T​M ​Wildcards</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Proxies &amp; Direct Table Access"><span title="​T​M ​Proxies &amp; ​Direct ​Table ​Access" class="linkLabel_WmDU">​T​M ​Proxies &amp; ​Direct ​Table ​Access</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Schema Validation"><span title="​T​M ​Schema ​Validation" class="linkLabel_WmDU">​T​M ​Schema ​Validation</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" tabindex="0" href="/ModulesOnRails/api/TM Opaque Values"><span title="​T​M ​Opaque ​Values" class="linkLabel_WmDU">​T​M ​Opaque ​Values</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Performance"><span title="​T​M ​Performance" class="linkLabel_WmDU">​T​M ​Performance</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM Reactive State Wrappers"><span title="​T​M ​Reactive ​State ​Wrappers" class="linkLabel_WmDU">​T​M ​Reactive ​State ​Wrappers</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TM For &amp; Map Views [Unreleased]"><span title="​T​M ​For &amp; ​Map ​Views [​Unreleased]" class="linkLabel_WmDU">​T​M ​For &amp; ​Map ​Views [​Unreleased]</span></a></li></ul></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/TableReplicator"><span title="TableReplicator" class="categoryLinkLabel_W154">TableReplicator</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/NetWire"><span title="NetWire" class="categoryLinkLabel_W154">NetWire</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Component"><span title="Instance Component Systems" class="categoryLinkLabel_W154">Instance Component Systems</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/DropletManager"><span title="DropletManager" class="categoryLinkLabel_W154">DropletManager</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/AdjustableTimer"><span title="AdjustableTimer [Unreleased]" class="categoryLinkLabel_W154">AdjustableTimer [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/PlayerProfileManager"><span title="PlayerDataManagement [Unreleased]" class="categoryLinkLabel_W154">PlayerDataManagement [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/CmdrHandler"><span title="Admin Commands [Cmdr]" class="categoryLinkLabel_W154">Admin Commands [Cmdr]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Queue"><span title="Data Structures" class="categoryLinkLabel_W154">Data Structures</span></a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BufferCodec"><span title="​Buffer​Codec" class="linkLabel_WmDU">​Buffer​Codec</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ObjectCache"><span title="​Object​Cache" class="linkLabel_WmDU">​Object​Cache</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ProbabilityDistributor"><span title="​Probability​Distributor" class="linkLabel_WmDU">​Probability​Distributor</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PromValue"><span title="​Prom​Value" class="linkLabel_WmDU">​Prom​Value</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/T"><span title="​T" class="linkLabel_WmDU">​T</span></a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">T</span><span style="display:inline-block">M</span><span style="display:inline-block"></span><span style="display:inline-block">Opaque</span><span style="display:inline-block"></span><span style="display:inline-block">Values</span></h1><div class="luaClassTags_EipM"></div><div>
 <p>
   By default a <a href="/ModulesOnRails/api/TableManager">TableManager</a> walks into every table to detect
   nested changes. Marking a value <strong>opaque</strong> tells the diff engine to treat it as
@@ -158,17 +344,80 @@ while another observes them.
     shared by every manager rather than just this one.
   </li>
 </ul>
+<p>
+  The wrapper is unwrapped at write time, so what actually lands in the table is
+  the bare inner value — the wrapper only carries the "treat this as opaque"
+  instruction. Marking is by value <strong>reference</strong>, so it survives array shifts,
+  <code>MoveTo</code>, and <code>Swap</code>. A change to an opaque value's internals fires nothing;
+  replacing the reference fires a single change event at its own slot.
+</p>
+<h3><code>Opaque</code> — one indivisible leaf</h3>
+<p>Reach for <code>Opaque</code> when a single value should be compared by identity only.</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> manager <span class="token operator">=</span> TableManager<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">{</span><span class="token punctuation">}</span><span class="token punctuation">)</span>
+
+<span class="token comment">-- A large immutable blob: skip the per-diff clone/walk of thousands of entries.</span>
+manager<span class="token punctuation">:</span><span class="token function">Set</span><span class="token punctuation">(</span><span class="token string">"WorldSnapshot"</span><span class="token punctuation">,</span> TableManager<span class="token punctuation">.</span><span class="token function">Opaque</span><span class="token punctuation">(</span>hugeReadOnlyTable<span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token comment">-- A foreign object the diff engine should never traverse.</span>
+manager<span class="token punctuation">:</span><span class="token function">Set</span><span class="token punctuation">(</span><span class="token string">"Model"</span><span class="token punctuation">,</span> TableManager<span class="token punctuation">.</span><span class="token function">Opaque</span><span class="token punctuation">(</span>workspace<span class="token punctuation">.</span>Rig<span class="token punctuation">)</span><span class="token punctuation">)</span>          <span class="token comment">-- a Roblox Instance</span>
+manager<span class="token punctuation">:</span><span class="token function">Set</span><span class="token punctuation">(</span><span class="token string">"Profile"</span><span class="token punctuation">,</span> TableManager<span class="token punctuation">.</span><span class="token function">Opaque</span><span class="token punctuation">(</span>profileStore<span class="token punctuation">.</span>Data<span class="token punctuation">)</span><span class="token punctuation">)</span>    <span class="token comment">-- ProfileStore-owned data</span>
+
+<span class="token comment">-- Replacing the reference still fires ONE change at "WorldSnapshot";</span>
+<span class="token comment">-- mutating the blob's internals fires nothing (identity is unchanged).</span>
+manager<span class="token punctuation">:</span><span class="token function">Set</span><span class="token punctuation">(</span><span class="token string">"WorldSnapshot"</span><span class="token punctuation">,</span> nextSnapshot<span class="token punctuation">)</span>
+</code></pre>
+<h3><code>OpaqueChildren</code> — a collection of leaves</h3>
+<p>
+  When a container holds many entries that are each individually indivisible,
+  mark the <em>container</em> once so every current AND future direct child is opaque —
+  you don't have to wrap each element on insert.
+</p>
 <pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> manager <span class="token operator">=</span> TableManager<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">{</span>
-	Enemies <span class="token operator">=</span> TableManager<span class="token punctuation">.</span><span class="token function">OpaqueChildren</span><span class="token punctuation">(</span><span class="token punctuation">{</span><span class="token punctuation">}</span><span class="token punctuation">)</span><span class="token punctuation">,</span> <span class="token comment">-- each enemy table is a leaf</span>
+	Enemies <span class="token operator">=</span> TableManager<span class="token punctuation">.</span><span class="token function">OpaqueChildren</span><span class="token punctuation">(</span><span class="token punctuation">{</span><span class="token punctuation">}</span><span class="token punctuation">)</span><span class="token punctuation">,</span>  <span class="token comment">-- each enemy table is a leaf</span>
 <span class="token punctuation">}</span><span class="token punctuation">)</span>
 
-manager<span class="token punctuation">:</span><span class="token function">Set</span><span class="token punctuation">(</span><span class="token string">"BigBlob"</span><span class="token punctuation">,</span> TableManager<span class="token punctuation">.</span><span class="token function">Opaque</span><span class="token punctuation">(</span>hugeImmutableTable<span class="token punctuation">)</span><span class="token punctuation">)</span>
+<span class="token comment">-- No per-element wrapping needed: later inserts are opaque automatically.</span>
+manager<span class="token punctuation">:</span><span class="token function">ArrayInsert</span><span class="token punctuation">(</span><span class="token string">"Enemies"</span><span class="token punctuation">,</span> <span class="token punctuation">{</span> Id <span class="token operator">=</span> <span class="token number">1</span><span class="token punctuation">,</span> Hp <span class="token operator">=</span> <span class="token number">100</span><span class="token punctuation">,</span> Ai <span class="token operator">=</span> <span class="token punctuation">{</span><span class="token punctuation">}</span> <span class="token punctuation">}</span><span class="token punctuation">)</span>
+manager<span class="token punctuation">:</span><span class="token function">ArrayInsert</span><span class="token punctuation">(</span><span class="token string">"Enemies"</span><span class="token punctuation">,</span> <span class="token punctuation">{</span> Id <span class="token operator">=</span> <span class="token number">2</span><span class="token punctuation">,</span> Hp <span class="token operator">=</span> <span class="token number">100</span><span class="token punctuation">,</span> Ai <span class="token operator">=</span> <span class="token punctuation">{</span><span class="token punctuation">}</span> <span class="token punctuation">}</span><span class="token punctuation">)</span>
+
+<span class="token comment">-- The container itself is still diffed: add/remove of an enemy fires</span>
+<span class="token comment">-- ArrayInserted/ArrayRemoved. Only each enemy's *internals* are hidden.</span>
+manager<span class="token punctuation">:</span><span class="token function">OnArrayInsert</span><span class="token punctuation">(</span><span class="token string">"Enemies"</span><span class="token punctuation">,</span> <span class="token keyword">function</span><span class="token punctuation">(</span>index<span class="token punctuation">,</span> enemy<span class="token punctuation">)</span>
+	<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"spawned enemy"</span><span class="token punctuation">,</span> enemy<span class="token punctuation">.</span>Id<span class="token punctuation">)</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
 </code></pre>
+<h3><code>GlobalOpaque</code> / <code>GlobalOpaqueChildren</code> — shared across every manager</h3>
 <p>
-  A change to an opaque value's internals fires nothing; replacing the reference
-  fires a single change event at its own slot. Marking is by value reference, so it
-  survives array shifts, <code>MoveTo</code>, and <code>Swap</code>.
+  Use the global variants for reference data that is opaque everywhere, so you
+  mark it once instead of per manager. Ideal for shared, immutable lookup tables.
 </p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> ItemDefs <span class="token operator">=</span> <span class="token function">require</span><span class="token punctuation">(</span>ReplicatedStorage<span class="token punctuation">.</span>ItemDefinitions<span class="token punctuation">)</span>
+TableManager<span class="token punctuation">.</span><span class="token function">GlobalOpaque</span><span class="token punctuation">(</span>ItemDefs<span class="token punctuation">)</span> <span class="token comment">-- mark once, at startup</span>
+
+<span class="token comment">-- Every manager that stores ItemDefs now treats it as an opaque leaf:</span>
+<span class="token keyword">local</span> a <span class="token operator">=</span> TableManager<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">{</span> Defs <span class="token operator">=</span> ItemDefs <span class="token punctuation">}</span><span class="token punctuation">)</span>
+<span class="token keyword">local</span> b <span class="token operator">=</span> TableManager<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">{</span> Cache <span class="token operator">=</span> <span class="token punctuation">{</span> Defs <span class="token operator">=</span> ItemDefs <span class="token punctuation">}</span> <span class="token punctuation">}</span><span class="token punctuation">)</span>
+</code></pre>
+<h3>Per-viewer opacity</h3>
+<p>
+  Opacity is a property of <em>the viewer</em>, not the value: the same live table can be
+  opaque to one manager and transparent to another. This lets one system hold a
+  coarse view while another observes the detail.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> sword <span class="token operator">=</span> <span class="token punctuation">{</span> Name <span class="token operator">=</span> <span class="token string">"Sword"</span><span class="token punctuation">,</span> Enchant <span class="token operator">=</span> <span class="token punctuation">{</span> Level <span class="token operator">=</span> <span class="token number">1</span> <span class="token punctuation">}</span> <span class="token punctuation">}</span>
+
+<span class="token comment">-- The inventory only cares that a sword is present/absent — treat it as a leaf.</span>
+<span class="token keyword">local</span> inventory <span class="token operator">=</span> TableManager<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token punctuation">{</span> Items <span class="token operator">=</span> TableManager<span class="token punctuation">.</span><span class="token function">OpaqueChildren</span><span class="token punctuation">(</span><span class="token punctuation">{</span><span class="token punctuation">}</span><span class="token punctuation">)</span> <span class="token punctuation">}</span><span class="token punctuation">)</span>
+inventory<span class="token punctuation">:</span><span class="token function">ArrayInsert</span><span class="token punctuation">(</span><span class="token string">"Items"</span><span class="token punctuation">,</span> sword<span class="token punctuation">)</span>
+
+<span class="token comment">-- A dedicated manager rooted at the SAME table observes its internals fully.</span>
+<span class="token keyword">local</span> swordManager <span class="token operator">=</span> TableManager<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span>sword<span class="token punctuation">)</span>
+swordManager<span class="token punctuation">:</span><span class="token function">OnValueChange</span><span class="token punctuation">(</span><span class="token string">"Enchant.Level"</span><span class="token punctuation">,</span> <span class="token keyword">function</span><span class="token punctuation">(</span>lvl<span class="token punctuation">)</span>
+	<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"enchant now"</span><span class="token punctuation">,</span> lvl<span class="token punctuation">)</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+
+swordManager<span class="token punctuation">:</span><span class="token function">Set</span><span class="token punctuation">(</span><span class="token string">"Enchant.Level"</span><span class="token punctuation">,</span> <span class="token number">2</span><span class="token punctuation">)</span> <span class="token comment">-- swordManager fires; inventory stays silent</span>
+</code></pre>
 
   
     
@@ -177,14 +426,14 @@ manager<span class="token punctuation">:</span><span class="token function">Set<
         <div class="admonition-heading">
           <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="16" viewBox="0 0 14 16">
                 <path d="M6.3 5.69a.942.942 0 0 1-.28-.7c0-.28.09-.52.28-.7.19-.18.42-.28.7-.28.28 0 .52.09.7.28.18.19.28.42.28.7 0 .28-.09.52-.28.7a1 1 0 0 1-.7.3c-.28 0-.52-.11-.7-.3zM8 7.99c-.02-.25-.11-.48-.31-.69-.2-.19-.42-.3-.69-.31H6c-.27.02-.48.13-.69.31-.2.2-.3.44-.31.69h1v3c.02.27.11.5.31.69.2.2.42.31.69.31h1c.27 0 .48-.11.69-.31.2-.19.3-.42.31-.69H8V7.98v.01zM7 2.3c-3.14 0-5.7 2.54-5.7 5.68 0 3.14 2.56 5.7 5.7 5.7s5.7-2.55 5.7-5.7c0-3.15-2.56-5.69-5.7-5.69v.01zM7 .98c3.86 0 7 3.14 7 7s-3.14 7-7 7-7-3.12-7-7 3.14-7 7-7z"></path>
-              </svg></span><span class="admonition-title">Opacity is per-viewer</span></h5>
+              </svg></span><span class="admonition-title">Opacity is the sharing boundary</span></h5>
         </div>
         <div class="admonition-content">
           <p>
-            The same live table can be opaque to one manager and transparent to another —
-            e.g. an Inventory manager treats a <code>Sword</code> table as an opaque leaf while a
-            dedicated Sword manager observes it transparently. Opacity is also the boundary
-            for implicit cross-manager sharing: an opaque value never propagates.
+            Opacity is also the boundary for implicit cross-manager sharing: an opaque value
+            never propagates. In the example above, mutating the sword through
+            <code>swordManager</code> does not fan out to <code>inventory</code>, precisely because <code>inventory</code>
+            holds it opaquely.
           </p>
         </div>
       </div>
@@ -201,18 +450,51 @@ manager<span class="token punctuation">:</span><span class="token function">Set<
 </p>
 <pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> manager <span class="token operator">=</span> TableManager<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span>data<span class="token punctuation">,</span> <span class="token punctuation">{</span> FrozenTablesAreOpaque <span class="token operator">=</span> <span class="token keyword">true</span> <span class="token punctuation">}</span><span class="token punctuation">)</span>
 </code></pre>
-<h2>When to use opacity</h2>
+<h2>How to best leverage opacity</h2>
+<p>Opacity is a performance-and-scoping tool. It pays off most when:</p>
+<ul>
+  <li>
+    <strong>The value is large and immutable.</strong> Skipping the per-diff clone/walk of a
+    big blob turns an O(n) cost into an O(1) identity compare. Use <code>Opaque</code> (or a
+    deeply frozen table).
+  </li>
+  <li>
+    <strong>The value is foreign.</strong> Roblox <code>Instance</code>s, <code>ProfileStore</code> data, userdata, or
+    any object with custom <code>__eq</code>/<code>__index</code> should not be traversed by the diff
+    engine — <code>Opaque</code> keeps it out.
+  </li>
+  <li>
+    <strong>You have a collection of self-contained items.</strong> Mark the container with
+    <code>OpaqueChildren</code> once so every element is a leaf; you still get add/remove
+    events for the collection, just not spurious "a field deep inside item 37
+    changed" churn.
+  </li>
+  <li>
+    <strong>You want to scope observation.</strong> Give a coarse view an opaque handle and a
+    detailed view a transparent one (the per-viewer pattern above), which also
+    stops the two from implicitly sharing.
+  </li>
+  <li>
+    <strong>The data is shared and read-only.</strong> Mark it once with <code>GlobalOpaque</code> instead
+    of per manager.
+  </li>
+</ul>
 <p>
-  Reach for opacity when a value is large and immutable (skip the clone/walk cost
-  on every diff), when it's a foreign object the diff engine shouldn't traverse, or
-  when you deliberately want to hide a shared table's internals from one manager
-  while another observes them.
+  When <strong>not</strong> to use it: a value you actually want to observe through this
+  manager. Making it opaque hides exactly the changes you'd otherwise get events
+  for — reach for <a href="/ModulesOnRails/api/TableManager#TableManagerConfig">Ignored Paths</a> instead if
+  the goal is "don't fire for writes here", or just leave it transparent.
+</p>
+<p>
+  See the <a href="/ModulesOnRails/api/TM%20Performance">Performance</a> guide for how opacity fits with the
+  other diff-cost optimizations.
 </p>
 <hr>
 <h3>See also</h3>
 <ul>
   <li><strong><a href="/ModulesOnRails/api/TM%20Proxies%20&#x26;%20Direct%20Table%20Access">TM Proxies &#x26; Direct Table Access</a></strong> — how reads/writes flow, and duplicate references.</li>
   <li><strong><a href="/ModulesOnRails/api/TM%20Flushing">TM Flushing</a></strong> — the diff cycle opacity opts out of.</li>
+  <li><strong><a href="/ModulesOnRails/api/TM%20Performance">TM Performance</a></strong> — opacity alongside the other internal optimizations.</li>
   <li><strong><a href="/ModulesOnRails/api/TM%20Schema%20Validation">TM Schema Validation</a></strong> — the other construction-time data control.</li>
 </ul>
 </div></header></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
@@ -220,9 +502,9 @@ manager<span class="token punctuation">:</span><span class="token function">Set<
     &quot;properties&quot;: [],
     &quot;types&quot;: [],
     &quot;name&quot;: &quot;TM Opaque Values&quot;,
-    &quot;desc&quot;: &quot;By default a [TableManager](/api/TableManager) walks into every table to detect\nnested changes. Marking a value **opaque** tells the diff engine to treat it as\nan indivisible leaf: it is never cloned, frozen, or walked — only its identity is\ncompared. Use it for large immutable blobs, foreign objects, or anything whose\ninternals you never observe through this manager.\n\n## Marking values opaque\n\nWrap a value at write time with one of the constructors:\n\n- [`TableManager.Opaque(value)`](/api/TableManager#Opaque) — this value is an\n  opaque leaf for this manager.\n- [`TableManager.OpaqueChildren(container)`](/api/TableManager#OpaqueChildren) —\n  the container is diffed normally, but its direct table children are opaque\n  leaves.\n- `GlobalOpaque` / `GlobalOpaqueChildren` — same, but registered in a registry\n  shared by every manager rather than just this one.\n\n```lua\nlocal manager = TableManager.new({\n\tEnemies = TableManager.OpaqueChildren({}), -- each enemy table is a leaf\n})\n\nmanager:Set(\&quot;BigBlob\&quot;, TableManager.Opaque(hugeImmutableTable))\n```\n\nA change to an opaque value&#x27;s internals fires nothing; replacing the reference\nfires a single change event at its own slot. Marking is by value reference, so it\nsurvives array shifts, `MoveTo`, and `Swap`.\n\n:::note Opacity is per-viewer\nThe same live table can be opaque to one manager and transparent to another —\ne.g. an Inventory manager treats a `Sword` table as an opaque leaf while a\ndedicated Sword manager observes it transparently. Opacity is also the boundary\nfor implicit cross-manager sharing: an opaque value never propagates.\n:::\n\n## Frozen tables\n\nA **deeply** frozen table (every table-typed descendant also frozen) is always\ntreated as opaque — that case is provably immutable, so there&#x27;s nothing to diff.\nSet `FrozenTablesAreOpaque = true` to extend the same trust to **shallowly**\nfrozen tables, treating the freeze as an opt-in immutability assertion the way\n`Opaque` is.\n\n```lua\nlocal manager = TableManager.new(data, { FrozenTablesAreOpaque = true })\n```\n\n## When to use opacity\n\nReach for opacity when a value is large and immutable (skip the clone/walk cost\non every diff), when it&#x27;s a foreign object the diff engine shouldn&#x27;t traverse, or\nwhen you deliberately want to hide a shared table&#x27;s internals from one manager\nwhile another observes them.\n\n---\n### See also\n\n- **[TM Proxies &amp; Direct Table Access](/api/TM%20Proxies%20&amp;%20Direct%20Table%20Access)** — how reads/writes flow, and duplicate references.\n- **[TM Flushing](/api/TM%20Flushing)** — the diff cycle opacity opts out of.\n- **[TM Schema Validation](/api/TM%20Schema%20Validation)** — the other construction-time data control.&quot;,
+    &quot;desc&quot;: &quot;By default a [TableManager](/api/TableManager) walks into every table to detect\nnested changes. Marking a value **opaque** tells the diff engine to treat it as\nan indivisible leaf: it is never cloned, frozen, or walked — only its identity is\ncompared. Use it for large immutable blobs, foreign objects, or anything whose\ninternals you never observe through this manager.\n\n## Marking values opaque\n\nWrap a value at write time with one of the constructors:\n\n- [`TableManager.Opaque(value)`](/api/TableManager#Opaque) — this value is an\n  opaque leaf for this manager.\n- [`TableManager.OpaqueChildren(container)`](/api/TableManager#OpaqueChildren) —\n  the container is diffed normally, but its direct table children are opaque\n  leaves.\n- `GlobalOpaque` / `GlobalOpaqueChildren` — same, but registered in a registry\n  shared by every manager rather than just this one.\n\nThe wrapper is unwrapped at write time, so what actually lands in the table is\nthe bare inner value — the wrapper only carries the \&quot;treat this as opaque\&quot;\ninstruction. Marking is by value **reference**, so it survives array shifts,\n`MoveTo`, and `Swap`. A change to an opaque value&#x27;s internals fires nothing;\nreplacing the reference fires a single change event at its own slot.\n\n### `Opaque` — one indivisible leaf\n\nReach for `Opaque` when a single value should be compared by identity only.\n\n```lua\nlocal manager = TableManager.new({})\n\n-- A large immutable blob: skip the per-diff clone/walk of thousands of entries.\nmanager:Set(\&quot;WorldSnapshot\&quot;, TableManager.Opaque(hugeReadOnlyTable))\n\n-- A foreign object the diff engine should never traverse.\nmanager:Set(\&quot;Model\&quot;, TableManager.Opaque(workspace.Rig))          -- a Roblox Instance\nmanager:Set(\&quot;Profile\&quot;, TableManager.Opaque(profileStore.Data))    -- ProfileStore-owned data\n\n-- Replacing the reference still fires ONE change at \&quot;WorldSnapshot\&quot;;\n-- mutating the blob&#x27;s internals fires nothing (identity is unchanged).\nmanager:Set(\&quot;WorldSnapshot\&quot;, nextSnapshot)\n```\n\n### `OpaqueChildren` — a collection of leaves\n\nWhen a container holds many entries that are each individually indivisible,\nmark the *container* once so every current AND future direct child is opaque —\nyou don&#x27;t have to wrap each element on insert.\n\n```lua\nlocal manager = TableManager.new({\n\tEnemies = TableManager.OpaqueChildren({}),  -- each enemy table is a leaf\n})\n\n-- No per-element wrapping needed: later inserts are opaque automatically.\nmanager:ArrayInsert(\&quot;Enemies\&quot;, { Id = 1, Hp = 100, Ai = {} })\nmanager:ArrayInsert(\&quot;Enemies\&quot;, { Id = 2, Hp = 100, Ai = {} })\n\n-- The container itself is still diffed: add/remove of an enemy fires\n-- ArrayInserted/ArrayRemoved. Only each enemy&#x27;s *internals* are hidden.\nmanager:OnArrayInsert(\&quot;Enemies\&quot;, function(index, enemy)\n\tprint(\&quot;spawned enemy\&quot;, enemy.Id)\nend)\n```\n\n### `GlobalOpaque` / `GlobalOpaqueChildren` — shared across every manager\n\nUse the global variants for reference data that is opaque everywhere, so you\nmark it once instead of per manager. Ideal for shared, immutable lookup tables.\n\n```lua\nlocal ItemDefs = require(ReplicatedStorage.ItemDefinitions)\nTableManager.GlobalOpaque(ItemDefs) -- mark once, at startup\n\n-- Every manager that stores ItemDefs now treats it as an opaque leaf:\nlocal a = TableManager.new({ Defs = ItemDefs })\nlocal b = TableManager.new({ Cache = { Defs = ItemDefs } })\n```\n\n### Per-viewer opacity\n\nOpacity is a property of *the viewer*, not the value: the same live table can be\nopaque to one manager and transparent to another. This lets one system hold a\ncoarse view while another observes the detail.\n\n```lua\nlocal sword = { Name = \&quot;Sword\&quot;, Enchant = { Level = 1 } }\n\n-- The inventory only cares that a sword is present/absent — treat it as a leaf.\nlocal inventory = TableManager.new({ Items = TableManager.OpaqueChildren({}) })\ninventory:ArrayInsert(\&quot;Items\&quot;, sword)\n\n-- A dedicated manager rooted at the SAME table observes its internals fully.\nlocal swordManager = TableManager.new(sword)\nswordManager:OnValueChange(\&quot;Enchant.Level\&quot;, function(lvl)\n\tprint(\&quot;enchant now\&quot;, lvl)\nend)\n\nswordManager:Set(\&quot;Enchant.Level\&quot;, 2) -- swordManager fires; inventory stays silent\n```\n\n:::note Opacity is the sharing boundary\nOpacity is also the boundary for implicit cross-manager sharing: an opaque value\nnever propagates. In the example above, mutating the sword through\n`swordManager` does not fan out to `inventory`, precisely because `inventory`\nholds it opaquely.\n:::\n\n## Frozen tables\n\nA **deeply** frozen table (every table-typed descendant also frozen) is always\ntreated as opaque — that case is provably immutable, so there&#x27;s nothing to diff.\nSet `FrozenTablesAreOpaque = true` to extend the same trust to **shallowly**\nfrozen tables, treating the freeze as an opt-in immutability assertion the way\n`Opaque` is.\n\n```lua\nlocal manager = TableManager.new(data, { FrozenTablesAreOpaque = true })\n```\n\n## How to best leverage opacity\n\nOpacity is a performance-and-scoping tool. It pays off most when:\n\n- **The value is large and immutable.** Skipping the per-diff clone/walk of a\n  big blob turns an O(n) cost into an O(1) identity compare. Use `Opaque` (or a\n  deeply frozen table).\n- **The value is foreign.** Roblox `Instance`s, `ProfileStore` data, userdata, or\n  any object with custom `__eq`/`__index` should not be traversed by the diff\n  engine — `Opaque` keeps it out.\n- **You have a collection of self-contained items.** Mark the container with\n  `OpaqueChildren` once so every element is a leaf; you still get add/remove\n  events for the collection, just not spurious \&quot;a field deep inside item 37\n  changed\&quot; churn.\n- **You want to scope observation.** Give a coarse view an opaque handle and a\n  detailed view a transparent one (the per-viewer pattern above), which also\n  stops the two from implicitly sharing.\n- **The data is shared and read-only.** Mark it once with `GlobalOpaque` instead\n  of per manager.\n\nWhen **not** to use it: a value you actually want to observe through this\nmanager. Making it opaque hides exactly the changes you&#x27;d otherwise get events\nfor — reach for [Ignored Paths](/api/TableManager#TableManagerConfig) instead if\nthe goal is \&quot;don&#x27;t fire for writes here\&quot;, or just leave it transparent.\n\nSee the [Performance](/api/TM%20Performance) guide for how opacity fits with the\nother diff-cost optimizations.\n\n---\n### See also\n\n- **[TM Proxies &amp; Direct Table Access](/api/TM%20Proxies%20&amp;%20Direct%20Table%20Access)** — how reads/writes flow, and duplicate references.\n- **[TM Flushing](/api/TM%20Flushing)** — the diff cycle opacity opts out of.\n- **[TM Performance](/api/TM%20Performance)** — opacity alongside the other internal optimizations.\n- **[TM Schema Validation](/api/TM%20Schema%20Validation)** — the other construction-time data control.&quot;,
     &quot;source&quot;: {
-        &quot;line&quot;: 67,
+        &quot;line&quot;: 160,
         &quot;path&quot;: &quot;lib/tablemanager/src/Docs/TM_Opaque_Values.luau&quot;
     }
 }</pre></details></div></div></div></main></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
