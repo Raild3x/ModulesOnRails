@@ -197,6 +197,17 @@ For a single change, observed order is:
 - `SetPathIgnored(path, ignored)`: an ignored write still updates `Raw`/`Get` but fires nothing and is
   excluded from diffing. `Config.IgnoredPaths` is the construction-time equivalent.
 
+### Reads (`Get` / `GetLastEmitted`)
+- `Get(path, suppressNilPartialPaths?)` returns the current **live** value at `path` (an empty path
+  returns the root / `Raw`). A non-table intermediate segment errors unless `suppressNilPartialPaths`.
+- `GetLastEmitted(path, suppressNilPartialPaths?)` returns the value listeners **last saw** at `path` —
+  the value carried by the most recent change event for `path`, which can lag the live value while a
+  flush is pending (inside a `Batch`/`Suspend` window, or under `FlushMode = "coalesced"` / a deferred
+  fire mode). Under immediate flush with no pending changes it equals `Get`. If `path` was never
+  observed (no baseline was ever recorded), it falls back to a live `Get`. A **table** result is the
+  baseline mirror node and follows the same stability rule as a listener's table `oldValue` (§1.2) —
+  copy it to retain past the synchronous call; scalar results are always safe.
+
 ---
 
 ## 6. Batching

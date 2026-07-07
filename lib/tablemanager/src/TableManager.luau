@@ -26,25 +26,32 @@
 
 	
 	### Usage
-	
+
 	```lua
-	const manager = TableManager.new({
-		player = { health = 100, level = 5 },
-		settings = { volume = 80 }
+	local manager = TableManager.new({
+		Player = { Name = "Alice", Health = 100 },
+		Inventory = { "Sword", "Shield" },
 	})
-	
-	-- Listen to direct changes only
-	manager:OnChange("player", function(newValue, oldValue, metadata)
 
+	-- Fire when a specific field changes.
+	manager:OnValueChange("Player.Health", function(health, oldHealth)
+		print(`health: {oldHealth} -> {health}`)
 	end)
-	
-	-- Listen to all changes (including descendants)
-	manager:OnValueChange("player", function(newValue, oldValue, metadata)
 
+	-- Fire for any change under a subtree (the field OR a descendant).
+	manager:OnChange("Player", function(_, _, metadata)
+		print("player changed at:", table.concat(metadata.OriginPath, "."))
 	end)
-	
-	-- Array operations
-	manager:ArrayInsert("player.items", "Sword")
+
+	manager:Set("Player.Health", 80)
+	-- prints "health: 100 -> 80"
+	--        "player changed at: Player.Health"
+
+	-- Array contents have their own methods and events.
+	manager:OnArrayInsert("Inventory", function(index, item)
+		print(`picked up {item} (slot {index})`)
+	end)
+	manager:ArrayInsert("Inventory", "Potion") -- prints "picked up Potion (slot 3)"
 	```
 
 	## Best Practices
@@ -562,20 +569,16 @@ end
 	```
 ]=]
 function TableManager.GetMatching<T, S>(self: TM_Internal<T>, path: Path<S>): { PathHelpers.WildcardExpansion }
-	debug.profilebegin("TM.GetMatching")
 	const parsedPath = PathHelpers.ParsePath(path)
 	const wildcardIndex = PathHelpers.FindFirstWildcard(parsedPath)
 	if wildcardIndex == nil then
-		debug.profileend()
 		const value = self:Get(parsedPath :: any)
 		if value == nil then
 			return {}
 		end
 		return { { Path = table.clone(parsedPath), Value = value, WildcardMatches = nil } }
 	end
-	const entries = resolveWildcardExpansion(self, parsedPath, wildcardIndex, false)
-	debug.profileend()
-	return entries
+	return resolveWildcardExpansion(self, parsedPath, wildcardIndex, false)
 end
 
 --[=[
@@ -600,7 +603,6 @@ function TableManager.GetProxy<T, S>(
 	path: Path<S>,
 	suppressNilPartialPaths: boolean?
 ): (Proxy<T, S> | ValueAtPath<T, S>)?
-	debug.profilebegin("TableManager.GetProxy")
 	const proxyManager = self._proxyManager
 	if proxyManager == nil then
 		error("GetProxy requires proxies (Config.EnableProxies = false for this TableManager)")
@@ -610,7 +612,6 @@ function TableManager.GetProxy<T, S>(
 	local previousKey: any = nil
 	for _, key in parsedPath do
 		if not proxyManager:IsProxy(current) then
-			debug.profileend()
 			if suppressNilPartialPaths then
 				return nil
 			else
@@ -620,8 +621,64 @@ function TableManager.GetProxy<T, S>(
 		current = current[key]
 		previousKey = key
 	end
-	debug.profileend()
 	return current
+end
+
+--[=[
+	@within TableManager
+	@method GetLastEmitted
+
+	Reads the value at `path` as listeners **last saw it** -- the value carried by
+	the most recent change event fired for `path`, rather than the current live
+	value. Under the default immediate flush mode with no pending changes this is
+	identical to [TableManager:Get]; the two diverge only when the live data has
+	moved ahead of what has been emitted -- inside a `Batch`/`Suspend` window, or
+	under `FlushMode = "coalesced"` / a deferred fire mode, before the pending
+	flush runs.
+
+	If `path` has never been observed (no listener, Signal, link, or `OnApplied`
+	subscriber ever covered it) there is no recorded "last emitted" value, so this
+	falls back to a live [TableManager:Get] -- the same value a first listener
+	would receive.
+
+	:::caution Table results are snapshots
+	When the value at `path` is a table, the returned table is the internal
+	baseline mirror of the last-emitted state: it follows the same stability rules
+	as a listener's table `oldValue` (a stable snapshot only for the duration of
+	the synchronous call -- copy it if you need to retain it). Scalar results are
+	always safe to keep.
+	:::
+
+	@param path Path
+	@param suppressNilPartialPaths boolean? -- Return `nil` instead of erroring when a segment along the path is not a table (only consulted on the live fallback).
+	@return any -- The value last emitted for `path` (or the live value when `path` was never observed).
+
+	```lua
+	local manager = TableManager.new({ Score = 0 }, { FlushMode = "coalesced" })
+	manager:OnValueChange("Score", function() end) -- observe so a baseline is kept
+
+	manager:Set("Score", 10)
+	manager:Get("Score")            -- 10 (live)
+	manager:GetLastEmitted("Score") -- 0  (listeners have not been told yet)
+
+	manager:Flush("Score")
+	manager:GetLastEmitted("Score") -- 10 (now emitted)
+	```
+]=]
+function TableManager.GetLastEmitted<T, S>(
+	self: TM_Internal<T>,
+	path: Path<S>,
+	suppressNilPartialPaths: boolean?
+): ValueAtPath<T, S>?
+	const parsedPath = PathHelpers.ParsePath(path)
+	const baseline = BaselineModule.Get(self, parsedPath)
+	if baseline ~= nil then
+		return baseline
+	end
+	-- No materialized baseline (path never observed, or its last-emitted value is
+	-- itself nil): fall back to the current live value -- what a first listener
+	-- would see.
+	return self:Get(parsedPath :: any, suppressNilPartialPaths)
 end
 
 --[=[
@@ -879,7 +936,6 @@ end
 	```
 ]=]
 function TableManager.ArrayInsert<T, S>(self: TM_Internal<T>, pathOrProxy: Path<S> | Proxy<T, S>, ...: any): ()
-	debug.profilebegin("TM.ArrayInsert")
 	local parsedPath, array = resolveArrayForWrite(self, pathOrProxy)
 
 	-- Determine if a position was provided or default to appending.
@@ -924,7 +980,6 @@ function TableManager.ArrayInsert<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 			EmitterModule.emitReplicationOp(self, "ArrayInsert", parsedPath, unwrappedValue, pos, nil)
 		end
 	end
-	debug.profileend()
 end
 TableManager.Insert = TableManager.ArrayInsert
 
@@ -943,7 +998,6 @@ TableManager.Insert = TableManager.ArrayInsert
 	@return any -- The removed element.
 ]=]
 function TableManager.ArrayRemove<T, S>(self: TM_Internal<T>, pathOrProxy: Path<S> | Proxy<T, S>, index: number): any
-	debug.profilebegin("TM.ArrayRemove")
 	local parsedPath, array = resolveArrayForWrite(self, pathOrProxy)
 
 	const inBatch = trackArrayMutation(self, parsedPath)
@@ -957,7 +1011,6 @@ function TableManager.ArrayRemove<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 	pruneDetachedValue(self, oldValue, nil)
 
 	if inBatch then
-		debug.profileend()
 		return oldValue
 	end
 
@@ -969,7 +1022,6 @@ function TableManager.ArrayRemove<T, S>(self: TM_Internal<T>, pathOrProxy: Path<
 	elseif self._appliedListeners[1] ~= nil then
 		EmitterModule.emitReplicationOp(self, "ArrayRemove", parsedPath, nil, index, nil)
 	end
-	debug.profileend()
 	return oldValue
 end
 TableManager.Remove = TableManager.ArrayRemove
@@ -1305,7 +1357,6 @@ function TableManager.MoveTo<T, S1, S2>(
 	currentPath: Path<S1> | Proxy<T, S1>,
 	newPath: Path<S2> | Proxy<T, S2>
 )
-	debug.profilebegin("TM.MoveTo")
 	const sourcePath: PathArray<S1> = resolvePathFromPathOrProxy(self, currentPath)
 	const targetPath: PathArray<S2> = resolvePathFromPathOrProxy(self, newPath)
 
@@ -1314,7 +1365,6 @@ function TableManager.MoveTo<T, S1, S2>(
 	end
 
 	if PathHelpers.ArePathsEqual(sourcePath, targetPath) then
-		debug.profileend()
 		return
 	end
 
@@ -1343,7 +1393,6 @@ function TableManager.MoveTo<T, S1, S2>(
 		restoreReparent(self._proxyManager, rollback)
 		error(moveErr, 2)
 	end
-	debug.profileend()
 end
 
 --[=[
@@ -1357,7 +1406,6 @@ end
 	This is specifically useful for copying tables around without breaking proxy references.
 ]=]
 function TableManager.CopyTo<T, S1, S2>(self: TM_Internal<T>, currentPath: Path<S1> | Proxy<T, S1>, newPath: Path<S2>)
-	debug.profilebegin("TM.CopyTo")
 	const sourcePath = resolvePathFromPathOrProxy(self, currentPath)
 	const targetPath = resolvePathFromPathOrProxy(self, newPath)
 
@@ -1377,7 +1425,6 @@ function TableManager.CopyTo<T, S1, S2>(self: TM_Internal<T>, currentPath: Path<
 	const sourceValue = self:Get(sourcePath)
 	const copiedValue = deepCloneValue(sourceValue)
 	self:Set(targetPath, copiedValue)
-	debug.profileend()
 end
 
 --[=[
