@@ -1,0 +1,17 @@
+[package]
+name = "raild3x/uiparticleemitter"
+description = "FusionComponent for emitting 2d images"
+authors = ["Logan Hunt (Raildex)"]
+version = "0.1.0"
+license = "MIT"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+
+[custom]
+# The properly capitalized and spaced name of the library
+formattedName = "UIParticleEmitter"
+# The intro page for the documentation
+docsLink = "UIParticleEmitter"
+
+[dependencies]
+Fusion = "elttob/fusion@0.3.0"
