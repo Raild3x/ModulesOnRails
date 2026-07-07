@@ -13,8 +13,9 @@ Comprehensive examples for using the TableManager system.
 5. [Parent/Child Relationships](#parentchild-relationships)
 6. [Global Signals](#global-signals)
 7. [Path-Based Access](#path-based-access)
-8. [Common Patterns](#common-patterns)
-9. [Best Practices](#best-practices)
+8. [Opaque Values](#opaque-values)
+9. [Common Patterns](#common-patterns)
+10. [Best Practices](#best-practices)
 
 ---
 
@@ -596,6 +597,61 @@ manager.Proxy.Player.Stats.Mana = 40
 
 > Note: Fusion helper APIs are not part of this package's current public API.
 > Keep integration logic in application code using signals/listeners from this module.
+
+---
+
+## Opaque Values
+
+Marking a value **opaque** tells the diff engine to treat it as an indivisible
+leaf — never cloned, frozen, or walked, only identity-compared. Use it for large
+immutable blobs, foreign objects, or collections of self-contained items. See the
+[Opaque Values guide](/api/TM%20Opaque%20Values) for the full treatment.
+
+### A single opaque leaf
+
+```lua
+local manager = TableManager.new({})
+
+-- Skip the per-diff clone/walk of a big immutable table:
+manager:Set("WorldSnapshot", TableManager.Opaque(hugeReadOnlyTable))
+
+-- Keep a foreign object out of the diff engine entirely:
+manager:Set("Model", TableManager.Opaque(workspace.Rig))
+
+manager:OnValueChange("WorldSnapshot", function()
+    print("snapshot reference replaced")
+end)
+
+manager:Set("WorldSnapshot", nextSnapshot) -- fires once (identity changed)
+-- Mutating hugeReadOnlyTable's internals would fire NOTHING.
+```
+
+### A collection of opaque children
+
+```lua
+local manager = TableManager.new({
+    -- Every direct child of Enemies is a leaf, including ones inserted later.
+    Enemies = TableManager.OpaqueChildren({}),
+})
+
+manager:OnArrayInsert("Enemies", function(index, enemy)
+    print("spawned", enemy.Id)
+end)
+
+-- No per-element wrapping: add/remove still fires, internals stay hidden.
+manager:ArrayInsert("Enemies", { Id = 1, Hp = 100, Ai = {} })
+manager:ArrayInsert("Enemies", { Id = 2, Hp = 100, Ai = {} })
+```
+
+### Shared, read-only reference data
+
+```lua
+local ItemDefs = require(ReplicatedStorage.ItemDefinitions)
+TableManager.GlobalOpaque(ItemDefs) -- mark once; opaque in every manager
+
+local a = TableManager.new({ Defs = ItemDefs })
+local b = TableManager.new({ Cache = { Defs = ItemDefs } })
+```
 
 ---
 

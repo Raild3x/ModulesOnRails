@@ -31,6 +31,7 @@ classes = [
 	"TM Proxies & Direct Table Access",
 	"TM Schema Validation",
 	"TM Opaque Values",
+	"TM Performance",
 	"TM Reactive State Wrappers",
 	"TM For & Map Views [Unreleased]",
 ]

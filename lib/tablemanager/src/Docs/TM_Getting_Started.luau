@@ -41,11 +41,44 @@
 	manager:Get("Inventory")              -- { "Sword", "Shield" }
 	```
 
+	#### String paths vs. array paths
+
+	Every path-taking method accepts either form, and they resolve to the same
+	place. The choice is not purely cosmetic, though — three things differ:
+
+	- **What keys you can address.** A dot-string is split on `.` into string
+	  segments, so it can *only* reach string keys, and never a key that itself
+	  contains a `.`. An array path holds the keys verbatim, so it is the only way
+	  to address a numeric index, a boolean key, or a string key with a dot in it:
+
+	  ```lua
+	  manager:Get({ "Inventory", 1 })        -- numeric index -> needs an array
+	  manager:Get({ "Config", "a.b.c" })     -- key literally named "a.b.c"
+	  manager:Get("Config.a.b.c")            -- WRONG: reads Config -> a -> b -> c
+	  ```
+
+	- **Type inference / linting.** A *string literal* path lets the type solver
+	  resolve the value's type through the path, so `Get`/`Set` stay type-checked
+	  and autocompleted. An array path (or a string built at runtime) resolves to
+	  `any`, losing that inference. Prefer literal string paths where you want the
+	  types. (Some of this inference is currently disabled pending a Luau bug — see
+	  the tip above.)
+
+	- **Cost.** Passing an array is the cheapest call — it is used as-is. A
+	  dot-string is split once and then **cached**, so a repeated *literal* string
+	  (`"Player.Health"` in a loop) is effectively free after the first use. A
+	  string assembled fresh each call (`"Player." .. field`) never hits that cache
+	  and re-splits every time — for dynamic paths, build an array instead. See the
+	  [Performance](/api/TM%20Performance) guide.
+
+	Rule of thumb: **literal string paths** for readable, type-checked access;
+	**array paths** for dynamic paths and non-string keys.
+
 	### 3. Writing data
 
 	`Set` writes a value at a path; `Update` and `Increment` are convenience
 	wrappers over it. Array contents have their own methods — `ArrayInsert`,
-	`ArrayRemove`, and friends (see the For & Map and Listeners guides).
+	`ArrayRemove`, etc...
 
 	```lua
 	manager:Set("Player.Health", 80)
@@ -140,4 +173,5 @@
 	- **[TM Schema Validation](/api/TM%20Schema%20Validation)** — validating data shape at construction.
 	- **[TM Opaque Values](/api/TM%20Opaque%20Values)** — telling the diff engine to skip certain values.
 	- **[TM For & Map Reactive Views](/api/TM%20For%20&%20Map%20Reactive%20Views)** — per-item reconcilers and derived managers.
+	- **[TM Performance](/api/TM%20Performance)** — the optimizations you get for free and how to leverage them.
 ]=]

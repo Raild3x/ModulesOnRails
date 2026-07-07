@@ -104,4 +104,5 @@
 	- **[TM Batching](/api/TM%20Batching)** — deferring flushes to group many writes into one.
 	- **[TM Listeners & Fire Modes](/api/TM%20Listeners%20&%20Fire%20Modes)** — what a flush fires, and how callbacks are scheduled.
 	- **[TM Proxies & Direct Table Access](/api/TM%20Proxies%20&%20Direct%20Table%20Access)** — writing through the manager vs. bypassing it.
+	- **[TM Performance](/api/TM%20Performance)** — the optimizations behind "free when nothing watches" and how to leverage them.
 ]=]

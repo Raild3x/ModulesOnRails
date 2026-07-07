@@ -96,9 +96,7 @@
 		local connection = manager:OnChange(path, function(newValue)
 			src(newValue)
 		end, options)
-		cleanup(function()
-			connection:Disconnect()
-		end)
+		cleanup(connection)
 		return src
 	end
 
@@ -115,22 +113,6 @@
 	do nothing — `scope:doCleanup()` (Fusion) or the reactive scope's destruction
 	(Vide) disconnects the binding. Destroying the manager
 	([`manager:Destroy()`](/api/TableManager#Destroy)) also disconnects everything.
-
-	## Two-way binding
-
-	These wrappers are one-way (data → view), which is the common UI case. To push
-	edits *back* into the manager, drive `manager:Set` from the framework's own
-	observer — and guard the feedback loop so a manager-originated update doesn't
-	bounce back as a redundant write:
-
-	```lua
-	Fusion.Observer(state):onChange(function()
-		local next = Fusion.peek(state)
-		if next ~= manager:Get(path) then -- only write real changes
-			manager:Set(path, next)
-		end
-	end)
-	```
 
 	---
 	### See also
