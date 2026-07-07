@@ -394,7 +394,6 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 	end
 
 	if self._batchDepth > 0 then
-		debug.profilebegin("applyWrite (batched)")
 		const batch = self._batch
 		const parentPath: PathArray<S> = table.move(parsedPath, 1, lastIdx - 1, 1, table.create(lastIdx - 1)) :: any
 		-- Only the batched path needs the full O(n) classification: it gates
@@ -417,11 +416,9 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 			PropagationModule.RegisterSubtree(self, newValue)
 		end
 		Mutator.pruneDetachedValue(self, oldValue, newValue)
-		debug.profileend()
 		return
 	end
 
-	debug.profilebegin("applyWrite (immediate)")
 	const oldValue = parentTable[key]
 	-- Trackability and the diff depth bound resolve together in one registry
 	-- walk + one signal probe (`ResolveWriteObservation`); the depth is handed
@@ -470,10 +467,8 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 			-- never-materialized slot.
 			BaselineModule.SeedIfNeeded(self, parsedPath, oldValue)
 			parentTable[key] = newValue
-			debug.profileend()
 			return
 		end
-		debug.profilebegin("applyWrite (scalar fast lane)")
 		parentTable[key] = newValue
 		-- RegisterSubtree and pruneDetachedValue are both no-ops for scalar
 		-- old/new values — deliberately skipped.
@@ -486,8 +481,6 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 			else { type = "changed" :: "changed", old = oldValue, new = newValue, children = nil }
 		const oldSnapshot = BatchUtilsModule.BuildOldSnapshot(self, parsedPath, oldValue)
 		self._changeDetector:DispatchDiffNode(diffNode, parsedPath :: { any }, self.Raw :: any, oldSnapshot)
-		debug.profileend()
-		debug.profileend()
 		return
 	end
 
@@ -514,7 +507,6 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 		-- subscriber still needs to see it -- ship the value directly.
 		EmitterModule.emitReplicationOp(self, "Set", parsedPath, newValue, nil, nil)
 	end
-	debug.profileend()
 end
 
 --[[

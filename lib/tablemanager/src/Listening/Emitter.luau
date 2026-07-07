@@ -254,7 +254,6 @@ function Emitter.fireAncestorValueChangedNotifications(
 	metadata: ChangeMetadata,
 	includeKeyChanged: boolean?
 )
-	debug.profilebegin("fireAncestorValueChangedNotifications")
 	const ancestorMetadata: ChangeMetadata = {
 		Diff = nil,
 		OriginPath = metadata.OriginPath,
@@ -293,7 +292,6 @@ function Emitter.fireAncestorValueChangedNotifications(
 	)
 
 	registry:EndAncestorSpine()
-	debug.profileend()
 end
 
 --[[
@@ -385,7 +383,6 @@ function Emitter.emitRemoved(
 	move: MoveMetadata?,
 	knownTrackable: boolean?
 )
-	debug.profilebegin("emitRemoved")
 	const removedPath: PathArray = PathHelpers.Append(path, index)
 	-- Array element old values are never a slice of some larger captured
 	-- container (unlike the dict path's diff `old`, each direct array op
@@ -401,7 +398,6 @@ function Emitter.emitRemoved(
 		OldValue = oldValue,
 		Metadata = metadata,
 	}, knownTrackable)
-	debug.profileend()
 end
 
 function Emitter.emitInserted(
@@ -412,7 +408,6 @@ function Emitter.emitInserted(
 	move: MoveMetadata?,
 	knownTrackable: boolean?
 )
-	debug.profilebegin("emitInserted")
 	const insertedPath = PathHelpers.Append(path, index)
 	const metadata = createSyntheticMetadata(manager.Raw, insertedPath, "added", index, newValue, nil, nil)
 	metadata.Move = move
@@ -421,7 +416,6 @@ function Emitter.emitInserted(
 		NewValue = newValue,
 		Metadata = metadata,
 	}, knownTrackable)
-	debug.profileend()
 end
 
 function Emitter.emitSet(
@@ -433,7 +427,6 @@ function Emitter.emitSet(
 	move: MoveMetadata?,
 	knownTrackable: boolean?
 )
-	debug.profilebegin("emitSet")
 	const setPath = PathHelpers.Append(path, index)
 	const oldSnapshot = BatchUtilsModule.BuildOldSnapshotForLeaf(manager, path, setPath, oldValue)
 	const metadata = createSyntheticMetadata(manager.Raw, setPath, "changed", index, newValue, oldValue, oldSnapshot)
@@ -444,7 +437,6 @@ function Emitter.emitSet(
 		OldValue = oldValue,
 		Metadata = metadata,
 	}, knownTrackable)
-	debug.profileend()
 end
 
 --[[

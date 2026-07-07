@@ -304,8 +304,6 @@ function ChangeDetector.CaptureSnapshot(self: CD_Internal, rootTable: { [any]: a
 		print("  path:", table.concat(path, "."))
 		print("  rootTable type:", type(rootTable))
 	end
-	debug.profilebegin("CD:CaptureSnapshot")
-
 	-- Navigate to the value at the path
 	local valueAtPath = rootTable
 	for _, key in ipairs(path) do
@@ -323,7 +321,6 @@ function ChangeDetector.CaptureSnapshot(self: CD_Internal, rootTable: { [any]: a
 		Timestamp = os.clock(),
 	}
 
-	debug.profileend()
 	return snapshot
 end
 
@@ -437,10 +434,8 @@ function ChangeDetector.CheckForChangesBetween(
 	-- by _dispatch diffs against state at DRAIN time (see _dispatch's note on
 	-- collapsing chained re-entrant writes).
 	self:_dispatch(function()
-		debug.profilebegin("Dispatch")
 		local rootDiffNode = Diff.diff(oldValue, newValue, nil, nil, ctx, localArrays, boundedMaxDepth)
 		self:_emitRootNode(rootDiffNode, basePath, ancestorSnapshot)
-		debug.profileend()
 	end)
 
 	if arraySink ~= nil and localArrays ~= nil then
@@ -643,8 +638,6 @@ function ChangeDetector._emitRootNode(self: CD_Internal, node: Diff.DiffNode?, b
 	if not node then
 		return
 	end
-	debug.profilebegin("emitRootNode")
-
 	local rootParentPath: PathArray = {}
 	local rootKey: any? = nil
 	if #basePath > 0 then
@@ -660,7 +653,6 @@ function ChangeDetector._emitRootNode(self: CD_Internal, node: Diff.DiffNode?, b
 	-- instead skip their own empty-node work via `ListenerRegistry.HasListenerNodeAt`.
 	self:_processDiffNode(node, basePath, rootParentPath, rootKey, basePath, node, ancestorSnapshot)
 	self:_fireAncestorCallbacks(basePath, node, ancestorSnapshot)
-	debug.profileend()
 end
 
 --[=[
@@ -793,7 +785,6 @@ function ChangeDetector.EmitAncestorNotifications(
 	-- nil = fire every level (unchanged behavior / wildcard registries).
 	levelHasListener: { any }?
 )
-	debug.profilebegin("CD:EmitAncestorNotifications")
 	-- Bound all per-level work to the DEEPEST level that will actually fire. With a
 	-- skip oracle, a deep write observed only by a shallow listener (e.g. a lone
 	-- root `OnChange` under a 10-level path) fires just the top couple of levels —
@@ -814,7 +805,6 @@ function ChangeDetector.EmitAncestorNotifications(
 			end
 		end
 		if topDepth < 0 then
-			debug.profileend()
 			return -- no level fires; nothing to navigate, build, or emit.
 		end
 	end
@@ -900,7 +890,6 @@ function ChangeDetector.EmitAncestorNotifications(
 			end
 		end
 	end
-	debug.profileend()
 end
 
 --[=[

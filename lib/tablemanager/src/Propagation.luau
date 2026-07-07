@@ -154,7 +154,6 @@ const function registerSubtree(manager: TableManagerLike, value: any)
 	if type(value) ~= "table" then
 		return
 	end
-	debug.profilebegin("registerSubtree")
 	const ctx = manager._changeDetector:GetOpaqueCtx()
 	const isOpaque = ctx ~= nil and ctx.isOpaque
 	const registries = manager._opaqueRegistries
@@ -204,7 +203,6 @@ const function registerSubtree(manager: TableManagerLike, value: any)
 		end
 	end
 	recurse(value)
-	debug.profileend()
 end
 
 --------------------------------------------------------------------------------
