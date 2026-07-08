@@ -207,6 +207,11 @@ For a single change, observed order is:
   observed (no baseline was ever recorded), it falls back to a live `Get`. A **table** result is the
   baseline mirror node and follows the same stability rule as a listener's table `oldValue` (§1.2) —
   copy it to retain past the synchronous call; scalar results are always safe.
+  - **Known limitation:** the baseline cannot tell "never observed" from "observed, last emitted
+    value was `nil`" (an absent key and a `nil`-valued key are indistinguishable), so both fall back
+    to the live `Get`. This is exact except when the last emit for `path` was `nil` **and** the live
+    value has since moved ahead inside a pending flush window — then `GetLastEmitted` returns the
+    pending live value rather than the emitted `nil`, converging once the flush drains.
 
 ---
 

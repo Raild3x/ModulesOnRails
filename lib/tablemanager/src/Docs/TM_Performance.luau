@@ -86,10 +86,13 @@
 	5. **Ignore paths you never observe but write hot.** `IgnoredPaths` (or
 	   `SetPathIgnored`) skips all diff/event work for a branch while keeping the
 	   value live in `Raw`/`Get`.
-	6. **Reuse literal string paths; use arrays for dynamic ones.** A repeated
-	   *literal* string path is parsed once and cached; a string assembled per call
-	   (`"Player." .. field`) re-splits every time — pass an array for those. See
-	   the string-vs-array notes in [Getting Started](/api/TM%20Getting%20Started).
+	6. **Reuse literal string paths; use arrays for dynamic ones.** Parsing caches
+	   by the string's contents, so any repeated string — literal or an assembled
+	   `"Player." .. field` that keeps resolving the same — is parsed once and then
+	   cached. The cost of a per-call assembled path is the string allocation and
+	   concatenation, plus (when the field varies) many *distinct* strings that each
+	   pay a one-time split and grow the cache. Pass an array for those. See the
+	   string-vs-array notes in [Getting Started](/api/TM%20Getting%20Started).
 
 	:::tip Measure, don't assume
 	These optimizations mean the expensive cases are the observable, deep, large

@@ -96,6 +96,36 @@ return function(tiniest)
 			manager:Destroy()
 		end)
 
+		test("known limitation: last-emitted nil reads the pending live value inside a window", function()
+			-- Documents a KNOWN LIMITATION, not the ideal contract (CONTRACT.md §5):
+			-- the baseline cannot distinguish "never observed" from "observed, last
+			-- emitted value was nil" -- an absent key and a nil-valued key are the same
+			-- in the store -- so both fall back to a live Get. When the last emit was a
+			-- deletion AND the live value has since moved ahead inside a pending flush,
+			-- GetLastEmitted returns that pending live value rather than the emitted nil.
+			local manager = TableManager.new({ buff = "speed" })
+			manager:OnValueChange("buff", function() end)
+
+			manager:Set("buff", nil) -- emitted removal: last-emitted value is now nil
+			expect(manager:GetLastEmitted("buff")).never_exists() -- exact while live is also nil
+
+			manager:Suspend()
+			manager:Set("buff", "shield") -- batched: nothing emitted yet; last emit is still nil
+
+			expect(manager:Get("buff")).is("shield") -- live has moved ahead
+			-- IDEAL contract would be nil (the emitted deletion); current behavior falls
+			-- back to the pending live value because the nil baseline is indistinguishable
+			-- from "never observed".
+			expect(manager:GetLastEmitted("buff")).is("shield")
+
+			manager:Resume() -- flush drains; baseline catches up to the live value
+
+			expect(manager:GetLastEmitted("buff")).is("shield")
+			expect(manager:GetLastEmitted("buff")).is(manager:Get("buff"))
+
+			manager:Destroy()
+		end)
+
 		test("accepts array paths equivalently to string paths", function()
 			local manager = TableManager.new({ player = { mana = 30 } })
 			manager:OnValueChange("player.mana", function() end)
