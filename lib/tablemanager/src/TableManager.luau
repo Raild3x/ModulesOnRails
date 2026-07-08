@@ -54,12 +54,10 @@
 	manager:ArrayInsert("Inventory", "Potion") -- prints "picked up Potion (slot 3)"
 	```
 
-	## Best Practices
-	- Avoid keeping large datastructures within arrays contained within a tablemanager. It is best 
-	to manage the array separately and have a TableManager for each object.
-
-	- Avoid mixed tables.
-
+	## Good Practices
+	- If you have very large datastructures, consider utilizing Opaque 
+	 wrappers to avoid deep cloning and unnecessary change detection.
+	- Avoid mixed tables. This is general good practice.
 	- Utilize pure string keys so the linter can try to infer your types.
 ]=]
 
@@ -147,6 +145,7 @@ end
 --// Module //--
 --------------------------------------------------------------------------------
 
+const Static = {}
 const TableManager = {}
 const TableManager_MT = { __index = TableManager }
 
@@ -640,6 +639,17 @@ end
 	subscriber ever covered it) there is no recorded "last emitted" value, so this
 	falls back to a live [TableManager:Get] -- the same value a first listener
 	would receive.
+
+	:::caution Last-emitted `nil` inside a pending window
+	The recorded baseline cannot distinguish "never observed" from "observed, and
+	the last value emitted was itself `nil`" (e.g. after an emitted deletion) -- an
+	absent key and a `nil`-valued key are indistinguishable in the baseline store.
+	Both fall back to the live `Get`. That fallback is exact except in one narrow
+	window: if the last emit for `path` was `nil` **and** the live value has since
+	moved ahead of it inside a pending flush (a `Batch`/`Suspend` window, or
+	`FlushMode = "coalesced"` / a deferred fire mode), this returns the pending live
+	value rather than the emitted `nil`. Once that flush drains, it converges again.
+	:::
 
 	:::caution Table results are snapshots
 	When the value at `path` is a table, the returned table is the internal

@@ -65,11 +65,13 @@
 	  the tip above.)
 
 	- **Cost.** Passing an array is the cheapest call — it is used as-is. A
-	  dot-string is split once and then **cached**, so a repeated *literal* string
-	  (`"Player.Health"` in a loop) is effectively free after the first use. A
-	  string assembled fresh each call (`"Player." .. field`) never hits that cache
-	  and re-splits every time — for dynamic paths, build an array instead. See the
-	  [Performance](/api/TM%20Performance) guide.
+	  dot-string is split once and then **cached** by its string contents, so a
+	  repeated string (`"Player.Health"` in a loop, or a `"Player." .. field`
+	  that keeps producing the same result) is effectively free after the first
+	  use. The cost of assembling a string fresh each call is the allocation and
+	  concatenation itself, plus — when the field varies — a stream of *distinct*
+	  strings that each pay a one-time split and grow the cache. For dynamic paths,
+	  build an array instead. See the [Performance](/api/TM%20Performance) guide.
 
 	Rule of thumb: **literal string paths** for readable, type-checked access;
 	**array paths** for dynamic paths and non-string keys.
