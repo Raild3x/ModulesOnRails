@@ -143,7 +143,7 @@
 
 const PathHelpers = require("../PathHelpers")
 const ArrayDiffModule = require("../Diffing/ArrayDiff")
-const IsDeferred = require("./IsDeferred")
+const FireSchedulerModule = require("./FireScheduler")
 
 --// Types //--
 -- type Path = PathHelpers.Path
@@ -232,7 +232,12 @@ export type FireMode = "immediate" | "deferred" | "bindable" | "coalesced"
 
 export type ListenerRegistryConfig = {
 	DebugMode: boolean?,
-	FireMode: FireMode,
+	-- Used only when `Scheduler` is omitted, to default-create one. Ignored when
+	-- a `Scheduler` is injected (the manager's, which already carries the mode).
+	FireMode: FireMode?,
+	-- The manager's shared fire scheduler. When omitted (standalone registries in
+	-- specs / `ForMap`), one is created from `FireMode`.
+	Scheduler: FireSchedulerModule.FireScheduler?,
 }
 
 type Listener = {
@@ -244,7 +249,8 @@ type Listener = {
 	ProvideDiff: boolean,
 	PathLength: number,
 	Connection: Connection,
-	-- "coalesced" fire-mode pending state; see `flushCoalescedListener`.
+	-- "coalesced" fire-mode pending state; owned by `FireScheduler`, which reads
+	-- and writes these while draining the listener's coalesce window.
 	_coalescePending: boolean?,
 	_coalesceEventData: EventData?,
 }
@@ -348,8 +354,10 @@ export type ListenerRegistry = {
 
 	_root: ListenerNode,
 	_debugMode: boolean,
-	-- Resolved fire mode; "bindable" is collapsed into "immediate"/"deferred" at construction.
-	_fireMode: "immediate" | "deferred" | "coalesced",
+	-- Owns fire-mode resolution and dispatch timing (immediate/deferred/coalesced,
+	-- plus the free-runner thread). Shared with the manager's Emitter, or default-
+	-- created for a standalone registry. See `FireScheduler`.
+	_scheduler: FireSchedulerModule.FireScheduler,
 	_destroyed: boolean,
 	_hasWildcards: boolean,
 	-- One-way latch: true once any SnapshotOldValues listener is registered at a
@@ -373,9 +381,6 @@ export type ListenerRegistry = {
 
 const ListenerRegistry = {}
 const ListenerRegistry_MT = { __index = ListenerRegistry }
-
--- The currently idle thread to run the next listener callback on.
-local freeRunnerThread: thread? = nil
 
 const function executeListenerCallback(
 	callback: (...any) -> (),
@@ -403,43 +408,6 @@ const function executeListenerCallback(
 
 	if not success and debugMode then
 		warn(`ListenerRegistry: Error in {eventType} callback: {err}`)
-	end
-end
-
-const function acquireRunnerThreadAndCall(
-	callback: (...any) -> (),
-	eventType: EventType,
-	eventData: EventData,
-	debugMode: boolean
-)
-	local acquiredRunnerThread = freeRunnerThread
-	freeRunnerThread = nil
-	executeListenerCallback(callback, eventType, eventData, debugMode)
-	-- Callback finished. This runner thread can be reused.
-	freeRunnerThread = acquiredRunnerThread
-end
-
--- Argless on purpose: the runner thread is primed with an empty resume so it
--- parks at coroutine.yield() before receiving any payload. Taking the first
--- payload as function parameters instead would pin that payload (callback +
--- eventData, including its Metadata.Snapshot.RootTable reference) on the
--- thread's stack for the thread's entire lifetime.
-const function runListenerCallbackInFreeThread()
-	while true do
-		acquireRunnerThreadAndCall(coroutine.yield())
-	end
-end
-
--- "coalesced" fire-mode flush: runs once via task.defer per pending listener,
--- regardless of how many times that listener was "fired" before this ran.
--- Re-checks Connected at flush time (unlike the "deferred" path) since a
--- coalesced flush can be scheduled well after the listener disconnects.
-const function flushCoalescedListener(listener: Listener, eventType: EventType, debugMode: boolean)
-	listener._coalescePending = false
-	local eventData = listener._coalesceEventData :: EventData
-	listener._coalesceEventData = nil
-	if listener.Connection.Connected then
-		executeListenerCallback(listener.Callback, eventType, eventData, debugMode)
 	end
 end
 
@@ -605,7 +573,7 @@ const function fireListenersOnNode(
 	eventType: EventType,
 	fireEventData: EventData,
 	baseRelativeDepth: number,
-	fireMode: "immediate" | "deferred" | "coalesced",
+	scheduler: FireSchedulerModule.FireScheduler,
 	debugMode: boolean
 )
 	local listeners = node.Listeners[eventType]
@@ -636,23 +604,7 @@ const function fireListenersOnNode(
 			listener.Connection.Connected = false
 			hasOnceFired = true
 		end
-		if fireMode == "deferred" then
-			task.defer(executeListenerCallback, listener.Callback, eventType, eventDataToUse, debugMode)
-		elseif fireMode == "coalesced" then
-			if listener._coalescePending then
-				listener._coalesceEventData = eventDataToUse
-			else
-				listener._coalescePending = true
-				listener._coalesceEventData = eventDataToUse
-				task.defer(flushCoalescedListener, listener, eventType, debugMode)
-			end
-		else
-			if not freeRunnerThread then
-				freeRunnerThread = coroutine.create(runListenerCallbackInFreeThread)
-				coroutine.resume(freeRunnerThread :: thread)
-			end
-			task.spawn(freeRunnerThread :: thread, listener.Callback, eventType, eventDataToUse, debugMode)
-		end
+		scheduler:RunListener(listener, eventType, eventDataToUse, debugMode)
 	end
 	if hasOnceFired then
 		local removed = 0
@@ -678,22 +630,6 @@ const function fireListenersOnNode(
 	end
 end
 
-const function resolveFireMode(configuredMode: FireMode): "immediate" | "deferred" | "coalesced"
-	assert(
-		type(configuredMode) == "string",
-		`ListenerRegistry: FireMode must be a string, got {typeof(configuredMode)}`
-	)
-	configuredMode = configuredMode:lower()
-	if configuredMode == "bindable" then
-		return if IsDeferred() then "deferred" else "immediate"
-	elseif configuredMode == "immediate" or configuredMode == "deferred" or configuredMode == "coalesced" then
-		return configuredMode
-	end
-	error(
-		`ListenerRegistry: Invalid FireMode "{configuredMode}". Must be "immediate", "deferred", "bindable", or "coalesced".`
-	)
-end
-
 function ListenerRegistry.new(config: ListenerRegistryConfig?): ListenerRegistry
 	local self: ListenerRegistry = setmetatable({}, ListenerRegistry_MT) :: ListenerRegistry
 	const resolvedConfig: ListenerRegistryConfig = config or {} :: any
@@ -701,7 +637,12 @@ function ListenerRegistry.new(config: ListenerRegistryConfig?): ListenerRegistry
 
 	self._root = createNode(nil, nil)
 	self._debugMode = debugMode
-	self._fireMode = resolveFireMode(resolvedConfig.FireMode or "bindable")
+	-- Use the manager's shared scheduler when injected; otherwise default-create
+	-- one from FireMode (standalone registries). Either way, bind our listener-
+	-- callback invoker so the scheduler can run callbacks at the resolved time.
+	self._scheduler = resolvedConfig.Scheduler
+		or FireSchedulerModule.new({ ListenerFireMode = resolvedConfig.FireMode })
+	self._scheduler:BindListenerInvoker(executeListenerCallback)
 	self._destroyed = false
 	self._hasWildcards = false
 	self._hasSnapshotWildcards = false
@@ -853,7 +794,7 @@ function ListenerRegistry.FireListenersExact(
 )
 	local root = self._root
 	local debugMode = self._debugMode
-	local fireMode = self._fireMode
+	local scheduler = self._scheduler
 
 	-- For ancestor notifications (Diff == nil), compute relative depth from OriginPath.
 	-- Direct change notifications always have relativeDepth = 0 (change is at the listener's path).
@@ -880,7 +821,7 @@ function ListenerRegistry.FireListenersExact(
 		if len == 0 or (self._spineBasePath :: PathArray)[len] == path[len] then
 			const node = spineNodes[len + 1]
 			if node ~= nil then
-				fireListenersOnNode(node :: ListenerNode, eventType, eventData, baseRelativeDepth, fireMode, debugMode)
+				fireListenersOnNode(node :: ListenerNode, eventType, eventData, baseRelativeDepth, scheduler, debugMode)
 			end
 			return
 		end
@@ -893,7 +834,7 @@ function ListenerRegistry.FireListenersExact(
 		if node == nil then
 			return
 		end
-		fireListenersOnNode(node, eventType, eventData, baseRelativeDepth, fireMode, debugMode)
+		fireListenersOnNode(node, eventType, eventData, baseRelativeDepth, scheduler, debugMode)
 		return
 	end
 
@@ -915,7 +856,7 @@ function ListenerRegistry.FireListenersExact(
 			fireEventData = table.clone(eventData)
 			fireEventData.Metadata = newMetadata
 		end
-		fireListenersOnNode(result.node, eventType, fireEventData, baseRelativeDepth, fireMode, debugMode)
+		fireListenersOnNode(result.node, eventType, fireEventData, baseRelativeDepth, scheduler, debugMode)
 	end
 end
 

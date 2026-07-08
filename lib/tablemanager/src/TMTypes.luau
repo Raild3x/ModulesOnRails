@@ -4,6 +4,7 @@
 const PathHelpers = require("./PathHelpers")
 const ProxyManagerModule = require("./ProxyManager")
 const ListenerRegistryModule = require("./Listening/ListenerRegistry")
+const FireSchedulerModule = require("./Listening/FireScheduler")
 const ChangeDetectorModule = require("./Diffing/ChangeDetector")
 const SchemaNavigatorModule = require("./SchemaNavigator")
 const ArrayDiffModule = require("./Diffing/ArrayDiff")
@@ -76,10 +77,11 @@ export type ListenerFireMode = ListenerRegistryModule.FireMode
 	@within TableManager
 	@type SignalFireMode "immediate" | "deferred" | "bindable" | "coalesced"
 	How the per-change Signals (`ValueChanged`, `KeyAdded`, etc.) are dispatched.
-	`"immediate"`/`"deferred"`/`"bindable"` map onto `Signal:Fire`/`:FireDeferred`/
-	`:FireBindable`; `"coalesced"` is implemented in `Emitter.luau` by wrapping
-	`:Fire` so repeated fires within a frame collapse into one carrying the latest
-	values.
+	Resolved and driven by the manager's `FireScheduler`:
+	`"immediate"`/`"deferred"` map onto `Signal:Fire`/`:FireDeferred`; `"bindable"`
+	resolves once (at construction) to whichever of those the environment does
+	natively; `"coalesced"` collapses repeated fires of the SAME signal within a
+	frame into one carrying the latest values.
 ]=]
 export type SignalFireMode = "immediate" | "deferred" | "bindable" | "coalesced"
 
@@ -380,7 +382,6 @@ export type TableManager<T = { [any]: any }> = {
 
 export type TM_Internal<T = { [any]: any }> = TableManager<T> & {
 	-- cached Config values
-	_signalFireMode: SignalFireMode,
 	_flushMode: FlushMode,
 	_duplicateReferenceMode: DuplicateReferenceMode,
 	_schema: SchemaCheck?,
@@ -389,12 +390,13 @@ export type TM_Internal<T = { [any]: any }> = TableManager<T> & {
 	-- internal helper objects
 	_proxyManager: ProxyManagerModule.ProxyManager<T>?,
 	_listenerRegistry: ListenerRegistry,
+	-- Owns fire-mode resolution and delivery timing for both surfaces (Signals via
+	-- `Emitter`, listeners via `_listenerRegistry`) and both coalesce windows. See
+	-- `FireScheduler`.
+	_fireScheduler: FireSchedulerModule.FireScheduler,
 	_changeDetector: ChangeDetector,
 	_opaqueRegistries: OpaqueRegistries,
 	_ignoreTrie: IgnoreTrieNode,
-
-	-- Lazily created by `Emitter.fireSignalCoalesced` when `SignalFireMode == "Coalesced"`.
-	_signalCoalesceState: { [any]: { Args: { n: number, [number]: any } } }?,
 
 	-- Batch state
 	_batchDepth: number,

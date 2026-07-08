@@ -74,6 +74,7 @@ const BatchUtilsModule = require("./Batching/BatchUtils")
 const BatchFlushModule = require("./Batching/BatchFlush")
 const ProxyManagerModule = require("./ProxyManager")
 const ListenerRegistryModule = require("./Listening/ListenerRegistry")
+const FireSchedulerModule = require("./Listening/FireScheduler")
 const ChangeDetectorModule = require("./Diffing/ChangeDetector")
 const SchemaNavigatorModule = require("./SchemaNavigator")
 const PropagationModule = require("./Propagation")
@@ -374,11 +375,16 @@ function Static.new<T>(initialData: T, config: TableManagerConfig?): TableManage
 	
 	-- Initialize subsystems
 	self._proxyManager = initProxyManager(self, resolvedConfig)
+	-- One scheduler owns delivery timing for both surfaces; the registry shares it
+	-- (see `FireScheduler`), so listener and signal fire modes resolve in one place.
+	self._fireScheduler = FireSchedulerModule.new {
+		SignalFireMode = normalizeSignalFireMode(resolvedConfig.SignalFireMode),
+		ListenerFireMode = resolvedConfig.ListenerFireMode or Static.DefaultListenerFireMode,
+	}
 	self._listenerRegistry = ListenerRegistryModule.new {
 		DebugMode = false,
-		FireMode = resolvedConfig.ListenerFireMode or Static.DefaultListenerFireMode,
+		Scheduler = self._fireScheduler,
 	}
-	self._signalFireMode = normalizeSignalFireMode(resolvedConfig.SignalFireMode)
 	self._flushMode = resolvedConfig.FlushMode or Static.DefaultFlushMode
 	self._pendingFlushRoot = nil
 	self._coalescedFlushScheduled = false
@@ -1571,11 +1577,7 @@ function TableManager.Observe<T, S>(
 		callback(currentValue, nil, nil)
 	end
 
-	if self._listenerRegistry._fireMode ~= "immediate" then
-		task.defer(fireInitial)
-	else
-		task.spawn(fireInitial)
-	end
+	self._fireScheduler:RunInitial(fireInitial)
 
 	return self._listenerRegistry:RegisterListener("ValueChanged", parsedPath, callback, options)
 end
