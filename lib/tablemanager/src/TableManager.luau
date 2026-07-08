@@ -149,7 +149,7 @@ const Static = {}
 const TableManager = {}
 const TableManager_MT = { __index = TableManager }
 
-TableManager.T = T
+Static.T = T
 
 --------------------------------------------------------------------------------
 --// Static Default Config //--
@@ -189,7 +189,7 @@ export type ConfigDefaults = {
 	Read at construction time only -- changing it affects only TableManagers
 	created afterwards. Read-only -- use [TableManager.SetDefaults] to change it.
 ]=]
-TableManager.DefaultListenerFireMode = "bindable" :: ListenerRegistryModule.FireMode
+Static.DefaultListenerFireMode = "bindable" :: ListenerRegistryModule.FireMode
 
 --[=[
 	@tag Static
@@ -203,7 +203,7 @@ TableManager.DefaultListenerFireMode = "bindable" :: ListenerRegistryModule.Fire
 	Read at construction time only -- changing it affects only TableManagers
 	created afterwards. Read-only -- use [TableManager.SetDefaults] to change it.
 ]=]
-TableManager.DefaultSignalFireMode = "bindable" :: Types.SignalFireMode
+Static.DefaultSignalFireMode = "bindable" :: Types.SignalFireMode
 
 --[=[
 	@tag Static
@@ -217,7 +217,7 @@ TableManager.DefaultSignalFireMode = "bindable" :: Types.SignalFireMode
 	Read at construction time only -- changing it affects only TableManagers
 	created afterwards. Read-only -- use [TableManager.SetDefaults] to change it.
 ]=]
-TableManager.DefaultFlushMode = "immediate" :: Types.FlushMode
+Static.DefaultFlushMode = "immediate" :: Types.FlushMode
 
 --[=[
 	@tag Static
@@ -232,7 +232,7 @@ TableManager.DefaultFlushMode = "immediate" :: Types.FlushMode
 	Read at construction time only -- changing it affects only TableManagers
 	created afterwards. Read-only -- use [TableManager.SetDefaults] to change it.
 ]=]
-TableManager.DefaultDuplicateReferenceMode = "allow" :: DuplicateReferenceMode
+Static.DefaultDuplicateReferenceMode = "allow" :: DuplicateReferenceMode
 
 --[=[
 	@tag Static
@@ -255,19 +255,19 @@ TableManager.DefaultDuplicateReferenceMode = "allow" :: DuplicateReferenceMode
 	})
 	```
 ]=]
-function TableManager.SetDefaults(defaults: ConfigDefaults)
+function Static.SetDefaults(defaults: ConfigDefaults)
 	assert(type(defaults) == "table", `SetDefaults expects a table, got {typeof(defaults)}`)
 	if defaults.ListenerFireMode ~= nil then
-		TableManager.DefaultListenerFireMode = normalizeModeString(defaults.ListenerFireMode, VALID_FIRE_MODES, "ListenerFireMode") :: ListenerRegistryModule.FireMode
+		Static.DefaultListenerFireMode = normalizeModeString(defaults.ListenerFireMode, VALID_FIRE_MODES, "ListenerFireMode") :: ListenerRegistryModule.FireMode
 	end
 	if defaults.SignalFireMode ~= nil then
-		TableManager.DefaultSignalFireMode = normalizeModeString(defaults.SignalFireMode, VALID_FIRE_MODES, "SignalFireMode") :: Types.SignalFireMode
+		Static.DefaultSignalFireMode = normalizeModeString(defaults.SignalFireMode, VALID_FIRE_MODES, "SignalFireMode") :: Types.SignalFireMode
 	end
 	if defaults.FlushMode ~= nil then
-		TableManager.DefaultFlushMode = normalizeModeString(defaults.FlushMode, VALID_FLUSH_MODES, "FlushMode") :: Types.FlushMode
+		Static.DefaultFlushMode = normalizeModeString(defaults.FlushMode, VALID_FLUSH_MODES, "FlushMode") :: Types.FlushMode
 	end
 	if defaults.DuplicateReferenceMode ~= nil then
-		TableManager.DefaultDuplicateReferenceMode = normalizeModeString(defaults.DuplicateReferenceMode, VALID_DUPLICATE_REFERENCE_MODES, "DuplicateReferenceMode") :: DuplicateReferenceMode
+		Static.DefaultDuplicateReferenceMode = normalizeModeString(defaults.DuplicateReferenceMode, VALID_DUPLICATE_REFERENCE_MODES, "DuplicateReferenceMode") :: DuplicateReferenceMode
 	end
 end
 
@@ -312,7 +312,7 @@ const function validateInitialSchema<T>(self: TM_Internal<T>)
 end
 
 const function normalizeSignalFireMode(mode: Types.SignalFireMode?): Types.SignalFireMode
-	return if mode == nil then TableManager.DefaultSignalFireMode else (mode :: any):lower() :: Types.SignalFireMode
+	return if mode == nil then Static.DefaultSignalFireMode else (mode :: any):lower() :: Types.SignalFireMode
 end
 
 const function initProxyManager<T>(self: TM_Internal<T>, resolvedConfig: TableManagerConfig): ProxyManager<T>?
@@ -343,11 +343,11 @@ end
 	@param config TableManagerConfig? -- Optional configuration for the TableManager.
 	@return TableManager -- The newly created TableManager instance.
 ]=]
-function TableManager.new<T>(initialData: T, config: TableManagerConfig?): TableManager<T>
+function Static.new<T>(initialData: T, config: TableManagerConfig?): TableManager<T>
 	debug.profilebegin("TM.new")
 	const self: TM_Internal<T> = (setmetatable({}, TableManager_MT) :: any) :: TM_Internal<T>
 	const resolvedConfig: TableManagerConfig = config or {} :: { [string]: any? }
-	const duplicateReferenceMode: DuplicateReferenceMode = resolvedConfig.DuplicateReferenceMode or TableManager.DefaultDuplicateReferenceMode
+	const duplicateReferenceMode: DuplicateReferenceMode = resolvedConfig.DuplicateReferenceMode or Static.DefaultDuplicateReferenceMode
 	
 	assert(type(initialData) == "table", "Initial data must be a table")
 	-- Store original data
@@ -376,10 +376,10 @@ function TableManager.new<T>(initialData: T, config: TableManagerConfig?): Table
 	self._proxyManager = initProxyManager(self, resolvedConfig)
 	self._listenerRegistry = ListenerRegistryModule.new {
 		DebugMode = false,
-		FireMode = resolvedConfig.ListenerFireMode or TableManager.DefaultListenerFireMode,
+		FireMode = resolvedConfig.ListenerFireMode or Static.DefaultListenerFireMode,
 	}
 	self._signalFireMode = normalizeSignalFireMode(resolvedConfig.SignalFireMode)
-	self._flushMode = resolvedConfig.FlushMode or TableManager.DefaultFlushMode
+	self._flushMode = resolvedConfig.FlushMode or Static.DefaultFlushMode
 	self._pendingFlushRoot = nil
 	self._coalescedFlushScheduled = false
 	self._appliedListeners = {}
@@ -1840,7 +1840,7 @@ function TableManager.Extend<T, S>(
 	-- with no explicit link. If `self` later replaces `object`, it stops resolving
 	-- to that identity and propagation between them lapses (the extended manager
 	-- keeps `object` as its root).
-	const extended = TableManager.new(object)
+	const extended = Static.new(object)
 
 	return extended
 end
@@ -1977,7 +1977,7 @@ function TableManager.MapKeys<T, S>(
 	transform: (entryJanitor: Janitor, key: KeyAtPath<T, S>, value: ElementAtPath<T, S>) -> any
 ): TableManager<any>
 	const parsedPath = PathHelpers.ParsePath(path)
-	const derived: TM_Internal<any> = TableManager.new({}) :: any
+	const derived: TM_Internal<any> = Static.new({}) :: any
 	const onAdd, onRemove, onRefresh = ForMapModule.makeKeyRemapHandlers(derived, function(itemJanitor, key, value)
 		return transform(itemJanitor, key, value), value
 	end)
@@ -2007,7 +2007,7 @@ function TableManager.MapValues<T, S>(
 	transform: (entryJanitor: Janitor, value: ElementAtPath<T, S>, key: KeyAtPath<T, S>) -> any
 ): TableManager<any>
 	const parsedPath = PathHelpers.ParsePath(path)
-	const derived: TM_Internal<any> = TableManager.new({}) :: any
+	const derived: TM_Internal<any> = Static.new({}) :: any
 
 	const connection = makeKeyedReconciler(
 		self,
@@ -2049,7 +2049,7 @@ function TableManager.MapPairs<T, S>(
 	transform: (entryJanitor: Janitor, key: KeyAtPath<T, S>, value: ElementAtPath<T, S>) -> (any, any)
 ): TableManager<any>
 	const parsedPath = PathHelpers.ParsePath(path)
-	const derived: TM_Internal<any> = TableManager.new({}) :: any
+	const derived: TM_Internal<any> = Static.new({}) :: any
 	const onAdd, onRemove = ForMapModule.makeKeyRemapHandlers(derived, transform)
 	const connection =
 		makeKeyedReconciler(self, parsedPath, true, onAdd, onRemove, nil, nil, ForMapModule.batchedInitialFire(derived))
@@ -2206,6 +2206,7 @@ function TableManager.Destroy<T>(self: TM_Internal<T>)
 	-- Setup No-op Destroy to avoid double-destroying errors
 	const tm = self :: any
 	tm.Destroy = function() end
+	tm.IsDestroyed = function() return true end
 end
 
 --[=[
@@ -2230,9 +2231,12 @@ end
 	TableManager.IsDestroyed(manager) -- safe before AND after manager:Destroy()
 	```
 ]=]
-function TableManager.IsDestroyed(manager: TM_Internal): boolean
+function Static.IsDestroyed(manager: any): boolean
 	return getmetatable(manager) == nil
 end
+-- Also exposed on the instance table so the documented colon alias
+-- `manager:IsDestroyed()` keeps resolving (before Destroy strips the metatable).
+TableManager.IsDestroyed = Static.IsDestroyed
 
 -- Opacity wrapper constructors (see OpaqueRegistry): mark a value (or a
 -- container's direct children) opaque to the diff engine — no clone/freeze/
@@ -2251,7 +2255,7 @@ end
 	value. Useful for large immutable blobs or foreign objects you don't want the
 	diff engine to traverse. See the Opaque Values guide.
 ]=]
-TableManager.Opaque = OpaqueRegistryModule.Opaque
+Static.Opaque = OpaqueRegistryModule.Opaque
 
 --[=[
 	@within TableManager
@@ -2262,7 +2266,7 @@ TableManager.Opaque = OpaqueRegistryModule.Opaque
 	Like [TableManager.Opaque], but registers `value` as opaque in a registry
 	shared by every TableManager rather than just this one.
 ]=]
-TableManager.GlobalOpaque = OpaqueRegistryModule.GlobalOpaque
+Static.GlobalOpaque = OpaqueRegistryModule.GlobalOpaque
 
 --[=[
 	@within TableManager
@@ -2274,7 +2278,7 @@ TableManager.GlobalOpaque = OpaqueRegistryModule.GlobalOpaque
 	child is identity-compared, never cloned/frozen/walked), while the container
 	itself is still diffed normally.
 ]=]
-TableManager.OpaqueChildren = OpaqueRegistryModule.OpaqueChildren
+Static.OpaqueChildren = OpaqueRegistryModule.OpaqueChildren
 
 --[=[
 	@within TableManager
@@ -2285,6 +2289,8 @@ TableManager.OpaqueChildren = OpaqueRegistryModule.OpaqueChildren
 	Like [TableManager.OpaqueChildren], but registers the children as opaque in a
 	registry shared by every TableManager rather than just this one.
 ]=]
-TableManager.GlobalOpaqueChildren = OpaqueRegistryModule.GlobalOpaqueChildren
+Static.GlobalOpaqueChildren = OpaqueRegistryModule.GlobalOpaqueChildren
 
-return TableManager
+export type Static = typeof(Static)
+
+return Static
