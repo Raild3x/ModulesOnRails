@@ -63,31 +63,30 @@ local {formatted_name} = {{}}
 
 return {formatted_name}
 """
-    (src_dir / "init.luau").write_text(content, encoding="utf-8")
+    (src_dir / f"{formatted_name}.luau").write_text(content, encoding="utf-8")
 
 
 def create_init_spec_luau(src_dir: Path, formatted_name: str) -> None:
     today = date.today().strftime("%B %d, %Y")
     content = f"""-- Authors: {AUTHOR}
 -- {today}
---[=[
-    @class {formatted_name}.spec
-    @ignore
-
-    This is a test suite for the {formatted_name} class.
-]=]
+--[[
+    Generic Test Scaffolding for {formatted_name}
+]]
 
 return function(t: tiniest)
-    local {formatted_name} = require(script.Parent)
+    local {formatted_name} = require(./\"{formatted_name}\")
 
+    local FOCUS = t.FOCUS
     local describe = t.describe
+    local context = t.context
     local expect = t.expect
     local test = t.test
 
     
 end
 """
-    (src_dir / "init.spec.luau").write_text(content, encoding="utf-8")
+    (src_dir / f"{formatted_name}.spec.luau").write_text(content, encoding="utf-8")
 
 
 def main() -> int:
@@ -128,16 +127,16 @@ def main() -> int:
     print("Created wally.toml")
 
     create_init_luau(src_dir, formatted_name)
-    print("Created src/init.luau")
+    print(f"Created src/{formatted_name}.luau")
 
     create_init_spec_luau(src_dir, formatted_name)
-    print("Created src/init.spec.luau")
+    print(f"Created src/{formatted_name}.spec.luau")
 
     # Run setup for the new package
-    run_setup = input("Run setup now (wally install + generate types)? (y/n): ").strip().lower()
-    if run_setup == "y":
-        print("Running setup...")
-        run_command([sys.executable, "scripts/setup_package_for_testing.py", folder_name], "Setup failed.")
+    # run_setup = input("Run setup now (wally install + generate types)? (y/n): ").strip().lower()
+    # if run_setup == "y":
+    #     print("Running setup...")
+    #     run_command([sys.executable, "scripts/setup_package_for_testing.py", folder_name], "Setup failed.")
 
     print(f"\nPackage '{formatted_name}' created successfully at {package_dir}")
     return 0
