@@ -11,6 +11,8 @@ See `docs/agents/domain.md` for how the engineering skills consume these files.
 - [lib/dragdrop/CONTEXT.md](lib/dragdrop/CONTEXT.md) — pointer/selection drag-and-drop
   for Roblox GUI: payloads, sources, targets, ghosts, the controller state machine,
   and its two injection seams (transition surface + input environment).
+- [lib/tablemanager/CONTEXT.md](lib/tablemanager/CONTEXT.md) — reactive table-state
+  management: surfaces, fire modes, the fire scheduler, and coalesce windows.
 
 Other packages under `lib/` do not have a `CONTEXT.md` yet; they are created lazily
 (via `/domain-modeling`) when a term or decision actually needs pinning down.
