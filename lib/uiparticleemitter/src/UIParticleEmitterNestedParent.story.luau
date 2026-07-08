@@ -96,7 +96,7 @@ return {
 					emitter:Fire {
 						Amount = amount,
 						SpawnAreaAbsolutePosition = inner.AbsolutePosition + inner.AbsoluteSize / 2,
-						SpawnAreaAbsoluteSize = Vector2.zero,
+						SpawnAreaSize = UDim2.fromOffset(0, 0),
 					}
 				else
 					emitter:Fire { Amount = amount }

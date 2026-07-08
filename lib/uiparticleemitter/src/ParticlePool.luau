@@ -69,6 +69,7 @@ function ParticlePool.Release(self: ParticlePool, instance: GuiObject)
 	end
 
 	instance.Visible = false
+	instance.Position = UDim2.fromScale(-2, -2) -- Shift far off screen
 	if instance:IsA("ImageLabel") then
 		table.insert(self._images, instance)
 	else

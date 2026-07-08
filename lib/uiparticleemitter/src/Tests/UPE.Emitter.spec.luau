@@ -431,6 +431,85 @@ return function(tiniest)
 		end)
 	end)
 
+	describe("MaintainRelativePosition", function()
+		-- The emitter UI is scale-sized (0, 0), so its pivot equals its
+		-- AbsolutePosition; moving UI.Position shifts the pivot by the same
+		-- absolute delta. Steps use dt = 0 so the only thing that can move a
+		-- particle is the emitter-follow translation (physics contributes 0).
+
+		test("live particles follow the emitter when enabled", function()
+			local emitter, _, _, cleanup = setup { MaintainRelativePosition = true }
+			emitter:Fire { Amount = 3 }
+			emitter:Stop()
+
+			emitter.UI.Position = UDim2.fromOffset(100, 100)
+			emitter:_Step(0) -- establish the pivot baseline
+			local pivotBefore = emitter.UI.AbsolutePosition
+			local partBefore = emitter._particles[1].Position
+
+			emitter.UI.Position = UDim2.fromOffset(150, 130)
+			emitter:_Step(0)
+			local delta = emitter.UI.AbsolutePosition - pivotBefore
+			local partAfter = emitter._particles[1].Position
+
+			expect(partAfter.X - partBefore.X).is(delta.X)
+			expect(partAfter.Y - partBefore.Y).is(delta.Y)
+			cleanup()
+		end)
+
+		test("particles stay in screen space when disabled (default)", function()
+			local emitter, _, _, cleanup = setup()
+			emitter:Fire { Amount = 1 }
+			emitter:Stop()
+
+			emitter:_Step(0)
+			local before = emitter._particles[1].Position
+			emitter.UI.Position = UDim2.fromOffset(300, 300)
+			emitter:_Step(0)
+			expect(emitter._particles[1].Position).is(before)
+			cleanup()
+		end)
+
+		test("toggling on mid-flight starts fresh without a stale jump", function()
+			local gui = Instance.new("ScreenGui")
+			gui.Parent = game:GetService("StarterGui")
+			local scope = Fusion.scoped(Fusion)
+			local maintain = scope:Value(false)
+			local emitter = UIParticleEmitter(scope, {
+				Parent = gui,
+				LifeTime = SAFE_LIFETIME,
+				MaintainRelativePosition = maintain,
+			})
+			emitter:Fire { Amount = 1 }
+			emitter:Stop()
+
+			-- While disabled, move the emitter far away; the particle must not move.
+			emitter:_Step(0)
+			local before = emitter._particles[1].Position
+			emitter.UI.Position = UDim2.fromOffset(500, 500)
+			emitter:_Step(0)
+			expect(emitter._particles[1].Position).is(before)
+
+			-- Enabling establishes a fresh baseline at the current pivot: the
+			-- 500px move above must not retroactively jump the particle.
+			maintain:set(true)
+			emitter:_Step(0)
+			expect(emitter._particles[1].Position).is(before)
+
+			-- A subsequent move now shifts the particle.
+			local pivotBefore = emitter.UI.AbsolutePosition
+			emitter.UI.Position = UDim2.fromOffset(560, 540)
+			emitter:_Step(0)
+			local delta = emitter.UI.AbsolutePosition - pivotBefore
+			expect(emitter._particles[1].Position.X - before.X).is(delta.X)
+			expect(emitter._particles[1].Position.Y - before.Y).is(delta.Y)
+
+			emitter:Clear()
+			Fusion.doCleanup(scope)
+			gui:Destroy()
+		end)
+	end)
+
 	describe("Enabled", function()
 		test("constant Enabled = true spawns continuously", function()
 			-- Rate 4 -> exact 0.25s spawn interval (binary-exact), so one

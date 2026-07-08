@@ -115,6 +115,7 @@ function Emitter.new(scope: Types.Scope<any>, props: Types.EmitterProps)
 	end
 	self._timeSinceLastSpawn = 0
 	self._lastInset = 0
+	self._lastEmitterPivot = nil :: Vector2? -- baseline for MaintainRelativePosition
 	self._connection = nil :: RBXScriptConnection?
 	self._poolHandle = nil :: PoolRegistry.Handle?
 	self._destroyed = false -- destruction initiated (no more spawning)
@@ -215,6 +216,23 @@ function Emitter:_Step(dt: number)
 		self._lastInset = inset
 	end
 
+	-- MaintainRelativePosition: rigidly translate the live particle cloud by
+	-- however far the emitter's pivot has moved since last frame, so the cloud
+	-- rides the emitter while world-space physics keeps running.
+	local followDelta: Vector2? = nil
+	if peek(props.MaintainRelativePosition) and self.UI.Parent then
+		local ui = self.UI :: Frame
+		local pivot = ui.AbsolutePosition + ui.AnchorPoint * ui.AbsoluteSize
+		if self._lastEmitterPivot then
+			followDelta = pivot - self._lastEmitterPivot
+		end
+		self._lastEmitterPivot = pivot
+	else
+		-- Disabled or draining (no parent): drop the baseline so re-enabling
+		-- later starts fresh instead of applying a stale jump.
+		self._lastEmitterPivot = nil
+	end
+
 	-- Simulate, render, and reap in one pass (swap-remove keeps this O(n)).
 	const particles = self._particles
 	local i = 1
@@ -227,6 +245,9 @@ function Emitter:_Step(dt: number)
 			particles[i] = particles[last]
 			particles[last] = nil
 		else
+			if followDelta then
+				particle.Position += followDelta
+			end
 			Simulation.ApplyVisuals(particle, inset)
 			i += 1
 		end

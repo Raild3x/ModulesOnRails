@@ -18,6 +18,9 @@
 	  a pool shared by all emitters on the same LayerCollector for high spawn
 	  rates
 	- `MaxParticles` cap (new spawns are dropped at the cap)
+	- `MaintainRelativePosition` makes live particles ride along with the
+	  emitter as it moves, instead of staying where they spawned in screen
+	  space (default off)
 	- Particle management with `:Stop()`, `:Clear()`, and `:GetParticleCount()`
 	- Presets via `UIParticleEmitter.Presets` (e.g. `Presets.Confetti`)
 
