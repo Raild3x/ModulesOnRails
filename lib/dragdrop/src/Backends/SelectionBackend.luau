@@ -11,19 +11,23 @@
 
 	Both gamepad and keyboard flow through here — the only difference is which
 	KeyCodes are used (from Config). Controlled (script-owned) drags are ignored.
+
+	Constructed by the controller with the injected transition `api` and input
+	`env`; selection reads, action binds and input come through `env` so the grab
+	flow can be driven headlessly under test.
 ]]
 
-const ContextActionService = game:GetService("ContextActionService")
-const GuiService = game:GetService("GuiService")
-const UserInputService = game:GetService("UserInputService")
-
 const Janitor = require("../../Janitor")
+const Types = require("../Types")
+
+type TransitionSurface = Types.TransitionSurface
+type Env = Types.Env
 
 const DROP_ACTION = "DragDropSelectionDrop"
 const CANCEL_ACTION = "DragDropSelectionCancel"
 const HIGH_PRIORITY = Enum.ContextActionPriority.High.Value
 
-return function(api)
+return function(api: TransitionSurface, env: Env)
 	local janitor: any = nil
 	local dragJanitor: any = nil -- CAS binds live only during a selection drag
 
@@ -36,7 +40,7 @@ return function(api)
 		if not isSelectionDrag(st) then
 			return
 		end
-		const selected = GuiService.SelectedObject
+		const selected = env.GetSelectedObject()
 		const entry = if selected then api.ResolveTarget(selected) else nil
 		api.UpdateHover(entry)
 	end
@@ -77,13 +81,13 @@ return function(api)
 			cancelKey = api.GetConfig("KeyboardCancelKeyCode")
 		end
 
-		ContextActionService:BindActionAtPriority(DROP_ACTION, onAction, false, HIGH_PRIORITY, dropKey)
+		env.BindAction(DROP_ACTION, onAction, HIGH_PRIORITY, dropKey)
 		if cancelKey then
-			ContextActionService:BindActionAtPriority(CANCEL_ACTION, onAction, false, HIGH_PRIORITY, cancelKey)
+			env.BindAction(CANCEL_ACTION, onAction, HIGH_PRIORITY, cancelKey)
 		end
 		dragJanitor:Add(function()
-			ContextActionService:UnbindAction(DROP_ACTION)
-			ContextActionService:UnbindAction(CANCEL_ACTION)
+			env.UnbindAction(DROP_ACTION)
+			env.UnbindAction(CANCEL_ACTION)
 		end, true)
 
 		onSelectionChanged() -- snap the ghost onto the initially selected slot
@@ -98,7 +102,7 @@ return function(api)
 
 	-- A lift key on a selected source enters grab mode (a menu "Switch" button can
 	-- also call DragDrop.BeginDrag directly).
-	const function onInputBegan(input: InputObject)
+	const function onInputBegan(input: Types.InputLike)
 		if api.GetState().Kind ~= "Idle" then
 			return
 		end
@@ -106,7 +110,7 @@ return function(api)
 		if keyCode ~= api.GetConfig("GamepadLiftKeyCode") and keyCode ~= api.GetConfig("KeyboardLiftKeyCode") then
 			return
 		end
-		const selected = GuiService.SelectedObject
+		const selected = env.GetSelectedObject()
 		if not selected then
 			return
 		end
@@ -123,8 +127,8 @@ return function(api)
 			return
 		end
 		janitor = Janitor.new()
-		janitor:Add(GuiService:GetPropertyChangedSignal("SelectedObject"):Connect(onSelectionChanged))
-		janitor:Add(UserInputService.InputBegan:Connect(onInputBegan))
+		janitor:Add(env.SelectionChanged:Connect(onSelectionChanged))
+		janitor:Add(env.InputBegan:Connect(onInputBegan))
 		janitor:Add(api.DragStarted:Connect(onDragStarted), "Disconnect")
 		janitor:Add(api.DragEnded:Connect(onDragEnded), "Disconnect")
 		janitor:Add(function()

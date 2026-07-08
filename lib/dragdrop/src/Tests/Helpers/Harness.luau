@@ -6,16 +6,55 @@
 	RenderStepped, which errors off the client), no real device input, and a
 	controllable clock and preferred-input class.
 
+	It also exposes the same Env-shaped `InputEnv` to the pointer/selection backends
+	(via StartPointerBackend / StartSelectionBackend), plus simulation helpers
+	(MouseDown/Move/Up, TouchStart/Move/End, Render, SetSelected, PressKey,
+	FireAction). This lets the gesture-translation layer be driven through its own
+	interface — the fake signals — rather than around it. The fake clock (Advance)
+	is the single time authority: it moves the clock AND fires any due Delay timers,
+	so the touch long-press is deterministic.
+
 	Usage:
 		local harness = Harness.new()
-		-- ... register frames, drive drags ...
-		harness:Destroy() -- restores Env/Config and cancels any live drag
+		local pointer = harness:StartPointerBackend()
+		-- ... register frames, simulate input, assert ...
+		harness:Destroy() -- stops backends, restores Env/Config, cancels any drag
 ]]
 
 const Controller = require("../../Controller")
+const PointerBackend = require("../../Backends/PointerBackend")
+const SelectionBackend = require("../../Backends/SelectionBackend")
 
 const Harness = {}
 Harness.__index = Harness
+
+-- A minimal Connectable that satisfies the backends' `env` signals. Fire iterates
+-- a snapshot so a handler disconnecting mid-fire (e.g. backend Stop) is safe.
+const function makeSignal()
+	const handlers: { [(...any) -> ()]: true } = {}
+	return {
+		Connect = function(_self: any, callback: (...any) -> ())
+			handlers[callback] = true
+			const function disconnect()
+				handlers[callback] = nil
+			end
+			-- Both names: backends add pointer connections bare (Janitor defaults to
+			-- Destroy) and the selection signals with an explicit "Disconnect".
+			return { Disconnect = disconnect, Destroy = disconnect }
+		end,
+		Fire = function(_self: any, ...: any)
+			const snapshot = {}
+			for callback in handlers do
+				table.insert(snapshot, callback)
+			end
+			for _, callback in snapshot do
+				if handlers[callback] then
+					callback(...)
+				end
+			end
+		end,
+	}
+end
 
 function Harness.new()
 	const self = setmetatable({}, Harness)
@@ -26,6 +65,19 @@ function Harness.new()
 	self.HitList = {} :: { GuiObject } -- what GuiObjectsAt returns
 	self.Ghosts = {} :: { any }
 	self.LastGhost = nil :: any
+
+	-- Backend input state.
+	self.Pointer = Vector2.zero -- what env.PointerLocation returns (mouse)
+	self.Selected = nil :: Instance? -- what env.GetSelectedObject returns
+	self.Actions = {} :: { [string]: any } -- currently bound CAS actions
+	self.Timers = {} :: { any } -- pending env.Delay callbacks
+	self._backends = {} :: { any } -- backends started via this harness
+
+	self.InputBegan = makeSignal()
+	self.InputChanged = makeSignal()
+	self.InputEnded = makeSignal()
+	self.RenderStepped = makeSignal()
+	self.SelectionChanged = makeSignal()
 
 	const function fakeMount(_params: any): any
 		const ghost = {
@@ -66,8 +118,153 @@ function Harness.new()
 		end,
 	}
 
+	-- The Env handed to backends. Shares the harness's mutable state with the
+	-- controller-side patch above, so both sides agree on clock, hit-list, etc.
+	self.InputEnv = {
+		GuiObjectsAt = function(_absPos: Vector2)
+			return self.HitList
+		end,
+		Clock = function()
+			return self.Clock
+		end,
+		PointerLocation = function()
+			return self.Pointer
+		end,
+		InputBegan = self.InputBegan,
+		InputChanged = self.InputChanged,
+		InputEnded = self.InputEnded,
+		RenderStepped = self.RenderStepped,
+		SelectionChanged = self.SelectionChanged,
+		GetSelectedObject = function(): Instance?
+			return self.Selected
+		end,
+		BindAction = function(name: string, handler: any, priority: number, ...: Enum.KeyCode)
+			self.Actions[name] = { Handler = handler, Priority = priority, Keys = { ... } }
+		end,
+		UnbindAction = function(name: string)
+			self.Actions[name] = nil
+		end,
+		Delay = function(seconds: number, callback: () -> ()): () -> ()
+			const timer = { Due = self.Clock + seconds, Callback = callback, Cancelled = false }
+			table.insert(self.Timers, timer)
+			return function()
+				timer.Cancelled = true
+			end
+		end,
+	}
+
 	return self
 end
+
+--------------------------------------------------------------------------------
+--// Backend construction //--
+--------------------------------------------------------------------------------
+
+function Harness.StartPointerBackend(self: any)
+	const backend = PointerBackend(Controller._api, self.InputEnv)
+	backend.Start()
+	table.insert(self._backends, backend)
+	return backend
+end
+
+function Harness.StartSelectionBackend(self: any)
+	const backend = SelectionBackend(Controller._api, self.InputEnv)
+	backend.Start()
+	table.insert(self._backends, backend)
+	return backend
+end
+
+--------------------------------------------------------------------------------
+--// Pointer simulation //--
+--------------------------------------------------------------------------------
+
+const function pointerInput(userInputType: Enum.UserInputType, pos: Vector2): any
+	return {
+		UserInputType = userInputType,
+		KeyCode = Enum.KeyCode.Unknown,
+		Position = Vector3.new(pos.X, pos.Y, 0),
+	}
+end
+
+-- Press the mouse at `pos`. The pointer location is set to the same point so the
+-- press's start position and subsequent PointerLocation reads agree.
+function Harness.MouseDown(self: any, pos: Vector2)
+	self.Pointer = pos
+	self.InputBegan:Fire(pointerInput(Enum.UserInputType.MouseButton1, pos))
+end
+
+function Harness.MouseMove(self: any, pos: Vector2)
+	self.Pointer = pos
+	self.InputChanged:Fire(pointerInput(Enum.UserInputType.MouseMovement, pos))
+end
+
+function Harness.MouseUp(self: any, pos: Vector2?)
+	if pos then
+		self.Pointer = pos
+	end
+	self.InputEnded:Fire(pointerInput(Enum.UserInputType.MouseButton1, self.Pointer))
+end
+
+-- Touch inputs carry their identity across began/changed/ended, so these return
+-- (and re-use) the same input table. TouchStart returns it; feed it back in.
+function Harness.TouchStart(self: any, pos: Vector2): any
+	const input = pointerInput(Enum.UserInputType.Touch, pos)
+	self.InputBegan:Fire(input)
+	return input
+end
+
+function Harness.TouchMove(self: any, input: any, pos: Vector2)
+	input.Position = Vector3.new(pos.X, pos.Y, 0)
+	self.InputChanged:Fire(input)
+end
+
+function Harness.TouchEnd(self: any, input: any, pos: Vector2?)
+	if pos then
+		input.Position = Vector3.new(pos.X, pos.Y, 0)
+	end
+	self.InputEnded:Fire(input)
+end
+
+-- Fire one RenderStepped frame (drives the pointer ghost follow + re-hover).
+function Harness.Render(self: any, deltaTime: number?)
+	self.RenderStepped:Fire(deltaTime or 1 / 60)
+end
+
+--------------------------------------------------------------------------------
+--// Selection simulation //--
+--------------------------------------------------------------------------------
+
+-- Set GuiService.SelectedObject and fire the change (nil clears it).
+function Harness.SetSelected(self: any, instance: Instance?)
+	self.Selected = instance
+	self.SelectionChanged:Fire()
+end
+
+-- Fire a key press (grab-mode lift). Only KeyCode is read by the selection backend.
+function Harness.PressKey(self: any, keyCode: Enum.KeyCode)
+	self.InputBegan:Fire {
+		UserInputType = Enum.UserInputType.Keyboard,
+		KeyCode = keyCode,
+		Position = Vector3.zero,
+	}
+end
+
+-- Invoke a bound ContextAction as CAS would; returns its ContextActionResult.
+function Harness.FireAction(self: any, name: string, inputState: Enum.UserInputState?): any
+	const action = self.Actions[name]
+	if not action then
+		error(`No action bound: {name}`)
+	end
+	return action.Handler(name, inputState or Enum.UserInputState.Begin, {} :: any)
+end
+
+function Harness.IsActionBound(self: any, name: string): boolean
+	return self.Actions[name] ~= nil
+end
+
+--------------------------------------------------------------------------------
+--// Clock / preferred-input //--
+--------------------------------------------------------------------------------
 
 -- Simulate a preferred-input class switch: updates the reported class and fires
 -- every live class observer (iterating a snapshot so cancel-driven disconnects
@@ -85,12 +282,27 @@ function Harness.SwitchInput(self: any, newClass: string)
 	end
 end
 
--- Advance the fake clock (seconds).
+-- Advance the fake clock (seconds) and fire any Delay timers that come due. This
+-- is the single time authority: clock and long-press timers move together.
 function Harness.Advance(self: any, seconds: number)
 	self.Clock += seconds
+	local index = 1
+	while index <= #self.Timers do
+		const timer = self.Timers[index]
+		if not timer.Cancelled and timer.Due <= self.Clock then
+			table.remove(self.Timers, index)
+			timer.Callback()
+		else
+			index += 1
+		end
+	end
 end
 
 function Harness.Destroy(self: any)
+	for _, backend in self._backends do
+		backend.Stop()
+	end
+	self._backends = {}
 	Controller.Cancel()
 	if Controller.GetInputMode() ~= "Automatic" then
 		Controller.SetInputMode("Automatic")

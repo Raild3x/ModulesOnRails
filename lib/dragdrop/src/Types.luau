@@ -198,4 +198,81 @@ export type GhostHandle = {
 	Cleanup: () -> (),
 }
 
+--// Backend seam types //--
+
+-- The subset of an InputObject that the backends actually read. Real Roblox
+-- InputObjects satisfy this structurally; the test harness supplies plain tables
+-- of the same shape. Position is in the same space InputObject.Position uses (the
+-- backends pass it to InputUtil.InputPosition, which is pure over this field).
+export type InputLike = {
+	UserInputType: Enum.UserInputType,
+	KeyCode: Enum.KeyCode,
+	Position: Vector3,
+}
+
+-- A disconnectable handle (RBXScriptConnection, or the harness's fake).
+export type Connection = { Disconnect: (Connection) -> () }
+
+-- Anything a backend can `:Connect` to. Real Roblox signals and the harness's
+-- fake signals both satisfy it; the callback args are left open because different
+-- signals fire different shapes and the backends read them positionally.
+export type Signalish = { Connect: (self: any, callback: (...any) -> ()) -> Connection }
+
+-- The environment a backend translates input from. The real adapter (built in the
+-- controller) wires these to UserInputService / GuiService / ContextActionService /
+-- task.delay; the test harness installs fakes so gesture logic runs headlessly.
+-- This is the seam that makes the input-translation layer testable through its
+-- interface rather than around it.
+export type Env = {
+	-- Rendering + preferred-input + clock (shared with the controller's own reads).
+	MountGhost: (params: any) -> GhostHandle,
+	ObserveInputClass: (callback: (newClass: string) -> ()) -> (() -> ()),
+	CurrentInputClass: () -> string,
+	GuiObjectsAt: (absPos: Vector2) -> { GuiObject },
+	Clock: () -> number,
+	-- Pointer input (mouse + touch).
+	InputBegan: Signalish,
+	InputChanged: Signalish,
+	InputEnded: Signalish,
+	RenderStepped: Signalish,
+	PointerLocation: () -> Vector2,
+	-- Selection input (gamepad + keyboard grab mode).
+	SelectionChanged: Signalish,
+	GetSelectedObject: () -> Instance?,
+	BindAction: (
+		name: string,
+		handler: (name: string, inputState: Enum.UserInputState, input: InputObject) -> Enum.ContextActionResult,
+		priority: number,
+		...Enum.KeyCode
+	) -> (),
+	UnbindAction: (name: string) -> (),
+	-- Deferred timing for the touch long-press. Returns a canceller. The harness
+	-- drives these off its controllable clock so long-press timing is deterministic.
+	Delay: (seconds: number, callback: () -> ()) -> (() -> ()),
+}
+
+-- The transition surface the controller injects into its backends (and exposes to
+-- specs as `Controller._api`). Backends never touch the controller's state table
+-- directly; they call these transitions and read a state snapshot via GetState.
+export type TransitionSurface = {
+	Press: (entry: SourceEntry?, absPos: Vector2, inputObject: InputLike?, device: Device) -> (),
+	Lift: () -> (),
+	ReleaseAsClick: () -> (),
+	AbortPending: () -> (),
+	UpdateHover: (rawEntry: TargetEntry?) -> (),
+	Drop: () -> boolean,
+	CancelDrag: () -> (),
+	-- The live drag state. Still untyped this pass (narrowing it is its own change);
+	-- backends read Kind/Device/Controlled/InputObject/StartPos/Ghost off it.
+	GetState: () -> any,
+	ResolveSource: (instance: Instance?) -> SourceEntry?,
+	ResolveTarget: (instance: Instance?) -> TargetEntry?,
+	HitTestTarget: (absPos: Vector2) -> TargetEntry?,
+	BeginSelectionDrag: (instance: GuiObject) -> DragHandle?,
+	IsDragging: () -> boolean,
+	GetConfig: (key: string) -> any,
+	DragStarted: Signalish,
+	DragEnded: Signalish,
+}
+
 return {}

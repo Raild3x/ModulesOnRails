@@ -24,6 +24,7 @@
 const RunService = game:GetService("RunService")
 const UserInputService = game:GetService("UserInputService")
 const GuiService = game:GetService("GuiService")
+const ContextActionService = game:GetService("ContextActionService")
 
 const Signal = require("../Signal")
 const Janitor = require("../Janitor")
@@ -41,6 +42,7 @@ type TargetEntry = Types.TargetEntry
 type TargetDescriptor = Types.TargetDescriptor
 type DragHandle = Types.DragHandle
 type InputMode = Types.InputMode
+type InputLike = Types.InputLike
 
 -- Window after a drag ends during which a stray Activated should be swallowed
 -- (see ConsumeActivation).
@@ -142,16 +144,44 @@ const DragEnded = Signal.new()
 --// Test seam //--
 --------------------------------------------------------------------------------
 
--- The controller reads its environment through this table so specs can drive the
--- machine headlessly (no real rendering / device input). `_setEnv` patches it.
-const DefaultEnv = {
+-- The controller and its backends read their environment through this one table
+-- so specs can drive the machine headlessly (no real rendering / device input).
+-- `_setEnv` patches it in place and the same table is handed to the backends, so
+-- there is only ever one live environment identity. See Types.Env for the shape.
+const DefaultEnv: Types.Env = {
+	-- Rendering + preferred-input + clock.
 	MountGhost = GhostLayer.mount,
 	ObserveInputClass = InputUtil.ObserveInputClass,
 	CurrentInputClass = InputUtil.CurrentInputClass,
 	GuiObjectsAt = InputUtil.GuiObjectsAt,
 	Clock = os.clock,
+	-- Pointer input.
+	InputBegan = UserInputService.InputBegan :: any,
+	InputChanged = UserInputService.InputChanged :: any,
+	InputEnded = UserInputService.InputEnded :: any,
+	RenderStepped = RunService.RenderStepped :: any,
+	PointerLocation = InputUtil.PointerLocation,
+	-- Selection input.
+	SelectionChanged = GuiService:GetPropertyChangedSignal("SelectedObject") :: any,
+	GetSelectedObject = function(): Instance?
+		return GuiService.SelectedObject
+	end,
+	BindAction = function(name, handler, priority, ...)
+		-- createTouchButton is always false: grab-mode drop/cancel never surface a
+		-- mobile button (touch uses the pointer backend, not selection).
+		ContextActionService:BindActionAtPriority(name, handler, false, priority, ...)
+	end,
+	UnbindAction = function(name: string)
+		ContextActionService:UnbindAction(name)
+	end,
+	Delay = function(seconds: number, callback: () -> ()): () -> ()
+		const thread = task.delay(seconds, callback)
+		return function()
+			task.cancel(thread)
+		end
+	end,
 }
-local Env = table.clone(DefaultEnv)
+local Env: Types.Env = table.clone(DefaultEnv)
 
 --------------------------------------------------------------------------------
 --// Registries + backend lifecycle //--
@@ -361,7 +391,7 @@ type EnterParams = {
 	Payload: Payload,
 	Device: Device,
 	InputClass: string,
-	InputObject: InputObject?,
+	InputObject: InputLike?,
 	GrabPoint: Vector2,
 	Controlled: boolean,
 	GhostStyle: "Follow" | "Snap",
@@ -445,7 +475,7 @@ const function enterDragging(params: EnterParams)
 	end
 end
 
-const function press(entry: SourceEntry?, absPos: Vector2, inputObject: InputObject?, device: Device)
+const function press(entry: SourceEntry?, absPos: Vector2, inputObject: InputLike?, device: Device)
 	if state.Kind ~= "Idle" or not entry then
 		return
 	end
@@ -782,7 +812,7 @@ end
 --------------------------------------------------------------------------------
 
 -- Injected transition surface, shared with backends and exposed for specs.
-const api = {
+const api: Types.TransitionSurface = {
 	Press = press,
 	Lift = lift,
 	ReleaseAsClick = releaseAsClick,
@@ -805,20 +835,25 @@ const api = {
 	end,
 	IsDragging = Controller.IsDragging,
 	GetConfig = getConfig,
-	DragStarted = DragStarted,
-	DragEnded = DragEnded,
+	DragStarted = DragStarted :: any,
+	DragEnded = DragEnded :: any,
 }
 
 Controller._api = api
 
 function Controller._setEnv(patch: { [string]: any })
 	for key, value in patch do
-		Env[key] = value
+		(Env :: any)[key] = value
 	end
 end
 
 function Controller._resetEnv()
-	Env = table.clone(DefaultEnv)
+	-- Refill in place rather than reassigning: the backends captured this exact
+	-- table at construction, so the identity must stay stable.
+	table.clear(Env :: any)
+	for key, value in DefaultEnv :: any do
+		(Env :: any)[key] = value
+	end
 end
 
 --------------------------------------------------------------------------------
@@ -826,8 +861,8 @@ end
 --------------------------------------------------------------------------------
 
 if RunService:IsClient() then
-	table.insert(backends, PointerBackend(api))
-	table.insert(backends, SelectionBackend(api))
+	table.insert(backends, PointerBackend(api, Env))
+	table.insert(backends, SelectionBackend(api, Env))
 end
 
 return Controller

@@ -6,7 +6,8 @@
 	uses long-press-to-lift with a movement slop, so a swipe that starts on a slot
 	scrolls its ScrollingFrame instead of lifting.
 
-	Constructed by the controller with the injected transition `api`; returns a
+	Constructed by the controller with the injected transition `api` and input
+	`env` (real device input in production, fakes under test); returns a
 	{ Start, Stop } backend. Controlled (script-owned) drags are ignored here — the
 	handle drives them.
 
@@ -14,13 +15,15 @@
 	a panel's transparent hit-area button and arrive "processed".
 ]]
 
-const RunService = game:GetService("RunService")
-const UserInputService = game:GetService("UserInputService")
-
 const Janitor = require("../../Janitor")
 const InputUtil = require("../InputUtil")
+const Types = require("../Types")
 
-return function(api)
+type TransitionSurface = Types.TransitionSurface
+type Env = Types.Env
+type InputLike = Types.InputLike
+
+return function(api: TransitionSurface, env: Env)
 	local janitor: any = nil
 	local longPressGeneration = 0
 	-- Last known canonical position of the active touch's InputObject (#2): touch
@@ -29,7 +32,7 @@ return function(api)
 	local lastRenderPos: Vector2? = nil
 
 	const function hitTestSource(absPos: Vector2)
-		for _, gui in InputUtil.GuiObjectsAt(absPos) do
+		for _, gui in env.GuiObjectsAt(absPos) do
 			const entry = api.ResolveSource(gui)
 			if entry then
 				return entry
@@ -39,7 +42,7 @@ return function(api)
 	end
 
 	const function hitTestTarget(absPos: Vector2)
-		for _, gui in InputUtil.GuiObjectsAt(absPos) do
+		for _, gui in env.GuiObjectsAt(absPos) do
 			const entry = api.ResolveTarget(gui)
 			if entry then
 				return entry
@@ -53,14 +56,14 @@ return function(api)
 		if st.Device == "Touch" then
 			return touchDragPos or InputUtil.InputPosition(st.InputObject)
 		end
-		return InputUtil.PointerLocation()
+		return env.PointerLocation()
 	end
 
-	const function armLongPress(input: InputObject)
+	const function armLongPress(input: InputLike)
 		longPressGeneration += 1
 		const myGeneration = longPressGeneration
 		const holdSeconds = api.GetConfig("LongPressSeconds")
-		task.delay(holdSeconds, function()
+		env.Delay(holdSeconds, function()
 			const st = api.GetState()
 			if st.Kind == "Pending" and st.InputObject == input and myGeneration == longPressGeneration then
 				api.Lift()
@@ -68,7 +71,7 @@ return function(api)
 		end)
 	end
 
-	const function onInputBegan(input: InputObject)
+	const function onInputBegan(input: InputLike)
 		if
 			input.UserInputType ~= Enum.UserInputType.MouseButton1
 			and input.UserInputType ~= Enum.UserInputType.Touch
@@ -95,7 +98,7 @@ return function(api)
 		end
 	end
 
-	const function onInputChanged(input: InputObject)
+	const function onInputChanged(input: InputLike)
 		const st = api.GetState()
 
 		-- Keep the active touch position current for follow/drop while dragging.
@@ -111,7 +114,7 @@ return function(api)
 			if input.UserInputType ~= Enum.UserInputType.MouseMovement then
 				return
 			end
-			const absPos = InputUtil.PointerLocation()
+			const absPos = env.PointerLocation()
 			if (absPos - st.StartPos).Magnitude > api.GetConfig("DragThresholdPx") then
 				api.Lift()
 			end
@@ -129,14 +132,14 @@ return function(api)
 		end
 	end
 
-	const function inputMatchesGesture(st: any, input: InputObject): boolean
+	const function inputMatchesGesture(st: any, input: InputLike): boolean
 		if st.Device == "Mouse" then
 			return input.UserInputType == Enum.UserInputType.MouseButton1
 		end
 		return input == st.InputObject
 	end
 
-	const function onInputEnded(input: InputObject)
+	const function onInputEnded(input: InputLike)
 		const st = api.GetState()
 		if st.Kind == "Pending" then
 			if inputMatchesGesture(st, input) then
@@ -175,10 +178,10 @@ return function(api)
 			return
 		end
 		janitor = Janitor.new()
-		janitor:Add(UserInputService.InputBegan:Connect(onInputBegan))
-		janitor:Add(UserInputService.InputChanged:Connect(onInputChanged))
-		janitor:Add(UserInputService.InputEnded:Connect(onInputEnded))
-		janitor:Add(RunService.RenderStepped:Connect(onRender))
+		janitor:Add(env.InputBegan:Connect(onInputBegan))
+		janitor:Add(env.InputChanged:Connect(onInputChanged))
+		janitor:Add(env.InputEnded:Connect(onInputEnded))
+		janitor:Add(env.RenderStepped:Connect(onRender))
 	end
 
 	function backend.Stop()

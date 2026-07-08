@@ -74,7 +74,8 @@ end
 
 -- An InputObject's position in canonical space. Mouse/touch `InputObject.Position`
 -- is already inset-relative, so it is returned unchanged (unlike GetMouseLocation).
-function InputUtil.InputPosition(input: InputObject): Vector2
+-- Typed to the one field read so a structurally-equal test fake also satisfies it.
+function InputUtil.InputPosition(input: { Position: Vector3 }): Vector2
 	return Vector2.new(input.Position.X, input.Position.Y)
 end
 
