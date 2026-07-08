@@ -24,37 +24,10 @@
 const Controller = require("../../Controller")
 const PointerBackend = require("../../Backends/PointerBackend")
 const SelectionBackend = require("../../Backends/SelectionBackend")
+const Signal = require("../../../Signal")
 
 const Harness = {}
 Harness.__index = Harness
-
--- A minimal Connectable that satisfies the backends' `env` signals. Fire iterates
--- a snapshot so a handler disconnecting mid-fire (e.g. backend Stop) is safe.
-const function makeSignal()
-	const handlers: { [(...any) -> ()]: true } = {}
-	return {
-		Connect = function(_self: any, callback: (...any) -> ())
-			handlers[callback] = true
-			const function disconnect()
-				handlers[callback] = nil
-			end
-			-- Both names: backends add pointer connections bare (Janitor defaults to
-			-- Destroy) and the selection signals with an explicit "Disconnect".
-			return { Disconnect = disconnect, Destroy = disconnect }
-		end,
-		Fire = function(_self: any, ...: any)
-			const snapshot = {}
-			for callback in handlers do
-				table.insert(snapshot, callback)
-			end
-			for _, callback in snapshot do
-				if handlers[callback] then
-					callback(...)
-				end
-			end
-		end,
-	}
-end
 
 function Harness.new()
 	const self = setmetatable({}, Harness)
@@ -73,11 +46,14 @@ function Harness.new()
 	self.Timers = {} :: { any } -- pending env.Delay callbacks
 	self._backends = {} :: { any } -- backends started via this harness
 
-	self.InputBegan = makeSignal()
-	self.InputChanged = makeSignal()
-	self.InputEnded = makeSignal()
-	self.RenderStepped = makeSignal()
-	self.SelectionChanged = makeSignal()
+	-- Fake input signals (the `Signal` package, same as production uses). Its
+	-- connections carry Disconnect + Destroy, so backend janitors clean them up,
+	-- and Fire runs handlers synchronously — no bespoke signal to maintain.
+	self.InputBegan = Signal.new()
+	self.InputChanged = Signal.new()
+	self.InputEnded = Signal.new()
+	self.RenderStepped = Signal.new()
+	self.SelectionChanged = Signal.new()
 
 	const function fakeMount(_params: any): any
 		const ghost = {
