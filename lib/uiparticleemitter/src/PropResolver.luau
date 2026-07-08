@@ -23,13 +23,13 @@ PropResolver.Defaults = {
 	Color3 = Color3.new(1, 1, 1),
 	Velocity = Vector2.zero,
 	Transparency = 0,
-	LifeTime = NumberRange.new(2, 4),
+	LifeTime = NumberRange.new(1, 1.5),
 	Rotation = 0,
 	RotationSpeed = 0,
 	Rate = 5,
 	Drag = 0.95,
 	Gravity = 500,
-	MaxParticles = 1000,
+	MaxParticles = 500,
 }
 
 --[[

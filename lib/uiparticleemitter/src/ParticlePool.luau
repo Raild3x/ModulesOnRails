@@ -1,9 +1,13 @@
 -- Authors: Logan Hunt (Raildex)
 -- July 06, 2026
 --[[
-	Per-emitter GuiObject pool. Reuses Frame/ImageLabel instances instead of
+	GuiObject pool. Reuses Frame/ImageLabel instances instead of
 	Instance.new/Destroy per particle. Released instances stay parented to the
 	particles folder with Visible = false to avoid reparent churn.
+
+	One pool is shared by every emitter on a given LayerCollector (see
+	PoolRegistry), so an instance released by one emitter can be re-acquired by
+	another in place.
 ]]
 
 local ParticlePool = {}

@@ -47,6 +47,7 @@ export type EmitterProps = {
 
 	MaxParticles: UsedAs<number>?,
 	CleanupParticlesImmediately: UsedAs<boolean>?,
+	MaintainRelativePosition: UsedAs<boolean>?,
 	Seed: number?,
 }
 

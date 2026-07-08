@@ -2,7 +2,11 @@
 -- July 06, 2026
 --[[
 	The UIParticleEmitter Fusion component. Owns the spawn-area frame, the
-	per-emitter particles folder, the particle list/pool, and the update loop.
+	particle list, and the update loop. The particles folder and instance pool
+	are not owned per-emitter: they are shared across every emitter on the same
+	LayerCollector via PoolRegistry, so idle instances released by one emitter
+	can be reused by another. The emitter holds a pool handle for as long as it
+	has particles to render.
 
 	Lifecycle:
 	- The update loop runs only while there are live particles or the emitter
@@ -20,7 +24,7 @@ local RunService = game:GetService("RunService")
 
 --// Imports //--
 local Fusion = require("../Fusion")
-local ParticlePool = require("./ParticlePool")
+local PoolRegistry = require("./PoolRegistry")
 local PropResolver = require("./PropResolver")
 local SequenceUtil = require("./SequenceUtil")
 local Simulation = require("./Simulation")
@@ -34,8 +38,6 @@ local Defaults = PropResolver.Defaults
 -- emitter still works (and is testable) in plugin/server contexts.
 local STEP_SIGNAL: RBXScriptSignal = if RunService:IsClient() then RunService.RenderStepped else RunService.Heartbeat
 
-local PARTICLES_FOLDER_NAME = "UIParticles"
-
 local Emitter = {}
 Emitter.__index = Emitter
 
@@ -48,7 +50,13 @@ local function resolveUDim2(value: UDim2, containerSize: Vector2): (number, numb
 end
 
 -- Computes the absolute spawn rectangle. Fire() overrides win over the UI
--- frame's own geometry.
+-- frame's own geometry. Overridden UDim2 fields (SpawnAreaPosition/Size) are
+-- explicitly authored as fractions of the LayerCollector and are resolved
+-- against it; a field left un-overridden falls back to the UI's own
+-- Absolute* properties directly rather than re-resolving ui.Position/ui.Size
+-- against the LayerCollector -- those UDim2s are relative to ui.Parent, which
+-- may be nested arbitrarily deep under the LayerCollector and have a
+-- completely different size.
 local function computeSpawnArea(
 	ui: Frame,
 	layerCollector: LayerCollector,
@@ -68,21 +76,28 @@ local function computeSpawnArea(
 
 	local layerCollectorSize = layerCollector.AbsoluteSize
 
-	local sizeX, sizeY = resolveUDim2(area.SpawnAreaSize or ui.Size, layerCollectorSize)
-	local containerSize = Vector2.new(sizeX, sizeY)
-
-	local posX: number, posY: number
-	if area.SpawnAreaAbsolutePosition then
-		posX = area.SpawnAreaAbsolutePosition.X
-		posY = area.SpawnAreaAbsolutePosition.Y
+	local containerSize: Vector2
+	if area.SpawnAreaSize then
+		local sizeX, sizeY = resolveUDim2(area.SpawnAreaSize, layerCollectorSize)
+		containerSize = Vector2.new(sizeX, sizeY)
 	else
-		posX, posY = resolveUDim2(area.SpawnAreaPosition or ui.Position, layerCollectorSize)
+		containerSize = ui.AbsoluteSize
+	end
+
+	-- Where the anchor point sits in absolute space, independent of
+	-- containerSize (which may itself be overridden to a different size).
+	local anchorPos: Vector2
+	if area.SpawnAreaAbsolutePosition then
+		anchorPos = area.SpawnAreaAbsolutePosition
+	elseif area.SpawnAreaPosition then
+		local posX, posY = resolveUDim2(area.SpawnAreaPosition, layerCollectorSize)
+		anchorPos = Vector2.new(posX, posY)
+	else
+		anchorPos = ui.AbsolutePosition + ui.AnchorPoint * ui.AbsoluteSize
 	end
 
 	local anchor = area.SpawnAreaAnchorPoint or ui.AnchorPoint
-	local containerPos = Vector2.new(posX - anchor.X * containerSize.X, posY - anchor.Y * containerSize.Y)
-
-	return containerPos, containerSize
+	return anchorPos - anchor * containerSize, containerSize
 end
 
 --------------------------------------------------------------------------------
@@ -95,13 +110,13 @@ function Emitter.new(scope: Types.Scope<any>, props: Types.EmitterProps)
 	self._props = props
 	self._particles = {} :: { Types.Particle }
 	self._rng = if props.Seed then Random.new(props.Seed) else Random.new()
-	self._pool = ParticlePool.new(function()
+	self._maxSizeGetter = function()
 		return peek(props.MaxParticles) or Defaults.MaxParticles
-	end)
+	end
 	self._timeSinceLastSpawn = 0
 	self._lastInset = 0
 	self._connection = nil :: RBXScriptConnection?
-	self._folder = nil :: Folder?
+	self._poolHandle = nil :: PoolRegistry.Handle?
 	self._destroyed = false -- destruction initiated (no more spawning)
 	self._dead = false -- destruction finished (folder gone, loop stopped)
 	self._warnedNoTarget = false
@@ -187,10 +202,14 @@ function Emitter:_Step(dt: number)
 	}
 
 	-- GUI inset compensation: prefer the (possibly destroyed) UI's ancestor,
-	-- fall back to the particles folder's during draining.
+	-- fall back to the shared pool handle's LayerCollector during draining.
 	local inset = self._lastInset
-	const host: Instance? = if self.UI.Parent then self.UI else self._folder
-	const layerCollector = host and host:FindFirstAncestorWhichIsA("LayerCollector")
+	local layerCollector: LayerCollector? = nil
+	if self.UI.Parent then
+		layerCollector = self.UI:FindFirstAncestorWhichIsA("LayerCollector")
+	elseif self._poolHandle then
+		layerCollector = self._poolHandle.layerCollector
+	end
 	if layerCollector then
 		inset = layerCollector.AbsolutePosition.Y
 		self._lastInset = inset
@@ -203,7 +222,7 @@ function Emitter:_Step(dt: number)
 		local particle = particles[i]
 		Simulation.Step(particle, scaledDt, env)
 		if particle.LifeTime <= 0 then
-			self._pool:Release(particle.Instance)
+			(self._poolHandle :: PoolRegistry.Handle).pool:Release(particle.Instance)
 			local last = #particles
 			particles[i] = particles[last]
 			particles[last] = nil
@@ -248,6 +267,28 @@ function Emitter:_WarnOnce(reason: string)
 	end
 end
 
+-- Returns the shared pool handle for `layerCollector`, acquiring one on first
+-- use. If the emitter has migrated to a different LayerCollector, its live
+-- particles are moved into the new shared folder before the old handle is
+-- released (which may tear down the old shared folder/pool).
+function Emitter:_EnsurePoolHandle(layerCollector: LayerCollector): PoolRegistry.Handle
+	local old = self._poolHandle
+	if old and old.layerCollector == layerCollector then
+		return old
+	end
+
+	local handle = PoolRegistry.Acquire(layerCollector, self._maxSizeGetter)
+	self._poolHandle = handle
+	if old then
+		local folder = PoolRegistry.GetFolder(handle)
+		for _, particle in self._particles do
+			particle.Instance.Parent = folder
+		end
+		PoolRegistry.Release(old)
+	end
+	return handle
+end
+
 function Emitter:_SpawnOne(params: Types.SpawnParams, area: Types.SpawnAreaOverrides?)
 	local props = self._props
 	if params.LifeTime <= 0 then
@@ -272,17 +313,10 @@ function Emitter:_SpawnOne(params: Types.SpawnParams, area: Types.SpawnAreaOverr
 	local inset = layerCollector.AbsolutePosition.Y
 	self._lastInset = inset
 
-	-- Per-emitter particles folder, created lazily and reparented if the
-	-- emitter moved to a different LayerCollector.
-	local folder = self._folder
-	if not folder or folder.Parent == nil then
-		folder = Instance.new("Folder")
-		folder.Name = PARTICLES_FOLDER_NAME
-		folder.Parent = layerCollector
-		self._folder = folder
-	elseif folder.Parent ~= layerCollector then
-		folder.Parent = layerCollector
-	end
+	-- Shared per-LayerCollector particles folder + pool, acquired lazily and
+	-- re-acquired if the emitter moved to a different LayerCollector.
+	local handle = self:_EnsurePoolHandle(layerCollector)
+	local folder = PoolRegistry.GetFolder(handle)
 
 	local containerPos, containerSize = computeSpawnArea(ui, layerCollector, area)
 
@@ -320,7 +354,7 @@ function Emitter:_SpawnOne(params: Types.SpawnParams, area: Types.SpawnAreaOverr
 	end
 
 	local isImage = params.Image ~= nil
-	local instance = self._pool:Acquire(isImage)
+	local instance = handle.pool:Acquire(isImage)
 	local initialSize = baseSize * initialScale
 	instance.Size = UDim2.fromOffset(initialSize.X, initialSize.Y)
 	instance.Rotation = params.Rotation
@@ -374,8 +408,6 @@ function Emitter:_OnDestroyed()
 		table.clear(self._particles)
 	end
 
-	self._pool:Destroy()
-
 	if #self._particles == 0 then
 		self:_FinishDestroy()
 	else
@@ -391,9 +423,11 @@ function Emitter:_FinishDestroy()
 	end
 	self._dead = true
 	self:_Disconnect()
-	if self._folder then
-		self._folder:Destroy()
-		self._folder = nil
+	-- Drop our share of the pool; the registry tears down the shared folder
+	-- and pool once the last emitter on the LayerCollector releases.
+	if self._poolHandle then
+		PoolRegistry.Release(self._poolHandle)
+		self._poolHandle = nil
 	end
 end
 
@@ -449,8 +483,13 @@ end
 	the pool while the emitter is alive).
 ]=]
 function Emitter:Clear()
+	local handle = self._poolHandle
 	for _, particle in self._particles do
-		self._pool:Release(particle.Instance)
+		if handle then
+			handle.pool:Release(particle.Instance)
+		else
+			particle.Instance:Destroy()
+		end
 	end
 	table.clear(self._particles)
 	if self._destroyed then

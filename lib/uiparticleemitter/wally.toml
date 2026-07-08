@@ -1,6 +1,6 @@
 [package]
 name = "raild3x/uiparticleemitter"
-description = "FusionComponent for emitting 2d images"
+description = "FusionComponent for emitting 2D images"
 authors = ["Logan Hunt (Raildex)"]
 version = "0.1.0"
 license = "MIT"

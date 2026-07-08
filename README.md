@@ -21,7 +21,7 @@ ModulesOnRails is a collection of Wally packages to streamline Roblox developmen
 | [T](https://raild3x.github.io/ModulesOnRails/api/T) | `T = "raild3x/t@1.1.0"` | A runtime typechecker for Luau/Roblox |
 | [TableManager](https://raild3x.github.io/ModulesOnRails/api/TableManager) | `TableManager = "raild3x/tablemanager@1.0.2"` | A Luau library for managing tables. |
 | [TableReplicator](https://raild3x.github.io/ModulesOnRails/api/TableReplicator) | `TableReplicator = "raild3x/tablereplicator@1.0.1"` | Replicates a TableManager instance from server to client with minimal effort. |
-| [UIParticleEmitter](https://raild3x.github.io/ModulesOnRails/api/UIParticleEmitter) | `UIParticleEmitter = "raild3x/uiparticleemitter@0.1.0"` | FusionComponent for emitting 2d images |
+| [UIParticleEmitter](https://raild3x.github.io/ModulesOnRails/api/UIParticleEmitter) | `UIParticleEmitter = "raild3x/uiparticleemitter@0.1.0"` | FusionComponent for emitting 2D images |
 
 
 ---

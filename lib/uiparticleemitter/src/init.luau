@@ -15,7 +15,8 @@
 	  color, and size over a particle's lifetime (keypoint envelopes are
 	  ignored; values interpolate linearly between keypoints)
 	- Solid color (Frame) or image (ImageLabel) particles, recycled through
-	  an internal pool for high spawn rates
+	  a pool shared by all emitters on the same LayerCollector for high spawn
+	  rates
 	- `MaxParticles` cap (new spawns are dropped at the cap)
 	- Particle management with `:Stop()`, `:Clear()`, and `:GetParticleCount()`
 	- Presets via `UIParticleEmitter.Presets` (e.g. `Presets.Confetti`)

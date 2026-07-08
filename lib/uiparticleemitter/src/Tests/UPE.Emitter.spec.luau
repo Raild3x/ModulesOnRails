@@ -145,6 +145,82 @@ return function(tiniest)
 		end)
 	end)
 
+	describe("nested parent spawn area (regression)", function()
+		-- The emitter's UI is parented a level below a Frame with a fixed
+		-- (offset-based) size, so its AbsoluteSize/AbsolutePosition differ
+		-- from the ScreenGui's own -- exposing any fallback path that mixes
+		-- ui.Size/ui.Position up with the LayerCollector's AbsoluteSize.
+		local function setupNested(sizeScale: Vector2)
+			local gui = Instance.new("ScreenGui")
+			gui.Parent = game:GetService("StarterGui")
+
+			local container = Instance.new("Frame")
+			container.Size = UDim2.fromOffset(400, 300)
+			container.BackgroundTransparency = 1
+			container.Parent = gui
+
+			local scope = Fusion.scoped(Fusion)
+			local emitter = UIParticleEmitter(scope, {
+				Parent = container,
+				LifeTime = SAFE_LIFETIME,
+				SpawnAreaAnchorPoint = Vector2.new(0.5, 0.5),
+				SpawnAreaPosition = UDim2.fromScale(0.5, 0.5),
+				SpawnAreaSize = UDim2.fromScale(sizeScale.X, sizeScale.Y),
+			})
+
+			local function cleanup()
+				emitter:Clear()
+				Fusion.doCleanup(scope)
+				gui:Destroy()
+			end
+			return emitter, cleanup
+		end
+
+		-- Bounds check plus a spread check: a buggy fallback that collapses
+		-- containerSize to (0, 0) would put every particle at exactly
+		-- `center`, which a bounds-only check wouldn't catch.
+		local function assertParticlesWithin(emitter, center: Vector2, size: Vector2)
+			local half = size / 2
+			local first = emitter._particles[1].Position
+			local allSame = true
+			for _, particle in emitter._particles do
+				local pos = particle.Position
+				expect(pos.X >= center.X - half.X - 0.01).is_true()
+				expect(pos.X <= center.X + half.X + 0.01).is_true()
+				expect(pos.Y >= center.Y - half.Y - 0.01).is_true()
+				expect(pos.Y <= center.Y + half.Y + 0.01).is_true()
+				if pos ~= first then
+					allSame = false
+				end
+			end
+			expect(allSame).never_is_true()
+		end
+
+		test("size falls back to the UI's own AbsoluteSize when only Position is overridden", function()
+			local emitter, cleanup = setupNested(Vector2.new(0.5, 0.5))
+			expect(emitter.UI.AbsoluteSize).is(Vector2.new(200, 150))
+
+			emitter:Fire { Amount = 20, SpawnAreaAbsolutePosition = Vector2.new(5000, 5000) }
+			emitter:Stop()
+			expect(emitter:GetParticleCount()).is(20)
+
+			assertParticlesWithin(emitter, Vector2.new(5000, 5000), Vector2.new(200, 150))
+			cleanup()
+		end)
+
+		test("position falls back to the UI's own AbsolutePosition when only Size is overridden", function()
+			local emitter, cleanup = setupNested(Vector2.new(0.5, 0.5))
+			local expectedCenter = emitter.UI.AbsolutePosition + emitter.UI.AbsoluteSize / 2
+
+			emitter:Fire { Amount = 20, SpawnAreaSize = UDim2.fromOffset(60, 60) }
+			emitter:Stop()
+			expect(emitter:GetParticleCount()).is(20)
+
+			assertParticlesWithin(emitter, expectedCenter, Vector2.new(60, 60))
+			cleanup()
+		end)
+	end)
+
 	describe("MaxParticles", function()
 		test("explicit cap drops excess spawns", function()
 			local emitter, _, _, cleanup = setup { MaxParticles = 5 }
@@ -228,6 +304,95 @@ return function(tiniest)
 				expect((child :: GuiObject).Visible).never_is_true()
 			end
 			cleanup()
+		end)
+	end)
+
+	describe("shared pool", function()
+		-- Two emitters parented under the same LayerCollector share a single
+		-- UIParticles folder and instance pool.
+		local function setupPair(props: { [string]: any }?)
+			local gui = Instance.new("ScreenGui")
+			gui.Parent = game:GetService("StarterGui")
+
+			local function make()
+				local scope = Fusion.scoped(Fusion)
+				local emitterProps: { [string]: any } = { Parent = gui, LifeTime = SAFE_LIFETIME }
+				for key, value in props or {} do
+					emitterProps[key] = value
+				end
+				return UIParticleEmitter(scope, emitterProps), scope
+			end
+
+			local a, aScope = make()
+			local b, bScope = make()
+			local function cleanup()
+				a:Clear()
+				b:Clear()
+				Fusion.doCleanup(aScope)
+				Fusion.doCleanup(bScope)
+				gui:Destroy()
+			end
+			return a, aScope, b, bScope, gui, cleanup
+		end
+
+		local function countFolders(gui: ScreenGui): number
+			local n = 0
+			for _, child in gui:GetChildren() do
+				if child.Name == "UIParticles" then
+					n += 1
+				end
+			end
+			return n
+		end
+
+		test("emitters on the same LayerCollector share one folder", function()
+			local a, _, b, _, gui, cleanup = setupPair()
+			a:Fire { Amount = 2 }
+			a:Stop()
+			b:Fire { Amount = 3 }
+			b:Stop()
+
+			expect(countFolders(gui)).is(1)
+			expect(#(getFolder(gui) :: Folder):GetChildren()).is(5)
+			cleanup()
+		end)
+
+		test("idle instances released by one emitter are reused by another", function()
+			local a, _, b, _, gui, cleanup = setupPair { LifeTime = 1 }
+
+			-- a spawns 3, then lets them die back into the shared pool.
+			a:Fire { Amount = 3 }
+			a:Stop()
+			a:_Step(2)
+			expect(a:GetParticleCount()).is(0)
+			local folder = getFolder(gui) :: Folder
+			expect(#folder:GetChildren()).is(3)
+
+			-- b reuses those 3 idle instances in place -- no new instances.
+			b:Fire { Amount = 3 }
+			b:Stop()
+			expect(b:GetParticleCount()).is(3)
+			expect(#folder:GetChildren()).is(3)
+			cleanup()
+		end)
+
+		test("the shared folder is torn down only when the last emitter dies", function()
+			local a, aScope, b, bScope, gui, _ = setupPair { CleanupParticlesImmediately = true }
+			a:Fire { Amount = 1 }
+			a:Stop()
+			b:Fire { Amount = 1 }
+			b:Stop()
+			local folder = getFolder(gui) :: Folder
+			expect(folder.Parent).exists()
+
+			-- Destroying one emitter leaves the shared folder alive for the other.
+			Fusion.doCleanup(bScope)
+			expect(folder.Parent).exists()
+
+			-- Destroying the last one releases the shared resources.
+			Fusion.doCleanup(aScope)
+			expect(folder.Parent).never_exists()
+			gui:Destroy()
 		end)
 	end)
 
@@ -407,6 +572,14 @@ return function(tiniest)
 
 		test("the story module has the UI Labs shape", function()
 			local story = require("../UIParticleEmitter.story") :: any
+			expect(story).is_a("table")
+			expect(typeof(story.story)).is("function")
+			expect(story.controls).is_a("table")
+			expect(story.fusion).exists()
+		end)
+
+		test("the nested-parent story module has the UI Labs shape", function()
+			local story = require("../UIParticleEmitterNestedParent.story") :: any
 			expect(story).is_a("table")
 			expect(typeof(story.story)).is("function")
 			expect(story.controls).is_a("table")
