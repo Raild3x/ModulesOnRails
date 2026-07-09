@@ -8,33 +8,35 @@
 
 const Types = require("./Types")
 
-const DEFAULTS = {
-	DragThresholdPx = 8,
-	TouchSlopPx = 12,
-	LongPressSeconds = 0.4,
-	SnapSpeed = 30,
-	GamepadLiftKeyCode = Enum.KeyCode.ButtonX,
-	GamepadDropKeyCode = Enum.KeyCode.ButtonA,
-	GamepadCancelKeyCode = Enum.KeyCode.ButtonB,
-	KeyboardLiftKeyCode = Enum.KeyCode.Return,
+-- One schema per config key: its default and the value kind Configure()
+-- validates against. `default == nil` marks an optional key (GhostContainer,
+-- KeyboardCancelKeyCode) — no default, but still validated when supplied. This
+-- is the single source the live defaults AND validation derive from; adding a
+-- knob is one entry here (plus its public Types.Config field/doc).
+const CONFIG_SCHEMA: { [string]: { default: any, kind: string } } = {
+	DragThresholdPx = { default = 8, kind = "number" },
+	TouchSlopPx = { default = 12, kind = "number" },
+	LongPressSeconds = { default = 0.4, kind = "number" },
+	SnapSpeed = { default = 30, kind = "number" },
+	GhostContainer = { kind = "LayerCollector" },
+	GamepadLiftKeyCode = { default = Enum.KeyCode.ButtonX, kind = "EnumItem" },
+	GamepadDropKeyCode = { default = Enum.KeyCode.ButtonA, kind = "EnumItem" },
+	GamepadCancelKeyCode = { default = Enum.KeyCode.ButtonB, kind = "EnumItem" },
+	KeyboardLiftKeyCode = { default = Enum.KeyCode.Return, kind = "EnumItem" },
+	KeyboardCancelKeyCode = { kind = "EnumItem" },
 }
 
--- Value kind expected per config key, for Configure() validation. Keys whose
--- default is nil (GhostContainer, KeyboardCancelKeyCode) still validate here.
-const CONFIG_KINDS: { [string]: string } = {
-	DragThresholdPx = "number",
-	TouchSlopPx = "number",
-	LongPressSeconds = "number",
-	SnapSpeed = "number",
-	GhostContainer = "LayerCollector",
-	GamepadLiftKeyCode = "EnumItem",
-	GamepadDropKeyCode = "EnumItem",
-	GamepadCancelKeyCode = "EnumItem",
-	KeyboardLiftKeyCode = "EnumItem",
-	KeyboardCancelKeyCode = "EnumItem",
-}
+-- Overwrite `target` with the schema's defaults (optional keys stay absent).
+const function applyDefaults(target: { [string]: any })
+	for key, entry in CONFIG_SCHEMA do
+		if entry.default ~= nil then
+			target[key] = entry.default
+		end
+	end
+end
 
-const store: { [string]: any } = table.clone(DEFAULTS)
+const store: { [string]: any } = {}
+applyDefaults(store)
 
 const Config = {}
 
@@ -46,10 +48,11 @@ end
 function Config.Configure(config: Types.Config)
 	assert(typeof(config) == "table", "[DragDrop] Configure expects a table")
 	for key, value in config :: { [string]: any } do
-		const expectedKind = CONFIG_KINDS[key]
-		if not expectedKind then
+		const entry = CONFIG_SCHEMA[key]
+		if not entry then
 			error(`[DragDrop] Unknown config key: {tostring(key)}`, 2)
 		end
+		const expectedKind = entry.kind
 		if expectedKind == "LayerCollector" then
 			if typeof(value) ~= "Instance" or not (value :: Instance):IsA("LayerCollector") then
 				error(`[DragDrop] Config.{key} must be a LayerCollector`, 2)
@@ -65,12 +68,8 @@ end
 -- optional key (GhostContainer, KeyboardCancelKeyCode): Configure can't accept
 -- nil for them because nil values vanish from Luau tables.
 function Config.Reset()
-	for key in store do
-		store[key] = nil
-	end
-	for key, value in DEFAULTS do
-		store[key] = value
-	end
+	table.clear(store)
+	applyDefaults(store)
 end
 
 return Config
