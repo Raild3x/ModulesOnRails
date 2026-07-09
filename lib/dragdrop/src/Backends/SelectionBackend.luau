@@ -12,7 +12,7 @@
 	Both gamepad and keyboard flow through here — the only difference is which
 	KeyCodes are used (from Config). Controlled (script-owned) drags are ignored.
 
-	Constructed by the controller with the injected transition `api` and input
+	Constructed by Core with the injected transition `api` and input
 	`env`; selection reads, action binds and input come through `env` so the grab
 	flow can be driven headlessly under test.
 ]]
@@ -22,6 +22,8 @@ const Types = require("../Types")
 
 type TransitionSurface = Types.TransitionSurface
 type Env = Types.Env
+type DragState = Types.DragState
+type DraggingState = Types.DraggingState
 
 const DROP_ACTION = "DragDropSelectionDrop"
 const CANCEL_ACTION = "DragDropSelectionCancel"
@@ -31,13 +33,16 @@ return function(api: TransitionSurface, env: Env)
 	local janitor: any = nil
 	local dragJanitor: any = nil -- CAS binds live only during a selection drag
 
-	const function isSelectionDrag(st: any): boolean
-		return st.Kind == "Dragging" and not st.Controlled and (st.Device == "Gamepad" or st.Device == "Keyboard")
+	-- The live drag when it is a selection drag (grab mode), narrowed; else nil.
+	const function selectionDrag(st: DragState): DraggingState?
+		if st.Kind == "Dragging" and not st.Controlled and (st.Device == "Gamepad" or st.Device == "Keyboard") then
+			return st
+		end
+		return nil
 	end
 
 	const function onSelectionChanged()
-		const st = api.GetState()
-		if not isSelectionDrag(st) then
+		if not selectionDrag(api.GetState()) then
 			return
 		end
 		const selected = env.GetSelectedObject()
@@ -49,7 +54,7 @@ return function(api: TransitionSurface, env: Env)
 		if inputState ~= Enum.UserInputState.Begin then
 			return Enum.ContextActionResult.Pass
 		end
-		if not isSelectionDrag(api.GetState()) then
+		if not selectionDrag(api.GetState()) then
 			return Enum.ContextActionResult.Pass
 		end
 		if actionName == DROP_ACTION then
@@ -61,8 +66,8 @@ return function(api: TransitionSurface, env: Env)
 	end
 
 	const function onDragStarted()
-		const st = api.GetState()
-		if not isSelectionDrag(st) then
+		const drag = selectionDrag(api.GetState())
+		if not drag then
 			return
 		end
 		if dragJanitor then
@@ -73,7 +78,7 @@ return function(api: TransitionSurface, env: Env)
 		-- Device-appropriate drop/cancel keys, read live from config.
 		local dropKey: Enum.KeyCode
 		local cancelKey: Enum.KeyCode?
-		if st.Device == "Gamepad" then
+		if drag.Device == "Gamepad" then
 			dropKey = api.GetConfig("GamepadDropKeyCode")
 			cancelKey = api.GetConfig("GamepadCancelKeyCode")
 		else

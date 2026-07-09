@@ -17,6 +17,10 @@ const RunService = game:GetService("RunService")
 const GuiService = game:GetService("GuiService")
 const UserInputService = game:GetService("UserInputService")
 
+const Types = require("./Types")
+
+type InputClass = Types.InputClass
+
 const InputUtil = {}
 
 --------------------------------------------------------------------------------
@@ -126,7 +130,7 @@ end
 --// Preferred-input classification (#5) //--
 --------------------------------------------------------------------------------
 
-const InputTypeToClass: { [Enum.UserInputType]: string } = {
+const InputTypeToClass: { [Enum.UserInputType]: InputClass } = {
 	[Enum.UserInputType.MouseButton1] = "MouseKeyboard",
 	[Enum.UserInputType.MouseButton2] = "MouseKeyboard",
 	[Enum.UserInputType.MouseButton3] = "MouseKeyboard",
@@ -147,12 +151,12 @@ const InputTypeToClass: { [Enum.UserInputType]: string } = {
 -- Group a raw UserInputType into the class used for switch-cancel decisions.
 -- Unknown / focus / accelerometer inputs classify as the current preferred class
 -- (they should never, on their own, cancel a drag).
-function InputUtil.ClassifyInputType(inputType: Enum.UserInputType): string?
+function InputUtil.ClassifyInputType(inputType: Enum.UserInputType): InputClass?
 	return InputTypeToClass[inputType]
 end
 
 -- The current preferred input class, from the most recent meaningful input.
-function InputUtil.CurrentInputClass(): string
+function InputUtil.CurrentInputClass(): InputClass
 	const class = InputTypeToClass[UserInputService:GetLastInputType()]
 	return class or "MouseKeyboard"
 end
@@ -161,7 +165,7 @@ end
 -- `callback(newClass)` fires only when the class actually changes. Returns a
 -- disconnect function. Does not fire immediately (unlike a state observer) — it
 -- reports transitions, which is exactly what switch-cancel needs.
-function InputUtil.ObserveInputClass(callback: (newClass: string) -> ()): () -> ()
+function InputUtil.ObserveInputClass(callback: (newClass: InputClass) -> ()): () -> ()
 	local lastClass = InputUtil.CurrentInputClass()
 	const connection = UserInputService.LastInputTypeChanged:Connect(function(inputType: Enum.UserInputType)
 		const class = InputTypeToClass[inputType]

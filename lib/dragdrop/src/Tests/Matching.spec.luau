@@ -6,7 +6,7 @@
 ]]
 
 return function(t: tiniest)
-	const Controller = require("../Controller")
+	const Core = require("../Core")
 	const Harness = require("./Helpers/Harness")
 
 	const describe = t.describe
@@ -28,7 +28,7 @@ return function(t: tiniest)
 		const dropped = { Count = 0, Payload = nil :: any }
 		const src = frame()
 		const dst = frame()
-		Controller.RegisterSource(src, {
+		Core.RegisterSource(src, {
 			GetPayload = function()
 				return payload
 			end,
@@ -42,14 +42,14 @@ return function(t: tiniest)
 				userOnDrop(p, target)
 			end
 		end
-		Controller.RegisterTarget(dst, opts)
-		const handle = Controller.BeginDrag(src)
+		Core.RegisterTarget(dst, opts)
+		const handle = Core.BeginDrag(src)
 		return handle, dst, dropped
 	end
 
 	before_each(function()
 		harness = Harness.new()
-		Controller.SetInputMode("Scriptable")
+		Core.SetInputMode("Scriptable")
 	end)
 
 	after_each(function()
@@ -60,7 +60,7 @@ return function(t: tiniest)
 		test("accepts when a single tag matches", function()
 			const handle, dst, dropped = scenario({ Tags = { "Item" } }, { Accepts = { "Item" } })
 			expect(handle:SetHoveredTarget(dst)).is_true()
-			expect(Controller.GetHoveredTarget()).exists()
+			expect(Core.GetHoveredTarget()).exists()
 			expect(handle:Drop()).is_true()
 			expect(dropped.Count).is(1)
 		end)
@@ -68,7 +68,7 @@ return function(t: tiniest)
 		test("rejects when no tag matches", function()
 			const handle, dst, dropped = scenario({ Tags = { "Item" } }, { Accepts = { "Food" } })
 			expect(handle:SetHoveredTarget(dst)).never_is_true()
-			expect(Controller.GetHoveredTarget()).never_exists()
+			expect(Core.GetHoveredTarget()).never_exists()
 			expect(handle:Drop()).never_is_true()
 			expect(dropped.Count).is(0)
 		end)

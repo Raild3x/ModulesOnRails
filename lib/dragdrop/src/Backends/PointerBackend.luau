@@ -1,12 +1,12 @@
 --[[
 	DragDrop — pointer backend (mouse + touch).
 
-	Translates raw pointer input into controller transitions. Mouse uses a drag
+	Translates raw pointer input into drag-machine transitions. Mouse uses a drag
 	threshold (press + movement lifts; press+release in place is a click). Touch
 	uses long-press-to-lift with a movement slop, so a swipe that starts on a slot
 	scrolls its ScrollingFrame instead of lifting.
 
-	Constructed by the controller with the injected transition `api` and input
+	Constructed by Core with the injected transition `api` and input
 	`env` (real device input in production, fakes under test); returns a
 	{ Start, Stop } backend. Controlled (script-owned) drags are ignored here — the
 	handle drives them.
@@ -22,6 +22,8 @@ const Types = require("../Types")
 type TransitionSurface = Types.TransitionSurface
 type Env = Types.Env
 type InputLike = Types.InputLike
+type PendingState = Types.PendingState
+type DraggingState = Types.DraggingState
 
 return function(api: TransitionSurface, env: Env)
 	local janitor: any = nil
@@ -41,9 +43,10 @@ return function(api: TransitionSurface, env: Env)
 	end
 
 	-- Current pointer position for the active drag, in canonical space.
-	const function dragPointerPos(st: any): Vector2
+	const function dragPointerPos(st: PendingState | DraggingState): Vector2
 		if st.Device == "Touch" then
-			return touchDragPos or InputUtil.InputPosition(st.InputObject)
+			-- A touch press always captures its InputObject, so the cast is safe.
+			return touchDragPos or InputUtil.InputPosition(st.InputObject :: InputLike)
 		end
 		return env.PointerLocation()
 	end
@@ -121,7 +124,7 @@ return function(api: TransitionSurface, env: Env)
 		end
 	end
 
-	const function inputMatchesGesture(st: any, input: InputLike): boolean
+	const function inputMatchesGesture(st: PendingState | DraggingState, input: InputLike): boolean
 		if st.Device == "Mouse" then
 			return input.UserInputType == Enum.UserInputType.MouseButton1
 		end
@@ -138,7 +141,7 @@ return function(api: TransitionSurface, env: Env)
 			if not inputMatchesGesture(st, input) then
 				return
 			end
-			-- Report the release point (forcing a fresh hover) so the controller
+			-- Report the release point (forcing a fresh hover) so the machine
 			-- resolves the drop target, then commit the drop.
 			api.ReportPointer(dragPointerPos(st), true)
 			api.Drop()
@@ -146,7 +149,7 @@ return function(api: TransitionSurface, env: Env)
 		end
 	end
 
-	-- Drive the ghost by reporting the live pointer each frame; the controller owns
+	-- Drive the ghost by reporting the live pointer each frame; the machine owns
 	-- the ghost and the re-hover throttle (#7). The backend only sources the
 	-- device-specific pointer position (mouse vs the active touch).
 	const function onRender()

@@ -10,6 +10,9 @@
 ]]
 
 const Signal = require("../Signal")
+const Janitor = require("../Janitor")
+
+type Janitor = Janitor.Janitor
 
 --// Public types //--
 
@@ -181,7 +184,7 @@ export type TargetEntry = {
 }
 
 -- A pluggable input backend. Backends translate raw device input into the
--- controller's transition calls; they are started on the first registration (in
+-- drag machine's transition calls; they are started on the first registration (in
 -- Automatic mode) and stopped on the last, on Scriptable mode, or on teardown.
 export type Backend = {
 	Start: () -> (),
@@ -218,16 +221,16 @@ export type Connection = { Disconnect: (Connection) -> () }
 -- signals fire different shapes and the backends read them positionally.
 export type Signalish = { Connect: (self: any, callback: (...any) -> ()) -> Connection }
 
--- The environment a backend translates input from. The real adapter (built in the
--- controller) wires these to UserInputService / GuiService / ContextActionService /
+-- The environment a backend translates input from. The real adapter (built in
+-- Env.luau) wires these to UserInputService / GuiService / ContextActionService /
 -- task.delay; the test harness installs fakes so gesture logic runs headlessly.
 -- This is the seam that makes the input-translation layer testable through its
 -- interface rather than around it.
 export type Env = {
-	-- Rendering + preferred-input + clock (shared with the controller's own reads).
+	-- Rendering + preferred-input + clock (shared with the drag machine's own reads).
 	MountGhost: (params: any) -> GhostHandle,
-	ObserveInputClass: (callback: (newClass: string) -> ()) -> (() -> ()),
-	CurrentInputClass: () -> string,
+	ObserveInputClass: (callback: (newClass: InputClass) -> ()) -> (() -> ()),
+	CurrentInputClass: () -> InputClass,
 	GuiObjectsAt: (absPos: Vector2) -> { GuiObject },
 	Clock: () -> number,
 	-- Pointer input (mouse + touch).
@@ -251,24 +254,74 @@ export type Env = {
 	Delay: (seconds: number, callback: () -> ()) -> (() -> ()),
 }
 
--- The transition surface the controller injects into its backends (and exposes to
--- specs as `Controller._api`). Backends never touch the controller's state table
--- directly; they call these transitions and read a state snapshot via GetState.
+--// Drag state machine (tagged union on `Kind`) //--
+
+-- Ghost placement style, derived from device (see ghostStyleForDevice).
+export type GhostStyle = "Follow" | "Snap"
+
+export type IdleState = {
+	Kind: "Idle",
+}
+
+-- Press captured; the lift threshold / long-press has not resolved yet.
+export type PendingState = {
+	Kind: "Pending",
+	Source: SourceEntry,
+	Payload: Payload,
+	StartPos: Vector2,
+	InputObject: InputLike?,
+	Device: Device,
+	InputClass: InputClass,
+}
+
+-- Payload airborne; ghost + scroll locks live for this state's lifetime.
+export type DraggingState = {
+	Kind: "Dragging",
+	Source: SourceEntry,
+	Payload: Payload,
+	Device: Device,
+	InputClass: InputClass,
+	InputObject: InputLike?,
+	Ghost: GhostHandle,
+	GhostStyle: GhostStyle,
+	HoveredTarget: TargetEntry?,
+	Controlled: boolean,
+	Generation: number,
+	Janitor: Janitor,
+}
+
+export type DragState = IdleState | PendingState | DraggingState
+
+-- Enter Dragging from either a resolved Pending (backend lift) or directly
+-- (BeginDrag). `Controlled` suppresses the automatic cancels.
+export type EnterParams = {
+	Source: SourceEntry,
+	Payload: Payload,
+	Device: Device,
+	InputClass: InputClass,
+	InputObject: InputLike?,
+	GrabPoint: Vector2,
+	Controlled: boolean,
+	GhostStyle: GhostStyle,
+}
+
+-- The transition surface the drag machine exposes to its backends (and to specs,
+-- as `Core._api`). Backends never touch the machine's state table directly; they
+-- call these transitions and read a state snapshot via GetState.
 export type TransitionSurface = {
 	Press: (entry: SourceEntry?, absPos: Vector2, inputObject: InputLike?, device: Device) -> (),
 	Lift: () -> (),
 	ReleaseAsClick: () -> (),
 	AbortPending: () -> (),
 	UpdateHover: (rawEntry: TargetEntry?) -> (),
-	-- The pointer backend reports the live pointer here; the controller owns the
+	-- The pointer backend reports the live pointer here; the drag machine owns the
 	-- ghost, so it drives Follow placement and hover from the reported position.
 	-- `forceHover` bypasses the movement throttle for the discrete release commit.
 	ReportPointer: (absPos: Vector2, forceHover: boolean?) -> (),
 	Drop: () -> boolean,
 	CancelDrag: () -> (),
-	-- The live drag state. Still untyped this pass (narrowing it is its own change);
-	-- backends read Kind/Device/Controlled/InputObject/StartPos/Ghost off it.
-	GetState: () -> any,
+	-- The live drag state; backends narrow on `Kind` before reading variant fields.
+	GetState: () -> DragState,
 	ResolveSource: (instance: Instance?) -> SourceEntry?,
 	ResolveTarget: (instance: Instance?) -> TargetEntry?,
 	HitTestTarget: (absPos: Vector2) -> TargetEntry?,

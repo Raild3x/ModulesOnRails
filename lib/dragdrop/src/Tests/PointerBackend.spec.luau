@@ -7,7 +7,7 @@
 ]]
 
 return function(t: tiniest)
-	const Controller = require("../Controller")
+	const Core = require("../Core")
 	const Harness = require("./Helpers/Harness")
 
 	const describe = t.describe
@@ -28,13 +28,13 @@ return function(t: tiniest)
 		opts.GetPayload = opts.GetPayload or function()
 			return payload
 		end
-		return Controller.RegisterSource(instance :: any, opts)
+		return Core.RegisterSource(instance :: any, opts)
 	end
 
 	const function registerTarget(instance: Instance, extra: any?)
 		const opts = extra or {}
 		opts.OnDrop = opts.OnDrop or function() end
-		return Controller.RegisterTarget(instance :: any, opts)
+		return Core.RegisterTarget(instance :: any, opts)
 	end
 
 	before_each(function()
@@ -54,10 +54,10 @@ return function(t: tiniest)
 			harness.HitList = { src }
 
 			harness:MouseDown(Vector2.new(0, 0))
-			expect(Controller._api.GetState().Kind).is("Pending")
+			expect(Core._api.GetState().Kind).is("Pending")
 
 			harness:MouseMove(Vector2.new(20, 0)) -- 20px > 8px default threshold
-			expect(Controller.IsDragging()).is_true()
+			expect(Core.IsDragging()).is_true()
 		end)
 
 		test("a sub-threshold move does not lift", function()
@@ -67,7 +67,7 @@ return function(t: tiniest)
 
 			harness:MouseDown(Vector2.new(0, 0))
 			harness:MouseMove(Vector2.new(4, 0)) -- 4px < 8px
-			expect(Controller._api.GetState().Kind).is("Pending")
+			expect(Core._api.GetState().Kind).is("Pending")
 		end)
 
 		test("press then release in place is a click, not a drag", function()
@@ -83,13 +83,13 @@ return function(t: tiniest)
 			harness:MouseDown(Vector2.new(0, 0))
 			harness:MouseUp(Vector2.new(0, 0))
 			expect(activated).is(1)
-			expect(Controller._api.GetState().Kind).is("Idle")
+			expect(Core._api.GetState().Kind).is("Idle")
 		end)
 
 		test("a press on empty space starts nothing", function()
 			harness.HitList = {} -- nothing under the pointer
 			harness:MouseDown(Vector2.new(0, 0))
-			expect(Controller._api.GetState().Kind).is("Idle")
+			expect(Core._api.GetState().Kind).is("Idle")
 		end)
 
 		test("release over a compatible target drops on it", function()
@@ -106,12 +106,12 @@ return function(t: tiniest)
 			harness.HitList = { src }
 			harness:MouseDown(Vector2.new(0, 0))
 			harness:MouseMove(Vector2.new(20, 0))
-			expect(Controller.IsDragging()).is_true()
+			expect(Core.IsDragging()).is_true()
 
 			harness.HitList = { dst } -- pointer now over the target
 			harness:MouseUp()
 			expect(dropped).is(1)
-			expect(Controller.IsDragging()).never_is_true()
+			expect(Core.IsDragging()).never_is_true()
 		end)
 
 		test("render follows the pointer and re-hovers the target under it", function()
@@ -128,7 +128,7 @@ return function(t: tiniest)
 			harness:Render()
 
 			expect(harness.LastGhost.Followed).is(Vector2.new(50, 0))
-			expect(Controller.GetHoveredTarget()).exists()
+			expect(Core.GetHoveredTarget()).exists()
 		end)
 
 		test("a press while already dragging is ignored", function()
@@ -139,11 +139,13 @@ return function(t: tiniest)
 			harness.HitList = { src1 }
 			harness:MouseDown(Vector2.new(0, 0))
 			harness:MouseMove(Vector2.new(20, 0))
-			expect(Controller.IsDragging()).is_true()
+			expect(Core.IsDragging()).is_true()
 
 			harness.HitList = { src2 }
 			harness:MouseDown(Vector2.new(0, 0)) -- second press, mid-drag
-			expect(Controller._api.GetState().Source.Instance).is(src1)
+			const st = Core._api.GetState()
+			assert(st.Kind == "Dragging", "expected the first drag to survive the second press")
+			expect(st.Source.Instance).is(src1)
 		end)
 	end)
 
@@ -155,10 +157,10 @@ return function(t: tiniest)
 			harness.HitList = { src }
 
 			harness:TouchStart(Vector2.new(0, 0))
-			expect(Controller._api.GetState().Kind).is("Pending")
+			expect(Core._api.GetState().Kind).is("Pending")
 
 			harness:Advance(0.4) -- LongPressSeconds default
-			expect(Controller.IsDragging()).is_true()
+			expect(Core.IsDragging()).is_true()
 		end)
 
 		test("moving past the slop before the hold aborts (treated as a scroll)", function()
@@ -168,10 +170,10 @@ return function(t: tiniest)
 
 			const touch = harness:TouchStart(Vector2.new(0, 0))
 			harness:TouchMove(touch, Vector2.new(20, 0)) -- 20px > 12px slop
-			expect(Controller._api.GetState().Kind).is("Idle")
+			expect(Core._api.GetState().Kind).is("Idle")
 
 			harness:Advance(0.4) -- the armed hold must not fire after abort
-			expect(Controller.IsDragging()).never_is_true()
+			expect(Core.IsDragging()).never_is_true()
 		end)
 
 		test("a sub-slop move does not abort the pending hold", function()
@@ -181,10 +183,10 @@ return function(t: tiniest)
 
 			const touch = harness:TouchStart(Vector2.new(0, 0))
 			harness:TouchMove(touch, Vector2.new(5, 0)) -- 5px < 12px
-			expect(Controller._api.GetState().Kind).is("Pending")
+			expect(Core._api.GetState().Kind).is("Pending")
 
 			harness:Advance(0.4)
-			expect(Controller.IsDragging()).is_true()
+			expect(Core.IsDragging()).is_true()
 		end)
 
 		test("release before the hold is a click, and the hold cannot fire afterward", function()
@@ -200,10 +202,10 @@ return function(t: tiniest)
 			const touch = harness:TouchStart(Vector2.new(0, 0))
 			harness:TouchEnd(touch)
 			expect(activated).is(1)
-			expect(Controller._api.GetState().Kind).is("Idle")
+			expect(Core._api.GetState().Kind).is("Idle")
 
 			harness:Advance(0.4)
-			expect(Controller.IsDragging()).never_is_true()
+			expect(Core.IsDragging()).never_is_true()
 		end)
 
 		test("a lifted touch drag drops on the target under the release point", function()
@@ -220,13 +222,13 @@ return function(t: tiniest)
 			harness.HitList = { src }
 			const touch = harness:TouchStart(Vector2.new(0, 0))
 			harness:Advance(0.4)
-			expect(Controller.IsDragging()).is_true()
+			expect(Core.IsDragging()).is_true()
 
 			harness.HitList = { dst }
 			harness:TouchMove(touch, Vector2.new(80, 0)) -- keep the touch position current
 			harness:TouchEnd(touch, Vector2.new(80, 0))
 			expect(dropped).is(1)
-			expect(Controller.IsDragging()).never_is_true()
+			expect(Core.IsDragging()).never_is_true()
 		end)
 
 		test("a second touch while one is pending is ignored", function()
@@ -236,11 +238,15 @@ return function(t: tiniest)
 
 			harness.HitList = { src1 }
 			harness:TouchStart(Vector2.new(0, 0))
-			expect(Controller._api.GetState().Source.Instance).is(src1)
+			local st = Core._api.GetState()
+			assert(st.Kind == "Pending", "expected the touch press to be pending")
+			expect(st.Source.Instance).is(src1)
 
 			harness.HitList = { src2 }
 			harness:TouchStart(Vector2.new(0, 0)) -- second finger
-			expect(Controller._api.GetState().Source.Instance).is(src1)
+			st = Core._api.GetState()
+			assert(st.Kind == "Pending", "expected the first press to still be pending")
+			expect(st.Source.Instance).is(src1)
 		end)
 
 		test("a released touch's stale hold does not disturb a later press", function()
@@ -258,7 +264,7 @@ return function(t: tiniest)
 
 			harness:TouchStart(Vector2.new(0, 0)) -- fresh press
 			harness:Advance(0.4)
-			expect(Controller.IsDragging()).is_true()
+			expect(Core.IsDragging()).is_true()
 			expect(lifts).is(1) -- only the fresh press lifted
 		end)
 	end)

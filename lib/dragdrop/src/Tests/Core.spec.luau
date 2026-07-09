@@ -1,5 +1,5 @@
 --[[
-	Coverage for the controller state machine and its edge-case fixes:
+	Coverage for the drag state machine (driven through Core) and its edge-case fixes:
 	  - BeginDrag refusal paths and the DragHandle lifecycle.
 	  - Scroll-lock restore ordering (including a throwing OnDrop).
 	  - Unregister / Destroying mid-drag (source and hovered target).
@@ -10,7 +10,7 @@
 ]]
 
 return function(t: tiniest)
-	const Controller = require("../Controller")
+	const Core = require("../Core")
 	const InputUtil = require("../InputUtil")
 	const Harness = require("./Helpers/Harness")
 
@@ -31,13 +31,13 @@ return function(t: tiniest)
 		opts.GetPayload = opts.GetPayload or function()
 			return payload
 		end
-		return Controller.RegisterSource(instance :: any, opts)
+		return Core.RegisterSource(instance :: any, opts)
 	end
 
 	const function registerTarget(instance: Instance, extra: any?)
 		const opts = extra or {}
 		opts.OnDrop = opts.OnDrop or function() end
-		return Controller.RegisterTarget(instance :: any, opts)
+		return Core.RegisterTarget(instance :: any, opts)
 	end
 
 	before_each(function()
@@ -51,11 +51,11 @@ return function(t: tiniest)
 	--------------------------------------------------------------------------------
 	describe("BeginDrag refusals", function()
 		before_each(function()
-			Controller.SetInputMode("Scriptable")
+			Core.SetInputMode("Scriptable")
 		end)
 
 		test("refuses an unregistered instance", function()
-			expect(Controller.BeginDrag(frame())).never_exists()
+			expect(Core.BeginDrag(frame())).never_exists()
 		end)
 
 		test("refuses when GetPayload returns nil", function()
@@ -65,15 +65,15 @@ return function(t: tiniest)
 					return nil
 				end,
 			})
-			expect(Controller.BeginDrag(src)).never_exists()
+			expect(Core.BeginDrag(src)).never_exists()
 		end)
 
 		test("refuses while a drag is already active", function()
 			const src1, src2 = frame(), frame()
 			registerSource(src1, { Tags = { "A" } })
 			registerSource(src2, { Tags = { "B" } })
-			expect(Controller.BeginDrag(src1)).exists()
-			expect(Controller.BeginDrag(src2)).never_exists()
+			expect(Core.BeginDrag(src1)).exists()
+			expect(Core.BeginDrag(src2)).never_exists()
 		end)
 
 		test("resolves a descendant of a registered source", function()
@@ -81,32 +81,32 @@ return function(t: tiniest)
 			const child = frame()
 			child.Parent = src
 			registerSource(src, { Tags = { "A" } })
-			expect(Controller.BeginDrag(child)).exists()
-			expect(Controller.IsDragging()).is_true()
+			expect(Core.BeginDrag(child)).exists()
+			expect(Core.IsDragging()).is_true()
 		end)
 	end)
 
 	--------------------------------------------------------------------------------
 	describe("DragHandle lifecycle", function()
 		before_each(function()
-			Controller.SetInputMode("Scriptable")
+			Core.SetInputMode("Scriptable")
 		end)
 
 		test("SetHoveredTarget(nil) clears the hover and reports success", function()
 			const src, dst = frame(), frame()
 			registerSource(src, { Tags = { "Item" } })
 			registerTarget(dst, { Accepts = { "Item" } })
-			const handle = Controller.BeginDrag(src)
+			const handle = Core.BeginDrag(src)
 			expect(handle:SetHoveredTarget(dst)).is_true()
 			expect(handle:SetHoveredTarget(nil)).is_true()
-			expect(Controller.GetHoveredTarget()).never_exists()
+			expect(Core.GetHoveredTarget()).never_exists()
 		end)
 
 		test("GetPayload returns the carried payload", function()
 			const src = frame()
 			const payload = { Tags = { "Item" }, Guid = "abc" }
 			registerSource(src, payload)
-			const handle = Controller.BeginDrag(src)
+			const handle = Core.BeginDrag(src)
 			expect(handle:GetPayload()).is(payload)
 		end)
 
@@ -114,7 +114,7 @@ return function(t: tiniest)
 			const src, dst = frame(), frame()
 			registerSource(src, { Tags = { "Item" } })
 			registerTarget(dst, { Accepts = { "Item" } })
-			const handle = Controller.BeginDrag(src)
+			const handle = Core.BeginDrag(src)
 			handle:Cancel() -- ends the drag
 			expect(handle:IsActive()).never_is_true()
 			expect(handle:SetHoveredTarget(dst)).never_is_true()
@@ -124,16 +124,16 @@ return function(t: tiniest)
 		test("Drop returns false when nothing is hovered (revert)", function()
 			const src = frame()
 			registerSource(src, { Tags = { "Item" } })
-			const handle = Controller.BeginDrag(src)
+			const handle = Core.BeginDrag(src)
 			expect(handle:Drop()).never_is_true()
-			expect(Controller.IsDragging()).never_is_true()
+			expect(Core.IsDragging()).never_is_true()
 		end)
 	end)
 
 	--------------------------------------------------------------------------------
 	describe("Scroll-lock restore", function()
 		before_each(function()
-			Controller.SetInputMode("Scriptable")
+			Core.SetInputMode("Scriptable")
 		end)
 
 		test("locks ancestor scrolling for the drag and restores it on drop", function()
@@ -143,10 +143,10 @@ return function(t: tiniest)
 			registerSource(src, { Tags = { "Item" } })
 			expect(sf.ScrollingEnabled).is_true()
 
-			Controller.BeginDrag(src)
+			Core.BeginDrag(src)
 			expect(sf.ScrollingEnabled).never_is_true()
 
-			Controller.Drop()
+			Core.Drop()
 			expect(sf.ScrollingEnabled).is_true()
 		end)
 
@@ -162,58 +162,58 @@ return function(t: tiniest)
 					error("boom")
 				end,
 			})
-			const handle = Controller.BeginDrag(src)
+			const handle = Core.BeginDrag(src)
 			handle:SetHoveredTarget(dst)
 			expect(handle:Drop()).is_true() -- drop still resolves to the valid target
 			expect(sf.ScrollingEnabled).is_true() -- restored before the throwing callback ran
-			expect(Controller.IsDragging()).never_is_true()
+			expect(Core.IsDragging()).never_is_true()
 		end)
 	end)
 
 	--------------------------------------------------------------------------------
 	describe("Registration teardown mid-drag", function()
 		before_each(function()
-			Controller.SetInputMode("Scriptable")
+			Core.SetInputMode("Scriptable")
 		end)
 
 		test("unregistering the active source cancels the drag", function()
 			const src = frame()
 			const unregister = registerSource(src, { Tags = { "Item" } })
-			Controller.BeginDrag(src)
-			expect(Controller.IsDragging()).is_true()
+			Core.BeginDrag(src)
+			expect(Core.IsDragging()).is_true()
 			unregister()
-			expect(Controller.IsDragging()).never_is_true()
+			expect(Core.IsDragging()).never_is_true()
 		end)
 
 		test("destroying the active source cancels the drag", function()
 			const src = frame()
 			registerSource(src, { Tags = { "Item" } })
-			Controller.BeginDrag(src)
+			Core.BeginDrag(src)
 			src:Destroy()
-			expect(Controller.IsDragging()).never_is_true()
+			expect(Core.IsDragging()).never_is_true()
 		end)
 
 		test("unregistering the hovered target clears the hover", function()
 			const src, dst = frame(), frame()
 			registerSource(src, { Tags = { "Item" } })
 			const unregisterTargetFn = registerTarget(dst, { Accepts = { "Item" } })
-			const handle = Controller.BeginDrag(src)
+			const handle = Core.BeginDrag(src)
 			handle:SetHoveredTarget(dst)
-			expect(Controller.GetHoveredTarget()).exists()
+			expect(Core.GetHoveredTarget()).exists()
 			unregisterTargetFn()
-			expect(Controller.GetHoveredTarget()).never_exists()
-			expect(Controller.IsDragging()).is_true()
+			expect(Core.GetHoveredTarget()).never_exists()
+			expect(Core.IsDragging()).is_true()
 		end)
 
 		test("destroying the hovered target clears the hover", function()
 			const src, dst = frame(), frame()
 			registerSource(src, { Tags = { "Item" } })
 			registerTarget(dst, { Accepts = { "Item" } })
-			const handle = Controller.BeginDrag(src)
+			const handle = Core.BeginDrag(src)
 			handle:SetHoveredTarget(dst)
 			dst:Destroy()
-			expect(Controller.GetHoveredTarget()).never_exists()
-			expect(Controller.IsDragging()).is_true()
+			expect(Core.GetHoveredTarget()).never_exists()
+			expect(Core.IsDragging()).is_true()
 		end)
 	end)
 
@@ -221,26 +221,26 @@ return function(t: tiniest)
 	describe("Preferred-input switch cancel", function()
 		const function entryFor(instance: Instance)
 			registerSource(instance, { Tags = { "Item" } })
-			return Controller._api.ResolveSource(instance)
+			return Core._api.ResolveSource(instance)
 		end
 
 		test("a class switch cancels an active (non-controlled) drag", function()
 			const entry = entryFor(frame())
-			Controller._api.Press(entry, Vector2.zero, nil, "Mouse")
-			Controller._api.Lift()
-			expect(Controller.IsDragging()).is_true()
+			Core._api.Press(entry, Vector2.zero, nil, "Mouse")
+			Core._api.Lift()
+			expect(Core.IsDragging()).is_true()
 
 			harness:SwitchInput("Touch")
-			expect(Controller.IsDragging()).never_is_true()
+			expect(Core.IsDragging()).never_is_true()
 		end)
 
 		test("a class switch aborts a pending press", function()
 			const entry = entryFor(frame())
-			Controller._api.Press(entry, Vector2.zero, nil, "Mouse")
-			expect(Controller._api.GetState().Kind).is("Pending")
+			Core._api.Press(entry, Vector2.zero, nil, "Mouse")
+			expect(Core._api.GetState().Kind).is("Pending")
 
 			harness:SwitchInput("Gamepad")
-			expect(Controller._api.GetState().Kind).is("Idle")
+			expect(Core._api.GetState().Kind).is("Idle")
 		end)
 	end)
 
@@ -248,15 +248,15 @@ return function(t: tiniest)
 	describe("Backend transitions (api)", function()
 		const function entryFor(instance: Instance)
 			registerSource(instance, { Tags = { "Item" } })
-			return Controller._api.ResolveSource(instance)
+			return Core._api.ResolveSource(instance)
 		end
 
 		test("Press then Lift enters Dragging", function()
 			const entry = entryFor(frame())
-			Controller._api.Press(entry, Vector2.zero, nil, "Mouse")
-			expect(Controller._api.GetState().Kind).is("Pending")
-			Controller._api.Lift()
-			expect(Controller.IsDragging()).is_true()
+			Core._api.Press(entry, Vector2.zero, nil, "Mouse")
+			expect(Core._api.GetState().Kind).is("Pending")
+			Core._api.Lift()
+			expect(Core.IsDragging()).is_true()
 		end)
 
 		test("ReleaseAsClick fires OnActivated and returns to Idle", function()
@@ -267,11 +267,11 @@ return function(t: tiniest)
 					activated += 1
 				end,
 			})
-			const entry = Controller._api.ResolveSource(src)
-			Controller._api.Press(entry, Vector2.zero, nil, "Mouse")
-			Controller._api.ReleaseAsClick()
+			const entry = Core._api.ResolveSource(src)
+			Core._api.Press(entry, Vector2.zero, nil, "Mouse")
+			Core._api.ReleaseAsClick()
 			expect(activated).is(1)
-			expect(Controller._api.GetState().Kind).is("Idle")
+			expect(Core._api.GetState().Kind).is("Idle")
 		end)
 
 		test("AbortPending returns to Idle without activating", function()
@@ -282,11 +282,11 @@ return function(t: tiniest)
 					activated += 1
 				end,
 			})
-			const entry = Controller._api.ResolveSource(src)
-			Controller._api.Press(entry, Vector2.zero, nil, "Mouse")
-			Controller._api.AbortPending()
+			const entry = Core._api.ResolveSource(src)
+			Core._api.Press(entry, Vector2.zero, nil, "Mouse")
+			Core._api.AbortPending()
 			expect(activated).is(0)
-			expect(Controller._api.GetState().Kind).is("Idle")
+			expect(Core._api.GetState().Kind).is("Idle")
 		end)
 
 		test("Press with a nil payload stays Idle", function()
@@ -296,9 +296,9 @@ return function(t: tiniest)
 					return nil
 				end,
 			})
-			const entry = Controller._api.ResolveSource(src)
-			Controller._api.Press(entry, Vector2.zero, nil, "Mouse")
-			expect(Controller._api.GetState().Kind).is("Idle")
+			const entry = Core._api.ResolveSource(src)
+			Core._api.Press(entry, Vector2.zero, nil, "Mouse")
+			expect(Core._api.GetState().Kind).is("Idle")
 		end)
 
 		test("Press with a throwing GetPayload stays Idle", function()
@@ -308,38 +308,38 @@ return function(t: tiniest)
 					error("nope")
 				end,
 			})
-			const entry = Controller._api.ResolveSource(src)
-			Controller._api.Press(entry, Vector2.zero, nil, "Mouse")
-			expect(Controller._api.GetState().Kind).is("Idle")
+			const entry = Core._api.ResolveSource(src)
+			Core._api.Press(entry, Vector2.zero, nil, "Mouse")
+			expect(Core._api.GetState().Kind).is("Idle")
 		end)
 	end)
 
 	--------------------------------------------------------------------------------
 	describe("ConsumeActivation", function()
 		before_each(function()
-			Controller.SetInputMode("Scriptable")
+			Core.SetInputMode("Scriptable")
 		end)
 
 		test("is true immediately after a drag ends and false once the window passes", function()
 			const src = frame()
 			registerSource(src, { Tags = { "Item" } })
-			const handle = Controller.BeginDrag(src)
+			const handle = Core.BeginDrag(src)
 			handle:Cancel()
-			expect(Controller.ConsumeActivation()).is_true()
+			expect(Core.ConsumeActivation()).is_true()
 			harness:Advance(0.1)
-			expect(Controller.ConsumeActivation()).never_is_true()
+			expect(Core.ConsumeActivation()).never_is_true()
 		end)
 	end)
 
 	--------------------------------------------------------------------------------
 	describe("Observe semantics", function()
 		before_each(function()
-			Controller.SetInputMode("Scriptable")
+			Core.SetInputMode("Scriptable")
 		end)
 
 		test("ObserveActivePayload fires immediately and on change", function()
 			const calls = {}
-			const disconnect = Controller.ObserveActivePayload(function(payload)
+			const disconnect = Core.ObserveActivePayload(function(payload)
 				table.insert(calls, { Value = payload })
 			end)
 			expect(#calls).is(1) -- immediate
@@ -348,7 +348,7 @@ return function(t: tiniest)
 			const src = frame()
 			const payload = { Tags = { "Item" } }
 			registerSource(src, payload)
-			const handle = Controller.BeginDrag(src)
+			const handle = Core.BeginDrag(src)
 			expect(#calls).is(2)
 			expect(calls[2].Value).is(payload)
 
@@ -357,7 +357,7 @@ return function(t: tiniest)
 			expect(calls[3].Value).never_exists()
 
 			disconnect()
-			Controller.BeginDrag(src)
+			Core.BeginDrag(src)
 			expect(#calls).is(3) -- no further calls after disconnect
 		end)
 	end)
@@ -365,7 +365,7 @@ return function(t: tiniest)
 	--------------------------------------------------------------------------------
 	describe("Signals", function()
 		before_each(function()
-			Controller.SetInputMode("Scriptable")
+			Core.SetInputMode("Scriptable")
 		end)
 
 		test("DragStarted carries payload and source instance", function()
@@ -373,10 +373,10 @@ return function(t: tiniest)
 			const payload = { Tags = { "Item" } }
 			registerSource(src, payload)
 			local seenPayload, seenSource
-			const conn = Controller.DragStarted:Connect(function(p, s)
+			const conn = Core.DragStarted:Connect(function(p, s)
 				seenPayload, seenSource = p, s
 			end)
-			Controller.BeginDrag(src)
+			Core.BeginDrag(src)
 			conn:Disconnect()
 			expect(seenPayload).is(payload)
 			expect(seenSource).is(src)
@@ -388,13 +388,13 @@ return function(t: tiniest)
 			registerSource(src, payload)
 			registerTarget(dst, { Accepts = { "Item" }, Metadata = { Index = 7 } })
 			local droppedDescriptor, endedDescriptor
-			const c1 = Controller.Dropped:Connect(function(_p, target)
+			const c1 = Core.Dropped:Connect(function(_p, target)
 				droppedDescriptor = target
 			end)
-			const c2 = Controller.DragEnded:Connect(function(_p, target)
+			const c2 = Core.DragEnded:Connect(function(_p, target)
 				endedDescriptor = target
 			end)
-			const handle = Controller.BeginDrag(src)
+			const handle = Core.BeginDrag(src)
 			handle:SetHoveredTarget(dst)
 			handle:Drop()
 			c1:Disconnect()
@@ -408,10 +408,10 @@ return function(t: tiniest)
 			const src = frame()
 			registerSource(src, { Tags = { "Item" } })
 			local endedWith: any = "unset"
-			const conn = Controller.DragEnded:Connect(function(_p, target)
+			const conn = Core.DragEnded:Connect(function(_p, target)
 				endedWith = target
 			end)
-			const handle = Controller.BeginDrag(src)
+			const handle = Core.BeginDrag(src)
 			handle:Cancel()
 			conn:Disconnect()
 			expect(endedWith).never_exists()
@@ -421,7 +421,7 @@ return function(t: tiniest)
 	--------------------------------------------------------------------------------
 	describe("Reentrancy safety", function()
 		before_each(function()
-			Controller.SetInputMode("Scriptable")
+			Core.SetInputMode("Scriptable")
 		end)
 
 		test("calling Cancel from within OnDragEnd is safe", function()
@@ -430,13 +430,13 @@ return function(t: tiniest)
 			registerSource(src, { Tags = { "Item" } }, {
 				OnDragEnd = function()
 					ran = true
-					Controller.Cancel() -- must be a no-op, state already reset
+					Core.Cancel() -- must be a no-op, state already reset
 				end,
 			})
-			const handle = Controller.BeginDrag(src)
+			const handle = Core.BeginDrag(src)
 			handle:Cancel()
 			expect(ran).is_true()
-			expect(Controller.IsDragging()).never_is_true()
+			expect(Core.IsDragging()).never_is_true()
 		end)
 
 		test("calling Cancel from within OnDrop is safe", function()
@@ -445,13 +445,13 @@ return function(t: tiniest)
 			registerTarget(dst, {
 				Accepts = { "Item" },
 				OnDrop = function()
-					Controller.Cancel()
+					Core.Cancel()
 				end,
 			})
-			const handle = Controller.BeginDrag(src)
+			const handle = Core.BeginDrag(src)
 			handle:SetHoveredTarget(dst)
 			expect(handle:Drop()).is_true()
-			expect(Controller.IsDragging()).never_is_true()
+			expect(Core.IsDragging()).never_is_true()
 		end)
 	end)
 
@@ -504,7 +504,7 @@ return function(t: tiniest)
 	--------------------------------------------------------------------------------
 	describe("Programmatic control surface", function()
 		before_each(function()
-			Controller.SetInputMode("Scriptable")
+			Core.SetInputMode("Scriptable")
 		end)
 
 		test("MoveTo positions the ghost and resolves hover via hit-test", function()
@@ -513,10 +513,10 @@ return function(t: tiniest)
 			registerTarget(dst, { Accepts = { "Item" } })
 			harness.HitList = { dst } -- what GuiObjectsAt returns for the moved-to point
 
-			const handle = Controller.BeginDrag(src, Vector2.new(10, 10)) -- pointer-controlled
+			const handle = Core.BeginDrag(src, Vector2.new(10, 10)) -- pointer-controlled
 			expect(handle).exists()
 			handle:MoveTo(Vector2.new(40, 40))
-			expect(Controller.GetHoveredTarget()).exists()
+			expect(Core.GetHoveredTarget()).exists()
 			expect(harness.LastGhost.Followed).is(Vector2.new(40, 40) - Vector2.zero)
 		end)
 
@@ -524,11 +524,11 @@ return function(t: tiniest)
 			const src = frame()
 			const payload = { Tags = { "Item" } }
 			registerSource(src, payload)
-			expect(Controller.GetActivePayload()).never_exists()
-			const handle = Controller.BeginDrag(src)
-			expect(Controller.GetActivePayload()).is(payload)
+			expect(Core.GetActivePayload()).never_exists()
+			const handle = Core.BeginDrag(src)
+			expect(Core.GetActivePayload()).is(payload)
 			handle:Cancel()
-			expect(Controller.GetActivePayload()).never_exists()
+			expect(Core.GetActivePayload()).never_exists()
 		end)
 
 		test("ObserveHoveredTarget fires immediately and on change", function()
@@ -536,13 +536,13 @@ return function(t: tiniest)
 			registerSource(src, { Tags = { "Item" } })
 			registerTarget(dst, { Accepts = { "Item" } })
 			const calls = {}
-			const disconnect = Controller.ObserveHoveredTarget(function(target)
+			const disconnect = Core.ObserveHoveredTarget(function(target)
 				table.insert(calls, { Value = target })
 			end)
 			expect(#calls).is(1)
 			expect(calls[1].Value).never_exists()
 
-			const handle = Controller.BeginDrag(src)
+			const handle = Core.BeginDrag(src)
 			handle:SetHoveredTarget(dst)
 			expect(#calls).is(2)
 			expect(calls[2].Value).exists()
@@ -550,8 +550,8 @@ return function(t: tiniest)
 		end)
 
 		test("Drop and Cancel are no-ops when idle", function()
-			expect(Controller.Drop()).never_is_true()
-			expect(Controller.Cancel()).never_exists()
+			expect(Core.Drop()).never_is_true()
+			expect(Core.Cancel()).never_exists()
 		end)
 	end)
 
@@ -559,24 +559,24 @@ return function(t: tiniest)
 	describe("Input mode", function()
 		test("rejects an invalid mode", function()
 			expect(function()
-				Controller.SetInputMode("Weird" :: any)
+				Core.SetInputMode("Weird" :: any)
 			end).fails_with("Invalid input mode")
 		end)
 
 		test("setting the current mode again is a no-op", function()
-			expect(Controller.GetInputMode()).is("Automatic")
-			Controller.SetInputMode("Automatic")
-			expect(Controller.GetInputMode()).is("Automatic")
+			expect(Core.GetInputMode()).is("Automatic")
+			Core.SetInputMode("Automatic")
+			expect(Core.GetInputMode()).is("Automatic")
 		end)
 
 		test("switching to Scriptable cancels any active drag", function()
 			const src = frame()
 			registerSource(src, { Tags = { "Item" } })
-			Controller._api.Press(Controller._api.ResolveSource(src), Vector2.zero, nil, "Mouse")
-			Controller._api.Lift()
-			expect(Controller.IsDragging()).is_true()
-			Controller.SetInputMode("Scriptable")
-			expect(Controller.IsDragging()).never_is_true()
+			Core._api.Press(Core._api.ResolveSource(src), Vector2.zero, nil, "Mouse")
+			Core._api.Lift()
+			expect(Core.IsDragging()).is_true()
+			Core.SetInputMode("Scriptable")
+			expect(Core.IsDragging()).never_is_true()
 		end)
 	end)
 end

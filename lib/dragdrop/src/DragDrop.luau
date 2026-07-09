@@ -61,7 +61,7 @@
 	tutorials, and tests.
 ]=]
 
-const Controller = require("./Controller")
+const Core = require("./Core")
 const Types = require("./Types")
 
 export type Payload = Types.Payload
@@ -88,7 +88,7 @@ const DragDrop = {}
 	Returns a function that unregisters it; the source also auto-unregisters if the
 	instance is destroyed.
 ]=]
-DragDrop.RegisterSource = Controller.RegisterSource
+DragDrop.RegisterSource = Core.RegisterSource
 
 --[=[
 	@within DragDrop
@@ -101,7 +101,7 @@ DragDrop.RegisterSource = Controller.RegisterSource
 	Returns a function that unregisters it; the target also auto-unregisters if the
 	instance is destroyed.
 ]=]
-DragDrop.RegisterTarget = Controller.RegisterTarget
+DragDrop.RegisterTarget = Core.RegisterTarget
 
 --// Programmatic control //--
 
@@ -122,7 +122,7 @@ DragDrop.RegisterTarget = Controller.RegisterTarget
 	  gamepad/keyboard backend drives it (selection nav moves the ghost); in
 	  Scriptable mode you drive it with `handle:SetHoveredTarget` and `handle:Drop`.
 ]=]
-DragDrop.BeginDrag = Controller.BeginDrag
+DragDrop.BeginDrag = Core.BeginDrag
 
 --[=[
 	@within DragDrop
@@ -133,14 +133,14 @@ DragDrop.BeginDrag = Controller.BeginDrag
 	`"Scriptable"` (backends off; drags driven only through [DragDrop.BeginDrag]).
 	Any active drag is cancelled across the switch.
 ]=]
-DragDrop.SetInputMode = Controller.SetInputMode
+DragDrop.SetInputMode = Core.SetInputMode
 
 --[=[
 	@within DragDrop
 	@function GetInputMode
 	@return InputMode
 ]=]
-DragDrop.GetInputMode = Controller.GetInputMode
+DragDrop.GetInputMode = Core.GetInputMode
 
 --[=[
 	@within DragDrop
@@ -150,7 +150,7 @@ DragDrop.GetInputMode = Controller.GetInputMode
 	Ends the active drag on the currently hovered target. Returns `true` if it
 	landed on a valid target, `false` if there was none (a revert). No-op when idle.
 ]=]
-DragDrop.Drop = Controller.Drop
+DragDrop.Drop = Core.Drop
 
 --[=[
 	@within DragDrop
@@ -158,7 +158,7 @@ DragDrop.Drop = Controller.Drop
 
 	Reverts the active drag, or aborts a pending press. No-op when idle.
 ]=]
-DragDrop.Cancel = Controller.Cancel
+DragDrop.Cancel = Core.Cancel
 
 --// State //--
 
@@ -167,7 +167,7 @@ DragDrop.Cancel = Controller.Cancel
 	@function IsDragging
 	@return boolean
 ]=]
-DragDrop.IsDragging = Controller.IsDragging
+DragDrop.IsDragging = Core.IsDragging
 
 --[=[
 	@within DragDrop
@@ -176,7 +176,7 @@ DragDrop.IsDragging = Controller.IsDragging
 
 	The payload currently airborne, or nil when idle.
 ]=]
-DragDrop.GetActivePayload = Controller.GetActivePayload
+DragDrop.GetActivePayload = Core.GetActivePayload
 
 --[=[
 	@within DragDrop
@@ -185,7 +185,7 @@ DragDrop.GetActivePayload = Controller.GetActivePayload
 
 	The valid target the drag is currently over, or nil.
 ]=]
-DragDrop.GetHoveredTarget = Controller.GetHoveredTarget
+DragDrop.GetHoveredTarget = Core.GetHoveredTarget
 
 --[=[
 	@within DragDrop
@@ -196,7 +196,7 @@ DragDrop.GetHoveredTarget = Controller.GetHoveredTarget
 	Calls `callback` immediately with the current value and again whenever the
 	active payload changes. Return value tears the observer down.
 ]=]
-DragDrop.ObserveActivePayload = Controller.ObserveActivePayload
+DragDrop.ObserveActivePayload = Core.ObserveActivePayload
 
 --[=[
 	@within DragDrop
@@ -207,7 +207,7 @@ DragDrop.ObserveActivePayload = Controller.ObserveActivePayload
 	Calls `callback` immediately with the current value and again whenever the
 	hovered target changes.
 ]=]
-DragDrop.ObserveHoveredTarget = Controller.ObserveHoveredTarget
+DragDrop.ObserveHoveredTarget = Core.ObserveHoveredTarget
 
 --[=[
 	@within DragDrop
@@ -218,7 +218,7 @@ DragDrop.ObserveHoveredTarget = Controller.ObserveHoveredTarget
 	swallow a stray `Button.Activated` that fires right after a drop, so a drag
 	doesn't also read as a click.
 ]=]
-DragDrop.ConsumeActivation = Controller.ConsumeActivation
+DragDrop.ConsumeActivation = Core.ConsumeActivation
 
 --[=[
 	@within DragDrop
@@ -229,7 +229,7 @@ DragDrop.ConsumeActivation = Controller.ConsumeActivation
 	or wrong value types. Behavior knobs only — ghost appearance lives in
 	`SourceOptions.BuildGhost`.
 ]=]
-DragDrop.Configure = Controller.Configure
+DragDrop.Configure = Core.Configure
 
 --[=[
 	@within DragDrop
@@ -239,7 +239,7 @@ DragDrop.Configure = Controller.Configure
 	*clear* an optional key such as `GhostContainer` — [Configure](/api/DragDrop#Configure)
 	cannot accept nil for them, since nil values vanish from Luau tables.
 ]=]
-DragDrop.ResetConfig = Controller.ResetConfig
+DragDrop.ResetConfig = Core.ResetConfig
 
 --// Signals //--
 
@@ -249,7 +249,7 @@ DragDrop.ResetConfig = Controller.ResetConfig
 	Fires when a payload goes airborne.
 ]=]
 DragDrop.DragStarted =
-	Controller.DragStarted :: Types.Signal<(payload: Payload, source: GuiObject) -> (), Payload, GuiObject>
+	Core.DragStarted :: Types.Signal<(payload: Payload, source: GuiObject) -> (), Payload, GuiObject>
 
 --[=[
 	@within DragDrop
@@ -258,7 +258,7 @@ DragDrop.DragStarted =
 	`OnDrop` has run.
 ]=]
 DragDrop.Dropped =
-	Controller.Dropped :: Types.Signal<(payload: Payload, target: TargetDescriptor) -> (), Payload, TargetDescriptor>
+	Core.Dropped :: Types.Signal<(payload: Payload, target: TargetDescriptor) -> (), Payload, TargetDescriptor>
 
 --[=[
 	@within DragDrop
@@ -276,6 +276,6 @@ DragDrop.Dropped =
 	`DragEnded` (or from your own data layer) to pick up the result of the drop.
 ]=]
 DragDrop.DragEnded =
-	Controller.DragEnded :: Types.Signal<(payload: Payload, target: TargetDescriptor?) -> (), Payload, TargetDescriptor?>
+	Core.DragEnded :: Types.Signal<(payload: Payload, target: TargetDescriptor?) -> (), Payload, TargetDescriptor?>
 
 return DragDrop

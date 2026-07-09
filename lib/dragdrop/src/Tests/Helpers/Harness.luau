@@ -1,7 +1,7 @@
 --[[
 	DragDrop test harness.
 
-	Installs fake implementations into the Controller's Env seam so specs can drive
+	Installs fake implementations into the package's Env seam so specs can drive
 	the full state machine headlessly — no real rendering (the real GhostLayer uses
 	RenderStepped, which errors off the client), no real device input, and a
 	controllable clock and preferred-input class.
@@ -21,7 +21,7 @@
 		harness:Destroy() -- stops backends, restores Env/Config, cancels any drag
 ]]
 
-const Controller = require("../../Controller")
+const Core = require("../../Core")
 const PointerBackend = require("../../Backends/PointerBackend")
 const SelectionBackend = require("../../Backends/SelectionBackend")
 const Signal = require("../../../Signal")
@@ -75,7 +75,7 @@ function Harness.new()
 		return ghost
 	end
 
-	Controller._setEnv {
+	Core._setEnv {
 		MountGhost = fakeMount,
 		CurrentInputClass = function()
 			return self.CurrentClass
@@ -95,7 +95,7 @@ function Harness.new()
 	}
 
 	-- The Env handed to backends. Shares the harness's mutable state with the
-	-- controller-side patch above, so both sides agree on clock, hit-list, etc.
+	-- machine-side patch above, so both sides agree on clock, hit-list, etc.
 	self.InputEnv = {
 		GuiObjectsAt = function(_absPos: Vector2)
 			return self.HitList
@@ -137,14 +137,14 @@ end
 --------------------------------------------------------------------------------
 
 function Harness.StartPointerBackend(self: any)
-	const backend = PointerBackend(Controller._api, self.InputEnv)
+	const backend = PointerBackend(Core._api, self.InputEnv)
 	backend.Start()
 	table.insert(self._backends, backend)
 	return backend
 end
 
 function Harness.StartSelectionBackend(self: any)
-	const backend = SelectionBackend(Controller._api, self.InputEnv)
+	const backend = SelectionBackend(Core._api, self.InputEnv)
 	backend.Start()
 	table.insert(self._backends, backend)
 	return backend
@@ -279,12 +279,12 @@ function Harness.Destroy(self: any)
 		backend.Stop()
 	end
 	self._backends = {}
-	Controller.Cancel()
-	if Controller.GetInputMode() ~= "Automatic" then
-		Controller.SetInputMode("Automatic")
+	Core.Cancel()
+	if Core.GetInputMode() ~= "Automatic" then
+		Core.SetInputMode("Automatic")
 	end
-	Controller._resetEnv()
-	Controller.ResetConfig()
+	Core._resetEnv()
+	Core.ResetConfig()
 end
 
 return Harness

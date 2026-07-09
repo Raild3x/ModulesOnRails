@@ -9,7 +9,7 @@
 ]]
 
 return function(t: tiniest)
-	const Controller = require("../Controller")
+	const Core = require("../Core")
 	const Harness = require("./Helpers/Harness")
 
 	const describe = t.describe
@@ -34,13 +34,13 @@ return function(t: tiniest)
 		opts.GetPayload = opts.GetPayload or function()
 			return payload
 		end
-		return Controller.RegisterSource(instance :: any, opts)
+		return Core.RegisterSource(instance :: any, opts)
 	end
 
 	const function registerTarget(instance: Instance, extra: any?)
 		const opts = extra or {}
 		opts.OnDrop = opts.OnDrop or function() end
-		return Controller.RegisterTarget(instance :: any, opts)
+		return Core.RegisterTarget(instance :: any, opts)
 	end
 
 	before_each(function()
@@ -68,7 +68,7 @@ return function(t: tiniest)
 			const src = frame()
 			registerSource(src, { Tags = { "Item" } })
 			grab(src)
-			expect(Controller.IsDragging()).is_true()
+			expect(Core.IsDragging()).is_true()
 		end)
 
 		test("drop and cancel actions are bound only during the drag", function()
@@ -92,7 +92,7 @@ return function(t: tiniest)
 
 			grab(src)
 			harness:SetSelected(dst)
-			const hovered = Controller.GetHoveredTarget()
+			const hovered = Core.GetHoveredTarget()
 			expect(hovered).exists()
 			expect(hovered.Instance).is(dst)
 		end)
@@ -104,10 +104,10 @@ return function(t: tiniest)
 
 			grab(src)
 			harness:SetSelected(dst)
-			expect(Controller.GetHoveredTarget()).exists()
+			expect(Core.GetHoveredTarget()).exists()
 
 			harness:SetSelected(empty) -- not a registered target
-			expect(Controller.GetHoveredTarget()).never_exists()
+			expect(Core.GetHoveredTarget()).never_exists()
 		end)
 
 		test("the drop action drops on the selected target and sinks the input", function()
@@ -125,7 +125,7 @@ return function(t: tiniest)
 			harness:SetSelected(dst)
 			const result = harness:FireAction(DROP_ACTION)
 			expect(dropped).is(1)
-			expect(Controller.IsDragging()).never_is_true()
+			expect(Core.IsDragging()).never_is_true()
 			expect(result).is(Enum.ContextActionResult.Sink)
 		end)
 
@@ -144,7 +144,7 @@ return function(t: tiniest)
 			harness:SetSelected(dst)
 			harness:FireAction(CANCEL_ACTION)
 			expect(dropped).is(0)
-			expect(Controller.IsDragging()).never_is_true()
+			expect(Core.IsDragging()).never_is_true()
 		end)
 
 		test("an action on a non-Begin state passes through and does not drop", function()
@@ -163,7 +163,7 @@ return function(t: tiniest)
 			const result = harness:FireAction(DROP_ACTION, Enum.UserInputState.End)
 			expect(result).is(Enum.ContextActionResult.Pass)
 			expect(dropped).is(0)
-			expect(Controller.IsDragging()).is_true()
+			expect(Core.IsDragging()).is_true()
 		end)
 
 		test("stopping the backend mid-drag unbinds its actions", function()
@@ -184,20 +184,20 @@ return function(t: tiniest)
 			registerSource(src, { Tags = { "Item" } })
 			harness:SetSelected(src)
 			harness:PressKey(Enum.KeyCode.Return) -- KeyboardLiftKeyCode default
-			expect(Controller.IsDragging()).is_true()
+			expect(Core.IsDragging()).is_true()
 			expect(harness:IsActionBound(DROP_ACTION)).is_true()
 		end)
 
 		test("the lift key does nothing with no selection", function()
 			harness:SetSelected(nil)
 			harness:PressKey(Enum.KeyCode.Return)
-			expect(Controller.IsDragging()).never_is_true()
+			expect(Core.IsDragging()).never_is_true()
 		end)
 
 		test("the lift key does nothing on an unregistered selection", function()
 			harness:SetSelected(frame()) -- never registered as a source
 			harness:PressKey(Enum.KeyCode.Return)
-			expect(Controller.IsDragging()).never_is_true()
+			expect(Core.IsDragging()).never_is_true()
 		end)
 
 		test("a non-lift key is ignored", function()
@@ -205,7 +205,7 @@ return function(t: tiniest)
 			registerSource(src, { Tags = { "Item" } })
 			harness:SetSelected(src)
 			harness:PressKey(Enum.KeyCode.Space)
-			expect(Controller.IsDragging()).never_is_true()
+			expect(Core.IsDragging()).never_is_true()
 		end)
 	end)
 end
