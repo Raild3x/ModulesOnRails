@@ -298,6 +298,15 @@ local state: any = { Kind = "Idle" }
 local dragGeneration = 0
 local lastDragEndClock = -math.huge
 local pendingWatch: (() -> ())? = nil
+-- Last pointer position the backend reported this drag, for the re-hover throttle
+-- (#7). Owned here because the ghost is: reset per drag in enterDragging.
+local lastReportPos: Vector2? = nil
+
+-- Device → ghost placement style. Pointer devices follow the cursor; selection
+-- devices snap between slots. The single place this mapping is decided.
+const function ghostStyleForDevice(device: Device): "Follow" | "Snap"
+	return if device == "Gamepad" or device == "Keyboard" then "Snap" else "Follow"
+end
 
 const function clearPendingWatch()
 	if pendingWatch then
@@ -448,6 +457,7 @@ const function enterDragging(params: EnterParams)
 	end
 
 	dragGeneration += 1
+	lastReportPos = nil -- a fresh drag re-hit-tests on its first reported frame
 	state = {
 		Kind = "Dragging",
 		Source = source,
@@ -513,9 +523,6 @@ const function lift()
 	end
 	const pending = state
 	clearPendingWatch()
-	const ghostStyle: "Follow" | "Snap" = if pending.Device == "Gamepad" or pending.Device == "Keyboard"
-		then "Snap"
-		else "Follow"
 	enterDragging {
 		Source = pending.Source,
 		Payload = pending.Payload,
@@ -524,7 +531,7 @@ const function lift()
 		InputObject = pending.InputObject,
 		GrabPoint = pending.StartPos,
 		Controlled = false,
-		GhostStyle = ghostStyle,
+		GhostStyle = ghostStyleForDevice(pending.Device),
 	}
 end
 
@@ -558,6 +565,25 @@ const function hitTestTarget(absPos: Vector2): TargetEntry?
 		end
 	end
 	return nil
+end
+
+-- The pointer backend reports the live pointer here (every render frame while a
+-- Follow drag is airborne, and once more at release). The controller is the sole
+-- owner of the ghost, so it — not the backend — drives Follow placement and the
+-- re-hover from the reported position. Snap drags never reach here (selection
+-- devices place the ghost through updateHover), and controlled drags are ignored
+-- by the backend, so the Follow guard is all that's needed.
+const function reportPointer(absPos: Vector2, forceHover: boolean?)
+	if state.Kind ~= "Dragging" or state.GhostStyle ~= "Follow" then
+		return
+	end
+	state.Ghost.FollowPointer(absPos)
+	-- Only re-hit-test when the pointer actually moved (#7) — except at the release
+	-- commit (forceHover), which must resolve the drop target fresh regardless.
+	if forceHover or lastReportPos == nil or (absPos - lastReportPos).Magnitude > 0 then
+		lastReportPos = absPos
+		updateHover(hitTestTarget(absPos))
+	end
 end
 
 --------------------------------------------------------------------------------
@@ -696,15 +722,15 @@ function Controller.BeginDrag(instance: GuiObject, position: Vector2?): DragHand
 	end
 
 	const controlled = inputMode == "Scriptable" or position ~= nil
-	local ghostStyle: "Follow" | "Snap"
+	-- A positioned BeginDrag is a pointer-controlled drag (Mouse); an unpositioned
+	-- one is a selection grab on the current selection device. GhostStyle then falls
+	-- out of the device via the single mapping.
 	local grabPoint: Vector2
 	local device: Device
 	if position ~= nil then
-		ghostStyle = "Follow"
 		grabPoint = position
 		device = "Mouse"
 	else
-		ghostStyle = "Snap"
 		grabPoint = entry.Instance.AbsolutePosition + entry.Instance.AbsoluteSize / 2
 		device = if Env.CurrentInputClass() == "Gamepad" then "Gamepad" else "Keyboard"
 	end
@@ -717,7 +743,7 @@ function Controller.BeginDrag(instance: GuiObject, position: Vector2?): DragHand
 		InputObject = nil,
 		GrabPoint = grabPoint,
 		Controlled = controlled,
-		GhostStyle = ghostStyle,
+		GhostStyle = ghostStyleForDevice(device),
 	}
 	if state.Kind ~= "Dragging" then
 		return nil
@@ -818,6 +844,7 @@ const api: Types.TransitionSurface = {
 	ReleaseAsClick = releaseAsClick,
 	AbortPending = abortPending,
 	UpdateHover = updateHover,
+	ReportPointer = reportPointer,
 	Drop = drop,
 	CancelDrag = cancelDrag,
 	GetState = function()

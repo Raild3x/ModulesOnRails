@@ -15,7 +15,11 @@ the `/codebase-design` skill and is not redefined here.
   target `Accepts` a set of tags and may add a finer `CanDrop` gate.
 - **Ghost** — the visual proxy that represents the airborne payload during a drag.
   The `GhostLayer` module mounts one per drag and returns a **GhostHandle**
-  (`FollowPointer` / `SnapToRect` / `Cleanup`).
+  (`FollowPointer` / `SnapToRect` / `Cleanup`). The **controller is the sole owner
+  of the GhostHandle**: only it calls those methods. Backends never touch the
+  ghost — the pointer backend *reports* the live pointer (see `ReportPointer` under
+  the transition surface) and the controller drives Follow placement from it. See
+  [ADR 0002](docs/adr/0002-single-ghost-owner.md).
 - **Controller** — the process-global singleton state machine. Owns the registries,
   the config store, the reactive state (active payload / hovered target), the
   signals, and the drag state machine. It is device-agnostic: `Idle → Pending →
@@ -43,9 +47,13 @@ the `/codebase-design` skill and is not redefined here.
 
 - **Transition surface** — the typed interface (`Types.TransitionSurface`, exposed
   as `Controller._api`) that the controller injects into its backends and exposes to
-  specs. It is the device-agnostic seam: `Press`/`Lift`/`Drop`/`UpdateHover`/… plus
-  `GetState` (a read-only snapshot) and resolve/hit-test/config helpers. Backends
-  call these transitions; they never mutate state.
+  specs. It is the device-agnostic seam: `Press`/`Lift`/`Drop`/`UpdateHover`/
+  `ReportPointer`/… plus `GetState` (a read-only snapshot) and resolve/hit-test/
+  config helpers. Backends call these transitions; they never mutate state or touch
+  the ghost. `ReportPointer(pos, forceHover?)` is how the pointer backend tells the
+  controller where the pointer is each frame (and at release, with `forceHover` to
+  resolve the drop target); the controller — the sole ghost owner — does the Follow
+  placement and re-hover, keeping the `#7` movement throttle on its side.
 - **Input environment** (the **Env seam**) — the single table
   (`Types.Env`, the controller's `DefaultEnv`) through which both the controller and
   its backends reach the outside world: rendering, preferred-input, clock, and the

@@ -260,6 +260,10 @@ export type TransitionSurface = {
 	ReleaseAsClick: () -> (),
 	AbortPending: () -> (),
 	UpdateHover: (rawEntry: TargetEntry?) -> (),
+	-- The pointer backend reports the live pointer here; the controller owns the
+	-- ghost, so it drives Follow placement and hover from the reported position.
+	-- `forceHover` bypasses the movement throttle for the discrete release commit.
+	ReportPointer: (absPos: Vector2, forceHover: boolean?) -> (),
 	Drop: () -> boolean,
 	CancelDrag: () -> (),
 	-- The live drag state. Still untyped this pass (narrowing it is its own change);

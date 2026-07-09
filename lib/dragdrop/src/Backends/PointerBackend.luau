@@ -29,21 +29,10 @@ return function(api: TransitionSurface, env: Env)
 	-- Last known canonical position of the active touch's InputObject (#2): touch
 	-- drops/follows must not read the MOUSE location.
 	local touchDragPos: Vector2? = nil
-	local lastRenderPos: Vector2? = nil
 
 	const function hitTestSource(absPos: Vector2)
 		for _, gui in env.GuiObjectsAt(absPos) do
 			const entry = api.ResolveSource(gui)
-			if entry then
-				return entry
-			end
-		end
-		return nil
-	end
-
-	const function hitTestTarget(absPos: Vector2)
-		for _, gui in env.GuiObjectsAt(absPos) do
-			const entry = api.ResolveTarget(gui)
 			if entry then
 				return entry
 			end
@@ -149,26 +138,23 @@ return function(api: TransitionSurface, env: Env)
 			if not inputMatchesGesture(st, input) then
 				return
 			end
-			const absPos = dragPointerPos(st)
-			api.UpdateHover(hitTestTarget(absPos))
+			-- Report the release point (forcing a fresh hover) so the controller
+			-- resolves the drop target, then commit the drop.
+			api.ReportPointer(dragPointerPos(st), true)
 			api.Drop()
 			touchDragPos = nil
 		end
 	end
 
+	-- Drive the ghost by reporting the live pointer each frame; the controller owns
+	-- the ghost and the re-hover throttle (#7). The backend only sources the
+	-- device-specific pointer position (mouse vs the active touch).
 	const function onRender()
 		const st = api.GetState()
 		if st.Kind ~= "Dragging" or st.Controlled or (st.Device ~= "Mouse" and st.Device ~= "Touch") then
-			lastRenderPos = nil
 			return
 		end
-		const absPos = dragPointerPos(st)
-		st.Ghost.FollowPointer(absPos)
-		-- Only re-hit-test when the pointer actually moved (#7).
-		if lastRenderPos == nil or (absPos - lastRenderPos).Magnitude > 0 then
-			lastRenderPos = absPos
-			api.UpdateHover(hitTestTarget(absPos))
-		end
+		api.ReportPointer(dragPointerPos(st))
 	end
 
 	const backend = {}
@@ -188,7 +174,6 @@ return function(api: TransitionSurface, env: Env)
 		-- Invalidate any armed long-press so it can't fire after stop (#6).
 		longPressGeneration += 1
 		touchDragPos = nil
-		lastRenderPos = nil
 		if janitor then
 			janitor:Destroy()
 			janitor = nil
