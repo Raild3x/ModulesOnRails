@@ -1,0 +1,18 @@
+# Context Map
+
+This repo is **multi-context**: each package under `lib/` is its own domain context
+with its own ubiquitous language. This file points at the per-package `CONTEXT.md`
+glossaries. Read the one(s) relevant to what you're working on before exploring.
+
+See `docs/agents/domain.md` for how the engineering skills consume these files.
+
+## Per-package contexts
+
+- [lib/dragdrop/CONTEXT.md](lib/dragdrop/CONTEXT.md) — pointer/selection drag-and-drop
+  for Roblox GUI: payloads, sources, targets, ghosts, the controller state machine,
+  and its two injection seams (transition surface + input environment).
+- [lib/tablemanager/CONTEXT.md](lib/tablemanager/CONTEXT.md) — reactive table-state
+  management: surfaces, fire modes, the fire scheduler, and coalesce windows.
+
+Other packages under `lib/` do not have a `CONTEXT.md` yet; they are created lazily
+(via `/domain-modeling`) when a term or decision actually needs pinning down.

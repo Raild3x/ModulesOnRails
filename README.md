@@ -8,6 +8,7 @@ ModulesOnRails is a collection of Wally packages to streamline Roblox developmen
 | [BaseObject](https://raild3x.github.io/ModulesOnRails/api/BaseObject) | `BaseObject = "raild3x/baseobject@0.2.2"` | A base class for creating objects with a lifecycle, janitor, and event system. |
 | [CmdrHandler](https://raild3x.github.io/ModulesOnRails/api/CmdrHandler) | `CmdrHandler = "raild3x/cmdrhandler@0.2.2"` | A wrapper for eveara/quenty's Cmdr library. |
 | [Component](https://raild3x.github.io/ModulesOnRails/api/Component) | `Component = "raild3x/component@0.2.0"` | A fork of Sleitnick's Component class for Roblox. |
+| [DragDrop](https://raild3x.github.io/ModulesOnRails/api/DragDrop) | `DragDrop = "raild3x/dragdrop@0.1.0"` | A device-agnostic drag-and-drop system for Roblox UI (mouse, touch, gamepad, keyboard). |
 | [Heap](https://raild3x.github.io/ModulesOnRails/api/Heap) | `Heap = "raild3x/heap@2.1.4"` | A generic min/max heap implementation in Luau. |
 | [Loose-Tight-Double-Grid](https://raild3x.github.io/ModulesOnRails/api/LooseTightDoubleGrid) | `Loose-Tight-Double-Grid = "raild3x/loosetightdoublegrid@1.2.1"` | A spatial partitioning system to query varied size entities in 2d space. |
 | [NetWire](https://raild3x.github.io/ModulesOnRails/api/NetWire) | `NetWire = "raild3x/netwire@0.3.4"` | A networking library based off of sleitnicks comm library. |
@@ -19,7 +20,7 @@ ModulesOnRails is a collection of Wally packages to streamline Roblox developmen
 | [RemoteComponent](https://raild3x.github.io/ModulesOnRails/api/RemoteComponent) | `RemoteComponent = "raild3x/remotecomponent@0.1.3"` | A component extension to provide easy networking functionality. |
 | [Roam](https://raild3x.github.io/ModulesOnRails/api/Roam) | `Roam = "raild3x/roam@0.2.0"` | Roam is a service initialization framework for Roblox. |
 | [T](https://raild3x.github.io/ModulesOnRails/api/T) | `T = "raild3x/t@1.1.0"` | A runtime typechecker for Luau/Roblox |
-| [TableManager](https://raild3x.github.io/ModulesOnRails/api/TableManager) | `TableManager = "raild3x/tablemanager@1.0.2"` | A Luau library for managing tables. |
+| [TableManager](https://raild3x.github.io/ModulesOnRails/api/TableManager) | `TableManager = "raild3x/tablemanager@1.1.0"` | A Luau library for managing tables. |
 | [TableReplicator](https://raild3x.github.io/ModulesOnRails/api/TableReplicator) | `TableReplicator = "raild3x/tablereplicator@1.0.1"` | Replicates a TableManager instance from server to client with minimal effort. |
 
 
@@ -39,4 +40,4 @@ ModulesOnRails is a collection of Wally packages to streamline Roblox developmen
 
 ---
 
-*Last Modified: July 06, 2026*
+*Last Modified: July 08, 2026*
