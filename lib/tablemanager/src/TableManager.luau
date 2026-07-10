@@ -273,16 +273,11 @@ function Static.SetDefaults(defaults: ConfigDefaults)
 end
 
 -- Write-core helpers live in Mutator.luau; local aliases keep call sites unchanged.
-const resolvePathFromPathOrProxy = MutatorModule.resolvePathFromPathOrProxy
 const resolveArrayForWrite = MutatorModule.resolveArrayForWrite
-const getParentOriginalAtPath = MutatorModule.getParentOriginalAtPath
 const applyWrite = MutatorModule.applyWrite
 const applySet = MutatorModule.Set
 const pruneDetachedValue = MutatorModule.pruneDetachedValue
 const shiftArrayKeys = MutatorModule.shiftArrayKeys
-const reparentWithRollback = MutatorModule.reparentWithRollback
-const restoreReparent = MutatorModule.restoreReparent
-const deepCloneValue = MutatorModule.deepCloneValue
 const trackArrayMutation = MutatorModule.trackArrayMutation
 const applyRMW = MutatorModule.RMW
 
@@ -1216,42 +1211,7 @@ function TableManager.MoveTo<T, S1, S2>(
 	currentPath: Path<S1> | Proxy<T, S1>,
 	newPath: Path<S2> | Proxy<T, S2>
 )
-	const sourcePath: PathArray<S1> = resolvePathFromPathOrProxy(self, currentPath)
-	const targetPath: PathArray<S2> = resolvePathFromPathOrProxy(self, newPath)
-
-	if #sourcePath == 0 or #targetPath == 0 then
-		error("MoveTo cannot move the root table")
-	end
-
-	if PathHelpers.ArePathsEqual(sourcePath, targetPath) then
-		return
-	end
-
-	if PathHelpers.IsPrefixPath(sourcePath, targetPath) then
-		error("MoveTo cannot move a table into one of its descendants")
-	end
-
-	const sourceValue = self:Get(sourcePath :: Path<S1>)
-	if type(sourceValue) ~= "table" then
-		error("MoveTo source must be a table")
-	end
-
-	const targetParentPath, targetKey = PathHelpers.GetPathParentAndKey(targetPath)
-	const targetParentOriginal = getParentOriginalAtPath(self, targetParentPath, "MoveTo")
-
-	const rollback = reparentWithRollback(self._proxyManager, sourceValue, targetParentOriginal, targetKey)
-
-	const ok, moveErr = pcall(function()
-		self:Batch(function()
-			self:Set(targetPath, sourceValue)
-			self:Set(sourcePath, nil :: any)
-		end)
-	end)
-
-	if not ok then
-		restoreReparent(self._proxyManager, rollback)
-		error(moveErr, 2)
-	end
+	MutatorModule.MoveTo(self, currentPath, newPath)
 end
 
 --[=[
@@ -1265,25 +1225,7 @@ end
 	This is specifically useful for copying tables around without breaking proxy references.
 ]=]
 function TableManager.CopyTo<T, S1, S2>(self: TM_Internal<T>, currentPath: Path<S1> | Proxy<T, S1>, newPath: Path<S2>)
-	const sourcePath = resolvePathFromPathOrProxy(self, currentPath)
-	const targetPath = resolvePathFromPathOrProxy(self, newPath)
-
-	if #targetPath == 0 then
-		error("CopyTo cannot set the root table")
-	end
-
-	if PathHelpers.ArePathsEqual(sourcePath, targetPath) then
-		return
-	end
-
-	-- Validate destination parent before any mutation.
-	const targetParentPath: { any } = table.clone(targetPath :: any)
-	table.remove(targetParentPath)
-	getParentOriginalAtPath(self, targetParentPath, "CopyTo")
-
-	const sourceValue = self:Get(sourcePath)
-	const copiedValue = deepCloneValue(sourceValue)
-	self:Set(targetPath, copiedValue)
+	MutatorModule.CopyTo(self, currentPath, newPath)
 end
 
 --[=[
@@ -1307,44 +1249,7 @@ end
 	```
 ]=]
 function TableManager.Swap<T, S1, S2>(self: TM_Internal<T>, a: Path<S1> | Proxy<T, S1>, b: Path<S2> | Proxy<T, S2>)
-	const pathA = resolvePathFromPathOrProxy(self, a)
-	const pathB = resolvePathFromPathOrProxy(self, b)
-
-	if #pathA == 0 or #pathB == 0 then
-		error("Swap cannot target the root table")
-	end
-
-	if PathHelpers.ArePathsEqual(pathA, pathB) then
-		return
-	end
-
-	if PathHelpers.IsPrefixPath(pathA, pathB) or PathHelpers.IsPrefixPath(pathB, pathA) then
-		error("Swap cannot swap ancestor/descendant paths")
-	end
-
-	const parentPathA, keyA = PathHelpers.GetPathParentAndKey(pathA)
-	const parentPathB, keyB = PathHelpers.GetPathParentAndKey(pathB)
-	const parentOriginalA = getParentOriginalAtPath(self, parentPathA, "Swap")
-	const parentOriginalB = getParentOriginalAtPath(self, parentPathB, "Swap")
-
-	const valueA = self:Get(pathA)
-	const valueB = self:Get(pathB)
-
-	const rollbackA = reparentWithRollback(self._proxyManager, valueA, parentOriginalB, keyB)
-	const rollbackB = reparentWithRollback(self._proxyManager, valueB, parentOriginalA, keyA)
-
-	const ok, swapErr = pcall(function()
-		self:Batch(function()
-			self:Set(pathA, valueB)
-			self:Set(pathB, valueA)
-		end)
-	end)
-
-	if not ok then
-		restoreReparent(self._proxyManager, rollbackA)
-		restoreReparent(self._proxyManager, rollbackB)
-		error(swapErr, 2)
-	end
+	MutatorModule.Swap(self, a, b)
 end
 
 --------------------------------------------------------------------------------

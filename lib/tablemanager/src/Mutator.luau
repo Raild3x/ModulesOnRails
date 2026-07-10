@@ -43,10 +43,10 @@ type Proxy<T, S> = TMTypes.Proxy<T, S>
 const Mutator = {}
 
 -- ---------------------------------------------------------------------------
--- Path resolution helpers (exported — used by public Set / array methods)
+-- Path resolution helpers
 -- ---------------------------------------------------------------------------
 
-function Mutator.resolvePathFromPathOrProxy<T, S>(self: TM_Internal<T>, pathOrProxy: Path<S> | Proxy<T, S>): PathArray<S>
+local function resolvePathFromPathOrProxy<T, S>(self: TM_Internal<T>, pathOrProxy: Path<S> | Proxy<T, S>): PathArray<S>
 	const proxyManager = self._proxyManager
 	if proxyManager == nil then
 		if ProxyManagerModule.IsProxyValue(pathOrProxy) then
@@ -64,13 +64,13 @@ function Mutator.resolvePathFromPathOrProxy<T, S>(self: TM_Internal<T>, pathOrPr
 end
 
 function Mutator.resolveArrayForWrite<T, S>(self: TM_Internal<T>, pathOrProxy: Path<S> | Proxy<T, S>): (PathArray<S>, { any })
-	const parsedPath = Mutator.resolvePathFromPathOrProxy(self, pathOrProxy)
+	const parsedPath = resolvePathFromPathOrProxy(self, pathOrProxy)
 	const array = self:Get(parsedPath)
 	assert(type(array) == "table", "Target is not a table")
 	return parsedPath, array :: { any }
 end
 
-function Mutator.getParentOriginalAtPath<T, S>(self: TM_Internal<T>, parentPath: PathArray<S>, opName: string): {}
+local function getParentOriginalAtPath<T, S>(self: TM_Internal<T>, parentPath: PathArray<S>, opName: string): {}
 	local parentOriginal = if #parentPath == 0 then self.Raw else self:Get(parentPath)
 	if type(parentOriginal) ~= "table" then
 		error(`{opName} destination parent must be a table`)
@@ -82,7 +82,7 @@ end
 -- Deep clone (used by CopyTo)
 -- ---------------------------------------------------------------------------
 
-function Mutator.deepCloneValue(value: any, seen: { [any]: any }?): any
+local function deepCloneValue(value: any, seen: { [any]: any }?): any
 	if type(value) ~= "table" then
 		return value
 	end
@@ -93,7 +93,7 @@ function Mutator.deepCloneValue(value: any, seen: { [any]: any }?): any
 	const clone = {}
 	memo[value] = clone
 	for k, v in value do
-		clone[Mutator.deepCloneValue(k, memo)] = Mutator.deepCloneValue(v, memo)
+		clone[deepCloneValue(k, memo)] = deepCloneValue(v, memo)
 	end
 	return clone
 end
@@ -285,7 +285,7 @@ end
 -- fresh deep clone of it when `Config.DuplicateReferenceMode == "copy"`.
 local function resolveDuplicateReferencePolicy<T>(self: TM_Internal<T>, value: any): any
 	if self._duplicateReferenceMode == "copy" then
-		return Mutator.deepCloneValue(value)
+		return deepCloneValue(value)
 	end
 	return value
 end
@@ -718,7 +718,7 @@ function Mutator.Set<T, S>(
 				and self._duplicateReferenceMode == "copy"
 			self:Batch(function()
 				for i, entry in entries do
-					const valueToWrite = if clonePerPath and i > 1 then Mutator.deepCloneValue(unwrappedValue) else unwrappedValue
+					const valueToWrite = if clonePerPath and i > 1 then deepCloneValue(unwrappedValue) else unwrappedValue
 					Mutator.applyWrite(self, entry.Path, valueToWrite)
 				end
 			end)
@@ -767,6 +767,127 @@ function Mutator.Set<T, S>(
 	end
 
 	Mutator.applyWrite(self, parsedPath, unwrappedValue)
+end
+
+--[[
+	Move a table from one location to another within the same tree: unset at
+	`currentPath`, set at `newPath`, batched into one coherent flush, with the
+	backing proxy reparented so existing proxy references survive the move. If
+	either write fails the reparenting is rolled back.
+]]
+function Mutator.MoveTo<T, S1, S2>(
+	self: TM_Internal<T>,
+	currentPath: Path<S1> | Proxy<T, S1>,
+	newPath: Path<S2> | Proxy<T, S2>
+)
+	const sourcePath: PathArray<S1> = resolvePathFromPathOrProxy(self, currentPath)
+	const targetPath: PathArray<S2> = resolvePathFromPathOrProxy(self, newPath)
+
+	if #sourcePath == 0 or #targetPath == 0 then
+		error("MoveTo cannot move the root table")
+	end
+
+	if PathHelpers.ArePathsEqual(sourcePath, targetPath) then
+		return
+	end
+
+	if PathHelpers.IsPrefixPath(sourcePath, targetPath) then
+		error("MoveTo cannot move a table into one of its descendants")
+	end
+
+	const sourceValue = self:Get(sourcePath :: Path<S1>)
+	if type(sourceValue) ~= "table" then
+		error("MoveTo source must be a table")
+	end
+
+	const targetParentPath, targetKey = PathHelpers.GetPathParentAndKey(targetPath)
+	const targetParentOriginal = getParentOriginalAtPath(self, targetParentPath, "MoveTo")
+
+	const rollback = Mutator.reparentWithRollback(self._proxyManager, sourceValue, targetParentOriginal, targetKey)
+
+	const ok, moveErr = pcall(function()
+		self:Batch(function()
+			self:Set(targetPath, sourceValue)
+			self:Set(sourcePath, nil :: any)
+		end)
+	end)
+
+	if not ok then
+		Mutator.restoreReparent(self._proxyManager, rollback)
+		error(moveErr, 2)
+	end
+end
+
+--[[
+	Deep-copy the value at `currentPath` to `newPath`. The copy is a fresh deep
+	clone, so the two paths never share table identity.
+]]
+function Mutator.CopyTo<T, S1, S2>(self: TM_Internal<T>, currentPath: Path<S1> | Proxy<T, S1>, newPath: Path<S2>)
+	const sourcePath = resolvePathFromPathOrProxy(self, currentPath)
+	const targetPath = resolvePathFromPathOrProxy(self, newPath)
+
+	if #targetPath == 0 then
+		error("CopyTo cannot set the root table")
+	end
+
+	if PathHelpers.ArePathsEqual(sourcePath, targetPath) then
+		return
+	end
+
+	-- Validate destination parent before any mutation.
+	const targetParentPath: { any } = table.clone(targetPath :: any)
+	table.remove(targetParentPath)
+	getParentOriginalAtPath(self, targetParentPath, "CopyTo")
+
+	const sourceValue = self:Get(sourcePath)
+	const copiedValue = deepCloneValue(sourceValue)
+	self:Set(targetPath, copiedValue)
+end
+
+--[[
+	Swap the values at paths `a` and `b` as a single batched pair of writes,
+	reparenting both backing proxies so references are preserved, with rollback
+	when either write fails. Overlapping (ancestor/descendant) swaps error.
+]]
+function Mutator.Swap<T, S1, S2>(self: TM_Internal<T>, a: Path<S1> | Proxy<T, S1>, b: Path<S2> | Proxy<T, S2>)
+	const pathA = resolvePathFromPathOrProxy(self, a)
+	const pathB = resolvePathFromPathOrProxy(self, b)
+
+	if #pathA == 0 or #pathB == 0 then
+		error("Swap cannot target the root table")
+	end
+
+	if PathHelpers.ArePathsEqual(pathA, pathB) then
+		return
+	end
+
+	if PathHelpers.IsPrefixPath(pathA, pathB) or PathHelpers.IsPrefixPath(pathB, pathA) then
+		error("Swap cannot swap ancestor/descendant paths")
+	end
+
+	const parentPathA, keyA = PathHelpers.GetPathParentAndKey(pathA)
+	const parentPathB, keyB = PathHelpers.GetPathParentAndKey(pathB)
+	const parentOriginalA = getParentOriginalAtPath(self, parentPathA, "Swap")
+	const parentOriginalB = getParentOriginalAtPath(self, parentPathB, "Swap")
+
+	const valueA = self:Get(pathA)
+	const valueB = self:Get(pathB)
+
+	const rollbackA = Mutator.reparentWithRollback(self._proxyManager, valueA, parentOriginalB, keyB)
+	const rollbackB = Mutator.reparentWithRollback(self._proxyManager, valueB, parentOriginalA, keyA)
+
+	const ok, swapErr = pcall(function()
+		self:Batch(function()
+			self:Set(pathA, valueB)
+			self:Set(pathB, valueA)
+		end)
+	end)
+
+	if not ok then
+		Mutator.restoreReparent(self._proxyManager, rollbackA)
+		Mutator.restoreReparent(self._proxyManager, rollbackB)
+		error(swapErr, 2)
+	end
 end
 
 -- ---------------------------------------------------------------------------
