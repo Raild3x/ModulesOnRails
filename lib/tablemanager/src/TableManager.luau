@@ -2221,14 +2221,6 @@ end
 	Returns `true` once [TableManager:Destroy] has run on `manager`, `false`
 	otherwise. Pairs with [TableManager:OnDestroy] for teardown-time checks.
 
-	:::caution Call this as `TableManager.IsDestroyed(manager)`, not `manager:IsDestroyed()`
-	`Destroy` strips the instance's metatable, so a colon call (`manager:IsDestroyed()`)
-	errors ("attempt to call a nil value") once the manager is already destroyed
-	-- there is no longer a method table to resolve `IsDestroyed` through. Calling
-	it as a static function on `TableManager` looks it up directly and works in
-	both states, which is the whole point of a "was this destroyed?" check.
-	:::
-
 	```lua
 	TableManager.IsDestroyed(manager) -- safe before AND after manager:Destroy()
 	```

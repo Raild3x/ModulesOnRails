@@ -14,6 +14,7 @@ const IgnoreTrieModule = require("./IgnoreTrie")
 const DiffModule = require("./Diffing/Diff")
 const Signal = require("../Signal")
 const JanitorModule = require("../Janitor")
+const Promise = require("../Promise")
 
 --// Types //--
 type Path<S> = PathHelpers.Path<S>
@@ -34,6 +35,7 @@ type BatchState = BatchUtilsModule.BatchState
 type OpaqueRegistries = OpaqueRegistryModule.Registries
 type IgnoreTrieNode = IgnoreTrieModule.Node
 type DiffNode = DiffModule.DiffNode
+type Promise<T> = Promise.TypedPromise<T>
 
 export type Proxy<T, S> = ProxyManagerModule.Proxy<T, S>
 
@@ -239,9 +241,16 @@ export type TableManager<T = { [any]: any }> = {
 	--- Returns true if this manager currently shares a live table identity with `other`.
 	IsLinkedWith: (self: TableManager<T>, other: any) -> boolean,
 
+	PromiseValue: <S>(
+		self: TableManager<T>,
+		path: Path<S>,
+		predicate: ((newValue: ValueAtPath<T, S>) -> boolean)?
+	) -> Promise<ValueAtPath<T, S>>,
+
 	OnApplied: (self: TableManager<T>, callback: (op: AppliedOp) -> ()) -> ()->(),
 	OnDestroy: (self: TableManager<T>, callback: () -> ()) -> ()->(),
 
+	IsDestroyed: (manager: any) -> boolean,
 	Destroy: (self: TableManager<T>) -> (),
 
 	-- Fires when this path is directly reassigned OR any descendant of it
@@ -347,36 +356,36 @@ export type TableManager<T = { [any]: any }> = {
 		options: ForOptions?
 	) -> Connection,
 
-	--- Returns a live `TableManager` keyed by `transform`'s return value, with
-	--- values passed through unchanged. Re-runs `transform` only when the
-	--- source key changes; a value change at an existing key refreshes the
-	--- output value WITHOUT re-running `transform`. Destroying the returned
-	--- manager disconnects the source subscription; destroying the SOURCE does
-	--- NOT cascade-destroy the returned manager.
-	MapKeys: <S>(
-		self: TableManager<T>,
-		path: Path<S>,
-		transform: (entryJanitor: Janitor, key: KeyAtPath<T, S>, value: ElementAtPath<T, S>) -> any
-	) -> TableManager<any>,
+	-- --- Returns a live `TableManager` keyed by `transform`'s return value, with
+	-- --- values passed through unchanged. Re-runs `transform` only when the
+	-- --- source key changes; a value change at an existing key refreshes the
+	-- --- output value WITHOUT re-running `transform`. Destroying the returned
+	-- --- manager disconnects the source subscription; destroying the SOURCE does
+	-- --- NOT cascade-destroy the returned manager.
+	-- MapKeys: <S>(
+	-- 	self: TableManager<T>,
+	-- 	path: Path<S>,
+	-- 	transform: (entryJanitor: Janitor, key: KeyAtPath<T, S>, value: ElementAtPath<T, S>) -> any
+	-- ) -> TableManager<any>,
 
-	--- Returns a live `TableManager` keyed by the source key, with each entry
-	--- recomputed via `transform` whenever its value changes. Same lifecycle
-	--- rules as `MapKeys`.
-	MapValues: <S>(
-		self: TableManager<T>,
-		path: Path<S>,
-		transform: (entryJanitor: Janitor, value: ElementAtPath<T, S>, key: KeyAtPath<T, S>) -> any
-	) -> TableManager<any>,
+	-- --- Returns a live `TableManager` keyed by the source key, with each entry
+	-- --- recomputed via `transform` whenever its value changes. Same lifecycle
+	-- --- rules as `MapKeys`.
+	-- MapValues: <S>(
+	-- 	self: TableManager<T>,
+	-- 	path: Path<S>,
+	-- 	transform: (entryJanitor: Janitor, value: ElementAtPath<T, S>, key: KeyAtPath<T, S>) -> any
+	-- ) -> TableManager<any>,
 
-	--- Returns a live `TableManager` keyed by `transform`'s returned key, with
-	--- the entry recomputed whenever the source key or value changes. On an
-	--- output-key collision, the last write wins. Same lifecycle rules as
-	--- `MapKeys`.
-	MapPairs: <S>(
-		self: TableManager<T>,
-		path: Path<S>,
-		transform: (entryJanitor: Janitor, key: KeyAtPath<T, S>, value: ElementAtPath<T, S>) -> (any, any)
-	) -> TableManager<any>,
+	-- --- Returns a live `TableManager` keyed by `transform`'s returned key, with
+	-- --- the entry recomputed whenever the source key or value changes. On an
+	-- --- output-key collision, the last write wins. Same lifecycle rules as
+	-- --- `MapKeys`.
+	-- MapPairs: <S>(
+	-- 	self: TableManager<T>,
+	-- 	path: Path<S>,
+	-- 	transform: (entryJanitor: Janitor, key: KeyAtPath<T, S>, value: ElementAtPath<T, S>) -> (any, any)
+	-- ) -> TableManager<any>,
 
 }
 
