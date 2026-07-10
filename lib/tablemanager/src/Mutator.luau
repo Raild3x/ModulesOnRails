@@ -313,6 +313,85 @@ local function checkDuplicateTableWrite<T, S>(self: TM_Internal<T>, writePath: P
 	return resolveDuplicateReferencePolicy(self, value)
 end
 
+--[[
+	Replace the entire root table of the manager (the `Set({}, newRoot)` case).
+	The root has no parent slot, so instead of `parentTable[key] = value` this
+	swaps the manager's own root references and retargets the proxy graph, then
+	fires the old→new diff via `CheckForChangesBetween`. `newRoot` must already be
+	unwrapped (`ProxyManagerModule.Unwrap`). Order mirrors `applyWrite`:
+	dup-check → validation → apply → link reconcile → diff.
+]]
+local function applyRootSet<T>(self: TM_Internal<T>, newRoot: any)
+	if type(newRoot) ~= "table" then
+		error("Cannot set the root to a non-table value; the root must remain a table")
+	end
+
+	const oldRoot = self.Raw
+	if newRoot == oldRoot then
+		return
+	end
+
+	if self._batchDepth > 0 then
+		error("Cannot replace the root table inside a batch")
+	end
+
+	const rootPath = {} :: PathArray<any>
+
+	-- If the new root is already live elsewhere in this manager, the duplicate-
+	-- reference policy resolves what to actually use as the new root (itself, by
+	-- default, or a fresh clone under DuplicateReferenceMode = "copy").
+	if type(newRoot) == "table" and self._proxyManager ~= nil then
+		newRoot = checkDuplicateTableWrite(self, rootPath, newRoot)
+	end
+
+	const ok, err = validateWrite(self, rootPath, newRoot)
+	if not ok then
+		if err then
+			error(err, 2)
+		end
+		return
+	end
+
+	-- Seed the shadow from `oldRoot` BEFORE swapping `self.Raw` —
+	-- `Baseline.SeedIfNeeded` reads "current live" off `self.Raw`,
+	-- which is still `oldRoot` at this point.
+	const trackable, diffMaxDepth = CoverageModule.ResolveWriteObservation(self, rootPath)
+	if trackable then
+		-- rootPath is always {}, so this never builds an intermediate spine
+		-- (no opaque-ancestor risk; the root itself can never be opaque).
+		BaselineModule.SeedIfNeeded(self, rootPath, oldRoot)
+	end
+
+	-- Swap identity. `oldRoot` keeps its contents (we only repoint references and
+	-- never mutate the old object), so the diff below sees the true prior state.
+	self.Raw = newRoot
+	if self._proxyManager ~= nil then
+		self._proxyManager:RetargetRoot(oldRoot, newRoot)
+	end
+	-- The baseline is a global identity-keyed pool; the root's identity just
+	-- changed, so re-key its node from `oldRoot` to `newRoot` (interior nodes
+	-- keep their identities). This must happen before the root flush below so
+	-- `Baseline.Get({})` still finds the seeded pre-swap baseline.
+	BaselineModule.RebindRoot(oldRoot, newRoot)
+
+	-- Re-register the new root tree by identity. Observers of the OLD root that
+	-- no longer resolve to it are skipped lazily at dispatch (see Propagation);
+	-- no explicit divergence severing is needed.
+	if not self._suppressLinkFanOut then
+		PropagationModule.RegisterSubtree(self, newRoot)
+	end
+
+	-- Fire change events for the full root diff (shadow@{} vs the now-live
+	-- newRoot), then reconcile the shadow to newRoot.
+	if trackable then
+		CoalescedFlushModule.Request(self, rootPath, diffMaxDepth or math.huge)
+	elseif self._appliedListeners[1] ~= nil then
+		-- Untracked, so nothing will diff this root replacement -- but an
+		-- OnApplied subscriber still needs to see it -- ship the value directly.
+		EmitterModule.emitReplicationOp(self, "Set", rootPath, newRoot, nil, nil)
+	end
+end
+
 -- ---------------------------------------------------------------------------
 -- Write core (exported)
 -- ---------------------------------------------------------------------------
@@ -538,7 +617,7 @@ local function applyRMW<T, S>(
 		const newValue = transform(self.Raw)
 		local unwrappedValue = ProxyManagerModule.Unwrap(newValue)
 		unwrappedValue = OpaqueRegistryModule.UnwrapAndRegister(self._opaqueRegistries, unwrappedValue)
-		Mutator.applyRootSet(self, unwrappedValue)
+		applyRootSet(self, unwrappedValue)
 		return newValue
 	end
 
@@ -598,82 +677,96 @@ function Mutator.RMW<T, S>(
 end
 
 --[[
-	Replace the entire root table of the manager (the `Set({}, newRoot)` case).
-	The root has no parent slot, so instead of `parentTable[key] = value` this
-	swaps the manager's own root references and retargets the proxy graph, then
-	fires the old→new diff via `CheckForChangesBetween`. `newRoot` must already be
-	unwrapped (`ProxyManagerModule.Unwrap`). Order mirrors `applyWrite`:
-	dup-check → validation → apply → link reconcile → diff.
+	Write orchestration for `Set`: root replacement (empty path), wildcard
+	fan-out, the plain single-walk write, and dynamic building of missing
+	intermediate tables. `unwrappedValue` must already be unwrapped
+	(`ProxyManagerModule.Unwrap` + opaque registration); the facade owns that
+	plus path parsing.
 ]]
-function Mutator.applyRootSet<T>(self: TM_Internal<T>, newRoot: any)
-	if type(newRoot) ~= "table" then
-		error("Cannot set the root to a non-table value; the root must remain a table")
-	end
-
-	const oldRoot = self.Raw
-	if newRoot == oldRoot then
+function Mutator.Set<T, S>(
+	self: TM_Internal<T>,
+	parsedPath: PathArray<S>,
+	unwrappedValue: any,
+	buildTablesDynamically: boolean?
+)
+	-- Empty path replaces the entire root table (identity swap + full diff).
+	if #parsedPath == 0 then
+		applyRootSet(self, unwrappedValue)
 		return
 	end
 
-	if self._batchDepth > 0 then
-		error("Cannot replace the root table inside a batch")
-	end
-
-	const rootPath = {} :: PathArray<any>
-
-	-- If the new root is already live elsewhere in this manager, the duplicate-
-	-- reference policy resolves what to actually use as the new root (itself, by
-	-- default, or a fresh clone under DuplicateReferenceMode = "copy").
-	if type(newRoot) == "table" and self._proxyManager ~= nil then
-		newRoot = checkDuplicateTableWrite(self, rootPath, newRoot)
-	end
-
-	const ok, err = validateWrite(self, rootPath, newRoot)
-	if not ok then
-		if err then
-			error(err, 2)
+	-- Wildcard fan-out: expand "*" segments against the live data into N
+	-- concrete paths, then apply N ordinary writes -- batched when N > 1 so
+	-- listeners see one coherent flush. Deletes (nil) only target existing
+	-- values; non-nil writes also create a missing literal final key on every
+	-- matched parent, same as a plain Set would.
+	const wildcardIndex = PathHelpers.FindFirstWildcard(parsedPath)
+	if wildcardIndex ~= nil then
+		if buildTablesDynamically then
+			error(`Cannot build tables dynamically through a wildcard ("*") path segment`)
+		end
+		const entries = PathHelpers.ExpandWildcardsFromRoot(self.Raw, parsedPath, wildcardIndex, unwrappedValue ~= nil)
+		if #entries == 1 then
+			Mutator.applyWrite(self, entries[1].Path, unwrappedValue)
+		elseif #entries > 1 then
+			-- Fanning one table value to several paths: honor the duplicate-
+			-- reference policy here, deterministically. The per-write check in
+			-- `applyWrite` only catches duplicates that already have a proxy,
+			-- which a value first written during this same fan-out does not.
+			const clonePerPath = type(unwrappedValue) == "table"
+				and self._proxyManager ~= nil
+				and self._duplicateReferenceMode == "copy"
+			self:Batch(function()
+				for i, entry in entries do
+					const valueToWrite = if clonePerPath and i > 1 then Mutator.deepCloneValue(unwrappedValue) else unwrappedValue
+					Mutator.applyWrite(self, entry.Path, valueToWrite)
+				end
+			end)
 		end
 		return
 	end
 
-	-- Seed the shadow from `oldRoot` BEFORE swapping `self.Raw` —
-	-- `Baseline.SeedIfNeeded` reads "current live" off `self.Raw`,
-	-- which is still `oldRoot` at this point.
-	const trackable, diffMaxDepth = CoverageModule.ResolveWriteObservation(self, rootPath)
-	if trackable then
-		-- rootPath is always {}, so this never builds an intermediate spine
-		-- (no opaque-ancestor risk; the root itself can never be opaque).
-		BaselineModule.SeedIfNeeded(self, rootPath, oldRoot)
+	-- Fast path: a non-nil write with no dynamic-build request has no behavior
+	-- left in the loop below beyond what `applyWrite`'s own parent-chain walk
+	-- already performs (including reporting the identical "Path segment X is
+	-- not a table" error) — so skip straight to the single walk instead of
+	-- walking the parent chain twice.
+	if unwrappedValue ~= nil and not buildTablesDynamically then
+		Mutator.applyWrite(self, parsedPath, unwrappedValue)
+		return
 	end
 
-	-- Swap identity. `oldRoot` keeps its contents (we only repoint references and
-	-- never mutate the old object), so the diff below sees the true prior state.
-	self.Raw = newRoot
-	if self._proxyManager ~= nil then
-		self._proxyManager:RetargetRoot(oldRoot, newRoot)
-	end
-	-- The baseline is a global identity-keyed pool; the root's identity just
-	-- changed, so re-key its node from `oldRoot` to `newRoot` (interior nodes
-	-- keep their identities). This must happen before the root flush below so
-	-- `Baseline.Get({})` still finds the seeded pre-swap baseline.
-	BaselineModule.RebindRoot(oldRoot, newRoot)
+	-- Only build intermediate tables when setting non-nil values; removing (nil)
+	-- doesn't need them.
+	const shouldBuild = buildTablesDynamically and unwrappedValue ~= nil
 
-	-- Re-register the new root tree by identity. Observers of the OLD root that
-	-- no longer resolve to it are skipped lazily at dispatch (see Propagation);
-	-- no explicit divergence severing is needed.
-	if not self._suppressLinkFanOut then
-		PropagationModule.RegisterSubtree(self, newRoot)
+	local parent: any = self.Raw
+	for i = 1, #parsedPath - 1 do
+		const nextValue = parent[parsedPath[i]]
+		if type(nextValue) ~= "table" then
+			if not shouldBuild then
+				-- Reaching here always means `unwrappedValue == nil`: the fast path
+				-- above routes every non-nil write (when dynamic build is off) into
+				-- `applyWrite`, which raises the "Path segment X is not a table"
+				-- error itself, and `shouldBuild` is only false for a non-nil value
+				-- when build is off. So this is the "set a nonexistent path to nil"
+				-- case, which is already a no-op.
+				return
+			end
+
+			-- Build intermediate tables for the remainder of the path, then apply the write.
+			local nested: any = unwrappedValue
+			for j = #parsedPath, i + 1, -1 do
+				nested = { [parsedPath[j]] = nested }
+			end
+			const subPath = table.move(parsedPath, 1, i, 1, table.create(i))
+			Mutator.applyWrite(self, subPath, nested)
+			return
+		end
+		parent = nextValue
 	end
 
-	-- Fire change events for the full root diff (shadow@{} vs the now-live
-	-- newRoot), then reconcile the shadow to newRoot.
-	if trackable then
-		CoalescedFlushModule.Request(self, rootPath, diffMaxDepth or math.huge)
-	elseif self._appliedListeners[1] ~= nil then
-		-- Untracked, so nothing will diff this root replacement -- but an
-		-- OnApplied subscriber still needs to see it -- ship the value directly.
-		EmitterModule.emitReplicationOp(self, "Set", rootPath, newRoot, nil, nil)
-	end
+	Mutator.applyWrite(self, parsedPath, unwrappedValue)
 end
 
 -- ---------------------------------------------------------------------------

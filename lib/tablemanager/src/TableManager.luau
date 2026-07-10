@@ -277,7 +277,7 @@ const resolvePathFromPathOrProxy = MutatorModule.resolvePathFromPathOrProxy
 const resolveArrayForWrite = MutatorModule.resolveArrayForWrite
 const getParentOriginalAtPath = MutatorModule.getParentOriginalAtPath
 const applyWrite = MutatorModule.applyWrite
-const applyRootSet = MutatorModule.applyRootSet
+const applySet = MutatorModule.Set
 const pruneDetachedValue = MutatorModule.pruneDetachedValue
 const shiftArrayKeys = MutatorModule.shiftArrayKeys
 const reparentWithRollback = MutatorModule.reparentWithRollback
@@ -693,93 +693,9 @@ function TableManager.Set<T, S>(
 	buildTablesDynamically: boolean?
 )
 	debug.profilebegin("TM.Set")
-	local parsedPath = PathHelpers.ParsePath(path)
 	local unwrappedValue = ProxyManagerModule.Unwrap(value)
 	unwrappedValue = OpaqueRegistryModule.UnwrapAndRegister(self._opaqueRegistries, unwrappedValue)
-
-	-- Empty path replaces the entire root table (identity swap + full diff).
-	if #parsedPath == 0 then
-		applyRootSet(self, unwrappedValue)
-		debug.profileend()
-		return
-	end
-
-	-- Wildcard fan-out: expand "*" segments against the live data into N
-	-- concrete paths, then apply N ordinary writes -- batched when N > 1 so
-	-- listeners see one coherent flush. Deletes (nil) only target existing
-	-- values; non-nil writes also create a missing literal final key on every
-	-- matched parent, same as a plain Set would.
-	const wildcardIndex = PathHelpers.FindFirstWildcard(parsedPath)
-	if wildcardIndex ~= nil then
-		if buildTablesDynamically then
-			debug.profileend()
-			error(`Cannot build tables dynamically through a wildcard ("*") path segment`)
-		end
-		const entries = PathHelpers.ExpandWildcardsFromRoot(self.Raw, parsedPath, wildcardIndex, unwrappedValue ~= nil)
-		if #entries == 1 then
-			applyWrite(self, entries[1].Path, unwrappedValue)
-		elseif #entries > 1 then
-			-- Fanning one table value to several paths: honor the duplicate-
-			-- reference policy here, deterministically. The per-write check in
-			-- `applyWrite` only catches duplicates that already have a proxy,
-			-- which a value first written during this same fan-out does not.
-			const clonePerPath = type(unwrappedValue) == "table"
-				and self._proxyManager ~= nil
-				and self._duplicateReferenceMode == "copy"
-			self:Batch(function()
-				for i, entry in entries do
-					const valueToWrite = if clonePerPath and i > 1 then deepCloneValue(unwrappedValue) else unwrappedValue
-					applyWrite(self, entry.Path, valueToWrite)
-				end
-			end)
-		end
-		debug.profileend()
-		return
-	end
-
-	-- Only build intermediate tables when setting non-nil values; removing (nil) doesn't need them
-	const shouldBuild = buildTablesDynamically and unwrappedValue ~= nil
-
-	-- Fast path: a non-nil write with no dynamic-build request has no behavior
-	-- left in the loop below beyond what `applyWrite`'s own parent-chain walk
-	-- already performs (including reporting the identical "Path segment X is
-	-- not a table" error) — so skip straight to the single walk instead of
-	-- walking the parent chain twice.
-	if unwrappedValue ~= nil and not buildTablesDynamically then
-		applyWrite(self, parsedPath, unwrappedValue)
-		debug.profileend()
-		return
-	end
-
-	local parent: any = self.Raw
-	for i = 1, #parsedPath - 1 do
-		const nextValue = parent[parsedPath[i]]
-		if type(nextValue) ~= "table" then
-			if not shouldBuild then
-				-- Reaching here always means `unwrappedValue == nil`: the fast path
-				-- above routes every non-nil write (when dynamic build is off) into
-				-- `applyWrite`, which raises the "Path segment X is not a table"
-				-- error itself, and `shouldBuild` is only false for a non-nil value
-				-- when build is off. So this is the "set a nonexistent path to nil"
-				-- case, which is already a no-op.
-				debug.profileend()
-				return
-			end
-
-			-- Build intermediate tables for the remainder of the path, then apply the write.
-			local nested: any = unwrappedValue
-			for j = #parsedPath, i + 1, -1 do
-				nested = { [parsedPath[j]] = nested }
-			end
-			const subPath = table.move(parsedPath, 1, i, 1, table.create(i))
-			applyWrite(self, subPath, nested)
-			debug.profileend()
-			return
-		end
-		parent = nextValue
-	end
-
-	applyWrite(self, parsedPath, unwrappedValue)
+	applySet(self, PathHelpers.ParsePath(path), unwrappedValue, buildTablesDynamically)
 	debug.profileend()
 end
 
