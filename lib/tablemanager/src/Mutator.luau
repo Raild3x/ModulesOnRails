@@ -401,7 +401,7 @@ function Mutator.applyWrite<T, S>(self: TM_Internal<T>, parsedPath: PathArray<S>
 		-- requires knowing the table is actually array-shaped (not just
 		-- numeric-keyed) to avoid misdiffing sparse/dict tables as arrays.
 		if type(key) == "number" and batch then
-			const isArray = ProxyManagerModule.ClassifyTable(parentTable)
+			const isArray = PathHelpers.ClassifyArray(parentTable)
 			if isArray then
 				ensureBatchPathTracking(batch, parentPath)
 			end

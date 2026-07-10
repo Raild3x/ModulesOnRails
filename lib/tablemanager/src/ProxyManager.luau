@@ -173,12 +173,6 @@ const function getOriginal<T>(t: T | Proxy<T>): T
 	return t
 end
 
--- Classify table shape in one pass. Returns whether the table is an array
--- plus its array length when true. See `PathHelpers.ClassifyArray`.
-const function classifyTable(t: { [any]: any }): (boolean, number)
-	return PathHelpers.ClassifyArray(t)
-end
-
 --------------------------------------------------------------------------------
 --// Module //--
 --------------------------------------------------------------------------------
@@ -418,7 +412,7 @@ function ProxyManager.CreateProxy<T, S>(
 	self._originalToProxy[original] = proxy
 
 	-- Store metadata
-	const isArr, arrayLength = classifyTable(original)
+	const isArr, arrayLength = PathHelpers.ClassifyArray(original)
 	self._proxyMeta[proxy] = {
 		Original = original,
 		Parent = parentOriginal,
@@ -494,7 +488,7 @@ function ProxyManager.RetargetRoot<T>(self: ProxyManager<T>, oldRoot: any, newRo
 	-- Retarget the root proxy's metadata to the new original.
 	const meta = self._proxyMeta[rootProxy]
 	if meta ~= nil then
-		const isArr, arrayLength = classifyTable(newRoot)
+		const isArr, arrayLength = PathHelpers.ClassifyArray(newRoot)
 		meta.Original = newRoot
 		meta.IsArray = isArr
 		meta.ArrayLength = arrayLength
@@ -626,16 +620,6 @@ end
 --- Returns the original (unwrapped) table behind a proxy, or `t` unchanged if it isn't a proxy.
 function ProxyManager.Unwrap<T>(t: T | Proxy<T>): T
 	return getOriginal(t)
-end
-
---[[
-	Classify table shape in one pass.
-	Returns whether the table is an array plus its array length when true.
-	A table is considered an array when every key is a positive integer and
-	the set of keys is exactly `{1, .., maxIndex}` (so `{}` is a length-0 array).
-]]
-function ProxyManager.ClassifyTable(t: { [any]: any }): (boolean, number)
-	return classifyTable(t)
 end
 
 return ProxyManager
