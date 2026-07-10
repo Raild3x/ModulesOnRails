@@ -676,13 +676,9 @@ function Mutator.RMW<T, S>(
 	return nil
 end
 
---[[
-	Write orchestration for `Set`: root replacement (empty path), wildcard
-	fan-out, the plain single-walk write, and dynamic building of missing
-	intermediate tables. `unwrappedValue` must already be unwrapped
-	(`ProxyManagerModule.Unwrap` + opaque registration); the facade owns that
-	plus path parsing.
-]]
+-- Write orchestration for `Set` (see the facade doc for behavior).
+-- `unwrappedValue` must already be unwrapped (`ProxyManagerModule.Unwrap` +
+-- opaque registration); the facade owns that plus path parsing.
 function Mutator.Set<T, S>(
 	self: TM_Internal<T>,
 	parsedPath: PathArray<S>,
@@ -769,12 +765,8 @@ function Mutator.Set<T, S>(
 	Mutator.applyWrite(self, parsedPath, unwrappedValue)
 end
 
---[[
-	Move a table from one location to another within the same tree: unset at
-	`currentPath`, set at `newPath`, batched into one coherent flush, with the
-	backing proxy reparented so existing proxy references survive the move. If
-	either write fails the reparenting is rolled back.
-]]
+-- `MoveTo` core (see the facade doc): batched unset+set with the backing proxy
+-- reparented so references survive, rolled back if either write fails.
 function Mutator.MoveTo<T, S1, S2>(
 	self: TM_Internal<T>,
 	currentPath: Path<S1> | Proxy<T, S1>,
@@ -818,10 +810,8 @@ function Mutator.MoveTo<T, S1, S2>(
 	end
 end
 
---[[
-	Deep-copy the value at `currentPath` to `newPath`. The copy is a fresh deep
-	clone, so the two paths never share table identity.
-]]
+-- `CopyTo` core (see the facade doc): writes a fresh deep clone, so the two
+-- paths never share table identity.
 function Mutator.CopyTo<T, S1, S2>(self: TM_Internal<T>, currentPath: Path<S1> | Proxy<T, S1>, newPath: Path<S2>)
 	const sourcePath = resolvePathFromPathOrProxy(self, currentPath)
 	const targetPath = resolvePathFromPathOrProxy(self, newPath)
@@ -844,11 +834,8 @@ function Mutator.CopyTo<T, S1, S2>(self: TM_Internal<T>, currentPath: Path<S1> |
 	self:Set(targetPath, copiedValue)
 end
 
---[[
-	Swap the values at paths `a` and `b` as a single batched pair of writes,
-	reparenting both backing proxies so references are preserved, with rollback
-	when either write fails. Overlapping (ancestor/descendant) swaps error.
-]]
+-- `Swap` core (see the facade doc): one batched pair of writes, both backing
+-- proxies reparented, rolled back when either write fails.
 function Mutator.Swap<T, S1, S2>(self: TM_Internal<T>, a: Path<S1> | Proxy<T, S1>, b: Path<S2> | Proxy<T, S2>)
 	const pathA = resolvePathFromPathOrProxy(self, a)
 	const pathB = resolvePathFromPathOrProxy(self, b)
