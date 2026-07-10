@@ -523,9 +523,9 @@ end
 	can never re-error on the spine.
 
 	Returns `transform`'s raw result (pre-unwrap), matching what the public
-	methods have always returned; the unwrapped form of it is what gets written.
+	methods have always returned; the unwrapped form is what gets written.
 ]]
-function Mutator.applyRMW<T, S>(
+local function applyRMW<T, S>(
 	self: TM_Internal<T>,
 	parsedPath: PathArray<S>,
 	transform: (oldValue: any) -> any
@@ -559,6 +559,42 @@ function Mutator.applyRMW<T, S>(
 	unwrappedValue = OpaqueRegistryModule.UnwrapAndRegister(self._opaqueRegistries, unwrappedValue)
 	Mutator.applyWrite(self, parsedPath, unwrappedValue, parentTable)
 	return newValue
+end
+
+--[[
+	Read-modify-write entry for `Update`/`Increment`. A non-wildcard path takes
+	the single-walk core above. A wildcard path fans out to one read-modify-write
+	per matched concrete path -- the value is re-read immediately before each
+	write (not taken from the expansion snapshot) so a `transform` that touches
+	other matched paths never operates on stale data, and `transform` also
+	receives the keys matched by each `"*"` (left-to-right, one per wildcard)
+	plus the fully concrete path. Multiple writes are batched so listeners see
+	one coherent flush.
+
+	Returns the scalar transform result; `nil` for wildcard paths.
+]]
+function Mutator.RMW<T, S>(
+	self: TM_Internal<T>,
+	parsedPath: PathArray<S>,
+	transform: (oldValue: any, wildcardMatches: { any }?, path: { any }?) -> any
+): any
+	const wildcardIndex = PathHelpers.FindFirstWildcard(parsedPath)
+	if wildcardIndex == nil then
+		return applyRMW(self, parsedPath, transform)
+	end
+
+	const entries = PathHelpers.ExpandWildcardsFromRoot(self.Raw, parsedPath, wildcardIndex, false)
+	if #entries == 1 then
+		const entry = entries[1]
+		self:Set(entry.Path, transform(self:Get(entry.Path, true), entry.WildcardMatches :: { any }, entry.Path))
+	elseif #entries > 1 then
+		self:Batch(function()
+			for _, entry in entries do
+				self:Set(entry.Path, transform(self:Get(entry.Path, true), entry.WildcardMatches :: { any }, entry.Path))
+			end
+		end)
+	end
+	return nil
 end
 
 --[[

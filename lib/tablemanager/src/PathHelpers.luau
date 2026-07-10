@@ -395,6 +395,37 @@ function PathHelpers.ExpandWildcards(
 end
 
 --[=[
+	Expands a wildcard path against live data, starting from `root`. Segments
+	before `wildcardIndex` are literal and keep exact-path semantics (a non-table
+	value along the prefix errors, same as `Set`/`Get`); segments from
+	`wildcardIndex` on are expanded with match-what-exists semantics (branches
+	that cannot resolve are skipped). Returns a complete snapshot of matched
+	concrete paths, safe to iterate while mutating the tree.
+
+	@param root The table to resolve the concrete prefix against
+	@param path The full parsed path containing at least one wildcard
+	@param wildcardIndex Index of the first wildcard segment in `path`
+	@param includeMissingFinal When true, a missing literal final segment still yields an entry (Value = nil) — for writers that create the key.
+	@return The matched expansions (empty when nothing matches)
+]=]
+function PathHelpers.ExpandWildcardsFromRoot(
+	root: any,
+	path: PathArray,
+	wildcardIndex: number,
+	includeMissingFinal: boolean?
+): { WildcardExpansion }
+	local node: any = root
+	for i = 1, wildcardIndex - 1 do
+		const segment = path[i]
+		node = node[segment]
+		if type(node) ~= "table" then
+			error(`Path segment {segment} is not a table`)
+		end
+	end
+	return PathHelpers.ExpandWildcards(node, path, wildcardIndex, includeMissingFinal)
+end
+
+--[=[
 	Classifies table shape in one pass: a table is a dense array iff every key
 	is a positive integer and the set of keys is exactly `{1, .., maxIndex}`
 	(so `{}` is a length-0 array).

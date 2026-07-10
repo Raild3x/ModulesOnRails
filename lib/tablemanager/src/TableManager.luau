@@ -284,7 +284,7 @@ const reparentWithRollback = MutatorModule.reparentWithRollback
 const restoreReparent = MutatorModule.restoreReparent
 const deepCloneValue = MutatorModule.deepCloneValue
 const trackArrayMutation = MutatorModule.trackArrayMutation
-const applyRMW = MutatorModule.applyRMW
+const applyRMW = MutatorModule.RMW
 
 -- Emit/notify core lives in Emitter.luau; local aliases keep call sites unchanged.
 const emitInserted = EmitterModule.emitInserted
@@ -429,60 +429,6 @@ end
 --// Setter/Accessor Methods //--
 --------------------------------------------------------------------------------
 
---[[
-	Expands a wildcard path against the live raw data. Segments before
-	`wildcardIndex` are literal and keep exact-path semantics (a non-table value
-	along the prefix errors, same as `Set`/`Get`); segments from `wildcardIndex`
-	on are expanded with match-what-exists semantics (branches that cannot
-	resolve are skipped). Returns a complete snapshot of matched concrete paths,
-	safe to iterate while mutating the tree.
-]]
-const function resolveWildcardExpansion<T>(
-	self: TM_Internal<T>,
-	parsedPath: PathArray,
-	wildcardIndex: number,
-	includeMissingFinal: boolean
-): { PathHelpers.WildcardExpansion }
-	local node: any = self.Raw
-	for i = 1, wildcardIndex - 1 do
-		const segment = parsedPath[i]
-		node = node[segment]
-		if type(node) ~= "table" then
-			error(`Path segment {segment} is not a table`)
-		end
-	end
-	return PathHelpers.ExpandWildcards(node, parsedPath, wildcardIndex, includeMissingFinal)
-end
-
---[[
-	Fan-out core for wildcard `Update`/`Increment`: one read-modify-write per
-	matched concrete path. The value is re-read immediately before each write
-	(not taken from the expansion snapshot) so a `transform` that touches other
-	matched paths never operates on stale data. `transform` also receives the
-	keys matched by each `"*"` (left-to-right, one per wildcard) and the fully
-	concrete path. Multiple writes are batched so listeners see one coherent
-	flush.
-]]
-const function applyWildcardRMW<T>(
-	self: TM_Internal<T>,
-	entries: { PathHelpers.WildcardExpansion },
-	transform: (oldValue: any, wildcardMatches: { any }, path: { any }) -> any
-)
-	if #entries == 0 then
-		return
-	end
-	if #entries == 1 then
-		const entry = entries[1]
-		self:Set(entry.Path, transform(self:Get(entry.Path, true), entry.WildcardMatches :: { any }, entry.Path))
-		return
-	end
-	self:Batch(function()
-		for _, entry in entries do
-			self:Set(entry.Path, transform(self:Get(entry.Path, true), entry.WildcardMatches :: { any }, entry.Path))
-		end
-	end)
-end
-
 --[=[
 	@within TableManager
 	@method Get
@@ -583,7 +529,7 @@ function TableManager.GetMatching<T, S>(self: TM_Internal<T>, path: Path<S>): { 
 		end
 		return { { Path = table.clone(parsedPath), Value = value, WildcardMatches = nil } }
 	end
-	return resolveWildcardExpansion(self, parsedPath, wildcardIndex, false)
+	return PathHelpers.ExpandWildcardsFromRoot(self.Raw, parsedPath, wildcardIndex, false)
 end
 
 --[=[
@@ -769,7 +715,7 @@ function TableManager.Set<T, S>(
 			debug.profileend()
 			error(`Cannot build tables dynamically through a wildcard ("*") path segment`)
 		end
-		const entries = resolveWildcardExpansion(self, parsedPath, wildcardIndex, unwrappedValue ~= nil)
+		const entries = PathHelpers.ExpandWildcardsFromRoot(self.Raw, parsedPath, wildcardIndex, unwrappedValue ~= nil)
 		if #entries == 1 then
 			applyWrite(self, entries[1].Path, unwrappedValue)
 		elseif #entries > 1 then
@@ -879,16 +825,7 @@ function TableManager.Update<T, S>(
 	path: Path<S>,
 	updater: (oldValue: ValueAtPath<T, S>, wildcardMatches: { any }?, path: { any }?) -> ValueAtPath<T, S>
 ): ValueAtPath<T, S>
-	const parsedPath = PathHelpers.ParsePath(path)
-	const wildcardIndex = PathHelpers.FindFirstWildcard(parsedPath)
-	if wildcardIndex ~= nil then
-		const entries = resolveWildcardExpansion(self, parsedPath, wildcardIndex, false)
-		applyWildcardRMW(self, entries, updater :: any)
-		return nil :: any
-	end
-	-- Single-walk read-modify-write: resolves the parent chain once for both
-	-- the read and the write (see `Mutator.applyRMW`).
-	return applyRMW(self, parsedPath, updater :: any)
+	return applyRMW(self, PathHelpers.ParsePath(path), updater :: any)
 end
 
 --[=[
@@ -913,17 +850,7 @@ end
 	```
 ]=]
 function TableManager.Increment<T, S>(self: TM_Internal<T>, path: Path<S>, delta: any): any
-	const parsedPath = PathHelpers.ParsePath(path)
-	const wildcardIndex = PathHelpers.FindFirstWildcard(parsedPath)
-	if wildcardIndex ~= nil then
-		const entries = resolveWildcardExpansion(self, parsedPath, wildcardIndex, false)
-		applyWildcardRMW(self, entries, function(oldValue)
-			return oldValue + delta
-		end)
-		return nil
-	end
-	-- Single-walk read-modify-write (see `Mutator.applyRMW`).
-	return applyRMW(self, parsedPath, function(oldValue)
+	return applyRMW(self, PathHelpers.ParsePath(path), function(oldValue: any)
 		return oldValue + delta
 	end)
 end
