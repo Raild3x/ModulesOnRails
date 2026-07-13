@@ -96,26 +96,8 @@
 	-- - Listeners only fire for self or ancestor changes, not parent changes
 	-- - The tree traversal stops at {"Players", "Player1", "Health"}
 	```
-	
-	### Example 6: Performance Comparison
-	```lua
-	-- Old array-based approach:
-	-- 1000 total listeners registered at various paths
-	-- Change at {"Players", "Player1", "Health"}
-	-- Must iterate ALL 1000 listeners and check path relation for each
-	-- = ~1000 operations
-	
-	-- New tree-based approach:
-	-- Same 1000 listeners
-	-- Change at {"Players", "Player1", "Health"}
-	-- Walk tree: [ROOT] → "Players" → "Player1" → "Health"
-	-- Only check listeners at these 4 nodes (maybe 10 listeners total)
-	-- = ~14 operations
-	
-	-- Speed improvement: 70x faster!
-	```
 
-	### Example 7: Wildcard Listeners
+	### Example 6: Wildcard Listeners
 	```lua
 	-- Register a wildcard listener that matches any key at that segment:
 	registry:RegisterListener("ValueChanged", {"Players", "*", "Health"}, function(newValue, oldValue, metadata)
