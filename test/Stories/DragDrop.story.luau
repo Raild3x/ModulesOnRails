@@ -437,9 +437,10 @@ local function mountBoard(target: GuiObject): () -> ()
 	-- Repaints
 	----------------------------------------------------------------------------
 
-	addCleanup(DragDrop.ObserveHoveredTarget(redraw))
-	addCleanup(DragDrop.ObserveActivePayload(redraw))
-	-- The observers repaint while the drag state clears — BEFORE OnDrop mutates
+	redraw() -- seed the idle board; the change signals below don't fire on connect
+	addCleanup(DragDrop.HoveredTargetChanged:Connect(redraw))
+	addCleanup(DragDrop.ActivePayloadChanged:Connect(redraw))
+	-- The change signals repaint while the drag state clears — BEFORE OnDrop mutates
 	-- the board. DragEnded fires last, so this repaint shows the post-drop board.
 	addCleanup(DragDrop.DragEnded:Connect(redraw))
 

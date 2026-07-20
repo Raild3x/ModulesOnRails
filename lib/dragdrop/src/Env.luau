@@ -5,8 +5,8 @@
 	world: rendering, preferred-input, clock, and the device-input surface. See
 	Types.Env for the shape. Production wires the real services below; the test
 	harness patches fakes in with `Patch` and restores with `Reset`. Both mutate
-	the table IN PLACE — the backends capture it at construction, so its identity
-	must never change: there is only ever one live environment.
+	the table in place: the backends capture it at construction, so its identity
+	must never change. There is only ever one live environment.
 ]]
 
 const RunService = game:GetService("RunService")

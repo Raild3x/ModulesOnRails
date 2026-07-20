@@ -10,9 +10,9 @@ const Types = require("./Types")
 
 -- One schema per config key: its default and the value kind Configure()
 -- validates against. `default == nil` marks an optional key (GhostContainer,
--- KeyboardCancelKeyCode) — no default, but still validated when supplied. This
--- is the single source the live defaults AND validation derive from; adding a
--- knob is one entry here (plus its public Types.Config field/doc).
+-- KeyboardCancelKeyCode) — no default, but still validated when supplied. Both
+-- the live defaults and validation derive from this table; adding a knob is one
+-- entry here, plus its public Types.Config field and doc.
 const CONFIG_SCHEMA: { [string]: { default: any, kind: string } } = {
 	DragThresholdPx = { default = 8, kind = "number" },
 	TouchSlopPx = { default = 12, kind = "number" },
@@ -64,7 +64,7 @@ function Config.Configure(config: Types.Config)
 	end
 end
 
--- Restore every config key to its default. This is the only way to CLEAR an
+-- Restore every config key to its default. This is the only way to clear an
 -- optional key (GhostContainer, KeyboardCancelKeyCode): Configure can't accept
 -- nil for them because nil values vanish from Luau tables.
 function Config.Reset()

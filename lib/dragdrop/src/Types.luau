@@ -1,10 +1,9 @@
 --[[
 	DragDrop — shared type definitions.
 
-	The drag system is data-agnostic: it carries an opaque `Payload` (anything
-	with a `Type` discriminator) from a registered source to a registered target,
-	and emits intent via the target's `OnDrop`. Nothing in this system inspects a
-	payload past its `Type` field.
+	The drag system is data-agnostic: it carries an opaque `Payload` from a
+	registered source to a registered target, and emits intent via the target's
+	`OnDrop`. Nothing in this system inspects a payload past its `Tags` field.
 
 	See DragDrop.luau for the public facade and API docs.
 ]]
@@ -69,8 +68,7 @@ export type SourceOptions = {
 	-- the source's on-screen footprint. `Size = UDim2.fromScale(1, 1)` matches the
 	-- source; any explicit Size overrides it. All appearance (tilt, transparency,
 	-- scale) is the builder's business. The instance is destroyed on drag end.
-	-- Practically every source should supply this — the built-in fallback is a
-	-- bare debug plate, not something to ship.
+	-- Without one, the drag falls back to a plain plate listing the payload's tags.
 	BuildGhost: ((payload: Payload, source: GuiObject) -> GuiObject)?,
 }
 
@@ -158,8 +156,8 @@ export type DragHandle = {
 	@type Unregister () -> ()
 	@within DragDrop
 
-	Returned by [DragDrop.RegisterSource]/[DragDrop.RegisterTarget] and the
-	`Observe*` functions. Call it to tear the registration/observer down.
+	Returned by [DragDrop.RegisterSource] and [DragDrop.RegisterTarget]. Call it to
+	tear the registration down.
 ]=]
 export type Unregister = () -> ()
 
@@ -169,8 +167,8 @@ export type Unregister = () -> ()
 export type Device = "Mouse" | "Touch" | "Gamepad" | "Keyboard"
 
 -- Device grouping used to decide whether a preferred-input change should cancel
--- a drag: a keyboard press during a mouse drag stays in `MouseKeyboard` and must
--- NOT cancel, whereas touching the screen (Touch) or a controller (Gamepad) does.
+-- a drag: a keyboard press during a mouse drag stays in `MouseKeyboard` and does
+-- not cancel, whereas touching the screen (Touch) or a controller (Gamepad) does.
 export type InputClass = "MouseKeyboard" | "Touch" | "Gamepad"
 
 export type SourceEntry = {
@@ -224,8 +222,6 @@ export type Signalish = { Connect: (self: any, callback: (...any) -> ()) -> Conn
 -- The environment a backend translates input from. The real adapter (built in
 -- Env.luau) wires these to UserInputService / GuiService / ContextActionService /
 -- task.delay; the test harness installs fakes so gesture logic runs headlessly.
--- This is the seam that makes the input-translation layer testable through its
--- interface rather than around it.
 export type Env = {
 	-- Rendering + preferred-input + clock (shared with the drag machine's own reads).
 	MountGhost: (params: any) -> GhostHandle,
@@ -271,7 +267,6 @@ export type PendingState = {
 	StartPos: Vector2,
 	InputObject: InputLike?,
 	Device: Device,
-	InputClass: InputClass,
 }
 
 -- Payload airborne; ghost + scroll locks live for this state's lifetime.
@@ -280,7 +275,6 @@ export type DraggingState = {
 	Source: SourceEntry,
 	Payload: Payload,
 	Device: Device,
-	InputClass: InputClass,
 	InputObject: InputLike?,
 	Ghost: GhostHandle,
 	GhostStyle: GhostStyle,
@@ -298,7 +292,6 @@ export type EnterParams = {
 	Source: SourceEntry,
 	Payload: Payload,
 	Device: Device,
-	InputClass: InputClass,
 	InputObject: InputLike?,
 	GrabPoint: Vector2,
 	Controlled: boolean,

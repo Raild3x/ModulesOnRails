@@ -33,6 +33,14 @@ return function(api: TransitionSurface, env: Env)
 	local janitor: any = nil
 	local dragJanitor: any = nil -- CAS binds live only during a selection drag
 
+	-- Tear down the per-drag CAS binds. Safe to call when none are live.
+	const function unbindDragActions()
+		if dragJanitor then
+			dragJanitor:Destroy()
+			dragJanitor = nil
+		end
+	end
+
 	-- The live drag when it is a selection drag (grab mode), narrowed; else nil.
 	const function selectionDrag(st: DragState): DraggingState?
 		if st.Kind == "Dragging" and not st.Controlled and (st.Device == "Gamepad" or st.Device == "Keyboard") then
@@ -70,9 +78,7 @@ return function(api: TransitionSurface, env: Env)
 		if not drag then
 			return
 		end
-		if dragJanitor then
-			dragJanitor:Destroy()
-		end
+		unbindDragActions()
 		dragJanitor = Janitor.new()
 
 		-- Device-appropriate drop/cancel keys, read live from config.
@@ -98,12 +104,7 @@ return function(api: TransitionSurface, env: Env)
 		onSelectionChanged() -- snap the ghost onto the initially selected slot
 	end
 
-	const function onDragEnded()
-		if dragJanitor then
-			dragJanitor:Destroy()
-			dragJanitor = nil
-		end
-	end
+	const onDragEnded = unbindDragActions
 
 	-- A lift key on a selected source enters grab mode (a menu "Switch" button can
 	-- also call DragDrop.BeginDrag directly).
@@ -136,22 +137,13 @@ return function(api: TransitionSurface, env: Env)
 		janitor:Add(env.InputBegan:Connect(onInputBegan))
 		janitor:Add(api.DragStarted:Connect(onDragStarted), "Disconnect")
 		janitor:Add(api.DragEnded:Connect(onDragEnded), "Disconnect")
-		janitor:Add(function()
-			if dragJanitor then
-				dragJanitor:Destroy()
-				dragJanitor = nil
-			end
-		end, true)
+		janitor:Add(unbindDragActions, true)
 	end
 
 	function backend.Stop()
 		if janitor then
-			janitor:Destroy()
+			janitor:Destroy() -- also runs unbindDragActions
 			janitor = nil
-		end
-		if dragJanitor then
-			dragJanitor:Destroy()
-			dragJanitor = nil
 		end
 	end
 

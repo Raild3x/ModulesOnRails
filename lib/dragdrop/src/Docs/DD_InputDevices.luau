@@ -33,9 +33,8 @@
 	If the player changes input **class** while a drag is live — touching the screen
 	during a gamepad drag, picking up a controller during a mouse drag — the drag is
 	**cancelled and reverted**: scroll locks are restored, the ghost is removed, and
-	[DragEnded](/api/DragDrop#DragEnded) fires with a `nil` target. This is
-	deliberate: a half-finished drag owned by a device the player just put down is a
-	trap, so the system unwinds cleanly rather than guessing.
+	[DragEnded](/api/DragDrop#DragEnded) fires with a `nil` target. The drag is not
+	handed over to the new device.
 
 	Mouse and keyboard are the **same** class, so tapping a key during a mouse drag
 	(or clicking during keyboard grab mode) does **not** cancel. The three classes

@@ -1,11 +1,11 @@
 --[[
-	DragDrop — ghost/proxy layer (Fusion-free).
+	DragDrop — ghost/proxy layer.
 
-	Owns the visual proxy that represents the payload while it is airborne. This
-	module concerns itself only with PLACEMENT: it mounts a proxy, follows the
-	pointer, or springs between slots on selection devices. Appearance is entirely
-	the consumer's `BuildGhost` (a plain fallback plate is used when none is
-	given) — nothing here scales, tilts, or recolors the proxy.
+	Owns the visual proxy that represents the payload while it is airborne, and
+	handles its placement only: it mounts the proxy, follows the pointer, and
+	springs between slots on selection devices. Appearance comes from the
+	consumer's `BuildGhost` (a fallback plate is used when none is given);
+	nothing here scales, tilts, or recolors the proxy.
 
 	Coordinate space: everything is canonical (AbsolutePosition) space. The proxy
 	is parented either into the consumer's `GhostContainer` or an internal
@@ -71,10 +71,8 @@ const function rootInsetOffset(root: LayerCollector): Vector2
 	return Vector2.zero
 end
 
--- Text for the debug plate. Display is not the drag system's concern — this
--- exists only so a source that forgot its BuildGhost shows SOMETHING
--- identifiable while prototyping. All we can honestly pull off an opaque payload
--- is its tags, so that is what we render.
+-- Text for the fallback plate. Tags are the only readable field on an opaque
+-- payload, so they are what it shows.
 const function debugGhostText(payload: Payload): string
 	const tags = payload.Tags
 	if typeof(tags) == "table" and #tags > 0 then

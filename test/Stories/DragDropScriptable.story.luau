@@ -242,11 +242,12 @@ return {
 			}))
 		end
 
-		addCleanup(DragDrop.ObserveHoveredTarget(redraw))
-		addCleanup(DragDrop.ObserveActivePayload(redraw))
-		-- The observers repaint while the drag state clears — BEFORE the target's
-		-- OnDrop mutates occupancy — so on their own the board would show the box
-		-- back in its source slot after a drop. DragEnded fires last (after
+		redraw() -- seed the board; the change signals below don't fire on connect
+		addCleanup(DragDrop.HoveredTargetChanged:Connect(redraw))
+		addCleanup(DragDrop.ActivePayloadChanged:Connect(redraw))
+		-- The change signals repaint while the drag state clears — BEFORE the
+		-- target's OnDrop mutates occupancy — so on their own the board would show
+		-- the box back in its source slot after a drop. DragEnded fires last (after
 		-- OnDrop/OnDragEnd), so this repaint shows the post-drop occupancy.
 		addCleanup(DragDrop.DragEnded:Connect(function()
 			redraw()

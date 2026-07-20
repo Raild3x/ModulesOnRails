@@ -332,33 +332,32 @@ return function(t: tiniest)
 	end)
 
 	--------------------------------------------------------------------------------
-	describe("Observe semantics", function()
+	describe("State-change signals", function()
 		before_each(function()
 			Core.SetInputMode("Scriptable")
 		end)
 
-		test("ObserveActivePayload fires immediately and on change", function()
+		test("ActivePayloadChanged fires on change, not on connect", function()
 			const calls = {}
-			const disconnect = Core.ObserveActivePayload(function(payload)
+			const conn = Core.ActivePayloadChanged:Connect(function(payload)
 				table.insert(calls, { Value = payload })
 			end)
-			expect(#calls).is(1) -- immediate
-			expect(calls[1].Value).never_exists()
+			expect(#calls).is(0) -- no fire on connect; seed from GetActivePayload instead
 
 			const src = frame()
 			const payload = { Tags = { "Item" } }
 			registerSource(src, payload)
 			const handle = Core.BeginDrag(src)
-			expect(#calls).is(2)
-			expect(calls[2].Value).is(payload)
+			expect(#calls).is(1)
+			expect(calls[1].Value).is(payload)
 
 			handle:Cancel()
-			expect(#calls).is(3)
-			expect(calls[3].Value).never_exists()
+			expect(#calls).is(2)
+			expect(calls[2].Value).never_exists()
 
-			disconnect()
+			conn:Disconnect()
 			Core.BeginDrag(src)
-			expect(#calls).is(3) -- no further calls after disconnect
+			expect(#calls).is(2) -- no further calls after disconnect
 		end)
 	end)
 
@@ -483,21 +482,12 @@ return function(t: tiniest)
 			expect(InputUtil.GetBasePlayerGui()).is_a("Instance")
 		end)
 
-		test("GetInset and PointerLocation return Vector2s", function()
-			expect(InputUtil.GetInset()).is_a("Vector2")
+		test("PointerLocation returns a Vector2", function()
 			expect(InputUtil.PointerLocation()).is_a("Vector2")
 		end)
 
 		test("GuiObjectsAt returns a table", function()
 			expect(InputUtil.GuiObjectsAt(Vector2.zero)).is_a("table")
-		end)
-
-		test("GetLayerCollector walks to the nearest ancestor collector", function()
-			const gui = Instance.new("ScreenGui")
-			const child = frame()
-			child.Parent = gui
-			expect(InputUtil.GetLayerCollector(child)).is(gui)
-			expect(InputUtil.GetLayerCollector(frame())).never_exists()
 		end)
 	end)
 
@@ -531,22 +521,21 @@ return function(t: tiniest)
 			expect(Core.GetActivePayload()).never_exists()
 		end)
 
-		test("ObserveHoveredTarget fires immediately and on change", function()
+		test("HoveredTargetChanged fires on change, not on connect", function()
 			const src, dst = frame(), frame()
 			registerSource(src, { Tags = { "Item" } })
 			registerTarget(dst, { Accepts = { "Item" } })
 			const calls = {}
-			const disconnect = Core.ObserveHoveredTarget(function(target)
+			const conn = Core.HoveredTargetChanged:Connect(function(target)
 				table.insert(calls, { Value = target })
 			end)
-			expect(#calls).is(1)
-			expect(calls[1].Value).never_exists()
+			expect(#calls).is(0) -- no fire on connect
 
 			const handle = Core.BeginDrag(src)
 			handle:SetHoveredTarget(dst)
-			expect(#calls).is(2)
-			expect(calls[2].Value).exists()
-			disconnect()
+			expect(#calls).is(1)
+			expect(calls[1].Value).exists()
+			conn:Disconnect()
 		end)
 
 		test("Drop and Cancel are no-ops when idle", function()

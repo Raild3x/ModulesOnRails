@@ -9,10 +9,9 @@
 	It also exposes the same Env-shaped `InputEnv` to the pointer/selection backends
 	(via StartPointerBackend / StartSelectionBackend), plus simulation helpers
 	(MouseDown/Move/Up, TouchStart/Move/End, Render, SetSelected, PressKey,
-	FireAction). This lets the gesture-translation layer be driven through its own
-	interface — the fake signals — rather than around it. The fake clock (Advance)
-	is the single time authority: it moves the clock AND fires any due Delay timers,
-	so the touch long-press is deterministic.
+	FireAction), which drive the backends through the fake signals. The fake clock
+	(Advance) is the single time authority: it moves the clock and fires any due
+	Delay timers, so the touch long-press is deterministic.
 
 	Usage:
 		local harness = Harness.new()
@@ -46,9 +45,9 @@ function Harness.new()
 	self.Timers = {} :: { any } -- pending env.Delay callbacks
 	self._backends = {} :: { any } -- backends started via this harness
 
-	-- Fake input signals (the `Signal` package, same as production uses). Its
+	-- Fake input signals, built on the `Signal` package production uses. Its
 	-- connections carry Disconnect + Destroy, so backend janitors clean them up,
-	-- and Fire runs handlers synchronously — no bespoke signal to maintain.
+	-- and Fire runs handlers synchronously.
 	self.InputBegan = Signal.new()
 	self.InputChanged = Signal.new()
 	self.InputEnded = Signal.new()

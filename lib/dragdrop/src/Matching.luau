@@ -16,7 +16,7 @@ const Matching = {}
 -- Does the payload's `Tags` share at least one entry with the target's `Accepts`?
 -- A target with no `Accepts` (nil or empty) takes anything. Tags travel with the
 -- payload, so a source whose contents vary matches per lift.
-function Matching.TagsAccepted(targetEntry: TargetEntry, payload: Payload): boolean
+const function tagsAccepted(targetEntry: TargetEntry, payload: Payload): boolean
 	const accepts = targetEntry.Options.Accepts
 	if accepts == nil or #accepts == 0 then
 		return true
@@ -38,7 +38,7 @@ function Matching.CanDropInto(sourceEntry: SourceEntry?, targetEntry: TargetEntr
 	if not sourceEntry or not targetEntry then
 		return false
 	end
-	if not Matching.TagsAccepted(targetEntry, payload) then
+	if not tagsAccepted(targetEntry, payload) then
 		return false
 	end
 	const predicate = targetEntry.Options.CanDrop

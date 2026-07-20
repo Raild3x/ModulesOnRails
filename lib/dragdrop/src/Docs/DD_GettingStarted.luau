@@ -4,7 +4,7 @@
 	[DragDrop](/api/DragDrop) moves an opaque **payload** from a registered
 	*source* to a registered *target* across every input device — mouse, touch,
 	gamepad, and keyboard — and hands you the result through the target's `OnDrop`.
-	It never inspects your payload past its `Type`, so one system carries whatever
+	It never inspects your payload past its `Tags`, so one system carries whatever
 	your UI needs.
 
 	### 1. Require the module
@@ -60,7 +60,7 @@
 	})
 	```
 
-	### 4. Compatibility, in one paragraph
+	### 4. Compatibility
 
 	A target with `Accepts` only takes a drag whose payload `Tags` share at least
 	one entry with it. `{ Tags = { "Potion" } }` fits potion slots, while
@@ -72,30 +72,32 @@
 
 	### 5. React to drag state (optional)
 
-	The system exposes plain getters, observers, and signals — no Fusion, no
-	external reactive library required.
+	Drag state is exposed as plain getters and signals.
 
 	```lua
 	-- Poll:
 	if DragDrop.IsDragging() then ... end
 	local payload = DragDrop.GetActivePayload()
 
-	-- Observe (fires immediately, then on change):
-	local disconnect = DragDrop.ObserveHoveredTarget(function(target)
+	-- Subscribe to state changes. These fire on change but not on connect, so seed
+	-- the initial paint with the matching getter:
+	highlight(DragDrop.GetHoveredTarget())
+	DragDrop.HoveredTargetChanged:Connect(function(target)
 		highlight(target) -- target is a TargetDescriptor or nil
 	end)
 
-	-- Signals:
+	-- Lifecycle signals:
 	DragDrop.DragStarted:Connect(function(payload, sourceInstance) end)
 	DragDrop.Dropped:Connect(function(payload, target) end)
 	DragDrop.DragEnded:Connect(function(payload, target) end) -- nil target = cancelled/reverted
 	```
 
 	:::info Repainting after a drop
-	When a drag ends, the observers fire (with nil) *before* the target's `OnDrop`
-	runs. If a view repaints only from observers, it will still show pre-drop
-	data. `DragEnded` fires **last** — after `OnDrop` and `OnDragEnd` — so repaint
-	there (or from your own data layer) to reflect the drop.
+	When a drag ends, the `ActivePayloadChanged`/`HoveredTargetChanged` signals fire
+	(with nil) *before* the target's `OnDrop` runs. If a view repaints only from
+	those, it will still show pre-drop data. `DragEnded` fires **last** — after
+	`OnDrop` and `OnDragEnd` — so repaint there (or from your own data layer) to
+	reflect the drop.
 	:::
 
 	---

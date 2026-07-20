@@ -35,31 +35,20 @@ const backends: { Types.Backend } = {}
 local backendsActive = false
 local inputMode: InputMode = "Automatic"
 
-const function startBackends()
-	if backendsActive then
-		return
-	end
-	backendsActive = true
-	for _, backend in backends do
-		backend.Start()
-	end
-end
-
-const function stopBackends()
-	if not backendsActive then
-		return
-	end
-	backendsActive = false
-	for _, backend in backends do
-		backend.Stop()
-	end
-end
-
+-- Backends run only while there is something registered to drive, in Automatic
+-- mode. Idempotent: a no-change reconcile touches nothing.
 const function reconcileBackends()
-	if inputMode == "Automatic" and Registry.HasRegistrations() then
-		startBackends()
-	else
-		stopBackends()
+	const shouldRun = inputMode == "Automatic" and Registry.HasRegistrations()
+	if shouldRun == backendsActive then
+		return
+	end
+	backendsActive = shouldRun
+	for _, backend in backends do
+		if shouldRun then
+			backend.Start()
+		else
+			backend.Stop()
+		end
 	end
 end
 
@@ -72,6 +61,8 @@ const Core = {}
 Core.DragStarted = Reactive.DragStarted
 Core.Dropped = Reactive.Dropped
 Core.DragEnded = Reactive.DragEnded
+Core.ActivePayloadChanged = Reactive.ActivePayloadChanged
+Core.HoveredTargetChanged = Reactive.HoveredTargetChanged
 
 Core.RegisterSource = Registry.RegisterSource
 Core.RegisterTarget = Registry.RegisterTarget
@@ -131,14 +122,6 @@ end
 
 function Core.GetHoveredTarget(): TargetDescriptor?
 	return Reactive.HoveredTarget.get()
-end
-
-function Core.ObserveActivePayload(callback: (Payload?) -> ()): Types.Unregister
-	return Reactive.ActivePayload.observe(callback)
-end
-
-function Core.ObserveHoveredTarget(callback: (TargetDescriptor?) -> ()): Types.Unregister
-	return Reactive.HoveredTarget.observe(callback)
 end
 
 --------------------------------------------------------------------------------

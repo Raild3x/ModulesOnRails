@@ -1,9 +1,11 @@
 --[[
-	DragDrop — reactive state (Fusion-free observables) + cross-cutting signals.
+	DragDrop — observable state + cross-cutting signals.
 
-	Owns the two observed values (active payload, hovered target), the three
-	public signals, and SafeCall — the pcall guard every user callback in the
-	package runs under, so a throwing consumer callback can never break a drag.
+	Owns the two observed values (active payload, hovered target) and their change
+	signals, the three drag-lifecycle signals, and SafeCall — the pcall guard every
+	user option callback in the package runs under, so a throwing consumer callback
+	can never break a drag. Signal handlers are already isolated: Signal fires each
+	on its own task.spawn thread.
 ]]
 
 const Signal = require("../Signal")
@@ -27,13 +29,14 @@ end
 type Observable<T> = {
 	get: () -> T,
 	set: (value: T) -> (),
-	observe: (callback: (value: T) -> ()) -> () -> (),
+	-- Fires the new value on every real change (deduped by `set`). Does not fire
+	-- on connect; consumers seed the current value from `get`.
+	changed: Signal.Signal<(value: T) -> (), T>,
 }
 
 const function createObservable<T>(initial: T): Observable<T>
 	local value: T = initial
-	const observers: { [number]: (value: T) -> () } = {}
-	local nextId = 0
+	const changed: Signal.Signal<(value: T) -> (), T> = Signal.new()
 
 	return {
 		get = function(): T
@@ -44,27 +47,27 @@ const function createObservable<T>(initial: T): Observable<T>
 				return
 			end
 			value = newValue
-			for _, callback in observers do
-				Reactive.SafeCall(callback, newValue)
-			end
+			changed:Fire(newValue)
 		end,
-		observe = function(callback: (value: T) -> ()): () -> ()
-			const id = nextId
-			nextId += 1
-			observers[id] = callback
-			Reactive.SafeCall(callback, value) -- fire immediately with current value
-			return function()
-				observers[id] = nil
-			end
-		end,
+		changed = changed,
 	}
 end
 
 Reactive.ActivePayload = createObservable(nil :: Payload?)
 Reactive.HoveredTarget = createObservable(nil :: TargetDescriptor?)
 
-Reactive.DragStarted = Signal.new()
-Reactive.Dropped = Signal.new()
-Reactive.DragEnded = Signal.new()
+-- Public change signals, one per observed value. They fire the new value on every
+-- change (nil on drag end) but never on connect, so pair them with
+-- GetActivePayload / GetHoveredTarget to read the current value when you subscribe.
+Reactive.ActivePayloadChanged = Reactive.ActivePayload.changed
+Reactive.HoveredTargetChanged = Reactive.HoveredTarget.changed
+
+-- Drag lifecycle signals, typed at their definition so every consumer (Core, the
+-- facade, the backends) sees the same shape without re-asserting it at each hop.
+Reactive.DragStarted = Signal.new() :: Types.Signal<(payload: Payload, source: GuiObject) -> (), Payload, GuiObject>
+Reactive.Dropped =
+	Signal.new() :: Types.Signal<(payload: Payload, target: TargetDescriptor) -> (), Payload, TargetDescriptor>
+Reactive.DragEnded =
+	Signal.new() :: Types.Signal<(payload: Payload, target: TargetDescriptor?) -> (), Payload, TargetDescriptor?>
 
 return Reactive

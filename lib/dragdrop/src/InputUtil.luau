@@ -3,13 +3,13 @@
 
 	Owns the drag system's single source of truth for coordinates, GUI
 	hit-testing, PlayerGui resolution, and preferred-input classification. Every
-	other module works in ONE space, defined here:
+	other module works in one space, defined here:
 
 	  "Canonical space" == GuiObject.AbsolutePosition space == the argument space
 	  of LayerCollector:GetGuiObjectsAtPosition. `UserInputService:GetMouseLocation`
 	  is offset from this by the GUI inset, so `PointerLocation()` subtracts it
-	  once. `InputObject.Position` for mouse/touch is ALREADY in this space, so it
-	  is used as-is (the reference double-subtracted the inset here — see #1).
+	  once. `InputObject.Position` for mouse/touch is already in this space and is
+	  used as-is; subtracting the inset from it again would double-count.
 ]]
 
 const Players = game:GetService("Players")
@@ -65,12 +65,6 @@ end
 --// Coordinate space //--
 --------------------------------------------------------------------------------
 
--- The current GUI inset (top bar). Cheap to query; kept as a function so it
--- stays correct if the inset changes (resolution / topbar toggles).
-function InputUtil.GetInset(): Vector2
-	return GuiService:GetGuiInset()
-end
-
 -- Mouse pointer position in canonical space.
 function InputUtil.PointerLocation(): Vector2
 	return UserInputService:GetMouseLocation() - GuiService:GetGuiInset()
@@ -113,21 +107,8 @@ function InputUtil.ResolveRegistered<T>(registry: { [Instance]: T }, instance: I
 	return nil
 end
 
--- The nearest LayerCollector ancestor (inclusive), or nil. Used to bound the
--- scroll-lock walk and to keep coordinate work inside one GUI root.
-function InputUtil.GetLayerCollector(instance: Instance): LayerCollector?
-	local current: Instance? = instance
-	while current do
-		if current:IsA("LayerCollector") then
-			return current :: LayerCollector
-		end
-		current = current.Parent
-	end
-	return nil
-end
-
 --------------------------------------------------------------------------------
---// Preferred-input classification (#5) //--
+--// Preferred-input classification //--
 --------------------------------------------------------------------------------
 
 const InputTypeToClass: { [Enum.UserInputType]: InputClass } = {
@@ -161,10 +142,9 @@ function InputUtil.CurrentInputClass(): InputClass
 	return class or "MouseKeyboard"
 end
 
--- Observe changes to the preferred input CLASS (not every raw type change).
--- `callback(newClass)` fires only when the class actually changes. Returns a
--- disconnect function. Does not fire immediately (unlike a state observer) — it
--- reports transitions, which is exactly what switch-cancel needs.
+-- Observe changes to the preferred input class, not every raw input-type change.
+-- `callback(newClass)` fires only when the class itself changes. Returns a
+-- disconnect function. Reports transitions only, so it does not fire on connect.
 function InputUtil.ObserveInputClass(callback: (newClass: InputClass) -> ()): () -> ()
 	local lastClass = InputUtil.CurrentInputClass()
 	const connection = UserInputService.LastInputTypeChanged:Connect(function(inputType: Enum.UserInputType)

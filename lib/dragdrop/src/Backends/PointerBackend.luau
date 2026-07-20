@@ -28,8 +28,8 @@ type DraggingState = Types.DraggingState
 return function(api: TransitionSurface, env: Env)
 	local janitor: any = nil
 	local longPressGeneration = 0
-	-- Last known canonical position of the active touch's InputObject (#2): touch
-	-- drops/follows must not read the MOUSE location.
+	-- Last known canonical position of the active touch's InputObject. Touch
+	-- drops and follows read this rather than the mouse location.
 	local touchDragPos: Vector2? = nil
 
 	const function hitTestSource(absPos: Vector2)
@@ -150,7 +150,7 @@ return function(api: TransitionSurface, env: Env)
 	end
 
 	-- Drive the ghost by reporting the live pointer each frame; the machine owns
-	-- the ghost and the re-hover throttle (#7). The backend only sources the
+	-- the ghost and the re-hover throttle. The backend only sources the
 	-- device-specific pointer position (mouse vs the active touch).
 	const function onRender()
 		const st = api.GetState()
@@ -174,7 +174,7 @@ return function(api: TransitionSurface, env: Env)
 	end
 
 	function backend.Stop()
-		-- Invalidate any armed long-press so it can't fire after stop (#6).
+		-- Invalidate any armed long-press so it can't fire after stop.
 		longPressGeneration += 1
 		touchDragPos = nil
 		if janitor then

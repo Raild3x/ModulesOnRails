@@ -12,7 +12,7 @@
 	translators: they never touch state directly, only call the Api.
 
 	Every exit from Dragging runs the per-drag Janitor (restoring ScrollingFrame
-	locks and tearing down the ghost + observers) BEFORE any user callback fires,
+	locks and tearing down the ghost + observers) before any user callback fires,
 	and all user callbacks are pcall-guarded, so a throwing OnDrop can never leave
 	a scrolling list permanently locked.
 
@@ -49,9 +49,6 @@ const getConfig = Config.Get
 const safeCall = Reactive.SafeCall
 const canDropInto = Matching.CanDropInto
 
-const activePayloadObs = Reactive.ActivePayload
-const hoveredTargetObs = Reactive.HoveredTarget
-
 const DragStarted = Reactive.DragStarted
 const Dropped = Reactive.Dropped
 const DragEnded = Reactive.DragEnded
@@ -73,8 +70,8 @@ local state: DragState = { Kind = "Idle" }
 local dragGeneration = 0
 local lastDragEndClock = -math.huge
 local pendingWatch: (() -> ())? = nil
--- Last pointer position the backend reported this drag, for the re-hover throttle
--- (#7). Owned here because the ghost is: reset per drag in enterDragging.
+-- Last pointer position the backend reported this drag, for the re-hover
+-- throttle. Owned here alongside the ghost; reset per drag in enterDragging.
 local lastReportPos: Vector2? = nil
 
 -- Device → ghost placement style. Pointer devices follow the cursor; selection
@@ -138,13 +135,13 @@ const function updateHover(rawEntry: TargetEntry?)
 	dragging.HoveredTarget = entry
 
 	if entry then
-		hoveredTargetObs.set { Instance = entry.Instance, Metadata = entry.Options.Metadata or {} }
+		Reactive.HoveredTarget.set { Instance = entry.Instance, Metadata = entry.Options.Metadata or {} }
 		safeCall(entry.Options.OnHoverChanged, dragging.Payload)
 		if dragging.GhostStyle == "Snap" then
 			dragging.Ghost.SnapToRect(entry.Instance.AbsolutePosition, entry.Instance.AbsoluteSize)
 		end
 	else
-		hoveredTargetObs.set(nil)
+		Reactive.HoveredTarget.set(nil)
 		if dragging.GhostStyle == "Snap" then
 			dragging.Ghost.SnapToRect(dragging.Source.Instance.AbsolutePosition, dragging.Source.Instance.AbsoluteSize)
 		end
@@ -161,8 +158,8 @@ const function endDrag(dragging: DraggingState, dropDescriptor: TargetDescriptor
 	const hovered: TargetEntry? = dragging.HoveredTarget
 	dragging.Janitor:Cleanup()
 
-	activePayloadObs.set(nil)
-	hoveredTargetObs.set(nil)
+	Reactive.ActivePayload.set(nil)
+	Reactive.HoveredTarget.set(nil)
 
 	if hovered then
 		safeCall(hovered.Options.OnHoverChanged, nil)
@@ -258,7 +255,6 @@ const function enterDragging(params: EnterParams)
 		Source = source,
 		Payload = payload,
 		Device = params.Device,
-		InputClass = params.InputClass,
 		InputObject = params.InputObject,
 		Ghost = ghost,
 		GhostStyle = params.GhostStyle,
@@ -268,7 +264,7 @@ const function enterDragging(params: EnterParams)
 		Janitor = janitor,
 	}
 
-	activePayloadObs.set(payload)
+	Reactive.ActivePayload.set(payload)
 	safeCall(source.Options.OnLift, payload)
 	DragStarted:Fire(payload, source.Instance)
 
@@ -303,10 +299,9 @@ const function press(entry: SourceEntry?, absPos: Vector2, inputObject: InputLik
 		StartPos = absPos,
 		InputObject = inputObject,
 		Device = device,
-		InputClass = Env.CurrentInputClass(),
 	}
-	-- A device switch during the press aborts the pending lift (#5). Same-class
-	-- inputs (mouse↔keyboard) do not fire this.
+	-- A device switch during the press aborts the pending lift. Same-class inputs
+	-- (mouse↔keyboard) do not fire this.
 	pendingWatch = Env.ObserveInputClass(function()
 		if state.Kind == "Pending" then
 			clearPendingWatch()
@@ -325,7 +320,6 @@ const function lift()
 		Source = pending.Source,
 		Payload = pending.Payload,
 		Device = pending.Device,
-		InputClass = pending.InputClass,
 		InputObject = pending.InputObject,
 		GrabPoint = pending.StartPos,
 		Controlled = false,
@@ -377,7 +371,7 @@ const function reportPointer(absPos: Vector2, forceHover: boolean?)
 		return
 	end
 	dragging.Ghost.FollowPointer(absPos)
-	-- Only re-hit-test when the pointer actually moved (#7) — except at the release
+	-- Only re-hit-test when the pointer actually moved, except at the release
 	-- commit (forceHover), which must resolve the drop target fresh regardless.
 	if forceHover or lastReportPos == nil or (absPos - lastReportPos).Magnitude > 0 then
 		lastReportPos = absPos
@@ -478,7 +472,6 @@ function DragMachine.Begin(entry: SourceEntry, grabPoint: Vector2, device: Devic
 		Source = entry,
 		Payload = payload,
 		Device = device,
-		InputClass = Env.CurrentInputClass(),
 		InputObject = nil,
 		GrabPoint = grabPoint,
 		Controlled = controlled,

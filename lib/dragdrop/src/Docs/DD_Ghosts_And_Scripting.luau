@@ -7,10 +7,8 @@
 
 	## Custom ghosts
 
-	Practically every source should supply a `BuildGhost`. Without one the drag
-	falls back to a bare debug plate that just lists the payload's tags — enough to
-	see *that* something is being dragged while prototyping, but not something to
-	ship. Supply `BuildGhost` on the source to render your own:
+	Without a `BuildGhost`, the drag falls back to a plain plate listing the
+	payload's tags. Supply `BuildGhost` on the source to render your own:
 
 	```lua
 	DragDrop.RegisterSource(slot, {
@@ -32,9 +30,9 @@
 	- The returned `GuiObject` is parented into a proxy frame sized to the source's
 	  on-screen footprint. Return something with `Size = UDim2.fromScale(1, 1)` to
 	  match the source; give it an explicit offset `Size` to define its own.
-	- **Appearance is your job.** DragDrop never scales, tilts, or recolors the
-	  proxy — do that inside `BuildGhost`. The system owns *placement* only (it
-	  keeps the grab point under the cursor and springs between slots in grab mode).
+	- **Appearance belongs to `BuildGhost`.** DragDrop never scales, tilts, or
+	  recolors the proxy. It owns placement only: keeping the grab point under the
+	  cursor, and springing between slots in grab mode.
 	- The instance is destroyed when the drag ends. Don't reuse it across drags.
 
 	By default the proxy lives in an internal high-`DisplayOrder` `ScreenGui`. To
