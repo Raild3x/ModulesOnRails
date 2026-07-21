@@ -112,16 +112,13 @@ return function(t: tiniest)
 			expect(TableManager.IsDestroyed(manager)).is_true()
 		end)
 
-		test("the colon form errors once destroyed, unlike the static form", function()
-			-- `Destroy` strips the instance's metatable, so `manager:IsDestroyed()`
-			-- has no method table left to resolve through -- this is exactly why
-			-- `TableManager.IsDestroyed(manager)` is the documented preferred form.
+		test("the colon form still works after being destroyed", function()
 			local manager = TableManager.new { x = 1 }
 			manager:Destroy()
 
 			expect(function()
-				(manager :: any):IsDestroyed()
-			end).fails()
+				manager:IsDestroyed()
+			end).never_fails()
 		end)
 	end)
 
@@ -129,7 +126,7 @@ return function(t: tiniest)
 		test("stays pending until the value changes", function()
 			local manager = TableManager.new { player = { health = 100 } }
 
-			local prom = manager:PromiseValue({ "player", "health" })
+			local prom = manager:PromiseValue { "player", "health" }
 			-- The current value must not settle the promise (resolves on first change).
 			expect(prom:getStatus()).is("Started")
 
@@ -140,7 +137,7 @@ return function(t: tiniest)
 		test("resolves when the value first changes (no predicate)", function()
 			local manager = TableManager.new { player = { health = 100 } }
 
-			local prom = manager:PromiseValue({ "player", "health" })
+			local prom = manager:PromiseValue { "player", "health" }
 			manager:Set({ "player", "health" }, 90)
 
 			expect(prom:getStatus()).is("Resolved")

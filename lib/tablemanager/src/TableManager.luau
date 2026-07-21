@@ -74,6 +74,7 @@ const BatchUtilsModule = require("./Batching/BatchUtils")
 const BatchFlushModule = require("./Batching/BatchFlush")
 const ProxyManagerModule = require("./ProxyManager")
 const ListenerRegistryModule = require("./Listening/ListenerRegistry")
+const FireSchedulerModule = require("./Listening/FireScheduler")
 const ChangeDetectorModule = require("./Diffing/ChangeDetector")
 const SchemaNavigatorModule = require("./SchemaNavigator")
 const PropagationModule = require("./Propagation")
@@ -272,18 +273,13 @@ function Static.SetDefaults(defaults: ConfigDefaults)
 end
 
 -- Write-core helpers live in Mutator.luau; local aliases keep call sites unchanged.
-const resolvePathFromPathOrProxy = MutatorModule.resolvePathFromPathOrProxy
 const resolveArrayForWrite = MutatorModule.resolveArrayForWrite
-const getParentOriginalAtPath = MutatorModule.getParentOriginalAtPath
 const applyWrite = MutatorModule.applyWrite
-const applyRootSet = MutatorModule.applyRootSet
+const applySet = MutatorModule.Set
 const pruneDetachedValue = MutatorModule.pruneDetachedValue
 const shiftArrayKeys = MutatorModule.shiftArrayKeys
-const reparentWithRollback = MutatorModule.reparentWithRollback
-const restoreReparent = MutatorModule.restoreReparent
-const deepCloneValue = MutatorModule.deepCloneValue
 const trackArrayMutation = MutatorModule.trackArrayMutation
-const applyRMW = MutatorModule.applyRMW
+const applyRMW = MutatorModule.RMW
 
 -- Emit/notify core lives in Emitter.luau; local aliases keep call sites unchanged.
 const emitInserted = EmitterModule.emitInserted
@@ -374,11 +370,16 @@ function Static.new<T>(initialData: T, config: TableManagerConfig?): TableManage
 	
 	-- Initialize subsystems
 	self._proxyManager = initProxyManager(self, resolvedConfig)
+	-- One scheduler owns delivery timing for both surfaces; the registry shares it
+	-- (see `FireScheduler`), so listener and signal fire modes resolve in one place.
+	self._fireScheduler = FireSchedulerModule.new {
+		SignalFireMode = normalizeSignalFireMode(resolvedConfig.SignalFireMode),
+		ListenerFireMode = resolvedConfig.ListenerFireMode or Static.DefaultListenerFireMode,
+	}
 	self._listenerRegistry = ListenerRegistryModule.new {
 		DebugMode = false,
-		FireMode = resolvedConfig.ListenerFireMode or Static.DefaultListenerFireMode,
+		Scheduler = self._fireScheduler,
 	}
-	self._signalFireMode = normalizeSignalFireMode(resolvedConfig.SignalFireMode)
 	self._flushMode = resolvedConfig.FlushMode or Static.DefaultFlushMode
 	self._pendingFlushRoot = nil
 	self._coalescedFlushScheduled = false
@@ -422,60 +423,6 @@ end
 --------------------------------------------------------------------------------
 --// Setter/Accessor Methods //--
 --------------------------------------------------------------------------------
-
---[[
-	Expands a wildcard path against the live raw data. Segments before
-	`wildcardIndex` are literal and keep exact-path semantics (a non-table value
-	along the prefix errors, same as `Set`/`Get`); segments from `wildcardIndex`
-	on are expanded with match-what-exists semantics (branches that cannot
-	resolve are skipped). Returns a complete snapshot of matched concrete paths,
-	safe to iterate while mutating the tree.
-]]
-const function resolveWildcardExpansion<T>(
-	self: TM_Internal<T>,
-	parsedPath: PathArray,
-	wildcardIndex: number,
-	includeMissingFinal: boolean
-): { PathHelpers.WildcardExpansion }
-	local node: any = self.Raw
-	for i = 1, wildcardIndex - 1 do
-		const segment = parsedPath[i]
-		node = node[segment]
-		if type(node) ~= "table" then
-			error(`Path segment {segment} is not a table`)
-		end
-	end
-	return PathHelpers.ExpandWildcards(node, parsedPath, wildcardIndex, includeMissingFinal)
-end
-
---[[
-	Fan-out core for wildcard `Update`/`Increment`: one read-modify-write per
-	matched concrete path. The value is re-read immediately before each write
-	(not taken from the expansion snapshot) so a `transform` that touches other
-	matched paths never operates on stale data. `transform` also receives the
-	keys matched by each `"*"` (left-to-right, one per wildcard) and the fully
-	concrete path. Multiple writes are batched so listeners see one coherent
-	flush.
-]]
-const function applyWildcardRMW<T>(
-	self: TM_Internal<T>,
-	entries: { PathHelpers.WildcardExpansion },
-	transform: (oldValue: any, wildcardMatches: { any }, path: { any }) -> any
-)
-	if #entries == 0 then
-		return
-	end
-	if #entries == 1 then
-		const entry = entries[1]
-		self:Set(entry.Path, transform(self:Get(entry.Path, true), entry.WildcardMatches :: { any }, entry.Path))
-		return
-	end
-	self:Batch(function()
-		for _, entry in entries do
-			self:Set(entry.Path, transform(self:Get(entry.Path, true), entry.WildcardMatches :: { any }, entry.Path))
-		end
-	end)
-end
 
 --[=[
 	@within TableManager
@@ -577,7 +524,7 @@ function TableManager.GetMatching<T, S>(self: TM_Internal<T>, path: Path<S>): { 
 		end
 		return { { Path = table.clone(parsedPath), Value = value, WildcardMatches = nil } }
 	end
-	return resolveWildcardExpansion(self, parsedPath, wildcardIndex, false)
+	return PathHelpers.ExpandWildcardsFromRoot(self.Raw, parsedPath, wildcardIndex, false)
 end
 
 --[=[
@@ -741,93 +688,9 @@ function TableManager.Set<T, S>(
 	buildTablesDynamically: boolean?
 )
 	debug.profilebegin("TM.Set")
-	local parsedPath = PathHelpers.ParsePath(path)
 	local unwrappedValue = ProxyManagerModule.Unwrap(value)
 	unwrappedValue = OpaqueRegistryModule.UnwrapAndRegister(self._opaqueRegistries, unwrappedValue)
-
-	-- Empty path replaces the entire root table (identity swap + full diff).
-	if #parsedPath == 0 then
-		applyRootSet(self, unwrappedValue)
-		debug.profileend()
-		return
-	end
-
-	-- Wildcard fan-out: expand "*" segments against the live data into N
-	-- concrete paths, then apply N ordinary writes -- batched when N > 1 so
-	-- listeners see one coherent flush. Deletes (nil) only target existing
-	-- values; non-nil writes also create a missing literal final key on every
-	-- matched parent, same as a plain Set would.
-	const wildcardIndex = PathHelpers.FindFirstWildcard(parsedPath)
-	if wildcardIndex ~= nil then
-		if buildTablesDynamically then
-			debug.profileend()
-			error(`Cannot build tables dynamically through a wildcard ("*") path segment`)
-		end
-		const entries = resolveWildcardExpansion(self, parsedPath, wildcardIndex, unwrappedValue ~= nil)
-		if #entries == 1 then
-			applyWrite(self, entries[1].Path, unwrappedValue)
-		elseif #entries > 1 then
-			-- Fanning one table value to several paths: honor the duplicate-
-			-- reference policy here, deterministically. The per-write check in
-			-- `applyWrite` only catches duplicates that already have a proxy,
-			-- which a value first written during this same fan-out does not.
-			const clonePerPath = type(unwrappedValue) == "table"
-				and self._proxyManager ~= nil
-				and self._duplicateReferenceMode == "copy"
-			self:Batch(function()
-				for i, entry in entries do
-					const valueToWrite = if clonePerPath and i > 1 then deepCloneValue(unwrappedValue) else unwrappedValue
-					applyWrite(self, entry.Path, valueToWrite)
-				end
-			end)
-		end
-		debug.profileend()
-		return
-	end
-
-	-- Only build intermediate tables when setting non-nil values; removing (nil) doesn't need them
-	const shouldBuild = buildTablesDynamically and unwrappedValue ~= nil
-
-	-- Fast path: a non-nil write with no dynamic-build request has no behavior
-	-- left in the loop below beyond what `applyWrite`'s own parent-chain walk
-	-- already performs (including reporting the identical "Path segment X is
-	-- not a table" error) — so skip straight to the single walk instead of
-	-- walking the parent chain twice.
-	if unwrappedValue ~= nil and not buildTablesDynamically then
-		applyWrite(self, parsedPath, unwrappedValue)
-		debug.profileend()
-		return
-	end
-
-	local parent: any = self.Raw
-	for i = 1, #parsedPath - 1 do
-		const nextValue = parent[parsedPath[i]]
-		if type(nextValue) ~= "table" then
-			if not shouldBuild then
-				-- Reaching here always means `unwrappedValue == nil`: the fast path
-				-- above routes every non-nil write (when dynamic build is off) into
-				-- `applyWrite`, which raises the "Path segment X is not a table"
-				-- error itself, and `shouldBuild` is only false for a non-nil value
-				-- when build is off. So this is the "set a nonexistent path to nil"
-				-- case, which is already a no-op.
-				debug.profileend()
-				return
-			end
-
-			-- Build intermediate tables for the remainder of the path, then apply the write.
-			local nested: any = unwrappedValue
-			for j = #parsedPath, i + 1, -1 do
-				nested = { [parsedPath[j]] = nested }
-			end
-			const subPath = table.move(parsedPath, 1, i, 1, table.create(i))
-			applyWrite(self, subPath, nested)
-			debug.profileend()
-			return
-		end
-		parent = nextValue
-	end
-
-	applyWrite(self, parsedPath, unwrappedValue)
+	applySet(self, PathHelpers.ParsePath(path), unwrappedValue, buildTablesDynamically)
 	debug.profileend()
 end
 
@@ -873,16 +736,7 @@ function TableManager.Update<T, S>(
 	path: Path<S>,
 	updater: (oldValue: ValueAtPath<T, S>, wildcardMatches: { any }?, path: { any }?) -> ValueAtPath<T, S>
 ): ValueAtPath<T, S>
-	const parsedPath = PathHelpers.ParsePath(path)
-	const wildcardIndex = PathHelpers.FindFirstWildcard(parsedPath)
-	if wildcardIndex ~= nil then
-		const entries = resolveWildcardExpansion(self, parsedPath, wildcardIndex, false)
-		applyWildcardRMW(self, entries, updater :: any)
-		return nil :: any
-	end
-	-- Single-walk read-modify-write: resolves the parent chain once for both
-	-- the read and the write (see `Mutator.applyRMW`).
-	return applyRMW(self, parsedPath, updater :: any)
+	return applyRMW(self, PathHelpers.ParsePath(path), updater :: any)
 end
 
 --[=[
@@ -907,17 +761,7 @@ end
 	```
 ]=]
 function TableManager.Increment<T, S>(self: TM_Internal<T>, path: Path<S>, delta: any): any
-	const parsedPath = PathHelpers.ParsePath(path)
-	const wildcardIndex = PathHelpers.FindFirstWildcard(parsedPath)
-	if wildcardIndex ~= nil then
-		const entries = resolveWildcardExpansion(self, parsedPath, wildcardIndex, false)
-		applyWildcardRMW(self, entries, function(oldValue)
-			return oldValue + delta
-		end)
-		return nil
-	end
-	-- Single-walk read-modify-write (see `Mutator.applyRMW`).
-	return applyRMW(self, parsedPath, function(oldValue)
+	return applyRMW(self, PathHelpers.ParsePath(path), function(oldValue: any)
 		return oldValue + delta
 	end)
 end
@@ -1367,42 +1211,7 @@ function TableManager.MoveTo<T, S1, S2>(
 	currentPath: Path<S1> | Proxy<T, S1>,
 	newPath: Path<S2> | Proxy<T, S2>
 )
-	const sourcePath: PathArray<S1> = resolvePathFromPathOrProxy(self, currentPath)
-	const targetPath: PathArray<S2> = resolvePathFromPathOrProxy(self, newPath)
-
-	if #sourcePath == 0 or #targetPath == 0 then
-		error("MoveTo cannot move the root table")
-	end
-
-	if PathHelpers.ArePathsEqual(sourcePath, targetPath) then
-		return
-	end
-
-	if PathHelpers.IsPrefixPath(sourcePath, targetPath) then
-		error("MoveTo cannot move a table into one of its descendants")
-	end
-
-	const sourceValue = self:Get(sourcePath :: Path<S1>)
-	if type(sourceValue) ~= "table" then
-		error("MoveTo source must be a table")
-	end
-
-	const targetParentPath, targetKey = PathHelpers.GetPathParentAndKey(targetPath)
-	const targetParentOriginal = getParentOriginalAtPath(self, targetParentPath, "MoveTo")
-
-	const rollback = reparentWithRollback(self._proxyManager, sourceValue, targetParentOriginal, targetKey)
-
-	const ok, moveErr = pcall(function()
-		self:Batch(function()
-			self:Set(targetPath, sourceValue)
-			self:Set(sourcePath, nil :: any)
-		end)
-	end)
-
-	if not ok then
-		restoreReparent(self._proxyManager, rollback)
-		error(moveErr, 2)
-	end
+	MutatorModule.MoveTo(self, currentPath, newPath)
 end
 
 --[=[
@@ -1416,25 +1225,7 @@ end
 	This is specifically useful for copying tables around without breaking proxy references.
 ]=]
 function TableManager.CopyTo<T, S1, S2>(self: TM_Internal<T>, currentPath: Path<S1> | Proxy<T, S1>, newPath: Path<S2>)
-	const sourcePath = resolvePathFromPathOrProxy(self, currentPath)
-	const targetPath = resolvePathFromPathOrProxy(self, newPath)
-
-	if #targetPath == 0 then
-		error("CopyTo cannot set the root table")
-	end
-
-	if PathHelpers.ArePathsEqual(sourcePath, targetPath) then
-		return
-	end
-
-	-- Validate destination parent before any mutation.
-	const targetParentPath: { any } = table.clone(targetPath :: any)
-	table.remove(targetParentPath)
-	getParentOriginalAtPath(self, targetParentPath, "CopyTo")
-
-	const sourceValue = self:Get(sourcePath)
-	const copiedValue = deepCloneValue(sourceValue)
-	self:Set(targetPath, copiedValue)
+	MutatorModule.CopyTo(self, currentPath, newPath)
 end
 
 --[=[
@@ -1458,44 +1249,7 @@ end
 	```
 ]=]
 function TableManager.Swap<T, S1, S2>(self: TM_Internal<T>, a: Path<S1> | Proxy<T, S1>, b: Path<S2> | Proxy<T, S2>)
-	const pathA = resolvePathFromPathOrProxy(self, a)
-	const pathB = resolvePathFromPathOrProxy(self, b)
-
-	if #pathA == 0 or #pathB == 0 then
-		error("Swap cannot target the root table")
-	end
-
-	if PathHelpers.ArePathsEqual(pathA, pathB) then
-		return
-	end
-
-	if PathHelpers.IsPrefixPath(pathA, pathB) or PathHelpers.IsPrefixPath(pathB, pathA) then
-		error("Swap cannot swap ancestor/descendant paths")
-	end
-
-	const parentPathA, keyA = PathHelpers.GetPathParentAndKey(pathA)
-	const parentPathB, keyB = PathHelpers.GetPathParentAndKey(pathB)
-	const parentOriginalA = getParentOriginalAtPath(self, parentPathA, "Swap")
-	const parentOriginalB = getParentOriginalAtPath(self, parentPathB, "Swap")
-
-	const valueA = self:Get(pathA)
-	const valueB = self:Get(pathB)
-
-	const rollbackA = reparentWithRollback(self._proxyManager, valueA, parentOriginalB, keyB)
-	const rollbackB = reparentWithRollback(self._proxyManager, valueB, parentOriginalA, keyA)
-
-	const ok, swapErr = pcall(function()
-		self:Batch(function()
-			self:Set(pathA, valueB)
-			self:Set(pathB, valueA)
-		end)
-	end)
-
-	if not ok then
-		restoreReparent(self._proxyManager, rollbackA)
-		restoreReparent(self._proxyManager, rollbackB)
-		error(swapErr, 2)
-	end
+	MutatorModule.Swap(self, a, b)
 end
 
 --------------------------------------------------------------------------------
@@ -1571,11 +1325,7 @@ function TableManager.Observe<T, S>(
 		callback(currentValue, nil, nil)
 	end
 
-	if self._listenerRegistry._fireMode ~= "immediate" then
-		task.defer(fireInitial)
-	else
-		task.spawn(fireInitial)
-	end
+	self._fireScheduler:RunInitial(fireInitial)
 
 	return self._listenerRegistry:RegisterListener("ValueChanged", parsedPath, callback, options)
 end
@@ -2218,14 +1968,6 @@ end
 
 	Returns `true` once [TableManager:Destroy] has run on `manager`, `false`
 	otherwise. Pairs with [TableManager:OnDestroy] for teardown-time checks.
-
-	:::caution Call this as `TableManager.IsDestroyed(manager)`, not `manager:IsDestroyed()`
-	`Destroy` strips the instance's metatable, so a colon call (`manager:IsDestroyed()`)
-	errors ("attempt to call a nil value") once the manager is already destroyed
-	-- there is no longer a method table to resolve `IsDestroyed` through. Calling
-	it as a static function on `TableManager` looks it up directly and works in
-	both states, which is the whole point of a "was this destroyed?" check.
-	:::
 
 	```lua
 	TableManager.IsDestroyed(manager) -- safe before AND after manager:Destroy()
