@@ -57,7 +57,7 @@ export type Snapshot<T = { [any]: any }, S = string> = {
 }
 
 --[=[
-	@within TableManager
+	@within ChangeDetector
 	@interface AncestorSnapshot
 	.RootTable { [any]: any } -- Reference to the root table, for ancestor value navigation.
 
