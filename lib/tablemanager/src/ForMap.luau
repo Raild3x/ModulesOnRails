@@ -64,11 +64,7 @@ function ForMap.wireReconcileConnection(
 			end
 		end
 
-		if (options and options.Defer) or self._listenerRegistry._fireMode ~= "immediate" then
-			task.defer(fireInitial)
-		else
-			task.spawn(fireInitial)
-		end
+		self._fireScheduler:RunInitial(fireInitial, options and options.Defer)
 	end
 
 	const connection = {} :: Connection

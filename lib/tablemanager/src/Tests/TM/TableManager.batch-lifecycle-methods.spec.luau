@@ -35,7 +35,7 @@ return function(t: tiniest)
 		end)
 
 		test("a batched numeric-key write into a non-array (sparse) table is not tracked as an array", function()
-			-- applyWrite's batched-numeric classification (Mutator.luau:406, `isArray`):
+			-- applyWrite's batched-numeric classification (`isArray` via PathHelpers.ClassifyArray):
 			-- a numeric key written into a sparse/dict-shaped table must NOT be tracked
 			-- for the LCS array re-diff, so it surfaces as an ordinary key change.
 			local manager = TableManager.new {

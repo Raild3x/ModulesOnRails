@@ -104,51 +104,12 @@ const function getOldValueArgIndex(manager: TableManagerLike, signal: any): numb
 	return nil
 end
 
--- "coalesced" SignalFireMode: collapses repeated fires of the SAME signal
--- within a tick into a single `:Fire` call carrying the latest args, instead
--- of one call per fire. Implemented here (rather than as a `Signal` method)
--- because the runtime `Signal` module is resolved via `require("../Signal")`,
--- which Wally installs from the external `howmanysmall/better-signal`
--- package -- not the first-party `lib/signal` fork in this repo. A new method
--- added only to the fork would be missing on the actual installed dependency.
-const function fireSignalCoalesced(manager: TableManagerLike, signal: any, ...: any)
-	if not manager._signalCoalesceState then
-		(manager :: any)._signalCoalesceState = {}
-	end
-	const state = manager._signalCoalesceState :: { [any]: { Args: { n: number, [number]: any } } }
-
-	const entry = state[signal]
-	if entry then
-		const oldValueIndex = getOldValueArgIndex(manager, signal)
-		const preservedOldValue = if oldValueIndex then entry.Args[oldValueIndex] else nil
-		entry.Args = table.pack(...)
-		if oldValueIndex then
-			entry.Args[oldValueIndex] = preservedOldValue
-		end
-		return
-	end
-
-	const newEntry = { Args = table.pack(...) }
-	state[signal] = newEntry
-	task.defer(function()
-		state[signal] = nil
-		signal:Fire(table.unpack(newEntry.Args, 1, newEntry.Args.n))
-	end)
-end
-
--- Dispatches a fire on one of `manager`'s public per-change Signals according
--- to `manager._signalFireMode` (see `TMTypes.SignalFireMode`).
+-- Dispatches a fire on one of `manager`'s public per-change Signals. The manager's
+-- `FireScheduler` owns the SignalFireMode timing and the coalesce window; this
+-- helper supplies the old-value arg index (payload knowledge) so a coalesced
+-- window preserves it from the first fire.
 const function fireSignal(manager: TableManagerLike, signal: any, ...: any)
-	const mode = manager._signalFireMode
-	if mode == "deferred" then
-		signal:FireDeferred(...)
-	elseif mode == "bindable" then
-		signal:FireBindable(...)
-	elseif mode == "coalesced" then
-		fireSignalCoalesced(manager, signal, ...)
-	else
-		signal:Fire(...)
-	end
+	manager._fireScheduler:FireSignal(signal, getOldValueArgIndex(manager, signal), ...)
 end
 
 -- ---------------------------------------------------------------------------

@@ -4,7 +4,7 @@ This repo is **multi-context**: each package under `lib/` is its own domain cont
 with its own ubiquitous language. This file points at the per-package `CONTEXT.md`
 glossaries. Read the one(s) relevant to what you're working on before exploring.
 
-See `docs/agents/domain.md` for how the engineering skills consume these files.
+See `.github/agents/domain.md` for how the engineering skills consume these files.
 
 ## Per-package contexts
 

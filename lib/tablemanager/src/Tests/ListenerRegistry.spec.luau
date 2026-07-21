@@ -1286,8 +1286,8 @@ return function(t: tiniest)
 
 	describe("Coalesced listener lifecycle", function()
 		test("a coalesced listener disconnected before its deferred flush never runs", function()
-			-- flushCoalescedListener (ListenerRegistry.luau:441) skips a listener that
-			-- disconnected between the fire (which scheduled the defer) and the flush.
+			-- FireScheduler.flushCoalescedListener skips a listener that disconnected
+			-- between the fire (which scheduled the defer) and the flush.
 			local registry = ListenerRegistry.new { DebugMode = false, FireMode = "coalesced" }
 
 			local fired = 0
