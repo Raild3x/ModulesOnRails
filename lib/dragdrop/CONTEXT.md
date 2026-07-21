@@ -1,9 +1,7 @@
 # DragDrop — domain glossary
 
-Terminology for the `raild3x/dragdrop` package. Use these terms exactly in issues,
-tests, and refactor proposals; the `.luau` source and moonwave docs already use
-them. Architecture vocabulary (module, interface, seam, depth, adapter) comes from
-the `/codebase-design` skill and is not redefined here.
+Terminology for the `raild3x/dragdrop` package, as used by the `.luau` source and
+the moonwave docs.
 
 ## Core concepts
 
@@ -28,8 +26,8 @@ the `/codebase-design` skill and is not redefined here.
   facade sits on. Assembles the slices — `Config` (config store), `Reactive`
   (observables + signals), `Env` (the Env seam), `Registry` (source/target
   registries), `Matching` (compatibility gates), and the DragMachine — wires their
-  injected edges, and owns the input mode + backend lifecycle. Formerly one
-  `Controller.luau`; see [ADR 0003](docs/adr/0003-typed-dragstate-and-core-split.md).
+  injected edges, and owns the input mode + backend lifecycle. See
+  [ADR 0003](docs/adr/0003-typed-dragstate-and-core-split.md).
 
 ## Input
 
@@ -60,7 +58,7 @@ the `/codebase-design` skill and is not redefined here.
   the ghost. `ReportPointer(pos, forceHover?)` is how the pointer backend tells the
   machine where the pointer is each frame (and at release, with `forceHover` to
   resolve the drop target); the machine — the sole ghost owner — does the Follow
-  placement and re-hover, keeping the `#7` movement throttle on its side.
+  placement and re-hover, and owns the movement throttle.
 - **Input environment** (the **Env seam**) — the single table
   (`Types.Env`, built in `Env.luau`) through which both the drag machine and
   its backends reach the outside world: rendering, preferred-input, clock, and the
@@ -72,8 +70,8 @@ the `/codebase-design` skill and is not redefined here.
   live environment.
 - **InputLike** — the structural subset of a Roblox `InputObject` the backends read
   (`UserInputType`, `KeyCode`, `Position`). Real input objects satisfy it; test
-  fakes are plain tables of the same shape. This is what lets input cross the Env
-  seam without dragging the full `InputObject` type through the state machine. See
+  fakes are plain tables of the same shape, so input crosses the Env seam without
+  the full `InputObject` type reaching the state machine. See
   [ADR 0001](docs/adr/0001-structural-input-type-at-env-seam.md).
 
 ## Drag ownership
