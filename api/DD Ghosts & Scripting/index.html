@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en" dir="ltr" class="plugin-moonwave plugin-id-moonwave" data-has-hydrated="false">
+<head>
+<meta charset="UTF-8">
+<meta name="generator" content="Docusaurus v3.10.1">
+<title data-rh="true">DD Ghosts &amp; Scripting | ModulesOnRails</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:url" content="https://raild3x.github.io/ModulesOnRails/api/DD Ghosts &amp; Scripting"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docusaurus_tag" content="default"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docsearch:docusaurus_tag" content="default"><meta data-rh="true" property="og:title" content="DD Ghosts &amp; Scripting | ModulesOnRails"><meta data-rh="true" name="description" content="This guide covers the two ways you extend [DragDrop](/api/DragDrop) beyond the
+defaults: customizing the **ghost** (the proxy that represents the payload while
+it is airborne) and driving drags **programmatically** through Scriptable mode.
+
+## Custom ghosts
+
+Without a `BuildGhost`, the drag falls back to a plain plate listing the
+payload&#x27;s tags. Supply `BuildGhost` on the source to render your own:
+
+```lua
+DragDrop.RegisterSource(slot, {
+	GetPayload = function() return { Tags = { &quot;Item&quot; }, Guid = guid } end,
+	BuildGhost = function(payload, source)
+		local icon = Instance.new(&quot;ImageLabel&quot;)
+		icon.Size = UDim2.fromScale(1, 1) -- fill the proxy (matches the source&#x27;s footprint)
+		icon.BackgroundTransparency = 1
+		icon.Image = iconFor(payload.Guid)
+		icon.ImageTransparency = 0.1
+		icon.Rotation = 4 -- appearance is entirely yours
+		return icon
+	end,
+})
+```
+
+The contract:
+
+- The returned `GuiObject` is parented into a proxy frame sized to the source&#x27;s
+  on-screen footprint. Return something with `Size = UDim2.fromScale(1, 1)` to
+  match the source; give it an explicit offset `Size` to define its own.
+- **Appearance belongs to `BuildGhost`.** DragDrop never scales, tilts, or
+  recolors the proxy. It owns placement only: keeping the grab point under the
+  cursor, and springing between slots in grab mode.
+- The instance is destroyed when the drag ends. Don&#x27;t reuse it across drags.
+
+By default the proxy lives in an internal high-`DisplayOrder` `ScreenGui`. To
+host it yourself (custom layering, a specific `ScreenGui`), set
+`Config.GhostContainer` to any `LayerCollector`:
+
+```lua
+DragDrop.Configure({ GhostContainer = myOverlayScreenGui })
+```
+
+To go back to the internal container (or restore any other default), call
+`DragDrop.ResetConfig()` — `Configure` can&#x27;t clear an optional key, since nil
+values vanish from Luau tables.
+
+## Scriptable mode
+
+`SetInputMode(&quot;Scriptable&quot;)` disables all automatic input backends. Drags then
+start and move **only** through [BeginDrag](/api/DragDrop#BeginDrag) and the
+[DragHandle](/api/DragDrop#DragHandle) it returns — the same way you put a Camera
+into `Scriptable` and drive it by hand. Use it for cutscenes, guided tutorials,
+replays, and automated tests.
+
+```lua
+DragDrop.SetInputMode(&quot;Scriptable&quot;)
+
+local drag = DragDrop.BeginDrag(sourceSlot)      -- returns a DragHandle (or nil if refused)
+if drag then
+	drag:SetHoveredTarget(destinationSlot)        -- explicit hover (no hit-test needed)
+	local landed = drag:Drop()                    -- true if it dropped on a valid target
+end
+```
+
+Or drive it by screen position, letting the system hit-test for the target under
+the point:
+
+```lua
+local drag = DragDrop.BeginDrag(sourceSlot, startPosition) -- position =&gt; pointer-controlled
+drag:MoveTo(cursorPosition)  -- follows the point and resolves hover via hit-test
+drag:Drop()
+```
+
+The handle&#x27;s methods become no-ops (mutating ones return `false`) once the drag
+has ended, so it is always safe to hold onto.
+
+`BeginDrag` also works in **Automatic** mode without a position — that is how a
+menu &quot;Move&quot; button initiates a grab-mode drag the gamepad/keyboard backend then
+drives. With a position it always produces a pointer-controlled drag that the
+automatic backends leave alone.
+
+### DragHandle reference
+
+| Method | Effect |
+| --- | --- |
+| `MoveTo(position)` | Move the ghost to a screen point and hit-test for hover. |
+| `SetHoveredTarget(target)` | Set hover explicitly; returns `false` if the target is invalid/incompatible. |
+| `Drop()` | End on the current hover; `false` if there was no valid target (a revert). |
+| `Cancel()` | Revert this drag. |
+| `IsActive()` | Whether this handle still controls the live drag. |
+| `GetPayload()` | The payload this drag carries. |
+
+---
+### See also
+
+- **[DD Getting Started](/api/DD%20Getting%20Started)** — registering sources and targets.
+- **[DD Input Devices](/api/DD%20Input%20Devices)** — per-device gestures and the switch-to-revert rule."><meta data-rh="true" property="og:description" content="This guide covers the two ways you extend [DragDrop](/api/DragDrop) beyond the
+defaults: customizing the **ghost** (the proxy that represents the payload while
+it is airborne) and driving drags **programmatically** through Scriptable mode.
+
+## Custom ghosts
+
+Without a `BuildGhost`, the drag falls back to a plain plate listing the
+payload&#x27;s tags. Supply `BuildGhost` on the source to render your own:
+
+```lua
+DragDrop.RegisterSource(slot, {
+	GetPayload = function() return { Tags = { &quot;Item&quot; }, Guid = guid } end,
+	BuildGhost = function(payload, source)
+		local icon = Instance.new(&quot;ImageLabel&quot;)
+		icon.Size = UDim2.fromScale(1, 1) -- fill the proxy (matches the source&#x27;s footprint)
+		icon.BackgroundTransparency = 1
+		icon.Image = iconFor(payload.Guid)
+		icon.ImageTransparency = 0.1
+		icon.Rotation = 4 -- appearance is entirely yours
+		return icon
+	end,
+})
+```
+
+The contract:
+
+- The returned `GuiObject` is parented into a proxy frame sized to the source&#x27;s
+  on-screen footprint. Return something with `Size = UDim2.fromScale(1, 1)` to
+  match the source; give it an explicit offset `Size` to define its own.
+- **Appearance belongs to `BuildGhost`.** DragDrop never scales, tilts, or
+  recolors the proxy. It owns placement only: keeping the grab point under the
+  cursor, and springing between slots in grab mode.
+- The instance is destroyed when the drag ends. Don&#x27;t reuse it across drags.
+
+By default the proxy lives in an internal high-`DisplayOrder` `ScreenGui`. To
+host it yourself (custom layering, a specific `ScreenGui`), set
+`Config.GhostContainer` to any `LayerCollector`:
+
+```lua
+DragDrop.Configure({ GhostContainer = myOverlayScreenGui })
+```
+
+To go back to the internal container (or restore any other default), call
+`DragDrop.ResetConfig()` — `Configure` can&#x27;t clear an optional key, since nil
+values vanish from Luau tables.
+
+## Scriptable mode
+
+`SetInputMode(&quot;Scriptable&quot;)` disables all automatic input backends. Drags then
+start and move **only** through [BeginDrag](/api/DragDrop#BeginDrag) and the
+[DragHandle](/api/DragDrop#DragHandle) it returns — the same way you put a Camera
+into `Scriptable` and drive it by hand. Use it for cutscenes, guided tutorials,
+replays, and automated tests.
+
+```lua
+DragDrop.SetInputMode(&quot;Scriptable&quot;)
+
+local drag = DragDrop.BeginDrag(sourceSlot)      -- returns a DragHandle (or nil if refused)
+if drag then
+	drag:SetHoveredTarget(destinationSlot)        -- explicit hover (no hit-test needed)
+	local landed = drag:Drop()                    -- true if it dropped on a valid target
+end
+```
+
+Or drive it by screen position, letting the system hit-test for the target under
+the point:
+
+```lua
+local drag = DragDrop.BeginDrag(sourceSlot, startPosition) -- position =&gt; pointer-controlled
+drag:MoveTo(cursorPosition)  -- follows the point and resolves hover via hit-test
+drag:Drop()
+```
+
+The handle&#x27;s methods become no-ops (mutating ones return `false`) once the drag
+has ended, so it is always safe to hold onto.
+
+`BeginDrag` also works in **Automatic** mode without a position — that is how a
+menu &quot;Move&quot; button initiates a grab-mode drag the gamepad/keyboard backend then
+drives. With a position it always produces a pointer-controlled drag that the
+automatic backends leave alone.
+
+### DragHandle reference
+
+| Method | Effect |
+| --- | --- |
+| `MoveTo(position)` | Move the ghost to a screen point and hit-test for hover. |
+| `SetHoveredTarget(target)` | Set hover explicitly; returns `false` if the target is invalid/incompatible. |
+| `Drop()` | End on the current hover; `false` if there was no valid target (a revert). |
+| `Cancel()` | Revert this drag. |
+| `IsActive()` | Whether this handle still controls the live drag. |
+| `GetPayload()` | The payload this drag carries. |
+
+---
+### See also
+
+- **[DD Getting Started](/api/DD%20Getting%20Started)** — registering sources and targets.
+- **[DD Input Devices](/api/DD%20Input%20Devices)** — per-device gestures and the switch-to-revert rule."><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/DD Ghosts &amp; Scripting"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/DD Ghosts &amp; Scripting" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/DD Ghosts &amp; Scripting" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.e8e96400.css">
+<script src="/ModulesOnRails/assets/js/runtime~main.059257af.js" defer="defer"></script>
+<script src="/ModulesOnRails/assets/js/main.8b9c348b.js" defer="defer"></script>
+</head>
+<body>
+<svg style="display: none;"><defs>
+<symbol id="theme-svg-external-link" viewBox="0 0 24 24"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"/></symbol>
+</defs></svg>
+<script>!function(){var t=function(){try{return new URLSearchParams(window.location.search).get("docusaurus-theme")}catch(t){}}()||function(){try{return window.localStorage.getItem("theme")}catch(t){}}();document.documentElement.setAttribute("data-theme",t||(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")),document.documentElement.setAttribute("data-theme-choice",t||"system")}(),function(){try{const c=new URLSearchParams(window.location.search).entries();for(var[t,e]of c)if(t.startsWith("docusaurus-data-")){var a=t.replace("docusaurus-data-","data-");document.documentElement.setAttribute(a,e)}}catch(t){}}()</script><div id="__docusaurus"><div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#__docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="theme-layout-navbar navbar navbar--fixed-top"><div class="navbar__inner"><div class="theme-layout-navbar-left navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="theme-layout-navbar-right navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_nPIU"><use href="#theme-svg-external-link"></use></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="system mode" aria-label="Switch between dark and light mode (currently system mode)"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP systemToggleIcon_QzmC"><path fill="currentColor" d="m12 21c4.971 0 9-4.029 9-9s-4.029-9-9-9-9 4.029-9 9 4.029 9 9 9zm4.95-13.95c1.313 1.313 2.05 3.093 2.05 4.95s-0.738 3.637-2.05 4.95c-1.313 1.313-3.093 2.05-4.95 2.05v-14c1.857 0 3.637 0.737 4.95 2.05z"></path></svg></button></div><div class="navbarSearchContainer_Bca1"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input id="search_input_react" type="search" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="__docusaurus_skipToContent_fallback" class="theme-layout-main main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject"><span title="​Base​Object" class="linkLabel_WmDU">​Base​Object</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Roam"><span title="​Roam" class="linkLabel_WmDU">​Roam</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/TableManager"><span title="TableManager" class="categoryLinkLabel_W154">TableManager</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/TableReplicator"><span title="TableReplicator" class="categoryLinkLabel_W154">TableReplicator</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/NetWire"><span title="NetWire" class="categoryLinkLabel_W154">NetWire</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" href="/ModulesOnRails/api/DragDrop"><span title="DragDrop" class="categoryLinkLabel_W154">DragDrop</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/DragDrop"><span title="​Drag​Drop" class="linkLabel_WmDU">​Drag​Drop</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-2 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" tabindex="0" href="/ModulesOnRails/api/DD Getting Started"><span title="[Guides]" class="categoryLinkLabel_W154">[Guides]</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/DD Getting Started"><span title="​D​D ​Getting ​Started" class="linkLabel_WmDU">​D​D ​Getting ​Started</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/DD Input Devices"><span title="​D​D ​Input ​Devices" class="linkLabel_WmDU">​D​D ​Input ​Devices</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-3 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" tabindex="0" href="/ModulesOnRails/api/DD Ghosts &amp; Scripting"><span title="​D​D ​Ghosts &amp; ​Scripting" class="linkLabel_WmDU">​D​D ​Ghosts &amp; ​Scripting</span></a></li></ul></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Component"><span title="Instance Component Systems" class="categoryLinkLabel_W154">Instance Component Systems</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/DropletManager"><span title="DropletManager" class="categoryLinkLabel_W154">DropletManager</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/AdjustableTimer"><span title="AdjustableTimer [Unreleased]" class="categoryLinkLabel_W154">AdjustableTimer [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/PlayerProfileManager"><span title="PlayerDataManagement [Unreleased]" class="categoryLinkLabel_W154">PlayerDataManagement [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/CmdrHandler"><span title="Admin Commands [Cmdr]" class="categoryLinkLabel_W154">Admin Commands [Cmdr]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Queue"><span title="Data Structures" class="categoryLinkLabel_W154">Data Structures</span></a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BufferCodec"><span title="​Buffer​Codec" class="linkLabel_WmDU">​Buffer​Codec</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ObjectCache"><span title="​Object​Cache" class="linkLabel_WmDU">​Object​Cache</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ProbabilityDistributor"><span title="​Probability​Distributor" class="linkLabel_WmDU">​Probability​Distributor</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PromValue"><span title="​Prom​Value" class="linkLabel_WmDU">​Prom​Value</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/T"><span title="​T" class="linkLabel_WmDU">​T</span></a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">D</span><span style="display:inline-block">D</span><span style="display:inline-block"></span><span style="display:inline-block">Ghosts</span><span style="display:inline-block">&amp;</span><span style="display:inline-block"></span><span style="display:inline-block">Scripting</span></h1><div class="luaClassTags_EipM"></div><div>
+<p>
+  This guide covers the two ways you extend <a href="/ModulesOnRails/api/DragDrop">DragDrop</a> beyond the
+  defaults: customizing the <strong>ghost</strong> (the proxy that represents the payload while
+  it is airborne) and driving drags <strong>programmatically</strong> through Scriptable mode.
+</p>
+<h2>Custom ghosts</h2>
+<p>
+  Without a <code>BuildGhost</code>, the drag falls back to a plain plate listing the
+  payload's tags. Supply <code>BuildGhost</code> on the source to render your own:
+</p>
+<pre class="language-lua"><code class="language-lua">DragDrop<span class="token punctuation">.</span><span class="token function">RegisterSource</span><span class="token punctuation">(</span>slot<span class="token punctuation">,</span> <span class="token punctuation">{</span>
+	GetPayload <span class="token operator">=</span> <span class="token keyword">function</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token keyword">return</span> <span class="token punctuation">{</span> Tags <span class="token operator">=</span> <span class="token punctuation">{</span> <span class="token string">"Item"</span> <span class="token punctuation">}</span><span class="token punctuation">,</span> Guid <span class="token operator">=</span> guid <span class="token punctuation">}</span> <span class="token keyword">end</span><span class="token punctuation">,</span>
+	BuildGhost <span class="token operator">=</span> <span class="token keyword">function</span><span class="token punctuation">(</span>payload<span class="token punctuation">,</span> source<span class="token punctuation">)</span>
+		<span class="token keyword">local</span> icon <span class="token operator">=</span> Instance<span class="token punctuation">.</span><span class="token function">new</span><span class="token punctuation">(</span><span class="token string">"ImageLabel"</span><span class="token punctuation">)</span>
+		icon<span class="token punctuation">.</span>Size <span class="token operator">=</span> UDim2<span class="token punctuation">.</span><span class="token function">fromScale</span><span class="token punctuation">(</span><span class="token number">1</span><span class="token punctuation">,</span> <span class="token number">1</span><span class="token punctuation">)</span> <span class="token comment">-- fill the proxy (matches the source's footprint)</span>
+		icon<span class="token punctuation">.</span>BackgroundTransparency <span class="token operator">=</span> <span class="token number">1</span>
+		icon<span class="token punctuation">.</span>Image <span class="token operator">=</span> <span class="token function">iconFor</span><span class="token punctuation">(</span>payload<span class="token punctuation">.</span>Guid<span class="token punctuation">)</span>
+		icon<span class="token punctuation">.</span>ImageTransparency <span class="token operator">=</span> <span class="token number">0.1</span>
+		icon<span class="token punctuation">.</span>Rotation <span class="token operator">=</span> <span class="token number">4</span> <span class="token comment">-- appearance is entirely yours</span>
+		<span class="token keyword">return</span> icon
+	<span class="token keyword">end</span><span class="token punctuation">,</span>
+<span class="token punctuation">}</span><span class="token punctuation">)</span>
+</code></pre>
+<p>The contract:</p>
+<ul>
+  <li>
+    The returned <code>GuiObject</code> is parented into a proxy frame sized to the source's
+    on-screen footprint. Return something with <code>Size = UDim2.fromScale(1, 1)</code> to
+    match the source; give it an explicit offset <code>Size</code> to define its own.
+  </li>
+  <li>
+    <strong>Appearance belongs to <code>BuildGhost</code>.</strong> DragDrop never scales, tilts, or
+    recolors the proxy. It owns placement only: keeping the grab point under the
+    cursor, and springing between slots in grab mode.
+  </li>
+  <li>The instance is destroyed when the drag ends. Don't reuse it across drags.</li>
+</ul>
+<p>
+  By default the proxy lives in an internal high-<code>DisplayOrder</code> <code>ScreenGui</code>. To
+  host it yourself (custom layering, a specific <code>ScreenGui</code>), set
+  <code>Config.GhostContainer</code> to any <code>LayerCollector</code>:
+</p>
+<pre class="language-lua"><code class="language-lua">DragDrop<span class="token punctuation">.</span><span class="token function">Configure</span><span class="token punctuation">(</span><span class="token punctuation">{</span> GhostContainer <span class="token operator">=</span> myOverlayScreenGui <span class="token punctuation">}</span><span class="token punctuation">)</span>
+</code></pre>
+<p>
+  To go back to the internal container (or restore any other default), call
+  <code>DragDrop.ResetConfig()</code> — <code>Configure</code> can't clear an optional key, since nil
+  values vanish from Luau tables.
+</p>
+<h2>Scriptable mode</h2>
+<p>
+  <code>SetInputMode("Scriptable")</code> disables all automatic input backends. Drags then
+  start and move <strong>only</strong> through <a href="/ModulesOnRails/api/DragDrop#BeginDrag">BeginDrag</a> and the
+  <a href="/ModulesOnRails/api/DragDrop#DragHandle">DragHandle</a> it returns — the same way you put a Camera
+  into <code>Scriptable</code> and drive it by hand. Use it for cutscenes, guided tutorials,
+  replays, and automated tests.
+</p>
+<pre class="language-lua"><code class="language-lua">DragDrop<span class="token punctuation">.</span><span class="token function">SetInputMode</span><span class="token punctuation">(</span><span class="token string">"Scriptable"</span><span class="token punctuation">)</span>
+
+<span class="token keyword">local</span> drag <span class="token operator">=</span> DragDrop<span class="token punctuation">.</span><span class="token function">BeginDrag</span><span class="token punctuation">(</span>sourceSlot<span class="token punctuation">)</span>      <span class="token comment">-- returns a DragHandle (or nil if refused)</span>
+<span class="token keyword">if</span> drag <span class="token keyword">then</span>
+	drag<span class="token punctuation">:</span><span class="token function">SetHoveredTarget</span><span class="token punctuation">(</span>destinationSlot<span class="token punctuation">)</span>        <span class="token comment">-- explicit hover (no hit-test needed)</span>
+	<span class="token keyword">local</span> landed <span class="token operator">=</span> drag<span class="token punctuation">:</span><span class="token function">Drop</span><span class="token punctuation">(</span><span class="token punctuation">)</span>                    <span class="token comment">-- true if it dropped on a valid target</span>
+<span class="token keyword">end</span>
+</code></pre>
+<p>
+  Or drive it by screen position, letting the system hit-test for the target under
+  the point:
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> drag <span class="token operator">=</span> DragDrop<span class="token punctuation">.</span><span class="token function">BeginDrag</span><span class="token punctuation">(</span>sourceSlot<span class="token punctuation">,</span> startPosition<span class="token punctuation">)</span> <span class="token comment">-- position => pointer-controlled</span>
+drag<span class="token punctuation">:</span><span class="token function">MoveTo</span><span class="token punctuation">(</span>cursorPosition<span class="token punctuation">)</span>  <span class="token comment">-- follows the point and resolves hover via hit-test</span>
+drag<span class="token punctuation">:</span><span class="token function">Drop</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+</code></pre>
+<p>
+  The handle's methods become no-ops (mutating ones return <code>false</code>) once the drag
+  has ended, so it is always safe to hold onto.
+</p>
+<p>
+  <code>BeginDrag</code> also works in <strong>Automatic</strong> mode without a position — that is how a
+  menu "Move" button initiates a grab-mode drag the gamepad/keyboard backend then
+  drives. With a position it always produces a pointer-controlled drag that the
+  automatic backends leave alone.
+</p>
+<h3>DragHandle reference</h3>
+<table>
+  <thead>
+    <tr>
+      <th>Method</th>
+      <th>Effect</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>MoveTo(position)</code></td>
+      <td>Move the ghost to a screen point and hit-test for hover.</td>
+    </tr>
+    <tr>
+      <td><code>SetHoveredTarget(target)</code></td>
+      <td>Set hover explicitly; returns <code>false</code> if the target is invalid/incompatible.</td>
+    </tr>
+    <tr>
+      <td><code>Drop()</code></td>
+      <td>End on the current hover; <code>false</code> if there was no valid target (a revert).</td>
+    </tr>
+    <tr>
+      <td><code>Cancel()</code></td>
+      <td>Revert this drag.</td>
+    </tr>
+    <tr>
+      <td><code>IsActive()</code></td>
+      <td>Whether this handle still controls the live drag.</td>
+    </tr>
+    <tr>
+      <td><code>GetPayload()</code></td>
+      <td>The payload this drag carries.</td>
+    </tr>
+  </tbody>
+</table>
+<hr>
+<h3>See also</h3>
+<ul>
+  <li><strong><a href="/ModulesOnRails/api/DD%20Getting%20Started">DD Getting Started</a></strong> — registering sources and targets.</li>
+  <li><strong><a href="/ModulesOnRails/api/DD%20Input%20Devices">DD Input Devices</a></strong> — per-device gestures and the switch-to-revert rule.</li>
+</ul>
+</div></header></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
+    &quot;functions&quot;: [],
+    &quot;properties&quot;: [],
+    &quot;types&quot;: [],
+    &quot;name&quot;: &quot;DD Ghosts &amp; Scripting&quot;,
+    &quot;desc&quot;: &quot;This guide covers the two ways you extend [DragDrop](/api/DragDrop) beyond the\ndefaults: customizing the **ghost** (the proxy that represents the payload while\nit is airborne) and driving drags **programmatically** through Scriptable mode.\n\n## Custom ghosts\n\nWithout a `BuildGhost`, the drag falls back to a plain plate listing the\npayload&#x27;s tags. Supply `BuildGhost` on the source to render your own:\n\n```lua\nDragDrop.RegisterSource(slot, {\n\tGetPayload = function() return { Tags = { \&quot;Item\&quot; }, Guid = guid } end,\n\tBuildGhost = function(payload, source)\n\t\tlocal icon = Instance.new(\&quot;ImageLabel\&quot;)\n\t\ticon.Size = UDim2.fromScale(1, 1) -- fill the proxy (matches the source&#x27;s footprint)\n\t\ticon.BackgroundTransparency = 1\n\t\ticon.Image = iconFor(payload.Guid)\n\t\ticon.ImageTransparency = 0.1\n\t\ticon.Rotation = 4 -- appearance is entirely yours\n\t\treturn icon\n\tend,\n})\n```\n\nThe contract:\n\n- The returned `GuiObject` is parented into a proxy frame sized to the source&#x27;s\n  on-screen footprint. Return something with `Size = UDim2.fromScale(1, 1)` to\n  match the source; give it an explicit offset `Size` to define its own.\n- **Appearance belongs to `BuildGhost`.** DragDrop never scales, tilts, or\n  recolors the proxy. It owns placement only: keeping the grab point under the\n  cursor, and springing between slots in grab mode.\n- The instance is destroyed when the drag ends. Don&#x27;t reuse it across drags.\n\nBy default the proxy lives in an internal high-`DisplayOrder` `ScreenGui`. To\nhost it yourself (custom layering, a specific `ScreenGui`), set\n`Config.GhostContainer` to any `LayerCollector`:\n\n```lua\nDragDrop.Configure({ GhostContainer = myOverlayScreenGui })\n```\n\nTo go back to the internal container (or restore any other default), call\n`DragDrop.ResetConfig()` — `Configure` can&#x27;t clear an optional key, since nil\nvalues vanish from Luau tables.\n\n## Scriptable mode\n\n`SetInputMode(\&quot;Scriptable\&quot;)` disables all automatic input backends. Drags then\nstart and move **only** through [BeginDrag](/api/DragDrop#BeginDrag) and the\n[DragHandle](/api/DragDrop#DragHandle) it returns — the same way you put a Camera\ninto `Scriptable` and drive it by hand. Use it for cutscenes, guided tutorials,\nreplays, and automated tests.\n\n```lua\nDragDrop.SetInputMode(\&quot;Scriptable\&quot;)\n\nlocal drag = DragDrop.BeginDrag(sourceSlot)      -- returns a DragHandle (or nil if refused)\nif drag then\n\tdrag:SetHoveredTarget(destinationSlot)        -- explicit hover (no hit-test needed)\n\tlocal landed = drag:Drop()                    -- true if it dropped on a valid target\nend\n```\n\nOr drive it by screen position, letting the system hit-test for the target under\nthe point:\n\n```lua\nlocal drag = DragDrop.BeginDrag(sourceSlot, startPosition) -- position =&gt; pointer-controlled\ndrag:MoveTo(cursorPosition)  -- follows the point and resolves hover via hit-test\ndrag:Drop()\n```\n\nThe handle&#x27;s methods become no-ops (mutating ones return `false`) once the drag\nhas ended, so it is always safe to hold onto.\n\n`BeginDrag` also works in **Automatic** mode without a position — that is how a\nmenu \&quot;Move\&quot; button initiates a grab-mode drag the gamepad/keyboard backend then\ndrives. With a position it always produces a pointer-controlled drag that the\nautomatic backends leave alone.\n\n### DragHandle reference\n\n| Method | Effect |\n| --- | --- |\n| `MoveTo(position)` | Move the ghost to a screen point and hit-test for hover. |\n| `SetHoveredTarget(target)` | Set hover explicitly; returns `false` if the target is invalid/incompatible. |\n| `Drop()` | End on the current hover; `false` if there was no valid target (a revert). |\n| `Cancel()` | Revert this drag. |\n| `IsActive()` | Whether this handle still controls the live drag. |\n| `GetPayload()` | The payload this drag carries. |\n\n---\n### See also\n\n- **[DD Getting Started](/api/DD%20Getting%20Started)** — registering sources and targets.\n- **[DD Input Devices](/api/DD%20Input%20Devices)** — per-device gestures and the switch-to-revert rule.&quot;,
+    &quot;source&quot;: {
+        &quot;line&quot;: 102,
+        &quot;path&quot;: &quot;lib/dragdrop/src/Docs/DD_Ghosts_And_Scripting.luau&quot;
+    }
+}</pre></details></div></div></div></main></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
+</body>
+</html>

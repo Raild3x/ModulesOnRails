@@ -1,0 +1,985 @@
+<!doctype html>
+<html lang="en" dir="ltr" class="plugin-moonwave plugin-id-moonwave" data-has-hydrated="false">
+<head>
+<meta charset="UTF-8">
+<meta name="generator" content="Docusaurus v3.10.1">
+<title data-rh="true">DragDrop | ModulesOnRails</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:url" content="https://raild3x.github.io/ModulesOnRails/api/DragDrop"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docusaurus_tag" content="default"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docsearch:docusaurus_tag" content="default"><meta data-rh="true" property="og:title" content="DragDrop | ModulesOnRails"><meta data-rh="true" name="description" content="Device-agnostic drag-and-drop for Roblox UI. A singleton that moves an opaque
+[Payload] from a registered source to a registered target across **mouse,
+touch, gamepad, and keyboard**, emitting intent through the target&#x27;s `OnDrop`.
+It never inspects a payload past its `Tags`, so one registration handles any
+kind of content.
+
+Register a source and/or a target on a `GuiObject` and keep the returned
+[Unregister] alive for as long as the element should participate. In a
+component framework, insert it into your cleanup scope:
+
+```lua
+local DragDrop = require(Packages.DragDrop)
+
+local disconnectSource = DragDrop.RegisterSource(slot, {
+	GetPayload = function()
+		return { Tags = { &quot;Item&quot; }, Guid = guid, FromIndex = i }
+	end,
+	BuildGhost = function(payload, source) return MyItemGhost(payload) end,
+	OnActivated = openContextMenu, -- click / A-press without a lift
+})
+
+local disconnectTarget = DragDrop.RegisterTarget(slot, {
+	Accepts = { &quot;Item&quot; }, -- only takes item drags
+	OnDrop = function(payload, target) MoveItem(payload, target) end,
+	Metadata = { Index = i },
+})
+```
+
+### Where to read more
+
+- **[DD Getting Started](/api/DD%20Getting%20Started)** — registering sources and
+  targets, how `Tags`/`Accepts`/`CanDrop` decide compatibility, and reacting to
+  drag state.
+- **[DD Input Devices](/api/DD%20Input%20Devices)** — the gesture per device, the
+  configurable thresholds and keybinds, and what switching input class mid-drag
+  does.
+- **[DD Ghosts &amp; Scripting](/api/DD%20Ghosts%20&amp;%20Scripting)** — customizing the
+  drag proxy with `BuildGhost`, and driving drags by hand through
+  [DragDrop.SetInputMode] and [DragHandle]."><meta data-rh="true" property="og:description" content="Device-agnostic drag-and-drop for Roblox UI. A singleton that moves an opaque
+[Payload] from a registered source to a registered target across **mouse,
+touch, gamepad, and keyboard**, emitting intent through the target&#x27;s `OnDrop`.
+It never inspects a payload past its `Tags`, so one registration handles any
+kind of content.
+
+Register a source and/or a target on a `GuiObject` and keep the returned
+[Unregister] alive for as long as the element should participate. In a
+component framework, insert it into your cleanup scope:
+
+```lua
+local DragDrop = require(Packages.DragDrop)
+
+local disconnectSource = DragDrop.RegisterSource(slot, {
+	GetPayload = function()
+		return { Tags = { &quot;Item&quot; }, Guid = guid, FromIndex = i }
+	end,
+	BuildGhost = function(payload, source) return MyItemGhost(payload) end,
+	OnActivated = openContextMenu, -- click / A-press without a lift
+})
+
+local disconnectTarget = DragDrop.RegisterTarget(slot, {
+	Accepts = { &quot;Item&quot; }, -- only takes item drags
+	OnDrop = function(payload, target) MoveItem(payload, target) end,
+	Metadata = { Index = i },
+})
+```
+
+### Where to read more
+
+- **[DD Getting Started](/api/DD%20Getting%20Started)** — registering sources and
+  targets, how `Tags`/`Accepts`/`CanDrop` decide compatibility, and reacting to
+  drag state.
+- **[DD Input Devices](/api/DD%20Input%20Devices)** — the gesture per device, the
+  configurable thresholds and keybinds, and what switching input class mid-drag
+  does.
+- **[DD Ghosts &amp; Scripting](/api/DD%20Ghosts%20&amp;%20Scripting)** — customizing the
+  drag proxy with `BuildGhost`, and driving drags by hand through
+  [DragDrop.SetInputMode] and [DragHandle]."><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/DragDrop"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/DragDrop" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/DragDrop" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.e8e96400.css">
+<script src="/ModulesOnRails/assets/js/runtime~main.059257af.js" defer="defer"></script>
+<script src="/ModulesOnRails/assets/js/main.8b9c348b.js" defer="defer"></script>
+</head>
+<body>
+<svg style="display: none;"><defs>
+<symbol id="theme-svg-external-link" viewBox="0 0 24 24"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"/></symbol>
+</defs></svg>
+<script>!function(){var t=function(){try{return new URLSearchParams(window.location.search).get("docusaurus-theme")}catch(t){}}()||function(){try{return window.localStorage.getItem("theme")}catch(t){}}();document.documentElement.setAttribute("data-theme",t||(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")),document.documentElement.setAttribute("data-theme-choice",t||"system")}(),function(){try{const c=new URLSearchParams(window.location.search).entries();for(var[t,e]of c)if(t.startsWith("docusaurus-data-")){var a=t.replace("docusaurus-data-","data-");document.documentElement.setAttribute(a,e)}}catch(t){}}()</script><div id="__docusaurus"><div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#__docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="theme-layout-navbar navbar navbar--fixed-top"><div class="navbar__inner"><div class="theme-layout-navbar-left navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="theme-layout-navbar-right navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_nPIU"><use href="#theme-svg-external-link"></use></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="system mode" aria-label="Switch between dark and light mode (currently system mode)"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP systemToggleIcon_QzmC"><path fill="currentColor" d="m12 21c4.971 0 9-4.029 9-9s-4.029-9-9-9-9 4.029-9 9 4.029 9 9 9zm4.95-13.95c1.313 1.313 2.05 3.093 2.05 4.95s-0.738 3.637-2.05 4.95c-1.313 1.313-3.093 2.05-4.95 2.05v-14c1.857 0 3.637 0.737 4.95 2.05z"></path></svg></button></div><div class="navbarSearchContainer_Bca1"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input id="search_input_react" type="search" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="__docusaurus_skipToContent_fallback" class="theme-layout-main main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject"><span title="​Base​Object" class="linkLabel_WmDU">​Base​Object</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Roam"><span title="​Roam" class="linkLabel_WmDU">​Roam</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/TableManager"><span title="TableManager" class="categoryLinkLabel_W154">TableManager</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/TableReplicator"><span title="TableReplicator" class="categoryLinkLabel_W154">TableReplicator</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/NetWire"><span title="NetWire" class="categoryLinkLabel_W154">NetWire</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" href="/ModulesOnRails/api/DragDrop"><span title="DragDrop" class="categoryLinkLabel_W154">DragDrop</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" tabindex="0" href="/ModulesOnRails/api/DragDrop"><span title="​Drag​Drop" class="linkLabel_WmDU">​Drag​Drop</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-2 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" tabindex="0" href="/ModulesOnRails/api/DD Getting Started"><span title="[Guides]" class="categoryLinkLabel_W154">[Guides]</span></a></div></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Component"><span title="Instance Component Systems" class="categoryLinkLabel_W154">Instance Component Systems</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/DropletManager"><span title="DropletManager" class="categoryLinkLabel_W154">DropletManager</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/AdjustableTimer"><span title="AdjustableTimer [Unreleased]" class="categoryLinkLabel_W154">AdjustableTimer [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/PlayerProfileManager"><span title="PlayerDataManagement [Unreleased]" class="categoryLinkLabel_W154">PlayerDataManagement [Unreleased]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/CmdrHandler"><span title="Admin Commands [Cmdr]" class="categoryLinkLabel_W154">Admin Commands [Cmdr]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Queue"><span title="Data Structures" class="categoryLinkLabel_W154">Data Structures</span></a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BufferCodec"><span title="​Buffer​Codec" class="linkLabel_WmDU">​Buffer​Codec</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ObjectCache"><span title="​Object​Cache" class="linkLabel_WmDU">​Object​Cache</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ProbabilityDistributor"><span title="​Probability​Distributor" class="linkLabel_WmDU">​Probability​Distributor</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PromValue"><span title="​Prom​Value" class="linkLabel_WmDU">​Prom​Value</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/T"><span title="​T" class="linkLabel_WmDU">​T</span></a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><div class="tocCollapsible_ETCw theme-doc-toc-mobile tocMobile_oUs_"><button type="button" class="clean-btn tocCollapsibleButton_TO0P">On this page</button></div><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">Drag</span><span style="display:inline-block">Drop</span></h1><div class="luaClassTags_EipM"></div><div>
+<p>
+  Device-agnostic drag-and-drop for Roblox UI. A singleton that moves an opaque
+  <a href="/ModulesOnRails/api/DragDrop#Payload">Payload</a> from a registered source to a registered target across <strong>mouse,
+touch, gamepad, and keyboard</strong>, emitting intent through the target's <code>OnDrop</code>.
+  It never inspects a payload past its <code>Tags</code>, so one registration handles any
+  kind of content.
+</p>
+<p>
+  Register a source and/or a target on a <code>GuiObject</code> and keep the returned
+  <a href="/ModulesOnRails/api/DragDrop#Unregister">Unregister</a> alive for as long as the element should participate. In a
+  component framework, insert it into your cleanup scope:
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> DragDrop <span class="token operator">=</span> <span class="token function">require</span><span class="token punctuation">(</span>Packages<span class="token punctuation">.</span>DragDrop<span class="token punctuation">)</span>
+
+<span class="token keyword">local</span> disconnectSource <span class="token operator">=</span> DragDrop<span class="token punctuation">.</span><span class="token function">RegisterSource</span><span class="token punctuation">(</span>slot<span class="token punctuation">,</span> <span class="token punctuation">{</span>
+	GetPayload <span class="token operator">=</span> <span class="token keyword">function</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+		<span class="token keyword">return</span> <span class="token punctuation">{</span> Tags <span class="token operator">=</span> <span class="token punctuation">{</span> <span class="token string">"Item"</span> <span class="token punctuation">}</span><span class="token punctuation">,</span> Guid <span class="token operator">=</span> guid<span class="token punctuation">,</span> FromIndex <span class="token operator">=</span> i <span class="token punctuation">}</span>
+	<span class="token keyword">end</span><span class="token punctuation">,</span>
+	BuildGhost <span class="token operator">=</span> <span class="token keyword">function</span><span class="token punctuation">(</span>payload<span class="token punctuation">,</span> source<span class="token punctuation">)</span> <span class="token keyword">return</span> <span class="token function">MyItemGhost</span><span class="token punctuation">(</span>payload<span class="token punctuation">)</span> <span class="token keyword">end</span><span class="token punctuation">,</span>
+	OnActivated <span class="token operator">=</span> openContextMenu<span class="token punctuation">,</span> <span class="token comment">-- click / A-press without a lift</span>
+<span class="token punctuation">}</span><span class="token punctuation">)</span>
+
+<span class="token keyword">local</span> disconnectTarget <span class="token operator">=</span> DragDrop<span class="token punctuation">.</span><span class="token function">RegisterTarget</span><span class="token punctuation">(</span>slot<span class="token punctuation">,</span> <span class="token punctuation">{</span>
+	Accepts <span class="token operator">=</span> <span class="token punctuation">{</span> <span class="token string">"Item"</span> <span class="token punctuation">}</span><span class="token punctuation">,</span> <span class="token comment">-- only takes item drags</span>
+	OnDrop <span class="token operator">=</span> <span class="token keyword">function</span><span class="token punctuation">(</span>payload<span class="token punctuation">,</span> target<span class="token punctuation">)</span> <span class="token function">MoveItem</span><span class="token punctuation">(</span>payload<span class="token punctuation">,</span> target<span class="token punctuation">)</span> <span class="token keyword">end</span><span class="token punctuation">,</span>
+	Metadata <span class="token operator">=</span> <span class="token punctuation">{</span> Index <span class="token operator">=</span> i <span class="token punctuation">}</span><span class="token punctuation">,</span>
+<span class="token punctuation">}</span><span class="token punctuation">)</span>
+</code></pre>
+<h3>Where to read more</h3>
+<ul>
+  <li>
+    <strong><a href="/ModulesOnRails/api/DD%20Getting%20Started">DD Getting Started</a></strong> — registering sources and
+    targets, how <code>Tags</code>/<code>Accepts</code>/<code>CanDrop</code> decide compatibility, and reacting to
+    drag state.
+  </li>
+  <li>
+    <strong><a href="/ModulesOnRails/api/DD%20Input%20Devices">DD Input Devices</a></strong> — the gesture per device, the
+    configurable thresholds and keybinds, and what switching input class mid-drag
+    does.
+  </li>
+  <li>
+    <strong><a href="/ModulesOnRails/api/DD%20Ghosts%20&#x26;%20Scripting">DD Ghosts &#x26; Scripting</a></strong> — customizing the
+    drag proxy with <code>BuildGhost</code>, and driving drags by hand through
+    <a href="/ModulesOnRails/api/DragDrop#SetInputMode">DragDrop.SetInputMode</a> and <a href="/ModulesOnRails/api/DragDrop#DragHandle">DragHandle</a>.
+  </li>
+</ul>
+</div></header><h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="types">Types<a href="#types" class="hash-link" aria-label="Direct link to Types" title="Direct link to Types" translate="no">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="Payload"><code style="text-decoration:none">Payload</code><a href="#Payload" class="hash-link" aria-label="Direct link to Payload" title="Direct link to Payload" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/dragdrop/src/Types.luau#L35"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code class="purple_ieR2">type</code> <code>Payload<!-- --> = </code> <code class="purple_ieR2">{</code><div class="inset_uKQm"><code>Tags<!-- -->: </code><code class="green_DgR4">{</code><code class="blue_P4bS">string</code><code class="green_DgR4">}</code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><span><code>[</code><code class="blue_P4bS">string</code><code>]</code></span><code>: </code><code class="blue_P4bS">any</code></div><code class="purple_ieR2">}</code></div><div>
+<p>
+  The opaque value carried by a drag. <code>Tags</code> is the only field the system reads:
+  it lists the payload's kinds for target compatibility — a target's <code>Accepts</code>
+  takes the drag if it shares at least one tag. Everything else is yours to
+  shape (guids, indices, a display name for your ghost, ...).
+</p>
+<p>
+  Because <code>Tags</code> travels with the payload and <code>GetPayload</code> runs on every lift, a
+  source whose contents vary can return different tags per lift — e.g. a bag
+  slot returns <code>{ "Item", "Food" }</code> for a ration and <code>{ "Item", "Weapon" }</code> for
+  a sword, and each matches the right target.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="TargetDescriptor"><code style="text-decoration:none">TargetDescriptor</code><a href="#TargetDescriptor" class="hash-link" aria-label="Direct link to TargetDescriptor" title="Direct link to TargetDescriptor" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/dragdrop/src/Types.luau#L48"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code class="purple_ieR2">interface</code> <code>TargetDescriptor<!-- --> <!-- -->{</code><div class="inset_uKQm"><div><code>Instance<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/GuiObject" target="_blank" rel="noopener noreferrer">GuiObject<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><span class="inlineDescription_G7Er">-- <span>
+<p>The registered target the drop resolved onto.</p>
+</span></span></div><div><code>Metadata<!-- -->: </code><code class="purple_ieR2">{</code><span><code>[</code><code class="blue_P4bS">any</code><code>]</code></span><code>: </code><code class="blue_P4bS">any</code><code class="purple_ieR2">}</code><span class="inlineDescription_G7Er">-- <span>
+<p>Whatever <code>Metadata</code> the target registered with.</p>
+</span></span></div></div><code>}</code></div><div>
+<p>Handed to a target's <code>OnDrop</code> and returned by <a href="/ModulesOnRails/api/DragDrop#GetHoveredTarget">DragDrop.GetHoveredTarget</a>.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="InputMode"><code style="text-decoration:none">InputMode</code><a href="#InputMode" class="hash-link" aria-label="Direct link to InputMode" title="Direct link to InputMode" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/dragdrop/src/Types.luau#L101"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code class="purple_ieR2">type</code> <code>InputMode<!-- --> = </code> <code class="blue_P4bS">&quot;Automatic&quot;</code><code class="op_lSLc"> | </code><code class="blue_P4bS">&quot;Scriptable&quot;</code></div><div>
+<p>
+  <code>Automatic</code> (default) wires the pointer and selection backends to real device
+  input. <code>Scriptable</code> disables them so the only way a drag starts or moves is
+  through <a href="/ModulesOnRails/api/DragDrop#BeginDrag">DragDrop.BeginDrag</a> and the returned <a href="/ModulesOnRails/api/DragDrop#DragHandle">DragHandle</a> — like putting a
+  camera in Scriptable mode.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="Config"><code style="text-decoration:none">Config</code><a href="#Config" class="hash-link" aria-label="Direct link to Config" title="Direct link to Config" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/dragdrop/src/Types.luau#L119"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code class="purple_ieR2">interface</code> <code>Config<!-- --> <!-- -->{</code><div class="inset_uKQm"><div><code>DragThresholdPx<!-- -->: </code><code class="blue_P4bS">number?</code><span class="inlineDescription_G7Er">-- <span>
+<p>Mouse: movement past this (in pixels) lifts. Default 8.</p>
+</span></span></div><div><code>TouchSlopPx<!-- -->: </code><code class="blue_P4bS">number?</code><span class="inlineDescription_G7Er">-- <span>
+<p>Touch: movement past this before the hold fires = scroll, not lift. Default 12.</p>
+</span></span></div><div><code>LongPressSeconds<!-- -->: </code><code class="blue_P4bS">number?</code><span class="inlineDescription_G7Er">-- <span>
+<p>Touch: hold duration that lifts. Default 0.4.</p>
+</span></span></div><div><code>SnapSpeed<!-- -->: </code><code class="blue_P4bS">number?</code><span class="inlineDescription_G7Er">-- <span>
+<p>Selection mode: slot-to-slot ghost spring speed. Default 30.</p>
+</span></span></div><div><code>GhostContainer<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/LayerCollector" target="_blank" rel="noopener noreferrer">LayerCollector?<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><span class="inlineDescription_G7Er">-- <span>
+<p>Parent for ghost mounts. nil = an internal high-DisplayOrder ScreenGui.</p>
+</span></span></div><div><code>GamepadLiftKeyCode<!-- -->: </code><code class="blue_P4bS">Enum.KeyCode?</code><span class="inlineDescription_G7Er">-- <span>
+<p>Button that lifts the selected source. Default ButtonX.</p>
+</span></span></div><div><code>GamepadDropKeyCode<!-- -->: </code><code class="blue_P4bS">Enum.KeyCode?</code><span class="inlineDescription_G7Er">-- <span>
+<p>Button that drops on the selected target. Default ButtonA.</p>
+</span></span></div><div><code>GamepadCancelKeyCode<!-- -->: </code><code class="blue_P4bS">Enum.KeyCode?</code><span class="inlineDescription_G7Er">-- <span>
+<p>Button that cancels a drag. Default ButtonB.</p>
+</span></span></div><div><code>KeyboardLiftKeyCode<!-- -->: </code><code class="blue_P4bS">Enum.KeyCode?</code><span class="inlineDescription_G7Er">-- <span>
+<p>Key that toggles lift/drop in grab mode. Default Return.</p>
+</span></span></div><div><code>KeyboardCancelKeyCode<!-- -->: </code><code class="blue_P4bS">Enum.KeyCode?</code><span class="inlineDescription_G7Er">-- <span>
+<p>Optional explicit keyboard cancel key. Default nil.</p>
+</span></span></div></div><code>}</code></div><div>
+<p>Behavior knobs only — nothing here styles the ghost (that lives in <code>BuildGhost</code>).</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="DragHandle"><code style="text-decoration:none">DragHandle</code><a href="#DragHandle" class="hash-link" aria-label="Direct link to DragHandle" title="Direct link to DragHandle" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/dragdrop/src/Types.luau#L146"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code class="purple_ieR2">interface</code> <code>DragHandle<!-- --> <!-- -->{</code><div class="inset_uKQm"><div><code>MoveTo<!-- -->: </code><code class="purple_ieR2">(</code><div class="inset_uKQm"><code>self<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#DragHandle">DragHandle</a></code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code>position<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Vector2" target="_blank" rel="noopener noreferrer">Vector2<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code></div><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code><span class="inlineDescription_G7Er">-- <span>
+<p>Move the ghost to a screen point and hit-test for hover.</p>
+</span></span></div><div><code>SetHoveredTarget<!-- -->: </code><code class="purple_ieR2">(</code><div class="inset_uKQm"><code>self<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#DragHandle">DragHandle</a></code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code>target<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/GuiObject" target="_blank" rel="noopener noreferrer">GuiObject?<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code></div><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="blue_P4bS">boolean</code><span class="inlineDescription_G7Er">-- <span>
+<p>Set hover explicitly; false if the target is invalid/incompatible.</p>
+</span></span></div><div><code>Drop<!-- -->: </code><code class="purple_ieR2">(</code><code>self<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#DragHandle">DragHandle</a></code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="blue_P4bS">boolean</code><span class="inlineDescription_G7Er">-- <span>
+<p>End on the current hover; false if there was no valid target (reverted).</p>
+</span></span></div><div><code>Cancel<!-- -->: </code><code class="purple_ieR2">(</code><code>self<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#DragHandle">DragHandle</a></code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code><span class="inlineDescription_G7Er">-- <span>
+<p>Revert this drag.</p>
+</span></span></div><div><code>IsActive<!-- -->: </code><code class="purple_ieR2">(</code><code>self<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#DragHandle">DragHandle</a></code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="blue_P4bS">boolean</code><span class="inlineDescription_G7Er">-- <span>
+<p>Whether this handle still controls the live drag.</p>
+</span></span></div><div><code>GetPayload<!-- -->: </code><code class="purple_ieR2">(</code><code>self<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#DragHandle">DragHandle</a></code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#Payload">Payload</a></code><span class="inlineDescription_G7Er">-- <span>
+<p>The payload this drag carries.</p>
+</span></span></div></div><code>}</code></div><div>
+<p>
+  A programmatic controller for a single drag, returned by <a href="/ModulesOnRails/api/DragDrop#BeginDrag">DragDrop.BeginDrag</a>.
+  Every method becomes a no-op (and the mutating ones return false) once the
+  drag has ended.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="Unregister"><code style="text-decoration:none">Unregister</code><a href="#Unregister" class="hash-link" aria-label="Direct link to Unregister" title="Direct link to Unregister" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/dragdrop/src/Types.luau#L162"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code class="purple_ieR2">type</code> <code>Unregister<!-- --> = </code> <code class="purple_ieR2">(</code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code></div><div>
+<p>
+  Returned by <a href="/ModulesOnRails/api/DragDrop#RegisterSource">DragDrop.RegisterSource</a> and <a href="/ModulesOnRails/api/DragDrop#RegisterTarget">DragDrop.RegisterTarget</a>. Call it to
+  tear the registration down.
+</p>
+</div><h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="properties">Properties<a href="#properties" class="hash-link" aria-label="Direct link to Properties" title="Direct link to Properties" translate="no">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="ActivePayloadChanged"><code style="text-decoration:none">ActivePayloadChanged</code><a href="#ActivePayloadChanged" class="hash-link" aria-label="Direct link to ActivePayloadChanged" title="Direct link to ActivePayloadChanged" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/dragdrop/src/DragDrop.luau#L294"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>DragDrop<!-- -->.<!-- -->ActivePayloadChanged<!-- -->:<!-- --> </code> <code class="blue_P4bS">Signal</code><code class="op_lSLc">&lt;</code><code class="purple_ieR2">(</code><code>payload<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#Payload">Payload?</a></code><code class="purple_ieR2">)</code><code class="op_lSLc">&gt;</code></div><div>
+<p>
+  Fires whenever the airborne payload changes — the new payload on lift, nil on
+  drop or cancel.
+</p>
+<p>
+  It does <strong>not</strong> fire on connect, so read the current value with
+  <a href="/ModulesOnRails/api/DragDrop#GetActivePayload">DragDrop.GetActivePayload</a> when you subscribe. It is a plain [Signal], so it
+  works with anything that consumes signals — <code>:Once</code>, <code>:Wait</code>, a Janitor, a
+  reactive binding.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- Dim every incompatible slot while a drag is live. Seed from the getter, then</span>
+<span class="token comment">-- keep it in sync from the signal.</span>
+<span class="token keyword">local</span> <span class="token keyword">function</span> <span class="token function">repaint</span><span class="token punctuation">(</span>payload<span class="token punctuation">:</span> DragDrop<span class="token punctuation">.</span>Payload?<span class="token punctuation">)</span>
+	<span class="token keyword">for</span> _<span class="token punctuation">,</span> slot <span class="token keyword">in</span> slots <span class="token keyword">do</span>
+		slot<span class="token punctuation">.</span>Dimmed <span class="token operator">=</span> payload <span class="token operator">~=</span> <span class="token keyword">nil</span> <span class="token keyword">and</span> <span class="token keyword">not</span> <span class="token function">accepts</span><span class="token punctuation">(</span>slot<span class="token punctuation">,</span> payload<span class="token punctuation">)</span>
+	<span class="token keyword">end</span>
+<span class="token keyword">end</span>
+<span class="token function">repaint</span><span class="token punctuation">(</span>DragDrop<span class="token punctuation">.</span><span class="token function">GetActivePayload</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+<span class="token keyword">local</span> conn <span class="token operator">=</span> DragDrop<span class="token punctuation">.</span>ActivePayloadChanged<span class="token punctuation">:</span><span class="token function">Connect</span><span class="token punctuation">(</span>repaint<span class="token punctuation">)</span>
+
+<span class="token comment">-- later:</span>
+conn<span class="token punctuation">:</span><span class="token function">Disconnect</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="HoveredTargetChanged"><code style="text-decoration:none">HoveredTargetChanged</code><a href="#HoveredTargetChanged" class="hash-link" aria-label="Direct link to HoveredTargetChanged" title="Direct link to HoveredTargetChanged" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/dragdrop/src/DragDrop.luau#L313"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>DragDrop<!-- -->.<!-- -->HoveredTargetChanged<!-- -->:<!-- --> </code> <code class="blue_P4bS">Signal</code><code class="op_lSLc">&lt;</code><code class="purple_ieR2">(</code><code>target<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#TargetDescriptor">TargetDescriptor?</a></code><code class="purple_ieR2">)</code><code class="op_lSLc">&gt;</code></div><div>
+<p>
+  Fires whenever the hovered target changes — the new <a href="/ModulesOnRails/api/DragDrop#TargetDescriptor">TargetDescriptor</a> on enter,
+  nil on leave.
+</p>
+<p>
+  It does <strong>not</strong> fire on connect, so read the current value with
+  <a href="/ModulesOnRails/api/DragDrop#GetHoveredTarget">DragDrop.GetHoveredTarget</a> when you subscribe.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- Move a "drop here" highlight to whatever the ghost is over.</span>
+<span class="token keyword">local</span> conn <span class="token operator">=</span> DragDrop<span class="token punctuation">.</span>HoveredTargetChanged<span class="token punctuation">:</span><span class="token function">Connect</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span>target<span class="token punctuation">)</span>
+	highlight<span class="token punctuation">.</span>Visible <span class="token operator">=</span> target <span class="token operator">~=</span> <span class="token keyword">nil</span>
+	<span class="token keyword">if</span> target <span class="token keyword">then</span> highlight<span class="token punctuation">.</span>Parent <span class="token operator">=</span> target<span class="token punctuation">.</span>Instance <span class="token keyword">end</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="DragStarted"><code style="text-decoration:none">DragStarted</code><a href="#DragStarted" class="hash-link" aria-label="Direct link to DragStarted" title="Direct link to DragStarted" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/dragdrop/src/DragDrop.luau#L384"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>DragDrop<!-- -->.<!-- -->DragStarted<!-- -->:<!-- --> </code> <code class="blue_P4bS">Signal</code><code class="op_lSLc">&lt;</code><code class="purple_ieR2">(</code><div class="inset_uKQm"><code>payload<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#Payload">Payload</a></code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code>source<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/GuiObject" target="_blank" rel="noopener noreferrer">GuiObject<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code></div><code class="purple_ieR2">)</code><code class="op_lSLc">&gt;</code></div><div>
+<p>Fires when a payload goes airborne.</p>
+<pre class="language-lua"><code class="language-lua">DragDrop<span class="token punctuation">.</span>DragStarted<span class="token punctuation">:</span><span class="token function">Connect</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span>payload<span class="token punctuation">,</span> source<span class="token punctuation">)</span>
+	<span class="token function">playPickupSound</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+	source<span class="token punctuation">.</span>BackgroundTransparency <span class="token operator">=</span> <span class="token number">0.6</span> <span class="token comment">-- fade the origin slot while lifted</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="Dropped"><code style="text-decoration:none">Dropped</code><a href="#Dropped" class="hash-link" aria-label="Direct link to Dropped" title="Direct link to Dropped" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/dragdrop/src/DragDrop.luau#L402"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>DragDrop<!-- -->.<!-- -->Dropped<!-- -->:<!-- --> </code> <code class="blue_P4bS">Signal</code><code class="op_lSLc">&lt;</code><code class="purple_ieR2">(</code><div class="inset_uKQm"><code>payload<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#Payload">Payload</a></code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code>target<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#TargetDescriptor">TargetDescriptor</a></code></div><code class="purple_ieR2">)</code><code class="op_lSLc">&gt;</code></div><div>
+<p>
+  Fires when a payload lands on a valid target, immediately after that target's
+  <code>OnDrop</code> has run.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- A global listener for analytics, independent of any one target's OnDrop.</span>
+DragDrop<span class="token punctuation">.</span>Dropped<span class="token punctuation">:</span><span class="token function">Connect</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span>payload<span class="token punctuation">,</span> target<span class="token punctuation">)</span>
+	Analytics<span class="token punctuation">:</span><span class="token function">Log</span><span class="token punctuation">(</span><span class="token string">"item_moved"</span><span class="token punctuation">,</span> <span class="token punctuation">{</span>
+		guid <span class="token operator">=</span> payload<span class="token punctuation">.</span>Guid<span class="token punctuation">,</span>
+		to <span class="token operator">=</span> target<span class="token punctuation">.</span>Metadata<span class="token punctuation">.</span>Index<span class="token punctuation">,</span>
+	<span class="token punctuation">}</span><span class="token punctuation">)</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="DragEnded"><code style="text-decoration:none">DragEnded</code><a href="#DragEnded" class="hash-link" aria-label="Direct link to DragEnded" title="Direct link to DragEnded" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/dragdrop/src/DragDrop.luau#L429"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>DragDrop<!-- -->.<!-- -->DragEnded<!-- -->:<!-- --> </code> <code class="blue_P4bS">Signal</code><code class="op_lSLc">&lt;</code><code class="purple_ieR2">(</code><div class="inset_uKQm"><code>payload<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#Payload">Payload</a></code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code>target<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#TargetDescriptor">TargetDescriptor?</a></code></div><code class="purple_ieR2">)</code><code class="op_lSLc">&gt;</code></div><div>
+<p>Fires on every drag end. A nil target means the drag was cancelled or reverted.</p>
+<p>This is the <strong>last</strong> event of a drag. End-of-drag order:</p>
+<ol>
+  <li>
+    Reactive state clears — <code>GetActivePayload</code>/<code>GetHoveredTarget</code> go nil and
+    <a href="/ModulesOnRails/api/DragDrop#ActivePayloadChanged">DragDrop.ActivePayloadChanged</a>/<a href="/ModulesOnRails/api/DragDrop#HoveredTargetChanged">DragDrop.HoveredTargetChanged</a> fire
+    (ghost/scroll-lock teardown has already run).
+  </li>
+  <li>The target's <code>OnDrop</code> runs, then <a href="/ModulesOnRails/api/DragDrop#Dropped">DragDrop.Dropped</a> fires.</li>
+  <li>The source's <code>OnDragEnd</code> runs, then <code>DragEnded</code> fires.</li>
+</ol>
+<p>
+  Because those change signals fire <em>before</em> <code>OnDrop</code> mutates your data, a view
+  that repaints only from them will still show pre-drop data — repaint on
+  <code>DragEnded</code> (or from your own data layer) to pick up the result of the drop.
+</p>
+<pre class="language-lua"><code class="language-lua">DragDrop<span class="token punctuation">.</span>DragEnded<span class="token punctuation">:</span><span class="token function">Connect</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span>payload<span class="token punctuation">,</span> target<span class="token punctuation">)</span>
+	<span class="token keyword">if</span> target <span class="token operator">==</span> <span class="token keyword">nil</span> <span class="token keyword">then</span>
+		<span class="token function">playRevertSound</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token comment">-- cancelled or reverted</span>
+	<span class="token keyword">end</span>
+	<span class="token function">repaintInventory</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token comment">-- OnDrop has already applied the move by now</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+</code></pre>
+</div><h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="functions">Functions<a href="#functions" class="hash-link" aria-label="Direct link to Functions" title="Direct link to Functions" translate="no">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="RegisterSource"><code style="text-decoration:none">RegisterSource</code><a href="#RegisterSource" class="hash-link" aria-label="Direct link to RegisterSource" title="Direct link to RegisterSource" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/dragdrop/src/DragDrop.luau#L86"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>DragDrop<!-- -->.</code><code class="green_DgR4">RegisterSource</code><code>(</code><div class="inset_uKQm"><div><code>instance<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/GuiObject" target="_blank" rel="noopener noreferrer">GuiObject<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>,</code></div><div><code>options<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#SourceOptions">SourceOptions</a></code></div></div><code>) → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code></div><h3>Types</h3><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="SourceOptions"><a href="#SourceOptions" class="hash-link" aria-label="Direct link to SourceOptions" title="Direct link to SourceOptions" translate="no">​</a></h3><div class="memberString_GwaU"><code class="purple_ieR2">interface</code> <code>SourceOptions<!-- --> <!-- -->{</code><div class="inset_uKQm"><div><code>GetPayload<!-- -->: </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#Payload">Payload?</a></code><span class="inlineDescription_G7Er">-- <span>
+<p>Returns the payload to lift, or nil to refuse the lift (empty slot, disabled, ...). Called on press.</p>
+</span></span></div><div><code>OnActivated<!-- -->: </code><code class="purple_ieR2">(</code><code class="green_DgR4">(</code><code class="green_DgR4">)</code><code class="green_DgR4"> → </code><code class="green_DgR4">(</code><code class="green_DgR4">)</code><code class="purple_ieR2">)</code><code class="blue_P4bS">?</code><span class="inlineDescription_G7Er">-- <span>
+<p>Press + release without crossing the drag threshold (a "click").</p>
+</span></span></div><div><code>OnLift<!-- -->: </code><code class="purple_ieR2">(</code><code class="green_DgR4">(</code><code>payload<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#Payload">Payload</a></code><code class="green_DgR4">)</code><code class="green_DgR4"> → </code><code class="green_DgR4">(</code><code class="green_DgR4">)</code><code class="purple_ieR2">)</code><code class="blue_P4bS">?</code><span class="inlineDescription_G7Er">-- <span>
+<p>Fired the moment the payload goes airborne.</p>
+</span></span></div><div><code>OnDragEnd<!-- -->: </code><code class="purple_ieR2">(</code><code class="green_DgR4">(</code><div class="inset_uKQm"><code>payload<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#Payload">Payload</a></code><code class="green_DgR4">,</code></div><div class="inset_uKQm"><code>dropped<!-- -->: </code><code class="blue_P4bS">boolean</code></div><code class="green_DgR4">)</code><code class="green_DgR4"> → </code><code class="green_DgR4">(</code><code class="green_DgR4">)</code><code class="purple_ieR2">)</code><code class="blue_P4bS">?</code><span class="inlineDescription_G7Er">-- <span>
+<p>Fired on every drag end. <code>dropped=false</code> means cancelled/reverted.</p>
+</span></span></div><div><code>BuildGhost<!-- -->: </code><code class="purple_ieR2">(</code><code class="green_DgR4">(</code><div class="inset_uKQm"><code>payload<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#Payload">Payload</a></code><code class="green_DgR4">,</code></div><div class="inset_uKQm"><code>source<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/GuiObject" target="_blank" rel="noopener noreferrer">GuiObject<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code></div><code class="green_DgR4">)</code><code class="green_DgR4"> → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/GuiObject" target="_blank" rel="noopener noreferrer">GuiObject<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code class="purple_ieR2">)</code><code class="blue_P4bS">?</code><span class="inlineDescription_G7Er">-- <span>
+<p>Builds the dragged proxy. Strongly recommended; nil falls back to a bare debug plate.</p>
+</span></span></div></div><code>}</code></div><div></div><div>
+<p>
+  Marks <code>instance</code> (and its descendants) as something that can be picked up.
+  Returns a function that unregisters it; the source also auto-unregisters if the
+  instance is destroyed.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> unregister <span class="token operator">=</span> DragDrop<span class="token punctuation">.</span><span class="token function">RegisterSource</span><span class="token punctuation">(</span>slot<span class="token punctuation">,</span> <span class="token punctuation">{</span>
+	GetPayload <span class="token operator">=</span> <span class="token keyword">function</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+		<span class="token keyword">if</span> slot<span class="token punctuation">.</span>IsEmpty <span class="token keyword">then</span> <span class="token keyword">return</span> <span class="token keyword">nil</span> <span class="token keyword">end</span> <span class="token comment">-- refuse the lift</span>
+		<span class="token keyword">return</span> <span class="token punctuation">{</span> Tags <span class="token operator">=</span> <span class="token punctuation">{</span> <span class="token string">"Item"</span> <span class="token punctuation">}</span><span class="token punctuation">,</span> Guid <span class="token operator">=</span> slot<span class="token punctuation">.</span>Guid<span class="token punctuation">,</span> FromIndex <span class="token operator">=</span> i <span class="token punctuation">}</span>
+	<span class="token keyword">end</span><span class="token punctuation">,</span>
+	BuildGhost <span class="token operator">=</span> <span class="token keyword">function</span><span class="token punctuation">(</span>payload<span class="token punctuation">)</span> <span class="token keyword">return</span> <span class="token function">MyItemGhost</span><span class="token punctuation">(</span>payload<span class="token punctuation">)</span> <span class="token keyword">end</span><span class="token punctuation">,</span>
+	OnActivated <span class="token operator">=</span> <span class="token keyword">function</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token function">openContextMenu</span><span class="token punctuation">(</span>i<span class="token punctuation">)</span> <span class="token keyword">end</span><span class="token punctuation">,</span> <span class="token comment">-- click without a lift</span>
+<span class="token punctuation">}</span><span class="token punctuation">)</span>
+
+<span class="token comment">-- later, when the slot goes away:</span>
+<span class="token function">unregister</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="RegisterTarget"><code style="text-decoration:none">RegisterTarget</code><a href="#RegisterTarget" class="hash-link" aria-label="Direct link to RegisterTarget" title="Direct link to RegisterTarget" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/dragdrop/src/DragDrop.luau#L113"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>DragDrop<!-- -->.</code><code class="green_DgR4">RegisterTarget</code><code>(</code><div class="inset_uKQm"><div><code>instance<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/GuiObject" target="_blank" rel="noopener noreferrer">GuiObject<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>,</code></div><div><code>options<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#TargetOptions">TargetOptions</a></code></div></div><code>) → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code></div><h3>Types</h3><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="TargetOptions"><a href="#TargetOptions" class="hash-link" aria-label="Direct link to TargetOptions" title="Direct link to TargetOptions" translate="no">​</a></h3><div class="memberString_GwaU"><code class="purple_ieR2">interface</code> <code>TargetOptions<!-- --> <!-- -->{</code><div class="inset_uKQm"><div><code>Accepts<!-- -->: </code><code class="purple_ieR2">{</code><code class="blue_P4bS">string</code><code class="purple_ieR2">}</code><code class="blue_P4bS">?</code><span class="inlineDescription_G7Er">-- <span>
+<p>Tags this target accepts; matches if it shares at least one tag with the payload's <code>Tags</code>. Empty or omitted accepts any payload.</p>
+</span></span></div><div><code>CanDrop<!-- -->: </code><code class="purple_ieR2">(</code><code class="green_DgR4">(</code><code>payload<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#Payload">Payload</a></code><code class="green_DgR4">)</code><code class="green_DgR4"> → </code><code class="blue_P4bS">boolean</code><code class="purple_ieR2">)</code><code class="blue_P4bS">?</code><span class="inlineDescription_G7Er">-- <span>
+<p>Optional finer gate, checked in addition to <code>Accepts</code>.</p>
+</span></span></div><div><code>OnDrop<!-- -->: </code><code class="purple_ieR2">(</code><div class="inset_uKQm"><code>payload<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#Payload">Payload</a></code><code class="purple_ieR2">,</code></div><div class="inset_uKQm"><code>target<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#TargetDescriptor">TargetDescriptor</a></code></div><code class="purple_ieR2">)</code><code class="purple_ieR2"> → </code><code class="purple_ieR2">(</code><code class="purple_ieR2">)</code><span class="inlineDescription_G7Er">-- <span>
+<p>Called when a compatible payload is dropped here.</p>
+</span></span></div><div><code>OnHoverChanged<!-- -->: </code><code class="purple_ieR2">(</code><code class="green_DgR4">(</code><code>payload<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#Payload">Payload?</a></code><code class="green_DgR4">)</code><code class="green_DgR4"> → </code><code class="green_DgR4">(</code><code class="green_DgR4">)</code><code class="purple_ieR2">)</code><code class="blue_P4bS">?</code><span class="inlineDescription_G7Er">-- <span>
+<p><code>payload</code> on enter, nil on leave.</p>
+</span></span></div><div><code>Metadata<!-- -->: </code><code class="purple_ieR2">{</code><span><code>[</code><code class="blue_P4bS">any</code><code>]</code></span><code>: </code><code class="blue_P4bS">any</code><code class="purple_ieR2">}</code><code class="blue_P4bS">?</code><span class="inlineDescription_G7Er">-- <span>
+<p>Arbitrary data surfaced back through <code>TargetDescriptor.Metadata</code>.</p>
+</span></span></div></div><code>}</code></div><div></div><div>
+<p>
+  Marks <code>instance</code> (and its descendants) as somewhere a payload can be dropped.
+  Returns a function that unregisters it; the target also auto-unregisters if the
+  instance is destroyed.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> unregister <span class="token operator">=</span> DragDrop<span class="token punctuation">.</span><span class="token function">RegisterTarget</span><span class="token punctuation">(</span>slot<span class="token punctuation">,</span> <span class="token punctuation">{</span>
+	Accepts <span class="token operator">=</span> <span class="token punctuation">{</span> <span class="token string">"Item"</span> <span class="token punctuation">}</span><span class="token punctuation">,</span> <span class="token comment">-- only item drags; omit to accept any payload</span>
+	CanDrop <span class="token operator">=</span> <span class="token keyword">function</span><span class="token punctuation">(</span>payload<span class="token punctuation">)</span> <span class="token keyword">return</span> <span class="token keyword">not</span> slot<span class="token punctuation">.</span>Locked <span class="token keyword">end</span><span class="token punctuation">,</span> <span class="token comment">-- finer gate</span>
+	OnDrop <span class="token operator">=</span> <span class="token keyword">function</span><span class="token punctuation">(</span>payload<span class="token punctuation">,</span> target<span class="token punctuation">)</span>
+		<span class="token function">MoveItem</span><span class="token punctuation">(</span>payload<span class="token punctuation">.</span>Guid<span class="token punctuation">,</span> target<span class="token punctuation">.</span>Metadata<span class="token punctuation">.</span>Index<span class="token punctuation">)</span>
+	<span class="token keyword">end</span><span class="token punctuation">,</span>
+	OnHoverChanged <span class="token operator">=</span> <span class="token keyword">function</span><span class="token punctuation">(</span>payload<span class="token punctuation">)</span>
+		slot<span class="token punctuation">.</span>Highlight<span class="token punctuation">.</span>Visible <span class="token operator">=</span> payload <span class="token operator">~=</span> <span class="token keyword">nil</span> <span class="token comment">-- nil on leave</span>
+	<span class="token keyword">end</span><span class="token punctuation">,</span>
+	Metadata <span class="token operator">=</span> <span class="token punctuation">{</span> Index <span class="token operator">=</span> i <span class="token punctuation">}</span><span class="token punctuation">,</span>
+<span class="token punctuation">}</span><span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="BeginDrag"><code style="text-decoration:none">BeginDrag</code><a href="#BeginDrag" class="hash-link" aria-label="Direct link to BeginDrag" title="Direct link to BeginDrag" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/dragdrop/src/DragDrop.luau#L150"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>DragDrop<!-- -->.</code><code class="green_DgR4">BeginDrag</code><code>(</code><div class="inset_uKQm"><div><code>instance<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/class/GuiObject" target="_blank" rel="noopener noreferrer">GuiObject<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><code>,</code><span class="inlineDescription_G7Er">-- <span>
+<p>a registered source (or a descendant of one)</p>
+</span></span></div><div><code>position<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="https://developer.roblox.com/en-us/api-reference/datatype/Vector2" target="_blank" rel="noopener noreferrer">Vector2?<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" x="0px" y="0px" viewBox="0 0 100 100" width="15" height="15" class="icon outbound" style="color:gray;vertical-align:middle;margin-left:2px"><path fill="currentColor" d="M18.8,85.1h56l0,0c2.2,0,4-1.8,4-4v-32h-8v28h-48v-48h28v-8h-32l0,0c-2.2,0-4,1.8-4,4v56C14.8,83.3,16.6,85.1,18.8,85.1z"></path> <polygon fill="currentColor" points="45.7,48.7 51.3,54.3 77.2,28.5 77.2,37.2 85.2,37.2 85.2,14.9 62.8,14.9 62.8,22.9 71.5,22.9"></polygon></svg></a></code><span class="inlineDescription_G7Er">-- <span>
+<p>optional initial ghost position (canonical space)</p>
+</span></span></div></div><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#DragHandle">DragHandle?</a></code></div><div>
+<p>
+  Lifts a registered source programmatically and returns a <a href="/ModulesOnRails/api/DragDrop#DragHandle">DragHandle</a>, or nil
+  if the lift is refused (not registered, <code>GetPayload</code> returned nil, or a drag is
+  already active).
+</p>
+<ul>
+  <li>
+    With <code>position</code>: a <strong>pointer-controlled</strong> drag whose ghost follows the point
+    you feed via <code>handle:MoveTo</code>. The automatic backends leave it alone.
+  </li>
+  <li>
+    Without <code>position</code>: a <strong>selection grab-mode</strong> drag. In Automatic mode the
+    gamepad/keyboard backend drives it (selection nav moves the ghost); in
+    Scriptable mode you drive it with <code>handle:SetHoveredTarget</code> and <code>handle:Drop</code>.
+  </li>
+</ul>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- Pointer-controlled: feed the ghost a position yourself.</span>
+<span class="token keyword">local</span> handle <span class="token operator">=</span> DragDrop<span class="token punctuation">.</span><span class="token function">BeginDrag</span><span class="token punctuation">(</span>slot<span class="token punctuation">,</span> UserInputService<span class="token punctuation">:</span><span class="token function">GetMouseLocation</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+<span class="token keyword">if</span> handle <span class="token keyword">then</span>
+	handle<span class="token punctuation">:</span><span class="token function">MoveTo</span><span class="token punctuation">(</span>UserInputService<span class="token punctuation">:</span><span class="token function">GetMouseLocation</span><span class="token punctuation">(</span><span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token comment">-- each frame</span>
+	handle<span class="token punctuation">:</span><span class="token function">Drop</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token comment">-- lands on whatever it's hovering</span>
+<span class="token keyword">end</span>
+
+<span class="token comment">-- Selection grab-mode (no position): drive it explicitly under Scriptable mode.</span>
+<span class="token keyword">local</span> handle <span class="token operator">=</span> DragDrop<span class="token punctuation">.</span><span class="token function">BeginDrag</span><span class="token punctuation">(</span>sourceSlot<span class="token punctuation">)</span>
+<span class="token keyword">if</span> handle <span class="token keyword">then</span>
+	handle<span class="token punctuation">:</span><span class="token function">SetHoveredTarget</span><span class="token punctuation">(</span>destSlot<span class="token punctuation">)</span>
+	handle<span class="token punctuation">:</span><span class="token function">Drop</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+<span class="token keyword">end</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="SetInputMode"><code style="text-decoration:none">SetInputMode</code><a href="#SetInputMode" class="hash-link" aria-label="Direct link to SetInputMode" title="Direct link to SetInputMode" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/dragdrop/src/DragDrop.luau#L170"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>DragDrop<!-- -->.</code><code class="green_DgR4">SetInputMode</code><code>(</code><code>mode<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#InputMode">InputMode</a></code><code>) → </code><code>(</code><code>)</code></div><div>
+<p>
+  Switches between <code>"Automatic"</code> (device backends wired to real input) and
+  <code>"Scriptable"</code> (backends off; drags driven only through <a href="/ModulesOnRails/api/DragDrop#BeginDrag">DragDrop.BeginDrag</a>).
+  Any active drag is cancelled across the switch.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- In a test: take control away from real input, then drive a drag by hand.</span>
+DragDrop<span class="token punctuation">.</span><span class="token function">SetInputMode</span><span class="token punctuation">(</span><span class="token string">"Scriptable"</span><span class="token punctuation">)</span>
+<span class="token keyword">local</span> handle <span class="token operator">=</span> DragDrop<span class="token punctuation">.</span><span class="token function">BeginDrag</span><span class="token punctuation">(</span>sourceSlot<span class="token punctuation">)</span>
+handle<span class="token punctuation">:</span><span class="token function">SetHoveredTarget</span><span class="token punctuation">(</span>destSlot<span class="token punctuation">)</span>
+handle<span class="token punctuation">:</span><span class="token function">Drop</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+DragDrop<span class="token punctuation">.</span><span class="token function">SetInputMode</span><span class="token punctuation">(</span><span class="token string">"Automatic"</span><span class="token punctuation">)</span> <span class="token comment">-- hand input back</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="GetInputMode"><code style="text-decoration:none">GetInputMode</code><a href="#GetInputMode" class="hash-link" aria-label="Direct link to GetInputMode" title="Direct link to GetInputMode" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/dragdrop/src/DragDrop.luau#L183"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>DragDrop<!-- -->.</code><code class="green_DgR4">GetInputMode</code><code>(</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#InputMode">InputMode</a></code></div><div>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">if</span> DragDrop<span class="token punctuation">.</span><span class="token function">GetInputMode</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token operator">==</span> <span class="token string">"Automatic"</span> <span class="token keyword">then</span>
+	<span class="token comment">-- real device input is live</span>
+<span class="token keyword">end</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="Drop"><code style="text-decoration:none">Drop</code><a href="#Drop" class="hash-link" aria-label="Direct link to Drop" title="Direct link to Drop" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/dragdrop/src/DragDrop.luau#L201"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>DragDrop<!-- -->.</code><code class="green_DgR4">Drop</code><code>(</code><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
+<p>
+  Ends the active drag on the currently hovered target. Returns <code>true</code> if it
+  landed on a valid target, <code>false</code> if there was none (a revert). No-op when idle.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- Bind a "confirm" key to commit whatever drag is in flight.</span>
+<span class="token keyword">local</span> landed <span class="token operator">=</span> DragDrop<span class="token punctuation">.</span><span class="token function">Drop</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+<span class="token keyword">if</span> <span class="token keyword">not</span> landed <span class="token keyword">then</span>
+	<span class="token comment">-- reverted: nothing valid under the ghost</span>
+<span class="token keyword">end</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="Cancel"><code style="text-decoration:none">Cancel</code><a href="#Cancel" class="hash-link" aria-label="Direct link to Cancel" title="Direct link to Cancel" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/dragdrop/src/DragDrop.luau#L218"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>DragDrop<!-- -->.</code><code class="green_DgR4">Cancel</code><code>(</code><code>) → </code><code>(</code><code>)</code></div><div>
+<p>Reverts the active drag, or aborts a pending press. No-op when idle.</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- Escape backs out of whatever is in flight.</span>
+UserInputService<span class="token punctuation">.</span>InputBegan<span class="token punctuation">:</span><span class="token function">Connect</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span>input<span class="token punctuation">)</span>
+	<span class="token keyword">if</span> input<span class="token punctuation">.</span>KeyCode <span class="token operator">==</span> Enum<span class="token punctuation">.</span>KeyCode<span class="token punctuation">.</span>Escape <span class="token keyword">then</span>
+		DragDrop<span class="token punctuation">.</span><span class="token function">Cancel</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+	<span class="token keyword">end</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="IsDragging"><code style="text-decoration:none">IsDragging</code><a href="#IsDragging" class="hash-link" aria-label="Direct link to IsDragging" title="Direct link to IsDragging" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/dragdrop/src/DragDrop.luau#L234"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>DragDrop<!-- -->.</code><code class="green_DgR4">IsDragging</code><code>(</code><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- Suppress a hover tooltip while something is airborne.</span>
+<span class="token keyword">if</span> <span class="token keyword">not</span> DragDrop<span class="token punctuation">.</span><span class="token function">IsDragging</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token keyword">then</span>
+	<span class="token function">showTooltip</span><span class="token punctuation">(</span>slot<span class="token punctuation">)</span>
+<span class="token keyword">end</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="GetActivePayload"><code style="text-decoration:none">GetActivePayload</code><a href="#GetActivePayload" class="hash-link" aria-label="Direct link to GetActivePayload" title="Direct link to GetActivePayload" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/dragdrop/src/DragDrop.luau#L250"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>DragDrop<!-- -->.</code><code class="green_DgR4">GetActivePayload</code><code>(</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#Payload">Payload?</a></code></div><div>
+<p>The payload currently airborne, or nil when idle.</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> payload <span class="token operator">=</span> DragDrop<span class="token punctuation">.</span><span class="token function">GetActivePayload</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+<span class="token keyword">if</span> payload <span class="token keyword">and</span> table<span class="token punctuation">.</span><span class="token function">find</span><span class="token punctuation">(</span>payload<span class="token punctuation">.</span>Tags<span class="token punctuation">,</span> <span class="token string">"Item"</span><span class="token punctuation">)</span> <span class="token keyword">then</span>
+	<span class="token comment">-- an item is in flight right now</span>
+<span class="token keyword">end</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="GetHoveredTarget"><code style="text-decoration:none">GetHoveredTarget</code><a href="#GetHoveredTarget" class="hash-link" aria-label="Direct link to GetHoveredTarget" title="Direct link to GetHoveredTarget" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/dragdrop/src/DragDrop.luau#L266"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>DragDrop<!-- -->.</code><code class="green_DgR4">GetHoveredTarget</code><code>(</code><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#TargetDescriptor">TargetDescriptor?</a></code></div><div>
+<p>The valid target the drag is currently over, or nil.</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> target <span class="token operator">=</span> DragDrop<span class="token punctuation">.</span><span class="token function">GetHoveredTarget</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+<span class="token keyword">if</span> target <span class="token keyword">then</span>
+	<span class="token function">print</span><span class="token punctuation">(</span><span class="token string">"would drop into slot"</span><span class="token punctuation">,</span> target<span class="token punctuation">.</span>Metadata<span class="token punctuation">.</span>Index<span class="token punctuation">)</span>
+<span class="token keyword">end</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="ConsumeActivation"><code style="text-decoration:none">ConsumeActivation</code><a href="#ConsumeActivation" class="hash-link" aria-label="Direct link to ConsumeActivation" title="Direct link to ConsumeActivation" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/dragdrop/src/DragDrop.luau#L333"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>DragDrop<!-- -->.</code><code class="green_DgR4">ConsumeActivation</code><code>(</code><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
+<p>
+  True if a drag ended within the last few hundredths of a second — use it to
+  swallow a stray <code>Button.Activated</code> that fires right after a drop, so a drag
+  doesn't also read as a click.
+</p>
+<pre class="language-lua"><code class="language-lua">button<span class="token punctuation">.</span>Activated<span class="token punctuation">:</span><span class="token function">Connect</span><span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+	<span class="token keyword">if</span> DragDrop<span class="token punctuation">.</span><span class="token function">ConsumeActivation</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token keyword">then</span>
+		<span class="token keyword">return</span> <span class="token comment">-- this "click" was really the tail of a drag; ignore it</span>
+	<span class="token keyword">end</span>
+	<span class="token function">openSlot</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="Configure"><code style="text-decoration:none">Configure</code><a href="#Configure" class="hash-link" aria-label="Direct link to Configure" title="Direct link to Configure" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/dragdrop/src/DragDrop.luau#L352"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>DragDrop<!-- -->.</code><code class="green_DgR4">Configure</code><code>(</code><code>config<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/DragDrop#Config">Config</a></code><code>) → </code><code>(</code><code>)</code></div><div>
+<p>
+  Applies a partial <a href="/ModulesOnRails/api/DragDrop#Config">Config</a> over the current settings. Errors on unknown keys
+  or wrong value types. Behavior knobs only — ghost appearance lives in
+  <code>SourceOptions.BuildGhost</code>.
+</p>
+<pre class="language-lua"><code class="language-lua">DragDrop<span class="token punctuation">.</span><span class="token function">Configure</span><span class="token punctuation">(</span><span class="token punctuation">{</span>
+	DragThresholdPx <span class="token operator">=</span> <span class="token number">12</span><span class="token punctuation">,</span> <span class="token comment">-- a little more slop before a mouse lift</span>
+	LongPressSeconds <span class="token operator">=</span> <span class="token number">0.3</span><span class="token punctuation">,</span> <span class="token comment">-- quicker touch lift</span>
+	GhostContainer <span class="token operator">=</span> playerGui<span class="token punctuation">.</span>DragLayer<span class="token punctuation">,</span> <span class="token comment">-- mount ghosts here</span>
+<span class="token punctuation">}</span><span class="token punctuation">)</span>
+</code></pre>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="ResetConfig"><code style="text-decoration:none">ResetConfig</code><a href="#ResetConfig" class="hash-link" aria-label="Direct link to ResetConfig" title="Direct link to ResetConfig" translate="no">​</a></h3><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/dragdrop/src/DragDrop.luau#L368"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>DragDrop<!-- -->.</code><code class="green_DgR4">ResetConfig</code><code>(</code><code>) → </code><code>(</code><code>)</code></div><div>
+<p>
+  Restores every <a href="/ModulesOnRails/api/DragDrop#Config">Config</a> key to its default. This is also the only way to
+  <em>clear</em> an optional key such as <code>GhostContainer</code> — <a href="/ModulesOnRails/api/DragDrop#Configure">Configure</a>
+  cannot accept nil for them, since nil values vanish from Luau tables.
+</p>
+<pre class="language-lua"><code class="language-lua">DragDrop<span class="token punctuation">.</span><span class="token function">Configure</span><span class="token punctuation">(</span><span class="token punctuation">{</span> GhostContainer <span class="token operator">=</span> myLayer <span class="token punctuation">}</span><span class="token punctuation">)</span>
+<span class="token comment">-- ...</span>
+DragDrop<span class="token punctuation">.</span><span class="token function">ResetConfig</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token comment">-- back to defaults, GhostContainer cleared to nil</span>
+</code></pre>
+</div></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
+    &quot;functions&quot;: [
+        {
+            &quot;name&quot;: &quot;RegisterSource&quot;,
+            &quot;desc&quot;: &quot;Marks `instance` (and its descendants) as something that can be picked up.\nReturns a function that unregisters it; the source also auto-unregisters if the\ninstance is destroyed.\n\n```lua\nlocal unregister = DragDrop.RegisterSource(slot, {\n\tGetPayload = function()\n\t\tif slot.IsEmpty then return nil end -- refuse the lift\n\t\treturn { Tags = { \&quot;Item\&quot; }, Guid = slot.Guid, FromIndex = i }\n\tend,\n\tBuildGhost = function(payload) return MyItemGhost(payload) end,\n\tOnActivated = function() openContextMenu(i) end, -- click without a lift\n})\n\n-- later, when the slot goes away:\nunregister()\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;instance&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;GuiObject&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;options&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;SourceOptions&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;() -&gt; ()&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 86,
+                &quot;path&quot;: &quot;lib/dragdrop/src/DragDrop.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;RegisterTarget&quot;,
+            &quot;desc&quot;: &quot;Marks `instance` (and its descendants) as somewhere a payload can be dropped.\nReturns a function that unregisters it; the target also auto-unregisters if the\ninstance is destroyed.\n\n```lua\nlocal unregister = DragDrop.RegisterTarget(slot, {\n\tAccepts = { \&quot;Item\&quot; }, -- only item drags; omit to accept any payload\n\tCanDrop = function(payload) return not slot.Locked end, -- finer gate\n\tOnDrop = function(payload, target)\n\t\tMoveItem(payload.Guid, target.Metadata.Index)\n\tend,\n\tOnHoverChanged = function(payload)\n\t\tslot.Highlight.Visible = payload ~= nil -- nil on leave\n\tend,\n\tMetadata = { Index = i },\n})\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;instance&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;GuiObject&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;options&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;TargetOptions&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;() -&gt; ()&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 113,
+                &quot;path&quot;: &quot;lib/dragdrop/src/DragDrop.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;BeginDrag&quot;,
+            &quot;desc&quot;: &quot;Lifts a registered source programmatically and returns a [DragHandle], or nil\nif the lift is refused (not registered, `GetPayload` returned nil, or a drag is\nalready active).\n\n- With `position`: a **pointer-controlled** drag whose ghost follows the point\n  you feed via `handle:MoveTo`. The automatic backends leave it alone.\n- Without `position`: a **selection grab-mode** drag. In Automatic mode the\n  gamepad/keyboard backend drives it (selection nav moves the ghost); in\n  Scriptable mode you drive it with `handle:SetHoveredTarget` and `handle:Drop`.\n\n```lua\n-- Pointer-controlled: feed the ghost a position yourself.\nlocal handle = DragDrop.BeginDrag(slot, UserInputService:GetMouseLocation())\nif handle then\n\thandle:MoveTo(UserInputService:GetMouseLocation()) -- each frame\n\thandle:Drop() -- lands on whatever it&#x27;s hovering\nend\n\n-- Selection grab-mode (no position): drive it explicitly under Scriptable mode.\nlocal handle = DragDrop.BeginDrag(sourceSlot)\nif handle then\n\thandle:SetHoveredTarget(destSlot)\n\thandle:Drop()\nend\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;instance&quot;,
+                    &quot;desc&quot;: &quot;a registered source (or a descendant of one)&quot;,
+                    &quot;lua_type&quot;: &quot;GuiObject&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;position&quot;,
+                    &quot;desc&quot;: &quot;optional initial ghost position (canonical space)&quot;,
+                    &quot;lua_type&quot;: &quot;Vector2?&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;DragHandle?&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 150,
+                &quot;path&quot;: &quot;lib/dragdrop/src/DragDrop.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;SetInputMode&quot;,
+            &quot;desc&quot;: &quot;Switches between `\&quot;Automatic\&quot;` (device backends wired to real input) and\n`\&quot;Scriptable\&quot;` (backends off; drags driven only through [DragDrop.BeginDrag]).\nAny active drag is cancelled across the switch.\n\n```lua\n-- In a test: take control away from real input, then drive a drag by hand.\nDragDrop.SetInputMode(\&quot;Scriptable\&quot;)\nlocal handle = DragDrop.BeginDrag(sourceSlot)\nhandle:SetHoveredTarget(destSlot)\nhandle:Drop()\nDragDrop.SetInputMode(\&quot;Automatic\&quot;) -- hand input back\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;mode&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;InputMode&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 170,
+                &quot;path&quot;: &quot;lib/dragdrop/src/DragDrop.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetInputMode&quot;,
+            &quot;desc&quot;: &quot;```lua\nif DragDrop.GetInputMode() == \&quot;Automatic\&quot; then\n\t-- real device input is live\nend\n```&quot;,
+            &quot;params&quot;: [],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;InputMode&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 183,
+                &quot;path&quot;: &quot;lib/dragdrop/src/DragDrop.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;Drop&quot;,
+            &quot;desc&quot;: &quot;Ends the active drag on the currently hovered target. Returns `true` if it\nlanded on a valid target, `false` if there was none (a revert). No-op when idle.\n\n```lua\n-- Bind a \&quot;confirm\&quot; key to commit whatever drag is in flight.\nlocal landed = DragDrop.Drop()\nif not landed then\n\t-- reverted: nothing valid under the ghost\nend\n```&quot;,
+            &quot;params&quot;: [],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;boolean&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 201,
+                &quot;path&quot;: &quot;lib/dragdrop/src/DragDrop.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;Cancel&quot;,
+            &quot;desc&quot;: &quot;Reverts the active drag, or aborts a pending press. No-op when idle.\n\n```lua\n-- Escape backs out of whatever is in flight.\nUserInputService.InputBegan:Connect(function(input)\n\tif input.KeyCode == Enum.KeyCode.Escape then\n\t\tDragDrop.Cancel()\n\tend\nend)\n```&quot;,
+            &quot;params&quot;: [],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 218,
+                &quot;path&quot;: &quot;lib/dragdrop/src/DragDrop.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;IsDragging&quot;,
+            &quot;desc&quot;: &quot;```lua\n-- Suppress a hover tooltip while something is airborne.\nif not DragDrop.IsDragging() then\n\tshowTooltip(slot)\nend\n```&quot;,
+            &quot;params&quot;: [],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;boolean&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 234,
+                &quot;path&quot;: &quot;lib/dragdrop/src/DragDrop.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetActivePayload&quot;,
+            &quot;desc&quot;: &quot;The payload currently airborne, or nil when idle.\n\n```lua\nlocal payload = DragDrop.GetActivePayload()\nif payload and table.find(payload.Tags, \&quot;Item\&quot;) then\n\t-- an item is in flight right now\nend\n```&quot;,
+            &quot;params&quot;: [],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Payload?&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 250,
+                &quot;path&quot;: &quot;lib/dragdrop/src/DragDrop.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;GetHoveredTarget&quot;,
+            &quot;desc&quot;: &quot;The valid target the drag is currently over, or nil.\n\n```lua\nlocal target = DragDrop.GetHoveredTarget()\nif target then\n\tprint(\&quot;would drop into slot\&quot;, target.Metadata.Index)\nend\n```&quot;,
+            &quot;params&quot;: [],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;TargetDescriptor?&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 266,
+                &quot;path&quot;: &quot;lib/dragdrop/src/DragDrop.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;ConsumeActivation&quot;,
+            &quot;desc&quot;: &quot;True if a drag ended within the last few hundredths of a second — use it to\nswallow a stray `Button.Activated` that fires right after a drop, so a drag\ndoesn&#x27;t also read as a click.\n\n```lua\nbutton.Activated:Connect(function()\n\tif DragDrop.ConsumeActivation() then\n\t\treturn -- this \&quot;click\&quot; was really the tail of a drag; ignore it\n\tend\n\topenSlot()\nend)\n```&quot;,
+            &quot;params&quot;: [],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;boolean&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 333,
+                &quot;path&quot;: &quot;lib/dragdrop/src/DragDrop.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;Configure&quot;,
+            &quot;desc&quot;: &quot;Applies a partial [Config] over the current settings. Errors on unknown keys\nor wrong value types. Behavior knobs only — ghost appearance lives in\n`SourceOptions.BuildGhost`.\n\n```lua\nDragDrop.Configure({\n\tDragThresholdPx = 12, -- a little more slop before a mouse lift\n\tLongPressSeconds = 0.3, -- quicker touch lift\n\tGhostContainer = playerGui.DragLayer, -- mount ghosts here\n})\n```&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;config&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;Config&quot;
+                }
+            ],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 352,
+                &quot;path&quot;: &quot;lib/dragdrop/src/DragDrop.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;ResetConfig&quot;,
+            &quot;desc&quot;: &quot;Restores every [Config] key to its default. This is also the only way to\n*clear* an optional key such as `GhostContainer` — [Configure](/api/DragDrop#Configure)\ncannot accept nil for them, since nil values vanish from Luau tables.\n\n```lua\nDragDrop.Configure({ GhostContainer = myLayer })\n-- ...\nDragDrop.ResetConfig() -- back to defaults, GhostContainer cleared to nil\n```&quot;,
+            &quot;params&quot;: [],
+            &quot;returns&quot;: [],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 368,
+                &quot;path&quot;: &quot;lib/dragdrop/src/DragDrop.luau&quot;
+            }
+        }
+    ],
+    &quot;properties&quot;: [
+        {
+            &quot;name&quot;: &quot;ActivePayloadChanged&quot;,
+            &quot;desc&quot;: &quot;Fires whenever the airborne payload changes — the new payload on lift, nil on\ndrop or cancel.\n\nIt does **not** fire on connect, so read the current value with\n[DragDrop.GetActivePayload] when you subscribe. It is a plain [Signal], so it\nworks with anything that consumes signals — `:Once`, `:Wait`, a Janitor, a\nreactive binding.\n\n```lua\n-- Dim every incompatible slot while a drag is live. Seed from the getter, then\n-- keep it in sync from the signal.\nlocal function repaint(payload: DragDrop.Payload?)\n\tfor _, slot in slots do\n\t\tslot.Dimmed = payload ~= nil and not accepts(slot, payload)\n\tend\nend\nrepaint(DragDrop.GetActivePayload())\nlocal conn = DragDrop.ActivePayloadChanged:Connect(repaint)\n\n-- later:\nconn:Disconnect()\n```&quot;,
+            &quot;lua_type&quot;: &quot;Signal&lt;(payload: Payload?)&gt;&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 294,
+                &quot;path&quot;: &quot;lib/dragdrop/src/DragDrop.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;HoveredTargetChanged&quot;,
+            &quot;desc&quot;: &quot;Fires whenever the hovered target changes — the new [TargetDescriptor] on enter,\nnil on leave.\n\nIt does **not** fire on connect, so read the current value with\n[DragDrop.GetHoveredTarget] when you subscribe.\n\n```lua\n-- Move a \&quot;drop here\&quot; highlight to whatever the ghost is over.\nlocal conn = DragDrop.HoveredTargetChanged:Connect(function(target)\n\thighlight.Visible = target ~= nil\n\tif target then highlight.Parent = target.Instance end\nend)\n```&quot;,
+            &quot;lua_type&quot;: &quot;Signal&lt;(target: TargetDescriptor?)&gt;&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 313,
+                &quot;path&quot;: &quot;lib/dragdrop/src/DragDrop.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;DragStarted&quot;,
+            &quot;desc&quot;: &quot;Fires when a payload goes airborne.\n\n```lua\nDragDrop.DragStarted:Connect(function(payload, source)\n\tplayPickupSound()\n\tsource.BackgroundTransparency = 0.6 -- fade the origin slot while lifted\nend)\n```&quot;,
+            &quot;lua_type&quot;: &quot;Signal&lt;(payload: Payload, source: GuiObject)&gt;&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 384,
+                &quot;path&quot;: &quot;lib/dragdrop/src/DragDrop.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;Dropped&quot;,
+            &quot;desc&quot;: &quot;Fires when a payload lands on a valid target, immediately after that target&#x27;s\n`OnDrop` has run.\n\n```lua\n-- A global listener for analytics, independent of any one target&#x27;s OnDrop.\nDragDrop.Dropped:Connect(function(payload, target)\n\tAnalytics:Log(\&quot;item_moved\&quot;, {\n\t\tguid = payload.Guid,\n\t\tto = target.Metadata.Index,\n\t})\nend)\n```&quot;,
+            &quot;lua_type&quot;: &quot;Signal&lt;(payload: Payload, target: TargetDescriptor)&gt;&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 402,
+                &quot;path&quot;: &quot;lib/dragdrop/src/DragDrop.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;DragEnded&quot;,
+            &quot;desc&quot;: &quot;Fires on every drag end. A nil target means the drag was cancelled or reverted.\n\nThis is the **last** event of a drag. End-of-drag order:\n1. Reactive state clears — `GetActivePayload`/`GetHoveredTarget` go nil and\n   [DragDrop.ActivePayloadChanged]/[DragDrop.HoveredTargetChanged] fire\n   (ghost/scroll-lock teardown has already run).\n2. The target&#x27;s `OnDrop` runs, then [DragDrop.Dropped] fires.\n3. The source&#x27;s `OnDragEnd` runs, then `DragEnded` fires.\n\nBecause those change signals fire *before* `OnDrop` mutates your data, a view\nthat repaints only from them will still show pre-drop data — repaint on\n`DragEnded` (or from your own data layer) to pick up the result of the drop.\n\n```lua\nDragDrop.DragEnded:Connect(function(payload, target)\n\tif target == nil then\n\t\tplayRevertSound() -- cancelled or reverted\n\tend\n\trepaintInventory() -- OnDrop has already applied the move by now\nend)\n```&quot;,
+            &quot;lua_type&quot;: &quot;Signal&lt;(payload: Payload, target: TargetDescriptor?)&gt;&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 429,
+                &quot;path&quot;: &quot;lib/dragdrop/src/DragDrop.luau&quot;
+            }
+        }
+    ],
+    &quot;types&quot;: [
+        {
+            &quot;name&quot;: &quot;Payload&quot;,
+            &quot;desc&quot;: &quot;The opaque value carried by a drag. `Tags` is the only field the system reads:\nit lists the payload&#x27;s kinds for target compatibility — a target&#x27;s `Accepts`\ntakes the drag if it shares at least one tag. Everything else is yours to\nshape (guids, indices, a display name for your ghost, ...).\n\nBecause `Tags` travels with the payload and `GetPayload` runs on every lift, a\nsource whose contents vary can return different tags per lift — e.g. a bag\nslot returns `{ \&quot;Item\&quot;, \&quot;Food\&quot; }` for a ration and `{ \&quot;Item\&quot;, \&quot;Weapon\&quot; }` for\na sword, and each matches the right target.&quot;,
+            &quot;lua_type&quot;: &quot;{ Tags: { string }, [string]: any }&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 35,
+                &quot;path&quot;: &quot;lib/dragdrop/src/Types.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;TargetDescriptor&quot;,
+            &quot;desc&quot;: &quot;Handed to a target&#x27;s `OnDrop` and returned by [DragDrop.GetHoveredTarget].&quot;,
+            &quot;fields&quot;: [
+                {
+                    &quot;name&quot;: &quot;Instance&quot;,
+                    &quot;lua_type&quot;: &quot;GuiObject&quot;,
+                    &quot;desc&quot;: &quot;The registered target the drop resolved onto.&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;Metadata&quot;,
+                    &quot;lua_type&quot;: &quot;{ [any]: any }&quot;,
+                    &quot;desc&quot;: &quot;Whatever `Metadata` the target registered with.&quot;
+                }
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 48,
+                &quot;path&quot;: &quot;lib/dragdrop/src/Types.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;SourceOptions&quot;,
+            &quot;desc&quot;: &quot;&quot;,
+            &quot;fields&quot;: [
+                {
+                    &quot;name&quot;: &quot;GetPayload&quot;,
+                    &quot;lua_type&quot;: &quot;() -&gt; Payload?&quot;,
+                    &quot;desc&quot;: &quot;Returns the payload to lift, or nil to refuse the lift (empty slot, disabled, ...). Called on press.&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;OnActivated&quot;,
+                    &quot;lua_type&quot;: &quot;(() -&gt; ())?&quot;,
+                    &quot;desc&quot;: &quot;Press + release without crossing the drag threshold (a \&quot;click\&quot;).&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;OnLift&quot;,
+                    &quot;lua_type&quot;: &quot;((payload: Payload) -&gt; ())?&quot;,
+                    &quot;desc&quot;: &quot;Fired the moment the payload goes airborne.&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;OnDragEnd&quot;,
+                    &quot;lua_type&quot;: &quot;((payload: Payload, dropped: boolean) -&gt; ())?&quot;,
+                    &quot;desc&quot;: &quot;Fired on every drag end. `dropped=false` means cancelled/reverted.&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;BuildGhost&quot;,
+                    &quot;lua_type&quot;: &quot;((payload: Payload, source: GuiObject) -&gt; GuiObject)?&quot;,
+                    &quot;desc&quot;: &quot;Builds the dragged proxy. Strongly recommended; nil falls back to a bare debug plate.&quot;
+                }
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 62,
+                &quot;path&quot;: &quot;lib/dragdrop/src/Types.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;TargetOptions&quot;,
+            &quot;desc&quot;: &quot;&quot;,
+            &quot;fields&quot;: [
+                {
+                    &quot;name&quot;: &quot;Accepts&quot;,
+                    &quot;lua_type&quot;: &quot;{ string }?&quot;,
+                    &quot;desc&quot;: &quot;Tags this target accepts; matches if it shares at least one tag with the payload&#x27;s `Tags`. Empty or omitted accepts any payload.&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;CanDrop&quot;,
+                    &quot;lua_type&quot;: &quot;((payload: Payload) -&gt; boolean)?&quot;,
+                    &quot;desc&quot;: &quot;Optional finer gate, checked in addition to `Accepts`.&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;OnDrop&quot;,
+                    &quot;lua_type&quot;: &quot;(payload: Payload, target: TargetDescriptor) -&gt; ()&quot;,
+                    &quot;desc&quot;: &quot;Called when a compatible payload is dropped here.&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;OnHoverChanged&quot;,
+                    &quot;lua_type&quot;: &quot;((payload: Payload?) -&gt; ())?&quot;,
+                    &quot;desc&quot;: &quot;`payload` on enter, nil on leave.&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;Metadata&quot;,
+                    &quot;lua_type&quot;: &quot;{ [any]: any }?&quot;,
+                    &quot;desc&quot;: &quot;Arbitrary data surfaced back through `TargetDescriptor.Metadata`.&quot;
+                }
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 84,
+                &quot;path&quot;: &quot;lib/dragdrop/src/Types.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;InputMode&quot;,
+            &quot;desc&quot;: &quot;`Automatic` (default) wires the pointer and selection backends to real device\ninput. `Scriptable` disables them so the only way a drag starts or moves is\nthrough [DragDrop.BeginDrag] and the returned [DragHandle] — like putting a\ncamera in Scriptable mode.&quot;,
+            &quot;lua_type&quot;: &quot;\&quot;Automatic\&quot; | \&quot;Scriptable\&quot;&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 101,
+                &quot;path&quot;: &quot;lib/dragdrop/src/Types.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;Config&quot;,
+            &quot;desc&quot;: &quot;Behavior knobs only — nothing here styles the ghost (that lives in `BuildGhost`).&quot;,
+            &quot;fields&quot;: [
+                {
+                    &quot;name&quot;: &quot;DragThresholdPx&quot;,
+                    &quot;lua_type&quot;: &quot;number?&quot;,
+                    &quot;desc&quot;: &quot;Mouse: movement past this (in pixels) lifts. Default 8.&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;TouchSlopPx&quot;,
+                    &quot;lua_type&quot;: &quot;number?&quot;,
+                    &quot;desc&quot;: &quot;Touch: movement past this before the hold fires = scroll, not lift. Default 12.&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;LongPressSeconds&quot;,
+                    &quot;lua_type&quot;: &quot;number?&quot;,
+                    &quot;desc&quot;: &quot;Touch: hold duration that lifts. Default 0.4.&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;SnapSpeed&quot;,
+                    &quot;lua_type&quot;: &quot;number?&quot;,
+                    &quot;desc&quot;: &quot;Selection mode: slot-to-slot ghost spring speed. Default 30.&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;GhostContainer&quot;,
+                    &quot;lua_type&quot;: &quot;LayerCollector?&quot;,
+                    &quot;desc&quot;: &quot;Parent for ghost mounts. nil = an internal high-DisplayOrder ScreenGui.&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;GamepadLiftKeyCode&quot;,
+                    &quot;lua_type&quot;: &quot;Enum.KeyCode?&quot;,
+                    &quot;desc&quot;: &quot;Button that lifts the selected source. Default ButtonX.&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;GamepadDropKeyCode&quot;,
+                    &quot;lua_type&quot;: &quot;Enum.KeyCode?&quot;,
+                    &quot;desc&quot;: &quot;Button that drops on the selected target. Default ButtonA.&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;GamepadCancelKeyCode&quot;,
+                    &quot;lua_type&quot;: &quot;Enum.KeyCode?&quot;,
+                    &quot;desc&quot;: &quot;Button that cancels a drag. Default ButtonB.&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;KeyboardLiftKeyCode&quot;,
+                    &quot;lua_type&quot;: &quot;Enum.KeyCode?&quot;,
+                    &quot;desc&quot;: &quot;Key that toggles lift/drop in grab mode. Default Return.&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;KeyboardCancelKeyCode&quot;,
+                    &quot;lua_type&quot;: &quot;Enum.KeyCode?&quot;,
+                    &quot;desc&quot;: &quot;Optional explicit keyboard cancel key. Default nil.&quot;
+                }
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 119,
+                &quot;path&quot;: &quot;lib/dragdrop/src/Types.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;DragHandle&quot;,
+            &quot;desc&quot;: &quot;A programmatic controller for a single drag, returned by [DragDrop.BeginDrag].\nEvery method becomes a no-op (and the mutating ones return false) once the\ndrag has ended.&quot;,
+            &quot;fields&quot;: [
+                {
+                    &quot;name&quot;: &quot;MoveTo&quot;,
+                    &quot;lua_type&quot;: &quot;(self: DragHandle, position: Vector2) -&gt; ()&quot;,
+                    &quot;desc&quot;: &quot;Move the ghost to a screen point and hit-test for hover.&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;SetHoveredTarget&quot;,
+                    &quot;lua_type&quot;: &quot;(self: DragHandle, target: GuiObject?) -&gt; boolean&quot;,
+                    &quot;desc&quot;: &quot;Set hover explicitly; false if the target is invalid/incompatible.&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;Drop&quot;,
+                    &quot;lua_type&quot;: &quot;(self: DragHandle) -&gt; boolean&quot;,
+                    &quot;desc&quot;: &quot;End on the current hover; false if there was no valid target (reverted).&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;Cancel&quot;,
+                    &quot;lua_type&quot;: &quot;(self: DragHandle) -&gt; ()&quot;,
+                    &quot;desc&quot;: &quot;Revert this drag.&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;IsActive&quot;,
+                    &quot;lua_type&quot;: &quot;(self: DragHandle) -&gt; boolean&quot;,
+                    &quot;desc&quot;: &quot;Whether this handle still controls the live drag.&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;GetPayload&quot;,
+                    &quot;lua_type&quot;: &quot;(self: DragHandle) -&gt; Payload&quot;,
+                    &quot;desc&quot;: &quot;The payload this drag carries.&quot;
+                }
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 146,
+                &quot;path&quot;: &quot;lib/dragdrop/src/Types.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;Unregister&quot;,
+            &quot;desc&quot;: &quot;Returned by [DragDrop.RegisterSource] and [DragDrop.RegisterTarget]. Call it to\ntear the registration down.&quot;,
+            &quot;lua_type&quot;: &quot;() -&gt; ()&quot;,
+            &quot;source&quot;: {
+                &quot;line&quot;: 162,
+                &quot;path&quot;: &quot;lib/dragdrop/src/Types.luau&quot;
+            }
+        }
+    ],
+    &quot;name&quot;: &quot;DragDrop&quot;,
+    &quot;desc&quot;: &quot;Device-agnostic drag-and-drop for Roblox UI. A singleton that moves an opaque\n[Payload] from a registered source to a registered target across **mouse,\ntouch, gamepad, and keyboard**, emitting intent through the target&#x27;s `OnDrop`.\nIt never inspects a payload past its `Tags`, so one registration handles any\nkind of content.\n\nRegister a source and/or a target on a `GuiObject` and keep the returned\n[Unregister] alive for as long as the element should participate. In a\ncomponent framework, insert it into your cleanup scope:\n\n```lua\nlocal DragDrop = require(Packages.DragDrop)\n\nlocal disconnectSource = DragDrop.RegisterSource(slot, {\n\tGetPayload = function()\n\t\treturn { Tags = { \&quot;Item\&quot; }, Guid = guid, FromIndex = i }\n\tend,\n\tBuildGhost = function(payload, source) return MyItemGhost(payload) end,\n\tOnActivated = openContextMenu, -- click / A-press without a lift\n})\n\nlocal disconnectTarget = DragDrop.RegisterTarget(slot, {\n\tAccepts = { \&quot;Item\&quot; }, -- only takes item drags\n\tOnDrop = function(payload, target) MoveItem(payload, target) end,\n\tMetadata = { Index = i },\n})\n```\n\n### Where to read more\n\n- **[DD Getting Started](/api/DD%20Getting%20Started)** — registering sources and\n  targets, how `Tags`/`Accepts`/`CanDrop` decide compatibility, and reacting to\n  drag state.\n- **[DD Input Devices](/api/DD%20Input%20Devices)** — the gesture per device, the\n  configurable thresholds and keybinds, and what switching input class mid-drag\n  does.\n- **[DD Ghosts &amp; Scripting](/api/DD%20Ghosts%20&amp;%20Scripting)** — customizing the\n  drag proxy with `BuildGhost`, and driving drags by hand through\n  [DragDrop.SetInputMode] and [DragHandle].&quot;,
+    &quot;source&quot;: {
+        &quot;line&quot;: 45,
+        &quot;path&quot;: &quot;lib/dragdrop/src/DragDrop.luau&quot;
+    }
+}</pre></details></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#types" class="table-of-contents__link toc-highlight">Types</a><ul><li><a href="#Config" class="table-of-contents__link toc-highlight">Config</a></li><li><a href="#DragHandle" class="table-of-contents__link toc-highlight">DragHandle</a></li><li><a href="#InputMode" class="table-of-contents__link toc-highlight">InputMode</a></li><li><a href="#Payload" class="table-of-contents__link toc-highlight">Payload</a></li><li><a href="#SourceOptions" class="table-of-contents__link toc-highlight">SourceOptions</a></li><li><a href="#TargetDescriptor" class="table-of-contents__link toc-highlight">TargetDescriptor</a></li><li><a href="#TargetOptions" class="table-of-contents__link toc-highlight">TargetOptions</a></li><li><a href="#Unregister" class="table-of-contents__link toc-highlight">Unregister</a></li></ul></li><li><a href="#properties" class="table-of-contents__link toc-highlight">Properties</a><ul><li><a href="#ActivePayloadChanged" class="table-of-contents__link toc-highlight">ActivePayloadChanged</a></li><li><a href="#DragEnded" class="table-of-contents__link toc-highlight">DragEnded</a></li><li><a href="#DragStarted" class="table-of-contents__link toc-highlight">DragStarted</a></li><li><a href="#Dropped" class="table-of-contents__link toc-highlight">Dropped</a></li><li><a href="#HoveredTargetChanged" class="table-of-contents__link toc-highlight">HoveredTargetChanged</a></li></ul></li><li><a href="#functions" class="table-of-contents__link toc-highlight">Functions</a><ul><li><a href="#BeginDrag" class="table-of-contents__link toc-highlight">.BeginDrag</a></li><li><a href="#Cancel" class="table-of-contents__link toc-highlight">.Cancel</a></li><li><a href="#Configure" class="table-of-contents__link toc-highlight">.Configure</a></li><li><a href="#ConsumeActivation" class="table-of-contents__link toc-highlight">.ConsumeActivation</a></li><li><a href="#Drop" class="table-of-contents__link toc-highlight">.Drop</a></li><li><a href="#GetActivePayload" class="table-of-contents__link toc-highlight">.GetActivePayload</a></li><li><a href="#GetHoveredTarget" class="table-of-contents__link toc-highlight">.GetHoveredTarget</a></li><li><a href="#GetInputMode" class="table-of-contents__link toc-highlight">.GetInputMode</a></li><li><a href="#IsDragging" class="table-of-contents__link toc-highlight">.IsDragging</a></li><li><a href="#RegisterSource" class="table-of-contents__link toc-highlight">.RegisterSource</a></li><li><a href="#RegisterTarget" class="table-of-contents__link toc-highlight">.RegisterTarget</a></li><li><a href="#ResetConfig" class="table-of-contents__link toc-highlight">.ResetConfig</a></li><li><a href="#SetInputMode" class="table-of-contents__link toc-highlight">.SetInputMode</a></li></ul></li></ul></div></div></div></div></main></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
+</body>
+</html>
