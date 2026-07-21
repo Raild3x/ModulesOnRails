@@ -2,7 +2,7 @@
 name = "raild3x/tablemanager"
 description = "A Luau library for managing tables."
 authors = ["Logan Hunt (Raildex)"]
-version = "1.1.0"
+version = "1.1.1"
 license = "MIT"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
