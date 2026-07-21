@@ -2,7 +2,7 @@
 name = "raild3x/dragdrop"
 description = "A device-agnostic drag-and-drop system for Roblox UI (mouse, touch, gamepad, keyboard)."
 authors = ["Logan Hunt (Raildex)"]
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
