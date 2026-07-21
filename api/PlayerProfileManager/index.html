@@ -14,8 +14,8 @@ player profile loading, reconciliation, and data migration.
 It is a singleton class, so calling
 `PlayerProfileManager.new` multiple times will return the same instance. It is recommended to
 create a `PlayerDataService` to manage this class."><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/PlayerProfileManager"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/PlayerProfileManager" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/PlayerProfileManager" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.e8e96400.css">
-<script src="/ModulesOnRails/assets/js/runtime~main.8d252d09.js" defer="defer"></script>
-<script src="/ModulesOnRails/assets/js/main.251c9e9a.js" defer="defer"></script>
+<script src="/ModulesOnRails/assets/js/runtime~main.6df6dfb3.js" defer="defer"></script>
+<script src="/ModulesOnRails/assets/js/main.46cee9b0.js" defer="defer"></script>
 </head>
 <body>
 <svg style="display: none;"><defs>
@@ -438,76 +438,6 @@ create a `PlayerDataService` to manage this class."><link data-rh="true" rel="ca
     &quot;properties&quot;: [],
     &quot;types&quot;: [
         {
-            &quot;name&quot;: &quot;DataMigrator&quot;,
-            &quot;desc&quot;: &quot;Used to Transform data from one version to another\n```lua\n-- Turn all the deprecated currency &#x27;Candy&#x27; into the new currency &#x27;Gems&#x27; at a  1:10 rate\nlocal migrator = {\n    FromVersion = \&quot;0.0.1\&quot;,\n    ToVersion = \&quot;0.0.2\&quot;\n    Migrate = function(data: table, plr: Player)\n        if not data.Gems then\n            data.Gems = 0\n        end\n\n        local candy = data.Candy or 0\n        data.Gems += candy * 10\n        data.Candy = nil\n\n        return data\n    end\n}\n```&quot;,
-            &quot;fields&quot;: [
-                {
-                    &quot;name&quot;: &quot;FromVersion&quot;,
-                    &quot;lua_type&quot;: &quot;string&quot;,
-                    &quot;desc&quot;: &quot;&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;ToVersion&quot;,
-                    &quot;lua_type&quot;: &quot;string&quot;,
-                    &quot;desc&quot;: &quot;&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;Migrate&quot;,
-                    &quot;lua_type&quot;: &quot;(profileData: table, profileOwner: Player) -&gt; (table)&quot;,
-                    &quot;desc&quot;: &quot;&quot;
-                }
-            ],
-            &quot;source&quot;: {
-                &quot;line&quot;: 62,
-                &quot;path&quot;: &quot;lib/playerprofilemanager/src/init.luau&quot;
-            }
-        },
-        {
-            &quot;name&quot;: &quot;PPM_Config&quot;,
-            &quot;desc&quot;: &quot;- **DataStoreKey** is the internal Key used for the PlayerData&#x27;s DataStore.\n- **DefaultDataSchema** is a template table that is used for reconciling the player&#x27;s profile with. It is what new players are given if they dont have existing data.\n- **UseMock** determines whether or not a Mock ProfileStore will be used.\n- **Migrator** is a table of DataMigrators that are used to transform data from one version to another.\n\n- **GetPlayerKeyCallback** is a callback that is used to fetch the Key that each player&#x27;s data is mapped to.\n- **ReconcileCallback** is a callback that is called when the system attempts to reconcile the players profile. It will default to calling Profile:Reconcile if not provided.\n- **OnProfileLoadFailureCallback** is a callback that is called if the player&#x27;s data fails to load. It will default to kicking the player if not provided.&quot;,
-            &quot;fields&quot;: [
-                {
-                    &quot;name&quot;: &quot;DataStoreKey&quot;,
-                    &quot;lua_type&quot;: &quot;string&quot;,
-                    &quot;desc&quot;: &quot;&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;DefaultDataSchema&quot;,
-                    &quot;lua_type&quot;: &quot;table&quot;,
-                    &quot;desc&quot;: &quot;&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;UseMock&quot;,
-                    &quot;lua_type&quot;: &quot;boolean?&quot;,
-                    &quot;desc&quot;: &quot;&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;Migrator&quot;,
-                    &quot;lua_type&quot;: &quot;{DataMigrator}&quot;,
-                    &quot;desc&quot;: &quot;&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;GetPlayerKeyCallback&quot;,
-                    &quot;lua_type&quot;: &quot;((player: Player) -&gt; (string))?&quot;,
-                    &quot;desc&quot;: &quot;&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;ReconcileCallback&quot;,
-                    &quot;lua_type&quot;: &quot;((player: Player, profile: Profile) -&gt; ())?&quot;,
-                    &quot;desc&quot;: &quot;&quot;
-                },
-                {
-                    &quot;name&quot;: &quot;OnProfileLoadFailureCallback&quot;,
-                    &quot;lua_type&quot;: &quot;((player: Player, err: string) -&gt; ())?&quot;,
-                    &quot;desc&quot;: &quot;&quot;
-                }
-            ],
-            &quot;source&quot;: {
-                &quot;line&quot;: 103,
-                &quot;path&quot;: &quot;lib/playerprofilemanager/src/init.luau&quot;
-            }
-        },
-        {
             &quot;name&quot;: &quot;Profile&quot;,
             &quot;desc&quot;: &quot;Interface Type for Profiles&quot;,
             &quot;fields&quot;: [
@@ -621,6 +551,76 @@ create a `PlayerDataService` to manage this class."><link data-rh="true" rel="ca
             &quot;source&quot;: {
                 &quot;line&quot;: 37,
                 &quot;path&quot;: &quot;lib/playerprofilemanager/src/ProfileTypeDef.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;DataMigrator&quot;,
+            &quot;desc&quot;: &quot;Used to Transform data from one version to another\n```lua\n-- Turn all the deprecated currency &#x27;Candy&#x27; into the new currency &#x27;Gems&#x27; at a  1:10 rate\nlocal migrator = {\n    FromVersion = \&quot;0.0.1\&quot;,\n    ToVersion = \&quot;0.0.2\&quot;\n    Migrate = function(data: table, plr: Player)\n        if not data.Gems then\n            data.Gems = 0\n        end\n\n        local candy = data.Candy or 0\n        data.Gems += candy * 10\n        data.Candy = nil\n\n        return data\n    end\n}\n```&quot;,
+            &quot;fields&quot;: [
+                {
+                    &quot;name&quot;: &quot;FromVersion&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;,
+                    &quot;desc&quot;: &quot;&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;ToVersion&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;,
+                    &quot;desc&quot;: &quot;&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;Migrate&quot;,
+                    &quot;lua_type&quot;: &quot;(profileData: table, profileOwner: Player) -&gt; (table)&quot;,
+                    &quot;desc&quot;: &quot;&quot;
+                }
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 62,
+                &quot;path&quot;: &quot;lib/playerprofilemanager/src/init.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;PPM_Config&quot;,
+            &quot;desc&quot;: &quot;- **DataStoreKey** is the internal Key used for the PlayerData&#x27;s DataStore.\n- **DefaultDataSchema** is a template table that is used for reconciling the player&#x27;s profile with. It is what new players are given if they dont have existing data.\n- **UseMock** determines whether or not a Mock ProfileStore will be used.\n- **Migrator** is a table of DataMigrators that are used to transform data from one version to another.\n\n- **GetPlayerKeyCallback** is a callback that is used to fetch the Key that each player&#x27;s data is mapped to.\n- **ReconcileCallback** is a callback that is called when the system attempts to reconcile the players profile. It will default to calling Profile:Reconcile if not provided.\n- **OnProfileLoadFailureCallback** is a callback that is called if the player&#x27;s data fails to load. It will default to kicking the player if not provided.&quot;,
+            &quot;fields&quot;: [
+                {
+                    &quot;name&quot;: &quot;DataStoreKey&quot;,
+                    &quot;lua_type&quot;: &quot;string&quot;,
+                    &quot;desc&quot;: &quot;&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;DefaultDataSchema&quot;,
+                    &quot;lua_type&quot;: &quot;table&quot;,
+                    &quot;desc&quot;: &quot;&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;UseMock&quot;,
+                    &quot;lua_type&quot;: &quot;boolean?&quot;,
+                    &quot;desc&quot;: &quot;&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;Migrator&quot;,
+                    &quot;lua_type&quot;: &quot;{DataMigrator}&quot;,
+                    &quot;desc&quot;: &quot;&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;GetPlayerKeyCallback&quot;,
+                    &quot;lua_type&quot;: &quot;((player: Player) -&gt; (string))?&quot;,
+                    &quot;desc&quot;: &quot;&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;ReconcileCallback&quot;,
+                    &quot;lua_type&quot;: &quot;((player: Player, profile: Profile) -&gt; ())?&quot;,
+                    &quot;desc&quot;: &quot;&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;OnProfileLoadFailureCallback&quot;,
+                    &quot;lua_type&quot;: &quot;((player: Player, err: string) -&gt; ())?&quot;,
+                    &quot;desc&quot;: &quot;&quot;
+                }
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 103,
+                &quot;path&quot;: &quot;lib/playerprofilemanager/src/init.luau&quot;
             }
         }
     ],
