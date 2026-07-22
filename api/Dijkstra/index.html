@@ -1,0 +1,605 @@
+<!doctype html>
+<html lang="en" dir="ltr" class="plugin-moonwave plugin-id-moonwave" data-has-hydrated="false">
+<head>
+<meta charset="UTF-8">
+<meta name="generator" content="Docusaurus v3.10.1">
+<title data-rh="true">Dijkstra | ModulesOnRails</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:url" content="https://raild3x.github.io/ModulesOnRails/api/Dijkstra"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docusaurus_tag" content="default"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docsearch:docusaurus_tag" content="default"><meta data-rh="true" property="og:title" content="Dijkstra | ModulesOnRails"><meta data-rh="true" name="description" content="Dijkstra&#x27;s shortest-path and priority-ordered traversal algorithms.
+
+Dijkstra&#x27;s algorithm finds the shortest (lowest total weight) path from a
+source vertex to one or all reachable vertices in a graph with
+**non-negative edge weights**.  It uses a min-heap priority queue to always
+expand the cheapest known vertex next.
+
+:::caution Non-negative weights only
+Dijkstra&#x27;s algorithm produces incorrect results if any edge weight is
+negative.  Use [BellmanFord](/api/BellmanFord) when negative weights are
+possible.
+:::
+
+:::tip Priority traversal
+[`Dijkstra.toIterator`](#toIterator) and [`Dijkstra.toArray`](#toArray) let
+you traverse **all** reachable vertices in ascending accumulated-cost
+order — useful for budget-limited flood fill, range queries, and
+influence-map generation:
+```lua
+for vertex, costFromStart in Dijkstra.toIterator(origin, getNeighbors, getWeight) do
+    if costFromStart &gt; budget then break end
+    markInRange(vertex)
+end
+```
+:::
+
+All functions accept either callback form for `GetNeighbors` — see
+[GraphUtil](/api/GraphUtil) for details.
+
+### Example graph
+
+```lua
+--      2       1
+--  A ───── B ───── D
+--  │               │
+--  3               5
+--  │               │
+--  C ───────────────┘
+
+local weights = {
+    A = { B = 2, C = 3 },
+    B = { A = 2, D = 1 },
+    C = { A = 3, D = 5 },
+    D = { B = 1, C = 5 },
+}
+
+local function getNeighbors(v) return weights[v] and (function()
+    local keys = {}
+    for k in pairs(weights[v]) do table.insert(keys, k) end
+    return keys
+end)() or {} end
+
+local function getWeight(from, to) return weights[from][to] end
+```"><meta data-rh="true" property="og:description" content="Dijkstra&#x27;s shortest-path and priority-ordered traversal algorithms.
+
+Dijkstra&#x27;s algorithm finds the shortest (lowest total weight) path from a
+source vertex to one or all reachable vertices in a graph with
+**non-negative edge weights**.  It uses a min-heap priority queue to always
+expand the cheapest known vertex next.
+
+:::caution Non-negative weights only
+Dijkstra&#x27;s algorithm produces incorrect results if any edge weight is
+negative.  Use [BellmanFord](/api/BellmanFord) when negative weights are
+possible.
+:::
+
+:::tip Priority traversal
+[`Dijkstra.toIterator`](#toIterator) and [`Dijkstra.toArray`](#toArray) let
+you traverse **all** reachable vertices in ascending accumulated-cost
+order — useful for budget-limited flood fill, range queries, and
+influence-map generation:
+```lua
+for vertex, costFromStart in Dijkstra.toIterator(origin, getNeighbors, getWeight) do
+    if costFromStart &gt; budget then break end
+    markInRange(vertex)
+end
+```
+:::
+
+All functions accept either callback form for `GetNeighbors` — see
+[GraphUtil](/api/GraphUtil) for details.
+
+### Example graph
+
+```lua
+--      2       1
+--  A ───── B ───── D
+--  │               │
+--  3               5
+--  │               │
+--  C ───────────────┘
+
+local weights = {
+    A = { B = 2, C = 3 },
+    B = { A = 2, D = 1 },
+    C = { A = 3, D = 5 },
+    D = { B = 1, C = 5 },
+}
+
+local function getNeighbors(v) return weights[v] and (function()
+    local keys = {}
+    for k in pairs(weights[v]) do table.insert(keys, k) end
+    return keys
+end)() or {} end
+
+local function getWeight(from, to) return weights[from][to] end
+```"><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/Dijkstra"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/Dijkstra" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/Dijkstra" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.e8e96400.css">
+<script src="/ModulesOnRails/assets/js/runtime~main.8d64b0d1.js" defer="defer"></script>
+<script src="/ModulesOnRails/assets/js/main.58d2c12a.js" defer="defer"></script>
+</head>
+<body>
+<svg style="display: none;"><defs>
+<symbol id="theme-svg-external-link" viewBox="0 0 24 24"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"/></symbol>
+</defs></svg>
+<script>!function(){var t=function(){try{return new URLSearchParams(window.location.search).get("docusaurus-theme")}catch(t){}}()||function(){try{return window.localStorage.getItem("theme")}catch(t){}}();document.documentElement.setAttribute("data-theme",t||(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")),document.documentElement.setAttribute("data-theme-choice",t||"system")}(),function(){try{const c=new URLSearchParams(window.location.search).entries();for(var[t,e]of c)if(t.startsWith("docusaurus-data-")){var a=t.replace("docusaurus-data-","data-");document.documentElement.setAttribute(a,e)}}catch(t){}}()</script><div id="__docusaurus"><div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#__docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="theme-layout-navbar navbar navbar--fixed-top"><div class="navbar__inner"><div class="theme-layout-navbar-left navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="theme-layout-navbar-right navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_nPIU"><use href="#theme-svg-external-link"></use></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="system mode" aria-label="Switch between dark and light mode (currently system mode)"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP systemToggleIcon_QzmC"><path fill="currentColor" d="m12 21c4.971 0 9-4.029 9-9s-4.029-9-9-9-9 4.029-9 9 4.029 9 9 9zm4.95-13.95c1.313 1.313 2.05 3.093 2.05 4.95s-0.738 3.637-2.05 4.95c-1.313 1.313-3.093 2.05-4.95 2.05v-14c1.857 0 3.637 0.737 4.95 2.05z"></path></svg></button></div><div class="navbarSearchContainer_Bca1"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input id="search_input_react" type="search" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="__docusaurus_skipToContent_fallback" class="theme-layout-main main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject"><span title="​Base​Object" class="linkLabel_WmDU">​Base​Object</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Roam"><span title="​Roam" class="linkLabel_WmDU">​Roam</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/TableManager"><span title="TableManager" class="categoryLinkLabel_W154">TableManager</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/TableReplicator"><span title="TableReplicator" class="categoryLinkLabel_W154">TableReplicator</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/NetWire"><span title="NetWire" class="categoryLinkLabel_W154">NetWire</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/DragDrop"><span title="DragDrop" class="categoryLinkLabel_W154">DragDrop</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Component"><span title="Instance Component Systems" class="categoryLinkLabel_W154">Instance Component Systems</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/DropletManager"><span title="DropletManager" class="categoryLinkLabel_W154">DropletManager</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/CmdrHandler"><span title="Admin Commands [Cmdr]" class="categoryLinkLabel_W154">Admin Commands [Cmdr]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Queue"><span title="Data Structures" class="categoryLinkLabel_W154">Data Structures</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" href="/ModulesOnRails/api/GraphUtil"><span title="Graph Utilities" class="categoryLinkLabel_W154">Graph Utilities</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/GraphUtil"><span title="​Graph​Util" class="linkLabel_WmDU">​Graph​Util</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/Connectivity"><span title="​Connectivity" class="linkLabel_WmDU">​Connectivity</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/BFS"><span title="​B​F​S" class="linkLabel_WmDU">​B​F​S</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/DFS"><span title="​D​F​S" class="linkLabel_WmDU">​D​F​S</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" tabindex="0" href="/ModulesOnRails/api/Dijkstra"><span title="​Dijkstra" class="linkLabel_WmDU">​Dijkstra</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/AStar"><span title="​A​Star" class="linkLabel_WmDU">​A​Star</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/BellmanFord"><span title="​Bellman​Ford" class="linkLabel_WmDU">​Bellman​Ford</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/MST"><span title="​M​S​T" class="linkLabel_WmDU">​M​S​T</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TopologicalSort"><span title="​Topological​Sort" class="linkLabel_WmDU">​Topological​Sort</span></a></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/AdjustableTimer"><span title="[UNRELEASED]" class="categoryLinkLabel_W154">[UNRELEASED]</span></a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ObjectCache"><span title="​Object​Cache" class="linkLabel_WmDU">​Object​Cache</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ProbabilityDistributor"><span title="​Probability​Distributor" class="linkLabel_WmDU">​Probability​Distributor</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PromValue"><span title="​Prom​Value" class="linkLabel_WmDU">​Prom​Value</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/t"><span title="t" class="linkLabel_WmDU">t</span></a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><div class="tocCollapsible_ETCw theme-doc-toc-mobile tocMobile_oUs_"><button type="button" class="clean-btn tocCollapsibleButton_TO0P">On this page</button></div><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">Dijkstra</span></h1><div class="luaClassTags_EipM"></div><div>
+<p>Dijkstra's shortest-path and priority-ordered traversal algorithms.</p>
+<p>
+  Dijkstra's algorithm finds the shortest (lowest total weight) path from a
+  source vertex to one or all reachable vertices in a graph with
+  <strong>non-negative edge weights</strong>. It uses a min-heap priority queue to always
+  expand the cheapest known vertex next.
+</p>
+
+  
+    
+    
+      <div class="admonition admonition-caution alert alert--warning">
+        <div class="admonition-heading">
+          <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+                <path d="M8.893 1.5c-.183-.31-.52-.5-.887-.5s-.703.19-.886.5L.138 13.499a.98.98 0 0 0 0 1.001c.193.31.53.501.886.501h13.964c.367 0 .704-.19.877-.5a1.03 1.03 0 0 0 .01-1.002L8.893 1.5zm.133 11.497H6.987v-2.003h2.039v2.003zm0-3.004H6.987V5.987h2.039v4.006z"></path>
+              </svg></span><span class="admonition-title">Non-negative weights only</span></h5>
+        </div>
+        <div class="admonition-content">
+          <p>
+            Dijkstra's algorithm produces incorrect results if any edge weight is
+            negative. Use <a href="/ModulesOnRails/api/BellmanFord">BellmanFord</a> when negative weights are
+            possible.
+          </p>
+        </div>
+      </div>
+    
+  
+
+
+  
+    
+    
+      <div class="admonition admonition-success alert alert--success">
+        <div class="admonition-heading">
+          <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="16" viewBox="0 0 12 16">
+                <path d="M6.5 0C3.48 0 1 2.19 1 5c0 .92.55 2.25 1 3 1.34 2.25 1.78 2.78 2 4v1h5v-1c.22-1.22.66-1.75 2-4 .45-.75 1-2.08 1-3 0-2.81-2.48-5-5.5-5zm3.64 7.48c-.25.44-.47.8-.67 1.11-.86 1.41-1.25 2.06-1.45 3.23-.02.05-.02.11-.02.17H5c0-.06 0-.13-.02-.17-.2-1.17-.59-1.83-1.45-3.23-.2-.31-.42-.67-.67-1.11C2.44 6.78 2 5.65 2 5c0-2.2 2.02-4 4.5-4 1.22 0 2.36.42 3.22 1.19C10.55 2.94 11 3.94 11 5c0 .66-.44 1.78-.86 2.48zM4 14h5c-.23 1.14-1.3 2-2.5 2s-2.27-.86-2.5-2z"></path>
+              </svg></span><span class="admonition-title">Priority traversal</span></h5>
+        </div>
+        <div class="admonition-content">
+          <p>
+            <a href="#toIterator"><code>Dijkstra.toIterator</code></a> and <a href="#toArray"><code>Dijkstra.toArray</code></a> let
+            you traverse <strong>all</strong> reachable vertices in ascending accumulated-cost
+            order — useful for budget-limited flood fill, range queries, and
+            influence-map generation:
+          </p>
+          <pre class="language-lua"><code class="language-lua"><span class="token keyword">for</span> vertex<span class="token punctuation">,</span> costFromStart <span class="token keyword">in</span> Dijkstra<span class="token punctuation">.</span><span class="token function">toIterator</span><span class="token punctuation">(</span>origin<span class="token punctuation">,</span> getNeighbors<span class="token punctuation">,</span> getWeight<span class="token punctuation">)</span> <span class="token keyword">do</span>
+    <span class="token keyword">if</span> costFromStart <span class="token operator">></span> budget <span class="token keyword">then</span> <span class="token keyword">break</span> <span class="token keyword">end</span>
+    <span class="token function">markInRange</span><span class="token punctuation">(</span>vertex<span class="token punctuation">)</span>
+<span class="token keyword">end</span>
+</code></pre>
+        </div>
+      </div>
+    
+  
+
+<p>
+  All functions accept either callback form for <code>GetNeighbors</code> — see
+  <a href="/ModulesOnRails/api/GraphUtil">GraphUtil</a> for details.
+</p>
+<h3>Example graph</h3>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">--      2       1</span>
+<span class="token comment">--  A ───── B ───── D</span>
+<span class="token comment">--  │               │</span>
+<span class="token comment">--  3               5</span>
+<span class="token comment">--  │               │</span>
+<span class="token comment">--  C ───────────────┘</span>
+
+<span class="token keyword">local</span> weights <span class="token operator">=</span> <span class="token punctuation">{</span>
+    A <span class="token operator">=</span> <span class="token punctuation">{</span> B <span class="token operator">=</span> <span class="token number">2</span><span class="token punctuation">,</span> C <span class="token operator">=</span> <span class="token number">3</span> <span class="token punctuation">}</span><span class="token punctuation">,</span>
+    B <span class="token operator">=</span> <span class="token punctuation">{</span> A <span class="token operator">=</span> <span class="token number">2</span><span class="token punctuation">,</span> D <span class="token operator">=</span> <span class="token number">1</span> <span class="token punctuation">}</span><span class="token punctuation">,</span>
+    C <span class="token operator">=</span> <span class="token punctuation">{</span> A <span class="token operator">=</span> <span class="token number">3</span><span class="token punctuation">,</span> D <span class="token operator">=</span> <span class="token number">5</span> <span class="token punctuation">}</span><span class="token punctuation">,</span>
+    D <span class="token operator">=</span> <span class="token punctuation">{</span> B <span class="token operator">=</span> <span class="token number">1</span><span class="token punctuation">,</span> C <span class="token operator">=</span> <span class="token number">5</span> <span class="token punctuation">}</span><span class="token punctuation">,</span>
+<span class="token punctuation">}</span>
+
+<span class="token keyword">local</span> <span class="token keyword">function</span> <span class="token function">getNeighbors</span><span class="token punctuation">(</span>v<span class="token punctuation">)</span> <span class="token keyword">return</span> weights<span class="token punctuation">[</span>v<span class="token punctuation">]</span> <span class="token keyword">and</span> <span class="token punctuation">(</span><span class="token keyword">function</span><span class="token punctuation">(</span><span class="token punctuation">)</span>
+    <span class="token keyword">local</span> keys <span class="token operator">=</span> <span class="token punctuation">{</span><span class="token punctuation">}</span>
+    <span class="token keyword">for</span> k <span class="token keyword">in</span> <span class="token function">pairs</span><span class="token punctuation">(</span>weights<span class="token punctuation">[</span>v<span class="token punctuation">]</span><span class="token punctuation">)</span> <span class="token keyword">do</span> table<span class="token punctuation">.</span><span class="token function">insert</span><span class="token punctuation">(</span>keys<span class="token punctuation">,</span> k<span class="token punctuation">)</span> <span class="token keyword">end</span>
+    <span class="token keyword">return</span> keys
+<span class="token keyword">end</span><span class="token punctuation">)</span><span class="token punctuation">(</span><span class="token punctuation">)</span> <span class="token keyword">or</span> <span class="token punctuation">{</span><span class="token punctuation">}</span> <span class="token keyword">end</span>
+
+<span class="token keyword">local</span> <span class="token keyword">function</span> <span class="token function">getWeight</span><span class="token punctuation">(</span>from<span class="token punctuation">,</span> to<span class="token punctuation">)</span> <span class="token keyword">return</span> weights<span class="token punctuation">[</span>from<span class="token punctuation">]</span><span class="token punctuation">[</span>to<span class="token punctuation">]</span> <span class="token keyword">end</span>
+</code></pre>
+</div></header><h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="functions">Functions<a href="#functions" class="hash-link" aria-label="Direct link to Functions" title="Direct link to Functions" translate="no">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="shortestPath"><code style="text-decoration:none">shortestPath</code><a href="#shortestPath" class="hash-link" aria-label="Direct link to shortestPath" title="Direct link to shortestPath" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#925FB9;color:#925FB9">directed</span><span class="docTag__6UZ" style="border-color:#ff5252;color:#ff5252">undirected</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/graphutil/src/Dijkstra.luau#L130"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Dijkstra<!-- -->.</code><code class="green_DgR4">shortestPath</code><code>(</code><div class="inset_uKQm"><div><code>start<!-- -->: </code><code class="blue_P4bS">V</code><code>,</code></div><div><code>goal<!-- -->: </code><code class="blue_P4bS">V</code><code>,</code></div><div><code>getNeighbors<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/GraphUtil#GetNeighbors">GetNeighbors</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">V</code><code class="op_lSLc">&gt;</code><code>,</code></div><div><code>getWeight<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/GraphUtil#GetWeight">GetWeight</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">V</code><code class="op_lSLc">&gt;</code><code>,</code></div><div><code>shouldStop<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/GraphUtil#ShouldStop">ShouldStop</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">V</code><code class="op_lSLc">&gt;</code><code class="blue_P4bS">?</code></div></div><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/GraphUtil#PathResult">PathResult</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">V</code><code class="op_lSLc">&gt;</code><code class="blue_P4bS">?</code></div><div>
+<p>
+  Finds the <strong>shortest weighted path</strong> from <code>start</code> to <code>goal</code> and returns a
+  <a href="/ModulesOnRails/api/GraphUtil#PathResult">PathResult</a>, or <code>nil</code> if <code>goal</code> is unreachable.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> result <span class="token operator">=</span> Dijkstra<span class="token punctuation">.</span><span class="token function">shortestPath</span><span class="token punctuation">(</span><span class="token string">"A"</span><span class="token punctuation">,</span> <span class="token string">"D"</span><span class="token punctuation">,</span> getNeighbors<span class="token punctuation">,</span> getWeight<span class="token punctuation">)</span>
+<span class="token comment">-- result.path == { "A", "B", "D" }</span>
+<span class="token comment">-- result.cost == 3   (2 + 1)</span>
+</code></pre>
+<p>
+  Pass an optional <a href="/ModulesOnRails/api/GraphUtil#ShouldStop">ShouldStop</a> predicate to abort a
+  long-running search — checked once per expanded vertex (after the goal check),
+  returning <code>true</code> stops the search and returns <code>nil</code>:
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- Stop once the cheapest frontier vertex exceeds a budget of 500.</span>
+<span class="token keyword">local</span> result <span class="token operator">=</span> Dijkstra<span class="token punctuation">.</span><span class="token function">shortestPath</span><span class="token punctuation">(</span>start<span class="token punctuation">,</span> goal<span class="token punctuation">,</span> getNeighbors<span class="token punctuation">,</span> getWeight<span class="token punctuation">,</span> <span class="token keyword">function</span><span class="token punctuation">(</span>_vertex<span class="token punctuation">,</span> cost<span class="token punctuation">)</span>
+    <span class="token keyword">return</span> cost <span class="token operator">></span> <span class="token number">500</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+</code></pre>
+<p><em>Time complexity:</em> <code>O((V + E) log V)</code> with a binary min-heap.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="bidirectionalShortestPath"><code style="text-decoration:none">bidirectionalShortestPath</code><a href="#bidirectionalShortestPath" class="hash-link" aria-label="Direct link to bidirectionalShortestPath" title="Direct link to bidirectionalShortestPath" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#925FB9;color:#925FB9">directed</span><span class="docTag__6UZ" style="border-color:#ff5252;color:#ff5252">undirected</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/graphutil/src/Dijkstra.luau#L230"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Dijkstra<!-- -->.</code><code class="green_DgR4">bidirectionalShortestPath</code><code>(</code><div class="inset_uKQm"><div><code>start<!-- -->: </code><code class="blue_P4bS">V</code><code>,</code></div><div><code>goal<!-- -->: </code><code class="blue_P4bS">V</code><code>,</code></div><div><code>getNeighbors<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/GraphUtil#GetNeighbors">GetNeighbors</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">V</code><code class="op_lSLc">&gt;</code><code>,</code></div><div><code>getWeight<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/GraphUtil#GetWeight">GetWeight</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">V</code><code class="op_lSLc">&gt;</code><code>,</code></div><div><code>getReversedNeighbors<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/GraphUtil#GetNeighbors">GetNeighbors</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">V</code><code class="op_lSLc">&gt;</code><code class="blue_P4bS">?</code><code>,</code></div><div><code>shouldStop<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/GraphUtil#ShouldStop">ShouldStop</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">V</code><code class="op_lSLc">&gt;</code><code class="blue_P4bS">?</code></div></div><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/GraphUtil#PathResult">PathResult</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">V</code><code class="op_lSLc">&gt;</code><code class="blue_P4bS">?</code></div><div>
+<p>
+  Finds the <strong>shortest weighted path</strong> between <code>start</code> and <code>goal</code> by
+  running Dijkstra from both ends simultaneously — alternately expanding
+  whichever heap has the cheaper next vertex — and stopping as soon as the
+  two searches are provably guaranteed to have met at the shortest
+  possible point. Returns the same <a href="/ModulesOnRails/api/GraphUtil#PathResult">PathResult</a>
+  as <a href="#shortestPath"><code>Dijkstra.shortestPath</code></a>, or <code>nil</code> if <code>goal</code> is
+  unreachable.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> result <span class="token operator">=</span> Dijkstra<span class="token punctuation">.</span><span class="token function">bidirectionalShortestPath</span><span class="token punctuation">(</span><span class="token string">"A"</span><span class="token punctuation">,</span> <span class="token string">"D"</span><span class="token punctuation">,</span> getNeighbors<span class="token punctuation">,</span> getWeight<span class="token punctuation">)</span>
+<span class="token comment">-- result.path == { "A", "B", "D" }</span>
+<span class="token comment">-- result.cost == 3</span>
+</code></pre>
+<p>
+  :::caution Directed graphs
+  Growing a search backward from <code>goal</code> requires walking edges in
+  reverse. By default this function reuses <code>getNeighbors</code> for both
+  directions, which is only correct for <strong>undirected</strong> graphs. For a
+  directed graph, pass a callback that returns the <em>predecessors</em> of a
+  vertex (i.e. <code>getReversedNeighbors(v)</code> returns every <code>u</code> such that
+  <code>u → v</code> is an edge) — the edge weight is still looked up as
+  <code>getWeight(u, v)</code>, so no separate reverse-weight callback is needed:
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- Directed graph where reverseAdj[v] lists v's predecessors</span>
+<span class="token keyword">local</span> <span class="token keyword">function</span> <span class="token function">getReversedNeighbors</span><span class="token punctuation">(</span>v<span class="token punctuation">)</span>
+    <span class="token keyword">return</span> reverseAdj<span class="token punctuation">[</span>v<span class="token punctuation">]</span>
+<span class="token keyword">end</span>
+
+<span class="token keyword">local</span> result <span class="token operator">=</span> Dijkstra<span class="token punctuation">.</span><span class="token function">bidirectionalShortestPath</span><span class="token punctuation">(</span>
+    <span class="token string">"A"</span><span class="token punctuation">,</span> <span class="token string">"D"</span><span class="token punctuation">,</span> getNeighbors<span class="token punctuation">,</span> getWeight<span class="token punctuation">,</span> getReversedNeighbors
+<span class="token punctuation">)</span>
+</code></pre>
+<p>:::</p>
+<p>
+  An optional <a href="/ModulesOnRails/api/GraphUtil#ShouldStop">ShouldStop</a> predicate (passed after
+  <code>getReversedNeighbors</code>) aborts the search and returns <code>nil</code> — it is checked
+  each time either side settles a vertex.
+</p>
+<p>
+  <em>Time complexity:</em> <code>O((V + E) log V)</code>, but typically explores far fewer
+  vertices in practice since each side only has to reach roughly halfway.
+</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="distances"><code style="text-decoration:none">distances</code><a href="#distances" class="hash-link" aria-label="Direct link to distances" title="Direct link to distances" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#925FB9;color:#925FB9">directed</span><span class="docTag__6UZ" style="border-color:#ff5252;color:#ff5252">undirected</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/graphutil/src/Dijkstra.luau#L390"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Dijkstra<!-- -->.</code><code class="green_DgR4">distances</code><code>(</code><div class="inset_uKQm"><div><code>start<!-- -->: </code><code class="blue_P4bS">V</code><code>,</code></div><div><code>getNeighbors<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/GraphUtil#GetNeighbors">GetNeighbors</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">V</code><code class="op_lSLc">&gt;</code><code>,</code></div><div><code>getWeight<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/GraphUtil#GetWeight">GetWeight</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">V</code><code class="op_lSLc">&gt;</code><code>,</code></div><div><code>shouldStop<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/GraphUtil#ShouldStop">ShouldStop</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">V</code><code class="op_lSLc">&gt;</code><code class="blue_P4bS">?</code></div></div><code>) → </code><code class="purple_ieR2">{</code><span><code>[</code><code class="blue_P4bS">V</code><code>]</code></span><code>: </code><code class="blue_P4bS">number</code><code class="purple_ieR2">}</code></div><div>
+<p>
+  Runs Dijkstra from <code>start</code> to completion and returns a map of every
+  reachable vertex to its shortest distance from <code>start</code>. Unreachable
+  vertices are absent from the table.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> d <span class="token operator">=</span> Dijkstra<span class="token punctuation">.</span><span class="token function">distances</span><span class="token punctuation">(</span><span class="token string">"A"</span><span class="token punctuation">,</span> getNeighbors<span class="token punctuation">,</span> getWeight<span class="token punctuation">)</span>
+<span class="token function">print</span><span class="token punctuation">(</span>d<span class="token punctuation">[</span><span class="token string">"B"</span><span class="token punctuation">]</span><span class="token punctuation">)</span> <span class="token comment">-- 2</span>
+<span class="token function">print</span><span class="token punctuation">(</span>d<span class="token punctuation">[</span><span class="token string">"C"</span><span class="token punctuation">]</span><span class="token punctuation">)</span> <span class="token comment">-- 3</span>
+<span class="token function">print</span><span class="token punctuation">(</span>d<span class="token punctuation">[</span><span class="token string">"D"</span><span class="token punctuation">]</span><span class="token punctuation">)</span> <span class="token comment">-- 3</span>
+</code></pre>
+<p>
+  Pass an optional <a href="/ModulesOnRails/api/GraphUtil#ShouldStop">ShouldStop</a> predicate to abort a
+  long-running flood — checked once per settled vertex. Unlike the path-finders,
+  on early stop this returns the <strong>partial</strong> distance map accumulated so far
+  (every vertex settled before the stop is present and final):
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- Only compute distances out to a budget of 10.</span>
+<span class="token keyword">local</span> d <span class="token operator">=</span> Dijkstra<span class="token punctuation">.</span><span class="token function">distances</span><span class="token punctuation">(</span>start<span class="token punctuation">,</span> getNeighbors<span class="token punctuation">,</span> getWeight<span class="token punctuation">,</span> <span class="token keyword">function</span><span class="token punctuation">(</span>_vertex<span class="token punctuation">,</span> cost<span class="token punctuation">)</span>
+    <span class="token keyword">return</span> cost <span class="token operator">></span> <span class="token number">10</span>
+<span class="token keyword">end</span><span class="token punctuation">)</span>
+</code></pre>
+<p><em>Time complexity:</em> <code>O((V + E) log V)</code> with a binary min-heap.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="toIterator"><code style="text-decoration:none">toIterator</code><a href="#toIterator" class="hash-link" aria-label="Direct link to toIterator" title="Direct link to toIterator" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#925FB9;color:#925FB9">directed</span><span class="docTag__6UZ" style="border-color:#ff5252;color:#ff5252">undirected</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/graphutil/src/Dijkstra.luau#L465"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Dijkstra<!-- -->.</code><code class="green_DgR4">toIterator</code><code>(</code><div class="inset_uKQm"><div><code>start<!-- -->: </code><code class="blue_P4bS">V</code><code>,</code></div><div><code>getNeighbors<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/GraphUtil#GetNeighbors">GetNeighbors</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">V</code><code class="op_lSLc">&gt;</code><code>,</code></div><div><code>getWeight<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/GraphUtil#GetWeight">GetWeight</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">V</code><code class="op_lSLc">&gt;</code></div></div><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/GraphUtil#KVIterator">KVIterator</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">V,</code><code class="blue_P4bS">number</code><code class="op_lSLc">&gt;</code></div><div>
+<p>
+  Returns a lazy iterator that yields <code>(vertex, costFromStart)</code> pairs in
+  <strong>ascending accumulated-cost order</strong> — every vertex is visited before any
+  vertex that is reachable through it at higher cost.
+</p>
+<p>
+  The iterator drives the heap expansion internally via a closure; no
+  coroutines are used. You can <code>break</code> early to stop expansion, which is
+  the key advantage over <a href="#distances"><code>Dijkstra.distances</code></a>.
+</p>
+<p>Aliased as <a href="#forEach"><code>Dijkstra.forEach</code></a>.</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- Visit all nodes within a travel budget of 5</span>
+<span class="token keyword">for</span> vertex<span class="token punctuation">,</span> cost <span class="token keyword">in</span> Dijkstra<span class="token punctuation">.</span><span class="token function">toIterator</span><span class="token punctuation">(</span>origin<span class="token punctuation">,</span> getNeighbors<span class="token punctuation">,</span> getWeight<span class="token punctuation">)</span> <span class="token keyword">do</span>
+    <span class="token keyword">if</span> cost <span class="token operator">></span> <span class="token number">5</span> <span class="token keyword">then</span> <span class="token keyword">break</span> <span class="token keyword">end</span>
+    table<span class="token punctuation">.</span><span class="token function">insert</span><span class="token punctuation">(</span>inRange<span class="token punctuation">,</span> vertex<span class="token punctuation">)</span>
+<span class="token keyword">end</span>
+</code></pre>
+
+  
+    
+    
+      <div class="admonition admonition-success alert alert--success">
+        <div class="admonition-heading">
+          <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="16" viewBox="0 0 12 16">
+                <path d="M6.5 0C3.48 0 1 2.19 1 5c0 .92.55 2.25 1 3 1.34 2.25 1.78 2.78 2 4v1h5v-1c.22-1.22.66-1.75 2-4 .45-.75 1-2.08 1-3 0-2.81-2.48-5-5.5-5zm3.64 7.48c-.25.44-.47.8-.67 1.11-.86 1.41-1.25 2.06-1.45 3.23-.02.05-.02.11-.02.17H5c0-.06 0-.13-.02-.17-.2-1.17-.59-1.83-1.45-3.23-.2-.31-.42-.67-.67-1.11C2.44 6.78 2 5.65 2 5c0-2.2 2.02-4 4.5-4 1.22 0 2.36.42 3.22 1.19C10.55 2.94 11 3.94 11 5c0 .66-.44 1.78-.86 2.48zM4 14h5c-.23 1.14-1.3 2-2.5 2s-2.27-.86-2.5-2z"></path>
+              </svg></span><span class="admonition-title">for-loop usage</span></h5>
+        </div>
+        <div class="admonition-content">
+          <pre class="language-lua"><code class="language-lua"><span class="token keyword">for</span> vertex<span class="token punctuation">,</span> cost <span class="token keyword">in</span> Dijkstra<span class="token punctuation">.</span><span class="token function">toIterator</span><span class="token punctuation">(</span>start<span class="token punctuation">,</span> getNeighbors<span class="token punctuation">,</span> getWeight<span class="token punctuation">)</span> <span class="token keyword">do</span>
+    <span class="token function">print</span><span class="token punctuation">(</span>vertex<span class="token punctuation">,</span> cost<span class="token punctuation">)</span>
+<span class="token keyword">end</span>
+</code></pre>
+        </div>
+      </div>
+    
+  
+
+<p><em>Time complexity per call:</em> amortised <code>O(degree(V) · log V)</code></p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="forEach"><code style="text-decoration:none">forEach</code><a href="#forEach" class="hash-link" aria-label="Direct link to forEach" title="Direct link to forEach" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#925FB9;color:#925FB9">directed</span><span class="docTag__6UZ" style="border-color:#ff5252;color:#ff5252">undirected</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/graphutil/src/Dijkstra.luau#L512"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Dijkstra<!-- -->.</code><code class="green_DgR4">forEach</code><code>(</code><div class="inset_uKQm"><div><code>start<!-- -->: </code><code class="blue_P4bS">V</code><code>,</code></div><div><code>getNeighbors<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/GraphUtil#GetNeighbors">GetNeighbors</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">V</code><code class="op_lSLc">&gt;</code><code>,</code></div><div><code>getWeight<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/GraphUtil#GetWeight">GetWeight</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">V</code><code class="op_lSLc">&gt;</code></div></div><code>) → </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/GraphUtil#KVIterator">KVIterator</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">V,</code><code class="blue_P4bS">number</code><code class="op_lSLc">&gt;</code></div><div>
+<p>Alias of <a href="#toIterator"><code>Dijkstra.toIterator</code></a>.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="toArray"><code style="text-decoration:none">toArray</code><a href="#toArray" class="hash-link" aria-label="Direct link to toArray" title="Direct link to toArray" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#925FB9;color:#925FB9">directed</span><span class="docTag__6UZ" style="border-color:#ff5252;color:#ff5252">undirected</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/graphutil/src/Dijkstra.luau#L536"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Dijkstra<!-- -->.</code><code class="green_DgR4">toArray</code><code>(</code><div class="inset_uKQm"><div><code>start<!-- -->: </code><code class="blue_P4bS">V</code><code>,</code></div><div><code>getNeighbors<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/GraphUtil#GetNeighbors">GetNeighbors</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">V</code><code class="op_lSLc">&gt;</code><code>,</code></div><div><code>getWeight<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/GraphUtil#GetWeight">GetWeight</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">V</code><code class="op_lSLc">&gt;</code></div></div><code>) → </code><code class="purple_ieR2">{</code><code class="blue_P4bS">VisitRecord</code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">V</code><code class="op_lSLc">&gt;</code><code class="purple_ieR2">}</code></div><div>
+<p>
+  Runs Dijkstra from <code>start</code> to completion and returns an array of
+  <a href="/ModulesOnRails/api/Dijkstra#VisitRecord">VisitRecord</a> values in ascending accumulated-cost
+  order.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> records <span class="token operator">=</span> Dijkstra<span class="token punctuation">.</span><span class="token function">toArray</span><span class="token punctuation">(</span><span class="token string">"A"</span><span class="token punctuation">,</span> getNeighbors<span class="token punctuation">,</span> getWeight<span class="token punctuation">)</span>
+<span class="token keyword">for</span> _<span class="token punctuation">,</span> record <span class="token keyword">in</span> records <span class="token keyword">do</span>
+    <span class="token function">print</span><span class="token punctuation">(</span>record<span class="token punctuation">.</span>vertex<span class="token punctuation">,</span> record<span class="token punctuation">.</span>cost<span class="token punctuation">)</span>
+<span class="token keyword">end</span>
+<span class="token comment">-- A  0</span>
+<span class="token comment">-- B  2</span>
+<span class="token comment">-- C  3</span>
+<span class="token comment">-- D  3</span>
+</code></pre>
+<p><em>Time complexity:</em> <code>O((V + E) log V)</code> with a binary min-heap.</p>
+</div></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
+    &quot;functions&quot;: [
+        {
+            &quot;name&quot;: &quot;shortestPath&quot;,
+            &quot;desc&quot;: &quot;Finds the **shortest weighted path** from `start` to `goal` and returns a\n[PathResult](/api/GraphUtil#PathResult), or `nil` if `goal` is unreachable.\n\n```lua\nlocal result = Dijkstra.shortestPath(\&quot;A\&quot;, \&quot;D\&quot;, getNeighbors, getWeight)\n-- result.path == { \&quot;A\&quot;, \&quot;B\&quot;, \&quot;D\&quot; }\n-- result.cost == 3   (2 + 1)\n```\n\nPass an optional [ShouldStop](/api/GraphUtil#ShouldStop) predicate to abort a\nlong-running search — checked once per expanded vertex (after the goal check),\nreturning `true` stops the search and returns `nil`:\n\n```lua\n-- Stop once the cheapest frontier vertex exceeds a budget of 500.\nlocal result = Dijkstra.shortestPath(start, goal, getNeighbors, getWeight, function(_vertex, cost)\n    return cost &gt; 500\nend)\n```\n\n*Time complexity:* `O((V + E) log V)` with a binary min-heap.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;start&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;V&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;goal&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;V&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;getNeighbors&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;GetNeighbors&lt;V&gt;&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;getWeight&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;GetWeight&lt;V&gt;&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;shouldStop&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;ShouldStop&lt;V&gt;?\n&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;PathResult&lt;V&gt;?\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;tags&quot;: [
+                &quot;directed&quot;,
+                &quot;undirected&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 130,
+                &quot;path&quot;: &quot;lib/graphutil/src/Dijkstra.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;bidirectionalShortestPath&quot;,
+            &quot;desc&quot;: &quot;Finds the **shortest weighted path** between `start` and `goal` by\nrunning Dijkstra from both ends simultaneously — alternately expanding\nwhichever heap has the cheaper next vertex — and stopping as soon as the\ntwo searches are provably guaranteed to have met at the shortest\npossible point. Returns the same [PathResult](/api/GraphUtil#PathResult)\nas [`Dijkstra.shortestPath`](#shortestPath), or `nil` if `goal` is\nunreachable.\n\n```lua\nlocal result = Dijkstra.bidirectionalShortestPath(\&quot;A\&quot;, \&quot;D\&quot;, getNeighbors, getWeight)\n-- result.path == { \&quot;A\&quot;, \&quot;B\&quot;, \&quot;D\&quot; }\n-- result.cost == 3\n```\n\n:::caution Directed graphs\nGrowing a search backward from `goal` requires walking edges in\nreverse. By default this function reuses `getNeighbors` for both\ndirections, which is only correct for **undirected** graphs. For a\ndirected graph, pass a callback that returns the *predecessors* of a\nvertex (i.e. `getReversedNeighbors(v)` returns every `u` such that\n`u → v` is an edge) — the edge weight is still looked up as\n`getWeight(u, v)`, so no separate reverse-weight callback is needed:\n\n```lua\n-- Directed graph where reverseAdj[v] lists v&#x27;s predecessors\nlocal function getReversedNeighbors(v)\n    return reverseAdj[v]\nend\n\nlocal result = Dijkstra.bidirectionalShortestPath(\n    \&quot;A\&quot;, \&quot;D\&quot;, getNeighbors, getWeight, getReversedNeighbors\n)\n```\n:::\n\nAn optional [ShouldStop](/api/GraphUtil#ShouldStop) predicate (passed after\n`getReversedNeighbors`) aborts the search and returns `nil` — it is checked\neach time either side settles a vertex.\n\n*Time complexity:* `O((V + E) log V)`, but typically explores far fewer\nvertices in practice since each side only has to reach roughly halfway.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;start&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;V&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;goal&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;V&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;getNeighbors&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;GetNeighbors&lt;V&gt;&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;getWeight&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;GetWeight&lt;V&gt;&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;getReversedNeighbors&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;GetNeighbors&lt;V&gt;?&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;shouldStop&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;ShouldStop&lt;V&gt;?\n&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;PathResult&lt;V&gt;?\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;tags&quot;: [
+                &quot;directed&quot;,
+                &quot;undirected&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 230,
+                &quot;path&quot;: &quot;lib/graphutil/src/Dijkstra.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;distances&quot;,
+            &quot;desc&quot;: &quot;Runs Dijkstra from `start` to completion and returns a map of every\nreachable vertex to its shortest distance from `start`.  Unreachable\nvertices are absent from the table.\n\n```lua\nlocal d = Dijkstra.distances(\&quot;A\&quot;, getNeighbors, getWeight)\nprint(d[\&quot;B\&quot;]) -- 2\nprint(d[\&quot;C\&quot;]) -- 3\nprint(d[\&quot;D\&quot;]) -- 3\n```\n\nPass an optional [ShouldStop](/api/GraphUtil#ShouldStop) predicate to abort a\nlong-running flood — checked once per settled vertex. Unlike the path-finders,\non early stop this returns the **partial** distance map accumulated so far\n(every vertex settled before the stop is present and final):\n\n```lua\n-- Only compute distances out to a budget of 10.\nlocal d = Dijkstra.distances(start, getNeighbors, getWeight, function(_vertex, cost)\n    return cost &gt; 10\nend)\n```\n\n*Time complexity:* `O((V + E) log V)` with a binary min-heap.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;start&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;V&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;getNeighbors&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;GetNeighbors&lt;V&gt;&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;getWeight&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;GetWeight&lt;V&gt;&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;shouldStop&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;ShouldStop&lt;V&gt;?\n&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{ [V]: number }\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;tags&quot;: [
+                &quot;directed&quot;,
+                &quot;undirected&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 390,
+                &quot;path&quot;: &quot;lib/graphutil/src/Dijkstra.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;toIterator&quot;,
+            &quot;desc&quot;: &quot;Returns a lazy iterator that yields `(vertex, costFromStart)` pairs in\n**ascending accumulated-cost order** — every vertex is visited before any\nvertex that is reachable through it at higher cost.\n\nThe iterator drives the heap expansion internally via a closure; no\ncoroutines are used.  You can `break` early to stop expansion, which is\nthe key advantage over [`Dijkstra.distances`](#distances).\n\nAliased as [`Dijkstra.forEach`](#forEach).\n\n```lua\n-- Visit all nodes within a travel budget of 5\nfor vertex, cost in Dijkstra.toIterator(origin, getNeighbors, getWeight) do\n    if cost &gt; 5 then break end\n    table.insert(inRange, vertex)\nend\n```\n\n:::tip for-loop usage\n```lua\nfor vertex, cost in Dijkstra.toIterator(start, getNeighbors, getWeight) do\n    print(vertex, cost)\nend\n```\n:::\n\n*Time complexity per call:* amortised `O(degree(V) · log V)`&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;start&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;V&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;getNeighbors&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;GetNeighbors&lt;V&gt;&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;getWeight&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;GetWeight&lt;V&gt;&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;KVIterator&lt;V, number&gt;\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;tags&quot;: [
+                &quot;directed&quot;,
+                &quot;undirected&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 465,
+                &quot;path&quot;: &quot;lib/graphutil/src/Dijkstra.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;forEach&quot;,
+            &quot;desc&quot;: &quot;Alias of [`Dijkstra.toIterator`](#toIterator).&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;start&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;V&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;getNeighbors&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;GetNeighbors&lt;V&gt;&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;getWeight&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;GetWeight&lt;V&gt;&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;KVIterator&lt;V, number&gt;&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;tags&quot;: [
+                &quot;directed&quot;,
+                &quot;undirected&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 512,
+                &quot;path&quot;: &quot;lib/graphutil/src/Dijkstra.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;toArray&quot;,
+            &quot;desc&quot;: &quot;Runs Dijkstra from `start` to completion and returns an array of\n[VisitRecord](/api/Dijkstra#VisitRecord) values in ascending accumulated-cost\norder.\n\n```lua\nlocal records = Dijkstra.toArray(\&quot;A\&quot;, getNeighbors, getWeight)\nfor _, record in records do\n    print(record.vertex, record.cost)\nend\n-- A  0\n-- B  2\n-- C  3\n-- D  3\n```\n\n*Time complexity:* `O((V + E) log V)` with a binary min-heap.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;start&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;V&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;getNeighbors&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;GetNeighbors&lt;V&gt;&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;getWeight&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;GetWeight&lt;V&gt;&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{ VisitRecord&lt;V&gt; }\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;tags&quot;: [
+                &quot;directed&quot;,
+                &quot;undirected&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 536,
+                &quot;path&quot;: &quot;lib/graphutil/src/Dijkstra.luau&quot;
+            }
+        }
+    ],
+    &quot;properties&quot;: [],
+    &quot;types&quot;: [],
+    &quot;name&quot;: &quot;Dijkstra&quot;,
+    &quot;desc&quot;: &quot;Dijkstra&#x27;s shortest-path and priority-ordered traversal algorithms.\n\nDijkstra&#x27;s algorithm finds the shortest (lowest total weight) path from a\nsource vertex to one or all reachable vertices in a graph with\n**non-negative edge weights**.  It uses a min-heap priority queue to always\nexpand the cheapest known vertex next.\n\n:::caution Non-negative weights only\nDijkstra&#x27;s algorithm produces incorrect results if any edge weight is\nnegative.  Use [BellmanFord](/api/BellmanFord) when negative weights are\npossible.\n:::\n\n:::tip Priority traversal\n[`Dijkstra.toIterator`](#toIterator) and [`Dijkstra.toArray`](#toArray) let\nyou traverse **all** reachable vertices in ascending accumulated-cost\norder — useful for budget-limited flood fill, range queries, and\ninfluence-map generation:\n```lua\nfor vertex, costFromStart in Dijkstra.toIterator(origin, getNeighbors, getWeight) do\n    if costFromStart &gt; budget then break end\n    markInRange(vertex)\nend\n```\n:::\n\nAll functions accept either callback form for `GetNeighbors` — see\n[GraphUtil](/api/GraphUtil) for details.\n\n### Example graph\n\n```lua\n--      2       1\n--  A ───── B ───── D\n--  │               │\n--  3               5\n--  │               │\n--  C ───────────────┘\n\nlocal weights = {\n    A = { B = 2, C = 3 },\n    B = { A = 2, D = 1 },\n    C = { A = 3, D = 5 },\n    D = { B = 1, C = 5 },\n}\n\nlocal function getNeighbors(v) return weights[v] and (function()\n    local keys = {}\n    for k in pairs(weights[v]) do table.insert(keys, k) end\n    return keys\nend)() or {} end\n\nlocal function getWeight(from, to) return weights[from][to] end\n```&quot;,
+    &quot;source&quot;: {
+        &quot;line&quot;: 63,
+        &quot;path&quot;: &quot;lib/graphutil/src/Dijkstra.luau&quot;
+    }
+}</pre></details></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#functions" class="table-of-contents__link toc-highlight">Functions</a><ul><li><a href="#bidirectionalShortestPath" class="table-of-contents__link toc-highlight">.bidirectionalShortestPath</a></li><li><a href="#distances" class="table-of-contents__link toc-highlight">.distances</a></li><li><a href="#forEach" class="table-of-contents__link toc-highlight">.forEach</a></li><li><a href="#shortestPath" class="table-of-contents__link toc-highlight">.shortestPath</a></li><li><a href="#toArray" class="table-of-contents__link toc-highlight">.toArray</a></li><li><a href="#toIterator" class="table-of-contents__link toc-highlight">.toIterator</a></li></ul></li></ul></div></div></div></div></main></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
+</body>
+</html>

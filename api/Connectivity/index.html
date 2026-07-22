@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en" dir="ltr" class="plugin-moonwave plugin-id-moonwave" data-has-hydrated="false">
+<head>
+<meta charset="UTF-8">
+<meta name="generator" content="Docusaurus v3.10.1">
+<title data-rh="true">Connectivity | ModulesOnRails</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:url" content="https://raild3x.github.io/ModulesOnRails/api/Connectivity"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docusaurus_tag" content="default"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docsearch:docusaurus_tag" content="default"><meta data-rh="true" property="og:title" content="Connectivity | ModulesOnRails"><meta data-rh="true" name="description" content="Graph connectivity queries: reachability, components, cycle detection,
+bipartiteness, and strongly connected components.
+
+Most functions come in two flavours depending on whether the graph is
+**directed** or **undirected**.  Check each function&#x27;s `directed` /
+`undirected` tags to confirm which it operates on.
+
+### `allVertices` parameter
+
+Several functions require `allVertices: { V }` — the complete list of
+vertices in the graph.  This is needed to find disconnected components
+and to seed multi-source traversals.
+
+All functions accept either callback form for `GetNeighbors` — see
+[GraphUtil](/api/GraphUtil) for details.
+
+### Example graphs used in the docs below
+
+```lua
+-- Undirected: one component A─B─C─D, plus a separate component E─F
+--  A ── B ── C ── D        E ── F
+local undirAdj = {
+    A = {&quot;B&quot;}, B = {&quot;A&quot;,&quot;C&quot;}, C = {&quot;B&quot;,&quot;D&quot;}, D = {&quot;C&quot;},
+    E = {&quot;F&quot;}, F = {&quot;E&quot;},
+}
+
+-- Directed: a cycle A→B→C→A, plus an acyclic edge D→E
+--  A ──→ B ──→ C          D ──→ E
+--  ▲           │
+--  └───────────┘
+local dirAdj = {
+    A = {&quot;B&quot;}, B = {&quot;C&quot;}, C = {&quot;A&quot;},
+    D = {&quot;E&quot;}, E = {},
+}
+```"><meta data-rh="true" property="og:description" content="Graph connectivity queries: reachability, components, cycle detection,
+bipartiteness, and strongly connected components.
+
+Most functions come in two flavours depending on whether the graph is
+**directed** or **undirected**.  Check each function&#x27;s `directed` /
+`undirected` tags to confirm which it operates on.
+
+### `allVertices` parameter
+
+Several functions require `allVertices: { V }` — the complete list of
+vertices in the graph.  This is needed to find disconnected components
+and to seed multi-source traversals.
+
+All functions accept either callback form for `GetNeighbors` — see
+[GraphUtil](/api/GraphUtil) for details.
+
+### Example graphs used in the docs below
+
+```lua
+-- Undirected: one component A─B─C─D, plus a separate component E─F
+--  A ── B ── C ── D        E ── F
+local undirAdj = {
+    A = {&quot;B&quot;}, B = {&quot;A&quot;,&quot;C&quot;}, C = {&quot;B&quot;,&quot;D&quot;}, D = {&quot;C&quot;},
+    E = {&quot;F&quot;}, F = {&quot;E&quot;},
+}
+
+-- Directed: a cycle A→B→C→A, plus an acyclic edge D→E
+--  A ──→ B ──→ C          D ──→ E
+--  ▲           │
+--  └───────────┘
+local dirAdj = {
+    A = {&quot;B&quot;}, B = {&quot;C&quot;}, C = {&quot;A&quot;},
+    D = {&quot;E&quot;}, E = {},
+}
+```"><link data-rh="true" rel="canonical" href="https://raild3x.github.io/ModulesOnRails/api/Connectivity"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/Connectivity" hreflang="en"><link data-rh="true" rel="alternate" href="https://raild3x.github.io/ModulesOnRails/api/Connectivity" hreflang="x-default"><link rel="stylesheet" href="/ModulesOnRails/assets/css/styles.e8e96400.css">
+<script src="/ModulesOnRails/assets/js/runtime~main.8d64b0d1.js" defer="defer"></script>
+<script src="/ModulesOnRails/assets/js/main.58d2c12a.js" defer="defer"></script>
+</head>
+<body>
+<svg style="display: none;"><defs>
+<symbol id="theme-svg-external-link" viewBox="0 0 24 24"><path fill="currentColor" d="M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z"/></symbol>
+</defs></svg>
+<script>!function(){var t=function(){try{return new URLSearchParams(window.location.search).get("docusaurus-theme")}catch(t){}}()||function(){try{return window.localStorage.getItem("theme")}catch(t){}}();document.documentElement.setAttribute("data-theme",t||(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light")),document.documentElement.setAttribute("data-theme-choice",t||"system")}(),function(){try{const c=new URLSearchParams(window.location.search).entries();for(var[t,e]of c)if(t.startsWith("docusaurus-data-")){var a=t.replace("docusaurus-data-","data-");document.documentElement.setAttribute(a,e)}}catch(t){}}()</script><div id="__docusaurus"><div role="region" aria-label="Skip to main content"><a class="skipToContent_fXgn" href="#__docusaurus_skipToContent_fallback">Skip to main content</a></div><nav aria-label="Main" class="theme-layout-navbar navbar navbar--fixed-top"><div class="navbar__inner"><div class="theme-layout-navbar-left navbar__items"><button aria-label="Toggle navigation bar" aria-expanded="false" class="navbar__toggle clean-btn" type="button"><svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><path stroke="currentColor" stroke-linecap="round" stroke-miterlimit="10" stroke-width="2" d="M4 7h22M4 15h22M4 23h22"></path></svg></button><a class="navbar__brand" href="/ModulesOnRails/"><b class="navbar__title text--truncate">ModulesOnRails</b></a><a aria-current="page" class="navbar__item navbar__link navbar__link--active" href="/ModulesOnRails/api/">API</a></div><div class="theme-layout-navbar-right navbar__items navbar__items--right"><a href="https://github.com/Raild3x/ModulesOnRails" target="_blank" rel="noopener noreferrer" class="navbar__item navbar__link">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_nPIU"><use href="#theme-svg-external-link"></use></svg></a><div class="toggle_vylO colorModeToggle_DEke"><button class="clean-btn toggleButton_gllP toggleButtonDisabled_aARS" type="button" disabled="" title="system mode" aria-label="Switch between dark and light mode (currently system mode)"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP lightToggleIcon_pyhR"><path fill="currentColor" d="M12,9c1.65,0,3,1.35,3,3s-1.35,3-3,3s-3-1.35-3-3S10.35,9,12,9 M12,7c-2.76,0-5,2.24-5,5s2.24,5,5,5s5-2.24,5-5 S14.76,7,12,7L12,7z M2,13l2,0c0.55,0,1-0.45,1-1s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S1.45,13,2,13z M20,13l2,0c0.55,0,1-0.45,1-1 s-0.45-1-1-1l-2,0c-0.55,0-1,0.45-1,1S19.45,13,20,13z M11,2v2c0,0.55,0.45,1,1,1s1-0.45,1-1V2c0-0.55-0.45-1-1-1S11,1.45,11,2z M11,20v2c0,0.55,0.45,1,1,1s1-0.45,1-1v-2c0-0.55-0.45-1-1-1C11.45,19,11,19.45,11,20z M5.99,4.58c-0.39-0.39-1.03-0.39-1.41,0 c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0s0.39-1.03,0-1.41L5.99,4.58z M18.36,16.95 c-0.39-0.39-1.03-0.39-1.41,0c-0.39,0.39-0.39,1.03,0,1.41l1.06,1.06c0.39,0.39,1.03,0.39,1.41,0c0.39-0.39,0.39-1.03,0-1.41 L18.36,16.95z M19.42,5.99c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06c-0.39,0.39-0.39,1.03,0,1.41 s1.03,0.39,1.41,0L19.42,5.99z M7.05,18.36c0.39-0.39,0.39-1.03,0-1.41c-0.39-0.39-1.03-0.39-1.41,0l-1.06,1.06 c-0.39,0.39-0.39,1.03,0,1.41s1.03,0.39,1.41,0L7.05,18.36z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP darkToggleIcon_wfgR"><path fill="currentColor" d="M9.37,5.51C9.19,6.15,9.1,6.82,9.1,7.5c0,4.08,3.32,7.4,7.4,7.4c0.68,0,1.35-0.09,1.99-0.27C17.45,17.19,14.93,19,12,19 c-3.86,0-7-3.14-7-7C5,9.07,6.81,6.55,9.37,5.51z M12,3c-4.97,0-9,4.03-9,9s4.03,9,9,9s9-4.03,9-9c0-0.46-0.04-0.92-0.1-1.36 c-0.98,1.37-2.58,2.26-4.4,2.26c-2.98,0-5.4-2.42-5.4-5.4c0-1.81,0.89-3.42,2.26-4.4C12.92,3.04,12.46,3,12,3L12,3z"></path></svg><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" class="toggleIcon_g3eP systemToggleIcon_QzmC"><path fill="currentColor" d="m12 21c4.971 0 9-4.029 9-9s-4.029-9-9-9-9 4.029-9 9 4.029 9 9 9zm4.95-13.95c1.313 1.313 2.05 3.093 2.05 4.95s-0.738 3.637-2.05 4.95c-1.313 1.313-3.093 2.05-4.95 2.05v-14c1.857 0 3.637 0.737 4.95 2.05z"></path></svg></button></div><div class="navbarSearchContainer_Bca1"><div class="navbar__search"><span aria-label="expand searchbar" role="button" class="search-icon" tabindex="0"></span><input id="search_input_react" type="search" placeholder="Loading..." aria-label="Search" class="navbar__search-input search-bar" disabled=""></div></div></div></div><div role="presentation" class="navbar-sidebar__backdrop"></div></nav><div id="__docusaurus_skipToContent_fallback" class="theme-layout-main main-wrapper mainWrapper_z2l0 docPageContainer_wNNk"><div class="docPage_Dpn1"><div class="docSidebarContainer_o_re"><div class="sidebar_njMd"><nav aria-label="Docs sidebar" class="menu thin-scrollbar menu_SIkG"><ul class="theme-doc-sidebar-menu menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/BaseObject"><span title="​Base​Object" class="linkLabel_WmDU">​Base​Object</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/Roam"><span title="​Roam" class="linkLabel_WmDU">​Roam</span></a></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/TableManager"><span title="TableManager" class="categoryLinkLabel_W154">TableManager</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/TableReplicator"><span title="TableReplicator" class="categoryLinkLabel_W154">TableReplicator</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/NetWire"><span title="NetWire" class="categoryLinkLabel_W154">NetWire</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/DragDrop"><span title="DragDrop" class="categoryLinkLabel_W154">DragDrop</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Component"><span title="Instance Component Systems" class="categoryLinkLabel_W154">Instance Component Systems</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/DropletManager"><span title="DropletManager" class="categoryLinkLabel_W154">DropletManager</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/CmdrHandler"><span title="Admin Commands [Cmdr]" class="categoryLinkLabel_W154">Admin Commands [Cmdr]</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/Queue"><span title="Data Structures" class="categoryLinkLabel_W154">Data Structures</span></a></div></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret menu__link--active" role="button" aria-expanded="true" href="/ModulesOnRails/api/GraphUtil"><span title="Graph Utilities" class="categoryLinkLabel_W154">Graph Utilities</span></a></div><ul class="menu__list"><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/GraphUtil"><span title="​Graph​Util" class="linkLabel_WmDU">​Graph​Util</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link menu__link--active" aria-current="page" tabindex="0" href="/ModulesOnRails/api/Connectivity"><span title="​Connectivity" class="linkLabel_WmDU">​Connectivity</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/BFS"><span title="​B​F​S" class="linkLabel_WmDU">​B​F​S</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/DFS"><span title="​D​F​S" class="linkLabel_WmDU">​D​F​S</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/Dijkstra"><span title="​Dijkstra" class="linkLabel_WmDU">​Dijkstra</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/AStar"><span title="​A​Star" class="linkLabel_WmDU">​A​Star</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/BellmanFord"><span title="​Bellman​Ford" class="linkLabel_WmDU">​Bellman​Ford</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/MST"><span title="​M​S​T" class="linkLabel_WmDU">​M​S​T</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-2 menu__list-item"><a class="menu__link" tabindex="0" href="/ModulesOnRails/api/TopologicalSort"><span title="​Topological​Sort" class="linkLabel_WmDU">​Topological​Sort</span></a></li></ul></li><li class="theme-doc-sidebar-item-category theme-doc-sidebar-item-category-level-1 menu__list-item menu__list-item--collapsed"><div class="menu__list-item-collapsible"><a class="categoryLink_byQd menu__link menu__link--sublist menu__link--sublist-caret" role="button" aria-expanded="false" href="/ModulesOnRails/api/AdjustableTimer"><span title="[UNRELEASED]" class="categoryLinkLabel_W154">[UNRELEASED]</span></a></div></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ObjectCache"><span title="​Object​Cache" class="linkLabel_WmDU">​Object​Cache</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/ProbabilityDistributor"><span title="​Probability​Distributor" class="linkLabel_WmDU">​Probability​Distributor</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/PromValue"><span title="​Prom​Value" class="linkLabel_WmDU">​Prom​Value</span></a></li><li class="theme-doc-sidebar-item-link theme-doc-sidebar-item-link-level-1 menu__list-item"><a class="menu__link" href="/ModulesOnRails/api/t"><span title="t" class="linkLabel_WmDU">t</span></a></li></ul></nav></div></div><main class="docMainContainer_HJE1"><div class="container padding-vert--lg"><div class="row"><div class="col docItemCol_MU3C"><div class="docItemContainer_Wv98"><article><div class="member_J0w1 markdown"><div class="tocCollapsible_ETCw theme-doc-toc-mobile tocMobile_oUs_"><button type="button" class="clean-btn tocCollapsibleButton_TO0P">On this page</button></div><header><h1 class="docTitle_mZRt" style="text-decoration:none"><span style="display:inline-block">Connectivity</span></h1><div class="luaClassTags_EipM"></div><div>
+<p>
+  Graph connectivity queries: reachability, components, cycle detection,
+  bipartiteness, and strongly connected components.
+</p>
+<p>
+  Most functions come in two flavours depending on whether the graph is
+  <strong>directed</strong> or <strong>undirected</strong>. Check each function's <code>directed</code> /
+  <code>undirected</code> tags to confirm which it operates on.
+</p>
+<h3><code>allVertices</code> parameter</h3>
+<p>
+  Several functions require <code>allVertices: { V }</code> — the complete list of
+  vertices in the graph. This is needed to find disconnected components
+  and to seed multi-source traversals.
+</p>
+<p>
+  All functions accept either callback form for <code>GetNeighbors</code> — see
+  <a href="/ModulesOnRails/api/GraphUtil">GraphUtil</a> for details.
+</p>
+<h3>Example graphs used in the docs below</h3>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- Undirected: one component A─B─C─D, plus a separate component E─F</span>
+<span class="token comment">--  A ── B ── C ── D        E ── F</span>
+<span class="token keyword">local</span> undirAdj <span class="token operator">=</span> <span class="token punctuation">{</span>
+    A <span class="token operator">=</span> <span class="token punctuation">{</span><span class="token string">"B"</span><span class="token punctuation">}</span><span class="token punctuation">,</span> B <span class="token operator">=</span> <span class="token punctuation">{</span><span class="token string">"A"</span><span class="token punctuation">,</span><span class="token string">"C"</span><span class="token punctuation">}</span><span class="token punctuation">,</span> C <span class="token operator">=</span> <span class="token punctuation">{</span><span class="token string">"B"</span><span class="token punctuation">,</span><span class="token string">"D"</span><span class="token punctuation">}</span><span class="token punctuation">,</span> D <span class="token operator">=</span> <span class="token punctuation">{</span><span class="token string">"C"</span><span class="token punctuation">}</span><span class="token punctuation">,</span>
+    E <span class="token operator">=</span> <span class="token punctuation">{</span><span class="token string">"F"</span><span class="token punctuation">}</span><span class="token punctuation">,</span> F <span class="token operator">=</span> <span class="token punctuation">{</span><span class="token string">"E"</span><span class="token punctuation">}</span><span class="token punctuation">,</span>
+<span class="token punctuation">}</span>
+
+<span class="token comment">-- Directed: a cycle A→B→C→A, plus an acyclic edge D→E</span>
+<span class="token comment">--  A ──→ B ──→ C          D ──→ E</span>
+<span class="token comment">--  ▲           │</span>
+<span class="token comment">--  └───────────┘</span>
+<span class="token keyword">local</span> dirAdj <span class="token operator">=</span> <span class="token punctuation">{</span>
+    A <span class="token operator">=</span> <span class="token punctuation">{</span><span class="token string">"B"</span><span class="token punctuation">}</span><span class="token punctuation">,</span> B <span class="token operator">=</span> <span class="token punctuation">{</span><span class="token string">"C"</span><span class="token punctuation">}</span><span class="token punctuation">,</span> C <span class="token operator">=</span> <span class="token punctuation">{</span><span class="token string">"A"</span><span class="token punctuation">}</span><span class="token punctuation">,</span>
+    D <span class="token operator">=</span> <span class="token punctuation">{</span><span class="token string">"E"</span><span class="token punctuation">}</span><span class="token punctuation">,</span> E <span class="token operator">=</span> <span class="token punctuation">{</span><span class="token punctuation">}</span><span class="token punctuation">,</span>
+<span class="token punctuation">}</span>
+</code></pre>
+</div></header><h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="functions">Functions<a href="#functions" class="hash-link" aria-label="Direct link to Functions" title="Direct link to Functions" translate="no">​</a></h2><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="isConnected"><code style="text-decoration:none">isConnected</code><a href="#isConnected" class="hash-link" aria-label="Direct link to isConnected" title="Direct link to isConnected" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#925FB9;color:#925FB9">directed</span><span class="docTag__6UZ" style="border-color:#ff5252;color:#ff5252">undirected</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/graphutil/src/Connectivity.luau#L72"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Connectivity<!-- -->.</code><code class="green_DgR4">isConnected</code><code>(</code><div class="inset_uKQm"><div><code>start<!-- -->: </code><code class="blue_P4bS">V</code><code>,</code></div><div><code>goal<!-- -->: </code><code class="blue_P4bS">V</code><code>,</code></div><div><code>getNeighbors<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/GraphUtil#GetNeighbors">GetNeighbors</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">V</code><code class="op_lSLc">&gt;</code></div></div><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
+<p>
+  Returns <code>true</code> if <code>goal</code> is reachable from <code>start</code> by following edges
+  (directed or undirected depending on your <code>getNeighbors</code> callback).
+</p>
+<p>This is a single-target BFS and short-circuits as soon as <code>goal</code> is found.</p>
+<pre class="language-lua"><code class="language-lua"><span class="token function">print</span><span class="token punctuation">(</span>Connectivity<span class="token punctuation">.</span><span class="token function">isConnected</span><span class="token punctuation">(</span><span class="token string">"A"</span><span class="token punctuation">,</span> <span class="token string">"D"</span><span class="token punctuation">,</span> getNeighbors<span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token comment">-- true</span>
+<span class="token function">print</span><span class="token punctuation">(</span>Connectivity<span class="token punctuation">.</span><span class="token function">isConnected</span><span class="token punctuation">(</span><span class="token string">"A"</span><span class="token punctuation">,</span> <span class="token string">"E"</span><span class="token punctuation">,</span> getNeighbors<span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token comment">-- false (different component)</span>
+</code></pre>
+<p><em>Time complexity:</em> <code>O(V + E)</code> worst case, often much better.</p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="components"><code style="text-decoration:none">components</code><a href="#components" class="hash-link" aria-label="Direct link to components" title="Direct link to components" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#ff5252;color:#ff5252">undirected</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/graphutil/src/Connectivity.luau#L121"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Connectivity<!-- -->.</code><code class="green_DgR4">components</code><code>(</code><div class="inset_uKQm"><div><code>allVertices<!-- -->: </code><code class="purple_ieR2">{</code><code class="blue_P4bS">V</code><code class="purple_ieR2">}</code><code>,</code></div><div><code>getNeighbors<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/GraphUtil#GetNeighbors">GetNeighbors</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">V</code><code class="op_lSLc">&gt;</code></div></div><code>) → </code><code class="purple_ieR2">{</code><code class="green_DgR4">{</code><code class="blue_P4bS">V</code><code class="green_DgR4">}</code><code class="purple_ieR2">}</code></div><div>
+<p>
+  Finds all <strong>connected components</strong> of an undirected graph and returns them
+  as an array of vertex arrays. Each inner array is one component; vertices
+  within a component are in BFS discovery order.
+</p>
+<p>
+  Pass a bidirectional <code>getNeighbors</code> (each undirected edge appears in both
+  directions) so that every connected group is fully explored.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token keyword">local</span> comps <span class="token operator">=</span> Connectivity<span class="token punctuation">.</span><span class="token function">components</span><span class="token punctuation">(</span><span class="token punctuation">{</span><span class="token string">"A"</span><span class="token punctuation">,</span><span class="token string">"B"</span><span class="token punctuation">,</span><span class="token string">"C"</span><span class="token punctuation">,</span><span class="token string">"D"</span><span class="token punctuation">,</span><span class="token string">"E"</span><span class="token punctuation">,</span><span class="token string">"F"</span><span class="token punctuation">}</span><span class="token punctuation">,</span> getNeighbors<span class="token punctuation">)</span>
+<span class="token comment">-- { {"A","B","C","D"}, {"E","F"} }  (order may vary)</span>
+</code></pre>
+<p><em>Time complexity:</em> <code>O(V + E)</code></p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="hasDirectedCycle"><code style="text-decoration:none">hasDirectedCycle</code><a href="#hasDirectedCycle" class="hash-link" aria-label="Direct link to hasDirectedCycle" title="Direct link to hasDirectedCycle" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#925FB9;color:#925FB9">directed</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/graphutil/src/Connectivity.luau#L184"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Connectivity<!-- -->.</code><code class="green_DgR4">hasDirectedCycle</code><code>(</code><div class="inset_uKQm"><div><code>allVertices<!-- -->: </code><code class="purple_ieR2">{</code><code class="blue_P4bS">V</code><code class="purple_ieR2">}</code><code>,</code></div><div><code>getNeighbors<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/GraphUtil#GetNeighbors">GetNeighbors</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">V</code><code class="op_lSLc">&gt;</code></div></div><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
+<p>Returns <code>true</code> if the <strong>directed</strong> graph contains at least one cycle.</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- dirAdj: A→B→C→A forms a cycle</span>
+<span class="token function">print</span><span class="token punctuation">(</span>Connectivity<span class="token punctuation">.</span><span class="token function">hasDirectedCycle</span><span class="token punctuation">(</span><span class="token punctuation">{</span><span class="token string">"A"</span><span class="token punctuation">,</span><span class="token string">"B"</span><span class="token punctuation">,</span><span class="token string">"C"</span><span class="token punctuation">,</span><span class="token string">"D"</span><span class="token punctuation">,</span><span class="token string">"E"</span><span class="token punctuation">}</span><span class="token punctuation">,</span> getNeighbors<span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token comment">-- true</span>
+</code></pre>
+
+  
+    
+    
+      <div class="admonition admonition-caution alert alert--warning">
+        <div class="admonition-heading">
+          <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+                <path d="M8.893 1.5c-.183-.31-.52-.5-.887-.5s-.703.19-.886.5L.138 13.499a.98.98 0 0 0 0 1.001c.193.31.53.501.886.501h13.964c.367 0 .704-.19.877-.5a1.03 1.03 0 0 0 .01-1.002L8.893 1.5zm.133 11.497H6.987v-2.003h2.039v2.003zm0-3.004H6.987V5.987h2.039v4.006z"></path>
+              </svg></span><span class="admonition-title">Directed graphs only</span></h5>
+        </div>
+        <div class="admonition-content">
+          <p>For undirected cycle detection use <a href="#hasUndirectedCycle"><code>hasUndirectedCycle</code></a>.</p>
+        </div>
+      </div>
+    
+  
+
+<p>
+  :::info Internals
+  Uses iterative DFS with a three-colour marking scheme:
+</p>
+<ul>
+  <li><strong>white</strong> (0) — unvisited</li>
+  <li><strong>grey</strong> (1) — on the current DFS path (in the recursion stack)</li>
+  <li><strong>black</strong> (2) — fully processed</li>
+</ul>
+<p>
+  A back edge (grey → grey) indicates a cycle.
+  :::
+</p>
+<p><em>Time complexity:</em> <code>O(V + E)</code></p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="hasUndirectedCycle"><code style="text-decoration:none">hasUndirectedCycle</code><a href="#hasUndirectedCycle" class="hash-link" aria-label="Direct link to hasUndirectedCycle" title="Direct link to hasUndirectedCycle" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#ff5252;color:#ff5252">undirected</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/graphutil/src/Connectivity.luau#L246"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Connectivity<!-- -->.</code><code class="green_DgR4">hasUndirectedCycle</code><code>(</code><div class="inset_uKQm"><div><code>allVertices<!-- -->: </code><code class="purple_ieR2">{</code><code class="blue_P4bS">V</code><code class="purple_ieR2">}</code><code>,</code></div><div><code>getNeighbors<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/GraphUtil#GetNeighbors">GetNeighbors</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">V</code><code class="op_lSLc">&gt;</code></div></div><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
+<p>
+  Returns <code>true</code> if the <strong>undirected</strong> graph contains at least one cycle,
+  using BFS with parent tracking. An edge to an already-visited non-parent
+  vertex indicates a cycle.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- A-B-C-A forms an undirected cycle</span>
+<span class="token function">print</span><span class="token punctuation">(</span>Connectivity<span class="token punctuation">.</span><span class="token function">hasUndirectedCycle</span><span class="token punctuation">(</span><span class="token punctuation">{</span><span class="token string">"A"</span><span class="token punctuation">,</span><span class="token string">"B"</span><span class="token punctuation">,</span><span class="token string">"C"</span><span class="token punctuation">}</span><span class="token punctuation">,</span> getNeighbors<span class="token punctuation">)</span><span class="token punctuation">)</span> <span class="token comment">-- true</span>
+</code></pre>
+
+  
+    
+    
+      <div class="admonition admonition-caution alert alert--warning">
+        <div class="admonition-heading">
+          <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+                <path d="M8.893 1.5c-.183-.31-.52-.5-.887-.5s-.703.19-.886.5L.138 13.499a.98.98 0 0 0 0 1.001c.193.31.53.501.886.501h13.964c.367 0 .704-.19.877-.5a1.03 1.03 0 0 0 .01-1.002L8.893 1.5zm.133 11.497H6.987v-2.003h2.039v2.003zm0-3.004H6.987V5.987h2.039v4.006z"></path>
+              </svg></span><span class="admonition-title">Undirected graphs only</span></h5>
+        </div>
+        <div class="admonition-content">
+          <p>For directed cycle detection use <a href="#hasDirectedCycle"><code>hasDirectedCycle</code></a>.</p>
+        </div>
+      </div>
+    
+  
+
+<p><em>Time complexity:</em> <code>O(V + E)</code></p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="isBipartite"><code style="text-decoration:none">isBipartite</code><a href="#isBipartite" class="hash-link" aria-label="Direct link to isBipartite" title="Direct link to isBipartite" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#ff5252;color:#ff5252">undirected</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/graphutil/src/Connectivity.luau#L309"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Connectivity<!-- -->.</code><code class="green_DgR4">isBipartite</code><code>(</code><div class="inset_uKQm"><div><code>start<!-- -->: </code><code class="blue_P4bS">V</code><code>,</code></div><div><code>getNeighbors<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/GraphUtil#GetNeighbors">GetNeighbors</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">V</code><code class="op_lSLc">&gt;</code></div></div><code>) → </code><code class="blue_P4bS">boolean</code></div><div>
+<p>
+  Returns <code>true</code> if the graph component reachable from <code>start</code> is
+  <strong>bipartite</strong> — its vertices can be divided into two groups such that
+  every edge connects a vertex in one group to a vertex in the other.
+</p>
+<p>
+  Uses BFS two-colouring: colour <code>start</code> with 0 and alternate 0/1 for each
+  discovered vertex. If a neighbour already has the same colour as the
+  current vertex, the graph is not bipartite.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- A-B-C-D square (even cycle) → bipartite</span>
+<span class="token comment">-- A-B-C triangle (odd cycle)   → not bipartite</span>
+<span class="token function">print</span><span class="token punctuation">(</span>Connectivity<span class="token punctuation">.</span><span class="token function">isBipartite</span><span class="token punctuation">(</span><span class="token string">"A"</span><span class="token punctuation">,</span> getNeighbors<span class="token punctuation">)</span><span class="token punctuation">)</span>
+</code></pre>
+
+  
+    
+    
+      <div class="admonition admonition-note alert alert--secondary">
+        <div class="admonition-heading">
+          <h5><span class="admonition-icon"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="16" viewBox="0 0 14 16">
+                <path d="M6.3 5.69a.942.942 0 0 1-.28-.7c0-.28.09-.52.28-.7.19-.18.42-.28.7-.28.28 0 .52.09.7.28.18.19.28.42.28.7 0 .28-.09.52-.28.7a1 1 0 0 1-.7.3c-.28 0-.52-.11-.7-.3zM8 7.99c-.02-.25-.11-.48-.31-.69-.2-.19-.42-.3-.69-.31H6c-.27.02-.48.13-.69.31-.2.2-.3.44-.31.69h1v3c.02.27.11.5.31.69.2.2.42.31.69.31h1c.27 0 .48-.11.69-.31.2-.19.3-.42.31-.69H8V7.98v.01zM7 2.3c-3.14 0-5.7 2.54-5.7 5.68 0 3.14 2.56 5.7 5.7 5.7s5.7-2.55 5.7-5.7c0-3.15-2.56-5.69-5.7-5.69v.01zM7 .98c3.86 0 7 3.14 7 7s-3.14 7-7 7-7-3.12-7-7 3.14-7 7-7z"></path>
+              </svg></span><span class="admonition-title">Per-component</span></h5>
+        </div>
+        <div class="admonition-content">
+          <p>
+            This only checks the component reachable from <code>start</code>. Call once per
+            component (e.g. using <a href="#components"><code>components</code></a>) to check the full graph.
+          </p>
+        </div>
+      </div>
+    
+  
+
+<p><em>Time complexity:</em> <code>O(V + E)</code></p>
+</div><div class="divider_rE5g"></div><h3 class="anchor anchorTargetStickyNavbar_Vzrq" id="stronglyConnectedComponents"><code style="text-decoration:none">stronglyConnectedComponents</code><a href="#stronglyConnectedComponents" class="hash-link" aria-label="Direct link to stronglyConnectedComponents" title="Direct link to stronglyConnectedComponents" translate="no">​</a></h3><span class="docTag__6UZ" style="border-color:#925FB9;color:#925FB9">directed</span><div class="repositoryDetailsContainer_BPdw"><a class="sourceButton_sEho" href="https://github.com/Raild3x/ModulesOnRails/blob/main/lib/graphutil/src/Connectivity.luau#L358"><div class="sourceButtonText_Vh0m">&lt;/&gt;</div></a></div><div class="memberString_GwaU"><code>Connectivity<!-- -->.</code><code class="green_DgR4">stronglyConnectedComponents</code><code>(</code><div class="inset_uKQm"><div><code>allVertices<!-- -->: </code><code class="purple_ieR2">{</code><code class="blue_P4bS">V</code><code class="purple_ieR2">}</code><code>,</code></div><div><code>getNeighbors<!-- -->: </code><code class="blue_P4bS"><a style="text-decoration:underline;color:inherit" href="/ModulesOnRails/api/GraphUtil#GetNeighbors">GetNeighbors</a></code><code class="op_lSLc">&lt;</code><code class="blue_P4bS">V</code><code class="op_lSLc">&gt;</code></div></div><code>) → </code><code class="purple_ieR2">{</code><code class="green_DgR4">{</code><code class="blue_P4bS">V</code><code class="green_DgR4">}</code><code class="purple_ieR2">}</code></div><div>
+<p>
+  Finds all <strong>Strongly Connected Components</strong> (SCCs) of a directed graph
+  using <strong>Kosaraju's algorithm</strong> and returns them as an array of vertex
+  arrays. Within each SCC, every vertex can reach every other vertex.
+</p>
+<p>
+  Kosaraju's requires traversing the graph <em>and</em> its reverse. Because the
+  library's callback design doesn't expose a reverse-edge callback, this
+  function builds the reverse adjacency internally during the first DFS pass.
+</p>
+<pre class="language-lua"><code class="language-lua"><span class="token comment">-- A→B→C→A  (one SCC), D→E (two singleton SCCs)</span>
+<span class="token keyword">local</span> sccs <span class="token operator">=</span> Connectivity<span class="token punctuation">.</span><span class="token function">stronglyConnectedComponents</span><span class="token punctuation">(</span>
+    <span class="token punctuation">{</span><span class="token string">"A"</span><span class="token punctuation">,</span><span class="token string">"B"</span><span class="token punctuation">,</span><span class="token string">"C"</span><span class="token punctuation">,</span><span class="token string">"D"</span><span class="token punctuation">,</span><span class="token string">"E"</span><span class="token punctuation">}</span><span class="token punctuation">,</span> getNeighbors
+<span class="token punctuation">)</span>
+<span class="token comment">-- { {"A","B","C"}, {"D"}, {"E"} }  (order may vary)</span>
+</code></pre>
+<p><em>Time complexity:</em> <code>O(V + E)</code></p>
+</div></div></article></div><details><summary>Show raw api</summary><pre style="max-width:100%;white-space:pre-wrap">{
+    &quot;functions&quot;: [
+        {
+            &quot;name&quot;: &quot;isConnected&quot;,
+            &quot;desc&quot;: &quot;Returns `true` if `goal` is reachable from `start` by following edges\n(directed or undirected depending on your `getNeighbors` callback).\n\nThis is a single-target BFS and short-circuits as soon as `goal` is found.\n\n```lua\nprint(Connectivity.isConnected(\&quot;A\&quot;, \&quot;D\&quot;, getNeighbors)) -- true\nprint(Connectivity.isConnected(\&quot;A\&quot;, \&quot;E\&quot;, getNeighbors)) -- false (different component)\n```\n\n*Time complexity:* `O(V + E)` worst case, often much better.&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;start&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;V&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;goal&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;V&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;getNeighbors&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;GetNeighbors&lt;V&gt;&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;boolean\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;tags&quot;: [
+                &quot;directed&quot;,
+                &quot;undirected&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 72,
+                &quot;path&quot;: &quot;lib/graphutil/src/Connectivity.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;components&quot;,
+            &quot;desc&quot;: &quot;Finds all **connected components** of an undirected graph and returns them\nas an array of vertex arrays.  Each inner array is one component; vertices\nwithin a component are in BFS discovery order.\n\nPass a bidirectional `getNeighbors` (each undirected edge appears in both\ndirections) so that every connected group is fully explored.\n\n```lua\nlocal comps = Connectivity.components({\&quot;A\&quot;,\&quot;B\&quot;,\&quot;C\&quot;,\&quot;D\&quot;,\&quot;E\&quot;,\&quot;F\&quot;}, getNeighbors)\n-- { {\&quot;A\&quot;,\&quot;B\&quot;,\&quot;C\&quot;,\&quot;D\&quot;}, {\&quot;E\&quot;,\&quot;F\&quot;} }  (order may vary)\n```\n\n*Time complexity:* `O(V + E)`&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;allVertices&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{ V }&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;getNeighbors&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;GetNeighbors&lt;V&gt;&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{ { V } }\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;tags&quot;: [
+                &quot;undirected&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 121,
+                &quot;path&quot;: &quot;lib/graphutil/src/Connectivity.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;hasDirectedCycle&quot;,
+            &quot;desc&quot;: &quot;Returns `true` if the **directed** graph contains at least one cycle.\n\n```lua\n-- dirAdj: A→B→C→A forms a cycle\nprint(Connectivity.hasDirectedCycle({\&quot;A\&quot;,\&quot;B\&quot;,\&quot;C\&quot;,\&quot;D\&quot;,\&quot;E\&quot;}, getNeighbors)) -- true\n```\n\n:::caution Directed graphs only\nFor undirected cycle detection use [`hasUndirectedCycle`](#hasUndirectedCycle).\n:::\n\n:::info Internals\nUses iterative DFS with a three-colour marking scheme:\n- **white** (0) — unvisited\n- **grey** (1) — on the current DFS path (in the recursion stack)\n- **black** (2) — fully processed\n\nA back edge (grey → grey) indicates a cycle.\n:::\n\n*Time complexity:* `O(V + E)`&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;allVertices&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{ V }&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;getNeighbors&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;GetNeighbors&lt;V&gt;&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;boolean\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;tags&quot;: [
+                &quot;directed&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 184,
+                &quot;path&quot;: &quot;lib/graphutil/src/Connectivity.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;hasUndirectedCycle&quot;,
+            &quot;desc&quot;: &quot;Returns `true` if the **undirected** graph contains at least one cycle,\nusing BFS with parent tracking.  An edge to an already-visited non-parent\nvertex indicates a cycle.\n\n```lua\n-- A-B-C-A forms an undirected cycle\nprint(Connectivity.hasUndirectedCycle({\&quot;A\&quot;,\&quot;B\&quot;,\&quot;C\&quot;}, getNeighbors)) -- true\n```\n\n:::caution Undirected graphs only\nFor directed cycle detection use [`hasDirectedCycle`](#hasDirectedCycle).\n:::\n\n*Time complexity:* `O(V + E)`&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;allVertices&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{ V }&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;getNeighbors&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;GetNeighbors&lt;V&gt;&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;boolean\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;tags&quot;: [
+                &quot;undirected&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 246,
+                &quot;path&quot;: &quot;lib/graphutil/src/Connectivity.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;isBipartite&quot;,
+            &quot;desc&quot;: &quot;Returns `true` if the graph component reachable from `start` is\n**bipartite** — its vertices can be divided into two groups such that\nevery edge connects a vertex in one group to a vertex in the other.\n\nUses BFS two-colouring: colour `start` with 0 and alternate 0/1 for each\ndiscovered vertex.  If a neighbour already has the same colour as the\ncurrent vertex, the graph is not bipartite.\n\n```lua\n-- A-B-C-D square (even cycle) → bipartite\n-- A-B-C triangle (odd cycle)   → not bipartite\nprint(Connectivity.isBipartite(\&quot;A\&quot;, getNeighbors))\n```\n\n:::note Per-component\nThis only checks the component reachable from `start`.  Call once per\ncomponent (e.g. using [`components`](#components)) to check the full graph.\n:::\n\n*Time complexity:* `O(V + E)`&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;start&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;V&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;getNeighbors&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;GetNeighbors&lt;V&gt;&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;boolean\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;tags&quot;: [
+                &quot;undirected&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 309,
+                &quot;path&quot;: &quot;lib/graphutil/src/Connectivity.luau&quot;
+            }
+        },
+        {
+            &quot;name&quot;: &quot;stronglyConnectedComponents&quot;,
+            &quot;desc&quot;: &quot;Finds all **Strongly Connected Components** (SCCs) of a directed graph\nusing **Kosaraju&#x27;s algorithm** and returns them as an array of vertex\narrays.  Within each SCC, every vertex can reach every other vertex.\n\nKosaraju&#x27;s requires traversing the graph *and* its reverse.  Because the\nlibrary&#x27;s callback design doesn&#x27;t expose a reverse-edge callback, this\nfunction builds the reverse adjacency internally during the first DFS pass.\n\n```lua\n-- A→B→C→A  (one SCC), D→E (two singleton SCCs)\nlocal sccs = Connectivity.stronglyConnectedComponents(\n    {\&quot;A\&quot;,\&quot;B\&quot;,\&quot;C\&quot;,\&quot;D\&quot;,\&quot;E\&quot;}, getNeighbors\n)\n-- { {\&quot;A\&quot;,\&quot;B\&quot;,\&quot;C\&quot;}, {\&quot;D\&quot;}, {\&quot;E\&quot;} }  (order may vary)\n```\n\n*Time complexity:* `O(V + E)`&quot;,
+            &quot;params&quot;: [
+                {
+                    &quot;name&quot;: &quot;allVertices&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{ V }&quot;
+                },
+                {
+                    &quot;name&quot;: &quot;getNeighbors&quot;,
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;GetNeighbors&lt;V&gt;&quot;
+                }
+            ],
+            &quot;returns&quot;: [
+                {
+                    &quot;desc&quot;: &quot;&quot;,
+                    &quot;lua_type&quot;: &quot;{ { V } }\n&quot;
+                }
+            ],
+            &quot;function_type&quot;: &quot;static&quot;,
+            &quot;tags&quot;: [
+                &quot;directed&quot;
+            ],
+            &quot;source&quot;: {
+                &quot;line&quot;: 358,
+                &quot;path&quot;: &quot;lib/graphutil/src/Connectivity.luau&quot;
+            }
+        }
+    ],
+    &quot;properties&quot;: [],
+    &quot;types&quot;: [],
+    &quot;name&quot;: &quot;Connectivity&quot;,
+    &quot;desc&quot;: &quot;Graph connectivity queries: reachability, components, cycle detection,\nbipartiteness, and strongly connected components.\n\nMost functions come in two flavours depending on whether the graph is\n**directed** or **undirected**.  Check each function&#x27;s `directed` /\n`undirected` tags to confirm which it operates on.\n\n### `allVertices` parameter\n\nSeveral functions require `allVertices: { V }` — the complete list of\nvertices in the graph.  This is needed to find disconnected components\nand to seed multi-source traversals.\n\nAll functions accept either callback form for `GetNeighbors` — see\n[GraphUtil](/api/GraphUtil) for details.\n\n### Example graphs used in the docs below\n\n```lua\n-- Undirected: one component A─B─C─D, plus a separate component E─F\n--  A ── B ── C ── D        E ── F\nlocal undirAdj = {\n    A = {\&quot;B\&quot;}, B = {\&quot;A\&quot;,\&quot;C\&quot;}, C = {\&quot;B\&quot;,\&quot;D\&quot;}, D = {\&quot;C\&quot;},\n    E = {\&quot;F\&quot;}, F = {\&quot;E\&quot;},\n}\n\n-- Directed: a cycle A→B→C→A, plus an acyclic edge D→E\n--  A ──→ B ──→ C          D ──→ E\n--  ▲           │\n--  └───────────┘\nlocal dirAdj = {\n    A = {\&quot;B\&quot;}, B = {\&quot;C\&quot;}, C = {\&quot;A\&quot;},\n    D = {\&quot;E\&quot;}, E = {},\n}\n```&quot;,
+    &quot;source&quot;: {
+        &quot;line&quot;: 44,
+        &quot;path&quot;: &quot;lib/graphutil/src/Connectivity.luau&quot;
+    }
+}</pre></details></div><div class="col col--3"><div class="tableOfContents_bqdL thin-scrollbar"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#functions" class="table-of-contents__link toc-highlight">Functions</a><ul><li><a href="#components" class="table-of-contents__link toc-highlight">.components</a></li><li><a href="#hasDirectedCycle" class="table-of-contents__link toc-highlight">.hasDirectedCycle</a></li><li><a href="#hasUndirectedCycle" class="table-of-contents__link toc-highlight">.hasUndirectedCycle</a></li><li><a href="#isBipartite" class="table-of-contents__link toc-highlight">.isBipartite</a></li><li><a href="#isConnected" class="table-of-contents__link toc-highlight">.isConnected</a></li><li><a href="#stronglyConnectedComponents" class="table-of-contents__link toc-highlight">.stronglyConnectedComponents</a></li></ul></li></ul></div></div></div></div></main></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 Raild3x. Built with Moonwave and Docusaurus.</div></div></div></footer></div>
+</body>
+</html>
