@@ -1,0 +1,17 @@
+[package]
+name = "raild3x/graphutil"
+description = "A collection of Graph utilities"
+authors = ["Logan Hunt (Raildex)"]
+version = "0.1.0"
+license = "MIT"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+
+[custom]
+# The properly capitalized and spaced name of the library
+formattedName = "Graph Utilities"
+# The intro page for the documentation
+docsLink = "GraphUtil"
+
+[dependencies]
+Heap = "raild3x/heap@2.1.3"
