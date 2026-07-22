@@ -55,7 +55,7 @@
 	    return math.abs(v.X - goal.X) + math.abs(v.Y - goal.Y)
 	end
 
-	local result = AStar.search(
+	local result = AStar.shortestPath(
 	    Vector2.new(0, 0),
 	    Vector2.new(5, 5),
 	    getNeighbors,
@@ -65,8 +65,8 @@
 	```
 ]=]
 
-local Types = require(script.Parent.Types)
-local Heap = require(script.Parent.Parent.Heap)
+local Types = require("./Types")
+local Heap = require("../Heap")
 
 type GetNeighbors<V> = Types.GetNeighbors<V>
 type GetWeight<V> = Types.GetWeight<V>
@@ -86,7 +86,7 @@ local AStar = {}
 	the known cheapest cost from `start` to `v` and `h` is the heuristic.
 
 	```lua
-	local result = AStar.search(start, goal, getNeighbors, getWeight, heuristic)
+	local result = AStar.shortestPath(start, goal, getNeighbors, getWeight, heuristic)
 	if result then
 	    print("Path cost:", result.cost)
 	    for _, v in result.path do print(v) end
@@ -96,7 +96,7 @@ local AStar = {}
 	*Time complexity:* `O((V + E) log V)` in the worst case, but typically
 	much better in practice due to heuristic pruning.
 ]=]
-function AStar.search<V>(
+function AStar.shortestPath<V>(
 	start: V,
 	goal: V,
 	getNeighbors: GetNeighbors<V>,

@@ -17,9 +17,9 @@
 	### Example graph
 
 	```lua
-	--   A — B — D
-	--   |       |
-	--   C ——————+
+	--  A ─── B ─── D
+	--  │           │
+	--  C ──────────┘
 
 	local adj = {
 	    A = {"B", "C"},
@@ -34,7 +34,7 @@
 	```
 ]=]
 
-local Types = require(script.Parent.Types)
+local Types = require("./Types")
 
 type GetNeighbors<V> = Types.GetNeighbors<V>
 type Iterator<V> = Types.Iterator<V>
@@ -119,8 +119,10 @@ end
 	breadth-first order.  The iterator drives the BFS internally via a
 	closure — no coroutines are used.
 
+	Aliased as [`BFS.forEach`](#forEach).
+
 	```lua
-	local next = BFS.forEach("A", getNeighbors)
+	local next = BFS.toIterator("A", getNeighbors)
 	print(next()) -- "A"
 	print(next()) -- "B"
 	print(next()) -- "C"
@@ -132,7 +134,7 @@ end
 	The iterator is compatible with a plain `for` loop since Luau supports
 	`for x in fn do` for `() -> T?` iterators:
 	```lua
-	for vertex in BFS.forEach("A", getNeighbors) do
+	for vertex in BFS.toIterator("A", getNeighbors) do
 	    print(vertex)
 	end
 	```
@@ -140,7 +142,7 @@ end
 
 	*Time complexity per call:* amortised `O(degree(V))`
 ]=]
-function BFS.forEach<V>(start: V, getNeighbors: GetNeighbors<V>): Iterator<V>
+function BFS.toIterator<V>(start: V, getNeighbors: GetNeighbors<V>): Iterator<V>
 	local queue: { V } = { start }
 	local head = 1
 	local visited: { [V]: boolean } = { [start] = true }
@@ -163,6 +165,17 @@ function BFS.forEach<V>(start: V, getNeighbors: GetNeighbors<V>): Iterator<V>
 		return vertex
 	end
 end
+
+--[=[
+	@within BFS
+	@function forEach
+	@param start V
+	@param getNeighbors GetNeighbors<V>
+	@return Iterator<V>
+
+	Alias of [`BFS.toIterator`](#toIterator).
+]=]
+BFS.forEach = BFS.toIterator
 
 --[=[
 	@within BFS
@@ -229,6 +242,152 @@ function BFS.shortestPath<V>(start: V, goal: V, getNeighbors: GetNeighbors<V>): 
 	end
 
 	return { path = path, cost = #path - 1 }
+end
+
+--[=[
+	@within BFS
+
+	Finds the **shortest path** (fewest hops) between `start` and `goal` by
+	growing a BFS frontier from *both* ends simultaneously and stopping as
+	soon as the two frontiers are provably guaranteed to have met at the
+	shortest possible point.  Returns the same [PathResult](/api/GraphUtil#PathResult)
+	as [`BFS.shortestPath`](#shortestPath), or `nil` if `goal` is unreachable.
+
+	On large, densely-branching graphs this explores far fewer vertices than
+	a single-directional search — each side only needs to reach roughly
+	half the hop-distance, so the total number of vertices visited grows
+	with the *branching factor to the power of half the distance* instead of
+	the full distance.
+
+	```lua
+	local result = BFS.bidirectionalShortestPath("A", "D", getNeighbors)
+	-- result.path == { "A", "B", "D" }  (or { "A", "C", "D" })
+	-- result.cost == 2
+	```
+
+	:::caution Directed graphs
+	Growing a frontier backward from `goal` requires walking edges in
+	reverse.  By default this function reuses `getNeighbors` for both
+	directions, which is only correct for **undirected** graphs.  For a
+	directed graph, pass a third callback that returns the *predecessors* of
+	a vertex (i.e. `getReversedNeighbors(v)` returns every `u` such that
+	`u → v` is an edge):
+
+	```lua
+	-- Directed graph where reverseAdj[v] lists v's predecessors
+	local function getReversedNeighbors(v)
+	    return reverseAdj[v]
+	end
+
+	local result = BFS.bidirectionalShortestPath("A", "D", getNeighbors, getReversedNeighbors)
+	```
+	:::
+
+	*Time complexity:* `O(V + E)` worst case, but typically `O(b^(d/2))` for
+	a graph with branching factor `b` and hop-distance `d` between `start`
+	and `goal`.
+]=]
+function BFS.bidirectionalShortestPath<V>(
+	start: V,
+	goal: V,
+	getNeighbors: GetNeighbors<V>,
+	getReversedNeighbors: GetNeighbors<V>?
+): PathResult<V>?
+	if start == goal then
+		return { path = { start }, cost = 0 }
+	end
+
+	local getReverse: GetNeighbors<V> = getReversedNeighbors or getNeighbors
+
+	-- Distance-from-root maps double as visited sets for each side.
+	local fDist: { [V]: number } = { [start] = 0 }
+	local bDist: { [V]: number } = { [goal] = 0 }
+	local fParent: { [V]: V } = {}
+	local bParent: { [V]: V } = {}
+
+	local fQueue: { V } = { start }
+	local fHead = 1
+	local bQueue: { V } = { goal }
+	local bHead = 1
+
+	local best = math.huge
+	local meet: V? = nil
+
+	-- A newly-discovered vertex is a candidate meeting point only if the
+	-- other side has already reached it; keep the cheapest such candidate.
+	local function tryMeet(vertex: V)
+		local fd, bd = fDist[vertex], bDist[vertex]
+		if fd ~= nil and bd ~= nil and fd + bd < best then
+			best = fd + bd
+			meet = vertex
+		end
+	end
+
+	while fHead <= #fQueue and bHead <= #bQueue do
+		-- The FIFO queues are non-decreasing in distance, so the head of
+		-- each queue is a valid lower bound on anything left to expand on
+		-- that side.  Once neither side can possibly beat `best`, stop.
+		local fFrontierDist = fDist[fQueue[fHead]]
+		local bFrontierDist = bDist[bQueue[bHead]]
+		if fFrontierDist + bFrontierDist >= best then
+			break
+		end
+
+		-- Expand whichever side is currently shallower; purely a
+		-- performance choice (keeps both frontiers roughly level), not
+		-- required for correctness.
+		if fFrontierDist <= bFrontierDist then
+			local vertex: V = fQueue[fHead]
+			fHead += 1
+			for neighbor in Types.eachNeighbor(vertex, getNeighbors) do
+				if fDist[neighbor] == nil then
+					fDist[neighbor] = fFrontierDist + 1
+					fParent[neighbor] = vertex
+					table.insert(fQueue, neighbor)
+					tryMeet(neighbor)
+				end
+			end
+		else
+			local vertex: V = bQueue[bHead]
+			bHead += 1
+			for neighbor in Types.eachNeighbor(vertex, getReverse) do
+				if bDist[neighbor] == nil then
+					bDist[neighbor] = bFrontierDist + 1
+					bParent[neighbor] = vertex
+					table.insert(bQueue, neighbor)
+					tryMeet(neighbor)
+				end
+			end
+		end
+	end
+
+	if meet == nil then
+		return nil
+	end
+
+	-- Reconstruct start → meet via fParent, then meet → goal via bParent.
+	local path: { V } = {}
+	local cur: V? = meet
+	while cur ~= nil do
+		local c: V = cur :: V
+		table.insert(path, 1, c)
+		if c == start then
+			break
+		end
+		cur = fParent[c]
+	end
+
+	cur = bParent[meet :: V]
+	while cur ~= nil do
+		local c: V = cur :: V
+		table.insert(path, c)
+		if c == goal then
+			break
+		end
+		cur = bParent[c]
+	end
+
+	return { path = path, cost = best }
 end
 
 --[=[

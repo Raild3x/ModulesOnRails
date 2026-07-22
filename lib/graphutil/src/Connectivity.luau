@@ -23,13 +23,17 @@
 	### Example graphs used in the docs below
 
 	```lua
-	-- Undirected: A-B-C-D  (one component), E-F (second component)
+	-- Undirected: one component A─B─C─D, plus a separate component E─F
+	--  A ── B ── C ── D        E ── F
 	local undirAdj = {
 	    A = {"B"}, B = {"A","C"}, C = {"B","D"}, D = {"C"},
 	    E = {"F"}, F = {"E"},
 	}
 
-	-- Directed: A→B→C→A (cycle), D→E (no cycle)
+	-- Directed: a cycle A→B→C→A, plus an acyclic edge D→E
+	--  A ──→ B ──→ C          D ──→ E
+	--  ▲           │
+	--  └───────────┘
 	local dirAdj = {
 	    A = {"B"}, B = {"C"}, C = {"A"},
 	    D = {"E"}, E = {},
@@ -37,7 +41,7 @@
 	```
 ]=]
 
-local Types = require(script.Parent.Types)
+local Types = require("./Types")
 
 type GetNeighbors<V> = Types.GetNeighbors<V>
 
@@ -150,13 +154,7 @@ end
 --[=[
 	@within Connectivity
 
-	Returns `true` if the **directed** graph contains at least one cycle,
-	using iterative DFS with a three-colour marking scheme:
-	- **white** (0) — unvisited
-	- **grey** (1) — on the current DFS path (in the recursion stack)
-	- **black** (2) — fully processed
-
-	A back edge (grey → grey) indicates a cycle.
+	Returns `true` if the **directed** graph contains at least one cycle.
 
 	```lua
 	-- dirAdj: A→B→C→A forms a cycle
@@ -165,6 +163,15 @@ end
 
 	:::caution Directed graphs only
 	For undirected cycle detection use [`hasUndirectedCycle`](#hasUndirectedCycle).
+	:::
+
+	:::info Internals
+	Uses iterative DFS with a three-colour marking scheme:
+	- **white** (0) — unvisited
+	- **grey** (1) — on the current DFS path (in the recursion stack)
+	- **black** (2) — fully processed
+
+	A back edge (grey → grey) indicates a cycle.
 	:::
 
 	*Time complexity:* `O(V + E)`

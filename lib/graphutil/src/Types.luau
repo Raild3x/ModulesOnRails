@@ -1,99 +1,187 @@
 --!strict
 -- Authors: Logan Hunt (Raildex)
 -- May 13, 2026
---[=[
-	@class GraphUtil
-
-	A comprehensive library of generic graph algorithms.
-
-	All algorithms are graph-agnostic: you provide callbacks that describe
-	your graph's structure rather than building a specific data structure.
-	This lets you run any algorithm over any representation — adjacency
-	lists, spatial grids, implicit neighbour functions, and so on.
-
-	### Shared callback types
-
-	Every algorithm accepts a **`GetNeighbors<V>`** callback.  Two forms are
-	accepted and automatically normalised internally:
-
-	```lua title="Array form (simpler)"
-	local function getNeighbors(vertex)
-	    return adjacencyList[vertex] -- { V }
-	end
-	```
-	```lua title="Iterator form (zero-allocation)"
-	local function getNeighbors(vertex)
-	    local i = 0
-	    local neighbours = adjacencyList[vertex]
-	    return function()
-	        i += 1
-	        return neighbours[i]
-	    end
-	end
-	```
-
-	Weighted algorithms additionally accept a **`GetWeight<V>`** callback:
-
-	```lua
-	local function getWeight(from, to)
-	    return edgeWeights[from][to]
-	end
-	```
-
-	A* additionally requires a **`GetHeuristic<V>`** admissible heuristic:
-
-	```lua
-	local function heuristic(vertex, goal)
-	    return (vertex.Position - goal.Position).Magnitude
-	end
-	```
-
-	### Return types
-
-	Algorithms that find a path return a **`PathResult<V>`**:
-
-	```lua
-	type PathResult<V> = {
-	    path: { V },   -- ordered list of vertices from start to goal (inclusive)
-	    cost: number,  -- total edge-weight cost (0 for unweighted algorithms)
-	}
-	```
-]=]
+--
+-- The `@class GraphUtil` landing page lives in `init.luau`; every `@within
+-- GraphUtil` block below is merged onto that same page by Moonwave.
 
 --------------------------------------------------------------------------------
 --// Types //--
 --------------------------------------------------------------------------------
 
---- A callback that returns the neighbours of `vertex` as an array.
+--[=[
+	@within GraphUtil
+	@type GetNeighborsArray<V> (vertex: V) -> { V }
+
+	A callback that returns the neighbours of `vertex` as an array. The simpler
+	of the two [GetNeighbors] forms — return whatever's convenient and let the
+	algorithm collect it.
+
+	```lua
+	local adjacencyList = {
+	    A = { "B", "C" },
+	    B = { "A", "D" },
+	    C = { "A", "D" },
+	    D = { "B", "C" },
+	}
+
+	local function getNeighbors(vertex: string): { string }
+	    return adjacencyList[vertex]
+	end
+	```
+]=]
 export type GetNeighborsArray<V> = (vertex: V) -> { V }
 
---- A callback that returns an iterator over the neighbours of `vertex`.
---- More allocation-efficient but requires managing iteration state.
+--[=[
+	@within GraphUtil
+	@type GetNeighborsIterator<V> (vertex: V) -> () -> V?
+
+	A callback that returns a stateful iterator over the neighbours of
+	`vertex`. More allocation-efficient than [GetNeighborsArray] — no
+	intermediate table is built — at the cost of managing the iteration state
+	yourself.
+
+	```lua
+	local adjacencyList = {
+	    A = { "B", "C" },
+	    B = { "A", "D" },
+	    C = { "A", "D" },
+	    D = { "B", "C" },
+	}
+
+	local function getNeighbors(vertex: string): () -> string?
+	    local neighbours = adjacencyList[vertex]
+	    local i = 0
+	    return function(): string?
+	        i += 1
+	        return neighbours[i]
+	    end
+	end
+	```
+]=]
 export type GetNeighborsIterator<V> = (vertex: V) -> () -> V?
 
---- Either form of neighbour callback.  Accepted by all algorithms.
+--[=[
+	@within GraphUtil
+	@type GetNeighbors<V> GetNeighborsArray<V> | GetNeighborsIterator<V>
+
+	Either form of neighbour callback — [GetNeighborsArray] or
+	[GetNeighborsIterator]. Accepted by every algorithm in this library and
+	normalised internally, so you can pick whichever form is most natural for
+	your graph representation.
+
+	```lua
+	local function arrayForm(vertex: string): { string }
+	    return adjacencyList[vertex]
+	end
+
+	local ok = BFS.shortestPath("A", "D", arrayForm) -- both forms work
+	```
+]=]
 export type GetNeighbors<V> = GetNeighborsArray<V> | GetNeighborsIterator<V>
 
---- Returns the non-negative weight of the directed edge from → to.
+--[=[
+	@within GraphUtil
+	@type GetWeight<V> (from: V, to: V) -> number
+
+	Returns the non-negative weight of the directed edge from `from` to `to`.
+	Required by every weighted algorithm ([Dijkstra](/api/Dijkstra),
+	[AStar](/api/AStar), [BellmanFord](/api/BellmanFord), [MST](/api/MST)).
+
+	```lua
+	local edgeWeights = {
+	    A = { B = 2, C = 3 },
+	    B = { A = 2, D = 1 },
+	    C = { A = 3, D = 5 },
+	    D = { B = 1, C = 5 },
+	}
+
+	local function getWeight(from: string, to: string): number
+	    return edgeWeights[from][to]
+	end
+	```
+]=]
 export type GetWeight<V> = (from: V, to: V) -> number
 
---- Admissible heuristic: estimated cost from `vertex` to `goal`.
---- Must never overestimate the true cost (i.e. be admissible) for A* to be optimal.
+--[=[
+	@within GraphUtil
+	@type GetHeuristic<V> (vertex: V, goal: V) -> number
+
+	An admissible heuristic: an estimate of the cost from `vertex` to `goal`
+	that must never overestimate the true cost. Required by
+	[AStar](/api/AStar); an inadmissible heuristic makes A* fast but no longer
+	guaranteed optimal.
+
+	```lua
+	-- Straight-line distance is admissible for movement costs that are
+	-- never cheaper than a direct line (e.g. grid movement).
+	local function heuristic(vertex: { Position: Vector3 }, goal: { Position: Vector3 }): number
+	    return (vertex.Position - goal.Position).Magnitude
+	end
+	```
+]=]
 export type GetHeuristic<V> = (vertex: V, goal: V) -> number
 
---- A stateless iterator that yields successive values, returning nil when exhausted.
+--[=[
+	@within GraphUtil
+	@type Iterator<V> () -> V?
+
+	A stateless-to-the-caller iterator that yields successive values,
+	returning `nil` once exhausted. Used for lazy, break-early traversals such
+	as [`Dijkstra.toIterator`](/api/Dijkstra#toIterator).
+
+	```lua
+	local iter: Types.Iterator<string> = Dijkstra.toIterator(start, getNeighbors, getWeight) :: any
+
+	for vertex in iter do
+	    print(vertex)
+	end
+	```
+]=]
 export type Iterator<V> = () -> V?
 
---- The result of a path-finding algorithm.
+--[=[
+	@within GraphUtil
+	@interface PathResult<V>
+	.path { V } -- Ordered sequence of vertices from start to goal (both inclusive).
+	.cost number -- Total accumulated edge-weight along the path. For unweighted algorithms this is the hop-count.
+
+	The result of a path-finding algorithm — returned by
+	[`BFS.shortestPath`](/api/BFS#shortestPath),
+	[`Dijkstra.shortestPath`](/api/Dijkstra#shortestPath),
+	[`AStar.shortestPath`](/api/AStar#shortestPath), and
+	[`BellmanFord.shortestPath`](/api/BellmanFord#shortestPath).
+
+	```lua
+	local result = Dijkstra.shortestPath("A", "D", getNeighbors, getWeight)
+	if result then
+	    print(result.path) -- { "A", "B", "D" }
+	    print(result.cost) -- 3
+	end
+	```
+]=]
 export type PathResult<V> = {
-	--- Ordered sequence of vertices from start to goal (both inclusive).
 	path: { V },
-	--- Total accumulated edge-weight along the path.
-	--- For unweighted algorithms this is the hop-count.
 	cost: number,
 }
 
---- An edge in a spanning or search tree.
+--[=[
+	@within GraphUtil
+	@interface Edge<V>
+	.from V -- The vertex the edge starts at.
+	.to V -- The vertex the edge ends at.
+	.weight number -- The edge's weight.
+
+	An edge in a spanning or search tree, as produced by
+	[`MST.kruskal`](/api/MST#kruskal) and [`MST.prim`](/api/MST#prim).
+
+	```lua
+	local edges = MST.kruskal(vertices, getNeighbors, getWeight)
+	for _, edge in edges do
+	    print(`{edge.from} -> {edge.to} ({edge.weight})`)
+	end
+	```
+]=]
 export type Edge<V> = {
 	from: V,
 	to: V,

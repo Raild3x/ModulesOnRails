@@ -27,9 +27,9 @@
 
 	```lua
 	-- Task dependency graph (directed, acyclic):
-	-- "compile" → "link" → "test" → "deploy"
+	--  compile ──→ link ──→ test ──→ deploy
 	--              ↑
-	--           "assets"
+	--  assets ─────┘
 
 	local deps = {
 	    compile  = {},
@@ -47,7 +47,7 @@
 	```
 ]=]
 
-local Types = require(script.Parent.Types)
+local Types = require("./Types")
 
 type GetNeighbors<V> = Types.GetNeighbors<V>
 

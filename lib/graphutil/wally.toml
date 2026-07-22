@@ -14,4 +14,4 @@ formattedName = "Graph Utilities"
 docsLink = "GraphUtil"
 
 [dependencies]
-Heap = "raild3x/heap@0.1.0"
+Heap = "raild3x/heap@2.1.3"

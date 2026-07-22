@@ -32,11 +32,13 @@
 	### Example graph
 
 	```lua
-	--   A --1-- B
-	--   |  \    |
-	--   4   3   2
-	--   |    \  |
-	--   D --5-- C
+	--       1
+	--  A ─────── B
+	--  │ ╲       │
+	--  4  ╲3     2
+	--  │    ╲    │
+	--  D ─────── C
+	--       5
 
 	local weights = {
 	    A = {B=1, C=3, D=4},
@@ -55,8 +57,8 @@
 	```
 ]=]
 
-local Types = require(script.Parent.Types)
-local Heap = require(script.Parent.Parent.Heap)
+local Types = require("./Types")
+local Heap = require("../Heap")
 
 type GetNeighbors<V> = Types.GetNeighbors<V>
 type GetWeight<V> = Types.GetWeight<V>

@@ -16,8 +16,8 @@
 	| Scenario | Algorithm |
 	| --- | --- |
 	| All weights ≥ 0, single target | [Dijkstra.shortestPath](/api/Dijkstra#shortestPath) |
-	| All weights ≥ 0, weighted traversal | [Dijkstra.forEach](/api/Dijkstra#forEach) |
-	| All weights ≥ 0, heuristic available | [AStar.search](/api/AStar#search) |
+	| All weights ≥ 0, weighted traversal | [Dijkstra.toIterator](/api/Dijkstra#toIterator) |
+	| All weights ≥ 0, heuristic available | [AStar.shortestPath](/api/AStar#shortestPath) |
 	| Negative weights possible | **BellmanFord** |
 	:::
 
@@ -34,11 +34,12 @@
 	### Example
 
 	```lua
-	--   A --1-- B ---3--- D
-	--           |
-	--          -2
-	--           |
-	--           C
+	--        1         3
+	--  A ──→ B ──────→ D
+	--        │
+	--       -2
+	--        ↓
+	--        C
 
 	local weights = {
 	    A = { B = 1 },
@@ -58,7 +59,7 @@
 	```
 ]=]
 
-local Types = require(script.Parent.Types)
+local Types = require("./Types")
 
 type GetNeighbors<V> = Types.GetNeighbors<V>
 type GetWeight<V> = Types.GetWeight<V>

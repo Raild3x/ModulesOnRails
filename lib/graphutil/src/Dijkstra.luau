@@ -18,12 +18,12 @@
 	:::
 
 	:::tip Priority traversal
-	[`Dijkstra.forEach`](#forEach) and [`Dijkstra.toArray`](#toArray) let you
-	traverse **all** reachable vertices in ascending accumulated-cost order —
-	useful for budget-limited flood fill, range queries, and influence-map
-	generation:
+	[`Dijkstra.toIterator`](#toIterator) and [`Dijkstra.toArray`](#toArray) let
+	you traverse **all** reachable vertices in ascending accumulated-cost
+	order — useful for budget-limited flood fill, range queries, and
+	influence-map generation:
 	```lua
-	for vertex, costFromStart in Dijkstra.forEach(origin, getNeighbors, getWeight) do
+	for vertex, costFromStart in Dijkstra.toIterator(origin, getNeighbors, getWeight) do
 	    if costFromStart > budget then break end
 	    markInRange(vertex)
 	end
@@ -36,11 +36,12 @@
 	### Example graph
 
 	```lua
-	--   A --2-- B --1-- D
-	--   |               |
-	--   3               4
-	--   |               |
-	--   C ------5------ +
+	--      2       1
+	--  A ───── B ───── D
+	--  │               │
+	--  3               5
+	--  │               │
+	--  C ───────────────┘
 
 	local weights = {
 	    A = { B = 2, C = 3 },
@@ -59,14 +60,14 @@
 	```
 ]=]
 
-local Types = require(script.Parent.Types)
-local Heap = require(script.Parent.Parent.Heap)
+local Types = require("./Types")
+local Heap = require("../Heap")
 
 type GetNeighbors<V> = Types.GetNeighbors<V>
 type GetWeight<V> = Types.GetWeight<V>
 type PathResult<V> = Types.PathResult<V>
 
---- A single entry in the result of [`Dijkstra.toArray`](#toArray).
+-- A single entry in the result of [`Dijkstra.toArray`](#toArray).
 export type VisitRecord<V> = {
 	--- The visited vertex.
 	vertex: V,
@@ -165,6 +166,164 @@ end
 --[=[
 	@within Dijkstra
 
+	Finds the **shortest weighted path** between `start` and `goal` by
+	running Dijkstra from both ends simultaneously — alternately expanding
+	whichever heap has the cheaper next vertex — and stopping as soon as the
+	two searches are provably guaranteed to have met at the shortest
+	possible point. Returns the same [PathResult](/api/GraphUtil#PathResult)
+	as [`Dijkstra.shortestPath`](#shortestPath), or `nil` if `goal` is
+	unreachable.
+
+	```lua
+	local result = Dijkstra.bidirectionalShortestPath("A", "D", getNeighbors, getWeight)
+	-- result.path == { "A", "B", "D" }
+	-- result.cost == 3
+	```
+
+	:::caution Directed graphs
+	Growing a search backward from `goal` requires walking edges in
+	reverse. By default this function reuses `getNeighbors` for both
+	directions, which is only correct for **undirected** graphs. For a
+	directed graph, pass a callback that returns the *predecessors* of a
+	vertex (i.e. `getReversedNeighbors(v)` returns every `u` such that
+	`u → v` is an edge) — the edge weight is still looked up as
+	`getWeight(u, v)`, so no separate reverse-weight callback is needed:
+
+	```lua
+	-- Directed graph where reverseAdj[v] lists v's predecessors
+	local function getReversedNeighbors(v)
+	    return reverseAdj[v]
+	end
+
+	local result = Dijkstra.bidirectionalShortestPath(
+	    "A", "D", getNeighbors, getWeight, getReversedNeighbors
+	)
+	```
+	:::
+
+	*Time complexity:* `O((V + E) log V)`, but typically explores far fewer
+	vertices in practice since each side only has to reach roughly halfway.
+]=]
+function Dijkstra.bidirectionalShortestPath<V>(
+	start: V,
+	goal: V,
+	getNeighbors: GetNeighbors<V>,
+	getWeight: GetWeight<V>,
+	getReversedNeighbors: GetNeighbors<V>?
+): PathResult<V>?
+	if start == goal then
+		return { path = { start }, cost = 0 }
+	end
+
+	local getReverse: GetNeighbors<V> = getReversedNeighbors or getNeighbors
+
+	local fDist: { [V]: number } = { [start] = 0 }
+	local bDist: { [V]: number } = { [goal] = 0 }
+	local fParent: { [V]: V } = {}
+	local bParent: { [V]: V } = {}
+	local fSettled: { [V]: boolean } = {}
+	local bSettled: { [V]: boolean } = {}
+
+	local fHeap = Heap.min()
+	local bHeap = Heap.min()
+	fHeap:Push(start, 0)
+	bHeap:Push(goal, 0)
+
+	local best = math.huge
+	local meet: V? = nil
+
+	-- Tentative distances are always valid upper bounds (non-negative
+	-- weights), so any vertex known from both sides is a safe candidate
+	-- for the best total path length found so far — keep the cheapest.
+	local function tryMeet(vertex: V, fd: number?, bd: number?)
+		fd = fd or fDist[vertex]
+		bd = bd or bDist[vertex]
+		if fd ~= nil and bd ~= nil and (fd :: number) + (bd :: number) < best then
+			best = (fd :: number) + (bd :: number)
+			meet = vertex
+		end
+	end
+
+	while not fHeap:IsEmpty() and not bHeap:IsEmpty() do
+		-- Heap tops are valid lower bounds on anything left unsettled on
+		-- that side. Once neither side can possibly beat `best`, stop.
+		local _, fTop = fHeap:Peek()
+		local _, bTop = bHeap:Peek()
+		if (fTop :: number) + (bTop :: number) >= best then
+			break
+		end
+
+		if (fTop :: number) <= (bTop :: number) then
+			local rawVertex, rawCost = fHeap:Pop()
+			local vertex: V = rawVertex :: V
+			local cost: number = rawCost :: number
+			if fSettled[vertex] then
+				continue
+			end
+			fSettled[vertex] = true
+
+			for neighbor in Types.eachNeighbor(vertex, getNeighbors) do
+				local newDist = cost + getWeight(vertex, neighbor)
+				if newDist < (fDist[neighbor] or math.huge) then
+					fDist[neighbor] = newDist
+					fParent[neighbor] = vertex
+					fHeap:Push(neighbor, newDist)
+				end
+				tryMeet(neighbor, fDist[neighbor], bDist[neighbor])
+			end
+		else
+			local rawVertex, rawCost = bHeap:Pop()
+			local vertex: V = rawVertex :: V
+			local cost: number = rawCost :: number
+			if bSettled[vertex] then
+				continue
+			end
+			bSettled[vertex] = true
+
+			for predecessor in Types.eachNeighbor(vertex, getReverse) do
+				local newDist = cost + getWeight(predecessor, vertex)
+				if newDist < (bDist[predecessor] or math.huge) then
+					bDist[predecessor] = newDist
+					bParent[predecessor] = vertex
+					bHeap:Push(predecessor, newDist)
+				end
+				tryMeet(predecessor, fDist[predecessor], bDist[predecessor])
+			end
+		end
+	end
+
+	if meet == nil then
+		return nil
+	end
+
+	-- Reconstruct start → meet via fParent, then meet → goal via bParent.
+	local path: { V } = {}
+	local cur: V? = meet
+	while cur ~= nil do
+		local c: V = cur :: V
+		table.insert(path, 1, c)
+		if c == start then
+			break
+		end
+		cur = fParent[c]
+	end
+
+	cur = bParent[meet :: V]
+	while cur ~= nil do
+		local c: V = cur :: V
+		table.insert(path, c)
+		if c == goal then
+			break
+		end
+		cur = bParent[c]
+	end
+
+	return { path = path, cost = best }
+end
+
+--[=[
+	@within Dijkstra
+
 	Runs Dijkstra from `start` to completion and returns a map of every
 	reachable vertex to its shortest distance from `start`.  Unreachable
 	vertices are absent from the table.
@@ -223,9 +382,11 @@ end
 	coroutines are used.  You can `break` early to stop expansion, which is
 	the key advantage over [`Dijkstra.distances`](#distances).
 
+	Aliased as [`Dijkstra.forEach`](#forEach).
+
 	```lua
 	-- Visit all nodes within a travel budget of 5
-	for vertex, cost in Dijkstra.forEach(origin, getNeighbors, getWeight) do
+	for vertex, cost in Dijkstra.toIterator(origin, getNeighbors, getWeight) do
 	    if cost > 5 then break end
 	    table.insert(inRange, vertex)
 	end
@@ -233,7 +394,7 @@ end
 
 	:::tip for-loop usage
 	```lua
-	for vertex, cost in Dijkstra.forEach(start, getNeighbors, getWeight) do
+	for vertex, cost in Dijkstra.toIterator(start, getNeighbors, getWeight) do
 	    print(vertex, cost)
 	end
 	```
@@ -241,7 +402,7 @@ end
 
 	*Time complexity per call:* amortised `O(degree(V) · log V)`
 ]=]
-function Dijkstra.forEach<V>(start: V, getNeighbors: GetNeighbors<V>, getWeight: GetWeight<V>): () -> (V?, number?)
+function Dijkstra.toIterator<V>(start: V, getNeighbors: GetNeighbors<V>, getWeight: GetWeight<V>): () -> (V?, number?)
 	local dist: { [V]: number } = { [start] = 0 }
 	local visited: { [V]: boolean } = {}
 	local heap = Heap.min()
@@ -280,6 +441,18 @@ end
 
 --[=[
 	@within Dijkstra
+	@function forEach
+	@param start V
+	@param getNeighbors GetNeighbors<V>
+	@param getWeight GetWeight<V>
+	@return () -> (V?, number?)
+
+	Alias of [`Dijkstra.toIterator`](#toIterator).
+]=]
+Dijkstra.forEach = Dijkstra.toIterator
+
+--[=[
+	@within Dijkstra
 
 	Runs Dijkstra from `start` to completion and returns an array of
 	[VisitRecord](/api/Dijkstra#VisitRecord) values in ascending accumulated-cost
@@ -300,7 +473,7 @@ end
 ]=]
 function Dijkstra.toArray<V>(start: V, getNeighbors: GetNeighbors<V>, getWeight: GetWeight<V>): { VisitRecord<V> }
 	local result: { VisitRecord<V> } = {}
-	local iter = Dijkstra.forEach(start, getNeighbors, getWeight)
+	local iter = Dijkstra.toIterator(start, getNeighbors, getWeight)
 
 	while true do
 		local vertex, cost = iter()

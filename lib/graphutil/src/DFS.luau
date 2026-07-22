@@ -20,9 +20,10 @@
 	### Example graph
 
 	```lua
-	--   A → B → D
-	--   ↓
-	--   C → E
+	--  A ──→ B ──→ D
+	--  │
+	--  ↓
+	--  C ──→ E
 
 	local adj = {
 	    A = {"B", "C"},
@@ -46,7 +47,7 @@
 	:::
 ]=]
 
-local Types = require(script.Parent.Types)
+local Types = require("./Types")
 
 type GetNeighbors<V> = Types.GetNeighbors<V>
 type Iterator<V> = Types.Iterator<V>
@@ -131,8 +132,10 @@ end
 	depth-first order.  The iterator drives the DFS internally via a
 	closure — no coroutines are used.
 
+	Aliased as [`DFS.forEach`](#forEach).
+
 	```lua
-	local next = DFS.forEach("A", getNeighbors)
+	local next = DFS.toIterator("A", getNeighbors)
 	print(next()) -- "A"
 	print(next()) -- first deep branch vertex
 	-- ...
@@ -141,7 +144,7 @@ end
 
 	:::tip for-loop usage
 	```lua
-	for vertex in DFS.forEach("A", getNeighbors) do
+	for vertex in DFS.toIterator("A", getNeighbors) do
 	    print(vertex)
 	end
 	```
@@ -149,7 +152,7 @@ end
 
 	*Time complexity per call:* amortised `O(degree(V))`
 ]=]
-function DFS.forEach<V>(start: V, getNeighbors: GetNeighbors<V>): Iterator<V>
+function DFS.toIterator<V>(start: V, getNeighbors: GetNeighbors<V>): Iterator<V>
 	local stack: { V } = { start }
 	local visited: { [V]: boolean } = {}
 
@@ -173,6 +176,17 @@ function DFS.forEach<V>(start: V, getNeighbors: GetNeighbors<V>): Iterator<V>
 		return nil
 	end
 end
+
+--[=[
+	@within DFS
+	@function forEach
+	@param start V
+	@param getNeighbors GetNeighbors<V>
+	@return Iterator<V>
+
+	Alias of [`DFS.toIterator`](#toIterator).
+]=]
+DFS.forEach = DFS.toIterator
 
 --[=[
 	@within DFS
