@@ -7,7 +7,6 @@ Sets up proper linting by installing dependencies and generating types.
 import os
 import shutil
 import sys
-from convert_requires_to_string_format import process_directory
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -114,18 +113,8 @@ def setup_package(package_dir: Path) -> bool:
     if not _unpack_dependency_directory(package_dir, "Packages"):
         return False
 
-        process_directory(packages_dir)
-
-        # Move files out of Packages directory
-        print("Moving Wally Packages out of Packages directory...")
-        for item in packages_dir.iterdir():
-            dest = package_dir / item.name
-            shutil.move(str(item), str(dest))
-        print("Moved visible files.")
-
-        # Remove the empty Packages directory
-        print("Removing original Packages directory...")
-        packages_dir.rmdir()
+    if not _unpack_dependency_directory(package_dir, "ServerPackages", rewrite_server_requires=True):
+        return False
 
     return True
 
