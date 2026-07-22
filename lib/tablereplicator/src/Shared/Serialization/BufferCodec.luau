@@ -1,5 +1,5 @@
 --[=[
-
+	@ignore
 	@class BufferCodec
 
 	Compact binary value codec over Luau buffers — the byte-level layer of the replication
@@ -95,8 +95,8 @@ local TAG_VECTOR3 = 0x16
 local TAG_VECTOR2 = 0x17
 local TAG_CFRAME = 0x18
 local TAG_COLOR3 = 0x19
-local TAG_REF        = 0x1A -- varint index into the side list (Instance or any untagged value)
-local TAG_TABLEREF8  = 0x1B -- u8  back-ref id: table seen earlier this message
+local TAG_REF = 0x1A -- varint index into the side list (Instance or any untagged value)
+local TAG_TABLEREF8 = 0x1B -- u8  back-ref id: table seen earlier this message
 local TAG_TABLEREF16 = 0x1C -- u16 back-ref id
 
 local TAG_FIXSTR = 0x20 -- 0x20..0x3F: string, length 0..31 in the low 5 bits
@@ -282,13 +282,13 @@ const function newWriter(): Writer
 end
 
 const function resetWriter(writer: Writer)
-    writer.cursor = 0
-    writer.interned = {}
-    writer.internedCount = 0
-    writer.instanceRefs = {}
-    writer.instances = {}
-    writer.tableRefs = {}
-    writer.tableRefCount = 0
+	writer.cursor = 0
+	writer.interned = {}
+	writer.internedCount = 0
+	writer.instanceRefs = {}
+	writer.instances = {}
+	writer.tableRefs = {}
+	writer.tableRefCount = 0
 end
 
 --[=[
@@ -615,7 +615,9 @@ function writeValue(writer: Writer, value: any)
 		-- The remote can't serialize this, so it can't ride the side list either.
 		-- Drop just this value (encode nil) and warn, rather than letting it throw
 		-- at FireClient and lose every unrelated op batched into the same message.
-		warn(`[TableReplicator] cannot replicate a value of type "{valueType}"; encoding nil in its place so the rest of the message still delivers`)
+		warn(
+			`[TableReplicator] cannot replicate a value of type "{valueType}"; encoding nil in its place so the rest of the message still delivers`
+		)
 		putU8(writer, TAG_NIL)
 	else
 		-- No dedicated tag, but the remote can serialize it: offload the raw value
@@ -738,7 +740,7 @@ end
 
 local BufferCodec = {
 	newWriter = newWriter,
-    resetWriter = resetWriter,
+	resetWriter = resetWriter,
 	export = export,
 	writeByte = putU8,
 	writeVarint = writeVarint,
