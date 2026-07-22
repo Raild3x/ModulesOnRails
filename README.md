@@ -13,7 +13,7 @@ ModulesOnRails is a collection of Wally packages to streamline Roblox developmen
 | [CmdrHandler](https://raild3x.github.io/ModulesOnRails/api/CmdrHandler) | `CmdrHandler = "raild3x/cmdrhandler@0.2.2"` | A wrapper for eveara/quenty's Cmdr library. |
 | [Component](https://raild3x.github.io/ModulesOnRails/api/Component) | `Component = "raild3x/component@0.2.0"` | A fork of Sleitnick's Component class for Roblox. |
 | [DragDrop](https://raild3x.github.io/ModulesOnRails/api/DragDrop) | `DragDrop = "raild3x/dragdrop@0.2.0"` | A device-agnostic drag-and-drop system for Roblox UI (mouse, touch, gamepad, keyboard). |
-| [Graph Utilities](https://raild3x.github.io/ModulesOnRails/api/GraphUtil) | `Graph Utilities = "raild3x/graphutil@0.1.0"` | A collection of Graph utilities |
+| [Graph Utilities](https://raild3x.github.io/ModulesOnRails/api/GraphUtil) | `Graph Utilities = "raild3x/graphutil@0.2.0"` | A collection of Graph utilities |
 | [Heap](https://raild3x.github.io/ModulesOnRails/api/Heap) | `Heap = "raild3x/heap@2.1.4"` | A generic min/max heap implementation in Luau. |
 | [Loose-Tight-Double-Grid](https://raild3x.github.io/ModulesOnRails/api/LooseTightDoubleGrid) | `Loose-Tight-Double-Grid = "raild3x/loosetightdoublegrid@1.2.1"` | A spatial partitioning system to query varied size entities in 2d space. |
 | [NetWire](https://raild3x.github.io/ModulesOnRails/api/NetWire) | `NetWire = "raild3x/netwire@0.3.4"` | A networking library based off of sleitnicks comm library. |
