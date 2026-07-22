@@ -6,8 +6,6 @@
 lib/*/*
 !lib/*/src
 !lib/*/README.md
-!lib/*/CLAUDE.md
-!lib/*/CONTEXT.md
 !lib/*/docs
 !lib/*/docs/**
 
