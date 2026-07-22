@@ -1,2 +1,8 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Coverage-engine test fixtures/goldens: probe byte offsets and file sha256
+# values depend on exact source bytes, so these must stay LF everywhere.
+tools/coverage/engine/tests/fixtures/** text eol=lf
+tools/coverage/engine/tests/golden/** text eol=lf
+tools/coverage/lune/core/Tests/fixtures/** text eol=lf

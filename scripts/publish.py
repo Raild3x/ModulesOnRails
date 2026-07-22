@@ -7,7 +7,9 @@ Handles version incrementing, publishing, and rebuilding sourcemaps.
 import argparse
 import os
 import re
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -43,6 +45,34 @@ def find_exported_types(src_file: Path) -> list[tuple[str, str]]:
     return results
 
 
+def strip_type_param_defaults(type_params: str) -> str:
+    """Return *type_params* with generic defaults removed, e.g. ``<T = string, U>`` -> ``<T, U>``.
+
+    Luau permits defaults only where a generic is declared; a usage site must
+    pass bare arguments. The passthrough alias keeps defaults on its left-hand
+    side but needs them stripped on the right-hand side.
+    """
+    if not type_params:
+        return ""
+    inner = type_params.strip()[1:-1]
+    names: list[str] = []
+    current: list[str] = []
+    depth = 0
+    for char in inner + ",":
+        if char == "," and depth == 0:
+            param = "".join(current).strip()
+            if param:
+                names.append(param.split("=", 1)[0].strip())
+            current = []
+            continue
+        if char in "<{(":
+            depth += 1
+        elif char in ">})":
+            depth -= 1
+        current.append(char)
+    return f"<{', '.join(names)}>"
+
+
 def generate_passthrough_init(module_stem: str, exported_types: list[tuple[str, str]]) -> str:
     """Return the text of a passthrough init.luau that re-exports *module_stem*.
 
@@ -54,17 +84,65 @@ def generate_passthrough_init(module_stem: str, exported_types: list[tuple[str, 
     """
     lines = [
         "--!strict",
-        "-- AUTO-GENERATED passthrough -- temporary, do not commit.",
+        "-- AUTO-GENERATED passthrough file --.",
         f"local Module = require(script.{module_stem})",
         "",
     ]
     for type_name, type_params in exported_types:
-        lines.append(f"export type {type_name}{type_params} = Module.{type_name}{type_params}")
+        usage_params = strip_type_param_defaults(type_params)
+        lines.append(f"export type {type_name}{type_params} = Module.{type_name}{usage_params}")
     if exported_types:
         lines.append("")
     lines.append("return Module")
     lines.append("")
     return "\n".join(lines)
+
+
+def is_unpublished_file(name: str) -> bool:
+    """Return True for files that must never ship in the published package."""
+    lowered = name.lower()
+    return lowered.endswith(".spec.luau") or lowered.endswith(".spec.lua") or lowered == "claude.md"
+
+
+def stash_unpublished_files(package_dir: Path, stash_dir: Path) -> tuple[list[tuple[Path, Path]], list[Path]]:
+    """Move every spec file and ``CLAUDE.md`` under *package_dir* into *stash_dir*.
+
+    Spec files are test-only and ``CLAUDE.md`` is agent-only context; neither
+    must ship in the published package. Each file is moved to the same relative
+    path under *stash_dir* so it can be restored afterwards. Directories left
+    empty by the move (e.g. ``Tests/`` folders that contained only specs) are
+    removed as well.
+
+    Returns:
+        A ``(moved, removed_dirs)`` pair: ``moved`` is a list of
+        ``(original_path, stashed_path)`` tuples, ``removed_dirs`` the
+        directories deleted because stashing emptied them.
+    """
+    moved: list[tuple[Path, Path]] = []
+    for entry in sorted(package_dir.rglob("*")):
+        if entry.is_file() and is_unpublished_file(entry.name):
+            stashed = stash_dir / entry.relative_to(package_dir)
+            stashed.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(entry), str(stashed))
+            moved.append((entry, stashed))
+
+    # Prune directories emptied by the move, deepest first so parents that
+    # only contained now-empty children are removed too.
+    removed_dirs: list[Path] = []
+    for directory in sorted((d for d in package_dir.rglob("*") if d.is_dir()), reverse=True):
+        if not any(directory.iterdir()):
+            directory.rmdir()
+            removed_dirs.append(directory)
+    return moved, removed_dirs
+
+
+def restore_unpublished_files(moved: list[tuple[Path, Path]], removed_dirs: list[Path]):
+    """Undo :func:`stash_unpublished_files`: recreate pruned dirs and move files back."""
+    for directory in reversed(removed_dirs):
+        directory.mkdir(parents=True, exist_ok=True)
+    for original, stashed in moved:
+        original.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(stashed), str(original))
 
 
 def get_current_version(wally_toml: Path) -> Optional[str]:
@@ -201,11 +279,25 @@ def main():
     src_dir = package_dir / "src"
     temp_init: Optional[Path] = None
     publish_success: Optional[bool] = None
+    stash_dir = Path(tempfile.mkdtemp(prefix=f"wally-publish-stash-{package_name}-"))
+    stashed_files: list[tuple[Path, Path]] = []
+    stashed_dirs: list[Path] = []
     try:
+        # Spec files are test-only and CLAUDE.md is agent-only context; keep
+        # both out of the published package.
+        stashed_files, stashed_dirs = stash_unpublished_files(package_dir, stash_dir)
+        if stashed_files:
+            print(f"Stashed {len(stashed_files)} spec/CLAUDE.md file(s) out of the package for publish.")
+
         if src_dir.is_dir() and not (src_dir / "init.luau").is_file() and not (src_dir / "init.lua").is_file():
+            candidate: Optional[Path] = None
             for ext in (".luau", ".lua"):
-                candidate = src_dir / f"{package_name}{ext}"
-                if candidate.is_file():
+                target = f"{package_name}{ext}".lower()
+                for entry in src_dir.iterdir():
+                    if entry.is_file() and entry.name.lower() == target:
+                        candidate = entry
+                        break
+                if candidate:
                     exported_types = find_exported_types(candidate)
                     init_content = generate_passthrough_init(candidate.stem, exported_types)
                     temp_init = (src_dir / "init.luau").resolve()
@@ -230,6 +322,10 @@ def main():
         if default_project.is_file():
             default_project.unlink()
             print("default.project.json deleted.")
+        restore_unpublished_files(stashed_files, stashed_dirs)
+        if stashed_files:
+            print(f"Restored {len(stashed_files)} stashed file(s) to the package.")
+        shutil.rmtree(stash_dir, ignore_errors=True)
 
     if publish_success:
         print("Package published successfully.")

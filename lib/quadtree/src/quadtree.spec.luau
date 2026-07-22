@@ -3,6 +3,9 @@ local test_suite = function(tiniest)
 	local test = tiniest.test
 	local expect = tiniest.expect
 
+	local Vector2 = Vector2 or require("@Vector2")
+	local Vector3 = Vector3 or require("@Vector3")
+
 	local Quadtree = require("./quadtree")
 	print("Running Quadtree tests...", Quadtree)
 

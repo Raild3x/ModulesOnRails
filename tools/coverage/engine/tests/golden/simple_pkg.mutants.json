@@ -1,0 +1,438 @@
+{
+  "schema": "tm-coverage-mutants/1",
+  "engine_version": "0.1.0",
+  "package": "simple_pkg",
+  "total": 38,
+  "files": [
+    {
+      "path": "src/init.luau",
+      "sha256": "872f5cbaaaaad93f1b770fbf2b3998b84eaa3f62ee717241aff60c4cde8149f0",
+      "mutants": [
+        {
+          "id": 1,
+          "op": "lit",
+          "line": 8,
+          "col": 11,
+          "byte_start": 177,
+          "byte_end": 178,
+          "original": "1",
+          "replacement": "0",
+          "site": "mut:lit:src/init.luau:8:11"
+        },
+        {
+          "id": 2,
+          "op": "lit",
+          "line": 8,
+          "col": 23,
+          "byte_start": 189,
+          "byte_end": 190,
+          "original": "2",
+          "replacement": "0",
+          "site": "mut:lit:src/init.luau:8:23"
+        },
+        {
+          "id": 3,
+          "op": "lor",
+          "line": 11,
+          "col": 11,
+          "byte_start": 247,
+          "byte_end": 250,
+          "original": "and",
+          "replacement": "or",
+          "site": "mut:lor:src/init.luau:11:11"
+        },
+        {
+          "id": 4,
+          "op": "ror",
+          "line": 11,
+          "col": 7,
+          "byte_start": 243,
+          "byte_end": 244,
+          "original": ">",
+          "replacement": ">=",
+          "site": "mut:ror:src/init.luau:11:7"
+        },
+        {
+          "id": 5,
+          "op": "lit",
+          "line": 11,
+          "col": 9,
+          "byte_start": 245,
+          "byte_end": 246,
+          "original": "0",
+          "replacement": "1",
+          "site": "mut:lit:src/init.luau:11:9"
+        },
+        {
+          "id": 6,
+          "op": "ror",
+          "line": 11,
+          "col": 17,
+          "byte_start": 253,
+          "byte_end": 254,
+          "original": ">",
+          "replacement": ">=",
+          "site": "mut:ror:src/init.luau:11:17"
+        },
+        {
+          "id": 7,
+          "op": "lit",
+          "line": 11,
+          "col": 19,
+          "byte_start": 255,
+          "byte_end": 256,
+          "original": "0",
+          "replacement": "1",
+          "site": "mut:lit:src/init.luau:11:19"
+        },
+        {
+          "id": 8,
+          "op": "aor",
+          "line": 12,
+          "col": 12,
+          "byte_start": 273,
+          "byte_end": 274,
+          "original": "+",
+          "replacement": "-",
+          "site": "mut:aor:src/init.luau:12:12"
+        },
+        {
+          "id": 9,
+          "op": "aor",
+          "line": 14,
+          "col": 12,
+          "byte_start": 294,
+          "byte_end": 295,
+          "original": "-",
+          "replacement": "+",
+          "site": "mut:aor:src/init.luau:14:12"
+        },
+        {
+          "id": 10,
+          "op": "lit",
+          "line": 19,
+          "col": 16,
+          "byte_start": 343,
+          "byte_end": 344,
+          "original": "0",
+          "replacement": "1",
+          "site": "mut:lit:src/init.luau:19:16"
+        },
+        {
+          "id": 11,
+          "op": "lit",
+          "line": 20,
+          "col": 10,
+          "byte_start": 354,
+          "byte_end": 355,
+          "original": "1",
+          "replacement": "0",
+          "site": "mut:lit:src/init.luau:20:10"
+        },
+        {
+          "id": 12,
+          "op": "lit",
+          "line": 20,
+          "col": 13,
+          "byte_start": 357,
+          "byte_end": 358,
+          "original": "3",
+          "replacement": "0",
+          "site": "mut:lit:src/init.luau:20:13"
+        },
+        {
+          "id": 13,
+          "op": "aor",
+          "line": 21,
+          "col": 14,
+          "byte_start": 375,
+          "byte_end": 376,
+          "original": "+",
+          "replacement": "-",
+          "site": "mut:aor:src/init.luau:21:14"
+        },
+        {
+          "id": 14,
+          "op": "lit",
+          "line": 23,
+          "col": 10,
+          "byte_start": 393,
+          "byte_end": 394,
+          "original": "1",
+          "replacement": "0",
+          "site": "mut:lit:src/init.luau:23:10"
+        },
+        {
+          "id": 15,
+          "op": "lit",
+          "line": 23,
+          "col": 13,
+          "byte_start": 396,
+          "byte_end": 398,
+          "original": "10",
+          "replacement": "0",
+          "site": "mut:lit:src/init.luau:23:13"
+        },
+        {
+          "id": 16,
+          "op": "ror",
+          "line": 28,
+          "col": 7,
+          "byte_start": 472,
+          "byte_end": 473,
+          "original": ">",
+          "replacement": ">=",
+          "site": "mut:ror:src/init.luau:28:7"
+        },
+        {
+          "id": 17,
+          "op": "lit",
+          "line": 28,
+          "col": 9,
+          "byte_start": 474,
+          "byte_end": 476,
+          "original": "10",
+          "replacement": "0",
+          "site": "mut:lit:src/init.luau:28:9"
+        },
+        {
+          "id": 18,
+          "op": "lit",
+          "line": 29,
+          "col": 10,
+          "byte_start": 491,
+          "byte_end": 493,
+          "original": "10",
+          "replacement": "0",
+          "site": "mut:lit:src/init.luau:29:10"
+        },
+        {
+          "id": 19,
+          "op": "ror",
+          "line": 30,
+          "col": 11,
+          "byte_start": 504,
+          "byte_end": 505,
+          "original": ">",
+          "replacement": ">=",
+          "site": "mut:ror:src/init.luau:30:11"
+        },
+        {
+          "id": 20,
+          "op": "lit",
+          "line": 30,
+          "col": 13,
+          "byte_start": 506,
+          "byte_end": 507,
+          "original": "5",
+          "replacement": "0",
+          "site": "mut:lit:src/init.luau:30:13"
+        },
+        {
+          "id": 21,
+          "op": "lit",
+          "line": 31,
+          "col": 10,
+          "byte_start": 522,
+          "byte_end": 523,
+          "original": "5",
+          "replacement": "0",
+          "site": "mut:lit:src/init.luau:31:10"
+        },
+        {
+          "id": 22,
+          "op": "ror",
+          "line": 42,
+          "col": 10,
+          "byte_start": 666,
+          "byte_end": 667,
+          "original": ">",
+          "replacement": ">=",
+          "site": "mut:ror:src/init.luau:42:10"
+        },
+        {
+          "id": 23,
+          "op": "lit",
+          "line": 42,
+          "col": 12,
+          "byte_start": 668,
+          "byte_end": 669,
+          "original": "0",
+          "replacement": "1",
+          "site": "mut:lit:src/init.luau:42:12"
+        },
+        {
+          "id": 24,
+          "op": "lit",
+          "line": 43,
+          "col": 8,
+          "byte_start": 680,
+          "byte_end": 681,
+          "original": "1",
+          "replacement": "0",
+          "site": "mut:lit:src/init.luau:43:8"
+        },
+        {
+          "id": 25,
+          "op": "lit",
+          "line": 46,
+          "col": 8,
+          "byte_start": 702,
+          "byte_end": 703,
+          "original": "1",
+          "replacement": "0",
+          "site": "mut:lit:src/init.luau:46:8"
+        },
+        {
+          "id": 26,
+          "op": "ror",
+          "line": 47,
+          "col": 10,
+          "byte_start": 713,
+          "byte_end": 715,
+          "original": ">=",
+          "replacement": ">",
+          "site": "mut:ror:src/init.luau:47:10"
+        },
+        {
+          "id": 27,
+          "op": "lit",
+          "line": 47,
+          "col": 13,
+          "byte_start": 716,
+          "byte_end": 717,
+          "original": "1",
+          "replacement": "0",
+          "site": "mut:lit:src/init.luau:47:13"
+        },
+        {
+          "id": 28,
+          "op": "ror",
+          "line": 53,
+          "col": 12,
+          "byte_start": 835,
+          "byte_end": 836,
+          "original": "<",
+          "replacement": "<=",
+          "site": "mut:ror:src/init.luau:53:12"
+        },
+        {
+          "id": 29,
+          "op": "lit",
+          "line": 62,
+          "col": 10,
+          "byte_start": 956,
+          "byte_end": 957,
+          "original": "1",
+          "replacement": "0",
+          "site": "mut:lit:src/init.luau:62:10"
+        },
+        {
+          "id": 30,
+          "op": "lit",
+          "line": 64,
+          "col": 9,
+          "byte_start": 971,
+          "byte_end": 972,
+          "original": "0",
+          "replacement": "1",
+          "site": "mut:lit:src/init.luau:64:9"
+        },
+        {
+          "id": 31,
+          "op": "lit",
+          "line": 69,
+          "col": 6,
+          "byte_start": 1016,
+          "byte_end": 1018,
+          "original": "99",
+          "replacement": "0",
+          "site": "mut:lit:src/init.luau:69:6"
+        },
+        {
+          "id": 32,
+          "op": "lit",
+          "line": 72,
+          "col": 4,
+          "byte_start": 1027,
+          "byte_end": 1032,
+          "original": "false",
+          "replacement": "true",
+          "site": "mut:lit:src/init.luau:72:4"
+        },
+        {
+          "id": 33,
+          "op": "lit",
+          "line": 73,
+          "col": 7,
+          "byte_start": 1044,
+          "byte_end": 1045,
+          "original": "1",
+          "replacement": "0",
+          "site": "mut:lit:src/init.luau:73:7"
+        },
+        {
+          "id": 34,
+          "op": "lit",
+          "line": 76,
+          "col": 4,
+          "byte_start": 1054,
+          "byte_end": 1058,
+          "original": "true",
+          "replacement": "false",
+          "site": "mut:lit:src/init.luau:76:4"
+        },
+        {
+          "id": 35,
+          "op": "lit",
+          "line": 77,
+          "col": 6,
+          "byte_start": 1069,
+          "byte_end": 1070,
+          "original": "2",
+          "replacement": "0",
+          "site": "mut:lit:src/init.luau:77:6"
+        },
+        {
+          "id": 36,
+          "op": "lit",
+          "line": 79,
+          "col": 7,
+          "byte_start": 1082,
+          "byte_end": 1083,
+          "original": "2",
+          "replacement": "0",
+          "site": "mut:lit:src/init.luau:79:7"
+        }
+      ]
+    },
+    {
+      "path": "src/util/deep.luau",
+      "sha256": "6e7c21e9d1bd1b78aa67b210d611bd69a981c6f760f106d0f63f6ba972677707",
+      "mutants": [
+        {
+          "id": 37,
+          "op": "aor",
+          "line": 6,
+          "col": 11,
+          "byte_start": 145,
+          "byte_end": 146,
+          "original": "*",
+          "replacement": "/",
+          "site": "mut:aor:src/util/deep.luau:6:11"
+        },
+        {
+          "id": 38,
+          "op": "lit",
+          "line": 6,
+          "col": 13,
+          "byte_start": 147,
+          "byte_end": 148,
+          "original": "2",
+          "replacement": "0",
+          "site": "mut:lit:src/util/deep.luau:6:13"
+        }
+      ]
+    }
+  ]
+}
