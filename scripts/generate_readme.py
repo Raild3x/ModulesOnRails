@@ -10,6 +10,7 @@ import sys
 from datetime import date
 from pathlib import Path
 from typing import Dict, Optional, Tuple
+from urllib.parse import quote
 
 # ---------------------------------------------------------------------------
 # Local shared utilities (scripts/_common.py)
@@ -40,6 +41,27 @@ def get_git_remote_info() -> Tuple[Optional[str], Optional[str]]:
     print(f"Error: Could not parse remote URL: {remote_url}")
     return None, None
 
+
+
+def generate_badges(repo_owner: str, repo_name: str, docs_link: str) -> str:
+    """Generate the badge line shown at the top of the README.
+
+    The README renders both on GitHub and as the Moonwave landing page, so
+    every link is an absolute URL. The coverage badge reads a shields
+    endpoint JSON that the Coverage Badge workflow publishes to the `badges`
+    branch; it renders as "invalid" until that branch exists.
+    """
+    repo_url = f"https://github.com/{repo_owner}/{repo_name}"
+    coverage_json_url = (
+        f"https://raw.githubusercontent.com/{repo_owner}/{repo_name}/badges/coverage.json"
+    )
+    badges = [
+        f"[![CI]({repo_url}/actions/workflows/ci.yml/badge.svg)]({repo_url}/actions/workflows/ci.yml)",
+        f"[![Docs](https://img.shields.io/badge/docs-site-blue)]({docs_link}/)",
+        f"[![License](https://img.shields.io/github/license/{repo_owner}/{repo_name})]({repo_url}/blob/main/LICENSE)",
+        f"[![Coverage](https://img.shields.io/endpoint?url={quote(coverage_json_url, safe='')})]({repo_url}/actions/workflows/coverage-badge.yml)",
+    ]
+    return " ".join(badges)
 
 
 def get_config_value(config: Dict[str, Dict[str, str]], key: str, default: str = "") -> str:
@@ -141,7 +163,9 @@ def main():
             released_packages.append(table_row)
     
     # Generate README content
-    readme_content = f"""{repo_name} is a collection of Wally packages to streamline Roblox development.
+    readme_content = f"""{generate_badges(repo_owner, repo_name, docs_link)}
+
+{repo_name} is a collection of Wally packages to streamline Roblox development.
 
 # Packages
 

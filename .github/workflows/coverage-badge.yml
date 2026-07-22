@@ -1,0 +1,144 @@
+# Recomputes repo-wide test coverage and publishes the shields.io badge JSON
+# to the `badges` branch (read by the Coverage badge in README.md).
+#
+# Incremental: per-package results are cached in coverage-state.json on the
+# `badges` branch, and only packages changed since the recorded main SHA are
+# rerun. Changes to the coverage tooling itself invalidate every package.
+# See scripts/workflow_actions/coverage_badge.py for the stale/merge logic.
+name: Coverage Badge
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      full:
+        description: "Recompute coverage for every package"
+        type: boolean
+        default: false
+
+# Runs rewrite shared state on the badges branch; never run two at once.
+concurrency:
+  group: coverage-badge
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  badge:
+    name: "Update coverage badge"
+    runs-on: ubuntu-latest
+    env:
+      ROBLOX_API_KEY: ${{ secrets.ROBLOX_API_KEY }}
+      ROBLOX_UNIVERSE_ID: ${{ secrets.ROBLOX_UNIVERSE_ID }}
+      ROBLOX_PLACE_ID: ${{ secrets.ROBLOX_PLACE_ID }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so the diff against the cached SHA resolves
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # The badges branch (if it exists) holds the per-package coverage cache.
+      - name: Fetch cached coverage state
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git fetch origin badges 2>/dev/null; then
+            git show FETCH_HEAD:coverage-state.json > coverage-state-cache.json 2>/dev/null \
+              || echo "badges branch has no coverage-state.json yet."
+          else
+            echo "No badges branch yet; first run will cover every package."
+          fi
+
+      - name: Determine stale packages
+        id: stale
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/workflow_actions/coverage_badge.py stale \
+            --state-file coverage-state-cache.json \
+            --stale-packages-file stale-packages.txt \
+            ${{ inputs.full == true && '--full' || '' }}
+
+      - name: Setup toolchain
+        if: steps.stale.outputs.has_stale == 'true'
+        uses: ./.github/actions/setup-toolchain
+
+      - name: Setup Rust
+        if: steps.stale.outputs.has_stale == 'true'
+        uses: dtolnay/rust-toolchain@stable
+
+      # The coverage runner builds tools/coverage/engine with cargo on first
+      # use; cache the build so CI only pays for it when the engine changes.
+      - name: Cache coverage engine build
+        if: steps.stale.outputs.has_stale == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            tools/coverage/engine/target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: coverage-engine-${{ runner.os }}-${{ hashFiles('tools/coverage/engine/Cargo.lock', 'tools/coverage/engine/src/**') }}
+          restore-keys: |
+            coverage-engine-${{ runner.os }}-
+
+      # A failing package keeps its cached number (merge skips reports with
+      # failing tests) rather than blocking the badge for everything else.
+      - name: Run coverage (stale packages)
+        if: steps.stale.outputs.has_stale == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          has_opencloud=true
+          if [ -z "$ROBLOX_API_KEY" ] || [ -z "$ROBLOX_UNIVERSE_ID" ] || [ -z "$ROBLOX_PLACE_ID" ]; then
+            has_opencloud=false
+            echo "::notice::Open Cloud secrets not configured; Roblox-pipeline packages keep cached numbers."
+          fi
+          while read -r pkg; do
+            [ -z "$pkg" ] && continue
+            echo "::group::Coverage — $pkg"
+            python scripts/test_package.py "$pkg" --lune-only \
+              || echo "::warning::Lune coverage failed for $pkg; keeping cached value."
+            if [ "$has_opencloud" = "true" ]; then
+              python scripts/test_package.py "$pkg" --roblox-only --roblox-runner=opencloud \
+                || echo "::warning::Open Cloud coverage failed for $pkg; keeping cached value."
+            fi
+            echo "::endgroup::"
+          done < stale-packages.txt
+
+      - name: Merge results and build badge
+        if: steps.stale.outputs.has_stale == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/workflow_actions/coverage_badge.py merge \
+            --state-file coverage-state-cache.json \
+            --out-dir badge-out \
+            --main-sha "${{ github.sha }}"
+
+      # The badges branch is a single orphan commit holding only the badge
+      # JSON and the cache; history there has no value, so force-push a fresh
+      # commit each time to keep the branch tiny.
+      - name: Publish to badges branch
+        if: steps.stale.outputs.has_stale == 'true'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd badge-out
+          git init -q -b badges
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add coverage.json coverage-state.json
+          git commit -q -m "chore: update coverage badge for ${{ github.sha }}"
+          git push --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git" badges:badges
