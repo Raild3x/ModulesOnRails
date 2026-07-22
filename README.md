@@ -1,3 +1,7 @@
+[![CI](https://github.com/Raild3x/ModulesOnRails/actions/workflows/ci.yml/badge.svg)](https://github.com/Raild3x/ModulesOnRails/actions/workflows/ci.yml) [![Docs](https://img.shields.io/badge/docs-site-blue)](https://raild3x.github.io/ModulesOnRails/) [![License](https://img.shields.io/github/license/Raild3x/ModulesOnRails)](https://github.com/Raild3x/ModulesOnRails/blob/main/LICENSE) [![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FRaild3x%2FModulesOnRails%2Fbadges%2Fcoverage.json)](https://github.com/Raild3x/ModulesOnRails/actions/workflows/coverage-badge.yml)
+
+![ModulesOnRails banner](https://raw.githubusercontent.com/Raild3x/ModulesOnRails/main/brand/banner_logo.png)
+
 ModulesOnRails is a collection of Wally packages to streamline Roblox development.
 
 # Packages
@@ -9,6 +13,7 @@ ModulesOnRails is a collection of Wally packages to streamline Roblox developmen
 | [CmdrHandler](https://raild3x.github.io/ModulesOnRails/api/CmdrHandler) | `CmdrHandler = "raild3x/cmdrhandler@0.2.2"` | A wrapper for eveara/quenty's Cmdr library. |
 | [Component](https://raild3x.github.io/ModulesOnRails/api/Component) | `Component = "raild3x/component@0.2.0"` | A fork of Sleitnick's Component class for Roblox. |
 | [DragDrop](https://raild3x.github.io/ModulesOnRails/api/DragDrop) | `DragDrop = "raild3x/dragdrop@0.2.0"` | A device-agnostic drag-and-drop system for Roblox UI (mouse, touch, gamepad, keyboard). |
+| [Graph Utilities](https://raild3x.github.io/ModulesOnRails/api/GraphUtil) | `Graph Utilities = "raild3x/graphutil@0.2.0"` | A collection of Graph utilities |
 | [Heap](https://raild3x.github.io/ModulesOnRails/api/Heap) | `Heap = "raild3x/heap@2.1.4"` | A generic min/max heap implementation in Luau. |
 | [Loose-Tight-Double-Grid](https://raild3x.github.io/ModulesOnRails/api/LooseTightDoubleGrid) | `Loose-Tight-Double-Grid = "raild3x/loosetightdoublegrid@1.2.1"` | A spatial partitioning system to query varied size entities in 2d space. |
 | [NetWire](https://raild3x.github.io/ModulesOnRails/api/NetWire) | `NetWire = "raild3x/netwire@0.3.4"` | A networking library based off of sleitnicks comm library. |
@@ -17,9 +22,9 @@ ModulesOnRails is a collection of Wally packages to streamline Roblox developmen
 | [PromValue](https://raild3x.github.io/ModulesOnRails/api/PromValue) | `PromValue = "raild3x/promvalue@0.1.0"` | An object class that allows for delayed setting |
 | [Quadtree](https://raild3x.github.io/ModulesOnRails/api/Quadtree) | `Quadtree = "raild3x/quadtree@0.0.3"` | A spatial partitioning system to query points in a 2D space. Refactored from Sleitnick's Octree package. |
 | [Queue](https://raild3x.github.io/ModulesOnRails/api/Queue) | `Queue = "raild3x/queue@1.0.0"` | A generic queue implementation in luau. |
-| [RemoteComponent](https://raild3x.github.io/ModulesOnRails/api/RemoteComponent) | `RemoteComponent = "raild3x/remotecomponent@0.1.3"` | A component extension to provide easy networking functionality. |
+| [RemoteComponent](https://raild3x.github.io/ModulesOnRails/api/RemoteComponent) | `RemoteComponent = "raild3x/remotecomponent@0.2.0"` | A component extension to provide easy networking functionality. |
 | [Roam](https://raild3x.github.io/ModulesOnRails/api/Roam) | `Roam = "raild3x/roam@0.2.0"` | Roam is a service initialization framework for Roblox. |
-| [T](https://raild3x.github.io/ModulesOnRails/api/T) | `T = "raild3x/t@1.1.0"` | A runtime typechecker for Luau/Roblox |
+| [T](https://raild3x.github.io/ModulesOnRails/api/t) | `T = "raild3x/t@1.1.0"` | A runtime typechecker for Luau/Roblox |
 | [TableManager](https://raild3x.github.io/ModulesOnRails/api/TableManager) | `TableManager = "raild3x/tablemanager@1.1.1"` | A Luau library for managing tables. |
 | [TableReplicator](https://raild3x.github.io/ModulesOnRails/api/TableReplicator) | `TableReplicator = "raild3x/tablereplicator@1.0.1"` | Replicates a TableManager instance from server to client with minimal effort. |
 
@@ -40,4 +45,4 @@ ModulesOnRails is a collection of Wally packages to streamline Roblox developmen
 
 ---
 
-*Last Modified: July 21, 2026*
+*Last Modified: July 22, 2026*

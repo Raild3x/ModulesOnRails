@@ -4,6 +4,7 @@ Setup script for Wally packages environment.
 Sets up proper linting by installing dependencies and generating types.
 """
 
+import json
 import os
 import shutil
 import sys
@@ -81,6 +82,60 @@ def _unpack_dependency_directory(
     print(f"Removing original {dependency_dir_name} directory...")
     dependency_dir.rmdir()
     return True
+def _first_project_path(node) -> str | None:
+    """Return the first ``$path`` value found in a Rojo project tree, if any."""
+    if isinstance(node, dict):
+        path = node.get("$path")
+        if isinstance(path, str):
+            return path
+        for value in node.values():
+            found = _first_project_path(value)
+            if found is not None:
+                return found
+    return None
+
+
+def generate_lune_index_shims(index_dir: Path) -> None:
+    """Add ``init.luau`` shims so Wally deps resolve under Lune require-by-string.
+
+    Wally packages published with a ``default.project.json`` that redirects
+    ``$path`` to a subfolder (e.g. ``src``) are resolvable by Rojo/Roblox but not
+    by Lune: the generated linker requires the package folder as a directory, and
+    Lune looks for an ``init.luau`` there rather than following the Rojo project
+    redirect. For each such folder that lacks its own ``init``, drop in a shim
+    that re-exports the redirect target via ``@self``. This is a no-op for Rojo
+    (an explicit ``default.project.json`` takes precedence over the loose file).
+    """
+    if not index_dir.is_dir():
+        return
+
+    for project_file in index_dir.rglob("default.project.json"):
+        pkg_dir = project_file.parent
+        # Skip if the folder is already resolvable as a module on its own.
+        if (pkg_dir / "init.luau").exists() or (pkg_dir / "init.lua").exists():
+            continue
+
+        try:
+            project = json.loads(project_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+
+        target = _first_project_path(project)
+        # Only handle a redirect into a child path; "." would just point at the
+        # folder itself and can't be re-exported this way.
+        if not target or target.strip() in ("", "."):
+            continue
+
+        # Normalize into a require path: forward slashes, no source extension.
+        require_target = target.replace("\\", "/").strip("/")
+        for ext in (".luau", ".lua"):
+            if require_target.endswith(ext):
+                require_target = require_target[: -len(ext)]
+                break
+
+        shim = pkg_dir / "init.luau"
+        shim.write_text(f'return require("@self/{require_target}")\n', encoding="utf-8")
+        print(f"Generated Lune require shim: {shim}")
 
 
 def setup_package(package_dir: Path) -> bool:

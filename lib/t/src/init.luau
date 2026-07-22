@@ -3,7 +3,7 @@
 -- forked by raild3x from osyris's t
 
 --[=[
-    @class T
+    @class t
 
     A composable runtime typechecker for Luau and Roblox.
 
@@ -43,7 +43,7 @@
 --------------------------------------------------------------------------------
 
 --[=[
-	@within T
+	@within t
 	@type Check<V> (value: V | any) -> (boolean, string?)
 	A function that validates a single value and returns `true` on success or `false, errorMessage` on failure.
 	`V` is a phantom type tag used for composition — callers may pass any value regardless of V.
@@ -51,7 +51,7 @@
 export type Check<V = any> = (value: V | any) -> (boolean, string?)
 
 --[=[
-	@within T
+	@within t
 	@ignore
 	@type CheckStrict<V> (value: V) -> (boolean, string?)
 	A function that validates a single value and returns `true` on success or `false, errorMessage` on failure.
@@ -60,7 +60,7 @@ export type Check<V = any> = (value: V | any) -> (boolean, string?)
 export type CheckStrict<V = any> = (value: V) -> (boolean, string?)
 
 --[=[
-	@within T
+	@within t
 	@type CheckTuple<V...> (...: V...) -> (boolean, string?)
 	A function that validates a list of positional arguments and returns `true` on success or `false, errorMessage` on failure.
 ]=]
@@ -79,7 +79,7 @@ export type CheckTuple<V... = ...any> = (V...) -> (boolean, string?)
 local t = {}
 
 --[=[
-	@within T
+	@within t
 	@type CheckMeta { kind: "interface" | "strictInterface" | "partialInterface", fields: {[any]: Check<any>} } | { kind: "optional", innerCheck: Check<any> } | { kind: "array", valueCheck: Check<any> }
 	Metadata attached to navigable composed checks. Returned by `t.GetMeta`.
 	Leaf checks (e.g. `t.string`, `t.number`) do not have metadata.
@@ -101,7 +101,7 @@ local function annotate<T>(fn: T & Check<any>, meta: CheckMeta): T
 end
 
 --[=[
-	@within T
+	@within t
 	@function GetMeta
 	Returns the construction metadata for a navigable composed check, or `nil` for
 	leaf checks and any check that was not built with a metadata-aware factory.
@@ -121,7 +121,7 @@ function t.GetMeta(check: Check<any>): CheckMeta?
 end
 
 --[=[
-	@within T
+	@within t
 	@function type
 	Creates a checker using Lua's native `type()`.
 
@@ -146,7 +146,7 @@ end
 t.type = t_type
 
 --[=[
-	@within T
+	@within t
 	@function typeof
 	Creates a checker using Roblox's `typeof()`.
 
@@ -173,7 +173,7 @@ t.typeof = t_typeof
 -- Primitive checks (A-Z)
 
 --[=[
-	@within T
+	@within t
 	@function any
 	Matches any type except nil.
 
@@ -197,7 +197,7 @@ t.any = t_any
 
 --[=[
 	Ensures Lua primitive boolean type.
-	@within T
+	@within t
 	@function boolean
 	@param value any
 	@return boolean
@@ -207,7 +207,7 @@ t.boolean = t.typeof("boolean") :: Check<boolean>
 
 --[=[
 	Ensures Lua primitive buffer type.
-	@within T
+	@within t
 	@function buffer
 	@param value any
 	@return boolean
@@ -217,7 +217,7 @@ t.buffer = t.typeof("buffer") :: Check<buffer>
 
 --[=[
 	Ensures Lua primitive function type.
-	@within T
+	@within t
 	@function callback
 	@param value any
 	@return boolean
@@ -227,7 +227,7 @@ t.callback = t.typeof("function") :: Check<(...any) -> ...any>
 t["function"] = t.callback
 
 --[=[
-	@within T
+	@within t
 	@function nan
 	Ensures value is NaN.
 
@@ -256,7 +256,7 @@ t.nan = (t_nan :: any) :: Check<number>
 
 --[=[
 	Ensures Lua primitive nil type.
-	@within T
+	@within t
 	@function none
 	@param value any
 	@return boolean
@@ -267,7 +267,7 @@ t["nil"] = t.none
 
 --[=[
 	@function number
-	@within T
+	@within t
 	Ensures value is a non-NaN number.
 
 	```lua
@@ -295,7 +295,7 @@ t.number = (t_number :: any) :: Check<number>
 
 --[=[
 	Ensures Lua primitive string type.
-	@within T
+	@within t
 	@function string
 	@param value any
 	@return boolean
@@ -305,7 +305,7 @@ t.string = t.typeof("string") :: Check<string>
 
 --[=[
 	Ensures Lua primitive table type.
-	@within T
+	@within t
 	@function table
 	@param value any
 	@return boolean
@@ -315,7 +315,7 @@ t.table = t.typeof("table") :: Check<{ [any]: any }>
 
 --[=[
 	Ensures Lua primitive thread type.
-	@within T
+	@within t
 	@function thread
 	@param value any
 	@return boolean
@@ -325,7 +325,7 @@ t.thread = t.typeof("thread") :: Check<thread>
 
 --[=[
 	Ensures Lua primitive userdata type.
-	@within T
+	@within t
 	@function userdata
 	@param value any
 	@return boolean
@@ -335,7 +335,7 @@ t.userdata = t.type("userdata") :: Check<any>
 
 --[=[
 	Ensures Lua primitive vector type.
-	@within T
+	@within t
 	@function vector
 	@param value any
 	@return boolean
@@ -347,7 +347,7 @@ t.vector = t.type("vector") :: Check<vector>
 
 --[=[
 	Ensures Roblox Axes type.
-	@within T
+	@within t
 	@function Axes
 	@param value any
 	@return boolean
@@ -357,7 +357,7 @@ t.Axes = t.typeof("Axes") :: Check<Axes>
 
 --[=[
 	Ensures Roblox BrickColor type.
-	@within T
+	@within t
 	@function BrickColor
 	@param value any
 	@return boolean
@@ -367,7 +367,7 @@ t.BrickColor = t.typeof("BrickColor") :: Check<BrickColor>
 
 --[=[
 	Ensures Roblox CatalogSearchParams type.
-	@within T
+	@within t
 	@function CatalogSearchParams
 	@param value any
 	@return boolean
@@ -377,7 +377,7 @@ t.CatalogSearchParams = t.typeof("CatalogSearchParams") :: Check<CatalogSearchPa
 
 --[=[
 	Ensures Roblox CFrame type.
-	@within T
+	@within t
 	@function CFrame
 	@param value any
 	@return boolean
@@ -387,7 +387,7 @@ t.CFrame = t.typeof("CFrame") :: Check<CFrame>
 
 --[=[
 	Ensures Roblox Color3 type.
-	@within T
+	@within t
 	@function Color3
 	@param value any
 	@return boolean
@@ -397,7 +397,7 @@ t.Color3 = t.typeof("Color3") :: Check<Color3>
 
 --[=[
 	Ensures Roblox ColorSequence type.
-	@within T
+	@within t
 	@function ColorSequence
 	@param value any
 	@return boolean
@@ -407,7 +407,7 @@ t.ColorSequence = t.typeof("ColorSequence") :: Check<ColorSequence>
 
 --[=[
 	Ensures Roblox ColorSequenceKeypoint type.
-	@within T
+	@within t
 	@function ColorSequenceKeypoint
 	@param value any
 	@return boolean
@@ -417,7 +417,7 @@ t.ColorSequenceKeypoint = t.typeof("ColorSequenceKeypoint") :: Check<ColorSequen
 
 --[=[
 	Ensures Roblox Content type.
-	@within T
+	@within t
 	@function Content
 	@param value any
 	@return boolean
@@ -427,7 +427,7 @@ t.Content = t.typeof("Content") :: Check<Content>
 
 --[=[
 	Ensures Roblox DateTime type.
-	@within T
+	@within t
 	@function DateTime
 	@param value any
 	@return boolean
@@ -437,7 +437,7 @@ t.DateTime = t.typeof("DateTime") :: Check<DateTime>
 
 --[=[
 	Ensures Roblox DockWidgetPluginGuiInfo type.
-	@within T
+	@within t
 	@function DockWidgetPluginGuiInfo
 	@param value any
 	@return boolean
@@ -447,7 +447,7 @@ t.DockWidgetPluginGuiInfo = t.typeof("DockWidgetPluginGuiInfo") :: Check<DockWid
 
 --[=[
 	Ensures Roblox Enum type.
-	@within T
+	@within t
 	@function Enum
 	@param value any
 	@return boolean
@@ -457,7 +457,7 @@ t.Enum = t.typeof("Enum") :: Check<Enum>
 
 --[=[
 	Ensures Roblox EnumItem type.
-	@within T
+	@within t
 	@function EnumItem
 	@param value any
 	@return boolean
@@ -467,7 +467,7 @@ t.EnumItem = t.typeof("EnumItem") :: Check<EnumItem>
 
 --[=[
 	Ensures Roblox Enums type.
-	@within T
+	@within t
 	@function Enums
 	@param value any
 	@return boolean
@@ -477,7 +477,7 @@ t.Enums = t.typeof("Enums") :: Check<Enums>
 
 --[=[
 	Ensures Roblox Faces type.
-	@within T
+	@within t
 	@function Faces
 	@param value any
 	@return boolean
@@ -487,7 +487,7 @@ t.Faces = t.typeof("Faces") :: Check<Faces>
 
 --[=[
 	Ensures Roblox FloatCurveKey type.
-	@within T
+	@within t
 	@function FloatCurveKey
 	@param value any
 	@return boolean
@@ -497,7 +497,7 @@ t.FloatCurveKey = t.typeof("FloatCurveKey") :: Check<FloatCurveKey>
 
 --[=[
 	Ensures Roblox Font type.
-	@within T
+	@within t
 	@function Font
 	@param value any
 	@return boolean
@@ -507,7 +507,7 @@ t.Font = t.typeof("Font") :: Check<Font>
 
 --[=[
 	Ensures Roblox Instance type.
-	@within T
+	@within t
 	@function Instance
 	@param value any
 	@return boolean
@@ -517,7 +517,7 @@ t.Instance = t.typeof("Instance") :: Check<Instance>
 
 --[=[
 	Ensures Roblox NumberRange type.
-	@within T
+	@within t
 	@function NumberRange
 	@param value any
 	@return boolean
@@ -527,7 +527,7 @@ t.NumberRange = t.typeof("NumberRange") :: Check<NumberRange>
 
 --[=[
 	Ensures Roblox NumberSequence type.
-	@within T
+	@within t
 	@function NumberSequence
 	@param value any
 	@return boolean
@@ -537,7 +537,7 @@ t.NumberSequence = t.typeof("NumberSequence") :: Check<NumberSequence>
 
 --[=[
 	Ensures Roblox NumberSequenceKeypoint type.
-	@within T
+	@within t
 	@function NumberSequenceKeypoint
 	@param value any
 	@return boolean
@@ -547,7 +547,7 @@ t.NumberSequenceKeypoint = t.typeof("NumberSequenceKeypoint") :: Check<NumberSeq
 
 --[=[
 	Ensures Roblox OverlapParams type.
-	@within T
+	@within t
 	@function OverlapParams
 	@param value any
 	@return boolean
@@ -557,7 +557,7 @@ t.OverlapParams = t.typeof("OverlapParams") :: Check<OverlapParams>
 
 --[=[
 	Ensures Roblox Path2DControlPoint type.
-	@within T
+	@within t
 	@function Path2DControlPoint
 	@param value any
 	@return boolean
@@ -567,7 +567,7 @@ t.Path2DControlPoint = t.typeof("Path2DControlPoint") :: Check<Path2DControlPoin
 
 --[=[
 	Ensures Roblox PathWaypoint type.
-	@within T
+	@within t
 	@function PathWaypoint
 	@param value any
 	@return boolean
@@ -577,7 +577,7 @@ t.PathWaypoint = t.typeof("PathWaypoint") :: Check<PathWaypoint>
 
 --[=[
 	Ensures Roblox PhysicalProperties type.
-	@within T
+	@within t
 	@function PhysicalProperties
 	@param value any
 	@return boolean
@@ -587,7 +587,7 @@ t.PhysicalProperties = t.typeof("PhysicalProperties") :: Check<PhysicalPropertie
 
 --[=[
 	Ensures Roblox Random type.
-	@within T
+	@within t
 	@function Random
 	@param value any
 	@return boolean
@@ -597,7 +597,7 @@ t.Random = t.typeof("Random") :: Check<Random>
 
 --[=[
 	Ensures Roblox Ray type.
-	@within T
+	@within t
 	@function Ray
 	@param value any
 	@return boolean
@@ -607,7 +607,7 @@ t.Ray = t.typeof("Ray") :: Check<Ray>
 
 --[=[
 	Ensures Roblox RaycastParams type.
-	@within T
+	@within t
 	@function RaycastParams
 	@param value any
 	@return boolean
@@ -617,7 +617,7 @@ t.RaycastParams = t.typeof("RaycastParams") :: Check<RaycastParams>
 
 --[=[
 	Ensures Roblox RaycastResult type.
-	@within T
+	@within t
 	@function RaycastResult
 	@param value any
 	@return boolean
@@ -627,7 +627,7 @@ t.RaycastResult = t.typeof("RaycastResult") :: Check<RaycastResult>
 
 --[=[
 	Ensures Roblox RBXScriptConnection type.
-	@within T
+	@within t
 	@function RBXScriptConnection
 	@param value any
 	@return boolean
@@ -637,7 +637,7 @@ t.RBXScriptConnection = t.typeof("RBXScriptConnection") :: Check<RBXScriptConnec
 
 --[=[
 	Ensures Roblox RBXScriptSignal type.
-	@within T
+	@within t
 	@function RBXScriptSignal
 	@param value any
 	@return boolean
@@ -647,7 +647,7 @@ t.RBXScriptSignal = t.typeof("RBXScriptSignal") :: Check<RBXScriptSignal>
 
 --[=[
 	Ensures Roblox Rect type.
-	@within T
+	@within t
 	@function Rect
 	@param value any
 	@return boolean
@@ -657,7 +657,7 @@ t.Rect = t.typeof("Rect") :: Check<Rect>
 
 --[=[
 	Ensures Roblox Region3 type.
-	@within T
+	@within t
 	@function Region3
 	@param value any
 	@return boolean
@@ -667,7 +667,7 @@ t.Region3 = t.typeof("Region3") :: Check<Region3>
 
 --[=[
 	Ensures Roblox Region3int16 type.
-	@within T
+	@within t
 	@function Region3int16
 	@param value any
 	@return boolean
@@ -677,7 +677,7 @@ t.Region3int16 = t.typeof("Region3int16") :: Check<Region3int16>
 
 --[=[
 	Ensures Roblox RotationCurveKey type.
-	@within T
+	@within t
 	@function RotationCurveKey
 	@param value any
 	@return boolean
@@ -687,7 +687,7 @@ t.RotationCurveKey = t.typeof("RotationCurveKey") :: Check<RotationCurveKey>
 
 --[=[
 	Ensures Roblox Secret type.
-	@within T
+	@within t
 	@function Secret
 	@param value any
 	@return boolean
@@ -697,7 +697,7 @@ t.Secret = t.typeof("Secret") :: Check<Secret>
 
 --[=[
 	Ensures Roblox SecurityCapabilities type.
-	@within T
+	@within t
 	@function SecurityCapabilities
 	@param value any
 	@return boolean
@@ -707,7 +707,7 @@ t.SecurityCapabilities = t.typeof("SecurityCapabilities") :: Check<SecurityCapab
 
 --[=[
 	Ensures Roblox SharedTable type.
-	@within T
+	@within t
 	@function SharedTable
 	@param value any
 	@return boolean
@@ -717,7 +717,7 @@ t.SharedTable = t.typeof("SharedTable") :: Check<SharedTable>
 
 --[=[
 	Ensures Roblox TweenInfo type.
-	@within T
+	@within t
 	@function TweenInfo
 	@param value any
 	@return boolean
@@ -727,7 +727,7 @@ t.TweenInfo = t.typeof("TweenInfo") :: Check<TweenInfo>
 
 --[=[
 	Ensures Roblox UDim type.
-	@within T
+	@within t
 	@function UDim
 	@param value any
 	@return boolean
@@ -737,7 +737,7 @@ t.UDim = t.typeof("UDim") :: Check<UDim>
 
 --[=[
 	Ensures Roblox UDim2 type.
-	@within T
+	@within t
 	@function UDim2
 	@param value any
 	@return boolean
@@ -747,7 +747,7 @@ t.UDim2 = t.typeof("UDim2") :: Check<UDim2>
 
 --[=[
 	Ensures Roblox ValueCurveKey type.
-	@within T
+	@within t
 	@function ValueCurveKey
 	@param value any
 	@return boolean
@@ -757,7 +757,7 @@ t.ValueCurveKey = t.typeof("ValueCurveKey") :: Check<ValueCurveKey>
 
 --[=[
 	Ensures Roblox Vector2 type.
-	@within T
+	@within t
 	@function Vector2
 	@param value any
 	@return boolean
@@ -767,7 +767,7 @@ t.Vector2 = t.typeof("Vector2") :: Check<Vector2>
 
 --[=[
 	Ensures Roblox Vector2int16 type.
-	@within T
+	@within t
 	@function Vector2int16
 	@param value any
 	@return boolean
@@ -777,7 +777,7 @@ t.Vector2int16 = t.typeof("Vector2int16") :: Check<Vector2int16>
 
 --[=[
 	Ensures Roblox Vector3 type.
-	@within T
+	@within t
 	@function Vector3
 	@param value any
 	@return boolean
@@ -787,7 +787,7 @@ t.Vector3 = t.typeof("Vector3") :: Check<Vector3>
 
 --[=[
 	Ensures Roblox Vector3int16 type.
-	@within T
+	@within t
 	@function Vector3int16
 	@param value any
 	@return boolean
@@ -801,7 +801,7 @@ t.Vector3int16 = t.typeof("Vector3int16") :: Check<Vector3int16>
 
 --[=[
 	@function literal
-	@within T
+	@within t
 	Ensures value is a given literal value. When given multiple arguments,
 	creates a union of the provided literals.
 
@@ -837,7 +837,7 @@ t.literal = t_literal
 --[=[
 	Alias for `t.literal`.
 	@function exactly
-	@within T
+	@within t
 	@deprecated Use `t.literal` instead.
 	@param ... any -- The literal value(s) to match
 	@return Check<V>
@@ -845,7 +845,7 @@ t.literal = t_literal
 t.exactly = t.literal
 
 --[=[
-	@within T
+	@within t
 	@function keyOf
 	Returns a `t.union` of each key in the table as a `t.literal`.
 
@@ -869,7 +869,7 @@ end
 t.keyOf = t_keyOf
 
 --[=[
-	@within T
+	@within t
 	@function valueOf
 	Returns a `t.union` of each value in the table as a `t.literal`.
 
@@ -893,7 +893,7 @@ end
 t.valueOf = t_valueOf
 
 --[=[
-	@within T
+	@within t
 	@function integer
 	Ensures value is an integer (whole number).
 
@@ -920,7 +920,7 @@ end
 t.integer = (t_integer :: any) :: Check<number>
 
 --[=[
-	@within T
+	@within t
 	@function integerMin
 	Ensures value is an integer where `min <= value`.
 
@@ -949,7 +949,7 @@ end
 t.integerMin = t_integerMin
 
 --[=[
-	@within T
+	@within t
 	@function integerMax
 	Ensures value is an integer where `value <= max`.
 
@@ -978,7 +978,7 @@ end
 t.integerMax = t_integerMax
 
 --[=[
-	@within T
+	@within t
 	@function integerMinExclusive
 	Ensures value is an integer where `min < value`.
 
@@ -1007,7 +1007,7 @@ end
 t.integerMinExclusive = t_integerMinExclusive
 
 --[=[
-	@within T
+	@within t
 	@function integerMaxExclusive
 	Ensures value is an integer where `value < max`.
 
@@ -1037,7 +1037,7 @@ t.integerMaxExclusive = t_integerMaxExclusive
 
 --[=[
 	Ensures value is an integer greater than 0.
-	@within T
+	@within t
 	@function integerPositive
 	@param value any
 	@return boolean
@@ -1047,7 +1047,7 @@ t.integerPositive = t.integerMinExclusive(0) :: Check<number>
 
 --[=[
 	Ensures value is an integer less than 0.
-	@within T
+	@within t
 	@function integerNegative
 	@param value any
 	@return boolean
@@ -1056,7 +1056,7 @@ t.integerPositive = t.integerMinExclusive(0) :: Check<number>
 t.integerNegative = t.integerMaxExclusive(0) :: Check<number>
 
 --[=[
-	@within T
+	@within t
 	@function integerConstrained
 	Ensures value is an integer where `min <= value <= max`.
 
@@ -1089,7 +1089,7 @@ end
 t.integerConstrained = t_integerConstrained
 
 --[=[
-	@within T
+	@within t
 	@function integerConstrainedExclusive
 	Ensures value is an integer where `min < value < max`.
 
@@ -1122,7 +1122,7 @@ end
 t.integerConstrainedExclusive = t_integerConstrainedExclusive
 
 --[=[
-	@within T
+	@within t
 	@function numberMin
 	Ensures value is a number where `min <= value`.
 
@@ -1150,7 +1150,7 @@ end
 t.numberMin = t_numberMin
 
 --[=[
-	@within T
+	@within t
 	@function numberMax
 	Ensures value is a number where `value <= max`.
 
@@ -1178,7 +1178,7 @@ end
 t.numberMax = t_numberMax
 
 --[=[
-	@within T
+	@within t
 	@function numberMinExclusive
 	Ensures value is a number where `min < value`.
 
@@ -1206,7 +1206,7 @@ end
 t.numberMinExclusive = t_numberMinExclusive
 
 --[=[
-	@within T
+	@within t
 	@function numberMaxExclusive
 	Ensures value is a number where `value < max`.
 
@@ -1235,7 +1235,7 @@ t.numberMaxExclusive = t_numberMaxExclusive
 
 --[=[
 	Ensures value is a number greater than 0.
-	@within T
+	@within t
 	@function numberPositive
 	@param value any
 	@return boolean
@@ -1245,7 +1245,7 @@ t.numberPositive = t.numberMinExclusive(0) :: Check<number>
 
 --[=[
 	Ensures value is a number less than 0.
-	@within T
+	@within t
 	@function numberNegative
 	@param value any
 	@return boolean
@@ -1254,7 +1254,7 @@ t.numberPositive = t.numberMinExclusive(0) :: Check<number>
 t.numberNegative = t.numberMaxExclusive(0) :: Check<number>
 
 --[=[
-	@within T
+	@within t
 	@function numberConstrained
 	Ensures value is a number where `min <= value <= max`.
 
@@ -1287,7 +1287,7 @@ end
 t.numberConstrained = t_numberConstrained
 
 --[=[
-	@within T
+	@within t
 	@function numberConstrainedExclusive
 	Ensures value is a number where `min < value < max`.
 
@@ -1324,7 +1324,7 @@ t.numberConstrainedExclusive = t_numberConstrainedExclusive
 --------------------------------------------------------------------------------
 
 --[=[
-	@within T
+	@within t
 	@function match
 	Ensures value is a string matching the given Lua pattern.
 
@@ -1352,7 +1352,7 @@ end
 t.match = t_match
 
 --[=[
-	@within T
+	@within t
 	@function optional
 	Ensures value is either nil or passes the given check.
 
@@ -1382,7 +1382,7 @@ t.optional = t_optional
 t.maybe = t.optional
 
 --[=[
-	@within T
+	@within t
 	@function where
 	Refines an existing check with an additional predicate.
 
@@ -1421,7 +1421,7 @@ t.where = t_where
 --------------------------------------------------------------------------------
 
 --[=[
-	@within T
+	@within t
 	@function tuple
 	Matches a tuple of values against a tuple of checks.
 
@@ -1449,7 +1449,7 @@ end
 t.tuple = t_tuple
 
 --[=[
-	@within T
+	@within t
 	@function strictTuple
 	Matches a tuple of values against a tuple of checks and disallows excess arguments.
 
@@ -1483,7 +1483,7 @@ end
 t.strictTuple = t_strictTuple
 
 --[=[
-	@within T
+	@within t
 	@function keys
 	Ensures all keys in a table pass the given check.
 
@@ -1514,7 +1514,7 @@ end
 t.keys = t_keys
 
 --[=[
-	@within T
+	@within t
 	@function values
 	Ensures all values in a table pass the given check.
 
@@ -1545,7 +1545,7 @@ end
 t.values = t_values
 
 --[=[
-	@within T
+	@within t
 	@function map<K, V>
 	Ensures value is a table where all keys pass `keyCheck` and all values pass `valueCheck`.
 
@@ -1578,7 +1578,7 @@ end
 t.map = t_map
 
 --[=[
-	@within T
+	@within t
 	@function set
 	Ensures value is a set — a table where all keys pass `valueCheck` and all values are `true`.
 
@@ -1598,7 +1598,7 @@ t.set = t_set
 local arrayKeysCheck = t.keys(t.integer)
 
 --[=[
-	@within T
+	@within t
 	@function array
 	Ensures value is a sequential array where every element passes the given check.
 
@@ -1639,7 +1639,7 @@ end
 t.array = t_array
 
 --[=[
-	@within T
+	@within t
 	@function strictArray
 	Ensures value is an array with an exact sequence of element types.
 	The array must not be longer than the number of provided checks.
@@ -1683,7 +1683,7 @@ t.strictArray = t_strictArray
 local callbackArray = t.array(t.callback)
 
 --[=[
-	@within T
+	@within t
 	@function union
 	Creates a union type that passes if any of the given checks pass.
 
@@ -1716,7 +1716,7 @@ t.union = t_union
 
 --[=[
 	Alias for `t.union`.
-	@within T
+	@within t
 	@function anyOf
 	@param ... Check -- The checks to union
 	@return Check
@@ -1725,7 +1725,7 @@ t.anyOf = t.union
 
 --[=[
 	Alias for `t.union`.
-	@within T
+	@within t
 	@function some
 	@deprecated Use `t.union` instead.
 	@param ... Check -- The checks to union
@@ -1734,7 +1734,7 @@ t.anyOf = t.union
 t.some = t.union
 
 --[=[
-	@within T
+	@within t
 	@function intersection
 	Creates an intersection type that passes only if all of the given checks pass.
 
@@ -1765,7 +1765,7 @@ t.intersection = t_intersection
 
 --[=[
 	Alias for `t.intersection`.
-	@within T
+	@within t
 	@function allOf
 	@param ... Check<V> -- The checks to intersect
 	@return Check<V>
@@ -1774,7 +1774,7 @@ t.allOf = t.intersection
 
 --[=[
 	Alias for `t.intersection`.
-	@within T
+	@within t
 	@function every
 	@deprecated Use `t.intersection` instead.
 	@param ... Check<V> -- The checks to intersect
@@ -1803,7 +1803,7 @@ local function formatKey(key: unknown): string
 end
 
 --[=[
-	@within T
+	@within t
 	@function interface
 	Ensures value is a table matching the given interface definition.
 	Extra fields on the table are allowed.
@@ -1837,7 +1837,7 @@ end
 t.interface = t_interface
 
 --[=[
-	@within T
+	@within t
 	@function partialInterface
 	Ensures value is a table whose known fields pass the given checks when present.
 	Missing fields are allowed.
@@ -1877,7 +1877,7 @@ end
 t.partialInterface = t_partialInterface
 
 --[=[
-	@within T
+	@within t
 	@function strictInterface
 	Ensures value is a table matching the given interface definition exactly.
 	Any extra fields not present in `checkTable` will cause the check to fail.
@@ -1931,7 +1931,7 @@ local checkProperties = t.map(t.string, t.callback)
 local checkChildren = t.map(t.string, t.callback)
 
 --[=[
-	@within T
+	@within t
 	@function attributes
 	Ensures an Instance has attributes whose values pass the corresponding checks.
 
@@ -1964,7 +1964,7 @@ end
 t.attributes = t_attributes
 
 --[=[
-	@within T
+	@within t
 	@function properties
 	Ensures an Instance has properties whose values pass the corresponding checks.
 
@@ -2005,7 +2005,7 @@ t.properties = t_properties
 local t_children: (checkTable: { [string]: Check<Instance> }) -> Check<Instance>
 
 --[=[
-	@within T
+	@within t
 	@function instanceOf
 	Ensures value is an Instance whose `ClassName` exactly matches the given class name.
 
@@ -2065,7 +2065,7 @@ t.instanceOf = t_instanceOf
 
 --[=[
 	Alias for `t.instanceOf`.
-	@within T
+	@within t
 	@function instance
 	@deprecated Use `t.instanceOf` instead.
 	@param className string -- The exact class name to match
@@ -2075,7 +2075,7 @@ t.instanceOf = t_instanceOf
 t.instance = t.instanceOf
 
 --[=[
-	@within T
+	@within t
 	@function instanceIsA
 	Ensures value is an Instance that passes `value:IsA(className)`.
 
@@ -2119,7 +2119,7 @@ end
 t.instanceIsA = t_instanceIsA
 
 --[=[
-	@within T
+	@within t
 	@function children
 	Ensures an Instance tree has named children that pass the corresponding checks.
 	Each entry in `checkTable` must be satisfied by a child with that exact name.
@@ -2170,7 +2170,7 @@ t.children = t_children
 --------------------------------------------------------------------------------
 
 --[=[
-	@within T
+	@within t
 	@function itemOfEnum
 	Ensures value is an EnumItem belonging to the given Enum type.
 
@@ -2213,7 +2213,7 @@ t.enum = t.itemOfEnum -- Alias for itemOfEnum. Kept for backward compatibility.
 local checkWrap = t.tuple(t.callback, t.callback)
 
 --[=[
-	@within T
+	@within t
 	@function wrap
 	Wraps a callback with an argument-check assertion. The returned function
 	will `assert` the check before forwarding to the original callback.
@@ -2238,7 +2238,7 @@ end
 t.wrap = t_wrap
 
 --[=[
-	@within T
+	@within t
 	@function wrapArgs
 	Wraps a callback with an argument-check assertion, taking variadic
 	single-value checks and composing them into a tuple check internally.
@@ -2263,7 +2263,7 @@ end
 t.wrapArgs = t_wrapArgs
 
 --[=[
-	@within T
+	@within t
 	@function strict
 	Wraps a check in an `assert`, producing a function that throws on failure.
 

@@ -75,14 +75,6 @@ classes = ["Component", "RemoteComponent", "BaseComponent"]
 section = "DropletManager"
 classes = ["DropletManager", "DropletServerManager", "DropletClientManager", "Droplet", "DropletUtil", "ExampleResourceTypeData"]
 
-[[classOrder]]
-section = "AdjustableTimer [Unreleased]"
-classes = ["AdjustableTimer", "AdjustableTimerManager"]
-
-
-[[classOrder]]
-section = "PlayerDataManagement [Unreleased]"
-classes = ["PlayerProfileManager", "PlayerDataManager", "ServerPlayerDataManager", "ClientPlayerDataManager"]
 
 
 [[classOrder]]
@@ -92,3 +84,25 @@ classes = ["CmdrHandler", "PermissionsHandler", "CmdrServer", "CmdrClient", "Cmd
 [[classOrder]]
 section = "Data Structures"
 classes = ["Queue", "Heap", "LooseTightDoubleGrid", "Quadtree"]
+
+[[classOrder]]
+section = "Graph Utilities"
+classes = ["GraphUtil", "Connectivity", "BFS", "DFS", "Dijkstra", "AStar", "BellmanFord", "MST", "TopologicalSort"]
+
+[[classOrder]]
+section = "[UNRELEASED]"
+
+[[classOrder.items]]
+section = "AdjustableTimer"
+classes = ["AdjustableTimer", "AdjustableTimerManager"]
+
+[[classOrder.items]]
+section = "Player Data Management"
+classes = ["PlayerProfileManager"]
+
+[[classOrder.items.items]]
+section = "PlayerDataManager"
+classes = ["PlayerDataManager", "ServerPlayerDataManager", "ClientPlayerDataManager"]
+
+[[classOrder]]
+section = "[DEPRECATED]"

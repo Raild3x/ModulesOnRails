@@ -10,6 +10,7 @@ import sys
 from datetime import date
 from pathlib import Path
 from typing import Dict, Optional, Tuple
+from urllib.parse import quote
 
 # ---------------------------------------------------------------------------
 # Local shared utilities (scripts/_common.py)
@@ -42,6 +43,37 @@ def get_git_remote_info() -> Tuple[Optional[str], Optional[str]]:
 
 
 
+def generate_banner(repo_owner: str, repo_name: str) -> str:
+    """Generate the banner logo line shown at the very top of the README.
+
+    Uses an absolute raw.githubusercontent.com URL (not a repo-relative path)
+    so the image also renders on the Moonwave landing page, not just GitHub.
+    """
+    banner_url = f"https://raw.githubusercontent.com/{repo_owner}/{repo_name}/main/brand/banner_logo.png"
+    return f"![{repo_name} banner]({banner_url})"
+
+
+def generate_badges(repo_owner: str, repo_name: str, docs_link: str) -> str:
+    """Generate the badge line shown at the top of the README.
+
+    The README renders both on GitHub and as the Moonwave landing page, so
+    every link is an absolute URL. The coverage badge reads a shields
+    endpoint JSON that the Coverage Badge workflow publishes to the `badges`
+    branch; it renders as "invalid" until that branch exists.
+    """
+    repo_url = f"https://github.com/{repo_owner}/{repo_name}"
+    coverage_json_url = (
+        f"https://raw.githubusercontent.com/{repo_owner}/{repo_name}/badges/coverage.json"
+    )
+    badges = [
+        f"[![CI]({repo_url}/actions/workflows/ci.yml/badge.svg)]({repo_url}/actions/workflows/ci.yml)",
+        f"[![Docs](https://img.shields.io/badge/docs-site-blue)]({docs_link}/)",
+        f"[![License](https://img.shields.io/github/license/{repo_owner}/{repo_name})]({repo_url}/blob/main/LICENSE)",
+        f"[![Coverage](https://img.shields.io/endpoint?url={quote(coverage_json_url, safe='')})]({repo_url}/actions/workflows/coverage-badge.yml)",
+    ]
+    return " ".join(badges)
+
+
 def get_config_value(config: Dict[str, Dict[str, str]], key: str, default: str = "") -> str:
     """Get a value from config, checking both package and custom sections."""
     # Check custom section first (for formattedName, docsLink, etc.)
@@ -60,18 +92,31 @@ def generate_table_row(config: Dict[str, Dict[str, str]], docs_link: str) -> str
     package_name = get_config_value(config, "name")
     package_version = get_config_value(config, "version")
     package_description = get_config_value(config, "description")
-    
+
     # Use package name if no formatted name provided
     if not formatted_name:
         formatted_name = package_name.replace("raild3x/", "")
         print(f"  No formatted name provided for {formatted_name}. Using package name.")
-    
+
+    # Absolute docs-site URL. The README is rendered on two surfaces: GitHub's repo
+    # page (where the table is the only navigation) and the Moonwave landing page.
+    # A root-relative /api/... link would 404 on GitHub, so we use the full published
+    # URL, which works there and on the production docs site. The one tradeoff is that
+    # in `moonwave dev` these links point at the live site rather than localhost; that
+    # only affects this index page (guide pages use root-relative links and are fine).
     full_docs_link = f"{docs_link}/api/{package_docs_link}"
-    
+
     return f'| [{formatted_name}]({full_docs_link}) | `{formatted_name} = "{package_name}@{package_version}"` | {package_description} |'
 
 
 def main():
+    # The generated README (echoed below for the CI log) contains non-Latin-1
+    # characters such as the ⚠️ warning emoji. On Windows the console defaults to
+    # cp1252, so print() would raise UnicodeEncodeError after the file is already
+    # written. Force UTF-8 so the confirmation echo works on any platform.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+
     find_project_root()
 
     # Check if source directory exists
@@ -86,10 +131,10 @@ def main():
     
     print(f"Repository Owner: {repo_owner}")
     print(f"Repository Name: {repo_name}")
-    
+
     docs_link = f"https://{repo_owner.lower()}.github.io/{repo_name}"
     print(f"Docs Link: {docs_link}")
-    
+
     # Collect packages
     released_packages = []
     unreleased_packages = []
@@ -128,7 +173,11 @@ def main():
             released_packages.append(table_row)
     
     # Generate README content
-    readme_content = f"""{repo_name} is a collection of Wally packages to streamline Roblox development.
+    readme_content = f"""{generate_badges(repo_owner, repo_name, docs_link)}
+
+{generate_banner(repo_owner, repo_name)}
+
+{repo_name} is a collection of Wally packages to streamline Roblox development.
 
 # Packages
 

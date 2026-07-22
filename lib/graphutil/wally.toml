@@ -1,16 +1,17 @@
 [package]
-name = "raild3x/t"
-description = "A runtime typechecker for Luau/Roblox"
-authors = ["Logan Hunt (Raildex)", "osyrisrblx"]
-version = "1.1.0"
+name = "raild3x/graphutil"
+description = "A collection of Graph utilities"
+authors = ["Logan Hunt (Raildex)"]
+version = "0.2.0"
 license = "MIT"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
 
 [custom]
 # The properly capitalized and spaced name of the library
-formattedName = "T"
+formattedName = "Graph Utilities"
 # The intro page for the documentation
-docsLink = "t"
+docsLink = "GraphUtil"
 
 [dependencies]
+Heap = "raild3x/heap@2.1.3"
