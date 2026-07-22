@@ -11,7 +11,7 @@
 
 --[=[
 	@within GraphUtil
-	@type GetNeighborsArray<V> (vertex: V) -> { V }
+	@type GetNeighborsArray (vertex: V) -> { V }
 
 	A callback that returns the neighbours of `vertex` as an array. The simpler
 	of the two [GetNeighbors] forms — return whatever's convenient and let the
@@ -36,7 +36,7 @@ export type GetNeighborsArray<V> = (vertex: V) -> { V }
 
 --[=[
 	@within GraphUtil
-	@type GetNeighborsIterator<V> (vertex: V) -> () -> V?
+	@type GetNeighborsIterator (vertex: V) -> () -> V?
 
 	A callback that returns a stateful iterator over the neighbours of
 	`vertex`. More allocation-efficient than [GetNeighborsArray] — no
@@ -65,7 +65,7 @@ export type GetNeighborsIterator<V> = (vertex: V) -> () -> V?
 
 --[=[
 	@within GraphUtil
-	@type GetNeighbors<V> GetNeighborsArray<V> | GetNeighborsIterator<V>
+	@type GetNeighbors GetNeighborsArray | GetNeighborsIterator
 
 	Either form of neighbour callback — [GetNeighborsArray] or
 	[GetNeighborsIterator]. Accepted by every algorithm in this library and
@@ -84,7 +84,7 @@ export type GetNeighbors<V> = GetNeighborsArray<V> | GetNeighborsIterator<V>
 
 --[=[
 	@within GraphUtil
-	@type GetWeight<V> (from: V, to: V) -> number
+	@type GetWeight (from: V, to: V) -> number
 
 	Returns the non-negative weight of the directed edge from `from` to `to`.
 	Required by every weighted algorithm ([Dijkstra](/api/Dijkstra),
@@ -107,7 +107,7 @@ export type GetWeight<V> = (from: V, to: V) -> number
 
 --[=[
 	@within GraphUtil
-	@type GetHeuristic<V> (vertex: V, goal: V) -> number
+	@type GetHeuristic (vertex: V, goal: V) -> number
 
 	An admissible heuristic: an estimate of the cost from `vertex` to `goal`
 	that must never overestimate the true cost. Required by
@@ -126,7 +126,7 @@ export type GetHeuristic<V> = (vertex: V, goal: V) -> number
 
 --[=[
 	@within GraphUtil
-	@type ShouldStop<V> (vertex: V, cost: number) -> boolean
+	@type ShouldStop (vertex: V, cost: number) -> boolean
 
 	An optional **cooperative cancellation** predicate. Search functions that
 	accept one call it once per expanded vertex — after the goal check, before
@@ -158,7 +158,7 @@ export type ShouldStop<V> = (vertex: V, cost: number) -> boolean
 
 --[=[
 	@within GraphUtil
-	@type KIterator<K> () -> K?
+	@type KIterator () -> K?
 
 	A stateless-to-the-caller iterator that yields one value per call,
 	returning `nil` once exhausted. This is the single-value form returned by
@@ -181,7 +181,7 @@ export type KIterator<K> = () -> K?
 
 --[=[
 	@within GraphUtil
-	@type KVIterator<K, V> () -> (K?, V?)
+	@type KVIterator () -> (K?, V?)
 
 	A stateless-to-the-caller iterator that yields a pair of values per call,
 	returning `(nil, nil)` once exhausted. This is the `(vertex, cost)` form
@@ -204,7 +204,7 @@ export type KVIterator<K, V> = () -> (K?, V?)
 
 --[=[
 	@within GraphUtil
-	@interface PathResult<V>
+	@interface PathResult
 	.path { V } -- Ordered sequence of vertices from start to goal (both inclusive).
 	.cost number -- Total accumulated edge-weight along the path. For unweighted algorithms this is the hop-count.
 
@@ -229,7 +229,7 @@ export type PathResult<V> = {
 
 --[=[
 	@within GraphUtil
-	@interface Edge<V>
+	@interface Edge
 	.from V -- The vertex the edge starts at.
 	.to V -- The vertex the edge ends at.
 	.weight number -- The edge's weight.
