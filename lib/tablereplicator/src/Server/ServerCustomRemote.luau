@@ -1,200 +1,202 @@
 --!strict
--- Authors: Logan Hunt [Raildex]
--- February 21, 2023
 --[=[
-    @class ServerCustomRemote
-    @server
-    @unreleased
-    @ignore
+	@class ServerCustomRemote
+	@server
+	@ignore
 
-    Serves as a middleware for handling RemoteObject RemoteEvents
+	A per-replicator custom signal: the server fires to active clients, and
+	clients fire back. Created via `ServerReplicator:RegisterRemoteSignal`,
+	`RegisterRemoteUnreliableSignal`, or `RegisterOrderedRemoteSignal`;
+	accessed from user code as `replicator.Client.MySignal`.
 
-    This class is not intended for end user usage. It is used internally by the TableReplicator class.
+	When constructed with a `coordinator` (FrameCoordinator), `Fire*` methods
+	route through the frame buffer so signal fires arrive at the client in the
+	same ordered sequence as adjacent data ops. Without a coordinator, fires go
+	directly through the transport RemoteEvent.
 ]=]
 
---[[
-    [API]
-    .new(index: string, replicator: TableReplicator, isUnreliable: boolean?)
-    :Destroy()
-    :Fire(player: Player, ...any)
-    :FireAll(...any)
-    :FireExcept(ignoredPlayers: Player | {Player}, ...any)
-    :FirePredicate(predicate: (plr: Player, T...) -> boolean, ...: T...)
-    :Connect(fn: (...any) -> ()) -> Connection
-    :Wait(predicate: (Player | Predicate)?) -> (Player, ...any)
-]]
+const Types = require("../Shared/Types")
+const Signal = Types.Signal
 
---// Requires //--
-local Packages = script.Parent.Parent.Parent
-local Signal = require(Packages.Signal)
-local Symbol = require(Packages.Symbol)
-local NetWire = require(Packages.NetWire)
+const ServerTransportModule = require("../Shared/Transport/ServerTransport")
+type ServerTransport = ServerTransportModule.ServerTransport
 
-local KEY_NAME = Symbol("Name")
-local KEY_REPLICATOR = Symbol("Replicator")
-local KEY_INBOUND_EVENT = Symbol("InboundEvent")
-local KEY_IS_UNRELIABLE = Symbol("IsUnreliable")
-
-type Predicate = (plr: Player, ...any) -> boolean
-type Connection = any
-
-local function GetActiveReplicationTargetsDictionary(self)
-    return self[KEY_REPLICATOR]._Replication.Active
-end
-
-local function WarnIfPendingPlayer(self, plr: Player)
-    local replicator = self[KEY_REPLICATOR]
-    if replicator._Replication.Pending[plr] then
-        warn("Requested Fire to player: "..plr.Name.." but they are not yet replicated!")
-    end
-end
-
---------------------------------------------------------------------------------
-    --// Class //--
---------------------------------------------------------------------------------
+type Connection = Types.Connection
+type Predicate = (player: Player, ...any) -> boolean
 
 local ServerCustomRemote = {}
 ServerCustomRemote.__index = ServerCustomRemote
 
-function ServerCustomRemote.new(remoteName: string, replicator: any, isUnreliable: boolean?)
-    local self = setmetatable({
-        [KEY_REPLICATOR] = replicator,
-        [KEY_NAME] = remoteName,
-        [KEY_INBOUND_EVENT] = Signal.new(),
-        [KEY_IS_UNRELIABLE] = isUnreliable,
-    }, ServerCustomRemote)
+export type ServerCustomRemote = typeof(setmetatable(
+	{} :: {
+		_Name: string,
+		_Replicator: any,
+		_Transport: ServerTransport,
+		_Coordinator: any?,
+		_Inbound: Types.Signal<any, any>,
+		_Unreliable: boolean,
+	},
+	ServerCustomRemote
+))
 
-    return self
+-- `coordinator`: when provided (a FrameCoordinator), Fire* methods route
+-- through the frame buffer instead of the transport, so signal fires arrive
+-- at the client in the same ordered sequence as data ops.
+function ServerCustomRemote.new(name: string, replicator: any, transport: ServerTransport, unreliable: boolean?, coordinator: any?): ServerCustomRemote
+	local self = setmetatable({}, ServerCustomRemote) :: ServerCustomRemote
+	self._Name = name
+	self._Replicator = replicator
+	self._Transport = transport
+	self._Coordinator = coordinator
+	self._Inbound = Signal.new()
+	self._Unreliable = unreliable == true
+	return self
 end
 
-function ServerCustomRemote:Destroy()
-    self[KEY_INBOUND_EVENT]:Destroy()
-    self[KEY_INBOUND_EVENT] = nil
-    self[KEY_REPLICATOR] = nil
-    self[KEY_NAME] = nil
-    setmetatable(self, nil)
-end
-
--- Not intended for end user usage
-function ServerCustomRemote:_FireServer(player: Player, ...: any)
-    self[KEY_INBOUND_EVENT]:Fire(player, ...)
-end
-
---[=[
-    Fires to a specific client
-]=]
-function ServerCustomRemote:Fire(player: Player, ...: any)
-    --print(self[KEY_NAME],"Firing to player: "..player.Name, ...)
-    if not (player and typeof(player) == "Instance" and player:IsA("Player")) then
-        if typeof(player) == "table" then
-            error("RE MISSING PLAYER! Did you mean to use FireExcept?")
-        elseif typeof(player) == "function" then
-            error("RE MISSING PLAYER! Did you mean to use FirePredicate?")
-        end
-        error("RE MISSING PLAYER! Did you mean to use FireAll?")
-    end
-
-    local ReplicatorWire = NetWire.Server("TableReplicator")
-
-    WarnIfPendingPlayer(self, player)
-
-    local id, name = self[KEY_REPLICATOR]:GetId(), self[KEY_NAME]
-    if self[KEY_IS_UNRELIABLE] then
-        ReplicatorWire.NetworkUnreliableEvent:Fire(player, id, name, ...)
-    else
-        ReplicatorWire.NetworkEvent:Fire(player, id, name, ...)
-    end
+function ServerCustomRemote.Destroy(self: ServerCustomRemote)
+	self._Inbound:Destroy()
+	setmetatable(self :: any, nil)
 end
 
 --[=[
-    Returns whether or not this remote is unreliable
+	Returns whether this signal uses unreliable delivery (only applies to
+	unordered signals; ordered signals always use reliable delivery).
 ]=]
-function ServerCustomRemote:IsUnreliable(): boolean
-    return self[KEY_IS_UNRELIABLE] == true
+function ServerCustomRemote.IsUnreliable(self: ServerCustomRemote): boolean
+	return self._Unreliable
+end
+
+-- Called by ServerReplicator's transport listener when a client fires this signal.
+function ServerCustomRemote._FireServer(self: ServerCustomRemote, player: Player, ...: any)
+	self._Inbound:Fire(player, ...)
 end
 
 --[=[
-    Fires to all currently replicated clients
+	Fires to a specific active player.
 ]=]
-function ServerCustomRemote:FireAll(...: any)
-    --print(self[KEY_NAME],"Firing to all players: ", ...)
-    local replicator = self[KEY_REPLICATOR]
-    for player: Player in replicator._Replication.Pending do
-        WarnIfPendingPlayer(self, player)
-    end
-
-    for player: Player in GetActiveReplicationTargetsDictionary(self) do
-        self:Fire(player, ...)
-    end
+function ServerCustomRemote.Fire(self: ServerCustomRemote, player: Player, ...: any)
+	assert(typeof(player) == "Instance" and player:IsA("Player"), "ServerCustomRemote.Fire: expected a Player")
+	local scope = self._Replicator._Scope
+	if not scope:IsActive(player) then
+		warn(`ServerCustomRemote.Fire: player {player.Name} is not active for replicator {self._Replicator.Id}`)
+		return
+	end
+	if self._Coordinator then
+		self._Coordinator:QueueSignal(scope, self._Replicator.Id, self._Name, { player }, { ... })
+		self._Replicator:_FlushIfImmediate()
+	else
+		self._Transport:FireSignal(player, self._Replicator.Id, self._Name, self._Unreliable, ...)
+	end
 end
 
 --[=[
-    Fires to all currently replicated clients except the ones specified
+	Fires to all currently active players for this replicator.
 ]=]
-function ServerCustomRemote:FireExcept(ignoredPlayers: Player | {Player}, ...: any)
-    if typeof(ignoredPlayers) == "Instance" then
-        assert(ignoredPlayers:IsA("Player"), "Invalid ignoredPlayer type!")
-        ignoredPlayers = {ignoredPlayers}
-    end
-    assert(ignoredPlayers and typeof(ignoredPlayers) == "table", "Invalid ignoredPlayer type!")
-    
-    for player: Player in GetActiveReplicationTargetsDictionary(self) do
-        if not table.find(ignoredPlayers, player) then
-            self:Fire(player, ...)
-        end
-    end
+function ServerCustomRemote.FireAll(self: ServerCustomRemote, ...: any)
+	local scope = self._Replicator._Scope
+	local players = scope:GetActivePlayers()
+	if self._Coordinator then
+		if #players > 0 then
+			self._Coordinator:QueueSignal(scope, self._Replicator.Id, self._Name, players, { ... })
+			self._Replicator:_FlushIfImmediate()
+		end
+	else
+		for _, player in players do
+			self._Transport:FireSignal(player, self._Replicator.Id, self._Name, self._Unreliable, ...)
+		end
+	end
 end
 
 --[=[
-    Fires to all currently replicated clients that pass the predicate test
+	Fires to all active players except the ones listed in `ignored`.
 ]=]
-function ServerCustomRemote:FirePredicate(predicate: Predicate, ...: any)
-    for player: Player in GetActiveReplicationTargetsDictionary(self) do
-        if predicate(player, ...) then
-            self:Fire(player, ...)
-        end
-    end
+function ServerCustomRemote.FireExcept(self: ServerCustomRemote, ignored: Player | { Player }, ...: any)
+	local ignoreList: { Player } = if typeof(ignored) == "Instance" then { ignored :: Player } else ignored :: { Player }
+	local scope = self._Replicator._Scope
+	if self._Coordinator then
+		local audience = {}
+		for _, player in scope:GetActivePlayers() do
+			if not table.find(ignoreList, player) then
+				table.insert(audience, player)
+			end
+		end
+		if #audience > 0 then
+			self._Coordinator:QueueSignal(scope, self._Replicator.Id, self._Name, audience, { ... })
+			self._Replicator:_FlushIfImmediate()
+		end
+	else
+		for _, player in scope:GetActivePlayers() do
+			if not table.find(ignoreList, player) then
+				self._Transport:FireSignal(player, self._Replicator.Id, self._Name, self._Unreliable, ...)
+			end
+		end
+	end
 end
 
 --[=[
-    Connects to the event and waits for a replicated client to fire to the server
+	Fires to all active players for whom `predicate` returns true.
 ]=]
-function ServerCustomRemote:Connect(callback: (Player: Player, ...any) -> ()): Connection
-    return self[KEY_INBOUND_EVENT]:Connect(callback)
+function ServerCustomRemote.FirePredicate(self: ServerCustomRemote, predicate: Predicate, ...: any)
+	local scope = self._Replicator._Scope
+	if self._Coordinator then
+		local audience = {}
+		for _, player in scope:GetActivePlayers() do
+			if predicate(player, ...) then
+				table.insert(audience, player)
+			end
+		end
+		if #audience > 0 then
+			self._Coordinator:QueueSignal(scope, self._Replicator.Id, self._Name, audience, { ... })
+			self._Replicator:_FlushIfImmediate()
+		end
+	else
+		for _, player in scope:GetActivePlayers() do
+			if predicate(player, ...) then
+				self._Transport:FireSignal(player, self._Replicator.Id, self._Name, self._Unreliable, ...)
+			end
+		end
+	end
 end
 
 --[=[
-    Connects to the event and waits for a replicated client to fire to the server 
-    one time and then disconnects
+	Connects a callback that fires whenever a client fires this signal.
+	The callback receives `(player, ...args)`.
 ]=]
-function ServerCustomRemote:Once(callback: (Player: Player, ...any) -> ()): Connection
-    return self[KEY_INBOUND_EVENT]:Once(callback)
+function ServerCustomRemote.Connect(self: ServerCustomRemote, callback: (player: Player, ...any) -> ()): Connection
+	return self._Inbound:Connect(callback)
 end
 
 --[=[
-    Waits for any or a specified client to fire to the server
+	Like `Connect` but disconnects automatically after the first fire.
 ]=]
-function ServerCustomRemote:Wait(predicate: (Player | Predicate)?): (Player, ...any)
-    if predicate then
-        if typeof(predicate) == "function" then
-            local results
-            repeat
-                results = table.pack(self[KEY_INBOUND_EVENT]:Wait())
-            until predicate(results[1], table.unpack(results, 2))
-            return table.unpack(results)
-        else
-            local player: Player = predicate
-            assert(typeof(player) == "Instance" and player:IsA("Player"), "Invalid 'Player' argument.")
-            local results
-            repeat
-                results = table.pack(self[KEY_INBOUND_EVENT]:Wait())
-            until results[1] == player
-            return table.unpack(results)
-        end
-    end
-    return self[KEY_INBOUND_EVENT]:Wait()
+function ServerCustomRemote.Once(self: ServerCustomRemote, callback: (player: Player, ...any) -> ()): Connection
+	return self._Inbound:Once(callback)
 end
 
-export type ServerCustomRemote = typeof(ServerCustomRemote.new("", nil, false))
+--[=[
+	Yields until a client fires this signal. If `predicate` is a `Player`,
+	waits for that specific player. If it's a function, waits until the
+	function returns true for the incoming args.
+]=]
+function ServerCustomRemote.Wait(self: ServerCustomRemote, predicate: (Player | Predicate)?): (Player, ...any)
+	local inbound = self._Inbound
+	if predicate == nil then
+		return inbound:Wait()
+	end
+	if typeof(predicate) == "function" then
+		local results
+		repeat
+			results = table.pack(inbound:Wait())
+		until (predicate :: Predicate)(results[1], table.unpack(results, 2))
+		return table.unpack(results)
+	else
+		local target = predicate :: Player
+		local results
+		repeat
+			results = table.pack(inbound:Wait())
+		until results[1] == target
+		return table.unpack(results)
+	end
+end
 
 return ServerCustomRemote

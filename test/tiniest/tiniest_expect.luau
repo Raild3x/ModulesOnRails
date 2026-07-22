@@ -41,6 +41,7 @@
 
 local tiniest_quote = require("./tiniest_quote")
 local outputCapture = require("./tiniest_output_capture")
+local tiniest_context = require("./tiniest_context")
 
 local tiniest_expect = {}
 
@@ -48,12 +49,14 @@ type Context = {
 	target: unknown,
 	test: string,
 	params: { unknown },
+	context_filter: { any }?,
 }
 
 local context: Context = {
 	target = nil,
 	test = "",
 	params = {},
+	context_filter = nil,
 }
 
 local function fail(message: string?): never
@@ -63,6 +66,29 @@ local function fail(message: string?): never
 	end
 	local param_list = table.concat(quoted, ",")
 	local source, line = debug.info(4, "sl")
+	local resolved_context: { { label: string, value: any } }? = nil
+	local filter = context.context_filter
+	local entries: { tiniest_context.Entry }
+	if filter ~= nil and #filter > 0 then
+		entries = tiniest_context.get_all(table.unpack(filter))
+	else
+		entries = tiniest_context.get_all()
+	end
+	if #entries > 0 then
+		local ctx: { { label: string, value: any } } = {}
+		for _, entry in entries do
+			local label: string = if entry.is_anonymous then "[?]" else tiniest_quote(entry.id)
+			local value: any
+			if typeof(entry.data) == "function" then
+				local ok, result = pcall(entry.data, context.target)
+				value = if ok then result else entry.data
+			else
+				value = entry.data
+			end
+			table.insert(ctx, { label = label, value = value })
+		end
+		resolved_context = ctx
+	end
 	error({
 		type = "tiniest.ErrorReport",
 		line = line,
@@ -73,6 +99,7 @@ local function fail(message: string?): never
 			snippet = `expect({tiniest_quote(context.target)}).{context.test}({param_list})`,
 			line = line,
 		},
+		context = resolved_context,
 	}, 0)
 end
 
@@ -177,6 +204,7 @@ end
 ]=]
 function tiniest_expect.expect(a: any)
 	local tests = {}
+	context.context_filter = nil
 
 	local function check_type(expectedType: string, value: any, msg: string?): ()
 		if msg ~= nil then
@@ -610,6 +638,11 @@ function tiniest_expect.expect(a: any)
 			context.params = { ... }
 			return body(...)
 		end
+	end
+
+	function tests.with_context(...: any)
+		context.context_filter = { ... }
+		return tests
 	end
 
 	return tests

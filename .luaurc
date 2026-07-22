@@ -1,17 +1,17 @@
 {
-	"aliases": {
-		"lune": "~/.lune/.typedefs/0.8.8",
-		"tiniest": "test/tiniest"
-	},
-
-	"globals": [
-		"beforeEach",
-		"afterEach",
-		"beforeAll",
-		"afterAll",
-		"describe",
-		"expect",
-		"it"
-	]
-
+  "aliases": {
+    "lune": "~/.lune/.typedefs/0.10.4/",
+    "tiniest": "test/tiniest",
+    "Vector3": "test/RobloxClassShims/Vector3",
+    "Vector2": "test/RobloxClassShims/Vector2"
+  },
+  "globals": [
+    "beforeEach",
+    "afterEach",
+    "beforeAll",
+    "afterAll",
+    "describe",
+    "expect",
+    "it"
+  ]
 }

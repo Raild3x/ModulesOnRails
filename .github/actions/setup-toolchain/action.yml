@@ -1,0 +1,39 @@
+name: Setup toolchain
+description: >
+  Install the Rokit toolchain manager (provides wally, lune, rojo, selene, ...)
+  and verify that the wally binary is accessible on PATH.  If wally was placed
+  in .rokit/bin but not yet exported to PATH, this action appends that
+  directory to GITHUB_PATH so that all subsequent steps in the calling job can
+  invoke the Rokit-managed tools directly.
+
+runs:
+  using: composite
+  steps:
+    # Install all tools declared in rokit.toml (includes wally).
+    - name: Setup Rokit
+      uses: raild3x/setup-rokit@v0.1.0
+
+    # Confirm wally is reachable and, if needed, add .rokit/bin to PATH.
+    # Exits with a non-zero code if wally cannot be found by either method,
+    # giving an actionable error message rather than a cryptic "command not found"
+    # failure later in the job.
+    - name: Verify Wally is available
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        if command -v wally >/dev/null 2>&1; then
+          echo "✓ wally is available in PATH"
+          wally --version
+          exit 0
+        fi
+
+        if [ -x .rokit/bin/wally ]; then
+          echo "$PWD/.rokit/bin" >> "$GITHUB_PATH"
+          echo "✓ wally found in .rokit/bin — added to PATH"
+          ./.rokit/bin/wally --version
+          exit 0
+        fi
+
+        echo "✗ wally not found. Ensure rokit.toml includes wally and setup-rokit succeeds." >&2
+        exit 1

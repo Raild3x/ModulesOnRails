@@ -1,0 +1,211 @@
+# Continuous-integration checks for every PR and for pushes to main.
+# Lints the codebase, runs the Lune-pipeline package test suites, and verifies
+# that the documentation and README can be built.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# One CI run per ref; a new push supersedes the in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read # publish_detect_changed_packages.py reads PR files via the API
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  # Run Selene static analysis across all source files in lib/.
+  lint:
+    name: "Selene lint"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup toolchain
+        uses: ./.github/actions/setup-toolchain
+      - name: Run Selene
+        run: selene lib
+
+  # Run the spec suites for the Lune-pipeline packages this PR changed, via the
+  # coverage runner. Only changed packages are set up and tested; if the PR
+  # touches no lib/ package the test step is skipped. Roblox-pipeline packages
+  # are handled by the test-roblox job.
+  test:
+    name: "Package tests (Lune pipeline)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so push-event diffs resolve
+
+      - name: Setup toolchain
+        uses: ./.github/actions/setup-toolchain
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # The coverage runner builds tools/coverage/engine with cargo on first
+      # use; cache the build so CI only pays for it when the engine changes.
+      - name: Cache coverage engine build
+        uses: actions/cache@v4
+        with:
+          path: |
+            tools/coverage/engine/target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: coverage-engine-${{ runner.os }}-${{ hashFiles('tools/coverage/engine/Cargo.lock', 'tools/coverage/engine/src/**') }}
+          restore-keys: |
+            coverage-engine-${{ runner.os }}-
+
+      - name: Detect changed packages
+        id: changes
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          python scripts/workflow_actions/publish_detect_changed_packages.py \
+            --event-name "${{ github.event_name }}" \
+            --event-path "$GITHUB_EVENT_PATH" \
+            --repository "${{ github.repository }}" \
+            --pr-number "${{ github.event.pull_request.number || 0 }}" \
+            --changed-packages-file changed-packages.txt
+
+      - name: Run package tests (changed packages)
+        if: steps.changes.outputs.has_changes == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          while read -r pkg; do
+            [ -z "$pkg" ] && continue
+            echo "::group::Lune tests — $pkg"
+            python scripts/test_package.py "$pkg" --lune-only
+            echo "::endgroup::"
+          done < changed-packages.txt
+
+  # Run coverage for the Roblox-pipeline packages (datamodel/`const`) on real
+  # Roblox via Open Cloud — the packages the Lune job skips. Needs the ROBLOX_*
+  # repo secrets; skips cleanly (stays green) when they are absent, e.g. on pull
+  # requests from forks. Packages whose Wally deps can't be resolved are skipped
+  # with a warning rather than failing the job.
+  test-roblox:
+    name: "Package tests (Roblox / Open Cloud)"
+    runs-on: ubuntu-latest
+    env:
+      ROBLOX_API_KEY: ${{ secrets.ROBLOX_API_KEY }}
+      ROBLOX_UNIVERSE_ID: ${{ secrets.ROBLOX_UNIVERSE_ID }}
+      ROBLOX_PLACE_ID: ${{ secrets.ROBLOX_PLACE_ID }}
+    steps:
+      # secrets can't be referenced in a job-level `if`, so gate the real steps on
+      # a guard step that checks whether the credentials are present.
+      - name: Check Open Cloud credentials
+        id: guard
+        run: |
+          if [ -z "$ROBLOX_API_KEY" ] || [ -z "$ROBLOX_UNIVERSE_ID" ] || [ -z "$ROBLOX_PLACE_ID" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Open Cloud secrets not configured; skipping Roblox tests."
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout repository
+        if: steps.guard.outputs.run == 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so push-event diffs resolve
+
+      - name: Setup toolchain
+        if: steps.guard.outputs.run == 'true'
+        uses: ./.github/actions/setup-toolchain
+
+      - name: Setup Python
+        if: steps.guard.outputs.run == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Setup Rust
+        if: steps.guard.outputs.run == 'true'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache coverage engine build
+        if: steps.guard.outputs.run == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            tools/coverage/engine/target
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: coverage-engine-${{ runner.os }}-${{ hashFiles('tools/coverage/engine/Cargo.lock', 'tools/coverage/engine/src/**') }}
+          restore-keys: |
+            coverage-engine-${{ runner.os }}-
+
+      - name: Detect changed packages
+        id: changes
+        if: steps.guard.outputs.run == 'true'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          python scripts/workflow_actions/publish_detect_changed_packages.py \
+            --event-name "${{ github.event_name }}" \
+            --event-path "$GITHUB_EVENT_PATH" \
+            --repository "${{ github.repository }}" \
+            --pr-number "${{ github.event.pull_request.number || 0 }}" \
+            --changed-packages-file changed-packages.txt
+
+      - name: Run Roblox package tests (Open Cloud, changed packages)
+        if: steps.guard.outputs.run == 'true' && steps.changes.outputs.has_changes == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          while read -r pkg; do
+            [ -z "$pkg" ] && continue
+            echo "::group::Open Cloud tests — $pkg"
+            python scripts/test_package.py "$pkg" --roblox-only --roblox-runner=opencloud
+            echo "::endgroup::"
+          done < changed-packages.txt
+
+  # Verify that the Moonwave documentation build succeeds (does not deploy).
+  docs-build:
+    name: "Can build docs"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Moonwave
+        run: npm i -g moonwave@latest
+      - name: Build docs
+        run: moonwave build
+
+  # Verify that the README generation script runs without errors.
+  read-me:
+    name: "Can generate README"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Generate README
+        run: python scripts/generate_readme.py
