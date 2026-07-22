@@ -82,9 +82,9 @@ local test_suite = function(tiniest: tiniest)
 		end)
 	end)
 
-	describe("forEach", function()
+	describe("toIterator", function()
 		test("yields all reachable vertices", function()
-			local iter = BFS.forEach("A", getNeighbors)
+			local iter = BFS.toIterator("A", getNeighbors)
 			local visited = {}
 			local v = iter()
 			while v ~= nil do
@@ -98,12 +98,12 @@ local test_suite = function(tiniest: tiniest)
 		end)
 
 		test("first yielded value is start", function()
-			local iter = BFS.forEach("A", getNeighbors)
+			local iter = BFS.toIterator("A", getNeighbors)
 			expect(iter()).is("A")
 		end)
 
 		test("returns nil when exhausted", function()
-			local iter = BFS.forEach("E", getNeighbors)
+			local iter = BFS.toIterator("E", getNeighbors)
 			iter() -- "E"
 			expect(iter()).is(nil)
 			expect(iter()).is(nil) -- stable after exhaustion
@@ -111,10 +111,14 @@ local test_suite = function(tiniest: tiniest)
 
 		test("works in a for loop", function()
 			local count = 0
-			for _ in BFS.forEach("A", getNeighbors) do
+			for _ in BFS.toIterator("A", getNeighbors) do
 				count += 1
 			end
 			expect(count).is(4)
+		end)
+
+		test("forEach is an alias of toIterator", function()
+			expect(BFS.forEach).is(BFS.toIterator)
 		end)
 	end)
 
@@ -147,6 +151,119 @@ local test_suite = function(tiniest: tiniest)
 		test("returns nil when goal is unreachable", function()
 			local result = BFS.shortestPath("A", "E", getNeighbors)
 			expect(result).never_exists()
+		end)
+	end)
+
+	describe("bidirectionalShortestPath", function()
+		test("start equals goal returns single-vertex path", function()
+			local result = BFS.bidirectionalShortestPath("A", "A", getNeighbors)
+			expect(result).exists()
+			expect(result.cost).is(0)
+			expect(#result.path).is(1)
+			expect(result.path[1]).is("A")
+		end)
+
+		test("returns correct path length and cost (A→D, 2 hops)", function()
+			local result = BFS.bidirectionalShortestPath("A", "D", getNeighbors)
+			expect(result).exists()
+			expect(result.cost).is(2)
+			expect(#result.path).is(3)
+			expect(result.path[1]).is("A")
+			expect(result.path[#result.path]).is("D")
+		end)
+
+		test("returns correct 1-hop path (A→B)", function()
+			local result = BFS.bidirectionalShortestPath("A", "B", getNeighbors)
+			expect(result).exists()
+			expect(result.cost).is(1)
+			expect(result.path[1]).is("A")
+			expect(result.path[2]).is("B")
+		end)
+
+		test("returns nil when goal is unreachable", function()
+			local result = BFS.bidirectionalShortestPath("A", "E", getNeighbors)
+			expect(result).never_exists()
+		end)
+
+		test("path is contiguous (each step is a valid edge)", function()
+			local result = BFS.bidirectionalShortestPath("A", "D", getNeighbors)
+			expect(result).exists()
+			local path = result.path
+			for i = 1, #path - 1 do
+				local u, v = path[i], path[i + 1]
+				local isEdge = false
+				for _, n in adj[u] do
+					if n == v then
+						isEdge = true
+						break
+					end
+				end
+				expect(isEdge).is(true)
+			end
+		end)
+
+		test("matches BFS.shortestPath cost across every reachable pair", function()
+			local vertices = { "A", "B", "C", "D" }
+			for _, s in vertices do
+				for _, g in vertices do
+					local single = BFS.shortestPath(s, g, getNeighbors)
+					local bidir = BFS.bidirectionalShortestPath(s, g, getNeighbors)
+					if single == nil then
+						expect(bidir).never_exists()
+					else
+						expect(bidir).exists()
+						expect((bidir :: any).cost).is(single.cost)
+						expect(#(bidir :: any).path).is(#single.path)
+					end
+				end
+			end
+		end)
+
+		test("directed graph: finds the path using an explicit reverse-neighbors callback", function()
+			-- Directed: A→B→D and A→C→D (both arms length 2, no way back from D)
+			local dirAdj = {
+				A = { "B", "C" },
+				B = { "D" },
+				C = { "D" },
+				D = {},
+			}
+			local reverseAdj = {
+				A = {},
+				B = { "A" },
+				C = { "A" },
+				D = { "B", "C" },
+			}
+			local function getDirNeighbors(v)
+				return dirAdj[v] or {}
+			end
+			local function getDirReverseNeighbors(v)
+				return reverseAdj[v] or {}
+			end
+
+			local result = BFS.bidirectionalShortestPath("A", "D", getDirNeighbors, getDirReverseNeighbors)
+			expect(result).exists()
+			expect(result.cost).is(2)
+			expect(result.path[1]).is("A")
+			expect(result.path[#result.path]).is("D")
+		end)
+
+		test("directed graph: correctly reports unreachable when only a one-way edge exists", function()
+			-- A → B is one-way; there is no directed path from B back to A.
+			local dirAdj = { A = { "B" }, B = {} }
+			local reverseAdj = { A = {}, B = { "A" } }
+			local function getDirNeighbors(v)
+				return dirAdj[v] or {}
+			end
+			local function getDirReverseNeighbors(v)
+				return reverseAdj[v] or {}
+			end
+
+			local forward = BFS.bidirectionalShortestPath("A", "B", getDirNeighbors, getDirReverseNeighbors)
+			expect(forward).exists()
+			expect(forward.cost).is(1)
+
+			local backward = BFS.bidirectionalShortestPath("B", "A", getDirNeighbors, getDirReverseNeighbors)
+			expect(backward).never_exists()
 		end)
 	end)
 

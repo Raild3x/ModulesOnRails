@@ -90,9 +90,9 @@ local test_suite = function(tiniest: tiniest)
 		end)
 	end)
 
-	describe("forEach", function()
+	describe("toIterator", function()
 		test("linear graph yields in DFS order", function()
-			local iter = DFS.forEach("A", linearNeighbors)
+			local iter = DFS.toIterator("A", linearNeighbors)
 			expect(iter()).is("A")
 			expect(iter()).is("B")
 			expect(iter()).is("C")
@@ -102,7 +102,7 @@ local test_suite = function(tiniest: tiniest)
 
 		test("yields all reachable vertices", function()
 			local visited = {}
-			for v in DFS.forEach("A", getNeighbors) do
+			for v in DFS.toIterator("A", getNeighbors) do
 				visited[v] = true
 			end
 			expect(visited["A"]).is(true)
@@ -113,10 +113,14 @@ local test_suite = function(tiniest: tiniest)
 		end)
 
 		test("returns nil when exhausted and remains stable", function()
-			local iter = DFS.forEach("E", getNeighbors)
+			local iter = DFS.toIterator("E", getNeighbors)
 			iter() -- "E"
 			expect(iter()).is(nil)
 			expect(iter()).is(nil)
+		end)
+
+		test("forEach is an alias of toIterator", function()
+			expect(DFS.forEach).is(DFS.toIterator)
 		end)
 	end)
 

@@ -39,9 +39,9 @@ local test_suite = function(tiniest: tiniest)
 		return 1000
 	end
 
-	describe("search", function()
+	describe("shortestPath", function()
 		test("start equals goal returns zero-cost single-vertex path", function()
-			local result = AStar.search("A", "A", getNeighbors, getWeight, zeroHeuristic)
+			local result = AStar.shortestPath("A", "A", getNeighbors, getWeight, zeroHeuristic)
 			expect(result).exists()
 			expect(result.cost).is(0)
 			expect(#result.path).is(1)
@@ -49,7 +49,7 @@ local test_suite = function(tiniest: tiniest)
 		end)
 
 		test("zero heuristic finds optimal path A→D (cost 3)", function()
-			local result = AStar.search("A", "D", getNeighbors, getWeight, zeroHeuristic)
+			local result = AStar.shortestPath("A", "D", getNeighbors, getWeight, zeroHeuristic)
 			expect(result).exists()
 			expect(result.cost).is(3)
 			expect(result.path[1]).is("A")
@@ -57,13 +57,13 @@ local test_suite = function(tiniest: tiniest)
 		end)
 
 		test("zero heuristic finds direct edge A→C (cost 3)", function()
-			local result = AStar.search("A", "C", getNeighbors, getWeight, zeroHeuristic)
+			local result = AStar.shortestPath("A", "C", getNeighbors, getWeight, zeroHeuristic)
 			expect(result).exists()
 			expect(result.cost).is(3)
 		end)
 
 		test("path is contiguous (each step is a valid edge)", function()
-			local result = AStar.search("A", "D", getNeighbors, getWeight, zeroHeuristic)
+			local result = AStar.shortestPath("A", "D", getNeighbors, getWeight, zeroHeuristic)
 			expect(result).exists()
 			local path = result.path
 			for i = 1, #path - 1 do
@@ -76,20 +76,20 @@ local test_suite = function(tiniest: tiniest)
 			local function noNeighbors(_v)
 				return {}
 			end
-			local result = AStar.search("A", "D", noNeighbors, getWeight, zeroHeuristic)
+			local result = AStar.shortestPath("A", "D", noNeighbors, getWeight, zeroHeuristic)
 			expect(result).never_exists()
 		end)
 
 		test("inadmissible heuristic still returns a path (not necessarily optimal)", function()
 			-- A* should not error with a bad heuristic, just potentially return a suboptimal path
-			local result = AStar.search("A", "D", getNeighbors, getWeight, hugeHeuristic)
+			local result = AStar.shortestPath("A", "D", getNeighbors, getWeight, hugeHeuristic)
 			expect(result).exists()
 			expect(result.path[1]).is("A")
 			expect(result.path[#result.path]).is("D")
 		end)
 
 		test("path cost matches sum of edge weights", function()
-			local result = AStar.search("A", "D", getNeighbors, getWeight, zeroHeuristic)
+			local result = AStar.shortestPath("A", "D", getNeighbors, getWeight, zeroHeuristic)
 			expect(result).exists()
 			local path = result.path
 			local total = 0

@@ -9,7 +9,7 @@
     *.spec.luau files alongside each module.
 ]=]
 
-local GraphUtil = require(script.Parent.Parent)
+local GraphUtil = require("..")
 
 local test_suite = function(t: tiniest)
 	local describe = t.describe
