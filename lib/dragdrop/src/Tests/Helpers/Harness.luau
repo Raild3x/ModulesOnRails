@@ -156,7 +156,7 @@ end
 const function pointerInput(userInputType: Enum.UserInputType, pos: Vector2): any
 	return {
 		UserInputType = userInputType,
-		KeyCode = Enum.KeyCode.Unknown,
+		KeyCode = Enum.KeyCode.None,
 		Position = Vector3.new(pos.X, pos.Y, 0),
 	}
 end
