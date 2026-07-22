@@ -1,0 +1,90 @@
+name: Publish changed Wally packages
+description: Authenticate with Wally, publish changed packages, and commit version bumps.
+inputs:
+  changed-packages-file:
+    description: Path to newline-delimited changed package names.
+    required: true
+  version-change:
+    description: Semver change type (major|minor|patch|none).
+    required: true
+  wally-token:
+    description: Wally API token.
+    required: true
+  commit-message:
+    description: Commit message for version bumps.
+    required: false
+    default: "chore: bump package versions"
+runs:
+  using: composite
+  steps:
+    - name: Validate Wally token
+      shell: bash
+      env:
+        WALLY_TOKEN: ${{ inputs.wally-token }}
+      run: |
+        set -euo pipefail
+        if [ -z "${WALLY_TOKEN:-}" ]; then
+          echo "Missing required input: wally-token" >&2
+          exit 1
+        fi
+
+    - name: Authenticate with Wally
+      shell: bash
+      env:
+        WALLY_TOKEN: ${{ inputs.wally-token }}
+      run: |
+        set -euo pipefail
+        # wally 0.3.2 reads ./wally.toml to determine the registry; run from a
+        # package directory so that file is present.
+        first_pkg=$(find lib -maxdepth 1 -mindepth 1 -type d | sort | head -n 1)
+        if [ -z "$first_pkg" ]; then
+          echo "No package directories found under lib/" >&2
+          exit 1
+        fi
+        (cd "$first_pkg" && wally login --token "$WALLY_TOKEN")
+
+    - name: Publish changed packages
+      shell: bash
+      env:
+        VERSION_CHANGE: ${{ inputs.version-change }}
+        CHANGED_PACKAGES_FILE: ${{ inputs.changed-packages-file }}
+      run: |
+        set -euo pipefail
+
+        if [ "$VERSION_CHANGE" = "none" ]; then
+          echo "Version change is 'none'; skipping publish."
+          exit 0
+        fi
+
+        if [ ! -f "$CHANGED_PACKAGES_FILE" ]; then
+          echo "Changed packages file not found: $CHANGED_PACKAGES_FILE" >&2
+          exit 1
+        fi
+
+        while IFS= read -r pkg; do
+          [ -n "$pkg" ] || continue
+          echo "Publishing $pkg with version change: $VERSION_CHANGE"
+          python scripts/publish.py --package-name "$pkg" --version-change "$VERSION_CHANGE" --publish
+        done < "$CHANGED_PACKAGES_FILE"
+
+    - name: Commit version bumps
+      shell: bash
+      env:
+        COMMIT_MESSAGE: ${{ inputs.commit-message }}
+      run: |
+        set -euo pipefail
+
+        if git diff --quiet -- lib/*/wally.toml; then
+          echo "No version changes to commit."
+          exit 0
+        fi
+
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git add lib/*/wally.toml
+        git commit -m "$COMMIT_MESSAGE"
+        # The packages are already published to Wally at this point (irreversible),
+        # so this commit must land. Rebase over anything that reached main since
+        # checkout rather than failing with a non-fast-forward rejection.
+        git pull --rebase origin main
+        git push origin HEAD:main

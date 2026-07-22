@@ -1,0 +1,21 @@
+{
+  "[lua]": {
+    "editor.defaultFormatter": "JohnnyMorganz.stylua",
+    "editor.formatOnSave": true
+  },
+  "[luau]": {
+    "editor.defaultFormatter": "JohnnyMorganz.stylua",
+    "editor.formatOnSave": true
+  },
+  "luau-lsp.types.definitionFiles": [
+    "types/tiniest_lib.d.luau"
+  ],
+  "luau-lsp.fflags.override": {
+    "DebugLuauTimeTracing": "false"
+  },
+
+  "selene.selenePath": "",
+  "stylua.targetReleaseVersion": "latest",
+
+
+}

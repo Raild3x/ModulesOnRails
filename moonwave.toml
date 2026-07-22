@@ -1,8 +1,13 @@
 gitSourceBranch = "main"
 
+apiCategories = [
+	"Static",
+]
+
 [docusaurus]
 url = "https://raild3x.github.io"
 baseUrl = "/ModulesOnRails"
+onBrokenAnchors = "warn" # or "throw"
 
 
 [[classOrder]]
@@ -13,15 +18,54 @@ classes = ["Roam"]
 
 [[classOrder]]
 section = "TableManager"
-classes = ["TableManager", "TableState"]
+classes = ["TableManager"]
+
+[[classOrder.items]]
+section = "[Guides]"
+classes = [
+	"TM Getting Started",
+	"TM Listeners & Fire Modes",
+	"TM Flushing",
+	"TM Batching",
+	"TM Wildcards",
+	"TM Proxies & Direct Table Access",
+	"TM Schema Validation",
+	"TM Opaque Values",
+	"TM Performance",
+	"TM Reactive State Wrappers",
+	"TM For & Map Views [Unreleased]",
+]
 
 [[classOrder]]
 section = "TableReplicator"
-classes = ["TableReplicator", "ServerTableReplicator", "ClientTableReplicator", "TableReplicatorSingleton", "BaseTableReplicator"]
+classes = ["TableReplicator", "ServerReplicator", "ClientReplicator"]
+
+[[classOrder.items]]
+section = "[Guides]"
+classes = [
+	"TR Getting Started",
+	"TR Discovery & Targeting",
+	"TR Namespaces & Tokens",
+	"TR Parent-Child Guide",
+	"TR Custom Remotes",
+	"TR Performance & Ordering",
+]
 
 [[classOrder]]
 section = "NetWire"
 classes = ["NetWire", "ServerNetWire", "ClientNetWire", "----------------", "ServerRemoteEvent", "ServerRemoteProperty", "ClientRemoteEvent", "ClientRemoteProperty"]
+
+[[classOrder]]
+section = "DragDrop"
+classes = ["DragDrop"]
+
+[[classOrder.items]]
+section = "[Guides]"
+classes = [
+	"DD Getting Started",
+	"DD Input Devices",
+	"DD Ghosts & Scripting",
+]
 
 [[classOrder]]
 section = "Instance Component Systems"
@@ -31,14 +75,6 @@ classes = ["Component", "RemoteComponent", "BaseComponent"]
 section = "DropletManager"
 classes = ["DropletManager", "DropletServerManager", "DropletClientManager", "Droplet", "DropletUtil", "ExampleResourceTypeData"]
 
-[[classOrder]]
-section = "AdjustableTimer [Unreleased]"
-classes = ["AdjustableTimer", "AdjustableTimerManager"]
-
-
-[[classOrder]]
-section = "PlayerDataManagement [Unreleased]"
-classes = ["PlayerProfileManager", "PlayerDataManager", "ServerPlayerDataManager", "ClientPlayerDataManager"]
 
 
 [[classOrder]]
@@ -47,4 +83,26 @@ classes = ["CmdrHandler", "PermissionsHandler", "CmdrServer", "CmdrClient", "Cmd
 
 [[classOrder]]
 section = "Data Structures"
-classes = ["Queue", "Heap", "LooseTightDoubleGrid"]
+classes = ["Queue", "Heap", "LooseTightDoubleGrid", "Quadtree"]
+
+[[classOrder]]
+section = "Graph Utilities"
+classes = ["GraphUtil", "Connectivity", "BFS", "DFS", "Dijkstra", "AStar", "BellmanFord", "MST", "TopologicalSort"]
+
+[[classOrder]]
+section = "[UNRELEASED]"
+
+[[classOrder.items]]
+section = "AdjustableTimer"
+classes = ["AdjustableTimer", "AdjustableTimerManager"]
+
+[[classOrder.items]]
+section = "Player Data Management"
+classes = ["PlayerProfileManager"]
+
+[[classOrder.items.items]]
+section = "PlayerDataManager"
+classes = ["PlayerDataManager", "ServerPlayerDataManager", "ClientPlayerDataManager"]
+
+[[classOrder]]
+section = "[DEPRECATED]"

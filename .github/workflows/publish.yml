@@ -1,0 +1,208 @@
+# Triggered when a PR labelled major/minor/patch is merged into main, or manually
+# via workflow_dispatch.  Detects which lib/ packages changed, bumps their
+# versions, publishes to Wally, and then regenerates the README and deploys the
+# docs site by calling the reusable 'Docs' workflow.
+#
+# Job graph:
+#   resolve-version ─┐
+#                    ├─► publish ─► docs
+#   detect-changes  ─┘
+name: Publish Packages
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version_change:
+        description: "Override version change (major|minor|patch|none)"
+        required: false
+        type: choice
+        default: patch
+        options:
+          - major
+          - minor
+          - patch
+          - none
+
+# Serialize all publishes: every run commits version bumps to main, so two
+# concurrently merged PRs must queue, not race each other's push.
+concurrency:
+  group: publish-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  # Resolve whether the version bump is major / minor / patch / none.
+  # On PRs, reads semver labels (e.g. "semver:patch") from the event payload.
+  # On workflow_dispatch, uses the manual input override.
+  # Runs in parallel with detect-changes.
+  resolve-version:
+    name: Resolve Version Change
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.ref_name == 'main') ||
+      (github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
+    outputs:
+      version_change: ${{ steps.version.outputs.version_change }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Resolve version change from PR labels
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          DISPATCH_ARGS=()
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            DISPATCH_ARGS=(--dispatch-version-change "${{ inputs.version_change }}")
+          fi
+
+          python scripts/workflow_actions/publish_resolve_version_change.py \
+            --event-name "${{ github.event_name }}" \
+            --event-path "$GITHUB_EVENT_PATH" \
+            "${DISPATCH_ARGS[@]}"
+
+      - name: Summary
+        shell: bash
+        run: |
+          echo "Version change resolved: ${{ steps.version.outputs.version_change }}" >> "$GITHUB_STEP_SUMMARY"
+
+  # Determine which packages under lib/ were modified in this PR.
+  # Uploads the result as an artifact for the publish job to consume.
+  # Runs in parallel with resolve-version.
+  detect-changes:
+    name: Detect Changed Packages
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.ref_name == 'main') ||
+      (github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
+    outputs:
+      has_changes: ${{ steps.changed.outputs.has_changes }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Detect changed packages
+        id: changed
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          python scripts/workflow_actions/publish_detect_changed_packages.py \
+            --event-name "${{ github.event_name }}" \
+            --event-path "$GITHUB_EVENT_PATH" \
+            --repository "${{ github.repository }}" \
+            --pr-number "${{ github.event.pull_request.number || 0 }}" \
+            --changed-packages-file changed-packages.txt
+
+      # Only upload when packages actually changed — the script deletes the file
+      # when there are no changes, so an unconditional upload would fail.
+      - name: Upload changed packages list
+        if: steps.changed.outputs.has_changes == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: changed-packages
+          path: changed-packages.txt
+          retention-days: 1
+
+      - name: Summary
+        shell: bash
+        run: |
+          if [ "${{ steps.changed.outputs.has_changes }}" = "true" ]; then
+            echo "Changed packages detected:" >> "$GITHUB_STEP_SUMMARY"
+            cat changed-packages.txt >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No changed packages detected under lib/." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # Install Rokit + wally, download the changed-packages artifact, then
+  # authenticate, bump versions, and publish each changed package to Wally.
+  publish:
+    name: Publish Changed Packages
+    runs-on: ubuntu-latest
+    needs: [resolve-version, detect-changes]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # Install Rokit and verify the wally binary is on PATH before any
+      # publish step attempts to call it.
+      - name: Setup toolchain
+        uses: ./.github/actions/setup-toolchain
+
+      # Only download when the detect-changes job found packages to publish.
+      # The artifact won't exist otherwise, and download-artifact would hard-fail.
+      - name: Download changed packages list
+        if: needs.detect-changes.outputs.has_changes == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: changed-packages
+
+      # Bump versions, authenticate with Wally, and publish each changed package.
+      # Also commits the updated wally.toml version lines back to main.
+      - name: Publish and persist versions
+        if: needs.detect-changes.outputs.has_changes == 'true' && needs.resolve-version.outputs.version_change != 'none'
+        uses: ./.github/actions/publish-packages
+        with:
+          changed-packages-file: changed-packages.txt
+          version-change: ${{ needs.resolve-version.outputs.version_change }}
+          wally-token: ${{ secrets.WALLY_TOKEN }}
+
+      - name: Summary
+        shell: bash
+        run: |
+          if [ "${{ needs.detect-changes.outputs.has_changes }}" != "true" ]; then
+            echo "### ⏭️ Skipped: no changed packages under lib/." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "${{ needs.resolve-version.outputs.version_change }}" = "none" ]; then
+            echo "### ⏭️ Skipped: no semver label found (major/minor/patch)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### ✅ Published changed packages with version change: ${{ needs.resolve-version.outputs.version_change }}" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # Regenerate the README and deploy the docs site — but only when a publish
+  # actually happened (something changed and a real version bump was resolved).
+  # Manual docs rebuilds go through the 'Docs' workflow's own workflow_dispatch.
+  docs:
+    name: Docs
+    needs: [resolve-version, detect-changes, publish]
+    if: |
+      needs.publish.result == 'success' &&
+      needs.detect-changes.outputs.has_changes == 'true' &&
+      needs.resolve-version.outputs.version_change != 'none'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/docs.yml
+    secrets: inherit

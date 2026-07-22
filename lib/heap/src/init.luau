@@ -1,87 +1,89 @@
 -- Author: Logan Hunt (Raild3x)
 -- Feb 27, 2025
 --[=[
-    @class Heap
-    A generic [Heap](https://en.wikipedia.org/wiki/Heap_(data_structure)) implementation for both min and max heaps. It is designed
-    for allowing the association of a cost to a given value so that users are not restricted to just numbers as values.
+	@class Heap
+	A generic [Heap](https://en.wikipedia.org/wiki/Heap_(data_structure)) implementation for both min and max heaps. It is designed
+	for allowing the association of a cost to a given value so that users are not restricted to just numbers as values.
 
-    ### *What is a Heap?*
-    Heaps are an implementation of [Priority Queues](https://en.wikipedia.org/wiki/Priority_queue) that excel at tracking the smallest
-    or largest element in an array. They are commonly used in algorithms like Dijkstra's shortest path algorithm and Huffman coding.
+	### *What is a Heap?*
+	Heaps are an implementation of [Priority Queues](https://en.wikipedia.org/wiki/Priority_queue) that excel at tracking the smallest
+	or largest element in an array. They are commonly used in algorithms like Dijkstra's shortest path algorithm and Huffman coding.
 
-    ### Examples:
-    
-    ```lua title="Min Heap"
-    local minHeap = Heap.min()
-    minHeap:Push("A", 5) -- A is the value, and 5 is the cost associated with it
-    minHeap:Push("B", 2)
-    minHeap:Push("C", 8)
-    minHeap:Push("D", 4)
-    
-    -- look at the current lowest value
-    local minValue, minCost = minHeap:Peek()
-    print(minValue, minCost) -- B 2
-    ```
-    ```lua title="Max Heap"
-    local maxHeap = Heap.max()
-    minHeap:Push("A", 5)
-    minHeap:Push("B", 2)
-    minHeap:Push("C", 8)
-    minHeap:Push("D", 4)
+	![Max Heap and Array Visual](../heap/Max-Heap.png)
 
-    local poppedValue, costOfPoppedValue = maxHeap:Pop() -- pops off the top value
-    print(poppedValue, costOfPoppedValue) -- C 8
+	### Examples:
 
-    -- look at the new highest value
-    print(maxHeap:Peek()) -- A 5
-    ```
+	```lua title="Min Heap"
+	local minHeap = Heap.min()
+	minHeap:Push("A", 5) -- A is the value, and 5 is the cost associated with it
+	minHeap:Push("B", 2)
+	minHeap:Push("C", 8)
+	minHeap:Push("D", 4)
 
-    ___
-    :::tip MetaMethods
-    Supports the following metamethods:
-    - `__tostring`: Returns a string representation of the heap in a tree like display.
-    - [`__len`](/api/Heap#Size): Returns the number of elements in the heap. Equivalent to calling [`:Size()`](/api/Heap#Size).
-        ```lua
-        local minHeap = Heap.min()
-        minHeap:Push("A", 5)
-        minHeap:Push("B", 2)
-        print(#minHeap) -- 2
-        ```
-    - [`__iter`](/api/Heap#__iter): Provides an iterator for for loop usage
-    :::
-    
-    :::tip Exported Types
-    This file exports a Heap type in the form of **`Heap<T>`** where **`T`** is the type of value stored in the heap.
-    Usually Luau can infer the type of **`T`** from your usage, but it may be useful to manually provide the type if
-    you are using more complex datatypes.
-    ```lua
-    local Heap = require(ReplicatedStorage.Heap)
-    type Heap<T> = Heap.Heap<T>
+	-- look at the current lowest value
+	local minValue, minCost = minHeap:Peek()
+	print(minValue, minCost) -- B 2
+	```
+	```lua title="Max Heap"
+	local maxHeap = Heap.max()
+	maxHeap:Push("A", 5)
+	maxHeap:Push("B", 2)
+	maxHeap:Push("C", 8)
+	maxHeap:Push("D", 4)
 
-    local myHeap: Heap<string> = Heap.min()
-    myHeap:Push("A", 5)
-    ```
-    :::
+	local poppedValue, costOfPoppedValue = maxHeap:Pop() -- pops off the top value
+	print(poppedValue, costOfPoppedValue) -- C 8
 
-    :::info Info for Nerds
-    *Read this only if you want to know more about the internals of this heap implmenentation.*
+	-- look at the new highest value
+	print(maxHeap:Peek()) -- A 5
+	```
 
-    In order to support the association of a cost to a value, the heap is implemented as three separate arrays.
-    One to store the values, one to store the costs, and one to store the index pointing to the first two.
-    I used this structure in order to optimize for cache hits on table lookups since using an object based 
-    approach `Ex: {Value: T, Cost: number}` could cause the CPU to potentially miss the `Cost` data since it may
-    not be stored continguously in memory.
+	___
+	:::tip MetaMethods
+	Supports the following metamethods:
+	- `__tostring`: Returns a string representation of the heap in a tree like display.
+	- [`__len`](/api/Heap#Size): Returns the number of elements in the heap. Equivalent to calling [`:Size()`](/api/Heap#Size).
+		```lua
+		local minHeap = Heap.min()
+		minHeap:Push("A", 5)
+		minHeap:Push("B", 2)
+		print(#minHeap) -- 2
+		```
+	- [`__iter`](/api/Heap#__iter): Provides an iterator for for loop usage
+	:::
 
-    When a value is popped from the heap, its reference index is stored in a stack of open indices for reuse.
-    This is done to hopefully reduce fragmentation of the heap and improve the likelyhood of cache hits.
+	:::tip Exported Types
+	This file exports a Heap type in the form of **`Heap<T>`** where **`T`** is the type of value stored in the heap.
+	Usually Luau can infer the type of **`T`** from your usage, but it may be useful to manually provide the type if
+	you are using more complex datatypes.
+	```lua
+	local Heap = require(ReplicatedStorage.Heap)
+	type Heap<T> = Heap.Heap<T>
 
-    I originally opted to use a dynamic cost system such that you would provide a comparator function
-    to the constructor that would be used to determine the cost of each value. However, this introduced
-    a number of potential issues such as if the comparator function was not deterministic, causing the order to desync.
-    There could very likely be cases where the cost could change without the heap's knowledge of it. So instead I opted
-    to require the cost to be provided at the time of insertion. Although technically the type definition specifies for
-    only number costs, you could in theory use any type luau considers comparable with relational operators.
-    :::
+	local myHeap: Heap<string> = Heap.min()
+	myHeap:Push("A", 5)
+	```
+	:::
+
+	:::info Info for Nerds
+	*Read this only if you want to know more about the internals of this heap implmenentation.*
+
+	In order to support the association of a cost to a value, the heap is implemented as three separate arrays.
+	One to store the values, one to store the costs, and one to store the index pointing to the first two.
+	I used this structure in order to optimize for cache hits on table lookups since using an object based 
+	approach `Ex: {Value: T, Cost: number}` could cause the CPU to potentially miss the `Cost` data since it may
+	not be stored continguously in memory.
+
+	When a value is popped from the heap, its reference index is stored in a stack of open indices for reuse.
+	This is done to hopefully reduce fragmentation of the heap and improve the likelyhood of cache hits.
+
+	I originally opted to use a dynamic cost system such that you would provide a comparator function
+	to the constructor that would be used to determine the cost of each value. However, this introduced
+	a number of potential issues such as if the comparator function was not deterministic, causing the order to desync.
+	There could very likely be cases where the cost could change without the heap's knowledge of it. So instead I opted
+	to require the cost to be provided at the time of insertion. Although technically the type definition specifies for
+	only number costs, you could in theory use any type luau considers comparable with relational operators.
+	:::
 ]=]
 
 type Branch<T> = { Value: T, Left: Branch<T>?, Right: Branch<T>? }
@@ -387,39 +389,45 @@ function Heap:UpdateCost<T>(
 	newCost: number | (value: T, oldCost: number) -> number,
 	updateAll: boolean?
 ): boolean
-    local Values, Costs, HeapIndex, Size = self._Values, self._Costs, self._HeapIndex, self._Size
-    local updated = 0
-    local updatedHeapIdx = nil -- used to track the heap index of the updated value (used only when updating a single value)
+	local Values, Costs, HeapIndex, Size = self._Values, self._Costs, self._HeapIndex, self._Size
+	local updated = 0
+	local updatedHeapIdx = nil -- used to track the heap index of the updated value (used only when updating a single value)
 
-    local newCostIsFn = type(newCost) == "function"
+	local newCostIsFn = type(newCost) == "function"
 
-    -- First pass: Update costs in place
-    if type(valueToUpdate) == "function" then -- I split this up intentionally to reduce the number of comparisons made
-        for realIdx, refIdx in pairs(HeapIndex) do
-            if valueToUpdate(Values[refIdx]) then
-                local oldCost = Costs[refIdx]
-                local computedNewCost: number = if newCostIsFn then (newCost :: any)(Values[refIdx], oldCost) else newCost
+	-- First pass: Update costs in place
+	if type(valueToUpdate) == "function" then -- I split this up intentionally to reduce the number of comparisons made
+		for realIdx, refIdx in pairs(HeapIndex) do
+			if valueToUpdate(Values[refIdx]) then
+				local oldCost = Costs[refIdx]
+				local computedNewCost: number = if newCostIsFn
+					then (newCost :: any)(Values[refIdx], oldCost)
+					else newCost
 
-                if oldCost ~= computedNewCost then
-                    Costs[refIdx] = computedNewCost
-                    updatedHeapIdx = realIdx -- Store the heap position, not the ref index
-                    updated += 1
-                end
+				if oldCost ~= computedNewCost then
+					Costs[refIdx] = computedNewCost
+					updatedHeapIdx = realIdx -- Store the heap position, not the ref index
+					updated += 1
+				end
 
-                if not updateAll then break end
-            end
-        end
-    else
-        for realIdx, refIdx in pairs(HeapIndex) do
-            if Values[refIdx] == valueToUpdate then
-                local oldCost = Costs[refIdx]
-                local computedNewCost: number = if newCostIsFn then (newCost :: any)(Values[refIdx], oldCost) else newCost
+				if not updateAll then
+					break
+				end
+			end
+		end
+	else
+		for realIdx, refIdx in pairs(HeapIndex) do
+			if Values[refIdx] == valueToUpdate then
+				local oldCost = Costs[refIdx]
+				local computedNewCost: number = if newCostIsFn
+					then (newCost :: any)(Values[refIdx], oldCost)
+					else newCost
 
-                if oldCost ~= computedNewCost then
-                    Costs[refIdx] = computedNewCost
-                    updatedHeapIdx = realIdx -- Store the heap position, not the ref index
-                    updated += 1
-                end
+				if oldCost ~= computedNewCost then
+					Costs[refIdx] = computedNewCost
+					updatedHeapIdx = realIdx -- Store the heap position, not the ref index
+					updated += 1
+				end
 
 				if not updateAll then
 					break
@@ -428,19 +436,19 @@ function Heap:UpdateCost<T>(
 		end
 	end
 
-    if updated == 1 then
-         -- Only heapify once if a single value was updated
-         -- Try heapifying up first (in case cost decreased for min-heap or increased for max-heap)
-         -- then heapify down (in case cost increased for min-heap or decreased for max-heap)
-        self:_heapifyUp(updatedHeapIdx)
-        self:_heapifyDown(updatedHeapIdx)
-    elseif updated > 1 then
-        -- If we made multiple updates, we need to perform a more robust heapify
-        -- Rebuild the heap from the bottom up
-        for i = math.floor(Size / 2), 1, -1 do
-            self:_heapifyDown(i)
-        end
-    end
+	if updated == 1 then
+		-- Only heapify once if a single value was updated
+		-- Try heapifying up first (in case cost decreased for min-heap or increased for max-heap)
+		-- then heapify down (in case cost increased for min-heap or decreased for max-heap)
+		self:_heapifyUp(updatedHeapIdx)
+		self:_heapifyDown(updatedHeapIdx)
+	elseif updated > 1 then
+		-- If we made multiple updates, we need to perform a more robust heapify
+		-- Rebuild the heap from the bottom up
+		for i = math.floor(Size / 2), 1, -1 do
+			self:_heapifyDown(i)
+		end
+	end
 
 	return if updated > 0 then true else false
 end
@@ -493,14 +501,13 @@ end
     Removes the first occurrence of a given value from the heap.
     Heaps are not optimized for search removals, so this method should
     be used sparingly.
-    
-    :::note Performance
+]=]
+--[[ -- Performance Note
     This operation requires O(n) search time to locate the element, followed by O(log n) heapify.
     A reverse mapping (refIdx → heapPos) could reduce this to O(log n), but would add memory overhead
     and complexity to maintain across all heap operations. For typical use cases where Push/Pop
     dominate, the current approach favors simplicity and lower memory usage.
-    :::
-]=]
+]]
 function Heap:RemoveFirstOccurrence<T>(valueToRemove: T): boolean
 	for refIdx, value in pairs(self._Values) do
 		if value == valueToRemove then
@@ -513,7 +520,7 @@ function Heap:RemoveFirstOccurrence<T>(valueToRemove: T): boolean
 					break
 				end
 			end
-			
+
 			if not heapPos then
 				-- This shouldn't happen, but handle it gracefully
 				return false
@@ -550,11 +557,11 @@ function Heap:RemoveFirstOccurrence<T>(valueToRemove: T): boolean
 					local parent = math.floor(heapPos / 2)
 					local movedCost = self._Costs[lastRefIdx]
 					local parentCost = self._Costs[self._HeapIndex[parent]]
-					
+
 					-- Check if moved element violates heap property with parent
 					local needsHeapifyUp = (self._isMinHeap and movedCost < parentCost)
 						or (not self._isMinHeap and movedCost > parentCost)
-					
+
 					if needsHeapifyUp then
 						self:_heapifyUp(heapPos)
 					else
@@ -586,7 +593,7 @@ function Heap:RemoveAllOccurrences<T>(valueToRemove: T): number
 			table.insert(toRemove, refIdx)
 		end
 	end
-	
+
 	-- Remove each occurrence
 	for _, refIdx in ipairs(toRemove) do
 		-- Find the heap position where this refIdx is located
@@ -597,7 +604,7 @@ function Heap:RemoveAllOccurrences<T>(valueToRemove: T): number
 				break
 			end
 		end
-		
+
 		if heapPos then
 			-- Remove the value and cost
 			self._Values[refIdx] = nil
@@ -624,11 +631,11 @@ function Heap:RemoveAllOccurrences<T>(valueToRemove: T): number
 						local parent = math.floor(heapPos / 2)
 						local movedCost = self._Costs[lastRefIdx]
 						local parentCost = self._Costs[self._HeapIndex[parent]]
-						
+
 						-- Check if moved element violates heap property with parent
 						local needsHeapifyUp = (self._isMinHeap and movedCost < parentCost)
 							or (not self._isMinHeap and movedCost > parentCost)
-						
+
 						if needsHeapifyUp then
 							self:_heapifyUp(heapPos)
 						else
@@ -640,7 +647,7 @@ function Heap:RemoveAllOccurrences<T>(valueToRemove: T): number
 					end
 				end
 			end
-			
+
 			count += 1
 		end
 	end

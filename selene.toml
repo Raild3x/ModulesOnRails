@@ -1,4 +1,5 @@
 std = "roblox+testez"
+exclude = ["**/_Index/**"]
 
 [rules]
 shadowing = "allow"
@@ -11,3 +12,4 @@ undefined_variable = "allow"
 manual_table_clone = "allow"
 global_usage = "allow"
 mixed_table = "allow"
+roblox_manual_fromscale_or_fromoffset = "allow"

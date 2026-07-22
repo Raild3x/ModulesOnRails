@@ -1,0 +1,10 @@
+# comment line, skipped
+-- also a comment, skipped
+   
+
+M.doThing
+"Quoted.Name"
+'Single.Name'
+   Padded.Name
+src/a.luau:12
+site:stmt:src/a.luau:3:1
