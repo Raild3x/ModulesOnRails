@@ -43,6 +43,16 @@ def get_git_remote_info() -> Tuple[Optional[str], Optional[str]]:
 
 
 
+def generate_banner(repo_owner: str, repo_name: str) -> str:
+    """Generate the banner logo line shown at the very top of the README.
+
+    Uses an absolute raw.githubusercontent.com URL (not a repo-relative path)
+    so the image also renders on the Moonwave landing page, not just GitHub.
+    """
+    banner_url = f"https://raw.githubusercontent.com/{repo_owner}/{repo_name}/main/brand/banner_logo.png"
+    return f"![{repo_name} banner]({banner_url})"
+
+
 def generate_badges(repo_owner: str, repo_name: str, docs_link: str) -> str:
     """Generate the badge line shown at the top of the README.
 
@@ -164,6 +174,8 @@ def main():
     
     # Generate README content
     readme_content = f"""{generate_badges(repo_owner, repo_name, docs_link)}
+
+{generate_banner(repo_owner, repo_name)}
 
 {repo_name} is a collection of Wally packages to streamline Roblox development.
 
