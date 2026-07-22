@@ -1,0 +1,1468 @@
+--!strict
+--!native
+-- Authors: Logan Hunt (Raildex)
+-- Revised: May 2026
+--[=[
+	@class Delaunay3d
+
+	A 3D [Delaunay Triangulation](https://en.wikipedia.org/wiki/Delaunay_triangulation)
+	implemented via the incremental **Bowyer–Watson** algorithm.
+
+	The key correctness invariant is the *orient × insphere* predicate:
+
+	```
+	circumSphereContains(A,B,C,D, P)
+	    ⟺  inSphere(A,B,C,D,P) * orient3d(A,B,C,D)  <  0
+	```
+
+	Both sub-predicates are computed in the translated frame of the query point `P`
+	(i.e. rows `A-P, B-P, C-P, D-P`) which minimises catastrophic cancellation without
+	requiring exact/multi-precision arithmetic.
+
+	### Usage
+	```lua
+	local Delaunay3d = require(path.to.Delaunay3d)
+
+	local vertices = {
+	    Vector3.new(0,  0,  0),
+	    Vector3.new(10, 0,  0),
+	    Vector3.new(5,  10, 0),
+	    Vector3.new(5,  5,  10),
+	}
+
+	local result = Delaunay3d.Triangulate(vertices)
+	print(#result.Tetrahedra) -- number of tetrahedra
+	print(#result.Triangles)  -- number of unique triangular faces
+	print(#result.Edges)      -- number of unique edges
+	```
+]=]
+
+-- Import geometric predicates.
+local Geometric3dUtils = require(script.Parent.Geometric3dUtils)
+local circumSphereContains = Geometric3dUtils.circumSphereContains
+local orient3d = Geometric3dUtils.orient3d
+
+--------------------------------------------------------------------------------
+--// Types //--
+--------------------------------------------------------------------------------
+
+--- A tetrahedron produced by the triangulation.
+export type Tetrahedron = { Vector3 }
+
+--- A triangular face produced by the triangulation.
+export type Triangle = { Vector3 }
+
+--- An edge produced by the triangulation.
+export type Edge = { Vector3 }
+
+--- The result returned by `Delaunay3d.Triangulate`.
+export type TriangulationResult = {
+	Vertices: { Vector3 },
+	Tetrahedra: { Tetrahedron },
+	Triangles: { Triangle },
+	Edges: { Edge },
+}
+
+--- Public interface of a Delaunay3d instance.
+export type Delaunay3dObject = {
+	-- Mutation
+	AddPoint: (self: Delaunay3dObject, point: Vector3, id: string?) -> string,
+	RemovePoint: (self: Delaunay3dObject, id: string) -> (),
+	MovePoint: (self: Delaunay3dObject, id: string, newPosition: Vector3) -> (),
+	Clear: (self: Delaunay3dObject) -> (),
+
+	-- Bulk accessors (allocate new tables)
+	GetVertices: (self: Delaunay3dObject) -> { Vector3 },
+	GetEdges: (self: Delaunay3dObject) -> { Edge },
+	GetTriangles: (self: Delaunay3dObject) -> { Triangle },
+	GetTetrahedrons: (self: Delaunay3dObject) -> { Tetrahedron },
+	GetHullVertices: (self: Delaunay3dObject) -> { Vector3 },
+	GetHullEdges: (self: Delaunay3dObject) -> { Edge },
+	GetHullTriangles: (self: Delaunay3dObject) -> { Triangle },
+
+	-- Zero-alloc iterators
+	-- Usage:  for u, v in self:ForEachEdge() do ... end
+	ForEachEdge: (self: Delaunay3dObject) -> () -> (Vector3, Vector3),
+	ForEachTriangle: (self: Delaunay3dObject) -> () -> (Vector3, Vector3, Vector3),
+	ForEachTetrahedron: (self: Delaunay3dObject) -> () -> (Vector3, Vector3, Vector3, Vector3),
+
+	-- Queries
+	GetAdjacentVertices: (self: Delaunay3dObject, id: string) -> { Vector3 },
+	GetTetrahedronsContaining: (self: Delaunay3dObject, point: Vector3) -> { Tetrahedron },
+}
+
+--------------------------------------------------------------------------------
+--// Generic Util Functions //--
+--------------------------------------------------------------------------------
+
+type table = typeof({})
+
+local function ClearChildTables(t: table)
+	for _, v in t :: any do
+		if type(v) == "table" then
+			table.clear(v)
+		end
+	end
+end
+
+--------------------------------------------------------------------------------
+--// Numeric Key Canonicalization (Opt#2) //--
+--------------------------------------------------------------------------------
+
+--[[
+  Returns a canonical sorted triple for three vertex ids.
+  Used to deduplicate triangular faces independent of winding.
+]]
+--[[
+	Fast permutation-independent integer triple comparison.
+	Used during Bowyer-Watson insertion (transient vertex pass)
+	to eliminate string allocation overhead in cavity detection.
+	
+	Returns a canonical tuple (ia, ib, ic) where ia <= ib <= ic.
+]]
+local function canonicalTriKey(ia: number, ib: number, ic: number): (number, number, number)
+	-- Sort three integers via min conditional swaps.
+	if ia > ib then
+		ia, ib = ib, ia
+	end
+	if ib > ic then
+		ib, ic = ic, ib
+	end
+	if ia > ib then
+		ia, ib = ib, ia
+	end
+	return ia, ib, ic
+end
+
+--[[
+  Returns a canonical sorted pair for two vertex ids.
+  Used to deduplicate edges independent of direction.
+]]
+--[[
+	Fast permutation-independent integer pair comparison.
+	Used during Bowyer-Watson insertion.
+	
+	Returns a canonical tuple (ia, ib) where ia <= ib.
+]]
+local function canonicalEdgeKey(ia: number, ib: number): (number, number)
+	if ia > ib then
+		return ib, ia
+	end
+	return ia, ib
+end
+
+--------------------------------------------------------------------------------
+--// Bounding Box + Super-Tetrahedron //--
+--------------------------------------------------------------------------------
+
+--[[
+	Computes the AABB centre and half-spread   M = max(rangeX, rangeY, rangeZ) / 2
+	of a non-empty point set.
+	M is the radius of the smallest axis-aligned cube centred at `centre` that
+	contains all input points.
+]]
+--[[
+  Computes the centre and half-spread of a non-empty point set.
+  The result is used to size the super-tetrahedron.
+]]
+local function computeBounds(verts: { Vector3 }): (Vector3, number)
+	local minX, minY, minZ = verts[1].X, verts[1].Y, verts[1].Z
+	local maxX, maxY, maxZ = minX, minY, minZ
+	for i = 2, #verts do
+		local v = verts[i]
+		if v.X < minX then
+			minX = v.X
+		elseif v.X > maxX then
+			maxX = v.X
+		end
+		if v.Y < minY then
+			minY = v.Y
+		elseif v.Y > maxY then
+			maxY = v.Y
+		end
+		if v.Z < minZ then
+			minZ = v.Z
+		elseif v.Z > maxZ then
+			maxZ = v.Z
+		end
+	end
+	local spread = math.max(maxX - minX, maxY - minY, maxZ - minZ) * 0.5
+	if spread < 1e-9 then
+		spread = 1
+	end
+	return Vector3.new((minX + maxX) * 0.5, (minY + maxY) * 0.5, (minZ + maxZ) * 0.5), spread
+end
+
+--[[
+	makeSuperTetrahedron(centre, M)
+
+	Constructs a super-tetrahedron that strictly contains the axis-aligned cube
+	[-M, M]³ around `centre`.
+
+	Vertex pattern: centre + s · { (+1,+1,+1), (-1,-1,+1), (-1,+1,-1), (+1,-1,-1) }
+	This is the regular tetrahedron with even-parity sign combinations.
+
+	The four half-space constraints for this tetrahedron are:
+	    x + y + z  ≥  −s        (opposite to vertex (+1,+1,+1))
+	    x + y − z  ≤   s        (opposite to vertex (-1,-1,+1))
+	    x − y + z  ≤   s        (opposite to vertex (-1,+1,-1))
+	   −x + y + z  ≤   s        (opposite to vertex (+1,-1,-1))
+
+	Any point with |px|,|py|,|pz| ≤ M satisfies all four if  s ≥ 3M.
+	We use  s = 1000M  for a comfortable geometric margin.
+]]
+--[[
+  Builds a super-tetrahedron that strictly encloses the current bounds cube.
+]]
+local function makeSuperTetrahedron(centre: Vector3, M: number): (Vector3, Vector3, Vector3, Vector3)
+	local s = M * 1000
+	return centre + Vector3.new(s, s, s),
+		centre + Vector3.new(-s, -s, s),
+		centre + Vector3.new(-s, s, -s),
+		centre + Vector3.new(s, -s, -s)
+end
+
+type FaceRecord = {
+	Count: number,
+	Start: number,
+}
+
+type PendingOpKind = "add" | "remove" | "move"
+
+type PendingOperation = {
+	Kind: PendingOpKind,
+	Id: string,
+	OldPosition: Vector3?,
+	NewPosition: Vector3?,
+}
+
+--[[
+  Creates or reuses the face record for a canonicalized triangle id triple.
+]]
+local function getFaceRecord(
+	root: { [number]: { [number]: { [number]: FaceRecord } } },
+	ia: number,
+	ib: number,
+	ic: number
+): FaceRecord
+	local level2 = root[ia]
+	if not level2 then
+		level2 = {}
+		root[ia] = level2
+	end
+
+	local level3 = level2[ib]
+	if not level3 then
+		level3 = {}
+		level2[ib] = level3
+	end
+
+	local record = level3[ic]
+	if not record then
+		record = { Count = 0, Start = 0 }
+		level3[ic] = record
+	end
+
+	return record
+end
+
+--[[
+  Marks a canonical triangle key as seen and returns whether it was new.
+]]
+local function markTriSeen(
+	root: { [number]: { [number]: { [number]: boolean } } },
+	ia: number,
+	ib: number,
+	ic: number
+): boolean
+	local level2 = root[ia]
+	if not level2 then
+		level2 = {}
+		root[ia] = level2
+	end
+
+	local level3 = level2[ib]
+	if not level3 then
+		level3 = {}
+		level2[ib] = level3
+	end
+
+	if level3[ic] then
+		return false
+	end
+
+	level3[ic] = true
+	return true
+end
+
+--[[
+  Marks a canonical edge key as seen and returns whether it was new.
+]]
+local function markEdgeSeen(root: { [number]: { [number]: boolean } }, ia: number, ib: number): boolean
+	local level2 = root[ia]
+	if not level2 then
+		level2 = {}
+		root[ia] = level2
+	end
+
+	if level2[ib] then
+		return false
+	end
+
+	level2[ib] = true
+	return true
+end
+
+--[[
+  Applies a delta to the pending unique-position counter map.
+  Returns the resulting delta for the position.
+]]
+local function bumpPendingUniqueDelta(deltaMap: { [Vector3]: number }, pos: Vector3, amount: number): number
+	local nextValue = (deltaMap[pos] or 0) + amount
+	if nextValue == 0 then
+		deltaMap[pos] = nil :: any
+		return 0
+	end
+	deltaMap[pos] = nextValue
+	return nextValue
+end
+
+--[[
+  Returns true when any net unique-position delta is pending.
+]]
+local function hasPendingUniqueDelta(deltaMap: { [Vector3]: number }): boolean
+	for _ in deltaMap do
+		return true
+	end
+	return false
+end
+
+--[[
+  Checks whether a point is inside the closed tetrahedron defined by a,b,c,d.
+]]
+local function pointInTetrahedron(a: Vector3, b: Vector3, c: Vector3, d: Vector3, point: Vector3): boolean
+	local o = orient3d(a, b, c, d)
+	if o == 0 then
+		return false
+	end
+
+	if o > 0 then
+		return orient3d(a, b, c, point) >= 0
+			and orient3d(a, b, point, d) >= 0
+			and orient3d(a, point, c, d) >= 0
+			and orient3d(point, b, c, d) >= 0
+	end
+
+	return orient3d(a, b, c, point) <= 0
+		and orient3d(a, b, point, d) <= 0
+		and orient3d(a, point, c, d) <= 0
+		and orient3d(point, b, c, d) <= 0
+end
+
+--------------------------------------------------------------------------------
+--// Bowyer–Watson Insertion Step //--
+--------------------------------------------------------------------------------
+
+--[[
+	insertPoint(tets, p)
+
+	Single Bowyer–Watson insertion step:
+	  1. Partition `tets` into "bad" (circumsphere contains p) and "good".
+	  2. Collect the boundary faces of the conflict cavity (faces shared by exactly
+	     one bad tetrahedron — the star-shaped boundary).
+	  3. Return the surviving good tetrahedra plus new tetrahedra formed by
+	     connecting each boundary face to p.
+
+	Returns a new table; the input `tets` is not mutated.
+]]
+local function insertPoint(flatTets: { Vector3 }, p: Vector3): { Vector3 }
+	-- Opt#2: Build a transient position → integer mapping to enable numeric cavity detection.
+	-- This eliminates string allocation in the hot loop (triKey calls).
+	local posToId: { [Vector3]: number } = {}
+	local nextId = 0
+
+	local function ensurePosId(pos: Vector3): number
+		local id = posToId[pos]
+		if id ~= nil then
+			return id
+		end
+		nextId += 1
+		posToId[pos] = nextId
+		return nextId
+	end
+
+	-- Use numeric buckets for cavity deduplication.
+	local faceRecords: { [number]: { [number]: { [number]: FaceRecord } } } = {}
+	local faceBuffer: { Vector3 } = {}
+	local result: { Vector3 } = {}
+
+	local function addBoundaryFace(u: Vector3, v: Vector3, w: Vector3, iu: number, iv: number, iw: number)
+		local ia, ib, ic = canonicalTriKey(iu, iv, iw)
+		local record = getFaceRecord(faceRecords, ia, ib, ic)
+		record.Count += 1
+		if record.Count == 1 then
+			local fi = #faceBuffer
+			faceBuffer[fi + 1] = u
+			faceBuffer[fi + 2] = v
+			faceBuffer[fi + 3] = w
+			record.Start = fi + 1
+		end
+	end
+
+	for i = 1, #flatTets, 4 do
+		local a, b, c, d = flatTets[i], flatTets[i + 1], flatTets[i + 2], flatTets[i + 3]
+		local ida, idb, idc, idd = ensurePosId(a), ensurePosId(b), ensurePosId(c), ensurePosId(d)
+		if circumSphereContains(a, b, c, d, p) then
+			-- Bad tet: register its four faces using numeric keys.
+			addBoundaryFace(a, b, c, ida, idb, idc)
+			addBoundaryFace(a, b, d, ida, idb, idd)
+			addBoundaryFace(a, c, d, ida, idc, idd)
+			addBoundaryFace(b, c, d, idb, idc, idd)
+		else
+			-- Good tet: keep as-is.
+			local ri = #result
+			result[ri + 1] = a
+			result[ri + 2] = b
+			result[ri + 3] = c
+			result[ri + 4] = d
+		end
+	end
+
+	-- Connect each boundary face (count == 1) to the new point.
+	for _, level2 in faceRecords do
+		for _, level3 in level2 do
+			for _, record in level3 do
+				if record.Count == 1 then
+					local startIndex = record.Start
+					local ri = #result
+					result[ri + 1] = faceBuffer[startIndex]
+					result[ri + 2] = faceBuffer[startIndex + 1]
+					result[ri + 3] = faceBuffer[startIndex + 2]
+					result[ri + 4] = p
+				end
+			end
+		end
+	end
+
+	return result
+end
+
+--------------------------------------------------------------------------------
+--// Public API //--
+--------------------------------------------------------------------------------
+
+-- Module-level counter for auto-generated vertex ids.
+local _nextId = 0
+local AUTO_ID_PREFIX = "__auto__:"
+
+local function nextAutoId(vertices: { [string]: Vector3? }): string
+	while true do
+		_nextId += 1
+		local id = AUTO_ID_PREFIX .. tostring(_nextId)
+		if vertices[id] == nil then
+			return id
+		end
+	end
+end
+
+-- Internal type — includes private fields not part of the public interface.
+type Delaunay3dInternal = {
+	--- id → position (source of truth for id-based lookups).
+	_Vertices: { [string]: Vector3? },
+	--- Dense flat list of unique positions. Fed directly to triangulation.
+	_UniqueVertices: { Vector3 },
+	--- Position-index map for O(1) swap-remove in _UniqueVertices.
+	_PositionToIndex: { [Vector3]: number },
+	--- Number of ids currently referencing a given position.
+	_PositionRefCount: { [Vector3]: number },
+
+	-- Flat stride-based output caches (recomputed on Flush).
+	_Flat: { Tetrahedra: { Vector3 }, Triangles: { Vector3 }, Edges: { Vector3 } },
+
+	-- Boxed struct caches (only rebuilt when needed, cleared on mutation).
+	_Boxed: {
+		Tetrahedra: { Tetrahedron }?,
+		Triangles: { Triangle }?,
+		Edges: { Edge }?,
+		HullTriangles: { Triangle }?,
+		HullEdges: { Edge }?,
+	},
+
+	-- Hull flat caches (derived from the current tetrahedra buffer on demand).
+	_Hull: { Vertices: { Vector3 }?, TrianglesFlat: { Vector3 }?, EdgesFlat: { Vector3 }? },
+
+	--- Adjacency: vertex position → adjacent vertex positions.
+	_AdjacencyMap: { [Vector3]: { Vector3 } },
+	--- Super-tetra cache and raw working tetrahedra.
+	_Super: {
+		RawTetrahedraWithSuper: { Vector3 }?,
+		A: Vector3?,
+		B: Vector3?,
+		C: Vector3?,
+		D: Vector3?,
+		Keys: { [Vector3]: true? }?,
+	},
+
+	--- Pending mutation queue (for future localized retriangulation pipelines).
+	_PendingOperations: { PendingOperation },
+	--- Net unique-position delta since last flush.
+	_PendingUniqueDelta: { [Vector3]: number },
+	--- Candidate points for incremental insertion during the next flush.
+	_PendingAddPoints: { Vector3 },
+	--- Safety gate: required for effective remove/move structural changes.
+	_RequiresFullRebuild: boolean,
+
+	--- True whenever mutation has occurred since the last flush.
+	_IsDirty: boolean,
+	--- Version counter incremented on each mutation; used to detect structural changes during iteration.
+	_GraphVersion: number,
+
+	_Flush: (self: Delaunay3dInternal) -> (),
+} & Delaunay3dObject
+
+local Delaunay3d = {}
+Delaunay3d.__index = Delaunay3d
+
+--[=[
+	Creates a new Delaunay3d instance, optionally seeded with an initial set of points.
+
+	@param initialPoints { Vector3 }? -- Optional initial vertices to insert.
+	@return Delaunay3dObject
+]=]
+function Delaunay3d.new(initialPoints: { Vector3 }?): Delaunay3dObject
+	local self = setmetatable({
+		_Vertices = {},
+		_UniqueVertices = {},
+		_PositionToIndex = {},
+		_PositionRefCount = {},
+		_Flat = { Tetrahedra = {}, Triangles = {}, Edges = {} },
+		_Boxed = { Tetrahedra = nil, Triangles = nil, Edges = nil, HullTriangles = nil, HullEdges = nil },
+		_Hull = { Vertices = nil, TrianglesFlat = nil, EdgesFlat = nil },
+		_AdjacencyMap = {},
+		_Super = { RawTetrahedraWithSuper = nil, A = nil, B = nil, C = nil, D = nil, Keys = nil },
+		_PendingOperations = {},
+		_PendingUniqueDelta = {},
+		_PendingAddPoints = {},
+		_RequiresFullRebuild = false,
+		_IsDirty = true,
+		_GraphVersion = 0,
+	}, Delaunay3d) :: any
+	if initialPoints then
+		for _, p in initialPoints do
+			(self :: Delaunay3dInternal):AddPoint(p)
+		end
+	end
+	return self
+end
+
+--------------------------------------------------------------------------------
+--// Private Methods //--
+--------------------------------------------------------------------------------
+
+local function clearDerivedCaches(self: Delaunay3dInternal)
+	table.clear(self._Boxed)
+	table.clear(self._Hull)
+end
+
+local function clearPendingState(self: Delaunay3dInternal)
+	table.clear(self._PendingOperations)
+	table.clear(self._PendingUniqueDelta)
+	table.clear(self._PendingAddPoints)
+	self._RequiresFullRebuild = false
+end
+
+local function enqueuePendingOperation(self: Delaunay3dInternal, op: PendingOperation)
+	self._PendingOperations[#self._PendingOperations + 1] = op
+end
+
+--[[
+	buildFlatMesh(tets, superKeys)
+
+	Given the raw Tetrahedron list produced by Bowyer-Watson and the set of
+	super-tetrahedron vertex keys, builds three flat stride-based arrays and an
+	adjacency map, discarding any tetrahedron that shares a vertex with the
+	super-tetrahedron.
+
+	Returns:
+	  flatTets  { Vector3 }  stride-4  (a,b,c,d per tetrahedron)
+	  flatTris  { Vector3 }  stride-3  (u,v,w per unique triangular face)
+	  flatEdges { Vector3 }  stride-2  (u,v per unique edge)
+	  adjMap    { [string]: { Vector3 } }  v3Key → adjacent positions
+]]
+local function buildFlatMesh(
+	flatTets: { Vector3 },
+	superKeys: { [Vector3]: true? }
+): ({ Vector3 }, { Vector3 }, { Vector3 }, { [Vector3]: { Vector3 } })
+	local outFlatTets: { Vector3 } = {}
+	local outFlatTris: { Vector3 } = {}
+	local outFlatEdges: { Vector3 } = {}
+	local adjMap: { [Vector3]: { Vector3 } } = {}
+
+	-- Opt#2: Build numeric position mapping for efficient deduplication.
+	local posToId: { [Vector3]: number } = {}
+	local nextId = 0
+
+	local function ensurePosId(pos: Vector3): number
+		local id = posToId[pos]
+		if id ~= nil then
+			return id
+		end
+		nextId += 1
+		posToId[pos] = nextId
+		return nextId
+	end
+
+	local trisSeen: { [number]: { [number]: { [number]: boolean } } } = {}
+	local edgesSeen: { [number]: { [number]: boolean } } = {}
+
+	-- Helper: add a directed link u→v into adjMap (one direction only; called
+	-- for both orders at each edge site).
+	local function addAdj(u: Vector3, v: Vector3)
+		local list = adjMap[u]
+		if not list then
+			list = {}
+			adjMap[u] = list
+		end
+		list[#list + 1] = v
+	end
+
+	local function addTri(u: Vector3, v: Vector3, w: Vector3, iu: number, iv: number, iw: number)
+		local ia, ib, ic = canonicalTriKey(iu, iv, iw)
+		if markTriSeen(trisSeen, ia, ib, ic) then
+			local fi = #outFlatTris
+			outFlatTris[fi + 1] = u
+			outFlatTris[fi + 2] = v
+			outFlatTris[fi + 3] = w
+		end
+	end
+
+	local function addEdge(u: Vector3, v: Vector3, iu: number, iv: number)
+		local ia, ib = canonicalEdgeKey(iu, iv)
+		if markEdgeSeen(edgesSeen, ia, ib) then
+			local ei = #outFlatEdges
+			outFlatEdges[ei + 1] = u
+			outFlatEdges[ei + 2] = v
+			addAdj(u, v)
+			addAdj(v, u)
+		end
+	end
+
+	for i = 1, #flatTets, 4 do
+		local a, b, c, d = flatTets[i], flatTets[i + 1], flatTets[i + 2], flatTets[i + 3]
+		if superKeys[a] or superKeys[b] or superKeys[c] or superKeys[d] then
+			continue
+		end
+
+		local ida = ensurePosId(a)
+		local idb = ensurePosId(b)
+		local idc = ensurePosId(c)
+		local idd = ensurePosId(d)
+
+		-- Flat tetrahedron entry.
+		local oti = #outFlatTets
+		outFlatTets[oti + 1] = a
+		outFlatTets[oti + 2] = b
+		outFlatTets[oti + 3] = c
+		outFlatTets[oti + 4] = d
+
+		-- Unique triangular faces + edges (using numeric keys).
+		addTri(a, b, c, ida, idb, idc)
+		addTri(a, b, d, ida, idb, idd)
+		addTri(a, c, d, ida, idc, idd)
+		addTri(b, c, d, idb, idc, idd)
+
+		addEdge(a, b, ida, idb)
+		addEdge(a, c, ida, idc)
+		addEdge(a, d, ida, idd)
+		addEdge(b, c, idb, idc)
+		addEdge(b, d, idb, idd)
+		addEdge(c, d, idc, idd)
+	end
+
+	return outFlatTets, outFlatTris, outFlatEdges, adjMap
+end
+
+local function rebuildAll(self: Delaunay3dInternal)
+	clearDerivedCaches(self)
+
+	local verts = self._UniqueVertices
+	if #verts < 4 then
+		ClearChildTables(self._Flat)
+		table.clear(self._Super)
+		table.clear(self._AdjacencyMap)
+		return
+	end
+
+	local centre, M = computeBounds(verts)
+	local sp1, sp2, sp3, sp4 = makeSuperTetrahedron(centre, M)
+
+	local superKeys: { [Vector3]: true? } = {
+		[sp1] = true,
+		[sp2] = true,
+		[sp3] = true,
+		[sp4] = true,
+	}
+
+	local rawTets: { Vector3 } = { sp1, sp2, sp3, sp4 }
+	for _, p in verts do
+		rawTets = insertPoint(rawTets, p)
+	end
+
+	local flatTets, flatTris, flatEdges, adjMap = buildFlatMesh(rawTets, superKeys)
+	self._Super.RawTetrahedraWithSuper = rawTets
+	self._Super.A = sp1
+	self._Super.B = sp2
+	self._Super.C = sp3
+	self._Super.D = sp4
+	self._Super.Keys = superKeys
+	self._Flat.Tetrahedra = flatTets
+	self._Flat.Triangles = flatTris
+	self._Flat.Edges = flatEdges
+	self._AdjacencyMap = adjMap
+end
+
+--------------------------------------------------------------------------------
+--// Private helpers //--
+--------------------------------------------------------------------------------
+
+--[=[
+	Removes all vertices and clears all cached triangulation output.
+]=]
+function Delaunay3d.Clear(self: Delaunay3dInternal)
+	self._IsDirty = true
+	table.clear(self._Vertices)
+	table.clear(self._UniqueVertices)
+	table.clear(self._PositionToIndex)
+	table.clear(self._PositionRefCount)
+	table.clear(self._AdjacencyMap)
+	table.clear(self._Super)
+	ClearChildTables(self._Flat)
+	clearDerivedCaches(self)
+	clearPendingState(self)
+	self._GraphVersion += 1
+end
+
+--------------------------------------------------------------------------------
+--// Phase 3 — _Flush //--
+--------------------------------------------------------------------------------
+
+--[=[
+	Recomputes the triangulation from the current vertex set if dirty.
+	Called automatically by all accessor and iterator methods.
+]=]
+function Delaunay3d._Flush(self: Delaunay3dInternal)
+	if not self._IsDirty then
+		return
+	end
+	if not hasPendingUniqueDelta(self._PendingUniqueDelta) then
+		self._IsDirty = false
+		clearPendingState(self)
+		return
+	end
+
+	local canUseIncremental = not self._RequiresFullRebuild
+		and self._Super.RawTetrahedraWithSuper ~= nil
+		and self._Super.Keys ~= nil
+	if canUseIncremental then
+		local superA = self._Super.A
+		local superB = self._Super.B
+		local superC = self._Super.C
+		local superD = self._Super.D
+		if not (superA and superB and superC and superD) then
+			canUseIncremental = false
+		else
+			local seenAdds: { [Vector3]: boolean } = {}
+			for _, point in self._PendingAddPoints do
+				if seenAdds[point] then
+					continue
+				end
+				seenAdds[point] = true
+				local delta = self._PendingUniqueDelta[point]
+				if delta ~= nil and delta > 0 and not pointInTetrahedron(superA, superB, superC, superD, point) then
+					canUseIncremental = false
+					break
+				end
+			end
+		end
+	end
+
+	if canUseIncremental then
+		clearDerivedCaches(self)
+		local rawTets = self._Super.RawTetrahedraWithSuper :: { Vector3 }
+		local seenAdds: { [Vector3]: boolean } = {}
+		for _, point in self._PendingAddPoints do
+			if seenAdds[point] then
+				continue
+			end
+			seenAdds[point] = true
+			local delta = self._PendingUniqueDelta[point]
+			if delta ~= nil and delta > 0 then
+				rawTets = insertPoint(rawTets, point)
+			end
+		end
+
+		self._Super.RawTetrahedraWithSuper = rawTets
+		local superKeys = self._Super.Keys :: { [Vector3]: true? }
+		local flatTets, flatTris, flatEdges, adjMap = buildFlatMesh(rawTets, superKeys)
+		self._Flat.Tetrahedra = flatTets
+		self._Flat.Triangles = flatTris
+		self._Flat.Edges = flatEdges
+		self._AdjacencyMap = adjMap
+	else
+		rebuildAll(self)
+	end
+
+	self._IsDirty = false
+	clearPendingState(self)
+end
+
+--------------------------------------------------------------------------------
+--// Phase 4 — Mutation methods //--
+--------------------------------------------------------------------------------
+
+--[=[
+	Inserts a vertex into the triangulation.
+
+	@param point Vector3 -- The position to insert.
+	@param id string? -- Optional caller-supplied id. Auto-generated if omitted.
+	@return string -- The id of the inserted vertex.
+]=]
+function Delaunay3d.AddPoint(self: Delaunay3dInternal, point: Vector3, id: string?): string
+	local vid: string
+	if id ~= nil then
+		if string.sub(id, 1, #AUTO_ID_PREFIX) == AUTO_ID_PREFIX then
+			error("Delaunay3d.AddPoint: manual ids cannot start with reserved auto-id prefix " .. AUTO_ID_PREFIX)
+		end
+		vid = id
+	else
+		vid = nextAutoId(self._Vertices)
+	end
+
+	local existingPosition = self._Vertices[vid]
+	if existingPosition ~= nil then
+		if existingPosition == point then
+			return vid -- no-op
+		end
+		self:MovePoint(vid, point)
+		return vid
+	end
+
+	self._Vertices[vid] = point
+	enqueuePendingOperation(self, {
+		Kind = "add",
+		Id = vid,
+		OldPosition = nil,
+		NewPosition = point,
+	})
+
+	local existingRefCount = self._PositionRefCount[point]
+	if existingRefCount ~= nil then
+		self._PositionRefCount[point] = existingRefCount + 1
+		self._GraphVersion += 1
+		return vid
+	end
+
+	local idx = #self._UniqueVertices + 1
+	self._UniqueVertices[idx] = point
+	self._PositionToIndex[point] = idx
+	self._PositionRefCount[point] = 1
+	bumpPendingUniqueDelta(self._PendingUniqueDelta, point, 1)
+	self._PendingAddPoints[#self._PendingAddPoints + 1] = point
+	self._IsDirty = true
+	self._GraphVersion += 1
+	return vid
+end
+
+--[=[
+	Removes the vertex with the given id from the triangulation.
+	Does nothing if the id is not found.
+
+	@param id string
+]=]
+function Delaunay3d.RemovePoint(self: Delaunay3dInternal, id: string)
+	local position = self._Vertices[id]
+	if position == nil then
+		return
+	end
+	enqueuePendingOperation(self, {
+		Kind = "remove",
+		Id = id,
+		OldPosition = position,
+		NewPosition = nil,
+	})
+	self._Vertices[id] = nil
+
+	local refCount = self._PositionRefCount[position]
+	if refCount == nil then
+		return
+	end
+	if refCount > 1 then
+		self._PositionRefCount[position] = refCount - 1
+		self._GraphVersion += 1
+		return -- unique vertex set unchanged, keep current dirty flag
+	end
+
+	self._PositionRefCount[position] = nil
+	local idx = self._PositionToIndex[position]
+	if idx == nil then
+		return
+	end
+	self._PositionToIndex[position] = nil
+
+	local last = #self._UniqueVertices
+	if idx ~= last then
+		local tailPosition = self._UniqueVertices[last]
+		self._UniqueVertices[idx] = tailPosition
+		self._PositionToIndex[tailPosition] = idx
+	end
+
+	self._UniqueVertices[last] = nil
+	local nextDelta = bumpPendingUniqueDelta(self._PendingUniqueDelta, position, -1)
+	if nextDelta < 0 then
+		self._RequiresFullRebuild = true
+	end
+	self._IsDirty = true
+	self._GraphVersion += 1
+end
+
+--[=[
+	Moves the vertex with the given id to a new position.
+	Does nothing if the id is not found.
+
+	@param id string
+	@param newPosition Vector3
+]=]
+function Delaunay3d.MovePoint(self: Delaunay3dInternal, id: string, newPosition: Vector3)
+	local oldPosition = self._Vertices[id]
+	if oldPosition == nil then
+		return
+	end
+	if oldPosition == newPosition then
+		return
+	end
+	enqueuePendingOperation(self, {
+		Kind = "move",
+		Id = id,
+		OldPosition = oldPosition,
+		NewPosition = newPosition,
+	})
+
+	self._Vertices[id] = newPosition
+
+	local uniqueChanged = false
+
+	-- Remove one reference from oldPosition, deleting it from unique storage if
+	-- no ids remain.
+	local oldRefCount = self._PositionRefCount[oldPosition]
+	if oldRefCount ~= nil then
+		if oldRefCount > 1 then
+			self._PositionRefCount[oldPosition] = oldRefCount - 1
+		else
+			self._PositionRefCount[oldPosition] = nil
+			local oldIdx = self._PositionToIndex[oldPosition]
+			if oldIdx ~= nil then
+				self._PositionToIndex[oldPosition] = nil
+				local last = #self._UniqueVertices
+				if oldIdx ~= last then
+					local tailPosition = self._UniqueVertices[last]
+					self._UniqueVertices[oldIdx] = tailPosition
+					self._PositionToIndex[tailPosition] = oldIdx
+				end
+				self._UniqueVertices[last] = nil
+				bumpPendingUniqueDelta(self._PendingUniqueDelta, oldPosition, -1)
+				uniqueChanged = true
+			end
+		end
+	end
+
+	-- Add one reference to newPosition, inserting into unique storage if needed.
+	local newRefCount = self._PositionRefCount[newPosition]
+	if newRefCount ~= nil then
+		self._PositionRefCount[newPosition] = newRefCount + 1
+	else
+		local idx = #self._UniqueVertices + 1
+		self._UniqueVertices[idx] = newPosition
+		self._PositionToIndex[newPosition] = idx
+		self._PositionRefCount[newPosition] = 1
+		bumpPendingUniqueDelta(self._PendingUniqueDelta, newPosition, 1)
+		self._PendingAddPoints[#self._PendingAddPoints + 1] = newPosition
+		uniqueChanged = true
+	end
+
+	if uniqueChanged then
+		self._IsDirty = true
+		self._RequiresFullRebuild = true
+	end
+	self._GraphVersion += 1
+end
+
+--------------------------------------------------------------------------------
+--// Phase 5 — Accessors, iterators, queries //--
+--------------------------------------------------------------------------------
+
+--[=[
+	Returns the current list of vertex positions (one per id, in insertion order).
+	Does not trigger a flush.
+]=]
+function Delaunay3d.GetVertices(self: Delaunay3dInternal): { Vector3 }
+	return self._UniqueVertices
+end
+
+--[=[
+	Returns all edges as tuple arrays `{ [1], [2] }`.
+]=]
+function Delaunay3d.GetEdges(self: Delaunay3dInternal): { Edge }
+	self:_Flush()
+	local boxed = self._Boxed.Edges
+	if boxed ~= nil then
+		return boxed
+	end
+
+	-- Box flat stride-2 edges and cache for repeated accessor calls.
+	local flat = self._Flat.Edges
+	local result: { Edge } = table.create(#flat / 2) :: any
+	local ri = 1
+	for i = 1, #flat, 2 do
+		result[ri] = { flat[i], flat[i + 1] }
+		ri += 1
+	end
+	self._Boxed.Edges = result
+	return result
+end
+
+--[=[
+	Returns all triangular faces as tuple arrays `{ [1], [2], [3] }`.
+]=]
+function Delaunay3d.GetTriangles(self: Delaunay3dInternal): { Triangle }
+	self:_Flush()
+	local boxed = self._Boxed.Triangles
+	if boxed ~= nil then
+		return boxed
+	end
+
+	-- Box flat stride-3 triangles and cache for repeated accessor calls.
+	local flat = self._Flat.Triangles
+	local result: { Triangle } = table.create(#flat / 3) :: any
+	local ri = 1
+	for i = 1, #flat, 3 do
+		result[ri] = { flat[i], flat[i + 1], flat[i + 2] }
+		ri += 1
+	end
+	self._Boxed.Triangles = result
+	return result
+end
+
+--[=[
+	Returns all tetrahedra as numerber arrays `{ [1], [2], [3], [4] }`.
+]=]
+function Delaunay3d.GetTetrahedrons(self: Delaunay3dInternal): { Tetrahedron }
+	self:_Flush()
+	local boxed = self._Boxed.Tetrahedra
+	if boxed ~= nil then
+		return boxed
+	end
+
+	-- Box flat stride-4 tetrahedra and cache for repeated accessor calls.
+	local flat = self._Flat.Tetrahedra
+	local result: { Tetrahedron } = table.create(#flat / 4) :: any
+	local ri = 1
+	for i = 1, #flat, 4 do
+		result[ri] = { flat[i], flat[i + 1], flat[i + 2], flat[i + 3] }
+		ri += 1
+	end
+	self._Boxed.Tetrahedra = result
+	return result
+end
+
+--------------------------------------------------------------------------------
+--// Special Accessors //--
+--------------------------------------------------------------------------------
+
+--[=[
+	Zero-alloc iterator over all edges.
+	```lua
+	for u, v in mesh:ForEachEdge() do ... end
+	```
+]=]
+function Delaunay3d.ForEachEdge(self: Delaunay3dInternal): () -> (Vector3, Vector3)
+	self:_Flush()
+	local flat = self._Flat.Edges
+	local i = 0
+	local startVersion = self._GraphVersion
+	return function(): (Vector3, Vector3)
+		if self._GraphVersion ~= startVersion then
+			warn(
+				"Delaunay3d.ForEachEdge: triangulation was modified during iteration; results may be incomplete or inconsistent"
+			)
+		end
+		i += 2
+		if i > #flat then
+			return nil :: any, nil :: any
+		end
+		return flat[i - 1], flat[i]
+	end
+end
+
+--[=[
+	Zero-alloc iterator over all triangular faces.
+	```lua
+	for u, v, w in mesh:ForEachTriangle() do ... end
+	```
+]=]
+function Delaunay3d.ForEachTriangle(self: Delaunay3dInternal): () -> (Vector3, Vector3, Vector3)
+	self:_Flush()
+	local flat = self._Flat.Triangles
+	local i = 0
+	local startVersion = self._GraphVersion
+	return function(): (Vector3, Vector3, Vector3)
+		if self._GraphVersion ~= startVersion then
+			warn(
+				"Delaunay3d.ForEachTriangle: triangulation was modified during iteration; results may be incomplete or inconsistent"
+			)
+		end
+		i += 3
+		if i > #flat then
+			return nil :: any, nil :: any, nil :: any
+		end
+		return flat[i - 2], flat[i - 1], flat[i]
+	end
+end
+
+--[=[
+	Zero-alloc iterator over all tetrahedra.
+	```lua
+	for a, b, c, d in mesh:ForEachTetrahedron() do ... end
+	```
+]=]
+function Delaunay3d.ForEachTetrahedron(self: Delaunay3dInternal): () -> (Vector3, Vector3, Vector3, Vector3)
+	self:_Flush()
+	local flat = self._Flat.Tetrahedra
+	local i = 0
+	local startVersion = self._GraphVersion
+	return function(): (Vector3, Vector3, Vector3, Vector3)
+		if self._GraphVersion ~= startVersion then
+			warn(
+				"Delaunay3d.ForEachTetrahedron: triangulation was modified during iteration; results may be incomplete or inconsistent"
+			)
+		end
+		i += 4
+		if i > #flat then
+			return nil :: any, nil :: any, nil :: any, nil :: any
+		end
+		return flat[i - 3], flat[i - 2], flat[i - 1], flat[i]
+	end
+end
+
+--[=[
+	Returns the list of vertex positions that share an edge with the vertex
+	identified by `id`. Returns an empty table if the id is unknown or the
+	triangulation has fewer than 4 points.
+
+	@param id string
+	@return { Vector3 }
+]=]
+function Delaunay3d.GetAdjacentVertices(self: Delaunay3dInternal, id: string): { Vector3 }
+	self:_Flush()
+	local pos = self._Vertices[id]
+	if not pos then
+		return {}
+	end
+	return self._AdjacencyMap[pos] or {}
+end
+
+--[=[
+	Returns all tetrahedra whose interior (closed) contains `point`.
+	Uses the orient3d sign-consistency test (5 calls per tetrahedron).
+
+	@param point Vector3
+	@return { Tetrahedron }
+]=]
+function Delaunay3d.GetTetrahedronsContaining(self: Delaunay3dInternal, point: Vector3): { Tetrahedron }
+	self:_Flush()
+	local flat = self._Flat.Tetrahedra
+	local result: { Tetrahedron } = {}
+
+	-- Point-in-tetrahedron: orient3d(A,B,C,D) determines the reference
+	-- orientation; then each of the four sub-volumes formed by replacing one
+	-- vertex with 'point' must have the same sign (≥ 0 for positive, ≤ 0 for
+	-- negative orientation).
+	for i = 1, #flat, 4 do
+		local a, b, c, d = flat[i], flat[i + 1], flat[i + 2], flat[i + 3]
+		local o = orient3d(a, b, c, d)
+		if o == 0 then
+			continue -- degenerate, skip
+		end
+		local inside: boolean
+		if o > 0 then
+			inside = orient3d(a, b, c, point) >= 0
+				and orient3d(a, b, point, d) >= 0
+				and orient3d(a, point, c, d) >= 0
+				and orient3d(point, b, c, d) >= 0
+		else
+			inside = orient3d(a, b, c, point) <= 0
+				and orient3d(a, b, point, d) <= 0
+				and orient3d(a, point, c, d) <= 0
+				and orient3d(point, b, c, d) <= 0
+		end
+		if inside then
+			result[#result + 1] = { a, b, c, d }
+		end
+	end
+	return result
+end
+
+--------------------------------------------------------------------------------
+--// Hull Accessors //--
+--------------------------------------------------------------------------------
+
+local function boxHullTrianglesFlat(flatTris: { Vector3 }): { Triangle }
+	local result: { Triangle } = table.create(#flatTris / 3) :: any
+	local ri = 1
+	for i = 1, #flatTris, 3 do
+		local tri: Triangle = { flatTris[i], flatTris[i + 1], flatTris[i + 2] }
+		result[ri] = tri
+		ri += 1
+	end
+	return result
+end
+
+local function boxHullEdgesFlat(flatEdges: { Vector3 }): { Edge }
+	local result: { Edge } = table.create(#flatEdges / 2) :: any
+	local ri = 1
+	for i = 1, #flatEdges, 2 do
+		local edge: Edge = { flatEdges[i], flatEdges[i + 1] }
+		result[ri] = edge
+		ri += 1
+	end
+	return result
+end
+
+local function buildHullFlatData(flatTets: { Vector3 }): ({ Vector3 }, { Vector3 }, { Vector3 })
+	local posToId: { [Vector3]: number } = {}
+	local nextId = 0
+
+	local function ensurePosId(pos: Vector3): number
+		local id = posToId[pos]
+		if id ~= nil then
+			return id
+		end
+		nextId += 1
+		posToId[pos] = nextId
+		return nextId
+	end
+
+	local faceRecords: { [number]: { [number]: { [number]: FaceRecord } } } = {}
+	local faceBuffer: { Vector3 } = {}
+	local edgeSeen: { [number]: { [number]: boolean } } = {}
+	local hullVerticesSeen: { [Vector3]: boolean } = {}
+	local hullVertices: { Vector3 } = {}
+	local hullTriangles: { Vector3 } = {}
+	local hullEdges: { Vector3 } = {}
+
+	local function addHullVertex(v: Vector3)
+		if hullVerticesSeen[v] then
+			return
+		end
+		hullVerticesSeen[v] = true
+		hullVertices[#hullVertices + 1] = v
+	end
+
+	local function addBoundaryFace(u: Vector3, v: Vector3, w: Vector3, iu: number, iv: number, iw: number)
+		local ia, ib, ic = canonicalTriKey(iu, iv, iw)
+		local record = getFaceRecord(faceRecords, ia, ib, ic)
+		record.Count += 1
+		if record.Count == 1 then
+			local fi = #faceBuffer
+			faceBuffer[fi + 1] = u
+			faceBuffer[fi + 2] = v
+			faceBuffer[fi + 3] = w
+			record.Start = fi + 1
+		end
+	end
+
+	for i = 1, #flatTets, 4 do
+		local a, b, c, d = flatTets[i], flatTets[i + 1], flatTets[i + 2], flatTets[i + 3]
+		local ida, idb, idc, idd = ensurePosId(a), ensurePosId(b), ensurePosId(c), ensurePosId(d)
+		addBoundaryFace(a, b, c, ida, idb, idc)
+		addBoundaryFace(a, b, d, ida, idb, idd)
+		addBoundaryFace(a, c, d, ida, idc, idd)
+		addBoundaryFace(b, c, d, idb, idc, idd)
+	end
+
+	local function addHullEdge(u: Vector3, v: Vector3, iu: number, iv: number)
+		local ia, ib = canonicalEdgeKey(iu, iv)
+		if markEdgeSeen(edgeSeen, ia, ib) then
+			local ei = #hullEdges
+			hullEdges[ei + 1] = u
+			hullEdges[ei + 2] = v
+			addHullVertex(u)
+			addHullVertex(v)
+		end
+	end
+
+	for _, level2 in faceRecords do
+		for _, level3 in level2 do
+			for _, record in level3 do
+				if record.Count == 1 then
+					local startIndex = record.Start
+					local u, v, w = faceBuffer[startIndex], faceBuffer[startIndex + 1], faceBuffer[startIndex + 2]
+					local iu, iv, iw = ensurePosId(u), ensurePosId(v), ensurePosId(w)
+					local hi = #hullTriangles
+					hullTriangles[hi + 1] = u
+					hullTriangles[hi + 2] = v
+					hullTriangles[hi + 3] = w
+					addHullEdge(u, v, iu, iv)
+					addHullEdge(u, w, iu, iw)
+					addHullEdge(v, w, iv, iw)
+				end
+			end
+		end
+	end
+
+	return hullVertices, hullTriangles, hullEdges
+end
+
+--[=[
+	Returns the current hull vertex positions.
+]=]
+function Delaunay3d.GetHullVertices(self: Delaunay3dInternal): { Vector3 }
+	self:_Flush()
+	if not self._Hull.Vertices then
+		local hullVertices, hullTrianglesFlat, hullEdgesFlat = buildHullFlatData(self._Flat.Tetrahedra)
+		self._Hull.Vertices = hullVertices
+		self._Hull.TrianglesFlat = hullTrianglesFlat
+		self._Hull.EdgesFlat = hullEdgesFlat
+		self._Boxed.HullTriangles = nil
+		self._Boxed.HullEdges = nil
+	end
+	local hullVertices = self._Hull.Vertices
+	if hullVertices == nil then
+		local computedHullVertices, hullTrianglesFlat, hullEdgesFlat = buildHullFlatData(self._Flat.Tetrahedra)
+		self._Hull.Vertices = computedHullVertices
+		self._Hull.TrianglesFlat = hullTrianglesFlat
+		self._Hull.EdgesFlat = hullEdgesFlat
+		self._Boxed.HullTriangles = nil
+		self._Boxed.HullEdges = nil
+		hullVertices = computedHullVertices
+	end
+	return hullVertices :: { Vector3 }
+end
+
+--[=[
+	Returns all hull triangles as tuple arrays `{ [1], [2], [3] }`.
+]=]
+function Delaunay3d.GetHullTriangles(self: Delaunay3dInternal): { Triangle }
+	self:_Flush()
+	local hullTrianglesFlat = self._Hull.TrianglesFlat
+	if hullTrianglesFlat == nil then
+		local hullVertices, computedHullTrianglesFlat, hullEdgesFlat = buildHullFlatData(self._Flat.Tetrahedra)
+		self._Hull.Vertices = hullVertices
+		self._Hull.TrianglesFlat = computedHullTrianglesFlat
+		self._Hull.EdgesFlat = hullEdgesFlat
+		hullTrianglesFlat = computedHullTrianglesFlat
+	end
+	assert(hullTrianglesFlat ~= nil, "Delaunay3d.GetHullTriangles: hull cache was not initialized")
+	local boxedHullTriangles = self._Boxed.HullTriangles
+	if boxedHullTriangles == nil then
+		boxedHullTriangles = boxHullTrianglesFlat(hullTrianglesFlat)
+		self._Boxed.HullTriangles = boxedHullTriangles
+	end
+	return boxedHullTriangles :: { Triangle }
+end
+
+--[=[
+	Returns all hull edges as tuple arrays `{ [1], [2] }`.
+]=]
+function Delaunay3d.GetHullEdges(self: Delaunay3dInternal): { Edge }
+	self:_Flush()
+	local hullEdgesFlat = self._Hull.EdgesFlat
+	if hullEdgesFlat == nil then
+		local hullVertices, hullTrianglesFlat, computedHullEdgesFlat = buildHullFlatData(self._Flat.Tetrahedra)
+		self._Hull.Vertices = hullVertices
+		self._Hull.TrianglesFlat = hullTrianglesFlat
+		self._Hull.EdgesFlat = computedHullEdgesFlat
+		hullEdgesFlat = computedHullEdgesFlat
+	end
+	assert(hullEdgesFlat ~= nil, "Delaunay3d.GetHullEdges: hull cache was not initialized")
+	local boxedHullEdges = self._Boxed.HullEdges
+	if boxedHullEdges == nil then
+		boxedHullEdges = boxHullEdgesFlat(hullEdgesFlat)
+		self._Boxed.HullEdges = boxedHullEdges
+	end
+	return boxedHullEdges :: { Edge }
+end
+
+--------------------------------------------------------------------------------
+--// Phase 6 — Static Triangulate //--
+--------------------------------------------------------------------------------
+
+--[=[
+	@within Delaunay3d
+	Performs 3D Delaunay Triangulation on the provided list of vertices using the
+	Bowyer–Watson incremental insertion algorithm.
+
+	The triangulation satisfies the Delaunay property: no vertex lies strictly inside
+	the circumsphere of any tetrahedron in the mesh.
+
+	Returns a `TriangulationResult` containing:
+	- `Tetrahedra` — the final tetrahedra of the mesh.
+	- `Triangles`  — every unique triangular face across all tetrahedra (including
+	                 shared interior faces).
+	- `Edges`      — every unique edge across all tetrahedra.
+	- `Vertices`   — the original input positions.
+
+	@param vertices { Vector3 } -- Must contain at least 4 non-coplanar positions.
+	@return TriangulationResult
+]=]
+function Delaunay3d.Triangulate(vertices: { Vector3 }): TriangulationResult
+	assert(#vertices >= 4, "Delaunay3d.Triangulate: need at least 4 non-coplanar vertices for a 3-D triangulation")
+
+	local centre, M = computeBounds(vertices)
+	local sp1, sp2, sp3, sp4 = makeSuperTetrahedron(centre, M)
+
+	local superKeys: { [Vector3]: true? } = {
+		[sp1] = true,
+		[sp2] = true,
+		[sp3] = true,
+		[sp4] = true,
+	}
+
+	local Tetrahedrons: { Vector3 } = { sp1, sp2, sp3, sp4 }
+	for _, p in vertices do
+		Tetrahedrons = insertPoint(Tetrahedrons, p)
+	end
+
+	local flatTets, flatTris, flatEdges = buildFlatMesh(Tetrahedrons, superKeys)
+
+	-- Box flat arrays into tuple arrays for static return payload.
+	local tetrahedra: { Tetrahedron } = table.create(#flatTets / 4) :: any
+	local triResult: { Triangle } = table.create(#flatTris / 3) :: any
+	local edgeResult: { Edge } = table.create(#flatEdges / 2) :: any
+
+	local ri = 1
+	for i = 1, #flatTets, 4 do
+		tetrahedra[ri] = { flatTets[i], flatTets[i + 1], flatTets[i + 2], flatTets[i + 3] }
+		ri += 1
+	end
+
+	ri = 1
+	for i = 1, #flatTris, 3 do
+		triResult[ri] = { flatTris[i], flatTris[i + 1], flatTris[i + 2] }
+		ri += 1
+	end
+
+	ri = 1
+	for i = 1, #flatEdges, 2 do
+		edgeResult[ri] = { flatEdges[i], flatEdges[i + 1] }
+		ri += 1
+	end
+
+	return {
+		Vertices = vertices,
+		Tetrahedra = tetrahedra,
+		Triangles = triResult,
+		Edges = edgeResult,
+	}
+end
+
+return Delaunay3d
