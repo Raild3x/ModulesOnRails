@@ -26,7 +26,9 @@
 	}
 
 	local function getNeighbors(vertex: string): { string }
-	    return adjacencyList[vertex]
+	    -- Return an empty array (never nil) for vertices with no neighbours,
+	    -- so the algorithms can index the result safely.
+	    return adjacencyList[vertex] or {}
 	end
 	```
 ]=]
@@ -50,7 +52,7 @@ export type GetNeighborsArray<V> = (vertex: V) -> { V }
 	}
 
 	local function getNeighbors(vertex: string): () -> string?
-	    local neighbours = adjacencyList[vertex]
+	    local neighbours = adjacencyList[vertex] or {}
 	    local i = 0
 	    return function(): string?
 	        i += 1
@@ -72,7 +74,7 @@ export type GetNeighborsIterator<V> = (vertex: V) -> () -> V?
 
 	```lua
 	local function arrayForm(vertex: string): { string }
-	    return adjacencyList[vertex]
+	    return adjacencyList[vertex] or {}
 	end
 
 	local ok = BFS.shortestPath("A", "D", arrayForm) -- both forms work
@@ -156,21 +158,49 @@ export type ShouldStop<V> = (vertex: V, cost: number) -> boolean
 
 --[=[
 	@within GraphUtil
-	@type Iterator<V> () -> V?
+	@type KIterator<K> () -> K?
 
-	A stateless-to-the-caller iterator that yields successive values,
-	returning `nil` once exhausted. Used for lazy, break-early traversals such
-	as [`Dijkstra.toIterator`](/api/Dijkstra#toIterator).
+	A stateless-to-the-caller iterator that yields one value per call,
+	returning `nil` once exhausted. This is the single-value form returned by
+	[`BFS.toIterator`](/api/BFS#toIterator) and
+	[`DFS.toIterator`](/api/DFS#toIterator); for the `(vertex, cost)` pair form
+	see [KVIterator].
+
+	The `nil`-at-exhaustion convention is what makes these iterators directly
+	usable in a plain `for` loop.
 
 	```lua
-	local iter: Types.Iterator<string> = Dijkstra.toIterator(start, getNeighbors, getWeight) :: any
+	local iter: Types.KIterator<string> = BFS.toIterator(start, getNeighbors)
 
 	for vertex in iter do
 	    print(vertex)
 	end
 	```
 ]=]
-export type Iterator<V> = () -> V?
+export type KIterator<K> = () -> K?
+
+--[=[
+	@within GraphUtil
+	@type KVIterator<K, V> () -> (K?, V?)
+
+	A stateless-to-the-caller iterator that yields a pair of values per call,
+	returning `(nil, nil)` once exhausted. This is the `(vertex, cost)` form
+	returned by [`Dijkstra.toIterator`](/api/Dijkstra#toIterator); for the
+	single-value form see [KIterator].
+
+	Write the type arguments *without* `?` — the alias applies the optionality
+	itself, since every slot is `nil` once the traversal is exhausted:
+	`KVIterator<string, number>` is `() -> (string?, number?)`.
+
+	```lua
+	local iter: Types.KVIterator<string, number> = Dijkstra.toIterator(start, getNeighbors, getWeight)
+
+	for vertex, cost in iter do
+	    print(vertex, cost)
+	end
+	```
+]=]
+export type KVIterator<K, V> = () -> (K?, V?)
 
 --[=[
 	@within GraphUtil

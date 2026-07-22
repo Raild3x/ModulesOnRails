@@ -1,4 +1,5 @@
 --!strict
+--!native
 -- Authors: Logan Hunt (Raildex)
 -- May 13, 2026
 --[=[
@@ -67,6 +68,7 @@ type GetNeighbors<V> = Types.GetNeighbors<V>
 type GetWeight<V> = Types.GetWeight<V>
 type ShouldStop<V> = Types.ShouldStop<V>
 type PathResult<V> = Types.PathResult<V>
+type KVIterator<K, V> = Types.KVIterator<K, V>
 
 -- A single entry in the result of [`Dijkstra.toArray`](#toArray).
 export type VisitRecord<V> = {
@@ -460,7 +462,7 @@ end
 
 	*Time complexity per call:* amortised `O(degree(V) · log V)`
 ]=]
-function Dijkstra.toIterator<V>(start: V, getNeighbors: GetNeighbors<V>, getWeight: GetWeight<V>): () -> (V?, number?)
+function Dijkstra.toIterator<V>(start: V, getNeighbors: GetNeighbors<V>, getWeight: GetWeight<V>): KVIterator<V, number>
 	local dist: { [V]: number } = { [start] = 0 }
 	local visited: { [V]: boolean } = {}
 	local heap = Heap.min()
@@ -503,7 +505,7 @@ end
 	@param start V
 	@param getNeighbors GetNeighbors<V>
 	@param getWeight GetWeight<V>
-	@return () -> (V?, number?)
+	@return KVIterator<V, number>
 
 	Alias of [`Dijkstra.toIterator`](#toIterator).
 ]=]

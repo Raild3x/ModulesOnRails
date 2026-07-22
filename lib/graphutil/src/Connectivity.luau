@@ -1,4 +1,5 @@
 --!strict
+--!native
 -- Authors: Logan Hunt (Raildex)
 -- May 13, 2026
 --[=[
@@ -360,7 +361,14 @@ function Connectivity.stronglyConnectedComponents<V>(allVertices: { V }, getNeig
 	local finishOrder: { V } = {}
 	local reverse: { [V]: { V } } = {}
 
+	-- Membership set for `allVertices`. Neighbours returned by `getNeighbors`
+	-- that are not in this set are treated as outside the graph and ignored, so
+	-- only the declared vertices are ever traversed or emitted. This keeps
+	-- `allVertices` unambiguously "the complete vertex set" (see the class docs)
+	-- rather than a mere seed set.
+	local inGraph: { [V]: boolean } = {}
 	for _, v in allVertices do
+		inGraph[v] = true
 		reverse[v] = reverse[v] or {}
 	end
 
@@ -382,11 +390,9 @@ function Connectivity.stronglyConnectedComponents<V>(allVertices: { V }, getNeig
 			if neighbor == nil then
 				table.insert(finishOrder, frame.vertex)
 				table.remove(stack)
-			else
-				-- Build reverse edge
-				if not reverse[neighbor] then
-					reverse[neighbor] = {}
-				end
+			elseif inGraph[neighbor] then
+				-- Build reverse edge (endpoint guaranteed to be in the graph,
+				-- so `reverse[neighbor]` was pre-seeded above).
 				table.insert(reverse[neighbor], frame.vertex)
 
 				if not visited[neighbor] then
@@ -397,6 +403,7 @@ function Connectivity.stronglyConnectedComponents<V>(allVertices: { V }, getNeig
 					})
 				end
 			end
+			-- neighbor outside allVertices: ignore it entirely
 		end
 	end
 

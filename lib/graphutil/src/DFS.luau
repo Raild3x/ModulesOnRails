@@ -1,4 +1,5 @@
 --!strict
+--!native
 -- Authors: Logan Hunt (Raildex)
 -- May 13, 2026
 --[=[
@@ -50,7 +51,7 @@
 local Types = require("./Types")
 
 type GetNeighbors<V> = Types.GetNeighbors<V>
-type Iterator<V> = Types.Iterator<V>
+type KIterator<K> = Types.KIterator<K>
 
 local DFS = {}
 
@@ -158,7 +159,7 @@ end
 
 	*Time complexity per call:* amortised `O(degree(V))`
 ]=]
-function DFS.toIterator<V>(start: V, getNeighbors: GetNeighbors<V>): Iterator<V>
+function DFS.toIterator<V>(start: V, getNeighbors: GetNeighbors<V>): KIterator<V>
 	local stack: { V } = { start }
 	local visited: { [V]: boolean } = {}
 
@@ -190,7 +191,7 @@ end
 	@tag undirected
 	@param start V
 	@param getNeighbors GetNeighbors<V>
-	@return Iterator<V>
+	@return KIterator<V>
 
 	Alias of [`DFS.toIterator`](#toIterator).
 ]=]

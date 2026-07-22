@@ -37,7 +37,7 @@
 local Types = require("./Types")
 
 type GetNeighbors<V> = Types.GetNeighbors<V>
-type Iterator<V> = Types.Iterator<V>
+type KIterator<K> = Types.KIterator<K>
 type ShouldStop<V> = Types.ShouldStop<V>
 type PathResult<V> = Types.PathResult<V>
 
@@ -149,7 +149,7 @@ end
 
 	*Time complexity per call:* amortised `O(degree(V))`
 ]=]
-function BFS.toIterator<V>(start: V, getNeighbors: GetNeighbors<V>): Iterator<V>
+function BFS.toIterator<V>(start: V, getNeighbors: GetNeighbors<V>): KIterator<V>
 	local queue: { V } = { start }
 	local head = 1
 	local visited: { [V]: boolean } = { [start] = true }
@@ -180,7 +180,7 @@ end
 	@tag undirected
 	@param start V
 	@param getNeighbors GetNeighbors<V>
-	@return Iterator<V>
+	@return KIterator<V>
 
 	Alias of [`BFS.toIterator`](#toIterator).
 ]=]

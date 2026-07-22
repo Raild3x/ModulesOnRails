@@ -156,6 +156,49 @@ local test_suite = function(tiniest: tiniest)
 			expect(result.path[#result.path]).is("E")
 		end)
 
+		test("reopens a closed vertex for an admissible but inconsistent heuristic", function()
+			-- Admissibility alone must guarantee optimality, which requires
+			-- re-opening a vertex if a cheaper path to it is found after it was
+			-- popped. This heuristic is admissible but *inconsistent* (h(X)=3
+			-- drops to h(C)=0 across an edge of weight 1).
+			--
+			--   S →1 X →1 C →2 G        (optimal S→X→C→G = 4)
+			--   S ─────3───→ C          (decoy: S→C→G = 5)
+			--
+			-- The heuristic makes A* pop C at the decoy cost g=3 *before* X is
+			-- expanded; X then relaxes C down to g=2. Without re-opening, C's
+			-- edge to G is never re-relaxed and the search returns the
+			-- suboptimal cost 5.
+			local adj = {
+				S = { X = 1, C = 3 },
+				X = { C = 1 },
+				C = { G = 2 },
+				G = {},
+			}
+			local function adjNeighbors(v)
+				local result = {}
+				for k in pairs(adj[v] or {}) do
+					table.insert(result, k)
+				end
+				return result
+			end
+			local function adjWeight(u, v)
+				return adj[u][v]
+			end
+			-- Inconsistent yet admissible: never exceeds true remaining cost
+			-- (d(C,G)=2, d(X,G)=3, d(S,G)=4).
+			local hVals = { S = 0, X = 3, C = 0, G = 0 }
+			local function inconsistentHeuristic(v, _goal)
+				return hVals[v]
+			end
+
+			local result = AStar.shortestPath("S", "G", adjNeighbors, adjWeight, inconsistentHeuristic)
+			expect(result).exists()
+			expect(result.cost).is(4) -- S→X→C→G (1+1+2), not the decoy S→C→G (3+2)
+			expect(result.path[1]).is("S")
+			expect(result.path[#result.path]).is("G")
+		end)
+
 		test("accepts the iterator form of getNeighbors", function()
 			-- getNeighbors may return a stateful iterator () -> V? instead of
 			-- an array; the result must match the array form.

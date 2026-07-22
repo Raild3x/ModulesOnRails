@@ -1,4 +1,5 @@
 --!strict
+--!native
 -- Authors: Logan Hunt (Raildex)
 -- May 13, 2026
 --[=[

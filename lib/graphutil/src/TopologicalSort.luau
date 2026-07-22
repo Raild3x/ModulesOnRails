@@ -1,4 +1,5 @@
 --!strict
+--!native
 -- Authors: Logan Hunt (Raildex)
 -- May 13, 2026
 --[=[
@@ -58,9 +59,9 @@ local TopologicalSort = {}
 	@tag directed
 
 	Returns a topological ordering of `allVertices` using iterative
-	**DFS post-order**.  After fully exploring all outgoing edges of a vertex,
-	it is prepended to the result list — this naturally places dependencies
-	before dependents.
+	**DFS post-order**.  Each vertex is appended once all its outgoing edges are
+	explored, yielding reverse-topological order; the list is flipped once at the
+	end so dependencies land before dependents.
 
 	Returns `nil` if the graph contains a directed cycle (no valid ordering
 	exists).
@@ -92,9 +93,13 @@ function TopologicalSort.sort<V>(allVertices: { V }, getNeighbors: GetNeighbors<
 			local neighbor = frame.iter()
 
 			if neighbor == nil then
-				-- Finished: prepend to result (post-order → reverse = topo order)
+				-- Finished: append in DFS post-order. A vertex is appended only
+				-- after all its descendants, so the array ends up in reverse
+				-- topological order and is flipped once at the end. Appending is
+				-- O(1) amortised, whereas prepending (`table.insert(result, 1, …)`)
+				-- shifts every element and would make the whole sort O(V^2).
 				color[frame.vertex] = 2
-				table.insert(result, 1, frame.vertex)
+				table.insert(result, frame.vertex)
 				table.remove(stack)
 			else
 				local c = color[neighbor] or 0
@@ -109,6 +114,12 @@ function TopologicalSort.sort<V>(allVertices: { V }, getNeighbors: GetNeighbors<
 				end
 			end
 		end
+	end
+
+	-- Flip the reverse-topological post-order into topological order in place.
+	local n = #result
+	for i = 1, n // 2 do
+		result[i], result[n - i + 1] = result[n - i + 1], result[i]
 	end
 
 	return result

@@ -241,15 +241,14 @@ local test_suite = function(tiniest: tiniest)
 			expect(#sccs[1]).is(3)
 		end)
 
-		test("builds reverse edges for neighbours outside allVertices", function()
-			-- "X" is reachable from A but omitted from allVertices, so its
-			-- reverse-adjacency entry is created lazily on discovery rather
-			-- than pre-seeded. A is still its own singleton SCC.
+		test("ignores neighbours outside allVertices", function()
+			-- "X" is reachable from A but omitted from allVertices, so it is
+			-- treated as outside the graph: never traversed and never emitted.
+			-- A remains its own singleton SCC.
 			local adj = { A = { "X" }, X = {} }
 			local sccs = Connectivity.stronglyConnectedComponents({ "A" }, function(v)
 				return adj[v] or {}
 			end)
-			-- Only A is enumerated as a component seed.
 			local seen = {}
 			for _, scc in sccs do
 				for _, v in scc do
@@ -257,6 +256,7 @@ local test_suite = function(tiniest: tiniest)
 				end
 			end
 			expect(seen["A"]).is(true)
+			expect(seen["X"]).never_exists()
 		end)
 	end)
 end

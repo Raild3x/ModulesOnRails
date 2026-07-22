@@ -166,13 +166,18 @@ function AStar.shortestPath<V>(
 		end
 
 		for neighbor in Types.eachNeighbor(vertex, getNeighbors) do
-			if visited[neighbor] then
-				continue
-			end
 			local tentativeG = gVertex + getWeight(vertex, neighbor)
 			if tentativeG < (g[neighbor] or math.huge) then
 				g[neighbor] = tentativeG
 				parent[neighbor] = vertex
+				-- Re-open a previously-closed vertex. With an admissible but
+				-- *inconsistent* heuristic, a cheaper path to an already-popped
+				-- vertex can surface later; clearing its visited flag lets it be
+				-- expanded again so the returned path stays optimal. (With a
+				-- consistent heuristic this never happens — a closed vertex
+				-- already holds its final g, so `tentativeG < g[neighbor]` is
+				-- false and this branch is skipped.)
+				visited[neighbor] = nil
 				local f = tentativeG + heuristic(neighbor, goal)
 				heap:Push(neighbor, f)
 			end

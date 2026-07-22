@@ -122,7 +122,8 @@ export type GetNeighborsIterator<V> = Types.GetNeighborsIterator<V>
 export type GetWeight<V> = Types.GetWeight<V>
 export type GetHeuristic<V> = Types.GetHeuristic<V>
 export type ShouldStop<V> = Types.ShouldStop<V>
-export type Iterator<V> = Types.Iterator<V>
+export type KIterator<K> = Types.KIterator<K>
+export type KVIterator<K, V> = Types.KVIterator<K, V>
 export type PathResult<V> = Types.PathResult<V>
 export type Edge<V> = Types.Edge<V>
 
