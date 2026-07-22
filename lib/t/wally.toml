@@ -11,6 +11,6 @@ realm = "shared"
 # The properly capitalized and spaced name of the library
 formattedName = "T"
 # The intro page for the documentation
-docsLink = "T"
+docsLink = "t"
 
 [dependencies]

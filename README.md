@@ -17,9 +17,9 @@ ModulesOnRails is a collection of Wally packages to streamline Roblox developmen
 | [PromValue](https://raild3x.github.io/ModulesOnRails/api/PromValue) | `PromValue = "raild3x/promvalue@0.1.0"` | An object class that allows for delayed setting |
 | [Quadtree](https://raild3x.github.io/ModulesOnRails/api/Quadtree) | `Quadtree = "raild3x/quadtree@0.0.3"` | A spatial partitioning system to query points in a 2D space. Refactored from Sleitnick's Octree package. |
 | [Queue](https://raild3x.github.io/ModulesOnRails/api/Queue) | `Queue = "raild3x/queue@1.0.0"` | A generic queue implementation in luau. |
-| [RemoteComponent](https://raild3x.github.io/ModulesOnRails/api/RemoteComponent) | `RemoteComponent = "raild3x/remotecomponent@0.1.3"` | A component extension to provide easy networking functionality. |
+| [RemoteComponent](https://raild3x.github.io/ModulesOnRails/api/RemoteComponent) | `RemoteComponent = "raild3x/remotecomponent@0.2.0"` | A component extension to provide easy networking functionality. |
 | [Roam](https://raild3x.github.io/ModulesOnRails/api/Roam) | `Roam = "raild3x/roam@0.2.0"` | Roam is a service initialization framework for Roblox. |
-| [T](https://raild3x.github.io/ModulesOnRails/api/T) | `T = "raild3x/t@1.1.0"` | A runtime typechecker for Luau/Roblox |
+| [T](https://raild3x.github.io/ModulesOnRails/api/t) | `T = "raild3x/t@1.1.0"` | A runtime typechecker for Luau/Roblox |
 | [TableManager](https://raild3x.github.io/ModulesOnRails/api/TableManager) | `TableManager = "raild3x/tablemanager@1.1.1"` | A Luau library for managing tables. |
 | [TableReplicator](https://raild3x.github.io/ModulesOnRails/api/TableReplicator) | `TableReplicator = "raild3x/tablereplicator@1.0.1"` | Replicates a TableManager instance from server to client with minimal effort. |
 
@@ -40,4 +40,4 @@ ModulesOnRails is a collection of Wally packages to streamline Roblox developmen
 
 ---
 
-*Last Modified: July 21, 2026*
+*Last Modified: July 22, 2026*

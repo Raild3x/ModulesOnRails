@@ -60,18 +60,31 @@ def generate_table_row(config: Dict[str, Dict[str, str]], docs_link: str) -> str
     package_name = get_config_value(config, "name")
     package_version = get_config_value(config, "version")
     package_description = get_config_value(config, "description")
-    
+
     # Use package name if no formatted name provided
     if not formatted_name:
         formatted_name = package_name.replace("raild3x/", "")
         print(f"  No formatted name provided for {formatted_name}. Using package name.")
-    
+
+    # Absolute docs-site URL. The README is rendered on two surfaces: GitHub's repo
+    # page (where the table is the only navigation) and the Moonwave landing page.
+    # A root-relative /api/... link would 404 on GitHub, so we use the full published
+    # URL, which works there and on the production docs site. The one tradeoff is that
+    # in `moonwave dev` these links point at the live site rather than localhost; that
+    # only affects this index page (guide pages use root-relative links and are fine).
     full_docs_link = f"{docs_link}/api/{package_docs_link}"
-    
+
     return f'| [{formatted_name}]({full_docs_link}) | `{formatted_name} = "{package_name}@{package_version}"` | {package_description} |'
 
 
 def main():
+    # The generated README (echoed below for the CI log) contains non-Latin-1
+    # characters such as the ⚠️ warning emoji. On Windows the console defaults to
+    # cp1252, so print() would raise UnicodeEncodeError after the file is already
+    # written. Force UTF-8 so the confirmation echo works on any platform.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+
     find_project_root()
 
     # Check if source directory exists
@@ -86,10 +99,10 @@ def main():
     
     print(f"Repository Owner: {repo_owner}")
     print(f"Repository Name: {repo_name}")
-    
+
     docs_link = f"https://{repo_owner.lower()}.github.io/{repo_name}"
     print(f"Docs Link: {docs_link}")
-    
+
     # Collect packages
     released_packages = []
     unreleased_packages = []

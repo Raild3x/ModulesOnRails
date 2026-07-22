@@ -70,7 +70,7 @@
 	
 	:::tip Networking
 	Roam does not inherently have networking functionality. However, it can easily be added through the use of NetWire's 
-	**[.setupServiceNetworking](https://raild3x.github.io/ModulesOnRails/api/ServerNetWire/#setupServiceNetworking)** function.
+	**[.setupServiceNetworking](/api/ServerNetWire/#setupServiceNetworking)** function.
 	:::
 
 	----
