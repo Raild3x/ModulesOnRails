@@ -19,6 +19,13 @@ type Logger = Logger.Logger
 const WIPE_LOCK_TTL_SECONDS = Constants.WIPE_LOCK_TTL_SECONDS
 const WIPE_MESSAGE_KIND = Constants.WIPE_MESSAGE_KIND
 
+-- Shared retry config for all MemoryStore lock operations
+const LOCK_RETRY_CONFIG: RetryWithBackoff.RetryConfig = {
+	maxAttempts = 3,
+	baseDelay = 0.5,
+	backoff = "Exponential",
+}
+
 export type WipeLockManager = {
 	_wipeLockMap: WipeLockMap?,
 	_wipeLocksAcquired: { [number]: boolean },
@@ -79,11 +86,7 @@ function WipeLockManager.AcquireLock(self: WipeLockManager, userId: number): boo
 			didAcquire = true
 			return { acquiredAt = os.time(), initiator = game.JobId }
 		end, WIPE_LOCK_TTL_SECONDS)
-	end, {
-		maxAttempts = 3,
-		baseDelay = 0.5,
-		backoff = "Exponential",
-	})
+	end, LOCK_RETRY_CONFIG)
 
 	if success and finalResult ~= nil and didAcquire then
 		self._wipeLocksAcquired[userId] = true
@@ -106,11 +109,7 @@ function WipeLockManager.IsLocked(self: WipeLockManager, userId: number): boolea
 	const lockKey = `user_{userId}`
 	const success, result = RetryWithBackoff.retryAsync(function()
 		return self._wipeLockMap:GetAsync(lockKey)
-	end, {
-		maxAttempts = 3,
-		baseDelay = 0.5,
-		backoff = "Exponential",
-	})
+	end, LOCK_RETRY_CONFIG)
 
 	if success then
 		return result ~= nil
@@ -131,11 +130,7 @@ function WipeLockManager.ReleaseLock(self: WipeLockManager, userId: number): ()
 	const lockKey = `user_{userId}`
 	const success = RetryWithBackoff.retryAsync(function()
 		self._wipeLockMap:RemoveAsync(lockKey)
-	end, {
-		maxAttempts = 3,
-		baseDelay = 0.5,
-		backoff = "Exponential",
-	})
+	end, LOCK_RETRY_CONFIG)
 
 	if success then
 		self._logger:Debug(`Released wipe lock for userId {userId}`)

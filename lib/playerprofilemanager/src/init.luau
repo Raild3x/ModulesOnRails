@@ -156,13 +156,6 @@ const SAVE_PRIORITY = Constants.SAVE_PRIORITY
 const ACTIVE_DATA_STORE_KEYS = {} :: { [string]: boolean }
 
 --[[
-	Resolves a userId to a `Player?` if they are still in-game.
-]]
-local function resolvePlayer(userId: number): Player?
-	return Players:GetPlayerByUserId(userId)
-end
-
---[[
 	Claims a DataStore key, erroring if it's already in use.
 ]]
 local function claimDataStoreKey(dataStoreKey: string)
@@ -259,8 +252,10 @@ function PlayerProfileManager.new(config: PPM_Config): PlayerProfileManager
 		MigrationSystem.validateMigratorChain(config.Migrator, config.DefaultDataSchema[VERSION_KEY])
 	end
 
+	-- Claim before the pcall: a failed claim must not release the key held by
+	-- the other manager instance.
+	claimDataStoreKey(self._dataStoreKey)
 	local ok, err = pcall(function()
-		claimDataStoreKey(self._dataStoreKey)
 		self:_setupCallbacks()
 		self:_initializeProfileStore()
 		self:_startPlayerManagement()
@@ -286,7 +281,7 @@ function PlayerProfileManager._setupCallbacks(self: PPM_Internal)
 	self._reconcileCallback = self._config.ReconcileCallback or DEFAULT_RECONCILE_CALLBACK
 
 	local DEFAULT_LOAD_FAILURE_CALLBACK = function(userId: number, err: string)
-		const player = resolvePlayer(userId)
+		const player = Players:GetPlayerByUserId(userId)
 		if player then
 			player:Kick(
 				"Something went wrong and we failed to load your player data. Please rejoin the game. "
@@ -333,7 +328,7 @@ end
     @private
 ]=]
 function PlayerProfileManager._reconcileProfile(self: PPM_Internal, userId: number, profile: Profile)
-	local player = resolvePlayer(userId)
+	local player = Players:GetPlayerByUserId(userId)
 	if not player then
 		self._logger:Warn(`Skipping reconcile for userId {userId} — player not in game`)
 		return
@@ -426,7 +421,7 @@ end
 ]=]
 function PlayerProfileManager._createPlayerData(self: PPM_Internal, playerOrUserId: Player | number): Promise<any>
 	local userId = self:_getUserId(playerOrUserId)
-	local player = resolvePlayer(userId)
+	local player = Players:GetPlayerByUserId(userId)
 
 	if self._LoadingPlayers[userId] then
 		self._logger:Debug(`Profile already loading for userId {userId}, skipping duplicate attempt`)
@@ -466,7 +461,7 @@ end
     Stores the profile and wires up session-end / player-leaving cleanup handlers.
 ]=]
 function PlayerProfileManager._setupProfileSession(self: PPM_Internal, userId: number, profile: Profile)
-	local player = resolvePlayer(userId)
+	local player = Players:GetPlayerByUserId(userId)
 
 	self._PlayerProfileStorage[userId] = profile
 	self._logger:Info(`Profile session established for userId {userId}`)
@@ -649,7 +644,6 @@ end
     @return Profile?
 ]=]
 function PlayerProfileManager.GetProfile(self: PPM_Internal, playerOrUserId: Player | number): Profile?
-	self._logger:Assert(self.ClassName == "PlayerProfileManager", "Must be called on a PlayerProfileManager instance.")
 	return self._PlayerProfileStorage[self:_getUserId(playerOrUserId)]
 end
 
@@ -667,7 +661,6 @@ end
     @return Promise<Profile>
 ]=]
 function PlayerProfileManager.PromiseProfile(self: PPM_Internal, playerOrUserId: Player | number): Promise<Profile>
-	self._logger:Assert(self.ClassName == "PlayerProfileManager", "Must be called on a PlayerProfileManager instance.")
 	return self:OnLoaded(playerOrUserId):andThen(function()
 		local profile = self:GetProfile(playerOrUserId)
 		if not profile then
