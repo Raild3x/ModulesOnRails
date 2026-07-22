@@ -68,6 +68,7 @@ local MST = {}
 
 --[=[
 	@within MST
+	@tag undirected
 
 	Builds a Minimum Spanning Tree starting from `start` using **Prim's
 	algorithm** with a min-heap.  Returns an array of [Edge](/api/GraphUtil#Edge)
@@ -145,6 +146,7 @@ end
 
 --[=[
 	@within MST
+	@tag undirected
 
 	Builds a Minimum Spanning Tree using **Kruskal's algorithm**.  Returns an
 	array of [Edge](/api/GraphUtil#Edge) values whose total weight is minimised.

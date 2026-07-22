@@ -69,6 +69,8 @@ local BellmanFord = {}
 
 --[=[
 	@within BellmanFord
+	@tag directed
+	@tag undirected
 
 	Finds the shortest weighted path from `start` to `goal`, returning a
 	`(PathResult<V>?, boolean)` tuple.
@@ -165,6 +167,8 @@ end
 
 --[=[
 	@within BellmanFord
+	@tag directed
+	@tag undirected
 
 	Runs Bellman-Ford from `start` and returns all shortest distances from
 	`start` to every vertex in `allVertices`, alongside a negative-cycle flag.

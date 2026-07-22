@@ -31,6 +31,15 @@
 	[GetHeuristic](#GetHeuristic) (A\*). Path-finders return a
 	[PathResult](#PathResult); MST returns [Edge](#Edge) lists.
 
+	### Directed vs. undirected
+
+	Because your callbacks define the edges, most algorithms work on directed
+	and undirected graphs alike. Every function carries a `directed` and/or
+	`undirected` tag showing which graph kinds it supports — a function tagged
+	with only one (e.g. [TopologicalSort](/api/TopologicalSort) is
+	directed-only, [MST](/api/MST) is undirected-only) gives wrong or
+	meaningless results on the other kind.
+
 	```lua
 	local GraphUtil = require(Packages.GraphUtil)
 

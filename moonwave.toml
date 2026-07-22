@@ -86,7 +86,7 @@ section = "Data Structures"
 classes = ["Queue", "Heap", "LooseTightDoubleGrid", "Quadtree"]
 
 [[classOrder]]
-section = "GraphUtil"
+section = "Graph Utilities"
 classes = ["GraphUtil", "Connectivity", "BFS", "DFS", "Dijkstra", "AStar", "BellmanFord", "MST", "TopologicalSort"]
 
 [[classOrder]]

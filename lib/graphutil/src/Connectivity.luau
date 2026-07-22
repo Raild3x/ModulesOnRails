@@ -8,8 +8,8 @@
 	bipartiteness, and strongly connected components.
 
 	Most functions come in two flavours depending on whether the graph is
-	**directed** or **undirected**.  Read each function's documentation to
-	confirm which it operates on.
+	**directed** or **undirected**.  Check each function's `directed` /
+	`undirected` tags to confirm which it operates on.
 
 	### `allVertices` parameter
 
@@ -53,6 +53,8 @@ local Connectivity = {}
 
 --[=[
 	@within Connectivity
+	@tag directed
+	@tag undirected
 
 	Returns `true` if `goal` is reachable from `start` by following edges
 	(directed or undirected depending on your `getNeighbors` callback).
@@ -99,6 +101,7 @@ end
 
 --[=[
 	@within Connectivity
+	@tag undirected
 
 	Finds all **connected components** of an undirected graph and returns them
 	as an array of vertex arrays.  Each inner array is one component; vertices
@@ -153,6 +156,7 @@ end
 
 --[=[
 	@within Connectivity
+	@tag directed
 
 	Returns `true` if the **directed** graph contains at least one cycle.
 
@@ -221,6 +225,7 @@ end
 
 --[=[
 	@within Connectivity
+	@tag undirected
 
 	Returns `true` if the **undirected** graph contains at least one cycle,
 	using BFS with parent tracking.  An edge to an already-visited non-parent
@@ -277,6 +282,7 @@ end
 
 --[=[
 	@within Connectivity
+	@tag undirected
 
 	Returns `true` if the graph component reachable from `start` is
 	**bipartite** — its vertices can be divided into two groups such that
@@ -328,6 +334,7 @@ end
 
 --[=[
 	@within Connectivity
+	@tag directed
 
 	Finds all **Strongly Connected Components** (SCCs) of a directed graph
 	using **Kosaraju's algorithm** and returns them as an array of vertex

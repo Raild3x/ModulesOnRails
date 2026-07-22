@@ -45,6 +45,8 @@ local BFS = {}
 
 --[=[
 	@within BFS
+	@tag directed
+	@tag undirected
 
 	Visits every vertex reachable from `start` in breadth-first order and
 	returns them as an ordered array.
@@ -80,6 +82,8 @@ end
 
 --[=[
 	@within BFS
+	@tag directed
+	@tag undirected
 
 	Visits every vertex reachable from `start` in breadth-first order and
 	returns a set `{ [V]: true }` of all visited vertices.  Useful when you
@@ -115,6 +119,8 @@ end
 
 --[=[
 	@within BFS
+	@tag directed
+	@tag undirected
 
 	Returns a lazy iterator that yields vertices one at a time in
 	breadth-first order.  The iterator drives the BFS internally via a
@@ -170,6 +176,8 @@ end
 --[=[
 	@within BFS
 	@function forEach
+	@tag directed
+	@tag undirected
 	@param start V
 	@param getNeighbors GetNeighbors<V>
 	@return Iterator<V>
@@ -180,6 +188,8 @@ BFS.forEach = BFS.toIterator
 
 --[=[
 	@within BFS
+	@tag directed
+	@tag undirected
 
 	Finds the **shortest path** (fewest hops / edges) from `start` to `goal`
 	using BFS.  Returns a [PathResult](/api/GraphUtil#PathResult) where `cost`
@@ -271,6 +281,8 @@ end
 
 --[=[
 	@within BFS
+	@tag directed
+	@tag undirected
 
 	Finds the **shortest path** (fewest hops) between `start` and `goal` by
 	growing a BFS frontier from *both* ends simultaneously and stopping as
@@ -433,6 +445,8 @@ end
 
 --[=[
 	@within BFS
+	@tag directed
+	@tag undirected
 
 	Performs a full BFS from `start` and returns a **parent map** —
 	a table where every reachable vertex maps to the vertex it was

@@ -79,6 +79,8 @@ local AStar = {}
 
 --[=[
 	@within AStar
+	@tag directed
+	@tag undirected
 
 	Finds the shortest weighted path from `start` to `goal` using A\* search
 	guided by `heuristic`.  Returns a [PathResult](/api/GraphUtil#PathResult),

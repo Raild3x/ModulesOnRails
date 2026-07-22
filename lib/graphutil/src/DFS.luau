@@ -56,6 +56,8 @@ local DFS = {}
 
 --[=[
 	@within DFS
+	@tag directed
+	@tag undirected
 
 	Visits every vertex reachable from `start` in depth-first order and
 	returns them as an ordered array.
@@ -92,6 +94,8 @@ end
 
 --[=[
 	@within DFS
+	@tag directed
+	@tag undirected
 
 	Visits every vertex reachable from `start` in depth-first order and
 	returns a set `{ [V]: true }` of all visited vertices.
@@ -127,6 +131,8 @@ end
 
 --[=[
 	@within DFS
+	@tag directed
+	@tag undirected
 
 	Returns a lazy iterator that yields vertices one at a time in
 	depth-first order.  The iterator drives the DFS internally via a
@@ -180,6 +186,8 @@ end
 --[=[
 	@within DFS
 	@function forEach
+	@tag directed
+	@tag undirected
 	@param start V
 	@param getNeighbors GetNeighbors<V>
 	@return Iterator<V>
@@ -190,6 +198,8 @@ DFS.forEach = DFS.toIterator
 
 --[=[
 	@within DFS
+	@tag directed
+	@tag undirected
 
 	Performs a full DFS from `start` and returns a **parent map** —
 	a table where every reachable vertex maps to the vertex it was

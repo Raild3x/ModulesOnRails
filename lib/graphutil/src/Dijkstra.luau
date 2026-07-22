@@ -100,6 +100,8 @@ end
 
 --[=[
 	@within Dijkstra
+	@tag directed
+	@tag undirected
 
 	Finds the **shortest weighted path** from `start` to `goal` and returns a
 	[PathResult](/api/GraphUtil#PathResult), or `nil` if `goal` is unreachable.
@@ -178,6 +180,8 @@ end
 
 --[=[
 	@within Dijkstra
+	@tag directed
+	@tag undirected
 
 	Finds the **shortest weighted path** between `start` and `goal` by
 	running Dijkstra from both ends simultaneously — alternately expanding
@@ -353,6 +357,8 @@ end
 
 --[=[
 	@within Dijkstra
+	@tag directed
+	@tag undirected
 
 	Runs Dijkstra from `start` to completion and returns a map of every
 	reachable vertex to its shortest distance from `start`.  Unreachable
@@ -423,6 +429,8 @@ end
 
 --[=[
 	@within Dijkstra
+	@tag directed
+	@tag undirected
 
 	Returns a lazy iterator that yields `(vertex, costFromStart)` pairs in
 	**ascending accumulated-cost order** — every vertex is visited before any
@@ -490,6 +498,8 @@ end
 --[=[
 	@within Dijkstra
 	@function forEach
+	@tag directed
+	@tag undirected
 	@param start V
 	@param getNeighbors GetNeighbors<V>
 	@param getWeight GetWeight<V>
@@ -501,6 +511,8 @@ Dijkstra.forEach = Dijkstra.toIterator
 
 --[=[
 	@within Dijkstra
+	@tag directed
+	@tag undirected
 
 	Runs Dijkstra from `start` to completion and returns an array of
 	[VisitRecord](/api/Dijkstra#VisitRecord) values in ascending accumulated-cost

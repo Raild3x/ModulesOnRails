@@ -55,6 +55,7 @@ local TopologicalSort = {}
 
 --[=[
 	@within TopologicalSort
+	@tag directed
 
 	Returns a topological ordering of `allVertices` using iterative
 	**DFS post-order**.  After fully exploring all outgoing edges of a vertex,
@@ -115,6 +116,7 @@ end
 
 --[=[
 	@within TopologicalSort
+	@tag directed
 
 	Returns a topological ordering using **Kahn's algorithm** (BFS / in-degree
 	queue).  Vertices with zero in-degree are enqueued first; as each is
