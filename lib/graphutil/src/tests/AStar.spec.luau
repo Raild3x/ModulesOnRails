@@ -80,6 +80,32 @@ local test_suite = function(tiniest: tiniest)
 			expect(result).never_exists()
 		end)
 
+		test("returns nil after exploring a whole component when goal is unreachable", function()
+			-- The goal "Z" is disconnected, but several vertices are reachable
+			-- from the start, so the search expands the full A→B→C chain (the
+			-- main loop runs multiple times) before the frontier empties.
+			--   A →1 B →1 C   |   Z (isolated)
+			local chainAdj = {
+				A = { B = 1 },
+				B = { C = 1 },
+				C = {},
+				Z = {},
+			}
+			local function chainNeighbors(v)
+				local result = {}
+				for k in pairs(chainAdj[v] or {}) do
+					table.insert(result, k)
+				end
+				return result
+			end
+			local function chainWeight(u, v)
+				return chainAdj[u][v]
+			end
+
+			local result = AStar.shortestPath("A", "Z", chainNeighbors, chainWeight, zeroHeuristic)
+			expect(result).never_exists()
+		end)
+
 		test("inadmissible heuristic still returns a path (not necessarily optimal)", function()
 			-- A* should not error with a bad heuristic, just potentially return a suboptimal path
 			local result = AStar.shortestPath("A", "D", getNeighbors, getWeight, hugeHeuristic)
@@ -97,6 +123,122 @@ local test_suite = function(tiniest: tiniest)
 				total += getWeight(path[i], path[i + 1])
 			end
 			expect(total).is(result.cost)
+		end)
+
+		test("skips a stale heap entry when a vertex is relaxed to a cheaper cost", function()
+			-- C is first reached at g=4 (direct A→C) and pushed, then relaxed
+			-- to g=2 (A→B→C) and pushed again. The stale g=4 entry sits below
+			-- the goal's g=5 in the heap, so it is popped (and must be skipped
+			-- as already-visited) before the goal is reached.
+			--   A →1 B,  A →4 C,  B →1 C,  C →1 D,  D →2 E
+			local staleAdj = {
+				A = { B = 1, C = 4 },
+				B = { C = 1 },
+				C = { D = 1 },
+				D = { E = 2 },
+				E = {},
+			}
+			local function staleNeighbors(v)
+				local result = {}
+				for k in pairs(staleAdj[v] or {}) do
+					table.insert(result, k)
+				end
+				return result
+			end
+			local function staleWeight(u, v)
+				return staleAdj[u][v]
+			end
+
+			local result = AStar.shortestPath("A", "E", staleNeighbors, staleWeight, zeroHeuristic)
+			expect(result).exists()
+			expect(result.cost).is(5) -- A→B→C→D→E (1+1+1+2), not A→C→D→E (4+1+2)
+			expect(result.path[1]).is("A")
+			expect(result.path[#result.path]).is("E")
+		end)
+
+		test("accepts the iterator form of getNeighbors", function()
+			-- getNeighbors may return a stateful iterator () -> V? instead of
+			-- an array; the result must match the array form.
+			local function iterNeighbors(v)
+				local keys = {}
+				for k in pairs(weights[v] or {}) do
+					table.insert(keys, k)
+				end
+				local i = 0
+				return function()
+					i += 1
+					return keys[i]
+				end
+			end
+
+			local result = AStar.shortestPath("A", "D", iterNeighbors, getWeight, zeroHeuristic)
+			expect(result).exists()
+			expect(result.cost).is(3)
+			expect(result.path[1]).is("A")
+			expect(result.path[#result.path]).is("D")
+		end)
+	end)
+
+	describe("shouldStop", function()
+		-- A →1 B →1 C →1 D →1 E chain for deterministic budget testing.
+		local chainAdj = {
+			A = { B = 1 },
+			B = { C = 1 },
+			C = { D = 1 },
+			D = { E = 1 },
+			E = {},
+		}
+		local function chainNeighbors(v)
+			local result = {}
+			for k in pairs(chainAdj[v] or {}) do
+				table.insert(result, k)
+			end
+			return result
+		end
+		local function chainWeight(u, v)
+			return chainAdj[u][v]
+		end
+
+		test("predicate returning true on the first expansion aborts with nil", function()
+			local result = AStar.shortestPath("A", "D", getNeighbors, getWeight, zeroHeuristic, function()
+				return true
+			end)
+			expect(result).never_exists()
+		end)
+
+		test("a predicate that never fires is identical to omitting it", function()
+			local result = AStar.shortestPath("A", "D", getNeighbors, getWeight, zeroHeuristic, function()
+				return false
+			end)
+			expect(result).exists()
+			expect(result.cost).is(3)
+		end)
+
+		test("the goal is never passed to shouldStop (goal check wins)", function()
+			-- Predicate would fire on the goal, but the goal is returned before
+			-- shouldStop is ever evaluated for it.
+			local result = AStar.shortestPath("A", "D", getNeighbors, getWeight, zeroHeuristic, function(v)
+				return v == "D"
+			end)
+			expect(result).exists()
+			expect(result.cost).is(3)
+			expect(result.path[#result.path]).is("D")
+		end)
+
+		test("a cost budget stops the search before a too-far goal is reached", function()
+			-- Goal E is at cost 4; budget of 2 stops the search first.
+			local result = AStar.shortestPath("A", "E", chainNeighbors, chainWeight, zeroHeuristic, function(_v, cost)
+				return cost > 2
+			end)
+			expect(result).never_exists()
+		end)
+
+		test("a budget larger than the path cost still finds the goal", function()
+			local result = AStar.shortestPath("A", "E", chainNeighbors, chainWeight, zeroHeuristic, function(_v, cost)
+				return cost > 100
+			end)
+			expect(result).exists()
+			expect(result.cost).is(4)
 		end)
 	end)
 end

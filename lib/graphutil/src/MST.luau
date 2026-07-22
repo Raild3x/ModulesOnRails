@@ -107,10 +107,8 @@ function MST.prim<V>(start: V, getNeighbors: GetNeighbors<V>, getWeight: GetWeig
 	end
 
 	while not heap:IsEmpty() do
+		-- The IsEmpty check guarantees Pop returns a value.
 		local rawTo, rawCost = heap:Pop()
-		if not rawTo then
-			break
-		end
 		local to: V = (rawTo :: any) :: V
 		local cost: number = (rawCost :: any) :: number
 
@@ -186,10 +184,11 @@ function MST.kruskal<V>(allVertices: { V }, getNeighbors: GetNeighbors<V>, getWe
 	local seen: { [string]: boolean } = {}
 
 	for _, u in allVertices do
+		-- u comes from allVertices, so its id is always present.
+		local uid = id[u] :: number
 		for v in Types.eachNeighbor(u, getNeighbors) do
-			local uid = id[u]
 			local vid = id[v]
-			if uid == nil or vid == nil then
+			if vid == nil then
 				continue
 			end
 			-- Canonical key: smaller id first to deduplicate undirected edges
@@ -239,9 +238,10 @@ function MST.kruskal<V>(allVertices: { V }, getNeighbors: GetNeighbors<V>, getWe
 	-- Greedily add edges that connect distinct components
 	local result: { Edge<V> } = {}
 	for _, edge in edges do
-		local uid = id[edge.from]
-		local vid = id[edge.to]
-		if uid and vid and union(uid, vid) then
+		-- Both endpoints of a collected edge are always in allVertices.
+		local uid = id[edge.from] :: number
+		local vid = id[edge.to] :: number
+		if union(uid, vid) then
 			table.insert(result, { from = edge.from, to = edge.to, weight = edge.weight })
 			if #result == #allVertices - 1 then
 				break -- MST is complete

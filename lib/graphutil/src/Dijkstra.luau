@@ -65,6 +65,7 @@ local Heap = require("../Heap")
 
 type GetNeighbors<V> = Types.GetNeighbors<V>
 type GetWeight<V> = Types.GetWeight<V>
+type ShouldStop<V> = Types.ShouldStop<V>
 type PathResult<V> = Types.PathResult<V>
 
 -- A single entry in the result of [`Dijkstra.toArray`](#toArray).
@@ -84,14 +85,11 @@ local Dijkstra = {}
 -- Reconstructs an ordered path from a parent-pointer table.
 local function reconstructPath<V>(start: V, goal: V, parent: { [V]: V }): { V }
 	local path: { V } = {}
-	local cur: V? = goal
-	while cur ~= nil do
-		local c: V = cur :: V
-		table.insert(path, 1, c)
-		if c == start then
-			break
-		end
-		cur = parent[c]
+	local cur: V = goal
+	table.insert(path, 1, cur)
+	while cur ~= start do
+		cur = parent[cur]
+		table.insert(path, 1, cur)
 	end
 	return path
 end
@@ -112,13 +110,25 @@ end
 	-- result.cost == 3   (2 + 1)
 	```
 
+	Pass an optional [ShouldStop](/api/GraphUtil#ShouldStop) predicate to abort a
+	long-running search — checked once per expanded vertex (after the goal check),
+	returning `true` stops the search and returns `nil`:
+
+	```lua
+	-- Stop once the cheapest frontier vertex exceeds a budget of 500.
+	local result = Dijkstra.shortestPath(start, goal, getNeighbors, getWeight, function(_vertex, cost)
+	    return cost > 500
+	end)
+	```
+
 	*Time complexity:* `O((V + E) log V)` with a binary min-heap.
 ]=]
 function Dijkstra.shortestPath<V>(
 	start: V,
 	goal: V,
 	getNeighbors: GetNeighbors<V>,
-	getWeight: GetWeight<V>
+	getWeight: GetWeight<V>,
+	shouldStop: ShouldStop<V>?
 ): PathResult<V>?
 	if start == goal then
 		return { path = { start }, cost = 0 }
@@ -131,10 +141,8 @@ function Dijkstra.shortestPath<V>(
 	heap:Push(start, 0)
 
 	while not heap:IsEmpty() do
+		-- The IsEmpty check guarantees Pop returns a value.
 		local rawVertex, rawCost = heap:Pop()
-		if not rawVertex then
-			break
-		end
 		local vertex: V = (rawVertex :: any) :: V
 		local cost: number = (rawCost :: any) :: number
 
@@ -145,6 +153,11 @@ function Dijkstra.shortestPath<V>(
 
 		if vertex == goal then
 			return { path = reconstructPath(start, goal, parent), cost = cost }
+		end
+
+		-- Cooperative cancellation: abort once the caller's predicate fires.
+		if shouldStop and shouldStop(vertex, cost) then
+			break
 		end
 
 		for neighbor in Types.eachNeighbor(vertex, getNeighbors) do
@@ -201,6 +214,10 @@ end
 	```
 	:::
 
+	An optional [ShouldStop](/api/GraphUtil#ShouldStop) predicate (passed after
+	`getReversedNeighbors`) aborts the search and returns `nil` — it is checked
+	each time either side settles a vertex.
+
 	*Time complexity:* `O((V + E) log V)`, but typically explores far fewer
 	vertices in practice since each side only has to reach roughly halfway.
 ]=]
@@ -209,7 +226,8 @@ function Dijkstra.bidirectionalShortestPath<V>(
 	goal: V,
 	getNeighbors: GetNeighbors<V>,
 	getWeight: GetWeight<V>,
-	getReversedNeighbors: GetNeighbors<V>?
+	getReversedNeighbors: GetNeighbors<V>?,
+	shouldStop: ShouldStop<V>?
 ): PathResult<V>?
 	if start == goal then
 		return { path = { start }, cost = 0 }
@@ -231,6 +249,7 @@ function Dijkstra.bidirectionalShortestPath<V>(
 
 	local best = math.huge
 	local meet: V? = nil
+	local stopped = false
 
 	-- Tentative distances are always valid upper bounds (non-negative
 	-- weights), so any vertex known from both sides is a safe candidate
@@ -262,6 +281,12 @@ function Dijkstra.bidirectionalShortestPath<V>(
 			end
 			fSettled[vertex] = true
 
+			-- Cooperative cancellation: abort once the caller's predicate fires.
+			if shouldStop and shouldStop(vertex, cost) then
+				stopped = true
+				break
+			end
+
 			for neighbor in Types.eachNeighbor(vertex, getNeighbors) do
 				local newDist = cost + getWeight(vertex, neighbor)
 				if newDist < (fDist[neighbor] or math.huge) then
@@ -280,6 +305,12 @@ function Dijkstra.bidirectionalShortestPath<V>(
 			end
 			bSettled[vertex] = true
 
+			-- Cooperative cancellation: abort once the caller's predicate fires.
+			if shouldStop and shouldStop(vertex, cost) then
+				stopped = true
+				break
+			end
+
 			for predecessor in Types.eachNeighbor(vertex, getReverse) do
 				local newDist = cost + getWeight(predecessor, vertex)
 				if newDist < (bDist[predecessor] or math.huge) then
@@ -292,23 +323,22 @@ function Dijkstra.bidirectionalShortestPath<V>(
 		end
 	end
 
-	if meet == nil then
+	if stopped or meet == nil then
 		return nil
 	end
 
 	-- Reconstruct start → meet via fParent, then meet → goal via bParent.
+	-- The forward chain is guaranteed to reach start; the backward chain may
+	-- be empty when meet == goal, so it keeps its nil check.
 	local path: { V } = {}
-	local cur: V? = meet
-	while cur ~= nil do
-		local c: V = cur :: V
-		table.insert(path, 1, c)
-		if c == start then
-			break
-		end
-		cur = fParent[c]
+	local forward: V = meet :: V
+	table.insert(path, 1, forward)
+	while forward ~= start do
+		forward = fParent[forward]
+		table.insert(path, 1, forward)
 	end
 
-	cur = bParent[meet :: V]
+	local cur: V? = bParent[meet :: V]
 	while cur ~= nil do
 		local c: V = cur :: V
 		table.insert(path, c)
@@ -335,19 +365,34 @@ end
 	print(d["D"]) -- 3
 	```
 
+	Pass an optional [ShouldStop](/api/GraphUtil#ShouldStop) predicate to abort a
+	long-running flood — checked once per settled vertex. Unlike the path-finders,
+	on early stop this returns the **partial** distance map accumulated so far
+	(every vertex settled before the stop is present and final):
+
+	```lua
+	-- Only compute distances out to a budget of 10.
+	local d = Dijkstra.distances(start, getNeighbors, getWeight, function(_vertex, cost)
+	    return cost > 10
+	end)
+	```
+
 	*Time complexity:* `O((V + E) log V)` with a binary min-heap.
 ]=]
-function Dijkstra.distances<V>(start: V, getNeighbors: GetNeighbors<V>, getWeight: GetWeight<V>): { [V]: number }
+function Dijkstra.distances<V>(
+	start: V,
+	getNeighbors: GetNeighbors<V>,
+	getWeight: GetWeight<V>,
+	shouldStop: ShouldStop<V>?
+): { [V]: number }
 	local dist: { [V]: number } = { [start] = 0 }
 	local visited: { [V]: boolean } = {}
 	local heap = Heap.min()
 	heap:Push(start, 0)
 
 	while not heap:IsEmpty() do
+		-- The IsEmpty check guarantees Pop returns a value.
 		local rawVertex, rawCost = heap:Pop()
-		if not rawVertex then
-			break
-		end
 		local vertex: V = (rawVertex :: any) :: V
 		local cost: number = (rawCost :: any) :: number
 
@@ -355,6 +400,11 @@ function Dijkstra.distances<V>(start: V, getNeighbors: GetNeighbors<V>, getWeigh
 			continue
 		end
 		visited[vertex] = true
+
+		-- Cooperative cancellation: return the partial map accumulated so far.
+		if shouldStop and shouldStop(vertex, cost) then
+			break
+		end
 
 		for neighbor in Types.eachNeighbor(vertex, getNeighbors) do
 			if visited[neighbor] then
@@ -410,10 +460,8 @@ function Dijkstra.toIterator<V>(start: V, getNeighbors: GetNeighbors<V>, getWeig
 
 	return function(): (V?, number?)
 		while not heap:IsEmpty() do
+			-- The IsEmpty check guarantees Pop returns a value.
 			local rawVertex, rawCost = heap:Pop()
-			if not rawVertex then
-				break
-			end
 			local vertex: V = (rawVertex :: any) :: V
 			local cost: number = (rawCost :: any) :: number
 

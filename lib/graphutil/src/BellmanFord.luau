@@ -151,16 +151,13 @@ function BellmanFord.shortestPath<V>(
 		return nil, false
 	end
 
-	-- Reconstruct path
+	-- Reconstruct path (the parent chain is guaranteed to reach start)
 	local path: { V } = {}
-	local cur: V? = goal
-	while cur ~= nil do
-		local c: V = cur :: V
-		table.insert(path, 1, c)
-		if c == start then
-			break
-		end
-		cur = parent[c]
+	local cur: V = goal
+	table.insert(path, 1, cur)
+	while cur ~= start do
+		cur = parent[cur]
+		table.insert(path, 1, cur)
 	end
 
 	return { path = path, cost = dist[goal] :: number }, false

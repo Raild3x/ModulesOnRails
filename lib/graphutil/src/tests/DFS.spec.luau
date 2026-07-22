@@ -122,6 +122,48 @@ local test_suite = function(tiniest: tiniest)
 		test("forEach is an alias of toIterator", function()
 			expect(DFS.forEach).is(DFS.toIterator)
 		end)
+
+		test("skips duplicate stack entries without re-yielding a vertex", function()
+			-- X is pushed three times (by A, Y, and Z) before it is first
+			-- popped, leaving stale duplicates on the stack. Draining the
+			-- iterator must yield X exactly once and skip the leftovers.
+			--   A → X,  A → Y,  Y → X,  Y → Z,  Z → X
+			local dupAdj = {
+				A = { "X", "Y" },
+				Y = { "X", "Z" },
+				Z = { "X" },
+				X = {},
+			}
+			local function dupNeighbors(v)
+				return dupAdj[v] or {}
+			end
+
+			local counts = {}
+			for v in DFS.toIterator("A", dupNeighbors) do
+				counts[v] = (counts[v] or 0) + 1
+			end
+			expect(counts["A"]).is(1)
+			expect(counts["X"]).is(1)
+			expect(counts["Y"]).is(1)
+			expect(counts["Z"]).is(1)
+		end)
+
+		test("accepts the iterator form of getNeighbors", function()
+			local function iterNeighbors(v)
+				local list = linear[v] or {}
+				local i = 0
+				return function()
+					i += 1
+					return list[i]
+				end
+			end
+			local result = {}
+			for vertex in DFS.toIterator("A", iterNeighbors) do
+				table.insert(result, vertex)
+			end
+			expect(#result).is(4)
+			expect(result[1]).is("A")
+		end)
 	end)
 
 	describe("toParentMap", function()

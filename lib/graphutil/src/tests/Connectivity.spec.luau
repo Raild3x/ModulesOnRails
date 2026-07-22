@@ -219,6 +219,45 @@ local test_suite = function(tiniest: tiniest)
 			expect(singletons["D"]).is(true)
 			expect(singletons["E"]).is(true)
 		end)
+
+		test("collapses a hub with multiple incoming edges into one SCC", function()
+			-- A is a hub: both B and C point back to it, giving A in-degree 2.
+			-- The reverse graph then gives A two reverse-neighbours, so the
+			-- second (reverse) DFS pass iterates a multi-element predecessor
+			-- list rather than the single-predecessor lists of the other tests.
+			--   A ⇄ B,  A ⇄ C   →  one SCC {A, B, C}
+			local hubAdj = {
+				A = { "B", "C" },
+				B = { "A" },
+				C = { "A" },
+			}
+			local hubVerts = { "A", "B", "C" }
+			local function hubNeighbors(v)
+				return hubAdj[v] or {}
+			end
+
+			local sccs = Connectivity.stronglyConnectedComponents(hubVerts, hubNeighbors)
+			expect(#sccs).is(1)
+			expect(#sccs[1]).is(3)
+		end)
+
+		test("builds reverse edges for neighbours outside allVertices", function()
+			-- "X" is reachable from A but omitted from allVertices, so its
+			-- reverse-adjacency entry is created lazily on discovery rather
+			-- than pre-seeded. A is still its own singleton SCC.
+			local adj = { A = { "X" }, X = {} }
+			local sccs = Connectivity.stronglyConnectedComponents({ "A" }, function(v)
+				return adj[v] or {}
+			end)
+			-- Only A is enumerated as a component seed.
+			local seen = {}
+			for _, scc in sccs do
+				for _, v in scc do
+					seen[v] = true
+				end
+			end
+			expect(seen["A"]).is(true)
+		end)
 	end)
 end
 

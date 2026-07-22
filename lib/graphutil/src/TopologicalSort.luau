@@ -150,9 +150,6 @@ function TopologicalSort.kahn<V>(allVertices: { V }, getNeighbors: GetNeighbors<
 	for _, v in allVertices do
 		for neighbor in Types.eachNeighbor(v, getNeighbors) do
 			inDegree[neighbor] = (inDegree[neighbor] or 0) + 1
-			if not outEdges[v] then
-				outEdges[v] = {}
-			end
 			table.insert(outEdges[v], neighbor)
 		end
 	end

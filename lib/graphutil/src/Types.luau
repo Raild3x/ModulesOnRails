@@ -124,6 +124,38 @@ export type GetHeuristic<V> = (vertex: V, goal: V) -> number
 
 --[=[
 	@within GraphUtil
+	@type ShouldStop<V> (vertex: V, cost: number) -> boolean
+
+	An optional **cooperative cancellation** predicate. Search functions that
+	accept one call it once per expanded vertex — after the goal check, before
+	that vertex's neighbours are relaxed — and abort the search the moment it
+	returns `true`. Path-finders then return `nil` (indistinguishable from an
+	unreachable goal); [`Dijkstra.distances`](/api/Dijkstra#distances) returns
+	the partial result accumulated so far.
+
+	Because these algorithms run synchronously to completion, this predicate is
+	the only way to bound an open-ended search. `cost` is the accumulated cost
+	of `vertex` — weighted distance for [Dijkstra](/api/Dijkstra) /
+	[AStar](/api/AStar), hop-count for [BFS](/api/BFS) — so you can stop on a
+	budget; most callers ignore both arguments and stop on a wall-clock deadline.
+
+	```lua
+	-- Give up after half a second of searching.
+	local deadline = os.clock() + 0.5
+	local result = AStar.shortestPath(a, b, getNeighbors, getWeight, heuristic, function()
+	    return os.clock() > deadline
+	end)
+
+	-- Or stop once the search cost exceeds a budget of 500.
+	local result = Dijkstra.shortestPath(a, b, getNeighbors, getWeight, function(_vertex, cost)
+	    return cost > 500
+	end)
+	```
+]=]
+export type ShouldStop<V> = (vertex: V, cost: number) -> boolean
+
+--[=[
+	@within GraphUtil
 	@type Iterator<V> () -> V?
 
 	A stateless-to-the-caller iterator that yields successive values,

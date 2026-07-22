@@ -267,6 +267,98 @@ local test_suite = function(tiniest: tiniest)
 		end)
 	end)
 
+	describe("bidirectionalShortestPath (wide diamond ladder)", function()
+		-- Each of the two "diamonds" gives a vertex (B, then the meeting
+		-- region) two shortest incoming edges, so a frontier re-discovers an
+		-- already-seen vertex (its distance is already set) — exercising the
+		-- fDist/bDist "already discovered" guards. Start and goal are four hops
+		-- apart, so the meeting point lands mid-graph and BOTH reconstructions
+		-- run for multiple hops.
+		--        A           D
+		--      /   \       /   \
+		--   S        B ── ?      G
+		--      \   /       \   /
+		--        C           E
+		local ladderAdj = {
+			S = { "A", "C" },
+			A = { "S", "B" },
+			C = { "S", "B" },
+			B = { "A", "C", "D", "E" },
+			D = { "B", "G" },
+			E = { "B", "G" },
+			G = { "D", "E" },
+		}
+		local ladderVerts = { "S", "A", "C", "B", "D", "E", "G" }
+		local function ladderNeighbors(v)
+			return ladderAdj[v] or {}
+		end
+
+		test("finds a shortest S→G path of 4 hops", function()
+			local result = BFS.bidirectionalShortestPath("S", "G", ladderNeighbors)
+			expect(result).exists()
+			expect(result.cost).is(4)
+			expect(result.path[1]).is("S")
+			expect(result.path[#result.path]).is("G")
+			expect(#result.path).is(5)
+		end)
+
+		test("reconstructed path is contiguous", function()
+			local result = BFS.bidirectionalShortestPath("S", "G", ladderNeighbors)
+			expect(result).exists()
+			local path = result.path
+			for i = 1, #path - 1 do
+				local u, v = path[i], path[i + 1]
+				local isEdge = false
+				for _, n in ladderAdj[u] do
+					if n == v then
+						isEdge = true
+						break
+					end
+				end
+				expect(isEdge).is(true)
+			end
+		end)
+
+		test("matches BFS.shortestPath cost across every reachable pair", function()
+			for _, s in ladderVerts do
+				for _, g in ladderVerts do
+					local single = BFS.shortestPath(s, g, ladderNeighbors)
+					local bidir = BFS.bidirectionalShortestPath(s, g, ladderNeighbors)
+					if single == nil then
+						expect(bidir).never_exists()
+					else
+						expect(bidir).exists()
+						expect((bidir :: any).cost).is(single.cost)
+					end
+				end
+			end
+		end)
+	end)
+
+	describe("iterator-form getNeighbors", function()
+		-- getNeighbors may return a stateful iterator () -> V? instead of an
+		-- array; results must match the array form.
+		local function iterNeighbors(v)
+			local list = adj[v] or {}
+			local i = 0
+			return function()
+				i += 1
+				return list[i]
+			end
+		end
+
+		test("toArray matches the array form", function()
+			local result = BFS.toArray("A", iterNeighbors)
+			expect(containsAll(result, { "A", "B", "C", "D" })).is(true)
+		end)
+
+		test("shortestPath matches the array form", function()
+			local result = BFS.shortestPath("A", "D", iterNeighbors)
+			expect(result).exists()
+			expect(result.cost).is(2)
+		end)
+	end)
+
 	describe("toParentMap", function()
 		test("start maps to itself", function()
 			local parents = BFS.toParentMap("A", getNeighbors)
@@ -302,6 +394,88 @@ local test_suite = function(tiniest: tiniest)
 				end
 				expect(found).is(true)
 			end
+		end)
+	end)
+
+	describe("shouldStop", function()
+		-- Linear chain A-B-C-D-E-F (undirected) for deterministic depth testing.
+		local chainAdj = {
+			A = { "B" },
+			B = { "A", "C" },
+			C = { "B", "D" },
+			D = { "C", "E" },
+			E = { "D", "F" },
+			F = { "E" },
+		}
+		local function chainNeighbors(v)
+			return chainAdj[v] or {}
+		end
+
+		describe("shortestPath", function()
+			test("predicate returning true on the first dequeue aborts with nil", function()
+				local result = BFS.shortestPath("A", "D", getNeighbors, function()
+					return true
+				end)
+				expect(result).never_exists()
+			end)
+
+			test("a predicate that never fires is identical to omitting it", function()
+				local result = BFS.shortestPath("A", "D", getNeighbors, function()
+					return false
+				end)
+				expect(result).exists()
+				expect(result.cost).is(2)
+			end)
+
+			test("the goal is never passed to shouldStop (goal found before dequeue)", function()
+				local result = BFS.shortestPath("A", "D", getNeighbors, function(v)
+					return v == "D"
+				end)
+				expect(result).exists()
+				expect(result.cost).is(2)
+			end)
+
+			test("a depth budget stops the search before a too-far goal is reached", function()
+				-- Goal F is 5 hops away; stopping at depth 3 aborts first.
+				local result = BFS.shortestPath("A", "F", chainNeighbors, function(_v, depth)
+					return depth >= 3
+				end)
+				expect(result).never_exists()
+			end)
+
+			test("a depth budget larger than the path still finds the goal", function()
+				local result = BFS.shortestPath("A", "F", chainNeighbors, function(_v, depth)
+					return depth >= 100
+				end)
+				expect(result).exists()
+				expect(result.cost).is(5)
+			end)
+		end)
+
+		describe("bidirectionalShortestPath", function()
+			test("predicate returning true on the first dequeue aborts with nil", function()
+				local result = BFS.bidirectionalShortestPath("A", "D", getNeighbors, nil, function()
+					return true
+				end)
+				expect(result).never_exists()
+			end)
+
+			test("a predicate firing only on a backward-side vertex aborts with nil", function()
+				-- The backward frontier dequeues the goal "D" first; the predicate
+				-- fires there, exercising the backward-branch cancellation.
+				local result = BFS.bidirectionalShortestPath("A", "D", getNeighbors, nil, function(v)
+					return v == "D"
+				end)
+				expect(result).never_exists()
+			end)
+
+			test("a predicate that never fires is identical to omitting it", function()
+				local result = BFS.bidirectionalShortestPath("A", "D", getNeighbors, nil, function()
+					return false
+				end)
+				expect(result).exists()
+				expect(result.cost).is(2)
+			end)
 		end)
 	end)
 end

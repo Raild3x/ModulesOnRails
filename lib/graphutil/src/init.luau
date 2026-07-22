@@ -112,6 +112,7 @@ export type GetNeighborsArray<V> = Types.GetNeighborsArray<V>
 export type GetNeighborsIterator<V> = Types.GetNeighborsIterator<V>
 export type GetWeight<V> = Types.GetWeight<V>
 export type GetHeuristic<V> = Types.GetHeuristic<V>
+export type ShouldStop<V> = Types.ShouldStop<V>
 export type Iterator<V> = Types.Iterator<V>
 export type PathResult<V> = Types.PathResult<V>
 export type Edge<V> = Types.Edge<V>

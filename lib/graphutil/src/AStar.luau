@@ -1,4 +1,5 @@
 --!strict
+--!native
 -- Authors: Logan Hunt (Raildex)
 -- May 13, 2026
 --[=[
@@ -71,6 +72,7 @@ local Heap = require("../Heap")
 type GetNeighbors<V> = Types.GetNeighbors<V>
 type GetWeight<V> = Types.GetWeight<V>
 type GetHeuristic<V> = Types.GetHeuristic<V>
+type ShouldStop<V> = Types.ShouldStop<V>
 type PathResult<V> = Types.PathResult<V>
 
 local AStar = {}
@@ -93,6 +95,20 @@ local AStar = {}
 	end
 	```
 
+	Pass an optional [ShouldStop](/api/GraphUtil#ShouldStop) predicate to abort a
+	long-running search — it is checked once per expanded vertex (after the goal
+	check, so a within-budget goal is never abandoned) and returning `true` makes
+	the search stop and return `nil`:
+
+	```lua
+	-- Give up after half a second.
+	local deadline = os.clock() + 0.5
+	local result = AStar.shortestPath(start, goal, getNeighbors, getWeight, heuristic, function()
+	    return os.clock() > deadline
+	end)
+	-- result == nil if the deadline hit before the goal was reached
+	```
+
 	*Time complexity:* `O((V + E) log V)` in the worst case, but typically
 	much better in practice due to heuristic pruning.
 ]=]
@@ -101,7 +117,8 @@ function AStar.shortestPath<V>(
 	goal: V,
 	getNeighbors: GetNeighbors<V>,
 	getWeight: GetWeight<V>,
-	heuristic: GetHeuristic<V>
+	heuristic: GetHeuristic<V>,
+	shouldStop: ShouldStop<V>?
 ): PathResult<V>?
 	if start == goal then
 		return { path = { start }, cost = 0 }
@@ -117,10 +134,8 @@ function AStar.shortestPath<V>(
 	heap:Push(start, heuristic(start, goal))
 
 	while not heap:IsEmpty() do
-		local rawVertex, _ = heap:Pop()
-		if not rawVertex then
-			break
-		end
+		-- The IsEmpty check guarantees Pop returns a value.
+		local rawVertex = heap:Pop()
 		local vertex: V = (rawVertex :: any) :: V
 
 		if visited[vertex] then
@@ -129,21 +144,24 @@ function AStar.shortestPath<V>(
 		visited[vertex] = true
 
 		if vertex == goal then
-			-- Reconstruct path following parent pointers from goal back to start
+			-- Reconstruct path following parent pointers from goal back to
+			-- start. The parent chain is guaranteed to reach start.
 			local path: { V } = {}
-			local cur: V? = goal
-			while cur ~= nil do
-				local c: V = cur :: V
-				table.insert(path, 1, c)
-				if c == start then
-					break
-				end
-				cur = parent[c]
+			local cur: V = goal
+			table.insert(path, 1, cur)
+			while cur ~= start do
+				cur = parent[cur]
+				table.insert(path, 1, cur)
 			end
 			return { path = path, cost = g[goal] }
 		end
 
 		local gVertex = g[vertex] :: number
+
+		-- Cooperative cancellation: abort once the caller's predicate fires.
+		if shouldStop and shouldStop(vertex, gVertex) then
+			break
+		end
 
 		for neighbor in Types.eachNeighbor(vertex, getNeighbors) do
 			if visited[neighbor] then

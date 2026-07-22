@@ -38,6 +38,7 @@ local Types = require("./Types")
 
 type GetNeighbors<V> = Types.GetNeighbors<V>
 type Iterator<V> = Types.Iterator<V>
+type ShouldStop<V> = Types.ShouldStop<V>
 type PathResult<V> = Types.PathResult<V>
 
 local BFS = {}
@@ -193,15 +194,34 @@ BFS.forEach = BFS.toIterator
 	-- result.cost == 2
 	```
 
+	Pass an optional [ShouldStop](/api/GraphUtil#ShouldStop) predicate to abort a
+	long-running search — checked once per dequeued vertex, receiving that
+	vertex's hop-distance from `start` as `cost`. Returning `true` stops the
+	search and returns `nil`:
+
+	```lua
+	-- Search no deeper than 6 hops.
+	local result = BFS.shortestPath("A", "D", getNeighbors, function(_vertex, depth)
+	    return depth >= 6
+	end)
+	```
+
 	*Time complexity:* `O(V + E)`
 ]=]
-function BFS.shortestPath<V>(start: V, goal: V, getNeighbors: GetNeighbors<V>): PathResult<V>?
+function BFS.shortestPath<V>(
+	start: V,
+	goal: V,
+	getNeighbors: GetNeighbors<V>,
+	shouldStop: ShouldStop<V>?
+): PathResult<V>?
 	if start == goal then
 		return { path = { start }, cost = 0 }
 	end
 
 	local parent: { [V]: V } = {}
-	local visited: { [V]: boolean } = { [start] = true }
+	-- `dist` doubles as the visited set (`dist[v] ~= nil`) and supplies the
+	-- hop-distance passed to `shouldStop`.
+	local dist: { [V]: number } = { [start] = 0 }
 	local queue: { V } = { start }
 	local head = 1
 	local found = false
@@ -210,9 +230,16 @@ function BFS.shortestPath<V>(start: V, goal: V, getNeighbors: GetNeighbors<V>): 
 		local vertex: V = queue[head]
 		head += 1
 
+		-- Cooperative cancellation: abort once the caller's predicate fires.
+		-- The goal is caught below while expanding its discoverer, so it is
+		-- never dequeued here and thus never abandoned by an in-budget stop.
+		if shouldStop and shouldStop(vertex, dist[vertex]) then
+			break
+		end
+
 		for neighbor in Types.eachNeighbor(vertex, getNeighbors) do
-			if not visited[neighbor] then
-				visited[neighbor] = true
+			if dist[neighbor] == nil then
+				dist[neighbor] = dist[vertex] + 1
 				parent[neighbor] = vertex
 
 				if neighbor == goal then
@@ -230,15 +257,13 @@ function BFS.shortestPath<V>(start: V, goal: V, getNeighbors: GetNeighbors<V>): 
 	end
 
 	-- Reconstruct path by following parent pointers from goal back to start
+	-- (the parent chain is guaranteed to reach start)
 	local path: { V } = {}
-	local current: V? = goal
-	while current ~= nil do
-		local c: V = current :: V
-		table.insert(path, 1, c)
-		if c == start then
-			break
-		end
-		current = parent[c]
+	local current: V = goal
+	table.insert(path, 1, current)
+	while current ~= start do
+		current = parent[current]
+		table.insert(path, 1, current)
 	end
 
 	return { path = path, cost = #path - 1 }
@@ -283,6 +308,11 @@ end
 	```
 	:::
 
+	An optional [ShouldStop](/api/GraphUtil#ShouldStop) predicate (passed after
+	`getReversedNeighbors`) aborts the search and returns `nil` — it is checked
+	each time either side dequeues a vertex, receiving that vertex's hop-distance
+	from its own root as `cost`.
+
 	*Time complexity:* `O(V + E)` worst case, but typically `O(b^(d/2))` for
 	a graph with branching factor `b` and hop-distance `d` between `start`
 	and `goal`.
@@ -291,7 +321,8 @@ function BFS.bidirectionalShortestPath<V>(
 	start: V,
 	goal: V,
 	getNeighbors: GetNeighbors<V>,
-	getReversedNeighbors: GetNeighbors<V>?
+	getReversedNeighbors: GetNeighbors<V>?,
+	shouldStop: ShouldStop<V>?
 ): PathResult<V>?
 	if start == goal then
 		return { path = { start }, cost = 0 }
@@ -312,6 +343,7 @@ function BFS.bidirectionalShortestPath<V>(
 
 	local best = math.huge
 	local meet: V? = nil
+	local stopped = false
 
 	-- A newly-discovered vertex is a candidate meeting point only if the
 	-- other side has already reached it; keep the cheapest such candidate.
@@ -339,6 +371,11 @@ function BFS.bidirectionalShortestPath<V>(
 		if fFrontierDist <= bFrontierDist then
 			local vertex: V = fQueue[fHead]
 			fHead += 1
+			-- Cooperative cancellation: abort once the caller's predicate fires.
+			if shouldStop and shouldStop(vertex, fFrontierDist) then
+				stopped = true
+				break
+			end
 			for neighbor in Types.eachNeighbor(vertex, getNeighbors) do
 				if fDist[neighbor] == nil then
 					fDist[neighbor] = fFrontierDist + 1
@@ -350,6 +387,11 @@ function BFS.bidirectionalShortestPath<V>(
 		else
 			local vertex: V = bQueue[bHead]
 			bHead += 1
+			-- Cooperative cancellation: abort once the caller's predicate fires.
+			if shouldStop and shouldStop(vertex, bFrontierDist) then
+				stopped = true
+				break
+			end
 			for neighbor in Types.eachNeighbor(vertex, getReverse) do
 				if bDist[neighbor] == nil then
 					bDist[neighbor] = bFrontierDist + 1
@@ -361,23 +403,22 @@ function BFS.bidirectionalShortestPath<V>(
 		end
 	end
 
-	if meet == nil then
+	if stopped or meet == nil then
 		return nil
 	end
 
 	-- Reconstruct start → meet via fParent, then meet → goal via bParent.
+	-- The forward chain is guaranteed to reach start; the backward chain may
+	-- be empty when meet == goal, so it keeps its nil check.
 	local path: { V } = {}
-	local cur: V? = meet
-	while cur ~= nil do
-		local c: V = cur :: V
-		table.insert(path, 1, c)
-		if c == start then
-			break
-		end
-		cur = fParent[c]
+	local forward: V = meet :: V
+	table.insert(path, 1, forward)
+	while forward ~= start do
+		forward = fParent[forward]
+		table.insert(path, 1, forward)
 	end
 
-	cur = bParent[meet :: V]
+	local cur: V? = bParent[meet :: V]
 	while cur ~= nil do
 		local c: V = cur :: V
 		table.insert(path, c)

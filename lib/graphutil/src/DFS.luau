@@ -230,11 +230,6 @@ function DFS.toParentMap<V>(start: V, getNeighbors: GetNeighbors<V>): { [V]: V }
 	while #stack > 0 do
 		local vertex: V = table.remove(stack) :: V
 
-		-- Skip stale stack entries (vertex already assigned a parent)
-		if parent[vertex] == nil then
-			continue
-		end
-
 		for neighbor in Types.eachNeighbor(vertex, getNeighbors) do
 			if not parent[neighbor] then
 				parent[neighbor] = vertex
