@@ -109,6 +109,11 @@ export type PlayerProfileManager = {
 	-- profile access methods
 	GetProfile: (self: PlayerProfileManager, playerOrUserId: Player | number) -> Profile?,
 	PromiseProfile: (self: PlayerProfileManager, playerOrUserId: Player | number) -> Promise,
+	PromiseSave: (
+		self: PlayerProfileManager,
+		playerOrUserId: Player | number,
+		predicate: ((lastSavedData: { [any]: any }) -> boolean)?
+	) -> Promise,
 	OnSave: (
 		self: PlayerProfileManager,
 		playerOrUserId: Player | number,

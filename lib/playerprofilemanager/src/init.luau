@@ -671,6 +671,68 @@ function PlayerProfileManager.PromiseProfile(self: PPM_Internal, playerOrUserId:
 end
 
 --[=[
+	Saves the player's profile and returns a Promise that resolves once a save
+	is confirmed persisted (via `Profile.OnAfterSave`).
+
+	The optional `predicate` receives the persisted snapshot (`last_saved_data`).
+	When provided, the promise resolves only once a persisted snapshot satisfies
+	it — use this to confirm that a specific write actually landed, rather than
+	that "some save happened" (an autosave already in flight when this is called
+	may not include writes made just before the call).
+
+	Rejects if the profile is not loaded, or if the profile session ends before
+	a satisfying save is confirmed.
+
+	```lua
+	profile.Data.Coins += 100
+	manager:PromiseSave(player):andThen(function()
+		print("Coins persisted")
+	end)
+	```
+
+	@param playerOrUserId Player | number
+	@param predicate ((lastSavedData: table) -> boolean)?
+	@return Promise<()>
+]=]
+function PlayerProfileManager.PromiseSave(
+	self: PPM_Internal,
+	playerOrUserId: Player | number,
+	predicate: ((lastSavedData: { [any]: any }) -> boolean)?
+): Promise<()>
+	const profile = self:GetProfile(playerOrUserId)
+	if not profile then
+		return Promise.reject(`No loaded profile for userId {self:_getUserId(playerOrUserId)}`) :: any
+	end
+	return Promise.new(function(resolve, reject, onCancel)
+		local saveConn: any = nil
+		local endConn: any = nil
+		local function cleanup()
+			if saveConn then
+				saveConn:Disconnect()
+				saveConn = nil
+			end
+			if endConn then
+				endConn:Disconnect()
+				endConn = nil
+			end
+		end
+		saveConn = profile.OnAfterSave:Connect(function(lastSavedData: { [any]: any })
+			if predicate and not predicate(lastSavedData) then
+				return
+			end
+			cleanup()
+			resolve()
+		end)
+		endConn = profile.OnSessionEnd:Connect(function()
+			cleanup()
+			reject("Profile session ended before save confirmation")
+		end)
+		onCancel(cleanup)
+		profile:Save()
+	end)
+end
+
+--[=[
 	Registers a callback for regular profile saves for a specific player.
 
 	Callbacks run in descending priority order. Higher numbers run first.

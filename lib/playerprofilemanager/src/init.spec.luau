@@ -192,6 +192,81 @@ return function(t: tiniest)
 		end)
 	end)
 
+	describe("PlayerProfileManager.PromiseSave", function()
+		local Signal = require(script.Parent.Parent.Signal) :: any
+		local manager: any
+
+		before_each(function()
+			manager = newManager()
+		end)
+
+		after_each(function()
+			manager:Destroy()
+		end)
+
+		-- Minimal Profile stand-in: Save() "persists" Data on the next tick.
+		local function makeMockProfile()
+			local profile: any
+			profile = {
+				Data = {},
+				OnAfterSave = Signal.new(),
+				OnSessionEnd = Signal.new(),
+				Save = function()
+					task.defer(function()
+						profile.OnAfterSave:Fire(profile.Data)
+					end)
+				end,
+				EndSession = function() end,
+			}
+			return profile
+		end
+
+		test("rejects when the profile is not loaded", function()
+			local success, err = manager:PromiseSave(123):await()
+			expect(success).never_is_true()
+			expect(contains(err, "No loaded profile")).is_true()
+		end)
+
+		test("resolves once a save is confirmed", function()
+			manager._PlayerProfileStorage[123] = makeMockProfile()
+			local success = manager:PromiseSave(123):await()
+			expect(success).is_true()
+			manager._PlayerProfileStorage[123] = nil
+		end)
+
+		test("waits for a persisted snapshot that satisfies the predicate", function()
+			local profile = makeMockProfile()
+			manager._PlayerProfileStorage[123] = profile
+
+			local promise = manager:PromiseSave(123, function(lastSaved)
+				return lastSaved.Flag == true
+			end)
+
+			-- First save does not satisfy the predicate.
+			profile.OnAfterSave:Fire { Flag = false }
+			expect(promise:getStatus()).is("Started")
+
+			profile.OnAfterSave:Fire { Flag = true }
+			local success = promise:await()
+			expect(success).is_true()
+			manager._PlayerProfileStorage[123] = nil
+		end)
+
+		test("rejects when the session ends before confirmation", function()
+			local profile = makeMockProfile()
+			profile.Save = function() end -- swallow the save so nothing confirms
+			manager._PlayerProfileStorage[123] = profile
+
+			local promise = manager:PromiseSave(123)
+			profile.OnSessionEnd:Fire()
+
+			local success, err = promise:await()
+			expect(success).never_is_true()
+			expect(contains(err, "session ended")).is_true()
+			manager._PlayerProfileStorage[123] = nil
+		end)
+	end)
+
 	describe("PlayerProfileManager._endProfileSession", function()
 		local manager: any
 
