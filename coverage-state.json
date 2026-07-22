@@ -1,0 +1,41 @@
+{
+  "schema": "coverage-badge-state/1",
+  "last_main_sha": "887bb478f9c426576d92fc3b91df87c202a00f34",
+  "packages": {
+    "dragdrop": {
+      "pct": 82.3,
+      "lines": 949,
+      "sha": "5060dc9ffd8c4bddc27b51599196cb011605780e"
+    },
+    "graphutil": {
+      "pct": 98.56,
+      "lines": 765,
+      "sha": "887bb478f9c426576d92fc3b91df87c202a00f34"
+    },
+    "loosetightdoublegrid": {
+      "pct": 82.65,
+      "lines": 830,
+      "sha": "5060dc9ffd8c4bddc27b51599196cb011605780e"
+    },
+    "remotecomponent": {
+      "pct": 77.51,
+      "lines": 209,
+      "sha": "5060dc9ffd8c4bddc27b51599196cb011605780e"
+    },
+    "t": {
+      "pct": 93.62,
+      "lines": 596,
+      "sha": "5060dc9ffd8c4bddc27b51599196cb011605780e"
+    },
+    "tablemanager": {
+      "pct": 96.28,
+      "lines": 3331,
+      "sha": "5060dc9ffd8c4bddc27b51599196cb011605780e"
+    },
+    "tablereplicator": {
+      "pct": 95.95,
+      "lines": 1999,
+      "sha": "5060dc9ffd8c4bddc27b51599196cb011605780e"
+    }
+  }
+}
