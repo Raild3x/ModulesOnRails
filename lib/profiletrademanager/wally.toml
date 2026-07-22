@@ -2,7 +2,7 @@
 name = "raild3x/profiletrademanager"
 description = "Handles the exchanging of data between two profiles"
 authors = ["Logan Hunt (Raildex)"]
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"

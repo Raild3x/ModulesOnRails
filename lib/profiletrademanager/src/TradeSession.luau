@@ -9,11 +9,14 @@
 	Handles negotiation state, offer management, countdown, and execution.
 
 	Key Features:
-	- Offer management for both players
+	- Offer management for both players (any offer change resets both locks)
 	- Lock/unlock mechanism for confirming trades
 	- Countdown system before execution
 	- State transitions: Negotiating → Countdown → Processing → Completed/Stopped
 	- Callback-driven item movement (validation, escrow, finalization)
+
+	All escrow-field reads/writes and confirmed saves go through the EscrowLedger;
+	this module only orchestrates the two players through the phases.
 ]=]
 
 --// Services //--
@@ -27,6 +30,7 @@ const Janitor = require(Packages.Janitor)
 
 const Types = require(script.Parent.TradeTypes)
 const TradeStore = require(script.Parent.TradeStore)
+const EscrowLedger = require(script.Parent.EscrowLedger)
 
 --// Types //--
 type Janitor = Janitor.Janitor
@@ -45,6 +49,7 @@ export type TradeFinalizeContext = Types.TradeFinalizeContext
 export type TradeRecord = Types.TradeRecord
 
 type TradeStore = TradeStore.TradeStore
+type EscrowLedger = EscrowLedger.EscrowLedger
 
 type TradeSession_Internal = TradeSession & {
 	_janitor: Janitor,
@@ -57,6 +62,7 @@ type TradeSession_Internal = TradeSession & {
 	_player1Locked: boolean,
 	_player2Locked: boolean,
 	_callbacks: TradeCallbacks,
+	_ledger: EscrowLedger,
 	_countdownSeconds: number,
 	_countdownEndsAt: number?,
 	_countdownThread: thread?,
@@ -67,25 +73,25 @@ type TradeSession_Internal = TradeSession & {
 	_executionTimeoutThread: thread?,
 	_committedPlayers: { [Player]: boolean },
 	_rollingBack: boolean,
+	_destroyRequested: boolean,
 
 	_getOffersForPlayer: (self: TradeSession_Internal, player: Player) -> { TradeOfferEntry },
 	_getLockedStateForPlayer: (self: TradeSession_Internal, player: Player) -> boolean,
 	_setLockedStateForPlayer: (self: TradeSession_Internal, player: Player, locked: boolean) -> (),
+	_resetLocks: (self: TradeSession_Internal) -> (),
 	_startCountdown: (self: TradeSession_Internal) -> (),
 	_cancelCountdown: (self: TradeSession_Internal) -> (),
 	_cancelExecutionTimeout: (self: TradeSession_Internal) -> (),
-	_waitForSave: (self: TradeSession_Internal, player: Player) -> Promise<()>,
-	_rollbackSinglePlayer: (self: TradeSession_Internal, player: Player, reason: TradeStopReason) -> (),
 	_rollbackCommitted: (self: TradeSession_Internal, reason: TradeStopReason) -> (),
 	_executeTradeAsync: (self: TradeSession_Internal) -> (),
 	_stopSession: (self: TradeSession_Internal, reason: TradeStopReason) -> (),
+	_finishDeferredDestroy: (self: TradeSession_Internal) -> (),
 }
 
 --// Constants //--
 local DEFAULT_COUNTDOWN_SECONDS = 5
 local DEFAULT_EXECUTION_TIMEOUT_SECONDS = 60
 local COUNTDOWN_TICK_INTERVAL = 1 -- How often to fire CountdownTick signal (seconds)
-local TRADE_KEY = "ProfileTradeManager_ActiveTradeSession"
 
 --// Class //--
 local TradeSession = {}
@@ -97,6 +103,7 @@ TradeSession.__index = TradeSession
 	@param player1 Player -- First player in the trade
 	@param player2 Player -- Second player in the trade
 	@param callbacks TradeCallbacks -- Callbacks for validation and item movement
+	@param ledger EscrowLedger -- Shared owner of the profile escrow fields
 	@param tradeStore TradeStore -- DataStore wrapper for recording trade state
 	@param countdownSeconds number? -- Countdown duration in seconds (default: 5)
 	@param executionTimeoutSeconds number? -- Max seconds allowed for execution before rollback (default: 60)
@@ -106,6 +113,7 @@ function TradeSession.new(
 	player1: Player,
 	player2: Player,
 	callbacks: TradeCallbacks,
+	ledger: EscrowLedger,
 	tradeStore: TradeStore,
 	countdownSeconds: number?,
 	executionTimeoutSeconds: number?
@@ -122,6 +130,7 @@ function TradeSession.new(
 	self._player1Locked = false
 	self._player2Locked = false
 	self._callbacks = callbacks
+	self._ledger = ledger
 	self._countdownSeconds = countdownSeconds or DEFAULT_COUNTDOWN_SECONDS
 	self._countdownEndsAt = nil
 	self._countdownThread = nil
@@ -132,6 +141,7 @@ function TradeSession.new(
 	self._executionTimeoutThread = nil
 	self._committedPlayers = {}
 	self._rollingBack = false
+	self._destroyRequested = false
 
 	-- Initialize signals
 	self.OfferItemAdded = self._janitor:Add(Signal.new() :: any)
@@ -150,13 +160,27 @@ end
 
 --[=[
 	Destroys the trade session and cleans up all resources.
+	If execution is in flight, destruction is deferred until it finishes —
+	tearing down signals under a running execution would corrupt the saga.
 ]=]
 function TradeSession.Destroy(self: TradeSession_Internal)
+	if self._processing then
+		self._destroyRequested = true
+		return
+	end
 	self:_cancelCountdown()
+	self:_cancelExecutionTimeout()
 	self._janitor:Destroy()
 end
 
 --// Private Methods //--
+
+function TradeSession._finishDeferredDestroy(self: TradeSession_Internal)
+	if self._destroyRequested then
+		self._destroyRequested = false
+		self:Destroy()
+	end
+end
 
 function TradeSession._getOffersForPlayer(self: TradeSession_Internal, player: Player): { TradeOfferEntry }
 	if player == self._player1 then
@@ -183,6 +207,17 @@ function TradeSession._setLockedStateForPlayer(self: TradeSession_Internal, play
 		self._player2Locked = locked
 	else
 		error(`Player {player.Name} is not part of this trade session`)
+	end
+end
+
+-- Any offer mutation invalidates both players' confirmations. Prevents the
+-- last-second-switch scam where one player edits the offer after the other locked.
+function TradeSession._resetLocks(self: TradeSession_Internal)
+	for _, player in { self._player1, self._player2 } do
+		if self:_getLockedStateForPlayer(player) then
+			self:_setLockedStateForPlayer(player, false)
+			self.OfferUnlocked:Fire(player)
+		end
 	end
 end
 
@@ -230,56 +265,9 @@ function TradeSession._cancelExecutionTimeout(self: TradeSession_Internal)
 	end
 end
 
--- Waits for the player's profile to be saved. The connection is one-shot and
--- cleans itself up after firing. Cancellation disconnects the callback.
-function TradeSession._waitForSave(self: TradeSession_Internal, player: Player): Promise<()>
-	return Promise.new(function(resolve, _, onCancel)
-		local connection: any = nil
-		connection = self._callbacks.RegisterSaveCallback(player, function()
-			if connection then
-				connection:Disconnect()
-				connection = nil
-			end
-			resolve()
-		end)
-		onCancel(function()
-			if connection then
-				connection:Disconnect()
-				connection = nil
-			end
-		end)
-	end)
-end
-
--- Rolls back a single player who has already committed their outgoing items.
--- Calls RollbackOffer, clears their trade fields, and triggers a save.
-function TradeSession._rollbackSinglePlayer(self: TradeSession_Internal, player: Player, reason: TradeStopReason)
-	const profile = self._callbacks.GetProfile(player)
-	const outgoing = if profile and profile.Data[TRADE_KEY] then profile.Data[TRADE_KEY].outgoing else nil
-	pcall(function()
-		const ctx: TradeRollbackContext = {
-			Session = self :: any,
-			Player = player,
-			Outgoing = outgoing,
-			Reason = reason,
-		}
-		self._callbacks.RollbackOffer(ctx)
-	end)
-	if profile and profile.Data[TRADE_KEY] then
-		profile.Data[TRADE_KEY].outgoing = nil
-		profile.Data[TRADE_KEY].incoming = nil
-		profile.Data[TRADE_KEY].received = nil
-		profile.Data[TRADE_KEY].claimed = nil
-		profile.Data[TRADE_KEY].tradeId = nil
-		profile.Data[TRADE_KEY].jobId = nil
-		profile.Data[TRADE_KEY].executionStart = nil
-	end
-	self._callbacks.TriggerSave(player)
-end
-
 -- Rolls back all players who successfully committed their outgoing items.
--- Cancels the execution timeout, calls RollbackOffer for each committed player,
--- finalizes the DataStore record, and fires the Stopped signal.
+-- Cancels the execution timeout, rolls each committed player back through the
+-- ledger, finalizes the DataStore record as rolledback, and stops the session.
 function TradeSession._rollbackCommitted(self: TradeSession_Internal, reason: TradeStopReason)
 	if self._rollingBack then
 		return
@@ -289,13 +277,17 @@ function TradeSession._rollbackCommitted(self: TradeSession_Internal, reason: Tr
 	self:_cancelExecutionTimeout()
 
 	for player in self._committedPlayers do
-		self:_rollbackSinglePlayer(player, reason)
+		const ok, err = (self._ledger:Rollback(player, reason, self) :: any):await()
+		if not ok then
+			warn(
+				`[TradeSession] Rollback failed for {player.Name}: {err}.`
+					.. ` Escrow state kept; recovery will retry on rejoin.`
+			)
+		end
 	end
 	table.clear(self._committedPlayers)
 
-	task.spawn(function()
-		self._tradeStore:FinalizeAsync(self._sessionId, "rolledback")
-	end)
+	self._tradeStore:FinalizeAsync(self._sessionId, "rolledback")
 
 	self:_stopSession(reason)
 end
@@ -331,6 +323,7 @@ function TradeSession._executeTradeAsync(self: TradeSession_Internal)
 					`[TradeSession] Pre-flight validation failed for {pair.player.Name}:`
 						.. ` offer={offer.OfferId} reason={errMsg}`
 				)
+				self:_finishDeferredDestroy()
 				return
 			end
 		end
@@ -340,24 +333,34 @@ function TradeSession._executeTradeAsync(self: TradeSession_Internal)
 	const executionStart = os.time()
 	const jobId = game.JobId
 
-	-- Write the initial TradeRecord to the DataStore (fire-and-forget; non-fatal if it fails).
-	task.spawn(function()
-		self._tradeStore:WriteAsync {
-			tradeId = tradeId,
-			jobId = jobId,
-			player1Id = self._player1.UserId,
-			player2Id = self._player2.UserId,
-			player1Phase = 0,
-			player2Phase = 0,
-			executionStart = executionStart,
-			status = "active",
-			completedAt = nil,
-			expiresAt = nil,
-		}
-	end)
+	-- =========================================================================
+	-- Record write (blocking). The TradeRecord is recovery's cross-player
+	-- source of truth; nothing may be escrowed until it exists. Aborting here
+	-- is free — no mutations have happened yet.
+	-- =========================================================================
+	const _, writeSucceeded = (self._tradeStore:WriteAsync {
+		tradeId = tradeId,
+		jobId = jobId,
+		player1Id = self._player1.UserId,
+		player2Id = self._player2.UserId,
+		player1Phase = 0,
+		player2Phase = 0,
+		executionStart = executionStart,
+		status = "active",
+		completedAt = nil,
+		expiresAt = nil,
+	} :: any):await()
 
-	-- Start the execution timeout. If phases 1-3 don't complete in time,
-	-- rollback all committed players.
+	if not writeSucceeded then
+		warn(`[TradeSession] Could not write TradeRecord for {tradeId}. Aborting before escrow.`)
+		self._processing = false
+		self:_stopSession("ProcessingFailed")
+		self:_finishDeferredDestroy()
+		return
+	end
+
+	-- Start the execution timeout. If the phases don't complete before the
+	-- point of no return in time, rollback all committed players.
 	self._executionTimeoutThread = task.delay(self._executionTimeoutSeconds, function()
 		if self._status == "Processing" :: any then
 			warn(
@@ -368,16 +371,28 @@ function TradeSession._executeTradeAsync(self: TradeSession_Internal)
 		end
 	end)
 
+	-- Bail-out helper: true if a concurrent rollback (timeout) or stop landed
+	-- while we were yielding on a save.
+	const function interrupted(): boolean
+		return self._rollingBack or self._status ~= ("Processing" :: any)
+	end
+
 	-- =========================================================================
 	-- Phase 1: Commit Outgoing (concurrent)
-	-- Both players' commits run simultaneously. Each player atomically removes
-	-- their offered items from inventory (via MoveOfferToEscrow) and the package
-	-- writes trade metadata to the profile, then forces a save.
-	-- A _rollingBack guard prevents double-rollback if the timeout fires while
-	-- a commit coroutine is still in-flight after a yield.
+	-- Both players' commits run simultaneously. Each player's offered items are
+	-- moved to escrow by the consumer (MoveOfferToEscrow writes into ctx.Trade),
+	-- then the ledger stamps the trade metadata and confirms the save.
 	-- =========================================================================
-	const function commitPlayer(player: Player, offers: { TradeOfferEntry }, playerIndex: number): Promise<()>
+	const function commitPlayer(player: Player, offers: { TradeOfferEntry }): Promise<()>
 		return Promise.new(function(resolve, reject)
+			const tradeOk, tradeOrErr = pcall(function()
+				return self._ledger:EnsureTrade(player)
+			end)
+			if not tradeOk then
+				reject(tradeOrErr)
+				return
+			end
+
 			-- Escrow each item. This is the consumer's atomic inventory mutation.
 			local escrowOk, escrowErr = pcall(function()
 				for _, offer in offers do
@@ -385,222 +400,183 @@ function TradeSession._executeTradeAsync(self: TradeSession_Internal)
 						Session = self :: any,
 						Player = player,
 						IdentifyingData = offer.IdentifierData,
+						Trade = tradeOrErr,
 					}
 					self._callbacks.MoveOfferToEscrow(ctx)
 				end
 			end)
 			if not escrowOk then
+				-- A partial multi-item escrow may have already moved items in
+				-- memory. Restore them (Rollback with no outgoing is a no-op
+				-- beyond clearing the escrow table).
+				const rbOk, rbErr = (self._ledger:Rollback(player, "ProcessingFailed", self) :: any):await()
+				if not rbOk then
+					warn(`[TradeSession] Post-escrow-failure rollback failed for {player.Name}: {rbErr}`)
+				end
 				reject(escrowErr)
 				return
 			end
 
-			-- Write trade metadata to the profile so recovery can find this trade.
-			const profile = self._callbacks.GetProfile(player)
-			if not profile then
-				reject(`Profile for {player.Name} not found after escrow`)
-				return
-			end
-			if not profile.Data[TRADE_KEY] then
-				profile.Data[TRADE_KEY] = {}
-			end
-			profile.Data[TRADE_KEY].tradeId = tradeId
-			profile.Data[TRADE_KEY].jobId = jobId
-			profile.Data[TRADE_KEY].executionStart = executionStart
-
-			-- Force save and wait. TriggerSave is called before RegisterSaveCallback
-			-- so the queued save will include all data written above.
-			self._callbacks.TriggerSave(player)
-			const saveOk, saveErr = (self:_waitForSave(player) :: any):await()
-			if not saveOk then
-				reject(saveErr)
+			const commitOk, commitErr = (self._ledger:BeginCommit(player, {
+				tradeId = tradeId,
+				jobId = jobId,
+				executionStart = executionStart,
+			}) :: any):await()
+			if not commitOk then
+				-- The escrow mutation is live in memory even though the commit
+				-- didn't confirm. Restore it now so a later autosave can't
+				-- persist a half-escrowed profile.
+				const rbOk, rbErr = (self._ledger:Rollback(player, "ProcessingFailed", self) :: any):await()
+				if not rbOk then
+					warn(`[TradeSession] Post-commit-failure rollback failed for {player.Name}: {rbErr}`)
+				end
+				reject(commitErr)
 				return
 			end
 
-			-- After the yield: check whether rollback was triggered while we were saving.
-			-- If so, immediately roll back this player (their escrow succeeded) and bail.
+			-- After the yield: check whether rollback was triggered while we were
+			-- saving. If so, immediately roll back this player (their escrow
+			-- succeeded and is persisted) and bail.
 			if self._rollingBack then
-				self:_rollbackSinglePlayer(player, "ProcessingFailed")
+				const rbOk, rbErr = (self._ledger:Rollback(player, "ProcessingFailed", self) :: any):await()
+				if not rbOk then
+					warn(`[TradeSession] Mid-commit rollback failed for {player.Name}: {rbErr}`)
+				end
 				reject("Trade rolled back during commit")
 				return
 			end
 
 			self._committedPlayers[player] = true
-			task.spawn(function()
-				self._tradeStore:UpdatePhaseAsync(tradeId, playerIndex, 1)
-			end)
+			self._tradeStore:UpdatePhaseAsync(tradeId, if player == self._player1 then 1 else 2, 1)
 			resolve()
 		end)
 	end
 
 	const phase1Ok, phase1Err = Promise.all({
-		commitPlayer(self._player1, self._player1Offers, 1) :: any,
-		commitPlayer(self._player2, self._player2Offers, 2) :: any,
+		commitPlayer(self._player1, self._player1Offers) :: any,
+		commitPlayer(self._player2, self._player2Offers) :: any,
 	}):await()
 
 	if not phase1Ok then
 		warn(`[TradeSession] Phase 1 failed: {phase1Err}`)
 		self:_rollbackCommitted("ProcessingFailed")
+		self:_finishDeferredDestroy()
+		return
+	end
+	if interrupted() then
+		self:_finishDeferredDestroy()
 		return
 	end
 
 	-- =========================================================================
 	-- Phase 2: Copy Incoming (sequential)
-	-- The package reads each player's outgoing blob from their loaded profile
-	-- and writes it to the other player's incoming field, then forces a save.
-	-- Both profiles are guaranteed to be on this server at this point.
+	-- The ledger copies each player's outgoing blob into the other player's
+	-- incoming field and confirms the save. Both profiles are loaded on this
+	-- server at this point.
 	-- =========================================================================
 	do
-		const p1Profile = self._callbacks.GetProfile(self._player1)
-		const p2Profile = self._callbacks.GetProfile(self._player2)
-		if not p1Profile or not p2Profile then
-			warn(`[TradeSession] Phase 2: profile missing. Rolling back.`)
-			self:_rollbackCommitted("ProcessingFailed")
-			return
-		end
-
-		-- Capture both outgoing values before writing incoming (same profile objects).
-		const p1Outgoing = p1Profile.Data[TRADE_KEY] and p1Profile.Data[TRADE_KEY].outgoing
-		const p2Outgoing = p2Profile.Data[TRADE_KEY] and p2Profile.Data[TRADE_KEY].outgoing
-
-		-- P2 receives P1's items
-		if not p2Profile.Data[TRADE_KEY] then
-			p2Profile.Data[TRADE_KEY] = {}
-		end
-		p2Profile.Data[TRADE_KEY].incoming = p1Outgoing
-		self._callbacks.TriggerSave(self._player2)
-		const p2CopyOk, p2CopyErr = (self:_waitForSave(self._player2) :: any):await()
+		const p2CopyOk, p2CopyErr = (self._ledger:CopyIncoming(self._player2, self._player1) :: any):await()
 		if not p2CopyOk then
-			warn(`[TradeSession] Phase 2: P2 save failed: {p2CopyErr}. Rolling back.`)
+			warn(`[TradeSession] Phase 2: P2 copy failed: {p2CopyErr}. Rolling back.`)
 			self:_rollbackCommitted("ProcessingFailed")
+			self:_finishDeferredDestroy()
 			return
 		end
-		task.spawn(function()
-			self._tradeStore:UpdatePhaseAsync(tradeId, 2, 2)
-		end)
+		self._tradeStore:UpdatePhaseAsync(tradeId, 2, 2)
+		if interrupted() then
+			self:_finishDeferredDestroy()
+			return
+		end
 
-		-- P1 receives P2's items
-		if not p1Profile.Data[TRADE_KEY] then
-			p1Profile.Data[TRADE_KEY] = {}
-		end
-		p1Profile.Data[TRADE_KEY].incoming = p2Outgoing
-		self._callbacks.TriggerSave(self._player1)
-		const p1CopyOk, p1CopyErr = (self:_waitForSave(self._player1) :: any):await()
+		const p1CopyOk, p1CopyErr = (self._ledger:CopyIncoming(self._player1, self._player2) :: any):await()
 		if not p1CopyOk then
-			warn(`[TradeSession] Phase 2: P1 save failed: {p1CopyErr}. Rolling back.`)
+			warn(`[TradeSession] Phase 2: P1 copy failed: {p1CopyErr}. Rolling back.`)
 			self:_rollbackCommitted("ProcessingFailed")
+			self:_finishDeferredDestroy()
 			return
 		end
-		task.spawn(function()
-			self._tradeStore:UpdatePhaseAsync(tradeId, 1, 2)
-		end)
+		self._tradeStore:UpdatePhaseAsync(tradeId, 1, 2)
+		if interrupted() then
+			self:_finishDeferredDestroy()
+			return
+		end
 	end
 
 	-- =========================================================================
 	-- Phase 3: Mark Received (sequential)
-	-- Both players' profiles have received = true, confirming that incoming data
-	-- is saved. The point of no return is when P1's received = true is persisted.
-	-- After that, P1 cannot be safely rolled back — recovery handles both players
-	-- on rejoin if P2's save fails.
+	-- The point of no return is crossed when BOTH of these are durable:
+	--   1. P1's received = true is persisted in P1's profile.
+	--   2. The TradeRecord shows P1 at phase 3 (this update is awaited).
+	-- After that, rollback is no longer safe: recovery claims for any player
+	-- whose own received is set OR whose partner's record phase is >= 3.
 	-- =========================================================================
 	do
-		const p1Profile = self._callbacks.GetProfile(self._player1)
-		const p2Profile = self._callbacks.GetProfile(self._player2)
-		if not p1Profile or not p2Profile then
-			warn(`[TradeSession] Phase 3: profile missing. Rolling back.`)
-			self:_rollbackCommitted("ProcessingFailed")
-			return
-		end
-
-		p1Profile.Data[TRADE_KEY].received = true
-		self._callbacks.TriggerSave(self._player1)
-		const p1RecvOk, p1RecvErr = (self:_waitForSave(self._player1) :: any):await()
+		const p1RecvOk, p1RecvErr = (self._ledger:MarkReceived(self._player1) :: any):await()
 		if not p1RecvOk then
-			warn(`[TradeSession] Phase 3: P1 save failed: {p1RecvErr}. Rolling back.`)
+			warn(`[TradeSession] Phase 3: P1 mark-received failed: {p1RecvErr}. Rolling back.`)
 			self:_rollbackCommitted("ProcessingFailed")
+			self:_finishDeferredDestroy()
 			return
 		end
-		self._tradeStore:UpdatePhaseAsync(tradeId, 1, 3)
+		if interrupted() then
+			self:_finishDeferredDestroy()
+			return
+		end
 
-		-- P1 is past the point of no return. Cancel the timeout — rollback is no
-		-- longer safe. If P2's save fails, recovery will finalize both on rejoin.
+		-- Blocking: the record must witness P1's phase 3 before we give up the
+		-- ability to roll back — it is what tells P2's recovery to complete
+		-- rather than refund if this server dies right after this point.
+		const _, p1PhaseRecorded = (self._tradeStore:UpdatePhaseAsync(tradeId, 1, 3) :: any):await()
+		if not p1PhaseRecorded then
+			warn(`[TradeSession] Phase 3: could not record P1 phase 3. Rolling back.`)
+			self:_rollbackCommitted("ProcessingFailed")
+			self:_finishDeferredDestroy()
+			return
+		end
+		if interrupted() then
+			self:_finishDeferredDestroy()
+			return
+		end
+
+		-- Past the point of no return. Rollback is no longer valid.
 		self:_cancelExecutionTimeout()
 
-		p2Profile.Data[TRADE_KEY].received = true
-		self._callbacks.TriggerSave(self._player2)
-		const p2RecvOk, p2RecvErr = (self:_waitForSave(self._player2) :: any):await()
+		const p2RecvOk, p2RecvErr = (self._ledger:MarkReceived(self._player2) :: any):await()
 		if not p2RecvOk then
 			warn(
-				`[TradeSession] Phase 3: P2 save failed: {p2RecvErr}.`
-					.. ` P1 is past the point of no return; recovery will finalize both players on rejoin.`
+				`[TradeSession] Phase 3: P2 mark-received failed: {p2RecvErr}.`
+					.. ` Past the point of no return; recovery will finalize both players on rejoin.`
 			)
 			self:_stopSession("ProcessingFailed")
+			self:_finishDeferredDestroy()
 			return
 		end
 		self._tradeStore:UpdatePhaseAsync(tradeId, 2, 3)
 	end
 
 	-- =========================================================================
-	-- Phase 4: Claim (sequential)
-	-- Both players have received = true. Cancel the execution timeout if it was
-	-- not already cancelled at the end of Phase 3. The package calls FinalizeOffer
-	-- for each receiving player, then clears all trade fields. If FinalizeOffer
-	-- throws, claimed = true stays in the profile so recovery can retry on rejoin.
+	-- Phase 4: Claim (concurrent)
+	-- The ledger finalizes each receiving player: FinalizeOffer + claimed=true
+	-- + field clear persist atomically with the consumer's inventory add. A
+	-- failed claim keeps received + incoming intact, so recovery retries it.
 	-- =========================================================================
-	self:_cancelExecutionTimeout()
-
-	const function finalizePlayer(player: Player)
-		const profile = self._callbacks.GetProfile(player)
-		if not profile then
-			warn(`[TradeSession] Phase 4: profile for {player.Name} missing. Will be claimed on rejoin.`)
-			return Promise.reject()
+	const claimResults: { any } = Promise.allSettled({
+		self._ledger:Claim(self._player1, self) :: any,
+		self._ledger:Claim(self._player2, self) :: any,
+	}):expect()
+	for i, status in claimResults do
+		if status ~= "Resolved" then
+			const player = if i == 1 then self._player1 else self._player2
+			warn(`[TradeSession] Phase 4: claim did not complete for {player.Name}. Recovery will retry on rejoin.`)
 		end
-
-		const incoming = profile.Data[TRADE_KEY] and profile.Data[TRADE_KEY].incoming
-		const finalizeOk, finalizeErr = pcall(function()
-			const ctx: TradeFinalizeContext = {
-				Session = self :: any,
-				Player = player,
-				Incoming = incoming,
-			}
-			self._callbacks.FinalizeOffer(ctx)
-		end)
-		if not finalizeOk then
-			warn(
-				`[TradeSession] Phase 4: FinalizeOffer for {player.Name} failed: {finalizeErr}.`
-					.. ` Item will be claimed via recovery on rejoin.`
-			)
-		end
-
-		-- Always mark claimed and clear fields so recovery knows where we are.
-		profile.Data[TRADE_KEY].claimed = true
-		profile.Data[TRADE_KEY].incoming = nil
-		profile.Data[TRADE_KEY].outgoing = nil
-		profile.Data[TRADE_KEY].received = nil
-		profile.Data[TRADE_KEY].tradeId = nil
-		profile.Data[TRADE_KEY].jobId = nil
-		profile.Data[TRADE_KEY].executionStart = nil
-		self._callbacks.TriggerSave(player)
-		return self:_waitForSave(player):andThen(function()
-			-- Once the save confirms, fully clear the Trade table if everything went well.
-			if finalizeOk then
-				profile.Data[TRADE_KEY] = nil
-			end
-		end)
 	end
 
-	Promise.allSettled({
-		finalizePlayer(self._player1),
-		finalizePlayer(self._player2),
-	})
-		:andThen(function()
-			-- Update DataStore phases and finalize the record regardless of per-player errors.
-			self._tradeStore:FinalizeWithPhasesAsync(tradeId, 4, 4, "completed")
-		end)
-		:await()
+	const _, _ = (self._tradeStore:FinalizeWithPhasesAsync(tradeId, 4, 4, "completed") :: any):await()
 
 	self._status = "Completed"
 	self._processing = false
 	self.Completed:Fire(self._player1, self._player2)
+	self:_finishDeferredDestroy()
 end
 
 function TradeSession._stopSession(self: TradeSession_Internal, reason: TradeStopReason)
@@ -619,6 +595,7 @@ end
 --[=[
 	Adds an offer item to the player's side of the trade.
 	Validates the offer before adding it to the session.
+	Resets both players' locks — any offer change invalidates confirmations.
 	@param player Player -- The player adding the offer (must be part of this session)
 	@param identifierData TradeOfferPayload -- Consumer-owned data identifying the item
 	@return TradeOfferEntry -- The created offer entry with a unique OfferId
@@ -651,12 +628,14 @@ function TradeSession.AddOfferItem(
 	const offers = self:_getOffersForPlayer(player)
 	table.insert(offers, offer)
 
+	self:_resetLocks()
 	self.OfferItemAdded:Fire(player, offer)
 	return offer
 end
 
 --[=[
 	Removes an offer item from the player's side of the trade.
+	Resets both players' locks — any offer change invalidates confirmations.
 	@param player Player -- The player removing the offer
 	@param offerId string -- The unique ID of the offer to remove
 ]=]
@@ -668,6 +647,7 @@ function TradeSession.RemoveOfferItem(self: TradeSession_Internal, player: Playe
 	for i, offer in offers do
 		if offer.OfferId == offerId then
 			table.remove(offers, i)
+			self:_resetLocks()
 			self.OfferItemRemoved:Fire(player, offer)
 			return
 		end

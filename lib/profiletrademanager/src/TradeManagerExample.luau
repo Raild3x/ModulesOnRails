@@ -1,16 +1,20 @@
 --!strict
 --[=[
 	@ignore
-	Example integration of TradeManager with PlayerProfileManager.
+	Example integration of TradeManager with PlayerProfileManager (PPM).
 
-	This shows how to implement the TradeCallbacks to work with PPM's profile system.
+	This shows how to implement the TradeCallbacks against PPM's profile system.
+	The package owns all escrow state (profile.Data[TradeDataKey]) — these
+	callbacks only move items between the consumer's inventory and the contexts
+	the package hands them.
 ]=]
 
-local TradeManager = require(script.Parent.TradeManager)
+local TradeManager = require(script.Parent)
 local Types = require(script.Parent.TradeTypes)
 
 type TradeCallbacks = Types.TradeCallbacks
 type TradeOfferContext = Types.TradeOfferContext
+type TradeFinalizeContext = Types.TradeFinalizeContext
 type TradeRollbackContext = Types.TradeRollbackContext
 
 --[=[
@@ -19,11 +23,14 @@ type TradeRollbackContext = Types.TradeRollbackContext
 	This factory function creates a TradeCallbacks table that integrates with PPM.
 	Customize ValidateItem, RemoveItem, and AddItem for your specific inventory system.
 ]=]
-local function CreatePPMCallbacks(ppm: any, config: {
-	ValidateItem: (profile: any, itemData: any) -> (boolean, string?),
-	RemoveItem: (profile: any, itemData: any) -> (),
-	AddItem: (profile: any, itemData: any) -> (),
-}): TradeCallbacks
+local function CreatePPMCallbacks(
+	ppm: any,
+	config: {
+		ValidateItem: (profile: any, itemData: any) -> (boolean, string?),
+		RemoveItem: (profile: any, itemData: any) -> (),
+		AddItem: (profile: any, itemData: any) -> (),
+	}
+): TradeCallbacks
 	return {
 		-- Validate that the item exists and can be traded
 		ValidateOffer = function(context: TradeOfferContext): (boolean, string?)
@@ -31,64 +38,48 @@ local function CreatePPMCallbacks(ppm: any, config: {
 			if not profile then
 				return false, "Profile not loaded"
 			end
-
-			-- Validate against LastSavedData for safety
-			local lastSaved = profile.LastSavedData
-			if not lastSaved then
-				return false, "No saved data available"
-			end
-
 			return config.ValidateItem(profile, context.IdentifyingData)
 		end,
 
-		-- Move item from inventory to escrow (Data.Trade.outgoing)
+		-- Phase 1: remove the item from inventory and accumulate it into the
+		-- escrow table the package hands us (context.Trade). Do NOT save here —
+		-- the package commits and confirms the save itself.
 		MoveOfferToEscrow = function(context: TradeOfferContext)
 			local profile = ppm:GetProfile(context.Player)
 			if not profile then
 				error("Profile not loaded")
 			end
-
-			-- Initialize escrow if needed
-			profile.Data.Trade = profile.Data.Trade or {}
-			local escrow = profile.Data.Trade
-
-			-- Remove from inventory, store in escrow
 			config.RemoveItem(profile, context.IdentifyingData)
-			escrow.outgoing = context.IdentifyingData
-			escrow.tradeId = context.Session:GetSessionId()
-			escrow.executionStart = os.time()
 
-			-- Trigger save (async, doesn't wait)
-			profile:Save()
+			local trade = context.Trade :: { [string]: any }
+			trade.outgoing = trade.outgoing or {}
+			table.insert(trade.outgoing, context.IdentifyingData)
 		end,
 
-		-- Complete trade or rollback
-		MoveOfferToData = function(context: TradeOfferContext, rollback: TradeRollbackContext)
+		-- Phase 4: add the received items to the player's inventory.
+		FinalizeOffer = function(context: TradeFinalizeContext)
 			local profile = ppm:GetProfile(context.Player)
 			if not profile then
 				error("Profile not loaded")
 			end
-
-			local escrow = profile.Data.Trade
-			if not escrow then
-				warn("No escrow data found during MoveOfferToData")
-				return
-			end
-
-			if rollback.Reason then
-				-- ROLLBACK: Return outgoing item to inventory
-				if escrow.outgoing then
-					config.AddItem(profile, escrow.outgoing)
+			if context.Incoming ~= nil then
+				for _, itemData in context.Incoming :: { any } do
+					config.AddItem(profile, itemData)
 				end
-			else
-				-- COMPLETE: Add incoming item to inventory
-				-- Note: context.IdentifyingData is the item from the OTHER player
-				config.AddItem(profile, context.IdentifyingData)
 			end
+		end,
 
-			-- Clear escrow
-			profile.Data.Trade = nil
-			profile:Save()
+		-- Rollback/recovery: return the escrowed items to the player's inventory.
+		RollbackOffer = function(context: TradeRollbackContext)
+			local profile = ppm:GetProfile(context.Player)
+			if not profile then
+				error("Profile not loaded")
+			end
+			if context.Outgoing ~= nil then
+				for _, itemData in context.Outgoing :: { any } do
+					config.AddItem(profile, itemData)
+				end
+			end
 		end,
 
 		-- Profile utilities
@@ -96,16 +87,10 @@ local function CreatePPMCallbacks(ppm: any, config: {
 			return ppm:GetProfile(player)
 		end,
 
-		TriggerSave = function(player: Player)
-			local profile = ppm:GetProfile(player)
-			if profile then
-				profile:Save()
-			end
-		end,
-
-		RegisterSaveCallback = function(player: Player, callback: () -> ()): any
-			-- Returns a connection that can be disconnected
-			return ppm:OnSave(player, callback)
+		-- Save-and-confirm. PPM's PromiseSave resolves once a persisted snapshot
+		-- satisfies the package's predicate (i.e. the escrow write actually landed).
+		CommitProfile = function(player: Player, isPersisted: ((lastSavedData: { [any]: any }) -> boolean)?): any
+			return ppm:PromiseSave(player, isPersisted)
 		end,
 	}
 end
@@ -136,11 +121,20 @@ local function ExampleUsage(ppm: any)
 		end,
 	})
 
-	local tradeManager = TradeManager.new({
+	local tradeManager = TradeManager.new {
 		Callbacks = callbacks,
 		RequestExpirySeconds = 60,
 		CountdownSeconds = 5,
-	})
+	}
+
+	-- Run recovery whenever a profile finishes loading, before the player can act.
+	ppm.PlayerProfileLoadSuccess:Connect(function(userId: number)
+		local player = game:GetService("Players"):GetPlayerByUserId(userId)
+		local profile = ppm:GetProfile(userId)
+		if player and profile then
+			tradeManager:RecoverPlayerAsync(player, profile)
+		end
+	end)
 
 	return tradeManager
 end

@@ -21,28 +21,32 @@
 	local callbacks = {
 		ValidateOffer = function(context) -- Check if item can be traded
 			local profile = ppm:GetProfile(context.Player)
-			return profile.Data.Inventory[context.IdentifyingData] ~= nil
-		end,
-		MoveOfferToEscrow = function(context) -- Move to escrow
-			local profile = ppm:GetProfile(context.Player)
-			profile.Data.Trade = { outgoing = context.IdentifyingData }
-			profile:Save()
-		end,
-		MoveOfferToData = function(context, rollback) -- Complete or rollback
-			local profile = ppm:GetProfile(context.Player)
-			if rollback.Reason then
-				-- Rollback: return to inventory
-				profile.Data.Inventory[profile.Data.Trade.outgoing] = true
-			else
-				-- Complete: add received item
-				profile.Data.Inventory[context.IdentifyingData] = true
+			if not profile then
+				return false, "Profile not loaded"
 			end
-			profile.Data.Trade = nil
-			profile:Save()
+			return profile.Data.Inventory[context.IdentifyingData] ~= nil, "Item not in inventory"
 		end,
-		GetProfile = function(player) return ppm:GetProfile(player) end,
-		TriggerSave = function(player) ppm:GetProfile(player):Save() end,
-		RegisterSaveCallback = function(player, callback) return ppm:OnSave(player, callback) end,
+		MoveOfferToEscrow = function(context) -- Remove from inventory, accumulate into escrow
+			local profile = ppm:GetProfile(context.Player)
+			profile.Data.Inventory[context.IdentifyingData] = nil
+			context.Trade.outgoing = context.IdentifyingData
+		end,
+		FinalizeOffer = function(context) -- Add the received items to inventory
+			local profile = ppm:GetProfile(context.Player)
+			if context.Incoming ~= nil then
+				profile.Data.Inventory[context.Incoming] = true
+			end
+		end,
+		RollbackOffer = function(context) -- Return escrowed items to inventory
+			local profile = ppm:GetProfile(context.Player)
+			profile.Data.Inventory[context.Outgoing] = true
+		end,
+		GetProfile = function(player)
+			return ppm:GetProfile(player)
+		end,
+		CommitProfile = function(player, isPersisted)
+			return ppm:PromiseSave(player, isPersisted)
+		end,
 	}
 
 	local tradeManager = TradeManager.new({
@@ -67,6 +71,7 @@ local Types = require(script.TradeTypes)
 local TradeSession = require(script.TradeSession)
 local TradeStore = require(script.TradeStore)
 local TradeRecovery = require(script.TradeRecovery)
+local EscrowLedger = require(script.EscrowLedger)
 
 --// Types //--
 type Janitor = Janitor.Janitor
@@ -77,20 +82,19 @@ export type TradeSession = Types.TradeSession
 export type TradeRequest = Types.TradeRequest
 export type TradeCallbacks = Types.TradeCallbacks
 export type TradeStopReason = Types.TradeStopReason
-export type PendingRecoveryEntry = TradeRecovery.PendingRecoveryEntry
 
 type TradeManager_Internal = TradeManager & {
 	_janitor: Janitor,
 	_config: TradeManagerConfig,
 	_callbacks: TradeCallbacks,
 	_tradeStore: TradeStore.TradeStore, -- TradeStore module's exported type
+	_ledger: EscrowLedger.EscrowLedger,
 	_requestExpirySeconds: number,
 	_countdownSeconds: number,
 	_executionTimeoutSeconds: number,
 	_requests: { TradeRequest },
 	_sessions: { [string]: TradeSession }, -- sessionId -> session
 	_playerSessions: { [number]: string }, -- userId -> sessionId
-	_pendingRecovery: { [string]: PendingRecoveryEntry }, -- tradeId -> pending entry
 
 	_cleanupExpiredRequests: (self: TradeManager_Internal) -> (),
 	_getRequestKey: (prompter: Player, receiver: Player) -> string,
@@ -105,6 +109,7 @@ type TradeManager_Internal = TradeManager & {
 local DEFAULT_REQUEST_EXPIRY_SECONDS = 60
 local DEFAULT_COUNTDOWN_SECONDS = 5
 local DEFAULT_EXECUTION_TIMEOUT_SECONDS = 60
+local DEFAULT_TRADE_DATA_KEY = "TRADE_SESSION"
 local REQUEST_CLEANUP_INTERVAL = 10 -- How often to check for expired requests (seconds)
 
 --// Class //--
@@ -124,8 +129,7 @@ function TradeManager.new(config: TradeManagerConfig): TradeManager
 	assert(config.Callbacks.FinalizeOffer, "FinalizeOffer callback is required")
 	assert(config.Callbacks.RollbackOffer, "RollbackOffer callback is required")
 	assert(config.Callbacks.GetProfile, "GetProfile callback is required")
-	assert(config.Callbacks.TriggerSave, "TriggerSave callback is required")
-	assert(config.Callbacks.RegisterSaveCallback, "RegisterSaveCallback callback is required")
+	assert(config.Callbacks.CommitProfile, "CommitProfile callback is required")
 
 	local self = setmetatable({} :: any, TradeManager) :: TradeManager_Internal
 
@@ -138,8 +142,8 @@ function TradeManager.new(config: TradeManagerConfig): TradeManager
 	self._requests = {}
 	self._sessions = {}
 	self._playerSessions = {}
-	self._pendingRecovery = {}
 	self._tradeStore = TradeStore.new(config.TradeStoreOverride, config.TradeRecordTtlSeconds)
+	self._ledger = EscrowLedger.new(config.Callbacks, config.TradeDataKey or DEFAULT_TRADE_DATA_KEY)
 
 	-- Initialize signals
 	self.TradeStarted = self._janitor:Add(Signal.new() :: any)
@@ -147,16 +151,13 @@ function TradeManager.new(config: TradeManagerConfig): TradeManager
 	self.TradePrompted = self._janitor:Add(Signal.new() :: any)
 	self.TradePromptCancelled = self._janitor:Add(Signal.new() :: any)
 
-	-- Start periodic request cleanup
-	self._janitor:Add(
-		task.spawn(function()
-			while true do
-				task.wait(REQUEST_CLEANUP_INTERVAL)
-				self:_cleanupExpiredRequests()
-			end
-		end),
-		"cancel"
-	)
+	-- Start periodic request cleanup (threads are task.cancel'd by the janitor)
+	self._janitor:Add(task.spawn(function()
+		while true do
+			task.wait(REQUEST_CLEANUP_INTERVAL)
+			self:_cleanupExpiredRequests()
+		end
+	end))
 
 	-- Listen for player leaving to clean up sessions
 	self._janitor:Add(
@@ -164,7 +165,10 @@ function TradeManager.new(config: TradeManagerConfig): TradeManager
 			local sessionId = self._playerSessions[player.UserId]
 			if sessionId then
 				local session = self._sessions[sessionId]
-				if session then
+				-- A session mid-execution must not be torn down under the running
+				-- saga: the leaver's saves reject, execution rolls back or recovery
+				-- resolves it, and the Completed/Stopped signal removes the session.
+				if session and not session:IsProcessing() then
 					local player1, player2 = session:GetPlayers()
 					self:_removeSession(sessionId)
 					self.TradeStopped:Fire(player1.UserId, player2.UserId, "PlayerLeft")
@@ -243,6 +247,7 @@ function TradeManager._createSession(self: TradeManager_Internal, player1: Playe
 		player1,
 		player2,
 		self._callbacks,
+		self._ledger,
 		self._tradeStore,
 		self._countdownSeconds,
 		self._executionTimeoutSeconds
@@ -327,6 +332,8 @@ function TradeManager.AcceptTradeRequest(self: TradeManager_Internal, receiver: 
 	local request = self:_findRequest(prompter, receiver)
 	assert(request, `No trade request found from {prompter.Name} to {receiver.Name}`)
 	assert(request.Receiver == receiver, "You are not the receiver of this request")
+	assert(not self:HasTradeSession(receiver), `{receiver.Name} is already in an active trade session`)
+	assert(not self:HasTradeSession(prompter), `{prompter.Name} is already in an active trade session`)
 
 	-- Check expiry
 	if request.ExpiresAt and request.ExpiresAt <= os.time() then
@@ -447,15 +454,17 @@ end
 
 --[=[
 	Call this when a player's profile loads to check for and recover any in-flight
-	trade from a prior session. Must be called before giving the player control.
+	trade from a prior session. Must be called before giving the player control,
+	and after the profile is reachable through the GetProfile callback. Yields
+	until recovery resolves.
 	@param player Player -- The player whose profile just loaded
-	@param profile any -- The loaded profile object with a Data.Trade field
+	@param profile any -- The loaded profile object
 ]=]
 function TradeManager.RecoverPlayerAsync(self: TradeManager_Internal, player: Player, profile: any)
-	if not profile or not profile.Data or not profile.Data.Trade then
+	if not profile or not profile.Data then
 		return
 	end
-	TradeRecovery.RecoverAsync(player, profile, self._tradeStore, self._callbacks, self._pendingRecovery)
+	TradeRecovery.RecoverAsync(player, self._ledger, self._tradeStore)
 end
 
 return TradeManager

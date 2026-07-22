@@ -53,6 +53,10 @@ export type TradeOfferContext = {
 	Session: any, -- TradeSession (forward reference)
 	Player: Player,
 	IdentifyingData: TradeOfferPayload,
+	--- The live escrow table for this player's trade (profile.Data[TradeDataKey]).
+	--- Non-nil during MoveOfferToEscrow; accumulate offered items into Trade.outgoing.
+	--- Nil during ValidateOffer.
+	Trade: { [string]: any }?,
 }
 
 --[=[
@@ -99,25 +103,18 @@ export type TradeRecord = {
 }
 
 --[=[
-	The schema for profile.Data.Trade that consumers must include in their profile
-	data template. The package reads and writes these fields directly during
-	execution and recovery.
+	The escrow field schema stored under profile.Data[TradeDataKey] (default key:
+	"TRADE_SESSION", configurable via TradeManagerConfig.TradeDataKey).
 
-	Example data template entry:
-	```lua
-	Trade = {
-		tradeId = false,
-		jobId = false,
-		outgoing = false,
-		incoming = false,
-		received = false,
-		claimed = false,
-		executionStart = false,
-	}
-	```
+	The EscrowLedger is the sole owner of this table. Consumers never read or
+	write it directly — MoveOfferToEscrow receives the live table as
+	context.Trade, FinalizeOffer receives context.Incoming, and RollbackOffer
+	receives context.Outgoing. The field does NOT need to be present in the
+	consumer's profile data template.
 
-	- outgoing: written by the consumer's MoveOfferToEscrow callback. May be any
-	  serializable value. Multiple items can be accumulated into a table here.
+	- outgoing: written by the consumer's MoveOfferToEscrow callback via
+	  context.Trade. May be any serializable value; accumulate multiple items
+	  into a table here.
 	- incoming: written by the package during Phase 2 (copy of the other player's outgoing).
 	- received: written by the package during Phase 3.
 	- claimed: written by the package during Phase 4.
@@ -130,6 +127,9 @@ export type TradeProfileFields = {
 	received: boolean,
 	claimed: boolean,
 	executionStart: number?,
+	--- Highest phase this player's own profile has reached; written by the
+	--- EscrowLedger and used by CommitProfile persistence predicates.
+	phase: number?,
 }
 
 export type TradeCallbacks = {
@@ -155,18 +155,22 @@ export type TradeCallbacks = {
 	--- Returns the player's loaded profile object. Must return nil if not loaded.
 	GetProfile: (player: Player) -> any?,
 
-	--- Requests a profile save. Does not need to wait for completion.
-	TriggerSave: (player: Player) -> (),
-
-	--- Registers a one-shot callback that fires the next time this player's profile
-	--- is saved — specifically the save triggered by TriggerSave called just before
-	--- or just after this registration. Returns a connection with :Disconnect().
-	RegisterSaveCallback: (player: Player, callback: () -> ()) -> any,
+	--- Saves the player's profile and returns a Promise that resolves once the
+	--- save is confirmed persisted, including all writes made before this call.
+	--- The optional isPersisted predicate receives the persisted data snapshot;
+	--- when provided, the promise must resolve only once a persisted snapshot
+	--- satisfies it (adapters whose save primitive already guarantees inclusion
+	--- of prior writes, e.g. a synchronous in-memory fake, may ignore it).
+	--- With PlayerProfileManager: `return ppm:PromiseSave(player, isPersisted)`.
+	CommitProfile: (player: Player, isPersisted: ((lastSavedData: { [any]: any }) -> boolean)?) -> any,
 }
 
 export type TradeManagerConfig = {
 	--- Callbacks for item operations and profile integration.
 	Callbacks: TradeCallbacks,
+	--- The profile.Data key under which the package stores per-player escrow
+	--- state during a trade. Default: "TRADE_SESSION".
+	TradeDataKey: string?,
 	--- How long trade requests remain valid before auto-expiry. Default: 60 seconds.
 	RequestExpirySeconds: number?,
 	--- Duration of the user-facing countdown before trade execution begins. Default: 5 seconds.

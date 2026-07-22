@@ -8,386 +8,145 @@
 	Recovery logic for in-flight trades after a server crash or player disconnect.
 
 	Called by TradeManager:RecoverPlayerAsync() when a player's profile loads with
-	a non-nil Data.Trade table. Must be called before giving the player control.
+	escrow state present. Must be called before giving the player control. Yields.
 
-	## Decision Tree
+	Recovery is a pure per-player decision table over the player's own escrow
+	fields (read through the EscrowLedger) plus the shared TradeRecord. There is
+	no cross-player coordination and no resume: by the time recovery runs there
+	is no live session anywhere, so every path resolves to Claim, Rollback, or
+	cleanup. All item movement goes through the ledger, so recovery and live
+	execution share one implementation of each procedure.
 
-	The recovery path is determined by reading:
-	  1. The player's own profile fields (claimed, received, incoming, outgoing, jobId)
-	  2. The shared TradeRecord from the DataStore (phase tracking for both players)
+	## Decision Table
 
-	```
-	claimed = true              → clean up lingering fields only
-	record nil + received=true  → Claim (point-of-no-return, no record needed)
-	record nil + received=false → Rollback
-	myPhase = 4                 → clean up only
-	myPhase = 3, otherPhase ≥ 3 → Claim
-	myPhase = 3, otherPhase < 3 → Claim (other will claim independently)
-	myPhase = 2, otherPhase ≥ 2 → same-server check → Resume Phase 3 or Rollback
-	myPhase = 2, otherPhase < 2 → Rollback
-	myPhase = 1, otherPhase = 1 → same-server check → Resume Phase 2 or Rollback
-	myPhase = 1, otherPhase = 0 → Rollback
-	myPhase = 0                 → no-op
-	```
+	Evaluated top to bottom; first match wins:
 
-	## Same-Server Resume Check
+	| Condition                                          | Action              |
+	| -------------------------------------------------- | ------------------- |
+	| claimed = true                                      | cleanup leftovers   |
+	| no tradeId                                          | rollback if outgoing, else cleanup |
+	| player not in the TradeRecord                       | cleanup (stale)     |
+	| record status = "rolledback"                        | Rollback            |
+	| record "completed", own received, or partner ≥ 3    | Claim               |
+	| otherwise (active/missing record, not received)     | Rollback + finalize record "rolledback" |
 
-	When the decision tree says "same-server check":
-	  - jobId must match game.JobId (else different server → Rollback)
-	  - Both players must rejoin this server within RESUME_WAIT_SECONDS of each other
-	  - If the other player doesn't arrive in time → Rollback for both
-	  - If both arrive → signal the coordinator to resume from the appropriate phase
+	The "partner phase ≥ 3" claim condition covers the crash window between the
+	partner crossing the point of no return and this player's own received flag
+	persisting. The record-status checks are what keep the two players consistent
+	when they recover independently, possibly on different servers, hours apart:
+	a rollback finalizes the record so the partner's recovery also rolls back;
+	a completed record makes the partner's recovery claim.
 
-	## Claim Procedure (in recovery)
-
-	Calls FinalizeOffer with Player = this player, Incoming = profile.Data.Trade.incoming.
-	Sets claimed = true, clears trade fields, forces save, updates TradeRecord.
-
-	## Rollback Procedure (in recovery)
-
-	Calls RollbackOffer with Player = this player, Outgoing = profile.Data.Trade.outgoing.
-	Clears all trade fields, forces save, calls FinalizeAsync("rolledback") (idempotent).
+	Failed Claims and Rollbacks (consumer callback threw, save never confirmed)
+	leave the escrow fields untouched, so the next rejoin retries the same path.
 ]=]
 
 --// Imports //--
 const Types = require(script.Parent.TradeTypes)
+const TradeStore = require(script.Parent.TradeStore)
+const EscrowLedger = require(script.Parent.EscrowLedger)
 
 --// Types //--
 export type TradeCallbacks = Types.TradeCallbacks
 export type TradeRecord = Types.TradeRecord
-export type TradeStopReason = Types.TradeStopReason
 
-type TradeStore = {
-	ReadAsync: (self: TradeStore, tradeId: string) -> TradeRecord?,
-	UpdatePhaseAsync: (self: TradeStore, tradeId: string, playerIndex: number, phase: number) -> (),
-	FinalizeAsync: (self: TradeStore, tradeId: string, status: "completed" | "rolledback") -> (),
-}
-
---- An entry in the pending-recovery coordinator held by TradeManager.
---- When a player arrives for recovery, they register here. When both players
---- for the same trade arrive, both are signaled to resume.
-export type PendingRecoveryEntry = {
-	player: Player,
-	resolve: () -> (), -- call to signal: other player arrived, proceed
-	reject: () -> (), -- call to signal: timeout expired, roll back
-	timeoutThread: thread,
-}
-
---// Constants //--
-local RESUME_WAIT_SECONDS = 15 -- Max seconds to wait for the other player to rejoin before rollback
+type TradeStore = TradeStore.TradeStore
+type EscrowLedger = EscrowLedger.EscrowLedger
 
 --// Module //--
 local TradeRecovery = {}
 
--- Clears all trade fields from a profile and triggers a save.
-local function clearTradeFields(profile: any, callbacks: TradeCallbacks, player: Player)
-	if profile.Data.Trade then
-		profile.Data.Trade.tradeId = nil
-		profile.Data.Trade.jobId = nil
-		profile.Data.Trade.outgoing = nil
-		profile.Data.Trade.incoming = nil
-		profile.Data.Trade.received = nil
-		profile.Data.Trade.claimed = nil
-		profile.Data.Trade.executionStart = nil
+-- Awaits a ledger promise; warns with context if it fails. Returns success.
+local function awaitLedgerOp(op: any, player: Player, what: string): boolean
+	const ok, err = op:await()
+	if not ok then
+		warn(`[TradeRecovery] {what} failed for {player.Name}: {err}. Escrow state kept; will retry on next rejoin.`)
 	end
-	callbacks.TriggerSave(player)
-end
-
--- Performs the Claim procedure for a single player during recovery.
--- Calls FinalizeOffer, marks claimed, clears fields, saves, updates DataStore.
-local function claimForPlayer(
-	player: Player,
-	profile: any,
-	tradeId: string,
-	myIndex: number,
-	tradeStore: TradeStore,
-	callbacks: TradeCallbacks
-)
-	const incoming = profile.Data.Trade and profile.Data.Trade.incoming
-	const finalizeOk, finalizeErr = pcall(function()
-		callbacks.FinalizeOffer {
-			Session = nil,
-			Player = player,
-			Incoming = incoming,
-		}
-	end)
-	if not finalizeOk then
-		warn(
-			`[TradeRecovery] FinalizeOffer failed for {player.Name}: {finalizeErr}.`
-				.. ` claimed=true will remain so recovery can retry on next rejoin.`
-		)
-	end
-	-- Mark claimed and clear fields. If FinalizeOffer failed, leave claimed=true
-	-- in the profile so the next recovery attempt can retry.
-	if profile.Data.Trade then
-		profile.Data.Trade.claimed = true
-		profile.Data.Trade.incoming = nil
-		profile.Data.Trade.outgoing = nil
-		profile.Data.Trade.received = nil
-		profile.Data.Trade.tradeId = nil
-		profile.Data.Trade.jobId = nil
-		profile.Data.Trade.executionStart = nil
-	end
-	callbacks.TriggerSave(player)
-	if finalizeOk then
-		-- Safe to fully clear the trade table on the next tick.
-		task.defer(function()
-			if profile.Data.Trade then
-				profile.Data.Trade.claimed = nil
-				profile.Data.Trade = nil
-				callbacks.TriggerSave(player)
-			end
-		end)
-	end
-	task.spawn(function()
-		tradeStore:UpdatePhaseAsync(tradeId, myIndex, 4)
-	end)
-end
-
--- Performs the Rollback procedure for a single player during recovery.
--- Calls RollbackOffer, clears fields, saves, finalizes DataStore record.
-local function rollbackForPlayer(
-	player: Player,
-	profile: any,
-	tradeId: string,
-	myIndex: number,
-	reason: TradeStopReason,
-	tradeStore: TradeStore,
-	callbacks: TradeCallbacks
-)
-	const outgoing = profile.Data.Trade and profile.Data.Trade.outgoing
-	if outgoing ~= nil then
-		const rollbackOk, rollbackErr = pcall(function()
-			callbacks.RollbackOffer {
-				Session = nil,
-				Player = player,
-				Outgoing = outgoing,
-				Reason = reason,
-			}
-		end)
-		if not rollbackOk then
-			warn(
-				`[TradeRecovery] RollbackOffer failed for {player.Name}: {rollbackErr}.`
-					.. ` tradeId={tradeId} myIndex={myIndex} reason={reason}`
-			)
-		end
-	end
-	clearTradeFields(profile, callbacks, player)
-	task.spawn(function()
-		tradeStore:FinalizeAsync(tradeId, "rolledback")
-	end)
+	return ok
 end
 
 --[=[
 	Entry point. Called by TradeManager:RecoverPlayerAsync after a profile loads
-	with a non-nil Data.Trade table.
+	with escrow state present. Yields until recovery resolves.
 
 	@param player Player -- The player being recovered
-	@param profile any -- The loaded profile with Data.Trade fields
+	@param ledger EscrowLedger -- Sole owner of the profile escrow fields
 	@param tradeStore TradeStore -- The shared DataStore wrapper
-	@param callbacks TradeCallbacks -- Consumer callbacks (FinalizeOffer, RollbackOffer, etc.)
-	@param pendingRecovery { [string]: PendingRecoveryEntry } -- Cross-player coordinator held by TradeManager
 ]=]
-function TradeRecovery.RecoverAsync(
-	player: Player,
-	profile: any,
-	tradeStore: TradeStore,
-	callbacks: TradeCallbacks,
-	pendingRecovery: { [string]: PendingRecoveryEntry }
-)
-	const tradeData = profile.Data.Trade
-	if not tradeData then
+function TradeRecovery.RecoverAsync(player: Player, ledger: EscrowLedger, tradeStore: TradeStore)
+	const trade = ledger:Read(player)
+	if not trade then
 		return
 	end
 
-	const tradeId: string? = tradeData.tradeId
-	const jobId: string? = tradeData.jobId
-	const outgoing: any = tradeData.outgoing
-	const incoming: any = tradeData.incoming
-	const received: boolean = tradeData.received == true
-	const claimed: boolean = tradeData.claimed == true
-
-	-- Step 1: Already claimed — just clean up any lingering fields.
-	if claimed then
-		clearTradeFields(profile, callbacks, player)
-		if profile.Data.Trade then
-			profile.Data.Trade.claimed = nil
-			profile.Data.Trade = nil
-			callbacks.TriggerSave(player)
-		end
+	-- Already claimed from a prior attempt — just clean up lingering fields.
+	if trade.claimed == true then
+		awaitLedgerOp(ledger:Clear(player), player, "Cleanup (claimed)")
 		return
 	end
 
-	-- If there's no tradeId we can't match against a record. Rollback if we have outgoing.
+	const tradeId: string? = trade.tradeId
 	if not tradeId then
-		if outgoing ~= nil then
-			warn(
-				`[TradeRecovery] Profile for {player.Name} has outgoing data but no tradeId.`
-					.. ` Clearing trade fields.`
-			)
-			clearTradeFields(profile, callbacks, player)
+		-- Cannot match a record. Refund anything escrowed, else just clean up.
+		if trade.outgoing ~= nil then
+			warn(`[TradeRecovery] Profile for {player.Name} has outgoing data but no tradeId. Rolling back.`)
+			awaitLedgerOp(ledger:Rollback(player, "RecoveredRollback"), player, "Rollback (no tradeId)")
+		else
+			awaitLedgerOp(ledger:Clear(player), player, "Cleanup (no tradeId)")
 		end
 		return
 	end
 
-	-- Step 2: If received = true we are past the point of no return.
-	-- Complete the claim regardless of whether we can find the TradeRecord.
-	if received then
-		claimForPlayer(player, profile, tradeId, 0 :: number, tradeStore, callbacks)
-		-- myIndex = 0 here because we'll update it properly if we can read the record.
-		-- This is a best-effort update; the important thing is the claim happens.
-		return
-	end
-
-	-- Step 3: Fetch the TradeRecord to determine phase context.
 	const record: TradeRecord? = tradeStore:ReadAsync(tradeId)
 
-	-- Record expired or not found.
-	if not record then
-		if outgoing ~= nil then
-			-- Had committed items but no record — roll back.
-			warn(
-				`[TradeRecovery] TradeRecord for {tradeId} not found (expired or missing).`
-					.. ` Rolling back outgoing items for {player.Name}.`
-			)
-			rollbackForPlayer(player, profile, tradeId, 1, "RecoveredRollback", tradeStore, callbacks)
+	local myIndex = 0
+	local otherPhase = 0
+	if record then
+		if record.player1Id == player.UserId then
+			myIndex = 1
+			otherPhase = record.player2Phase
+		elseif record.player2Id == player.UserId then
+			myIndex = 2
+			otherPhase = record.player1Phase
 		else
-			clearTradeFields(profile, callbacks, player)
-		end
-		return
-	end
-
-	-- Determine which player index this player is.
-	local myIndex: number
-	local otherIndex: number
-	if record.player1Id == player.UserId then
-		myIndex = 1
-		otherIndex = 2
-	elseif record.player2Id == player.UserId then
-		myIndex = 2
-		otherIndex = 1
-	else
-		-- This player isn't in the record — stale/mismatched data. Clear it.
-		warn(
-			`[TradeRecovery] {player.Name} (userId={player.UserId}) not found in`
-				.. ` TradeRecord {tradeId}. Clearing trade fields.`
-		)
-		clearTradeFields(profile, callbacks, player)
-		return
-	end
-
-	const myPhase: number = if myIndex == 1 then record.player1Phase else record.player2Phase
-	const otherPhase: number = if otherIndex == 1 then record.player1Phase else record.player2Phase
-
-	-- Step 4: Decision tree.
-
-	-- Phase 4 — already claimed from a prior attempt.
-	if myPhase >= 4 then
-		clearTradeFields(profile, callbacks, player)
-		return
-	end
-
-	-- Phase 3 — received is set, incoming is saved. Must claim.
-	if myPhase >= 3 then
-		claimForPlayer(player, profile, tradeId, myIndex, tradeStore, callbacks)
-		return
-	end
-
-	-- Phase 2 — incoming was copied and saved, but not yet received.
-	-- Phase 1 — committed and saved, but incoming not yet copied.
-	-- Both require the other player to also be on this server (same jobId).
-	if myPhase >= 1 then
-		-- JobId mismatch means we're on a different server from when execution started.
-		-- Recovery from a different server cannot resume; rollback is the only safe option.
-		if jobId ~= game.JobId then
+			-- This player isn't in the record — stale/mismatched data. Clear it.
 			warn(
-				`[TradeRecovery] JobId mismatch for trade {tradeId} (stored={jobId}, current={game.JobId}).`
-					.. ` Rolling back {player.Name}.`
+				`[TradeRecovery] {player.Name} (userId={player.UserId}) not found in`
+					.. ` TradeRecord {tradeId}. Clearing escrow fields.`
 			)
-			rollbackForPlayer(player, profile, tradeId, myIndex, "RecoveredRollback", tradeStore, callbacks)
+			awaitLedgerOp(ledger:Clear(player), player, "Cleanup (not in record)")
 			return
 		end
+	end
 
-		-- Other player hasn't committed yet — we can't resume, roll back.
-		if otherPhase == 0 then
-			warn(
-				`[TradeRecovery] Other player has not committed for trade {tradeId}.` .. ` Rolling back {player.Name}.`
-			)
-			rollbackForPlayer(player, profile, tradeId, myIndex, "RecoveredRollback", tradeStore, callbacks)
-			return
-		end
+	-- Partner (or a prior recovery of this player) already rolled the trade
+	-- back. Roll back too — even if our own received flag is set, the partner
+	-- has been refunded, so claiming would duplicate items.
+	if record and record.status == "rolledback" then
+		awaitLedgerOp(ledger:Rollback(player, "RecoveredRollback"), player, "Rollback (record rolledback)")
+		return
+	end
 
-		-- Both players committed and this is the same server. Check if the other
-		-- player is also recovering right now (pending coordinator).
-		const existing: PendingRecoveryEntry? = pendingRecovery[tradeId]
-		if existing and existing.player ~= player then
-			-- Other player is already waiting. Cancel their timeout, signal both to proceed.
-			task.cancel(existing.timeoutThread)
-			pendingRecovery[tradeId] = nil
-			existing.resolve()
-			-- This player can now proceed to re-run from the appropriate phase.
-			-- Since both are on-server with matching jobId, continue from max(myPhase, otherPhase).
-			const resumeFromPhase = math.max(myPhase, otherPhase)
-			if resumeFromPhase >= 2 then
-				-- Both have incoming saved; proceed to mark received.
-				claimForPlayer(player, profile, tradeId, myIndex, tradeStore, callbacks)
-			else
-				-- Both committed but incoming not copied; rollback is safest since we
-				-- can't re-run Phase 2 without the live session context.
-				warn(
-					`[TradeRecovery] Both players on-server for trade {tradeId} at phase {resumeFromPhase},`
-						.. ` but no live session. Rolling back both.`
-				)
-				rollbackForPlayer(player, profile, tradeId, myIndex, "RecoveredRollback", tradeStore, callbacks)
-			end
-		else
-			-- Register this player and wait for the other to arrive.
-			local resolveCoord: () -> () = nil :: any
-			local rejectCoord: () -> () = nil :: any
-			local coordDone = false
-
-			resolveCoord = function()
-				if coordDone then
-					return
-				end
-				coordDone = true
-				-- Both players are on-server. Proceed from max phase.
-				const resumeFromPhase = math.max(myPhase, otherPhase)
-				if resumeFromPhase >= 2 then
-					claimForPlayer(player, profile, tradeId, myIndex, tradeStore, callbacks)
-				else
-					rollbackForPlayer(player, profile, tradeId, myIndex, "RecoveredRollback", tradeStore, callbacks)
-				end
-			end
-
-			rejectCoord = function()
-				if coordDone then
-					return
-				end
-				coordDone = true
-				-- Timeout: other player never arrived. Roll back this player.
-				pendingRecovery[tradeId] = nil
-				warn(
-					`[TradeRecovery] Other player did not rejoin within {RESUME_WAIT_SECONDS}s`
-						.. ` for trade {tradeId}. Rolling back {player.Name}.`
-				)
-				rollbackForPlayer(player, profile, tradeId, myIndex, "RecoveredRollback", tradeStore, callbacks)
-			end
-
-			const timeoutThread = task.delay(RESUME_WAIT_SECONDS, rejectCoord)
-
-			pendingRecovery[tradeId] = {
-				player = player,
-				resolve = resolveCoord,
-				reject = rejectCoord,
-				timeoutThread = timeoutThread,
-			}
+	-- Past the point of no return: the trade must complete for this player.
+	--   - record "completed": partner finished Phase 4 (crash mid-claim).
+	--   - own received flag: our incoming is confirmed persisted.
+	--   - partner phase >= 3: partner crossed received; both copies are durable.
+	const pastPointOfNoReturn = (record ~= nil and record.status == "completed")
+		or trade.received == true
+		or otherPhase >= 3
+	if pastPointOfNoReturn then
+		if awaitLedgerOp(ledger:Claim(player), player, "Claim") and record then
+			tradeStore:UpdatePhaseAsync(tradeId, myIndex, 4)
 		end
 		return
 	end
 
-	-- Phase 0 — nothing was committed. Clear any stale fields.
-	clearTradeFields(profile, callbacks, player)
+	-- Everything else — record active or missing, own received not set — rolls
+	-- back. Finalizing the record as rolledback is what tells the partner's own
+	-- recovery (wherever and whenever it runs) to roll back instead of claim.
+	if awaitLedgerOp(ledger:Rollback(player, "RecoveredRollback"), player, "Rollback") then
+		tradeStore:FinalizeAsync(tradeId, "rolledback")
+	end
 end
 
 return TradeRecovery
