@@ -101,6 +101,13 @@ def convert_require_path(expr: str):
     if parts:
         return f'{prefix}/{"/".join(parts)}'
 
+    # A bare parent reference with no child (e.g. `require(script.Parent)`).
+    # Roblox's require-by-string rejects a lone "." (paths must start with
+    # "./", "../", or "@"), so emit the trailing-slash form for the current
+    # directory. `..`, `../..`, etc. are already valid as-is.
+    if prefix == ".":
+        return "./"
+
     return prefix
 
 

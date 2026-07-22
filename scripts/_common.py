@@ -52,7 +52,7 @@ SRC_DIR: Path = Path("lib")
 #: File and directory names (or glob patterns) that are always preserved when
 #: a package directory is cleaned before ``wally install`` or ``wally
 #: publish``.  Extend this list when a caller needs extra files kept.
-WALLY_IGNORE_LIST: list[str] = ["src", "default.project.json", "wally.toml", "*.md"]
+WALLY_IGNORE_LIST: list[str] = ["src", "default.project.json", "wally.toml", "*.md", "docs"]
 
 
 # ---------------------------------------------------------------------------
