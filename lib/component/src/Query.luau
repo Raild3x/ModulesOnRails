@@ -12,20 +12,54 @@
 
 	A *requirement* is a **component class** (satisfied while that component is
 	*started* on the instance), a **tag string** (satisfied while the instance has
-	the raw CollectionService tag), or **another Query** (satisfied while the
-	instance matches it). An instance *matches* while:
+	the raw CollectionService tag), **another Query** (satisfied while the
+	instance matches it), a **filter node** (`Query.Attr` / `Query.Prop` /
+	`Query.Pred` — satisfied while the value test passes), or a **combinator
+	node** (`Query.And` / `Query.Or` / `Query.Not` — boolean composition of any
+	requirements, nesting freely). An instance *matches* while:
 
 	- every positional / `:with` requirement is satisfied,
-	- every `:anyOf(...)` group has at least one satisfied,
+	- every `:withAny(...)` group has at least one satisfied,
 	- no `:without` requirement is satisfied,
 	- every `:withAttribute` matches,
 	- every `:withProperty` matches, and
 	- every `:where` predicate returns true.
 
-	A query must have at least one positive requirement (component / tag /
-	sub-query in the positional args, `:with`, or `:anyOf`) so its candidate set
-	is bounded; a query built only from `:without` / `:withAttribute` /
-	`:withProperty` / `:where` errors when observed or read.
+	A query must have at least one ENUMERABLE positive requirement (component /
+	tag / sub-query — or an `And`/`Or` of them) so its candidate set is bounded;
+	filter nodes and `Not` only refine, and a query with no enumerable source
+	errors when observed or read.
+
+	## Composition: by value, normalized at build time
+
+	Every requirement is canonicalized as it enters a query, so one logical
+	shape has ONE internal form — and therefore one signature, one plan, and one
+	interned engine — no matter how it was spelled:
+
+	- `Query(q1):with(B)` is **literally** `q1:with(B)` (a raw `Query` composes
+	  by value: its clauses are spliced in positive position, or lowered to an
+	  equivalent node in `withAny`/`without`, where the query must stay atomic);
+	- `with(Query.And(a, b))` == `with(a, b)`; `with(Query.Or(a, b))` ==
+	  `withAny(a, b)`; `with(Query.Not(x))` == `without(x)`;
+	- `with(Query.Attr/Prop/Pred(...))` == `withAttribute` / `withProperty` /
+	  `where`; duplicated requirements do not split signatures.
+
+	`Query.Sub(q)` is the one deliberate exception: it composes **by
+	reference**, keeping `q` as a live nested sub-query with its own (shared)
+	reactive engine — see [Query.Sub] for when that is worth it.
+
+	Boolean recipes compose from `And`/`Or`/`Not` (a functionally complete
+	basis; variadic `Not(...)` is "none of" — i.e. NOR). E.g. exclusive-or,
+	"B or C but not both":
+
+	```lua
+	Component.query(A):withAny(B, C):without(Query.And(B, C))
+	```
+
+	:::caution Canonicalization can change the ORDER (and short-circuit count)
+	in which user predicate functions run relative to the exact spelling used.
+	Match results are unaffected; do not rely on side effects inside `Pred` /
+	`where` / function matchers. :::
 
 	See the Component `CONTEXT.md` for the glossary and the `README` for examples.
 ]=]
@@ -72,7 +106,54 @@ type RecheckSignalView = {
 	Connect: (self: RecheckSignalView, fn: () -> ()) -> ConnectionLike,
 }
 
-export type Queryable = ComponentClassLike | string | Query
+-- A single matcher for an attribute/property value: either a value the value
+-- must EQUAL, or a predicate `(instance, value) -> boolean`. `unknown` because a
+-- value can be anything; the predicate case is duck-detected via `type == "function"`.
+export type Matcher = unknown
+
+-- Caller-owned signal that forces a re-evaluation of all bounded instances when
+-- fired. Structural so it accepts both better-signal `Signal` and RBXScriptSignal.
+export type RecheckSignal = {
+	Connect: (self: RecheckSignal, callback: () -> ()) -> { Disconnect: (self: any) -> () },
+}
+
+-- ── Composable nodes ─────────────────────────────────────────────────────────
+-- A Filter is a leaf refinement: it tests ONE instance and contributes NO
+-- candidate source, so it is valid only nested inside a bounded query (via
+-- with / withAny / without / a combinator), never as a query's sole bound.
+-- Built by Query.Attr / Query.Prop / Query.Pred; never constructed by hand.
+export type Filter = {
+	_node: "filter",
+	op: "attr" | "prop" | "where",
+	name: string?, -- attr / prop
+	-- attr/prop: the compiled MatchSpec (existence flag + packed any-of matcher
+	-- list; explicit `nil` matchers survive via table.pack). Opaque to users.
+	spec: unknown?,
+	fn: ((instance: Instance) -> boolean)?, -- where
+	signal: RecheckSignal?, -- where: optional recheck
+}
+
+-- A Combinator composes child Queryables under a boolean operator. `not`, and
+-- an `or` with any unbounded child, are refinement-only; `and` is bounded when
+-- any child is (see the boundedness rules in `_validate`). Built by
+-- Query.And / Query.Or / Query.Not.
+export type Combinator = {
+	_node: "combinator",
+	op: "not" | "or" | "and",
+	children: { Queryable },
+}
+
+-- Compose-BY-REFERENCE marker: `Query.Sub(q)` keeps `q` as a live nested
+-- sub-query (own reactive engine, shared by every parent referencing an
+-- equivalent shape) instead of lowering its clauses into the parent. A raw
+-- `Query` passed anywhere composes BY VALUE (its clauses are spliced/lowered
+-- at build time); `Sub` is the only spelling that nests.
+export type Sub = {
+	_node: "sub",
+	query: Query,
+}
+
+export type Queryable = ComponentClassLike | string | Query | Filter | Combinator | Sub
 
 --[=[
 	@interface QueryConnection
@@ -90,11 +171,11 @@ export type QueryConnection = {
 
 export type Query = {
 	with: (self: Query, ...Queryable) -> Query,
-	anyOf: (self: Query, ...Queryable) -> Query,
+	withAny: (self: Query, ...Queryable) -> Query,
 	without: (self: Query, ...Queryable) -> Query,
-	withAttribute: (self: Query, name: string, matcher: unknown?) -> Query,
-	withProperty: (self: Query, name: string, matcher: unknown?) -> Query,
-	where: (self: Query, predicate: (Instance) -> boolean, recheckSignal: unknown?) -> Query,
+	withAttribute: (self: Query, name: string, ...Matcher) -> Query,
+	withProperty: (self: Query, name: string, ...Matcher) -> Query,
+	where: (self: Query, predicate: (Instance) -> boolean, recheckSignal: RecheckSignal?) -> Query,
 	observe: (self: Query, callback: (Instance, Janitor) -> ()) -> QueryConnection,
 	observeUnyielding: (self: Query, callback: (Instance, Janitor) -> ()) -> QueryConnection,
 	track: (self: Query) -> QueryConnection,
@@ -110,27 +191,23 @@ export type Query = {
 -- engine (sub-query engines) and the one-shot GetMatches (static membership).
 type SatisfiedFn = (QueryInternal, Instance) -> boolean
 
--- One `:withAttribute` requirement. `matcher` is the EXISTS sentinel, a
--- `(value) -> boolean` predicate, or a value the attribute must equal.
-type AttributeRequirement = {
+-- Unified attribute/property clause used by BOTH the fast-path lists
+-- (`_attributes` / `_properties`) and compiled attr/prop nodes. `exists`
+-- short-circuits to an existence check (0-matcher form); otherwise match =
+-- value satisfies ANY matcher (any-of). The list may legitimately hold `nil`
+-- matchers ("value == nil"), so `count` (table.pack's `n`) sizes it, never `#`.
+type MatchSpec = {
 	name: string,
-	matcher: unknown,
-}
-
--- One `:withProperty` requirement. `matcher` is the EXISTS sentinel (property
--- merely present on the Instance), a `(value) -> boolean` predicate, or a value
--- the property must equal (an explicit `nil` matcher is stored as `nil` and means
--- "property present AND equal to nil"; the omitted form is the EXISTS sentinel).
-type PropertyRequirement = {
-	name: string,
-	matcher: unknown,
+	exists: boolean,
+	matchers: { Matcher },
+	count: number,
 }
 
 -- One `:where` requirement; `signal` is duck-cast to `RecheckSignalView` when
 -- the engine activates.
 type PredicateRequirement = {
 	fn: (Instance) -> boolean,
-	signal: unknown?,
+	signal: RecheckSignal?,
 }
 
 type Observer = {
@@ -149,13 +226,17 @@ type ChangedSignal = Signal.Signal<(Instance, boolean) -> (), Instance, boolean>
 -- SINGLE table lookup — membership in `startedMap` IS "started" — and
 -- `startedList` gives `get()` an O(1)-sized, already-filtered seed source.
 type PlanReq = {
-	kind: "tag" | "class" | "classlike" | "query",
+	kind: "tag" | "class" | "classlike" | "query" | "attr" | "prop" | "where" | "not" | "or" | "and",
 	buildIndex: number, -- declaration position; tiebreak for the stable sort
 	tag: string?,
 	startedList: { Instance }?, -- class: live dense started-instance array
 	startedMap: { [Instance]: number }?, -- class: live instance -> list index
 	class: ComponentClassLike?, -- foreign class-like: FromInstance fallback
 	query: QueryInternal?,
+	spec: MatchSpec?, -- attr / prop node
+	fn: ((Instance) -> boolean)?, -- where node
+	signal: RecheckSignal?, -- where node
+	children: { PlanReq }?, -- not / or / and (compiled recursively)
 }
 
 -- The compiled shape of a query: requirement lists as PlanReqs plus presence
@@ -203,8 +284,8 @@ type QueryInternal = Query & {
 	_positive: { Queryable },
 	_anyOf: { { Queryable } }, -- array of groups
 	_negative: { Queryable },
-	_attributes: { AttributeRequirement },
-	_properties: { PropertyRequirement },
+	_attributes: { MatchSpec },
+	_properties: { MatchSpec },
 	_predicates: { PredicateRequirement },
 	_engine: Engine?,
 	_refcount: number,
@@ -221,6 +302,7 @@ type QueryInternal = Query & {
 	_validate: (self: QueryInternal) -> (),
 	_allReferences: (self: QueryInternal) -> { Queryable },
 	_positiveCandidate: (self: QueryInternal, instance: Instance, satisfiedFn: SatisfiedFn) -> boolean,
+	_universeCandidate: (self: QueryInternal, instance: Instance, satisfiedFn: SatisfiedFn) -> boolean,
 	_attributesMatch: (self: QueryInternal, instance: Instance) -> boolean,
 	_propertiesMatch: (self: QueryInternal, instance: Instance) -> boolean,
 	_predicatesPass: (self: QueryInternal, instance: Instance) -> boolean,
@@ -241,28 +323,66 @@ type QueryInternal = Query & {
 	_collect: (self: QueryInternal, onMatch: (Instance) -> boolean?) -> (),
 }
 
-const EXISTS = newproxy(false) -- sentinel: attribute must merely exist
 const INTERNAL = Keys.Internal -- hoisted for the plan compiler's class probe
 
+-- Module table: static constructors (`new`, `Attr`, `Prop`, `Pred`, `And`,
+-- `Or`, `Not`) plus the instance `prototype`. Made callable (`Query(...)` ==
+-- `Query.new(...)`) at the bottom of the file.
 const Query = {}
-Query.__index = Query
+-- Instance methods live on `prototype` (mirrors `Component.prototype`), keeping
+-- the static namespace free — `and`/`or`/`not` are reserved words, so combinators
+-- must be statics, and statics must not collide with method names.
+const prototype = {}
+prototype.__index = prototype
+Query.prototype = prototype
+
+-- Node prototypes: Filters/Combinators are tagged tables built through these so
+-- a later fluent matcher DSL can attach methods without changing representation.
+const FilterProto = {}
+FilterProto.__index = FilterProto
+const ComboProto = {}
+ComboProto.__index = ComboProto
+const SubProto = {}
+SubProto.__index = SubProto
 
 const function isQuery(value: unknown): boolean
-	return type(value) == "table" and getmetatable(value) == Query
+	return type(value) == "table" and getmetatable(value) == prototype
+end
+
+const function isFilter(value: unknown): boolean
+	return type(value) == "table" and getmetatable(value) == FilterProto
+end
+
+const function isCombinator(value: unknown): boolean
+	return type(value) == "table" and getmetatable(value) == ComboProto
+end
+
+const function isSub(value: unknown): boolean
+	return type(value) == "table" and getmetatable(value) == SubProto
 end
 
 const function isComponentClass(value: unknown): boolean
-	if type(value) ~= "table" or isQuery(value) then
+	if type(value) ~= "table" or isQuery(value) or isFilter(value) or isCombinator(value) or isSub(value) then
 		return false
 	end
 	return type((value :: { read Tag: unknown }).Tag) == "string"
 end
 
 const function assertQueryable(value: Queryable, method: string)
-	if type(value) == "string" or isQuery(value) or isComponentClass(value) then
+	if
+		type(value) == "string"
+		or isQuery(value)
+		or isFilter(value)
+		or isCombinator(value)
+		or isSub(value)
+		or isComponentClass(value)
+	then
 		return
 	end
-	error(`[Component] :{method}() expects a component class, tag string, or Query`, 3)
+	error(
+		`[Component] :{method}() expects a component class, tag string, Query, or Query.Attr/Prop/Pred/And/Or/Not/Sub node`,
+		3
+	)
 end
 
 --[=[
@@ -290,7 +410,7 @@ const function rawNew(): QueryInternal
 			_sources = nil,
 			_planned = nil,
 			_signatureCache = nil,
-		}, Query) :: any
+		}, prototype) :: any
 	) :: QueryInternal
 end
 
@@ -311,11 +431,297 @@ const function derive(self: QueryInternal): QueryInternal
 	return new
 end
 
+-- Packs a variadic matcher list into a MatchSpec. 0 matchers = existence check;
+-- otherwise the value must satisfy ANY entry (value-equality, or a predicate
+-- `(instance, value) -> boolean`). `table.pack` so explicit `nil` matchers
+-- ("value == nil") survive; `select("#")` distinguishes omitted from nil.
+const function makeMatchSpec(name: string, ...: Matcher): MatchSpec
+	const count = select("#", ...)
+	return {
+		name = name,
+		exists = count == 0,
+		matchers = table.pack(...) :: { Matcher },
+		count = count,
+	}
+end
+
+--------------------------------------------------------------------------------
+-- Static node constructors (composable Queryables)
+--------------------------------------------------------------------------------
+
+--[=[
+	@within Query
+	@function Attr
+	@param name string
+	@param ... any -- values and/or `(instance, value) -> boolean` predicates; ANY may match. Omit all for existence.
+	@return Filter
+	An attribute filter node, usable anywhere a Queryable is accepted
+	(`query(...)`, `:with`, `:withAny`, `:without`, or nested in `Query.And/Or/Not`).
+	Same matcher semantics as [Query:withAttribute].
+]=]
+function Query.Attr(name: string, ...: Matcher): Filter
+	assert(type(name) == "string", "[Component] Query.Attr() expects an attribute name string")
+	const spec = makeMatchSpec(name, ...)
+	return (setmetatable({ _node = "filter", op = "attr", name = name, spec = spec }, FilterProto) :: any) :: Filter
+end
+
+--[=[
+	@within Query
+	@function Prop
+	@param name string
+	@param ... any -- values and/or `(instance, value) -> boolean` predicates; ANY may match. Omit all for existence; explicit `nil` means "== nil".
+	@return Filter
+	A property filter node. Same matcher semantics as [Query:withProperty].
+]=]
+function Query.Prop(name: string, ...: Matcher): Filter
+	assert(type(name) == "string", "[Component] Query.Prop() expects a property name string")
+	const spec = makeMatchSpec(name, ...)
+	return (setmetatable({ _node = "filter", op = "prop", name = name, spec = spec }, FilterProto) :: any) :: Filter
+end
+
+--[=[
+	@within Query
+	@function Pred
+	@param fn (instance: Instance) -> boolean
+	@param recheckSignal RecheckSignal? -- fire to force re-evaluation
+	@return Filter
+	A predicate filter node. Same semantics (and staleness caveat) as [Query:where].
+]=]
+function Query.Pred(fn: (Instance) -> boolean, recheckSignal: RecheckSignal?): Filter
+	assert(type(fn) == "function", "[Component] Query.Pred() expects a predicate function")
+	return (
+		setmetatable({ _node = "filter", op = "where", fn = fn, signal = recheckSignal }, FilterProto) :: any
+	) :: Filter
+end
+
+const function makeCombinator(op: "not" | "or" | "and", method: string, ...: Queryable): Combinator
+	const children = { ... }
+	assert(#children > 0, `[Component] Query.{method}() expects at least one Queryable`)
+	for _, child in children do
+		assertQueryable(child, method)
+	end
+	return (setmetatable({ _node = "combinator", op = op, children = children }, ComboProto) :: any) :: Combinator
+end
+
+--[=[
+	@within Query
+	@function And
+	@param ... Queryable
+	@return Combinator
+	Satisfied when ALL children are. Bounded (usable as a candidate source) when
+	any child is bounded.
+]=]
+function Query.And(...: Queryable): Combinator
+	return makeCombinator("and", "And", ...)
+end
+
+--[=[
+	@within Query
+	@function Or
+	@param ... Queryable
+	@return Combinator
+	Satisfied when AT LEAST ONE child is. Bounded only when every child is
+	bounded (an unbounded branch would make the candidate set unbounded).
+]=]
+function Query.Or(...: Queryable): Combinator
+	return makeCombinator("or", "Or", ...)
+end
+
+--[=[
+	@within Query
+	@function Not
+	@param ... Queryable
+	@return Combinator
+	Satisfied when NONE of the children are (variadic "none of", mirroring
+	[Query:without]). Refinement-only: contributes no candidates.
+]=]
+function Query.Not(...: Queryable): Combinator
+	return makeCombinator("not", "Not", ...)
+end
+
+--[=[
+	@within Query
+	@function Sub
+	@param query Query
+	@return Sub
+
+	Composes `query` **by reference**: the parent keeps it as a live nested
+	sub-query with its own reactive engine (shared with every other parent
+	referencing an equivalent shape) instead of lowering its clauses into the
+	parent's plan.
+
+	A raw `Query` passed to `query(...)` / `:with` / `:withAny` / `:without`
+	composes **by value** — its clauses are spliced (or wrapped as an `And` node
+	in `withAny`/`without`) at build time, so `Query(q1):with(B)` is literally
+	`q1:with(B)`. Use `Sub` when you specifically want the nested form:
+	- the sub-query's clauses are expensive per candidate (heavy `Pred`s, many
+	  property reads) and it is shared by many active parents — one shared
+	  evaluation instead of per-parent probes;
+	- you want the sub-query validated standalone (a `Sub` of an unbounded
+	  query errors; a spliced one can be bounded by the parent's other sources);
+	- you rely on the sub-query's own evaluation order for side-effectful
+	  predicates.
+]=]
+function Query.Sub(query: Query): Sub
+	assert(isQuery(query), "[Component] Query.Sub() expects a Query")
+	return (setmetatable({ _node = "sub", query = query }, SubProto) :: any) :: Sub
+end
+
+-- Rebuilds a Filter node from an already-packed MatchSpec (the public
+-- `Query.Attr`/`Query.Prop` pack fresh varargs; lowering reuses stored specs —
+-- they are immutable after creation, so sharing is safe).
+const function filterFromSpec(op: "attr" | "prop", spec: MatchSpec): Filter
+	return (setmetatable({ _node = "filter", op = op, name = spec.name, spec = spec }, FilterProto) :: any) :: Filter
+end
+
+const function predToFilter(pred: PredicateRequirement): Filter
+	return (
+		setmetatable({ _node = "filter", op = "where", fn = pred.fn, signal = pred.signal }, FilterProto) :: any
+	) :: Filter
+end
+
+-- Lowers a whole query to a single equivalent node for ATOMIC positions
+-- (`withAny` members, `without` entries), where splicing would change meaning
+-- (De Morgan): the node is satisfied exactly while the query matches. Positive
+-- positions splice instead (see `addPositive`).
+const function queryToNode(q: QueryInternal, method: string): Queryable
+	const parts: { Queryable } = {}
+	for _, req in q._positive do
+		table.insert(parts, req)
+	end
+	for _, group in q._anyOf do
+		table.insert(parts, makeCombinator("or", "Or", table.unpack(group)))
+	end
+	if #q._negative > 0 then
+		table.insert(parts, makeCombinator("not", "Not", table.unpack(q._negative)))
+	end
+	for _, spec in q._attributes do
+		table.insert(parts, filterFromSpec("attr", spec))
+	end
+	for _, spec in q._properties do
+		table.insert(parts, filterFromSpec("prop", spec))
+	end
+	for _, pred in q._predicates do
+		table.insert(parts, predToFilter(pred))
+	end
+	if #parts == 0 then
+		error(`[Component] :{method}() cannot compose an empty query (it has no requirements)`, 3)
+	end
+	if #parts == 1 then
+		return parts[1]
+	end
+	return makeCombinator("and", "And", table.unpack(parts))
+end
+
+--------------------------------------------------------------------------------
+-- Build-time normalization
+--
+-- Every requirement is canonicalized as it enters a query, so ONE logical shape
+-- has ONE internal form (and therefore one signature, one plan, one interned
+-- engine) no matter how it was spelled:
+--   with(rawQuery)      == splicing its clauses  (compose by value)
+--   with(And(a, b))     == with(a, b)
+--   with(Or(a, b))      == withAny(a, b)
+--   with(Not(x))        == without(x)
+--   with(Attr/Prop/...) == withAttribute / withProperty / where
+--   withAny(x)          == with(x)              (a 1-member group is required)
+-- `Query.Sub(q)` is the deliberate exception: it composes by REFERENCE and is
+-- stored as-is. Normalization happens only here in the builders; stored queries
+-- are always already canonical, so splices never recurse.
+--------------------------------------------------------------------------------
+
+local normalizeAnyMember: (req: Queryable, method: string) -> Queryable
+
+-- Canonical entry of one requirement into REQUIRED (AND) position.
+const function addPositive(new: QueryInternal, req: Queryable, method: string)
+	if isQuery(req) then
+		-- Compose by value: splice the query's (already canonical) clauses.
+		const q = req :: QueryInternal
+		for _, entry in q._positive do
+			table.insert(new._positive, entry)
+		end
+		for _, group in q._anyOf do
+			table.insert(new._anyOf, group)
+		end
+		for _, entry in q._negative do
+			table.insert(new._negative, entry)
+		end
+		for _, spec in q._attributes do
+			table.insert(new._attributes, spec)
+		end
+		for _, spec in q._properties do
+			table.insert(new._properties, spec)
+		end
+		for _, pred in q._predicates do
+			table.insert(new._predicates, pred)
+		end
+		return
+	end
+	if isCombinator(req) then
+		const combo = req :: Combinator
+		const op = combo.op
+		if op == "and" then
+			for _, child in combo.children do
+				addPositive(new, child, method)
+			end
+			return
+		elseif op == "or" then
+			const group: { Queryable } = {}
+			for _, child in combo.children do
+				table.insert(group, normalizeAnyMember(child, method))
+			end
+			if #group == 1 then
+				addPositive(new, group[1], method)
+			else
+				table.insert(new._anyOf, group)
+			end
+			return
+		else -- not: required "none of" == excluded
+			for _, child in combo.children do
+				table.insert(new._negative, normalizeAnyMember(child, method))
+			end
+			return
+		end
+	end
+	if isFilter(req) then
+		const filter = req :: Filter
+		const op = filter.op
+		if op == "attr" then
+			table.insert(new._attributes, filter.spec :: MatchSpec)
+		elseif op == "prop" then
+			table.insert(new._properties, filter.spec :: MatchSpec)
+		else
+			table.insert(new._predicates, { fn = filter.fn :: (Instance) -> boolean, signal = filter.signal })
+		end
+		return
+	end
+	-- Sub node / class / tag / class-like: a plain required requirement.
+	table.insert(new._positive, req)
+end
+
+-- Canonical form of one requirement in an ATOMIC position (a `withAny` group
+-- member or a `without` entry), where the requirement must stand as a single
+-- testable unit: raw queries lower to an equivalent node (De Morgan forbids
+-- splicing here); nested single-child wrappers collapse; everything else is
+-- kept as-is.
+function normalizeAnyMember(req: Queryable, method: string): Queryable
+	if isQuery(req) then
+		return queryToNode(req :: QueryInternal, method)
+	end
+	if isCombinator(req) then
+		const combo = req :: Combinator
+		if #combo.children == 1 and combo.op ~= "not" then
+			return normalizeAnyMember(combo.children[1], method)
+		end
+	end
+	return req
+end
+
 function Query.new(...: Queryable): Query
 	const self = rawNew()
 	for _, req in { ... } do
 		assertQueryable(req, "with")
-		table.insert(self._positive, req)
+		addPositive(self, req, "with")
 	end
 	return self
 end
@@ -328,11 +734,11 @@ end
 	receiver is unchanged (builders never mutate, so chains branch freely).
 	`query():with(X)` is equivalent to `query(X)`.
 ]=]
-function Query.with(self: QueryInternal, ...: Queryable): Query
+function prototype.with(self: QueryInternal, ...: Queryable): Query
 	const new = derive(self)
 	for _, req in { ... } do
 		assertQueryable(req, "with")
-		table.insert(new._positive, req)
+		addPositive(new, req, "with")
 	end
 	return new
 end
@@ -342,19 +748,35 @@ end
 	@param ... Queryable
 	@return Query
 	Returns a NEW query with an "at least one of" group added: the instance
-	must satisfy at least one of the given requirements. Multiple `:anyOf`
+	must satisfy at least one of the given requirements. Multiple `:withAny`
 	calls each add an independent group. The receiver is unchanged.
 ]=]
-function Query.anyOf(self: QueryInternal, ...: Queryable): Query
-	const group = { ... }
-	for _, req in group do
-		assertQueryable(req, "anyOf")
-	end
-	if #group == 0 then
+function prototype.withAny(self: QueryInternal, ...: Queryable): Query
+	const raw = { ... }
+	if #raw == 0 then
 		return self
 	end
 	const new = derive(self)
-	table.insert(new._anyOf, group)
+	const group: { Queryable } = {}
+	for _, req in raw do
+		assertQueryable(req, "withAny")
+		-- A nested Or is the same disjunction: flatten its members into this
+		-- group so `withAny(Or(a, b), c)` == `withAny(a, b, c)`.
+		const normalized = normalizeAnyMember(req, "withAny")
+		if isCombinator(normalized) and (normalized :: Combinator).op == "or" then
+			for _, child in (normalized :: Combinator).children do
+				table.insert(group, normalizeAnyMember(child, "withAny"))
+			end
+		else
+			table.insert(group, normalized)
+		end
+	end
+	if #group == 1 then
+		-- "At least one of {x}" is just "x": required position.
+		addPositive(new, group[1], "withAny")
+	else
+		table.insert(new._anyOf, group)
+	end
 	return new
 end
 
@@ -365,11 +787,11 @@ end
 	Returns a NEW query with the given excluded requirements added: the
 	instance must satisfy none of them. The receiver is unchanged.
 ]=]
-function Query.without(self: QueryInternal, ...: Queryable): Query
+function prototype.without(self: QueryInternal, ...: Queryable): Query
 	const new = derive(self)
 	for _, req in { ... } do
 		assertQueryable(req, "without")
-		table.insert(new._negative, req)
+		table.insert(new._negative, normalizeAnyMember(req, "without"))
 	end
 	return new
 end
@@ -377,57 +799,51 @@ end
 --[=[
 	@within Query
 	@param name string
-	@param matcher any -- a value to equal, a `(value) -> boolean` predicate, or omitted for existence
+	@param ... any -- values to equal and/or `(instance, value) -> boolean` predicates; matches if ANY does. Omit all for existence.
 	@return Query
 	Returns a NEW query that additionally requires an attribute; the receiver
-	is unchanged. With no matcher, the attribute must merely exist; with a
-	function, the function must return true for the attribute's value; otherwise the
-	value must equal `matcher`. Re-evaluated reactively on attribute change.
+	is unchanged. With no matchers, the attribute must merely exist; otherwise
+	the attribute's value must satisfy at least one matcher (equal a value, or a
+	predicate returning true). Re-evaluated reactively on attribute change.
 ]=]
-function Query.withAttribute(self: QueryInternal, name: string, matcher: unknown?): Query
+function prototype.withAttribute(self: QueryInternal, name: string, ...: Matcher): Query
 	assert(type(name) == "string", "[Component] :withAttribute() expects an attribute name string")
 	const new = derive(self)
-	table.insert(new._attributes, {
-		name = name,
-		matcher = if matcher == nil then EXISTS else matcher,
-	})
+	table.insert(new._attributes, makeMatchSpec(name, ...))
 	return new
 end
 
 --[=[
 	@within Query
 	@param name string
-	@param matcher any -- a value to equal, a `(value) -> boolean` predicate, or omitted to require the property merely exists
+	@param ... any -- values to equal and/or `(instance, value) -> boolean` predicates; matches if ANY does. Omit all for existence.
 	@return Query
 	Returns a NEW query that additionally requires an Instance property; the
 	receiver is unchanged. Re-evaluated reactively when the property changes.
 
-	The matcher is REQUIRED but may be an explicit `nil`:
+	Matcher forms:
 	- **omitted** (`:withProperty("Anchored")`) — the property must merely *exist*
 	  on the instance (a candidate whose class lacks it never matches);
 	- **explicit `nil`** (`:withProperty("Parent", nil)`) — the property must exist
 	  and equal `nil` (e.g. "unparented");
-	- **a function** — it must return true for the property's value;
-	- **any other value** — the property must equal `matcher`.
+	- **functions** — must return true for `(instance, value)`;
+	- **any other value** — the property must equal it;
+	- **several matchers** — the value must satisfy at least one.
 
 	Unlike attributes, a property may not exist on every Instance class a query
 	spans; a class lacking the named property simply does not match.
 ]=]
-function Query.withProperty(self: QueryInternal, name: string, ...: unknown): Query
+function prototype.withProperty(self: QueryInternal, name: string, ...: Matcher): Query
 	assert(type(name) == "string", "[Component] :withProperty() expects a property name string")
 	const new = derive(self)
-	-- Omitted matcher (void) = existence check via the EXISTS sentinel; an EXPLICIT
-	-- `nil` is a real matcher meaning "property == nil". `select("#")` (arg count)
-	-- distinguishes the two, which `matcher == nil` cannot.
-	const matcher = if select("#", ...) == 0 then EXISTS else (...)
-	table.insert(new._properties, { name = name, matcher = matcher })
+	table.insert(new._properties, makeMatchSpec(name, ...))
 	return new
 end
 
 --[=[
 	@within Query
 	@param predicate (instance: Instance) -> boolean
-	@param recheckSignal Signal? -- fire to force re-evaluation
+	@param recheckSignal RecheckSignal? -- fire to force re-evaluation
 	@return Query
 
 	Returns a NEW query with an arbitrary predicate added; the receiver is
@@ -435,7 +851,7 @@ end
 	own — it is only re-evaluated when another requirement changes, or when the
 	optional `recheckSignal` fires. Without one, its result can go stale. :::
 ]=]
-function Query.where(self: QueryInternal, predicate: (Instance) -> boolean, recheckSignal: unknown?): Query
+function prototype.where(self: QueryInternal, predicate: (Instance) -> boolean, recheckSignal: RecheckSignal?): Query
 	assert(type(predicate) == "function", "[Component] :where() expects a predicate function")
 	const new = derive(self)
 	table.insert(new._predicates, { fn = predicate, signal = recheckSignal })
@@ -446,9 +862,9 @@ end
 -- Validation
 --------------------------------------------------------------------------------
 
--- Flattened positive requirements (positional/:with + every :anyOf member).
--- These bound the candidate set; a query with none is unbounded and rejected.
-function Query._positiveSources(self: QueryInternal): { Queryable }
+-- Flattened positive requirements (positional/:with + every :withAny member).
+-- These bound the candidate set; a query with no enumerable one is rejected.
+function prototype._positiveSources(self: QueryInternal): { Queryable }
 	const cached = self._sources
 	if cached then
 		return cached
@@ -466,18 +882,78 @@ function Query._positiveSources(self: QueryInternal): { Queryable }
 	return sources
 end
 
--- DFS over sub-query references; errors on an empty query. Cycles are
--- impossible by construction: builders copy-on-write, so a query can only ever
--- reference queries that existed before it did.
-function Query._validate(self: QueryInternal)
+-- Whether a requirement can ENUMERATE a finite candidate set: classes, tags,
+-- and sub-queries can; filters and `Not` cannot (they only test); an `And` can
+-- when any child can (that child's members are a superset of the And's); an
+-- `Or` only when every child can (its members are the union of the children's).
+const function isEnumerable(req: Queryable): boolean
+	if type(req) == "string" or isQuery(req) or isSub(req) then
+		return true
+	end
+	if isFilter(req) then
+		return false
+	end
+	if isCombinator(req) then
+		const combo = req :: Combinator
+		const op = combo.op
+		if op == "not" then
+			return false
+		elseif op == "and" then
+			for _, child in combo.children do
+				if isEnumerable(child) then
+					return true
+				end
+			end
+			return false
+		else -- or
+			for _, child in combo.children do
+				if not isEnumerable(child) then
+					return false
+				end
+			end
+			return true
+		end
+	end
+	return true -- component class / class-like
+end
+
+-- DFS over sub-query references; errors on an unbounded query. A query is
+-- bounded iff a required requirement is enumerable, or (with no enumerable
+-- required requirement) some `withAny` group is enumerable throughout — every
+-- match satisfies each group, so a fully-enumerable group's union bounds the
+-- candidate set. Cycles are impossible by construction: builders copy-on-write,
+-- so a query can only ever reference queries that existed before it did.
+function prototype._validate(self: QueryInternal)
 	if self._validated then
 		return
 	end
-	const sources = self:_positiveSources()
-	if #sources == 0 then
+	local bounded = false
+	for _, req in self._positive do
+		if isEnumerable(req) then
+			bounded = true
+			break
+		end
+	end
+	if not bounded then
+		for _, group in self._anyOf do
+			local groupEnumerable = #group > 0
+			for _, req in group do
+				if not isEnumerable(req) then
+					groupEnumerable = false
+					break
+				end
+			end
+			if groupEnumerable then
+				bounded = true
+				break
+			end
+		end
+	end
+	if not bounded then
 		error(
-			"[Component] Query has no positive requirement (component / tag / sub-query); "
-				.. "add one via query(...), :with(), or :anyOf() so its candidate set is bounded",
+			"[Component] Query has no enumerable positive requirement (component / tag / sub-query, "
+				.. "or an And/Or of them); filters and Not() only refine — add a bounded source via "
+				.. "query(...), :with(), or :withAny() so the candidate set is finite",
 			0
 		)
 	end
@@ -489,19 +965,34 @@ function Query._validate(self: QueryInternal)
 	self._validated = true
 end
 
--- Every requirement across all clauses (positive, anyOf, negative).
-function Query._allReferences(self: QueryInternal): { Queryable }
-	const refs = {}
-	for _, req in self._positive do
-		table.insert(refs, req)
-	end
-	for _, group in self._anyOf do
-		for _, req in group do
+-- Every requirement across all clauses (positive, anyOf, negative), flattened:
+-- combinators are unwrapped recursively and `Sub` nodes unwrap to their inner
+-- Query, so the list holds only leaf requirements (classes, tags, sub-queries,
+-- filters). Consumers subscribe / validate / memoize from this without knowing
+-- about nesting.
+function prototype._allReferences(self: QueryInternal): { Queryable }
+	const refs: { Queryable } = {}
+	const function add(req: Queryable)
+		if isCombinator(req) then
+			for _, child in (req :: Combinator).children do
+				add(child)
+			end
+		elseif isSub(req) then
+			table.insert(refs, (req :: Sub).query)
+		else
 			table.insert(refs, req)
 		end
 	end
+	for _, req in self._positive do
+		add(req)
+	end
+	for _, group in self._anyOf do
+		for _, req in group do
+			add(req)
+		end
+	end
 	for _, req in self._negative do
-		table.insert(refs, req)
+		add(req)
 	end
 	return refs
 end
@@ -510,37 +1001,27 @@ end
 -- Satisfaction / matching
 --------------------------------------------------------------------------------
 
-const function compileReq(req: Queryable, buildIndex: number): PlanReq
-	if type(req) == "string" then
-		return { kind = "tag" :: "tag", buildIndex = buildIndex, tag = req }
-	end
-	if isQuery(req) then
-		return { kind = "query" :: "query", buildIndex = buildIndex, query = req :: QueryInternal }
-	end
-	const internal = (req :: any)[INTERNAL]
-	if internal then
-		-- Our own class: capture its live started sparse set. Both tables are
-		-- mutated in place (never replaced) by the lifecycle, so the references
-		-- stay valid for the class's whole life; `Destroy` clears them, which
-		-- correctly reads as "no matches".
-		return {
-			kind = "class" :: "class",
-			buildIndex = buildIndex,
-			startedList = internal.startedList,
-			startedMap = internal.startedInstances,
-		}
-	end
-	return { kind = "classlike" :: "classlike", buildIndex = buildIndex, class = req :: ComponentClassLike }
-end
-
 -- Probe cost by kind, measured per candidate: a class check is one direct table
 -- lookup (~30ns), a sub-query check is a memo/engine hash lookup, a class-like
 -- goes through `FromInstance` (~80ns), and a tag check is a `HasTag` C-call
--- (~150ns). Every compiled list is sorted cheapest-first so per-candidate
--- evaluation short-circuits on the cheap probes; requirement semantics are
--- order-independent, so this is free. `buildIndex` keeps the sort deterministic
--- (`table.sort` is unstable).
-const KIND_COST: { [string]: number } = { class = 1, query = 2, classlike = 3, tag = 4 }
+-- (~150ns). Node kinds follow: an attr read is one `GetAttribute` C-call, a prop
+-- read a pcall'd index, `where` a user pcall, and combinators recurse into an
+-- unknown number of children — probed last. Every compiled list is sorted
+-- cheapest-first so per-candidate evaluation short-circuits on the cheap probes;
+-- requirement semantics are order-independent, so this is free. `buildIndex`
+-- keeps the sort deterministic (`table.sort` is unstable).
+const KIND_COST: { [string]: number } = {
+	class = 1,
+	query = 2,
+	classlike = 3,
+	tag = 4,
+	attr = 5,
+	prop = 6,
+	where = 7,
+	["not"] = 8,
+	["or"] = 8,
+	["and"] = 8,
+}
 
 -- A seed at or below this is narrow enough that hunting for a better one is
 -- not worth fetching more tag arrays: remaining probes run at most this many
@@ -564,8 +1045,111 @@ const function sortBySelectivity(reqs: { PlanReq })
 	end)
 end
 
+const function compileReq(req: Queryable, buildIndex: number): PlanReq
+	if type(req) == "string" then
+		return { kind = "tag" :: "tag", buildIndex = buildIndex, tag = req }
+	end
+	if isSub(req) then
+		return { kind = "query" :: "query", buildIndex = buildIndex, query = (req :: Sub).query :: QueryInternal }
+	end
+	if isQuery(req) then
+		-- Defensive: normalization never stores a raw Query, but compile it as a
+		-- sub-query rather than misclassifying if one ever slips through.
+		return { kind = "query" :: "query", buildIndex = buildIndex, query = req :: QueryInternal }
+	end
+	if isFilter(req) then
+		const filter = req :: Filter
+		if filter.op == "where" then
+			return { kind = "where" :: "where", buildIndex = buildIndex, fn = filter.fn, signal = filter.signal }
+		end
+		return {
+			kind = (if filter.op == "attr" then "attr" else "prop") :: "attr" | "prop",
+			buildIndex = buildIndex,
+			spec = filter.spec :: MatchSpec,
+		}
+	end
+	if isCombinator(req) then
+		const combo = req :: Combinator
+		const children: { PlanReq } = {}
+		for index, child in combo.children do
+			table.insert(children, compileReq(child, index))
+		end
+		sortBySelectivity(children)
+		return {
+			kind = combo.op :: "not" | "or" | "and",
+			buildIndex = buildIndex,
+			children = children,
+		}
+	end
+	const internal = (req :: any)[INTERNAL]
+	if internal then
+		-- Our own class: capture its live started sparse set. Both tables are
+		-- mutated in place (never replaced) by the lifecycle, so the references
+		-- stay valid for the class's whole life; `Destroy` clears them, which
+		-- correctly reads as "no matches".
+		return {
+			kind = "class" :: "class",
+			buildIndex = buildIndex,
+			startedList = internal.startedList,
+			startedMap = internal.startedInstances,
+		}
+	end
+	return { kind = "classlike" :: "classlike", buildIndex = buildIndex, class = req :: ComponentClassLike }
+end
+
+-- Evaluates one MatchSpec. `present` is whether the attribute/property exists at
+-- all on this instance (attribute: value ~= nil; property: the read didn't
+-- throw); `label` names the calling surface for matcher-error warnings. THE
+-- single implementation of matcher semantics — the fast-path clause lists and
+-- the compiled attr/prop nodes both route here.
+const function matchSpecSatisfied(
+	instance: Instance,
+	present: boolean,
+	value: unknown,
+	spec: MatchSpec,
+	label: string
+): boolean
+	if spec.exists then
+		return present
+	end
+	if not present then
+		return false
+	end
+	const matchers = spec.matchers
+	for i = 1, spec.count do
+		const matcher = matchers[i]
+		if type(matcher) == "function" then
+			const success, result = pcall(matcher :: (Instance, unknown) -> unknown, instance, value)
+			if success and result == true then
+				return true
+			end
+			if not success then
+				warn(`[Component] Query {label}('{spec.name}') matcher errored: {result}`)
+			end
+		elseif value == matcher then
+			return true
+		end
+	end
+	return false
+end
+
+const function attrSatisfies(instance: Instance, spec: MatchSpec): boolean
+	const value = instance:GetAttribute(spec.name)
+	return matchSpecSatisfied(instance, value ~= nil, value, spec, "Attr")
+end
+
+const function propSatisfies(instance: Instance, spec: MatchSpec): boolean
+	-- A property missing on this Instance's class throws on read; the pcall
+	-- failing IS the "property absent" signal (there is no reflection API for
+	-- game code). `present` distinguishes absent from present-but-nil.
+	const present, value = pcall(function()
+		return (instance :: any)[spec.name]
+	end)
+	return matchSpecSatisfied(instance, present, if present then value else nil, spec, "Prop")
+end
+
 -- Compiled requirement check. `satisfiedFn` is only consulted for sub-query
--- requirements; tag/class checks are direct.
+-- requirements; all other kinds are direct (combinators recurse).
 const function reqSatisfied(req: PlanReq, instance: Instance, satisfiedFn: SatisfiedFn): boolean
 	const kind = req.kind
 	if kind == "class" then
@@ -574,11 +1158,71 @@ const function reqSatisfied(req: PlanReq, instance: Instance, satisfiedFn: Satis
 		return CollectionService:HasTag(instance, req.tag :: string)
 	elseif kind == "query" then
 		return satisfiedFn(req.query :: QueryInternal, instance)
+	elseif kind == "attr" then
+		return attrSatisfies(instance, req.spec :: MatchSpec)
+	elseif kind == "prop" then
+		return propSatisfies(instance, req.spec :: MatchSpec)
+	elseif kind == "where" then
+		const success, result = pcall(req.fn :: (Instance) -> boolean, instance)
+		if not success then
+			warn(`[Component] Query.Pred() predicate errored: {result}`)
+			return false
+		end
+		return result == true
+	elseif kind == "not" then
+		for _, child in req.children :: { PlanReq } do
+			if reqSatisfied(child, instance, satisfiedFn) then
+				return false
+			end
+		end
+		return true
+	elseif kind == "or" then
+		for _, child in req.children :: { PlanReq } do
+			if reqSatisfied(child, instance, satisfiedFn) then
+				return true
+			end
+		end
+		return false
+	elseif kind == "and" then
+		for _, child in req.children :: { PlanReq } do
+			if not reqSatisfied(child, instance, satisfiedFn) then
+				return false
+			end
+		end
+		return true
 	else
 		const class = req.class :: ComponentClassLike
 		const component = class:FromInstance(instance)
 		return component ~= nil and Keys.inst(component).phase == "Started"
 	end
+end
+
+-- Loose per-requirement check used to track the candidate UNIVERSE: value
+-- filters (attr/prop/where) and negations are vacuously TRUE here, so an
+-- instance stays tracked (positiveSet membership, attribute/property change
+-- subscriptions) while it satisfies the SOURCE requirements alone — a filter
+-- that is currently false must not tear down the very subscription that would
+-- re-evaluate it when it flips true. The strict check decides actual matching.
+const function reqInUniverse(req: PlanReq, instance: Instance, satisfiedFn: SatisfiedFn): boolean
+	const kind = req.kind
+	if kind == "attr" or kind == "prop" or kind == "where" or kind == "not" then
+		return true
+	elseif kind == "or" then
+		for _, child in req.children :: { PlanReq } do
+			if reqInUniverse(child, instance, satisfiedFn) then
+				return true
+			end
+		end
+		return false
+	elseif kind == "and" then
+		for _, child in req.children :: { PlanReq } do
+			if not reqInUniverse(child, instance, satisfiedFn) then
+				return false
+			end
+		end
+		return true
+	end
+	return reqSatisfied(req, instance, satisfiedFn)
 end
 
 -- Placeholder SatisfiedFn for plans with no sub-query requirement: nothing can
@@ -587,7 +1231,7 @@ const function neverSub(_query: QueryInternal, _instance: Instance): boolean
 	return false
 end
 
-function Query._plan(self: QueryInternal): Plan
+function prototype._plan(self: QueryInternal): Plan
 	const cached = self._planned
 	if cached then
 		return cached
@@ -616,6 +1260,10 @@ function Query._plan(self: QueryInternal): Plan
 			if req.kind == "query" then
 				return true
 			end
+			const children = req.children
+			if children and anyQueryReq(children) then
+				return true
+			end
 		end
 		return false
 	end
@@ -642,7 +1290,7 @@ function Query._plan(self: QueryInternal): Plan
 	return plan
 end
 
-function Query._positiveCandidate(self: QueryInternal, instance: Instance, satisfiedFn: SatisfiedFn): boolean
+function prototype._positiveCandidate(self: QueryInternal, instance: Instance, satisfiedFn: SatisfiedFn): boolean
 	const plan = self:_plan()
 	for _, req in plan.required do
 		if not reqSatisfied(req, instance, satisfiedFn) then
@@ -664,60 +1312,49 @@ function Query._positiveCandidate(self: QueryInternal, instance: Instance, satis
 	return true
 end
 
-function Query._attributesMatch(self: QueryInternal, instance: Instance): boolean
-	for _, attr in self._attributes do
-		const value = instance:GetAttribute(attr.name)
-		const matcher = attr.matcher
-		local ok: boolean
-		if matcher == EXISTS then
-			ok = value ~= nil
-		elseif type(matcher) == "function" then
-			const success, result = pcall(matcher :: (unknown) -> unknown, value)
-			ok = success and result == true
-			if not success then
-				warn(`[Component] Query :withAttribute('{attr.name}') matcher errored: {result}`)
-			end
-		else
-			ok = value == matcher
+-- Universe (subscription-tracking) variant of `_positiveCandidate`: value
+-- filters count as vacuously satisfied (see `reqInUniverse`).
+function prototype._universeCandidate(self: QueryInternal, instance: Instance, satisfiedFn: SatisfiedFn): boolean
+	const plan = self:_plan()
+	for _, req in plan.required do
+		if not reqInUniverse(req, instance, satisfiedFn) then
+			return false
 		end
-		if not ok then
+	end
+	for _, group in plan.anyOf do
+		local anySatisfied = false
+		for _, req in group do
+			if reqInUniverse(req, instance, satisfiedFn) then
+				anySatisfied = true
+				break
+			end
+		end
+		if not anySatisfied then
 			return false
 		end
 	end
 	return true
 end
 
-function Query._propertiesMatch(self: QueryInternal, instance: Instance): boolean
-	for _, prop in self._properties do
-		-- A property missing on this Instance's class throws on read; the pcall
-		-- failing IS the "property absent" signal (there is no reflection API for
-		-- game code). `exists` distinguishes absent from present-but-nil.
-		const exists, value = pcall(function()
-			return (instance :: any)[prop.name]
-		end)
-		const matcher = prop.matcher
-		local ok: boolean
-		if matcher == EXISTS then
-			ok = exists
-		elseif not exists then
-			ok = false
-		elseif type(matcher) == "function" then
-			const success, result = pcall(matcher :: (unknown) -> unknown, value)
-			ok = success and result == true
-			if not success then
-				warn(`[Component] Query :withProperty('{prop.name}') matcher errored: {result}`)
-			end
-		else
-			ok = value == matcher
-		end
-		if not ok then
+function prototype._attributesMatch(self: QueryInternal, instance: Instance): boolean
+	for _, spec in self._attributes do
+		if not attrSatisfies(instance, spec) then
 			return false
 		end
 	end
 	return true
 end
 
-function Query._predicatesPass(self: QueryInternal, instance: Instance): boolean
+function prototype._propertiesMatch(self: QueryInternal, instance: Instance): boolean
+	for _, spec in self._properties do
+		if not propSatisfies(instance, spec) then
+			return false
+		end
+	end
+	return true
+end
+
+function prototype._predicatesPass(self: QueryInternal, instance: Instance): boolean
 	for _, pred in self._predicates do
 		const success, result = pcall(pred.fn, instance)
 		if not success then
@@ -735,7 +1372,7 @@ end
 -- callers that already know `instance` is a positive candidate (the reactive
 -- engine, and `get()` over a single-source enumeration) do not pay to prove it
 -- twice.
-function Query._matchesRest(self: QueryInternal, instance: Instance, satisfiedFn: SatisfiedFn): boolean
+function prototype._matchesRest(self: QueryInternal, instance: Instance, satisfiedFn: SatisfiedFn): boolean
 	const plan = self:_plan()
 	if plan.hasNegative then
 		for _, req in plan.negative do
@@ -756,7 +1393,7 @@ function Query._matchesRest(self: QueryInternal, instance: Instance, satisfiedFn
 	return true
 end
 
-function Query._fullMatch(self: QueryInternal, instance: Instance, satisfiedFn: SatisfiedFn): boolean
+function prototype._fullMatch(self: QueryInternal, instance: Instance, satisfiedFn: SatisfiedFn): boolean
 	if not self:_positiveCandidate(instance, satisfiedFn) then
 		return false
 	end
@@ -785,11 +1422,8 @@ end
 -- `withAttribute("Team", "Red")` clauses from different modules share; function
 -- matchers (and predicates) can only share by identity.
 const function matcherToken(matcher: unknown): string
-	if matcher == EXISTS then
-		return "*"
-	end
-	-- Only reachable from `:withProperty(name, nil)` — an explicit-nil matcher.
-	-- `idOf(nil)` would error (weak-key table keyed by the value), so short-circuit.
+	-- An explicit-nil matcher ("value == nil"). `idOf(nil)` would error
+	-- (weak-key table keyed by the value), so short-circuit.
 	if matcher == nil then
 		return "nil"
 	end
@@ -800,12 +1434,45 @@ const function matcherToken(matcher: unknown): string
 	return "f:" .. idOf(matcher)
 end
 
+-- Canonical token for one MatchSpec: `*` for existence, else the SORTED any-of
+-- matcher tokens (matcher order never matters, so reordered lists share).
+const function specToken(spec: MatchSpec): string
+	if spec.exists then
+		return "*"
+	end
+	const tokens = {}
+	for i = 1, spec.count do
+		table.insert(tokens, matcherToken(spec.matchers[i]))
+	end
+	table.sort(tokens)
+	return table.concat(tokens, "/")
+end
+
+-- Sorted token lists are deduped so duplicated requirements never split a
+-- signature: `query(A, A)` == `query(A)`, and clauses duplicated by splicing
+-- two overlapping queries still intern.
+const function dedupeSorted(tokens: { string }): { string }
+	local write = 0
+	local previous: string? = nil
+	for _, token in tokens do
+		if token ~= previous then
+			write += 1
+			tokens[write] = token
+			previous = token
+		end
+	end
+	for index = #tokens, write + 1, -1 do
+		tokens[index] = nil
+	end
+	return tokens
+end
+
 --[[
 	Canonical structural signature: requirement order never matters, so
 	`query(A, B)` and `query(B, A)` produce the same key. Sub-queries recurse.
 	Cached until the query mutates.
 ]]
-function Query._signature(self: QueryInternal): string
+function prototype._signature(self: QueryInternal): string
 	const cached = self._signatureCache
 	if cached then
 		return cached
@@ -813,8 +1480,30 @@ function Query._signature(self: QueryInternal): string
 	const function reqToken(req: Queryable): string
 		if type(req) == "string" then
 			return "t:" .. req
+		elseif isSub(req) then
+			return "q:(" .. ((req :: Sub).query :: QueryInternal):_signature() .. ")"
 		elseif isQuery(req) then
 			return "q:(" .. (req :: QueryInternal):_signature() .. ")"
+		elseif isFilter(req) then
+			const filter = req :: Filter
+			if filter.op == "where" then
+				return "w:" .. idOf(filter.fn) .. (if filter.signal ~= nil then ">" .. idOf(filter.signal) else "")
+			end
+			const spec = filter.spec :: MatchSpec
+			return (if filter.op == "attr" then "a:" else "p:") .. spec.name .. "=" .. specToken(spec)
+		elseif isCombinator(req) then
+			-- Child order never matters, so sorted tokens make reordered
+			-- combinators (and their whole queries) intern to the same engine.
+			const combo = req :: Combinator
+			const tokens = {}
+			for _, child in combo.children do
+				table.insert(tokens, reqToken(child))
+			end
+			table.sort(tokens)
+			dedupeSorted(tokens)
+			const op = combo.op
+			const sym = if op == "not" then "!" elseif op == "or" then "|" else "&"
+			return sym .. "(" .. table.concat(tokens, ",") .. ")"
 		end
 		return "c:" .. idOf(req)
 	end
@@ -824,6 +1513,7 @@ function Query._signature(self: QueryInternal): string
 			table.insert(tokens, reqToken(req))
 		end
 		table.sort(tokens)
+		dedupeSorted(tokens)
 		return table.concat(tokens, ",")
 	end
 	const groups = {}
@@ -831,21 +1521,25 @@ function Query._signature(self: QueryInternal): string
 		table.insert(groups, sortedTokens(group))
 	end
 	table.sort(groups)
+	dedupeSorted(groups)
 	const attrs = {}
 	for _, attr in self._attributes do
-		table.insert(attrs, attr.name .. "=" .. matcherToken(attr.matcher))
+		table.insert(attrs, attr.name .. "=" .. specToken(attr))
 	end
 	table.sort(attrs)
+	dedupeSorted(attrs)
 	const props = {}
 	for _, prop in self._properties do
-		table.insert(props, prop.name .. "=" .. matcherToken(prop.matcher))
+		table.insert(props, prop.name .. "=" .. specToken(prop))
 	end
 	table.sort(props)
+	dedupeSorted(props)
 	const preds = {}
 	for _, pred in self._predicates do
 		table.insert(preds, idOf(pred.fn) .. (if pred.signal ~= nil then ">" .. idOf(pred.signal) else ""))
 	end
 	table.sort(preds)
+	dedupeSorted(preds)
 	const signature = sortedTokens(self._positive)
 		.. "|"
 		.. table.concat(groups, ";")
@@ -944,7 +1638,7 @@ end
 -- Reactive engine (ref-counted; shared across all structurally equal queries)
 --------------------------------------------------------------------------------
 
-function Query._activate(self: QueryInternal): Engine
+function prototype._activate(self: QueryInternal): Engine
 	self._refcount += 1
 	const attached = self._engine
 	if attached then
@@ -1005,7 +1699,10 @@ function Query._activate(self: QueryInternal): Engine
 	-- One `AttributeChanged` connection per candidate, filtered by name, instead
 	-- of a Janitor plus a `GetAttributeChangedSignal` connection per attribute:
 	-- activation over a large candidate set was dominated by that allocation.
-	const hasAttributes = #self._attributes > 0
+	-- Watched names come from the chain-method lists AND from every attr/prop
+	-- filter node anywhere in the requirement tree (`_allReferences` flattens
+	-- combinator nesting).
+	local hasAttributes = #self._attributes > 0
 	const watchedAttributes: { [string]: boolean } = {}
 	for _, attr in self._attributes do
 		watchedAttributes[attr.name] = true
@@ -1013,18 +1710,36 @@ function Query._activate(self: QueryInternal): Engine
 
 	-- Properties have no single "any property changed" signal, so each watched
 	-- property gets its own `GetPropertyChangedSignal` connection per candidate.
-	const hasProperties = #self._properties > 0
+	local hasProperties = #self._properties > 0
 	const watchedProperties: { [string]: boolean } = {}
 	for _, prop in self._properties do
 		watchedProperties[prop.name] = true
+	end
+
+	const allReferences = self:_allReferences()
+	for _, req in allReferences do
+		if isFilter(req) then
+			const filter = req :: Filter
+			const op = filter.op
+			if op == "attr" then
+				hasAttributes = true
+				watchedAttributes[filter.name :: string] = true
+			elseif op == "prop" then
+				hasProperties = true
+				watchedProperties[filter.name :: string] = true
+			end
+		end
 	end
 
 	const function reevaluate(instance: Instance?)
 		if not instance then
 			return
 		end
-		const positive = self:_positiveCandidate(instance, subMatches)
-		-- Track the candidate universe and (only while bounded) attribute/property subs.
+		-- Universe membership (source requirements only) gates tracking and the
+		-- attribute/property subscriptions: a filter that is currently FALSE must
+		-- not tear down the very subscription that would re-evaluate it when it
+		-- flips true. Full positive candidacy (filters included) gates matching.
+		const positive = self:_universeCandidate(instance, subMatches)
 		if positive then
 			engine.positiveSet[instance] = true
 			if hasAttributes and not engine.attrConns[instance] then
@@ -1070,7 +1785,9 @@ function Query._activate(self: QueryInternal): Engine
 			end
 		end
 
-		const isMatch = positive and self:_matchesRest(instance, subMatches)
+		const isMatch = positive
+			and self:_positiveCandidate(instance, subMatches)
+			and self:_matchesRest(instance, subMatches)
 		const wasMatch = engine.matched[instance] ~= nil
 		if isMatch == wasMatch then
 			return
@@ -1111,6 +1828,11 @@ function Query._activate(self: QueryInternal): Engine
 	const connectedClasses: { [ComponentClassLike]: boolean } = {}
 	const connectedTags: { [string]: boolean } = {}
 	const function subscribeRef(req: Queryable)
+		if isFilter(req) then
+			-- Attr/prop names already fed the watched sets above; a `where` node's
+			-- recheck signal is connected with the chain predicates below.
+			return
+		end
 		if type(req) == "string" then
 			if connectedTags[req] then
 				return
@@ -1157,22 +1879,42 @@ function Query._activate(self: QueryInternal): Engine
 		end
 	end
 
-	for _, req in self:_allReferences() do
+	for _, req in allReferences do
 		subscribeRef(req)
 	end
 
-	-- `where` recheck signals force a full re-evaluation of bounded instances.
+	-- `where` recheck signals (chain predicates AND Pred nodes) force a full
+	-- re-evaluation of tracked instances.
+	-- Deduped by signal identity: the same recheck signal reachable through
+	-- several clauses (e.g. one predicate spliced in from two source queries)
+	-- must trigger ONE sweep, not one per reference.
+	const connectedRechecks: { [any]: boolean } = {}
+	const function connectRecheck(signal: unknown)
+		if connectedRechecks[signal] then
+			return
+		end
+		connectedRechecks[signal] = true
+		const recheck = signal :: RecheckSignalView
+		janitor:Add(
+			recheck:Connect(function()
+				for instance in engine.positiveSet do
+					reevaluate(instance)
+				end
+			end),
+			"Disconnect"
+		)
+	end
 	for _, pred in self._predicates do
 		if pred.signal ~= nil then
-			const recheck = pred.signal :: RecheckSignalView
-			janitor:Add(
-				recheck:Connect(function()
-					for instance in engine.positiveSet do
-						reevaluate(instance)
-					end
-				end),
-				"Disconnect"
-			)
+			connectRecheck(pred.signal)
+		end
+	end
+	for _, req in allReferences do
+		if isFilter(req) then
+			const filter = req :: Filter
+			if filter.op == "where" and filter.signal ~= nil then
+				connectRecheck(filter.signal)
+			end
 		end
 	end
 
@@ -1184,7 +1926,7 @@ function Query._activate(self: QueryInternal): Engine
 	return engine
 end
 
-function Query._deactivate(self: QueryInternal)
+function prototype._deactivate(self: QueryInternal)
 	const engine = self._engine
 	if not engine then
 		return
@@ -1207,7 +1949,7 @@ end
 -- Enumerate the candidate universe (union of positive sources). When `reactive`
 -- is true, sub-query membership comes from live engines (already activated);
 -- otherwise it is computed statically via each sub-query's GetMatches.
-function Query._enumerate(
+function prototype._enumerate(
 	self: QueryInternal,
 	reactive: boolean,
 	subSets: { [QueryInternal]: { [Instance]: boolean } }?
@@ -1218,8 +1960,8 @@ function Query._enumerate(
 			for _, instance in CollectionService:GetTagged(req) do
 				set[instance] = true
 			end
-		elseif isQuery(req) then
-			const subQuery = req :: QueryInternal
+		elseif isSub(req) or isQuery(req) then
+			const subQuery = (if isSub(req) then (req :: Sub).query else req) :: QueryInternal
 			if reactive then
 				const engine = self._engine :: Engine
 				const subEngine = engine.subEngines[subQuery]
@@ -1239,6 +1981,51 @@ function Query._enumerate(
 				else
 					for _, instance in subQuery:get() do
 						set[instance] = true
+					end
+				end
+			end
+		elseif isFilter(req) then
+			-- Refinement-only: contributes no candidates.
+			return
+		elseif isCombinator(req) then
+			const combo = req :: Combinator
+			const op = combo.op
+			if op == "not" then
+				return -- exclusion: contributes no candidates
+			elseif op == "and" then
+				-- Any one enumerable child's members are a superset of the And's
+				-- satisfiers, so ONE child bounds it. Prefer the narrowest child
+				-- whose population is known O(1) (a class's started list length),
+				-- mirroring top-level seed selection; otherwise first enumerable.
+				local best: Queryable? = nil
+				local bestSize = math.huge
+				for _, child in combo.children do
+					if isEnumerable(child) then
+						local startedList: { Instance }? = nil
+						if type(child) == "table" and not isCombinator(child) and not isSub(child) then
+							const internal = (child :: any)[INTERNAL] :: any
+							if internal ~= nil then
+								startedList = internal.startedList
+							end
+						end
+						if startedList ~= nil then
+							const size = #startedList
+							if size < bestSize then
+								best, bestSize = child, size
+							end
+						elseif best == nil then
+							best = child
+						end
+					end
+				end
+				if best ~= nil then
+					addFromRef(best)
+				end
+				return
+			else -- or: the union of all children (only valid fully enumerable)
+				if isEnumerable(req) then
+					for _, child in combo.children do
+						addFromRef(child)
 					end
 				end
 			end
@@ -1331,7 +2118,7 @@ const function attachObserver(
 	return connProxy
 end
 
-function Query.observe(self: QueryInternal, callback: (Instance, Janitor) -> ()): QueryConnection
+function prototype.observe(self: QueryInternal, callback: (Instance, Janitor) -> ()): QueryConnection
 	return attachObserver(self, callback, false, "observe")
 end
 
@@ -1350,7 +2137,7 @@ end
 	also disrupt the other observers and matches reacting to the same change. Use
 	[Query:observe] for any callback that may yield. :::
 ]=]
-function Query.observeUnyielding(self: QueryInternal, callback: (Instance, Janitor) -> ()): QueryConnection
+function prototype.observeUnyielding(self: QueryInternal, callback: (Instance, Janitor) -> ()): QueryConnection
 	return attachObserver(self, callback, true, "observeUnyielding")
 end
 
@@ -1380,7 +2167,7 @@ end
 	returned handle MUST be disconnected to release the engine — unlike a one-shot
 	[Query:get], a tracked query holds live subscriptions until then.
 ]=]
-function Query.track(self: QueryInternal): QueryConnection
+function prototype.track(self: QueryInternal): QueryConnection
 	self:_validate()
 	self:_activate()
 
@@ -1398,18 +2185,25 @@ function Query.track(self: QueryInternal): QueryConnection
 end
 
 -- The sole positive requirement when the query is the ECS hot shape -- exactly
--- one required requirement and no anyOf / negative / attribute / predicate
--- clause -- so a read can answer straight from that one source. `nil` otherwise.
-function Query._singleSource(self: QueryInternal): PlanReq?
+-- one required SOURCE requirement (class / tag / sub-query / class-like; node
+-- kinds are refinements, not dumpable sources) and no anyOf / negative /
+-- attribute / property / predicate clause -- so a read can answer straight from
+-- that one source. `nil` otherwise.
+function prototype._singleSource(self: QueryInternal): PlanReq?
 	const plan = self:_plan()
 	if
 		#plan.required == 1
 		and #plan.anyOf == 0
 		and not plan.hasNegative
 		and not plan.hasAttributes
+		and not plan.hasProperties
 		and not plan.hasPredicates
 	then
-		return plan.required[1]
+		const req = plan.required[1]
+		const kind = req.kind
+		if kind == "class" or kind == "tag" or kind == "query" or kind == "classlike" then
+			return req
+		end
 	end
 	return nil
 end
@@ -1419,7 +2213,7 @@ end
 -- ONCE and then answered by lookup (re-running it per candidate is quadratic in
 -- nested queries). When the plan references no sub-query, returns the no-op
 -- `neverSub` and nils, so callers allocate nothing.
-function Query._staticSub(
+function prototype._staticSub(
 	self: QueryInternal,
 	plan: Plan
 ): (SatisfiedFn, ((QueryInternal) -> { [Instance]: boolean })?, {
@@ -1472,7 +2266,7 @@ end
 -- one candidate, not all. The live-engine path and the single-requirement ECS
 -- shape are cheaper answers the public terminals handle themselves before
 -- falling back here, so this deliberately does NOT special-case them.
-function Query._collect(self: QueryInternal, onMatch: (Instance) -> boolean?)
+function prototype._collect(self: QueryInternal, onMatch: (Instance) -> boolean?)
 	const plan = self:_plan()
 	const staticSub, ensureSet, subSets = self:_staticSub(plan)
 	const required = plan.required
@@ -1546,7 +2340,21 @@ function Query._collect(self: QueryInternal, onMatch: (Instance) -> boolean?)
 			end
 		end
 	end
-	const chosenSeed: PlanReq = (seed or firstTag or firstQuery or firstClasslike) :: PlanReq
+	-- No direct source among the required reqs (they are all filter/combinator
+	-- nodes; validation guarantees an enumerable one is nested somewhere): fall
+	-- back to the union scan, same as the anyOf-only shape.
+	const fallbackSeed = seed or firstTag or firstQuery or firstClasslike
+	if not fallbackSeed then
+		for instance in self:_enumerate(false, subSets) do
+			if self:_fullMatch(instance, staticSub) then
+				if onMatch(instance) then
+					return
+				end
+			end
+		end
+		return
+	end
+	const chosenSeed: PlanReq = fallbackSeed :: PlanReq
 	const seedKind = chosenSeed.kind
 	-- Probes = every required requirement except the seed, most-selective-first
 	-- when populations are known (smaller population rejects more candidates
@@ -1690,7 +2498,7 @@ end
 	an O(matches) copy, identical to what observers see — making per-frame
 	`GetMatches` loops cheap enough for ECS-style iteration.
 ]=]
-function Query.get(self: QueryInternal): { Instance }
+function prototype.get(self: QueryInternal): { Instance }
 	self:_validate()
 
 	-- Live-engine fast path: the engine already maintains exactly this set.
@@ -1735,7 +2543,7 @@ function Query.get(self: QueryInternal): { Instance }
 	end)
 	return out
 end
-Query.GetMatches = Query.get
+prototype.GetMatches = prototype.get
 
 --[=[
 	@within Query
@@ -1746,7 +2554,7 @@ Query.GetMatches = Query.get
 	reactive engine's match set; cold, it evaluates this one instance against
 	every clause (no candidate enumeration).
 ]=]
-function Query.contains(self: QueryInternal, instance: Instance): boolean
+function prototype.contains(self: QueryInternal, instance: Instance): boolean
 	assert(typeof(instance) == "Instance", "[Component] Query:contains() expects an Instance")
 	self:_validate()
 	const engine = self._engine or activeEngines[self:_signature()]
@@ -1764,7 +2572,7 @@ end
 	this is an O(1) read of the engine's match count; cold it scans without
 	building the match array [Query:get] would allocate.
 ]=]
-function Query.count(self: QueryInternal): number
+function prototype.count(self: QueryInternal): number
 	self:_validate()
 	const engine = self._engine or activeEngines[self:_signature()]
 	if engine then
@@ -1789,7 +2597,7 @@ end
 	actively observed this is an O(1) read of the engine's first match; cold it
 	stops at the first matching candidate instead of collecting them all.
 ]=]
-function Query.first(self: QueryInternal): Instance?
+function prototype.first(self: QueryInternal): Instance?
 	self:_validate()
 	const engine = self._engine or activeEngines[self:_signature()]
 	if engine then
@@ -1829,7 +2637,7 @@ end
 	raw throughput; `iter()` is for hot per-frame loops where avoiding the cloned
 	array's GC garbage matters more than wall time.
 ]=]
-function Query.iter(self: QueryInternal): () -> Instance?
+function prototype.iter(self: QueryInternal): () -> Instance?
 	self:_validate()
 	const engine = self._engine or activeEngines[self:_signature()]
 	-- Backwards, so the engine's swap-remove (which moves an already-visited
@@ -1841,5 +2649,13 @@ function Query.iter(self: QueryInternal): () -> Instance?
 		return list[index]
 	end
 end
+
+-- Callable module: `Query(...)` == `Query.new(...)`. Query INSTANCES are
+-- unaffected — their metatable is `prototype`; this metatable is the module's.
+setmetatable(Query, {
+	__call = function(_, ...: Queryable): Query
+		return Query.new(...)
+	end,
+})
 
 return Query

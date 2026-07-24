@@ -113,7 +113,7 @@ return function(t: any)
 				redMatched[i] = true
 			end)
 			local obsHp = Component.query(A)
-				:withAttribute("Hp", function(v)
+				:withAttribute("Hp", function(_, v)
 					return type(v) == "number" and v > 0
 				end)
 				:observe(function(i)
@@ -147,7 +147,7 @@ return function(t: any)
 				namedMatched[i] = true
 			end)
 			local obsClear = Component.query(A)
-				:withProperty("Transparency", function(v)
+				:withProperty("Transparency", function(_, v)
 					return type(v) == "number" and v > 0.5
 				end)
 				:observe(function(i)
@@ -523,13 +523,13 @@ return function(t: any)
 	describe("started sparse set", function()
 		test("cold GetMatches excludes constructing and stopped components", function()
 			local gate = false
-			local A, aTag = H.makeClass({
+			local A, aTag = H.makeClass {
 				Construct = function()
 					while not gate do
 						task.wait()
 					end
 				end,
-			})
+			}
 			local q = Component.query(A)
 			local p = part { aTag }
 
@@ -552,6 +552,393 @@ return function(t: any)
 			expect(#q:GetMatches()).is(0)
 
 			A:Destroy()
+			p:Destroy()
+		end)
+	end)
+
+	describe("composable nodes", function()
+		local Query = Component.Query
+
+		test("the module is callable and exposes static node constructors", function()
+			local A, aTag = H.makeClass()
+			local p = part { aTag }
+			expect(H.waitStarted(A, p, 3)).is(true)
+
+			-- Query(...) == Query.new(...); Component.query is the same module.
+			expect(#Query(A):get()).is(1)
+			expect(Component.query).is(Query)
+			expect(type(Query.Attr)).is("function")
+			expect(type(Query.Or)).is("function")
+			expect(type(Query.Not)).is("function")
+
+			A:Destroy()
+			p:Destroy()
+		end)
+
+		test("Attr nodes work in with/without/withAny, reactively", function()
+			local A, aTag = H.makeClass()
+			local redLive, notRedLive, eitherLive = {}, {}, {}
+			local obsRed = Query(A):with(Query.Attr("Team", "Red")):observe(function(i, jani)
+				redLive[i] = true
+				jani:Add(function()
+					redLive[i] = nil
+				end)
+			end)
+			local obsNotRed = Query(A):without(Query.Attr("Team", "Red")):observe(function(i, jani)
+				notRedLive[i] = true
+				jani:Add(function()
+					notRedLive[i] = nil
+				end)
+			end)
+			local obsEither = Query(A)
+				:withAny(Query.Attr("Team", "Red"), Query.Attr("Team", "Blue"))
+				:observe(function(i, jani)
+					eitherLive[i] = true
+					jani:Add(function()
+						eitherLive[i] = nil
+					end)
+				end)
+
+			local p = part { aTag }
+			p:SetAttribute("Team", "Green")
+			expect(H.waitStarted(A, p, 3)).is(true)
+			task.wait(0.1)
+			expect(redLive[p]).never_exists()
+			expect(notRedLive[p]).is(true) -- Green is not Red
+			expect(eitherLive[p]).never_exists()
+
+			p:SetAttribute("Team", "Red")
+			expect(H.waitUntil(function()
+				return redLive[p] and eitherLive[p] and not notRedLive[p]
+			end, 3)).is(true)
+
+			p:SetAttribute("Team", "Blue")
+			expect(H.waitUntil(function()
+				return not redLive[p] and eitherLive[p] and notRedLive[p]
+			end, 3)).is(true)
+
+			obsRed:Disconnect()
+			obsNotRed:Disconnect()
+			obsEither:Disconnect()
+			A:Destroy()
+			p:Destroy()
+		end)
+
+		test("without(Prop) expresses property ABSENCE (class lacks the property)", function()
+			local A, aTag = H.makeClass()
+			local live = {}
+			-- Parts have no PrimaryPart property; Models do (even when nil-valued).
+			local obs = Query(A):without(Query.Prop("PrimaryPart")):observe(function(i, jani)
+				live[i] = true
+				jani:Add(function()
+					live[i] = nil
+				end)
+			end)
+
+			local p = part { aTag }
+			local model = Instance.new("Model")
+			CollectionService:AddTag(model, aTag)
+			model.Parent = workspace
+			expect(H.waitUntil(function()
+				return A:Has(p) and A:Has(model)
+			end, 3)).is(true)
+			task.wait(0.1)
+
+			expect(live[p]).is(true) -- Part lacks PrimaryPart -> absence matches
+			expect(live[model]).never_exists() -- Model HAS the property (nil-valued counts as present)
+
+			obs:Disconnect()
+			A:Destroy()
+			p:Destroy()
+			model:Destroy()
+		end)
+
+		test("any-of matcher lists pass (instance, value) to predicates", function()
+			local A, aTag = H.makeClass()
+			local sawInstance, sawValue = nil, nil
+			local live = {}
+			local obs = Query(A):withProperty("Name", "Alpha", function(i, v)
+				sawInstance, sawValue = i, v
+				return v == "Zed"
+			end):observe(function(i, jani)
+				live[i] = true
+				jani:Add(function()
+					live[i] = nil
+				end)
+			end)
+
+			local p = part { aTag }
+			p.Name = "Other"
+			expect(H.waitStarted(A, p, 3)).is(true)
+			task.wait(0.1)
+			expect(live[p]).never_exists()
+			-- The predicate branch ran and received both arguments.
+			expect(sawInstance).is(p)
+			expect(sawValue).is("Other")
+
+			p.Name = "Alpha" -- first value matcher
+			expect(H.waitUntil(function()
+				return live[p] == true
+			end, 3)).is(true)
+			p.Name = "Zed" -- predicate matcher
+			task.wait(0.1)
+			expect(live[p]).is(true)
+			p.Name = "Miss"
+			expect(H.waitUntil(function()
+				return live[p] == nil
+			end, 3)).is(true)
+
+			obs:Disconnect()
+			A:Destroy()
+			p:Destroy()
+		end)
+
+		test("And/Or/Not nest and react to nested clause flips", function()
+			local A, aTag = H.makeClass()
+			local B, bTag = H.makeClass()
+			local sectionLive, orLive = {}, {}
+			-- Negate a whole section: A minus (B AND Locked=true).
+			local obsSection = Query(A):without(Query.And(B, Query.Attr("Locked", true))):observe(function(i, jani)
+				sectionLive[i] = true
+				jani:Add(function()
+					sectionLive[i] = nil
+				end)
+			end)
+			-- Or mixes a filter with a component requirement.
+			local obsOr = Query(A):with(Query.Or(Query.Attr("Flag", 1), B)):observe(function(i, jani)
+				orLive[i] = true
+				jani:Add(function()
+					orLive[i] = nil
+				end)
+			end)
+
+			local p = part { aTag, bTag }
+			expect(H.waitUntil(function()
+				return A:Has(p) and B:Has(p)
+			end, 3)).is(true)
+			task.wait(0.1)
+			expect(sectionLive[p]).is(true) -- B started but not Locked
+			expect(orLive[p]).is(true) -- B satisfies the Or
+
+			p:SetAttribute("Locked", true)
+			expect(H.waitUntil(function()
+				return sectionLive[p] == nil
+			end, 3)).is(true)
+
+			CollectionService:RemoveTag(p, bTag)
+			expect(H.waitUntil(function()
+				return orLive[p] == nil -- B gone and Flag unset -> Or fails
+			end, 3)).is(true)
+			p:SetAttribute("Flag", 1)
+			expect(H.waitUntil(function()
+				return orLive[p] == true -- attr branch of the Or
+			end, 3)).is(true)
+
+			obsSection:Disconnect()
+			obsOr:Disconnect()
+			A:Destroy()
+			B:Destroy()
+			p:Destroy()
+		end)
+
+		test("structurally equal composed queries share one interned engine", function()
+			local A, aTag = H.makeClass()
+			local B, bTag = H.makeClass()
+			local live1, live2 = {}, {}
+			-- Same requirements, reordered combinator children AND reordered matchers.
+			local q1 = Query(A):with(Query.Or(Query.Attr("Team", "Red", "Blue"), B))
+			local q2 = Query(A):with(Query.Or(B, Query.Attr("Team", "Blue", "Red")))
+			local obs1 = q1:observe(function(i, jani)
+				live1[i] = true
+				jani:Add(function()
+					live1[i] = nil
+				end)
+			end)
+			local obs2 = q2:observe(function(i, jani)
+				live2[i] = true
+				jani:Add(function()
+					live2[i] = nil
+				end)
+			end)
+
+			local p = part { aTag, bTag }
+			expect(H.waitUntil(function()
+				return live1[p] == true and live2[p] == true
+			end, 3)).is(true)
+
+			-- Shared engine: disconnecting one observer must not kill the other's
+			-- reactivity (refcounted interning).
+			obs1:Disconnect()
+			p:SetAttribute("Team", "Red")
+			CollectionService:RemoveTag(p, bTag)
+			expect(H.waitUntil(function()
+				return live2[p] == true -- attr branch still satisfies the Or
+			end, 3)).is(true)
+			p:SetAttribute("Team", "Green")
+			expect(H.waitUntil(function()
+				return live2[p] == nil
+			end, 3)).is(true)
+
+			obs2:Disconnect()
+			A:Destroy()
+			B:Destroy()
+			p:Destroy()
+		end)
+
+		test("queries with no enumerable source error", function()
+			local A = H.makeClass()
+			-- Filter-only, Not-only, and Or-with-unbounded-branch are all unbounded.
+			expect(function()
+				Query(Query.Attr("X", 1)):get()
+			end).fails()
+			expect(function()
+				Query(Query.Not(A)):get()
+			end).fails()
+			expect(function()
+				Query(Query.Or(A, Query.Attr("X", 1))):get()
+			end).fails()
+			-- An And with one bounded child is fine.
+			expect(#Query(Query.And(A, Query.Attr("X", 1))):get()).is(0)
+			A:Destroy()
+		end)
+	end)
+
+	describe("composition unification", function()
+		local Query = Component.Query
+
+		test("Query(q1):with(B) is literally q1:with(B) (compose by value)", function()
+			local A, aTag = H.makeClass()
+			local B, bTag = H.makeClass()
+			local q1 = Query(A)
+			local nestedSpelling = Query(q1):with(B)
+			local chainedSpelling = q1:with(B)
+
+			-- One internal form: identical signatures, so they intern together.
+			expect(nestedSpelling:_signature()).is(chainedSpelling:_signature())
+
+			local pBoth = part { aTag, bTag }
+			local pA = part { aTag }
+			expect(H.waitUntil(function()
+				return A:Has(pBoth) and B:Has(pBoth) and A:Has(pA)
+			end, 3)).is(true)
+
+			for _, q in { nestedSpelling, chainedSpelling } do
+				expect(q:contains(pBoth)).is(true)
+				expect(q:contains(pA)).is(false)
+				expect(q:count()).is(1)
+			end
+
+			A:Destroy()
+			B:Destroy()
+			pBoth:Destroy()
+			pA:Destroy()
+		end)
+
+		test("equivalent spellings converge to one signature", function()
+			local A = H.makeClass()
+			local B = H.makeClass()
+			local C = H.makeClass()
+
+			expect(Query(A, Query.And(B, C)):_signature()).is(Query(A, B, C):_signature())
+			expect(Query(A):with(Query.Or(B, C)):_signature()).is(Query(A):withAny(B, C):_signature())
+			expect(Query(A):with(Query.Not(B)):_signature()).is(Query(A):without(B):_signature())
+			expect(Query(A, Query.Attr("D", 1)):_signature()).is(Query(A):withAttribute("D", 1):_signature())
+			expect(Query(A, A):_signature()).is(Query(A):_signature())
+
+			A:Destroy()
+			B:Destroy()
+			C:Destroy()
+		end)
+
+		test("a query in without/withAny stays atomic (De Morgan)", function()
+			local A, aTag = H.makeClass()
+			local B, bTag = H.makeClass()
+			local C, cTag = H.makeClass()
+			local dTag = H.uniqueTag()
+			local sub = Query(B):with(C)
+
+			local pB = part { aTag, bTag }
+			local pBC = part { aTag, bTag, cTag }
+			local pD = part { aTag, dTag }
+			expect(H.waitUntil(function()
+				return A:Has(pB) and B:Has(pB) and A:Has(pBC) and B:Has(pBC) and C:Has(pBC) and A:Has(pD)
+			end, 3)).is(true)
+
+			-- without(sub) excludes only instances matching ALL of sub, not any part.
+			local qWithout = Query(A):without(sub)
+			expect(qWithout:contains(pB)).is(true) -- has B alone: not (B and C)
+			expect(qWithout:contains(pBC)).is(false)
+
+			-- withAny(sub, tag): sub is one atomic alternative.
+			local qAny = Query(A):withAny(sub, dTag)
+			expect(qAny:contains(pBC)).is(true)
+			expect(qAny:contains(pD)).is(true)
+			expect(qAny:contains(pB)).is(false)
+
+			A:Destroy()
+			B:Destroy()
+			C:Destroy()
+			pB:Destroy()
+			pBC:Destroy()
+			pD:Destroy()
+		end)
+
+		test("splicing can bound an otherwise unbounded query", function()
+			local A, aTag = H.makeClass()
+			local filterOnly = Query():withAttribute("Powered", true)
+			-- Standalone it is unbounded and errors...
+			expect(function()
+				filterOnly:get()
+			end).fails()
+			-- ...but composed by value, the class bounds the spliced clauses.
+			local q = Query(filterOnly):with(A)
+			local pOn = part { aTag }
+			pOn:SetAttribute("Powered", true)
+			local pOff = part { aTag }
+			expect(H.waitUntil(function()
+				return A:Has(pOn) and A:Has(pOff)
+			end, 3)).is(true)
+			expect(q:contains(pOn)).is(true)
+			expect(q:contains(pOff)).is(false)
+
+			A:Destroy()
+			pOn:Destroy()
+			pOff:Destroy()
+		end)
+
+		test("Query.Sub composes by reference with identical matching, reactively", function()
+			local A, aTag = H.makeClass()
+			local B, bTag = H.makeClass()
+			local C, cTag = H.makeClass()
+			local sub = Query(B):with(C)
+			local byValue = Query(A):with(sub)
+			local byRef = Query(A):with(Query.Sub(sub))
+
+			local live = {}
+			local obs = byRef:observe(function(i, jani)
+				live[i] = true
+				jani:Add(function()
+					live[i] = nil
+				end)
+			end)
+
+			local p = part { aTag, bTag, cTag }
+			expect(H.waitUntil(function()
+				return live[p] == true
+			end, 3)).is(true)
+			expect(byValue:contains(p)).is(true)
+
+			-- Sub-driven unmatch propagates to the by-reference parent.
+			CollectionService:RemoveTag(p, cTag)
+			expect(H.waitUntil(function()
+				return live[p] == nil
+			end, 3)).is(true)
+			expect(byValue:contains(p)).is(false)
+
+			obs:Disconnect()
+			A:Destroy()
+			B:Destroy()
+			C:Destroy()
 			p:Destroy()
 		end)
 	end)

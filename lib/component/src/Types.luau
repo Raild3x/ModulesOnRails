@@ -26,6 +26,15 @@ const TypeFunctions = require("./TypeFunctions")
 
 export type Janitor = Janitor.Janitor
 export type Promise<T... = ()> = Promise.TypedPromise<T...>
+
+-- Structural view of a promise, used by Lifecycle's hook plumbing. Callbacks
+-- are `(...any) -> ...any` deliberately: `...unknown` params reject `() -> ()`
+-- handlers via contravariance. Vendor promises bridge through `unknown` once.
+export type PromiseLike = {
+	andThen: (self: PromiseLike, onResolve: (...any) -> ...any, onReject: ((...any) -> ...any)?) -> PromiseLike,
+	catch: (self: PromiseLike, onReject: (...any) -> ...any) -> PromiseLike,
+	cancel: (self: PromiseLike) -> (),
+}
 export type LifecyclePhase = Keys.LifecyclePhase
 export type StopReason = Keys.StopReason
 

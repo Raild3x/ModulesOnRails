@@ -113,6 +113,11 @@ export type ComponentConfig = Types.ComponentConfig
 export type ComponentClass = Types.ComponentClass
 export type TypedClass<M> = Types.TypedClass<M>
 export type Query = Query.Query
+export type Queryable = Query.Queryable
+export type Filter = Query.Filter
+export type Combinator = Query.Combinator
+export type Matcher = Query.Matcher
+export type RecheckSignal = Query.RecheckSignal
 
 -- Type functions (NEW type solver only) live in TypeFunctions.luau; re-exported
 -- here so users can compose `Component.extensionMethods<typeof(myExtension)>`
@@ -151,11 +156,17 @@ Component.DelaySetup = script:GetAttribute("DelaySetup") or false
 --[=[
 	@within Component
 	@function query
-	@param ... Queryable -- component classes, tag strings, and/or sub-queries
+	@param ... Queryable -- component classes, tag strings, sub-queries, and/or Query.Attr/Prop/Pred/And/Or/Not nodes
 	@return Query
 	Creates a world-level [Query] over tagged instances. See the [Query] class.
+
+	`Component.query` / `Component.Query` are the callable Query module itself:
+	`Component.Query(A, B)` builds a query, and the static node constructors
+	(`Component.Query.Attr`, `.Prop`, `.Pred`, `.And`, `.Or`, `.Not`) build
+	composable requirement nodes.
 ]=]
-Component.query = Query.new
+Component.query = Query
+Component.Query = Query
 
 --[=[
 	@tag Component
@@ -472,7 +483,10 @@ end
 	round-trip). Rejects if construction is vetoed by `ShouldConstruct` or is
 	stopped before it starts.
 ]=]
-function Component.prototype.GetCreateFromInstance(self: Class_Internal, instance: Instance): Promise<Types.AnyComponent>
+function Component.prototype.GetCreateFromInstance(
+	self: Class_Internal,
+	instance: Instance
+): Promise<Types.AnyComponent>
 	return Promise.new(function(resolve, reject, onCancel)
 		const existing = self:FromInstance(instance)
 		if existing and Keys.inst(existing).started then
@@ -506,6 +520,9 @@ function Component.prototype.GetCreateFromInstance(self: Class_Internal, instanc
 		end
 	end)
 end
+
+--- @deprecated v1.0.0 -- Renamed to [Component:GetCreateFromInstance].
+Component.prototype.GetOrCreateFromInstance = Component.prototype.GetCreateFromInstance
 
 --[=[
 	@tag Component Class
@@ -598,11 +615,7 @@ end
 	Adds a Promise to the component's core Janitor. An optional string `index`
 	names it so it can be removed/cancelled via [Component:RemoveTask].
 ]=]
-function Component.prototype.AddPromise<T...>(
-	self: Instance_Internal,
-	promise: Promise<T...>,
-	index: unknown?
-): Promise<T...>
+function Component.prototype.AddPromise<T...>(self: Instance_Internal, promise: Promise<T...>, index: unknown?): Promise<T...>
 	return Keys.inst(self).janitor:AddPromise(promise, index)
 end
 
