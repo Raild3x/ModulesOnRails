@@ -70,10 +70,19 @@ export type ClassInternal = {
 	pending: { [Instance]: any }, -- in-flight construction record (or `true` reservation)
 	extensions: { any },
 	classActiveExtensions: { any },
+	-- True when some extension defines `ShouldExtend`, so the active set genuinely
+	-- varies per instance. When false every instance resolves to
+	-- `classActiveExtensions` and the per-instance topological sort is skipped.
+	extensionsVaryPerInstance: boolean,
 	fields: { [string]: any }?, -- config.Fields: deep-copied onto every instance
 	initFields: (() -> { [string]: any })?, -- config.InitFields: called per instance
 	janitor: any, -- class-level Janitor (signals + CollectionService connections)
 	failed: any, -- internal Signal(instance, reason): construction ended without starting
+	-- Teardowns that have begun but not yet finished. `Destroy` must not tear the
+	-- class Janitor down while any are outstanding, or it would destroy the
+	-- `Stopped`/`failed` signals those teardowns still have to fire on.
+	teardownsInFlight: number,
+	destroyJanitorWhenIdle: boolean,
 }
 
 local INTERNAL = Symbol("Internal")

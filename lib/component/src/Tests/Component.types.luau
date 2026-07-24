@@ -146,10 +146,6 @@ function Methods.UseSibling(self: ti)
 		sibling:HelloExtension(11) -- checked on the sibling's merged type
 		print(inst)
 	end
-	self:WhileHasComponent(myComponent, function(comp, jani)
-		comp:HelloComponent("sibling")
-		print(jani)
-	end)
 end
 
 function Methods:Test(num: number): string

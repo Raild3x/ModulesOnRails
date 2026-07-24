@@ -323,7 +323,9 @@ export type ComponentInstance_Internal = ComponentClass_Internal_Methods & Compo
 -- same-frame reservation before the record exists).
 export type PendingRecord = {
 	component: ComponentInstance_Internal?,
-	promise: PromiseLike?,
+	-- Aborts an in-flight construction with the given reason. The driver wakes
+	-- from whatever it is parked on and routes to teardown.
+	cancel: ((StopReason) -> ())?,
 	id: number,
 }
 

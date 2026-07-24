@@ -45,11 +45,15 @@
 	resolved. `Construct()`/`Start()` may likewise yield or return a Promise.
 
 	Only the construct phases (`Constructing` → `Construct()` → `Constructed`) run
-	inline and hold up the construction chain. The start and stop phases are
-	dispatched with `task.defer`, so they never run on the thread that triggered
-	them and teardown never blocks its caller. Stop hooks are gated in *reverse*
-	dependency order — a dependency stops only after everything depending on it
-	has stopped.
+	inline and hold up the construction chain. The start phases run after a
+	`task.defer` boundary and teardown is deferred as a whole, so neither ever
+	runs on the thread that triggered it and teardown never blocks its caller.
+	Stop hooks are gated in *reverse* dependency order — a dependency stops only
+	after everything depending on it has stopped.
+
+	Hooks that neither yield nor return a Promise run inline in dependency order
+	and cost no Promise at all; the machinery only materializes for hooks that
+	actually suspend (see `Lifecycle.luau`).
 
 	If the instance leaves its valid ancestors, is untagged, or is superseded while
 	a hook is still waiting, the in-flight work is cancelled and the component is
@@ -244,10 +248,13 @@ const function componentNew(config: Types.ComponentConfig): Class_Internal
 		pending = {},
 		extensions = config.Extensions or {},
 		classActiveExtensions = {},
+		extensionsVaryPerInstance = false,
 		fields = config.Fields,
 		initFields = config.InitFields,
 		janitor = janitor,
 		failed = janitor:Add(Signal.new(), "Destroy"),
+		teardownsInFlight = 0,
+		destroyJanitorWhenIdle = false,
 	}
 	classAny[Keys.Internal] = ci
 	classAny.Tag = config.Tag
@@ -340,15 +347,13 @@ function ComponentClassMethods._tryDeconstruct(self: Class_Internal, instance: I
 	Lifecycle.Untrack(self, instance)
 	ci.pending[instance] = nil
 
-	-- If the component is still constructing, cancel the in-flight Promise chain.
+	-- If the component is still constructing, abort the in-flight driver; it runs
+	-- teardown itself with the reason we hand it.
 	if type(record) == "table" then
 		const pending = record :: Types.PendingRecord
-		const promise = pending.promise
-		if promise and Promise.is(promise) and promise:getStatus() == Promise.Status.Started then
-			-- Still in flight: cancel it; the chain's `finally` runs teardown with
-			-- the reason we stash here.
-			Keys.inst(pending.component).stopReason = reason
-			promise:cancel()
+		const cancel = pending.cancel
+		if cancel then
+			cancel(reason)
 			return
 		end
 	end
@@ -412,8 +417,18 @@ function ComponentClassMethods._setup(self: Class_Internal)
 	end
 
 	const ci = Keys.class(self)
-	ci.classActiveExtensions = Extensions.Resolve(self, ci.extensions, true)
-	Extensions.BindMethods(self, ci.classActiveExtensions)
+	const classActiveExtensions = Extensions.Resolve(self, ci.extensions, true)
+	ci.classActiveExtensions = classActiveExtensions
+	Extensions.BindMethods(self, classActiveExtensions)
+
+	-- Without a `ShouldExtend` anywhere, every instance resolves to exactly this
+	-- list, so `Lifecycle.Run` can share it instead of re-sorting per instance.
+	for _, extension in classActiveExtensions do
+		if type(extension.ShouldExtend) == "function" then
+			ci.extensionsVaryPerInstance = true
+			break
+		end
+	end
 
 	ci.janitor:Add(CollectionService:GetInstanceAddedSignal(self.Tag):Connect(function(instance)
 		self:_startWatching(instance)
@@ -631,7 +646,6 @@ function ComponentClassMethods.GetComponent(self: Instance_Internal, componentCl
 	return Keys.class(componentClass).instToComponents[self.Instance]
 end
 
-
 --[=[
 	@tag Component Instance
 	@return boolean
@@ -700,8 +714,6 @@ function ComponentClassMethods.GetTask(self: Instance_Internal, index: unknown):
 	return Keys.inst(self).janitor:Get(index)
 end
 
-
-
 --[=[
 	@tag Component Class
 	@function HeartbeatUpdate
@@ -755,7 +767,15 @@ function ComponentClassMethods.Destroy(self: Class_Internal)
 		self:_tryDeconstruct(instance, "ClassDestroyed")
 	end
 
-	ci.janitor:Destroy()
+	-- The teardowns kicked off above are deferred and still have to fire
+	-- `Stopped` (or `failed`) on this class's signals, which live on this
+	-- Janitor. Destroying it now would silently swallow those fires, so hand the
+	-- destroy to whichever teardown finishes last.
+	if ci.teardownsInFlight > 0 then
+		ci.destroyJanitorWhenIdle = true
+	else
+		ci.janitor:Destroy()
+	end
 
 	table.clear(ci.instToComponents)
 	table.clear(ci.components)

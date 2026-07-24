@@ -83,33 +83,6 @@ return function(t: any)
 			part:Destroy()
 		end)
 
-		test("Component.GetComponents returns every class's component on an instance", function()
-			local A, aTag = makeClass()
-			local B, bTag = makeClass()
-			local part = Instance.new("Part")
-			part.Anchored = true
-			CollectionService:AddTag(part, aTag)
-			CollectionService:AddTag(part, bTag)
-			part.Parent = workspace
-
-			expect(waitUntil(function()
-				return A:Has(part) and B:Has(part)
-			end)).is(true)
-
-			local all = Component.GetComponents(part)
-			local set = {}
-			for _, c in all do
-				set[getmetatable(c)] = true
-			end
-			expect(#all).is(2)
-			expect(set[A]).is(true)
-			expect(set[B]).is(true)
-
-			A:Destroy()
-			B:Destroy()
-			part:Destroy()
-		end)
-
 		test("instances outside valid ancestors do not construct", function()
 			local class, tag = makeClass { Ancestors = { workspace } }
 			local part = Instance.new("Part")

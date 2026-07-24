@@ -131,7 +131,7 @@ type Engine = {
 	observers: { [Observer]: boolean },
 	janitor: Janitor,
 	positiveSet: { [Instance]: boolean }, -- [Instance]: true while positively bounded (candidate universe)
-	attrJanitors: { [Instance]: Janitor }, -- attribute subscriptions
+	attrConns: { [Instance]: ConnectionLike }, -- one AttributeChanged sub per candidate
 	subEngines: { [QueryInternal]: Engine },
 }
 
@@ -143,17 +143,28 @@ type QueryInternal = Query & {
 	_predicates: { PredicateRequirement },
 	_engine: Engine?,
 	_refcount: number,
+	-- Caches invalidated by every mutator (`_invalidate`). A query is typically
+	-- built once and read many times, so re-walking the requirement graph on
+	-- every `get()`/`observe()` was pure waste.
+	_validated: boolean,
+	_sources: { Queryable }?,
 
+	_invalidate: (self: QueryInternal) -> (),
 	_positiveSources: (self: QueryInternal) -> { Queryable },
 	_validate: (self: QueryInternal, seen: { [QueryInternal]: boolean }?) -> (),
 	_allReferences: (self: QueryInternal) -> { Queryable },
 	_positiveCandidate: (self: QueryInternal, instance: Instance, satisfiedFn: SatisfiedFn) -> boolean,
 	_attributesMatch: (self: QueryInternal, instance: Instance) -> boolean,
 	_predicatesPass: (self: QueryInternal, instance: Instance) -> boolean,
+	_matchesRest: (self: QueryInternal, instance: Instance, satisfiedFn: SatisfiedFn) -> boolean,
 	_fullMatch: (self: QueryInternal, instance: Instance, satisfiedFn: SatisfiedFn) -> boolean,
 	_activate: (self: QueryInternal) -> Engine,
 	_deactivate: (self: QueryInternal) -> (),
-	_enumerate: (self: QueryInternal, reactive: boolean) -> { [Instance]: boolean },
+	_enumerate: (
+		self: QueryInternal,
+		reactive: boolean,
+		subSets: { [QueryInternal]: { [Instance]: boolean } }?
+	) -> { [Instance]: boolean },
 }
 
 local EXISTS = newproxy(false) -- sentinel: attribute must merely exist
@@ -199,10 +210,18 @@ function Query.new(...: Queryable): Query
 			_predicates = {},
 			_engine = nil,
 			_refcount = 0,
+			_validated = false,
+			_sources = nil,
 		}, Query) :: any
 	) :: QueryInternal
 	self:with(...)
 	return self
+end
+
+-- Drops the caches every mutator invalidates.
+function Query._invalidate(self: QueryInternal)
+	self._validated = false
+	self._sources = nil
 end
 
 --[=[
@@ -216,6 +235,7 @@ function Query.with(self: QueryInternal, ...: Queryable): Query
 		assertQueryable(req, "with")
 		table.insert(self._positive, req)
 	end
+	self:_invalidate()
 	return self
 end
 
@@ -234,6 +254,7 @@ function Query.anyOf(self: QueryInternal, ...: Queryable): Query
 	if #group > 0 then
 		table.insert(self._anyOf, group)
 	end
+	self:_invalidate()
 	return self
 end
 
@@ -248,6 +269,7 @@ function Query.without(self: QueryInternal, ...: Queryable): Query
 		assertQueryable(req, "without")
 		table.insert(self._negative, req)
 	end
+	self:_invalidate()
 	return self
 end
 
@@ -266,6 +288,7 @@ function Query.withAttribute(self: QueryInternal, name: string, matcher: unknown
 		name = name,
 		matcher = if matcher == nil then EXISTS else matcher,
 	})
+	self:_invalidate()
 	return self
 end
 
@@ -282,6 +305,7 @@ end
 function Query.where(self: QueryInternal, predicate: (Instance) -> boolean, recheckSignal: unknown?): Query
 	assert(type(predicate) == "function", "[Component] :where() expects a predicate function")
 	table.insert(self._predicates, { fn = predicate, signal = recheckSignal })
+	self:_invalidate()
 	return self
 end
 
@@ -292,6 +316,10 @@ end
 -- Flattened positive requirements (positional/:with + every :anyOf member).
 -- These bound the candidate set; a query with none is unbounded and rejected.
 function Query._positiveSources(self: QueryInternal): { Queryable }
+	local cached = self._sources
+	if cached then
+		return cached
+	end
 	local sources = {}
 	for _, req in self._positive do
 		table.insert(sources, req)
@@ -301,11 +329,15 @@ function Query._positiveSources(self: QueryInternal): { Queryable }
 			table.insert(sources, req)
 		end
 	end
+	self._sources = sources
 	return sources
 end
 
 -- DFS over sub-query references; errors on an empty query or a dependency cycle.
 function Query._validate(self: QueryInternal, seen: { [QueryInternal]: boolean }?)
+	if self._validated and seen == nil then
+		return
+	end
 	local seenSet = seen or {}
 	if seenSet[self] then
 		error("[Component] Query dependency cycle detected", 0)
@@ -326,6 +358,7 @@ function Query._validate(self: QueryInternal, seen: { [QueryInternal]: boolean }
 		end
 	end
 	seenSet[self] = nil
+	self._validated = true
 end
 
 -- Every requirement across all clauses (positive, anyOf, negative).
@@ -419,16 +452,24 @@ function Query._predicatesPass(self: QueryInternal, instance: Instance): boolean
 	return true
 end
 
-function Query._fullMatch(self: QueryInternal, instance: Instance, satisfiedFn: SatisfiedFn): boolean
-	if not self:_positiveCandidate(instance, satisfiedFn) then
-		return false
-	end
+-- Everything a match requires EXCEPT the positive requirements. Split out so
+-- callers that already know `instance` is a positive candidate (the reactive
+-- engine, and `get()` over a single-source enumeration) do not pay to prove it
+-- twice.
+function Query._matchesRest(self: QueryInternal, instance: Instance, satisfiedFn: SatisfiedFn): boolean
 	for _, req in self._negative do
 		if isSatisfied(satisfiedFn, req, instance) then
 			return false
 		end
 	end
 	return self:_attributesMatch(instance) and self:_predicatesPass(instance)
+end
+
+function Query._fullMatch(self: QueryInternal, instance: Instance, satisfiedFn: SatisfiedFn): boolean
+	if not self:_positiveCandidate(instance, satisfiedFn) then
+		return false
+	end
+	return self:_matchesRest(instance, satisfiedFn)
 end
 
 --------------------------------------------------------------------------------
@@ -452,15 +493,15 @@ function Query._activate(self: QueryInternal): Engine
 		observers = {},
 		janitor = janitor,
 		positiveSet = {},
-		attrJanitors = {},
+		attrConns = {},
 		subEngines = {},
 	}
 	self._engine = engine
 	janitor:Add(function()
-		for _, attrJanitor in engine.attrJanitors do
-			attrJanitor:Destroy()
+		for _, conn in engine.attrConns do
+			conn:Disconnect()
 		end
-		table.clear(engine.attrJanitors)
+		table.clear(engine.attrConns)
 	end)
 
 	local function subMatches(subQuery: QueryInternal, instance: Instance): boolean
@@ -468,7 +509,14 @@ function Query._activate(self: QueryInternal): Engine
 		return subEngine ~= nil and subEngine.matched[instance] == true
 	end
 
+	-- One `AttributeChanged` connection per candidate, filtered by name, instead
+	-- of a Janitor plus a `GetAttributeChangedSignal` connection per attribute:
+	-- activation over a large candidate set was dominated by that allocation.
 	local hasAttributes = #self._attributes > 0
+	local watchedAttributes: { [string]: boolean } = {}
+	for _, attr in self._attributes do
+		watchedAttributes[attr.name] = true
+	end
 
 	local function reevaluate(instance: Instance?)
 		if not instance then
@@ -479,28 +527,23 @@ function Query._activate(self: QueryInternal): Engine
 		-- Track the candidate universe and (only while bounded) attribute subs.
 		if positive then
 			engine.positiveSet[instance] = true
-			if hasAttributes and not engine.attrJanitors[instance] then
-				local attrJanitor = Janitor.new()
-				for _, attr in self._attributes do
-					attrJanitor:Add(
-						instance:GetAttributeChangedSignal(attr.name):Connect(function()
-							reevaluate(instance)
-						end),
-						"Disconnect"
-					)
-				end
-				engine.attrJanitors[instance] = attrJanitor
+			if hasAttributes and not engine.attrConns[instance] then
+				engine.attrConns[instance] = instance.AttributeChanged:Connect(function(attrName)
+					if watchedAttributes[attrName] then
+						reevaluate(instance)
+					end
+				end) :: any
 			end
 		else
 			engine.positiveSet[instance] = nil
-			local attrJanitor = engine.attrJanitors[instance]
-			if attrJanitor then
-				engine.attrJanitors[instance] = nil
-				attrJanitor:Destroy()
+			local attrConn = engine.attrConns[instance]
+			if attrConn then
+				engine.attrConns[instance] = nil
+				attrConn:Disconnect()
 			end
 		end
 
-		local isMatch = positive and self:_fullMatch(instance, subMatches)
+		local isMatch = positive and self:_matchesRest(instance, subMatches)
 		local wasMatch = engine.matched[instance] == true
 		if isMatch == wasMatch then
 			return
@@ -617,7 +660,11 @@ end
 -- Enumerate the candidate universe (union of positive sources). When `reactive`
 -- is true, sub-query membership comes from live engines (already activated);
 -- otherwise it is computed statically via each sub-query's GetMatches.
-function Query._enumerate(self: QueryInternal, reactive: boolean): { [Instance]: boolean }
+function Query._enumerate(
+	self: QueryInternal,
+	reactive: boolean,
+	subSets: { [QueryInternal]: { [Instance]: boolean } }?
+): { [Instance]: boolean }
 	local set: { [Instance]: boolean } = {}
 	local function addFromRef(req: Queryable)
 		if type(req) == "string" then
@@ -635,13 +682,26 @@ function Query._enumerate(self: QueryInternal, reactive: boolean): { [Instance]:
 					end
 				end
 			else
-				for _, instance in subQuery:get() do
-					set[instance] = true
+				-- Reuse the caller's per-call memo when there is one, so a nested
+				-- sub-query is evaluated once per `get()` rather than per candidate.
+				local memo = if subSets then subSets[subQuery] else nil
+				if memo then
+					for instance in memo do
+						set[instance] = true
+					end
+				else
+					for _, instance in subQuery:get() do
+						set[instance] = true
+					end
 				end
 			end
 		else -- component class
+			-- Iterate the class's live component array directly when it is one of
+			-- ours; `GetAll()` clones it purely to be thrown away here.
 			local class = req :: ComponentClassLike
-			for _, component in class:GetAll() do
+			local internal = (class :: any)[Keys.Internal]
+			local components = if internal then internal.components else class:GetAll()
+			for _, component in components do
 				if Keys.inst(component).phase == "Started" then
 					set[component.Instance] = true
 				end
@@ -710,12 +770,55 @@ end
 ]=]
 function Query.get(self: QueryInternal): { Instance }
 	self:_validate()
-	local function staticSub(subQuery: QueryInternal, instance: Instance): boolean
-		return subQuery:_fullMatch(instance, staticSub)
+
+	-- Each sub-query's match-set is computed ONCE per call and then answered by
+	-- lookup. Previously every candidate re-ran the whole sub-query (and
+	-- `_enumerate` ran it again on top), which is quadratic in nested queries.
+	local subSets: { [QueryInternal]: { [Instance]: boolean } } = {}
+	local staticSub: SatisfiedFn
+	local ensureSet: (QueryInternal) -> { [Instance]: boolean }
+	function ensureSet(subQuery: QueryInternal): { [Instance]: boolean }
+		local existing = subSets[subQuery]
+		if existing then
+			return existing
+		end
+		-- Seed the entry before recursing so a cycle (rejected by `_validate`,
+		-- but cheap to guard) cannot recurse forever.
+		local set: { [Instance]: boolean } = {}
+		subSets[subQuery] = set
+		-- Deepest first, so this sub-query's own enumeration finds its
+		-- references already memoized.
+		for _, req in subQuery:_allReferences() do
+			if isQuery(req) then
+				ensureSet(req :: QueryInternal)
+			end
+		end
+		for candidate in subQuery:_enumerate(false, subSets) do
+			if subQuery:_fullMatch(candidate, staticSub) then
+				set[candidate] = true
+			end
+		end
+		return set
 	end
+	function staticSub(subQuery: QueryInternal, instance: Instance): boolean
+		return ensureSet(subQuery)[instance] == true
+	end
+
+	for _, req in self:_allReferences() do
+		if isQuery(req) then
+			ensureSet(req :: QueryInternal)
+		end
+	end
+
+	-- A single positive source means enumeration membership already proves the
+	-- positive half of the match, so only the rest needs checking.
+	local singleSource = #self._positive == 1 and #self._anyOf == 0
 	local out: { Instance } = {}
-	for instance in self:_enumerate(false) do
-		if self:_fullMatch(instance, staticSub) then
+	for instance in self:_enumerate(false, subSets) do
+		local matches = if singleSource
+			then self:_matchesRest(instance, staticSub)
+			else self:_fullMatch(instance, staticSub)
+		if matches then
 			table.insert(out, instance)
 		end
 	end
