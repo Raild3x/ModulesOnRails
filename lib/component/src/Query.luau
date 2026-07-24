@@ -123,16 +123,55 @@ type Observer = {
 
 type ChangedSignal = Signal.Signal<(Instance, boolean) -> (), Instance, boolean>
 
+-- One requirement, compiled: its kind resolved once and, for component classes,
+-- the class's live tracking tables captured directly. Checking a class
+-- requirement per candidate is then a single table lookup + phase compare
+-- instead of a metatable dispatch through `FromInstance` (measured ~2.5x per
+-- candidate), and `comps` gives `get()` an O(1)-sized seed source.
+type PlanReq = {
+	kind: "tag" | "class" | "classlike" | "query",
+	buildIndex: number, -- declaration position; tiebreak for the stable sort
+	tag: string?,
+	comps: { any }?, -- class: live components array (seed iteration)
+	instTo: { [Instance]: any }?, -- class: live instance -> component map
+	class: ComponentClassLike?, -- foreign class-like: FromInstance fallback
+	query: QueryInternal?,
+}
+
+-- The compiled shape of a query: requirement lists as PlanReqs plus presence
+-- flags so empty clauses cost nothing per candidate. Cached on the query and
+-- rebuilt by `_invalidate` (i.e. on any mutation).
+type Plan = {
+	required: { PlanReq },
+	anyOf: { { PlanReq } },
+	negative: { PlanReq },
+	hasNegative: boolean,
+	hasAttributes: boolean,
+	hasPredicates: boolean,
+}
+
 -- Reactive state backing an activated query (ref-counted, shared when a query
 -- is used more than once).
 type Engine = {
-	matched: { [Instance]: boolean },
+	-- Sparse-set pair: `matched[instance]` is its 1-based position in
+	-- `matchedList` (the map doubles as the membership set), and `matchedList`
+	-- is the dense, insertion-ordered array reads iterate/clone. Removal is a
+	-- swap-remove, so both stay O(1) per transition.
+	matched: { [Instance]: number },
+	matchedList: { Instance },
 	changed: ChangedSignal,
 	observers: { [Observer]: boolean },
 	janitor: Janitor,
 	positiveSet: { [Instance]: boolean }, -- [Instance]: true while positively bounded (candidate universe)
 	attrConns: { [Instance]: ConnectionLike }, -- one AttributeChanged sub per candidate
 	subEngines: { [QueryInternal]: Engine },
+	-- Interning bookkeeping: the canonical signature this engine is registered
+	-- under, total activations across every equivalent query sharing it, and
+	-- the queries currently attached (so their `_engine` pointers can be
+	-- cleared when the engine dies).
+	signature: string,
+	refcount: number,
+	holders: { [QueryInternal]: boolean },
 }
 
 type QueryInternal = Query & {
@@ -143,15 +182,17 @@ type QueryInternal = Query & {
 	_predicates: { PredicateRequirement },
 	_engine: Engine?,
 	_refcount: number,
-	-- Caches invalidated by every mutator (`_invalidate`). A query is typically
-	-- built once and read many times, so re-walking the requirement graph on
-	-- every `get()`/`observe()` was pure waste.
+	-- Lazily-built caches. Queries are immutable after construction (builders
+	-- copy-on-write), so none of these can ever go stale.
 	_validated: boolean,
 	_sources: { Queryable }?,
+	_planned: Plan?,
+	_signatureCache: string?,
 
-	_invalidate: (self: QueryInternal) -> (),
+	_plan: (self: QueryInternal) -> Plan,
+	_signature: (self: QueryInternal) -> string,
 	_positiveSources: (self: QueryInternal) -> { Queryable },
-	_validate: (self: QueryInternal, seen: { [QueryInternal]: boolean }?) -> (),
+	_validate: (self: QueryInternal) -> (),
 	_allReferences: (self: QueryInternal) -> { Queryable },
 	_positiveCandidate: (self: QueryInternal, instance: Instance, satisfiedFn: SatisfiedFn) -> boolean,
 	_attributesMatch: (self: QueryInternal, instance: Instance) -> boolean,
@@ -168,6 +209,7 @@ type QueryInternal = Query & {
 }
 
 local EXISTS = newproxy(false) -- sentinel: attribute must merely exist
+local INTERNAL = Keys.Internal -- hoisted: the plan checks phases in hot loops
 
 local Query = {}
 Query.__index = Query
@@ -198,10 +240,10 @@ end
 
 	Creates a new query whose positional arguments are all required.
 ]=]
-function Query.new(...: Queryable): Query
+local function rawNew(): QueryInternal
 	-- Cast through `any`: without it the solver stamps `@metatable` onto the
 	-- table and rejects the internal type (same as TableManager's constructor).
-	local self = (
+	return (
 		setmetatable({
 			_positive = {},
 			_anyOf = {},
@@ -212,30 +254,34 @@ function Query.new(...: Queryable): Query
 			_refcount = 0,
 			_validated = false,
 			_sources = nil,
+			_planned = nil,
+			_signatureCache = nil,
 		}, Query) :: any
 	) :: QueryInternal
-	self:with(...)
-	return self
 end
 
--- Drops the caches every mutator invalidates.
-function Query._invalidate(self: QueryInternal)
-	self._validated = false
-	self._sources = nil
+-- Copy-on-write base for every builder: a fresh query with this one's
+-- requirement lists cloned shallowly. The inner entries (anyOf groups,
+-- attribute/predicate records) are never mutated after creation, so sharing
+-- them is safe. Queries are therefore immutable values: every builder returns
+-- a NEW query and the receiver is never changed, so chains branch freely --
+-- `qA:with(qB)` and `qA:without(qC)` are independent and `qA` stays `qA`.
+local function derive(self: QueryInternal): QueryInternal
+	local new = rawNew()
+	new._positive = table.clone(self._positive)
+	new._anyOf = table.clone(self._anyOf)
+	new._negative = table.clone(self._negative)
+	new._attributes = table.clone(self._attributes)
+	new._predicates = table.clone(self._predicates)
+	return new
 end
 
---[=[
-	@within Query
-	@param ... Queryable
-	@return Query
-	Adds required requirements. `query():with(X)` is equivalent to `query(X)`.
-]=]
-function Query.with(self: QueryInternal, ...: Queryable): Query
+function Query.new(...: Queryable): Query
+	local self = rawNew()
 	for _, req in { ... } do
 		assertQueryable(req, "with")
 		table.insert(self._positive, req)
 	end
-	self:_invalidate()
 	return self
 end
 
@@ -243,34 +289,54 @@ end
 	@within Query
 	@param ... Queryable
 	@return Query
-	Adds an "at least one of" group: the instance must satisfy at least one of the
-	given requirements. Multiple `:anyOf` calls each add an independent group.
+	Returns a NEW query with the given required requirements added; the
+	receiver is unchanged (builders never mutate, so chains branch freely).
+	`query():with(X)` is equivalent to `query(X)`.
+]=]
+function Query.with(self: QueryInternal, ...: Queryable): Query
+	local new = derive(self)
+	for _, req in { ... } do
+		assertQueryable(req, "with")
+		table.insert(new._positive, req)
+	end
+	return new
+end
+
+--[=[
+	@within Query
+	@param ... Queryable
+	@return Query
+	Returns a NEW query with an "at least one of" group added: the instance
+	must satisfy at least one of the given requirements. Multiple `:anyOf`
+	calls each add an independent group. The receiver is unchanged.
 ]=]
 function Query.anyOf(self: QueryInternal, ...: Queryable): Query
 	local group = { ... }
 	for _, req in group do
 		assertQueryable(req, "anyOf")
 	end
-	if #group > 0 then
-		table.insert(self._anyOf, group)
+	if #group == 0 then
+		return self
 	end
-	self:_invalidate()
-	return self
+	local new = derive(self)
+	table.insert(new._anyOf, group)
+	return new
 end
 
 --[=[
 	@within Query
 	@param ... Queryable
 	@return Query
-	Adds excluded requirements: the instance must satisfy none of them.
+	Returns a NEW query with the given excluded requirements added: the
+	instance must satisfy none of them. The receiver is unchanged.
 ]=]
 function Query.without(self: QueryInternal, ...: Queryable): Query
+	local new = derive(self)
 	for _, req in { ... } do
 		assertQueryable(req, "without")
-		table.insert(self._negative, req)
+		table.insert(new._negative, req)
 	end
-	self:_invalidate()
-	return self
+	return new
 end
 
 --[=[
@@ -278,18 +344,19 @@ end
 	@param name string
 	@param matcher any -- a value to equal, a `(value) -> boolean` predicate, or omitted for existence
 	@return Query
-	Requires an attribute. With no matcher, the attribute must merely exist; with a
+	Returns a NEW query that additionally requires an attribute; the receiver
+	is unchanged. With no matcher, the attribute must merely exist; with a
 	function, the function must return true for the attribute's value; otherwise the
 	value must equal `matcher`. Re-evaluated reactively on attribute change.
 ]=]
 function Query.withAttribute(self: QueryInternal, name: string, matcher: unknown?): Query
 	assert(type(name) == "string", "[Component] :withAttribute() expects an attribute name string")
-	table.insert(self._attributes, {
+	local new = derive(self)
+	table.insert(new._attributes, {
 		name = name,
 		matcher = if matcher == nil then EXISTS else matcher,
 	})
-	self:_invalidate()
-	return self
+	return new
 end
 
 --[=[
@@ -298,15 +365,16 @@ end
 	@param recheckSignal Signal? -- fire to force re-evaluation
 	@return Query
 
-	Adds an arbitrary predicate. :::caution A predicate has no change signal of its
+	Returns a NEW query with an arbitrary predicate added; the receiver is
+	unchanged. :::caution A predicate has no change signal of its
 	own — it is only re-evaluated when another requirement changes, or when the
 	optional `recheckSignal` fires. Without one, its result can go stale. :::
 ]=]
 function Query.where(self: QueryInternal, predicate: (Instance) -> boolean, recheckSignal: unknown?): Query
 	assert(type(predicate) == "function", "[Component] :where() expects a predicate function")
-	table.insert(self._predicates, { fn = predicate, signal = recheckSignal })
-	self:_invalidate()
-	return self
+	local new = derive(self)
+	table.insert(new._predicates, { fn = predicate, signal = recheckSignal })
+	return new
 end
 
 --------------------------------------------------------------------------------
@@ -333,14 +401,12 @@ function Query._positiveSources(self: QueryInternal): { Queryable }
 	return sources
 end
 
--- DFS over sub-query references; errors on an empty query or a dependency cycle.
-function Query._validate(self: QueryInternal, seen: { [QueryInternal]: boolean }?)
-	if self._validated and seen == nil then
+-- DFS over sub-query references; errors on an empty query. Cycles are
+-- impossible by construction: builders copy-on-write, so a query can only ever
+-- reference queries that existed before it did.
+function Query._validate(self: QueryInternal)
+	if self._validated then
 		return
-	end
-	local seenSet = seen or {}
-	if seenSet[self] then
-		error("[Component] Query dependency cycle detected", 0)
 	end
 	local sources = self:_positiveSources()
 	if #sources == 0 then
@@ -350,14 +416,11 @@ function Query._validate(self: QueryInternal, seen: { [QueryInternal]: boolean }
 			0
 		)
 	end
-	seenSet[self] = true
 	for _, req in self:_allReferences() do
 		if isQuery(req) then
-			local subQuery = req :: QueryInternal
-			subQuery:_validate(seenSet)
+			(req :: QueryInternal):_validate()
 		end
 	end
-	seenSet[self] = nil
 	self._validated = true
 end
 
@@ -382,28 +445,125 @@ end
 -- Satisfaction / matching
 --------------------------------------------------------------------------------
 
-local function isSatisfied(satisfiedFn: SatisfiedFn, req: Queryable, instance: Instance): boolean
+local function compileReq(req: Queryable, buildIndex: number): PlanReq
 	if type(req) == "string" then
-		return CollectionService:HasTag(instance, req)
-	elseif isQuery(req) then
-		return satisfiedFn(req :: QueryInternal, instance)
+		return { kind = "tag" :: "tag", buildIndex = buildIndex, tag = req }
+	end
+	if isQuery(req) then
+		return { kind = "query" :: "query", buildIndex = buildIndex, query = req :: QueryInternal }
+	end
+	local internal = (req :: any)[INTERNAL]
+	if internal then
+		-- Our own class: capture its live tracking tables. Both are mutated in
+		-- place (never replaced) by the lifecycle, so the references stay valid
+		-- for the class's whole life; `Destroy` clears them, which correctly
+		-- reads as "no matches".
+		return {
+			kind = "class" :: "class",
+			buildIndex = buildIndex,
+			comps = internal.components,
+			instTo = internal.instToComponents,
+		}
+	end
+	return { kind = "classlike" :: "classlike", buildIndex = buildIndex, class = req :: ComponentClassLike }
+end
+
+-- Probe cost by kind, measured per candidate: a class check is one direct table
+-- lookup (~30ns), a sub-query check is a memo/engine hash lookup, a class-like
+-- goes through `FromInstance` (~80ns), and a tag check is a `HasTag` C-call
+-- (~150ns). Every compiled list is sorted cheapest-first so per-candidate
+-- evaluation short-circuits on the cheap probes; requirement semantics are
+-- order-independent, so this is free. `buildIndex` keeps the sort deterministic
+-- (`table.sort` is unstable).
+local KIND_COST: { [string]: number } = { class = 1, query = 2, classlike = 3, tag = 4 }
+
+-- A seed at or below this is narrow enough that hunting for a better one is
+-- not worth fetching more tag arrays: remaining probes run at most this many
+-- times each.
+local TAG_SIZING_EARLY_EXIT = 32
+
+-- `get()` sizes every required tag via `GetTagged` (to pick the narrowest seed
+-- and order probes most-selective-first) only when the best class seed exceeds
+-- this. Below it the candidate set is already small, and sizing a huge tag
+-- would cost an array allocation proportional to its population for at most a
+-- few hundred cheap probes of savings.
+local TAG_SIZING_MIN_SEED = 200
+local function sortBySelectivity(reqs: { PlanReq })
+	table.sort(reqs, function(x: PlanReq, y: PlanReq): boolean
+		local cx = KIND_COST[x.kind] :: number
+		local cy = KIND_COST[y.kind] :: number
+		if cx ~= cy then
+			return cx < cy
+		end
+		return x.buildIndex < y.buildIndex
+	end)
+end
+
+-- Compiled requirement check. `satisfiedFn` is only consulted for sub-query
+-- requirements; tag/class checks are direct.
+local function reqSatisfied(req: PlanReq, instance: Instance, satisfiedFn: SatisfiedFn): boolean
+	local kind = req.kind
+	if kind == "class" then
+		local component = (req.instTo :: { [Instance]: any })[instance]
+		return component ~= nil and component[INTERNAL].phase == "Started"
+	elseif kind == "tag" then
+		return CollectionService:HasTag(instance, req.tag :: string)
+	elseif kind == "query" then
+		return satisfiedFn(req.query :: QueryInternal, instance)
 	else
-		local class = req :: ComponentClassLike
+		local class = req.class :: ComponentClassLike
 		local component = class:FromInstance(instance)
 		return component ~= nil and Keys.inst(component).phase == "Started"
 	end
 end
 
+function Query._plan(self: QueryInternal): Plan
+	local cached = self._planned
+	if cached then
+		return cached
+	end
+	local required: { PlanReq } = {}
+	for index, req in self._positive do
+		table.insert(required, compileReq(req, index))
+	end
+	sortBySelectivity(required)
+	local anyOf: { { PlanReq } } = {}
+	for _, group in self._anyOf do
+		local compiled: { PlanReq } = {}
+		for index, req in group do
+			table.insert(compiled, compileReq(req, index))
+		end
+		sortBySelectivity(compiled)
+		table.insert(anyOf, compiled)
+	end
+	local negative: { PlanReq } = {}
+	for index, req in self._negative do
+		table.insert(negative, compileReq(req, index))
+	end
+	sortBySelectivity(negative)
+	local plan: Plan = {
+		required = required,
+		anyOf = anyOf,
+		negative = negative,
+		hasNegative = #negative > 0,
+		hasAttributes = #self._attributes > 0,
+		hasPredicates = #self._predicates > 0,
+	}
+	self._planned = plan
+	return plan
+end
+
 function Query._positiveCandidate(self: QueryInternal, instance: Instance, satisfiedFn: SatisfiedFn): boolean
-	for _, req in self._positive do
-		if not isSatisfied(satisfiedFn, req, instance) then
+	local plan = self:_plan()
+	for _, req in plan.required do
+		if not reqSatisfied(req, instance, satisfiedFn) then
 			return false
 		end
 	end
-	for _, group in self._anyOf do
+	for _, group in plan.anyOf do
 		local anySatisfied = false
 		for _, req in group do
-			if isSatisfied(satisfiedFn, req, instance) then
+			if reqSatisfied(req, instance, satisfiedFn) then
 				anySatisfied = true
 				break
 			end
@@ -457,12 +617,21 @@ end
 -- engine, and `get()` over a single-source enumeration) do not pay to prove it
 -- twice.
 function Query._matchesRest(self: QueryInternal, instance: Instance, satisfiedFn: SatisfiedFn): boolean
-	for _, req in self._negative do
-		if isSatisfied(satisfiedFn, req, instance) then
-			return false
+	local plan = self:_plan()
+	if plan.hasNegative then
+		for _, req in plan.negative do
+			if reqSatisfied(req, instance, satisfiedFn) then
+				return false
+			end
 		end
 	end
-	return self:_attributesMatch(instance) and self:_predicatesPass(instance)
+	if plan.hasAttributes and not self:_attributesMatch(instance) then
+		return false
+	end
+	if plan.hasPredicates and not self:_predicatesPass(instance) then
+		return false
+	end
+	return true
 end
 
 function Query._fullMatch(self: QueryInternal, instance: Instance, satisfiedFn: SatisfiedFn): boolean
@@ -473,13 +642,116 @@ function Query._fullMatch(self: QueryInternal, instance: Instance, satisfiedFn: 
 end
 
 --------------------------------------------------------------------------------
--- Reactive engine (ref-counted, shared when a query is used more than once)
+-- Structural signatures + engine interning
+--------------------------------------------------------------------------------
+
+-- Stable ids for non-primitive signature atoms (classes, predicate/matcher
+-- functions, recheck signals). Weak keys: a dead class must not leak here.
+local signatureIds: { [any]: number } = setmetatable({}, { __mode = "k" }) :: any
+local nextSignatureId = 0
+local function idOf(value: any): string
+	local existing = signatureIds[value]
+	if existing then
+		return tostring(existing)
+	end
+	nextSignatureId += 1
+	signatureIds[value] = nextSignatureId
+	return tostring(nextSignatureId)
+end
+
+-- Primitive attribute matchers compare by value, so structurally identical
+-- `withAttribute("Team", "Red")` clauses from different modules share; function
+-- matchers (and predicates) can only share by identity.
+local function matcherToken(matcher: unknown): string
+	if matcher == EXISTS then
+		return "*"
+	end
+	local kind = type(matcher)
+	if kind == "string" or kind == "number" or kind == "boolean" then
+		return kind .. ":" .. tostring(matcher)
+	end
+	return "f:" .. idOf(matcher)
+end
+
+--[[
+	Canonical structural signature: requirement order never matters, so
+	`query(A, B)` and `query(B, A)` produce the same key. Sub-queries recurse.
+	Cached until the query mutates.
+]]
+function Query._signature(self: QueryInternal): string
+	local cached = self._signatureCache
+	if cached then
+		return cached
+	end
+	local function reqToken(req: Queryable): string
+		if type(req) == "string" then
+			return "t:" .. req
+		elseif isQuery(req) then
+			return "q:(" .. (req :: QueryInternal):_signature() .. ")"
+		end
+		return "c:" .. idOf(req)
+	end
+	local function sortedTokens(reqs: { Queryable }): string
+		local tokens = {}
+		for _, req in reqs do
+			table.insert(tokens, reqToken(req))
+		end
+		table.sort(tokens)
+		return table.concat(tokens, ",")
+	end
+	local groups = {}
+	for _, group in self._anyOf do
+		table.insert(groups, sortedTokens(group))
+	end
+	table.sort(groups)
+	local attrs = {}
+	for _, attr in self._attributes do
+		table.insert(attrs, attr.name .. "=" .. matcherToken(attr.matcher))
+	end
+	table.sort(attrs)
+	local preds = {}
+	for _, pred in self._predicates do
+		table.insert(preds, idOf(pred.fn) .. (if pred.signal ~= nil then ">" .. idOf(pred.signal) else ""))
+	end
+	table.sort(preds)
+	local signature = sortedTokens(self._positive)
+		.. "|"
+		.. table.concat(groups, ";")
+		.. "|"
+		.. sortedTokens(self._negative)
+		.. "|"
+		.. table.concat(attrs, ",")
+		.. "|"
+		.. table.concat(preds, ",")
+	self._signatureCache = signature
+	return signature
+end
+
+-- Live engines interned by signature: equivalent queries observed anywhere in
+-- the process share ONE engine (one set of subscriptions, one matched set, one
+-- re-evaluation per event) instead of each maintaining their own.
+local activeEngines: { [string]: Engine } = {}
+
+--------------------------------------------------------------------------------
+-- Reactive engine (ref-counted; shared across all structurally equal queries)
 --------------------------------------------------------------------------------
 
 function Query._activate(self: QueryInternal): Engine
 	self._refcount += 1
-	if self._engine then
-		return self._engine
+	local attached = self._engine
+	if attached then
+		attached.refcount += 1
+		return attached
+	end
+
+	-- An equivalent query may already maintain this exact engine.
+	local signature = self:_signature()
+	local interned = activeEngines[signature]
+	if interned then
+		interned.refcount += 1
+		interned.holders[self] = true
+		self._engine = interned
+		return interned
 	end
 
 	local janitor = Janitor.new()
@@ -489,13 +761,19 @@ function Query._activate(self: QueryInternal): Engine
 	janitor:Add(changed, "Destroy")
 	local engine: Engine = {
 		matched = {},
+		matchedList = {},
 		changed = changed,
 		observers = {},
 		janitor = janitor,
 		positiveSet = {},
 		attrConns = {},
 		subEngines = {},
+		signature = signature,
+		refcount = 1,
+		holders = {},
 	}
+	engine.holders[self] = true
+	activeEngines[signature] = engine
 	self._engine = engine
 	janitor:Add(function()
 		for _, conn in engine.attrConns do
@@ -506,7 +784,7 @@ function Query._activate(self: QueryInternal): Engine
 
 	local function subMatches(subQuery: QueryInternal, instance: Instance): boolean
 		local subEngine = engine.subEngines[subQuery]
-		return subEngine ~= nil and subEngine.matched[instance] == true
+		return subEngine ~= nil and subEngine.matched[instance] ~= nil
 	end
 
 	-- One `AttributeChanged` connection per candidate, filtered by name, instead
@@ -544,19 +822,30 @@ function Query._activate(self: QueryInternal): Engine
 		end
 
 		local isMatch = positive and self:_matchesRest(instance, subMatches)
-		local wasMatch = engine.matched[instance] == true
+		local wasMatch = engine.matched[instance] ~= nil
 		if isMatch == wasMatch then
 			return
 		end
 
+		local matchedList = engine.matchedList
 		if isMatch then
-			engine.matched[instance] = true
+			local n = #matchedList + 1
+			matchedList[n] = instance
+			engine.matched[instance] = n
 			for obs in engine.observers do
 				local matchJanitor = Janitor.new()
 				obs.janitors[instance] = matchJanitor
 				task.spawn(obs.callback, instance, matchJanitor)
 			end
 		else
+			-- Swap-remove: move the tail into the vacated slot. When the
+			-- instance IS the tail, the reassignments are harmless no-ops.
+			local index = engine.matched[instance] :: number
+			local lastIndex = #matchedList
+			local last = matchedList[lastIndex]
+			matchedList[index] = last
+			engine.matched[last] = index
+			matchedList[lastIndex] = nil
 			engine.matched[instance] = nil
 			for obs in engine.observers do
 				local matchJanitor = obs.janitors[instance]
@@ -647,13 +936,22 @@ function Query._activate(self: QueryInternal): Engine
 end
 
 function Query._deactivate(self: QueryInternal)
-	self._refcount -= 1
-	if self._refcount <= 0 then
-		self._refcount = 0
-		if self._engine then
-			self._engine.janitor:Destroy()
-			self._engine = nil
+	local engine = self._engine
+	if not engine then
+		return
+	end
+	self._refcount = math.max(0, self._refcount - 1)
+	engine.refcount -= 1
+	-- Holders stay attached until the engine dies: an attached query keeps
+	-- serving `get()` straight from the live match set for free.
+	if engine.refcount <= 0 then
+		activeEngines[engine.signature] = nil
+		for holder in engine.holders do
+			holder._engine = nil
+			holder._refcount = 0
 		end
+		table.clear(engine.holders)
+		engine.janitor:Destroy()
 	end
 end
 
@@ -677,7 +975,7 @@ function Query._enumerate(
 				local engine = self._engine :: Engine
 				local subEngine = engine.subEngines[subQuery]
 				if subEngine then
-					for instance in subEngine.matched do
+					for _, instance in subEngine.matchedList do
 						set[instance] = true
 					end
 				end
@@ -737,8 +1035,10 @@ function Query.observe(self: QueryInternal, callback: (Instance, Janitor) -> ())
 	local obs: Observer = { callback = callback, janitors = {} }
 	engine.observers[obs] = true
 
-	-- Fire for instances already matched at subscribe time.
-	for instance in engine.matched do
+	-- Fire for instances already matched at subscribe time. Iterate a SNAPSHOT:
+	-- under Immediate signal behavior a spawned callback can synchronously
+	-- retag/untag and mutate the live match set mid-loop.
+	for _, instance in table.clone(engine.matchedList) do
 		local matchJanitor = Janitor.new()
 		obs.janitors[instance] = matchJanitor
 		task.spawn(callback, instance, matchJanitor)
@@ -767,9 +1067,22 @@ end
 	@return { Instance }
 	Returns the instances that match right now. A one-shot read: it sets up no
 	subscriptions.
+
+	While the query is actively observed (any live [Query:observe] connection),
+	the read is served straight from the reactive engine's maintained match set —
+	an O(matches) copy, identical to what observers see — making per-frame
+	`GetMatches` loops cheap enough for ECS-style iteration.
 ]=]
 function Query.get(self: QueryInternal): { Instance }
 	self:_validate()
+
+	-- Live-engine fast path: the engine already maintains exactly this set.
+	-- An engine built by any structurally equal query serves just as well --
+	-- borrow it read-only via the intern registry.
+	local engine = self._engine or activeEngines[self:_signature()]
+	if engine then
+		return table.clone(engine.matchedList)
+	end
 
 	-- Each sub-query's match-set is computed ONCE per call and then answered by
 	-- lookup. Previously every candidate re-ran the whole sub-query (and
@@ -782,8 +1095,9 @@ function Query.get(self: QueryInternal): { Instance }
 		if existing then
 			return existing
 		end
-		-- Seed the entry before recursing so a cycle (rejected by `_validate`,
-		-- but cheap to guard) cannot recurse forever.
+		-- Seed the entry before recursing so shared sub-queries are computed
+		-- exactly once (recursion depth is finite: queries are immutable, so
+		-- the reference graph is a DAG by construction).
 		local set: { [Instance]: boolean } = {}
 		subSets[subQuery] = set
 		-- Deepest first, so this sub-query's own enumeration finds its
@@ -810,16 +1124,227 @@ function Query.get(self: QueryInternal): { Instance }
 		end
 	end
 
-	-- A single positive source means enumeration membership already proves the
-	-- positive half of the match, so only the rest needs checking.
-	local singleSource = #self._positive == 1 and #self._anyOf == 0
+	local plan = self:_plan()
+	local required = plan.required
 	local out: { Instance } = {}
-	for instance in self:_enumerate(false, subSets) do
-		local matches = if singleSource
-			then self:_matchesRest(instance, staticSub)
-			else self:_fullMatch(instance, staticSub)
-		if matches then
-			table.insert(out, instance)
+
+	if #required == 0 then
+		-- anyOf-only query: the candidate set genuinely is a union, so build it.
+		for instance in self:_enumerate(false, subSets) do
+			if self:_fullMatch(instance, staticSub) then
+				table.insert(out, instance)
+			end
+		end
+		return out
+	end
+
+	-- Required requirements intersect, so enumerate ONE of them (the narrowest
+	-- we can size cheaply) and check the rest by direct lookup per candidate.
+	-- Building the union of every positive source just to intersect it back
+	-- down was the dominant cost of joins (measured 12x on a 2-class join).
+	-- Preference: smallest class (its array length is O(1)), else first tag,
+	-- else first sub-query (its match-set is already memoized), else first
+	-- foreign class-like.
+	local seed: PlanReq? = nil
+	local seedSize = math.huge -- smallest KNOWN population so far
+	local firstTag: PlanReq? = nil
+	local firstQuery: PlanReq? = nil
+	local firstClasslike: PlanReq? = nil
+	for _, req in required do
+		local kind = req.kind
+		if kind == "class" then
+			local size = #(req.comps :: { any })
+			if size < seedSize then
+				seed, seedSize = req, size
+			end
+		elseif kind == "tag" then
+			firstTag = firstTag or req
+		elseif kind == "query" then
+			firstQuery = firstQuery or req
+		elseif kind == "classlike" then
+			firstClasslike = firstClasslike or req
+		end
+	end
+
+	-- Live tag sizing: population is the selectivity signal declaration order
+	-- cannot give us. When the candidate set would otherwise be large (or there
+	-- is no class seed at all), size every required tag; the narrowest source
+	-- seeds regardless of where the user wrote it, and the fetched arrays are
+	-- reused for seeding and for probe ordering below.
+	local tagSizes: { [PlanReq]: number }? = nil
+	local tagArrays: { [PlanReq]: { Instance } }? = nil
+	if firstTag and (seed == nil or seedSize > TAG_SIZING_MIN_SEED) then
+		local sizes: { [PlanReq]: number } = {}
+		local arrays: { [PlanReq]: { Instance } } = {}
+		tagSizes, tagArrays = sizes, arrays
+		for _, req in required do
+			if req.kind == "tag" then
+				local instances = CollectionService:GetTagged(req.tag :: string)
+				arrays[req] = instances
+				local size = #instances
+				sizes[req] = size
+				if size < seedSize then
+					seed, seedSize = req, size
+					-- Early exit: the seed is already narrow, so remaining tags
+					-- will be probed at most `seedSize` times each -- fetching
+					-- their (possibly huge) arrays just to rank them would cost
+					-- more than the probes they could save.
+					if size <= TAG_SIZING_EARLY_EXIT then
+						break
+					end
+				end
+			end
+		end
+	end
+	local chosenSeed: PlanReq = (seed or firstTag or firstQuery or firstClasslike) :: PlanReq
+	local seedKind = chosenSeed.kind
+
+	-- Probes = every required requirement except the seed, most-selective-first
+	-- when populations are known (smaller population rejects more candidates
+	-- sooner, so each later probe runs against fewer survivors). Unknown counts
+	-- keep the plan's cheap-kind-first order.
+	local probes: { PlanReq } = {}
+	for _, req in required do
+		if req ~= chosenSeed then
+			table.insert(probes, req)
+		end
+	end
+	if tagSizes and #probes > 1 then
+		local sizes = tagSizes :: { [PlanReq]: number }
+		local function populationOf(req: PlanReq): number
+			if req.kind == "class" then
+				return #(req.comps :: { any })
+			end
+			local sized = sizes[req]
+			if sized then
+				return sized
+			end
+			return math.huge
+		end
+		table.sort(probes, function(x: PlanReq, y: PlanReq): boolean
+			local px, py = populationOf(x), populationOf(y)
+			if px ~= py then
+				return px < py
+			end
+			return x.buildIndex < y.buildIndex
+		end)
+	end
+
+	-- A sized tag whose probe will run many times is cheaper as a hash set than
+	-- as repeated `HasTag` C-calls: one insert (~45ns) buys back every probe
+	-- (~150ns -> ~25ns). Convert when the expected probe count (the seed size)
+	-- makes the build pay for itself; the fetched array is reused, so this only
+	-- ever spends allocations already made for sizing.
+	local probeSets: { [PlanReq]: { [Instance]: boolean } }? = nil
+	if tagArrays and tagSizes then
+		local arrays = tagArrays :: { [PlanReq]: { Instance } }
+		local sizes = tagSizes :: { [PlanReq]: number }
+		for _, req in probes do
+			local instances = arrays[req]
+			if instances and seedSize * 3 > (sizes[req] :: number) then
+				local set: { [Instance]: boolean } = {}
+				for _, instance in instances do
+					set[instance] = true
+				end
+				local outSets = probeSets or {}
+				probeSets = outSets
+				outSets[req] = set
+			end
+		end
+	end
+
+	-- The ECS hot shape — one requirement, nothing else — is a straight dump of
+	-- the seed source: no per-candidate work at all.
+	local trivial = #required == 1
+		and #plan.anyOf == 0
+		and not plan.hasNegative
+		and not plan.hasAttributes
+		and not plan.hasPredicates
+
+	-- Checks everything except the seed requirement (the seed's own iteration
+	-- already proves it) and collects matches. Rest-checks are inlined here so a
+	-- candidate costs no extra method dispatch.
+	local anyOf = plan.anyOf
+	local function consider(instance: Instance)
+		for _, req in probes do
+			local set = if probeSets then (probeSets :: { [PlanReq]: { [Instance]: boolean } })[req] else nil
+			if set then
+				if not set[instance] then
+					return
+				end
+			elseif not reqSatisfied(req, instance, staticSub) then
+				return
+			end
+		end
+		for _, group in anyOf do
+			local anySatisfied = false
+			for _, req in group do
+				if reqSatisfied(req, instance, staticSub) then
+					anySatisfied = true
+					break
+				end
+			end
+			if not anySatisfied then
+				return
+			end
+		end
+		if plan.hasNegative then
+			for _, req in plan.negative do
+				if reqSatisfied(req, instance, staticSub) then
+					return
+				end
+			end
+		end
+		if plan.hasAttributes and not self:_attributesMatch(instance) then
+			return
+		end
+		if plan.hasPredicates and not self:_predicatesPass(instance) then
+			return
+		end
+		table.insert(out, instance)
+	end
+
+	local n = 0
+	if seedKind == "class" then
+		for _, component in chosenSeed.comps :: { any } do
+			if component[INTERNAL].phase == "Started" then
+				if trivial then
+					n += 1
+					out[n] = component.Instance
+				else
+					consider(component.Instance)
+				end
+			end
+		end
+	elseif seedKind == "tag" then
+		local seedInstances = if tagArrays then (tagArrays :: { [PlanReq]: { Instance } })[chosenSeed] else nil
+		for _, instance in seedInstances or CollectionService:GetTagged(chosenSeed.tag :: string) do
+			if trivial then
+				n += 1
+				out[n] = instance
+			else
+				consider(instance)
+			end
+		end
+	elseif seedKind == "query" then
+		for instance in ensureSet(chosenSeed.query :: QueryInternal) do
+			if trivial then
+				n += 1
+				out[n] = instance
+			else
+				consider(instance)
+			end
+		end
+	else
+		for _, component in (chosenSeed.class :: ComponentClassLike):GetAll() do
+			if Keys.inst(component).phase == "Started" then
+				if trivial then
+					n += 1
+					out[n] = component.Instance
+				else
+					consider(component.Instance)
+				end
+			end
 		end
 	end
 	return out

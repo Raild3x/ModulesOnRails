@@ -223,13 +223,26 @@ return function(t: any)
 			end).fails()
 		end)
 
-		test("a self-referential query errors", function()
-			local A = H.makeClass()
-			local q = Component.query(A)
-			q:with(q)
-			expect(function()
-				q:GetMatches()
-			end).fails()
+		test("builders are copy-on-write: chains branch independently", function()
+			local A, aTag = H.makeClass()
+			local B, bTag = H.makeClass()
+			local qA = Component.query(A)
+			local withB = qA:with(B)
+			local withoutB = qA:without(B)
+
+			local p = part { aTag, bTag }
+			expect(H.waitUntil(function()
+				return A:Has(p) and B:Has(p)
+			end, 3)).is(true)
+
+			-- Deriving never reshaped qA, and the two branches are independent.
+			expect(#qA:GetMatches()).is(1)
+			expect(#withB:GetMatches()).is(1)
+			expect(#withoutB:GetMatches()).is(0)
+
+			A:Destroy()
+			B:Destroy()
+			p:Destroy()
 		end)
 	end)
 
