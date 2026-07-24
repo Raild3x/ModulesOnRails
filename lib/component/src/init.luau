@@ -119,7 +119,8 @@ export type Query = Query.Query
 -- into their typed-path self alias.
 export type extensionMethods<E> = TypeFunctions.extensionMethods<E>
 
-type Janitor = Janitor.Janitor
+type Janitor = Types.Janitor
+type Promise<T...> = Types.Promise<T...>
 type Class_Internal = Types.ComponentClass_Internal
 type Instance_Internal = Types.ComponentInstance_Internal
 
@@ -129,12 +130,12 @@ const UNSETUP_COMPONENTS: { Class_Internal } = {}
 
 -- Typed view over the vendored `Promise.fromEvent`, whose inferred signature
 -- rejects our typed signals/predicates; the value bridges through `unknown` once.
-type FromEventFn = <T...>(event: unknown, predicate: ((T...) -> boolean)?) -> Types.PromiseLike
+type FromEventFn = <T...>(event: unknown, predicate: ((T...) -> boolean)?) -> Promise<T...>
 const fromEvent = (Promise.fromEvent :: unknown) :: FromEventFn
 
-const ComponentClassMethods = {}
 const Component = {}
-Component.__index = ComponentClassMethods
+Component.prototype = {}
+Component.__index = Component.prototype
 
 --[=[
 	@within Component
@@ -300,7 +301,7 @@ Component.new = (componentNew :: any) :: Types.NewFn
 --[[
 	Returns true if `instance` is a descendant of any valid ancestor.
 ]]
-function ComponentClassMethods._isInAncestorList(self: Class_Internal, instance: Instance): boolean
+function Component.prototype._isInAncestorList(self: Class_Internal, instance: Instance): boolean
 	for _, parent in Keys.class(self).ancestors do
 		if instance:IsDescendantOf(parent) then
 			return true
@@ -313,7 +314,7 @@ end
 	Begins watching `instance` for ancestry changes, constructing/deconstructing as
 	it enters or leaves the valid ancestor list. Idempotent.
 ]]
-function ComponentClassMethods._startWatching(self: Class_Internal, instance: Instance)
+function Component.prototype._startWatching(self: Class_Internal, instance: Instance)
 	const ci = Keys.class(self)
 	if ci.watching[instance] then
 		return
@@ -338,7 +339,7 @@ function ComponentClassMethods._startWatching(self: Class_Internal, instance: In
 	end
 end
 
-function ComponentClassMethods._stopWatching(self: Class_Internal, instance: Instance)
+function Component.prototype._stopWatching(self: Class_Internal, instance: Instance)
 	const ci = Keys.class(self)
 	const connections = ci.watching[instance]
 	if connections then
@@ -353,7 +354,7 @@ end
 	Wires the component class to CollectionService and begins processing tagged
 	instances. Called automatically unless `DelaySetup` is set.
 ]]
-function ComponentClassMethods._setup(self: Class_Internal)
+function Component.prototype._setup(self: Class_Internal)
 	const idx = table.find(UNSETUP_COMPONENTS, self)
 	if idx then
 		table.remove(UNSETUP_COMPONENTS, idx)
@@ -400,7 +401,7 @@ end
 	@return {Component}
 	Returns a copy of all active component instances of this class.
 ]=]
-function ComponentClassMethods.GetAll(self: Class_Internal): { Instance_Internal }
+function Component.prototype.GetAll(self: Class_Internal): { Instance_Internal }
 	return table.clone(Keys.class(self).components)
 end
 
@@ -411,7 +412,7 @@ end
 	Returns the component of this class bound to `instance`, or nil. The component
 	may still be constructing; use [Component:GetLifecycleStatus] to check.
 ]=]
-function ComponentClassMethods.FromInstance(self: Class_Internal, instance: Instance): Instance_Internal?
+function Component.prototype.FromInstance(self: Class_Internal, instance: Instance): Instance_Internal?
 	return Keys.class(self).instToComponents[instance]
 end
 
@@ -422,7 +423,7 @@ end
 	Whether a *started* component of this class is bound to `instance`. Use
 	[Component:FromInstance] if a still-constructing component should count.
 ]=]
-function ComponentClassMethods.Has(self: Class_Internal, instance: Instance): boolean
+function Component.prototype.Has(self: Class_Internal, instance: Instance): boolean
 	return Keys.class(self).startedInstances[instance] ~= nil
 end
 
@@ -433,7 +434,7 @@ end
 	Returns the lifecycle phase of the component bound to the given instance (or the
 	phase of the given component). `"None"` if there is no such component.
 ]=]
-function ComponentClassMethods.GetLifecycleStatus(
+function Component.prototype.GetLifecycleStatus(
 	self: Class_Internal,
 	instanceOrComponent: Instance | Types.AnyComponent
 ): LifecyclePhase
@@ -448,14 +449,14 @@ end
 	Resolves once a *started* component of this class exists on `instance`.
 	Defaults to a 60 second timeout.
 ]=]
-function ComponentClassMethods.WaitForInstance(
+function Component.prototype.WaitForInstance(
 	self: Class_Internal,
 	instance: Instance,
 	timeout: number?
-): Types.PromiseLike
+): Promise<Types.AnyComponent>
 	const componentInstance = self:FromInstance(instance)
 	if componentInstance and Keys.inst(componentInstance).started then
-		return (Promise.resolve(componentInstance) :: unknown) :: Types.PromiseLike
+		return Promise.resolve(componentInstance)
 	end
 	return fromEvent(self.Started, function(c: Instance_Internal)
 		return c.Instance == instance
@@ -471,57 +472,46 @@ end
 	round-trip). Rejects if construction is vetoed by `ShouldConstruct` or is
 	stopped before it starts.
 ]=]
-function ComponentClassMethods.CreateFromInstance(self: Class_Internal, instance: Instance): Types.PromiseLike
-	return (
-		Promise.new(function(resolve, reject, onCancel)
-			const existing = self:FromInstance(instance)
-			if existing and Keys.inst(existing).started then
-				resolve(existing)
-				return
-			end
+function Component.prototype.GetCreateFromInstance(self: Class_Internal, instance: Instance): Promise<Types.AnyComponent>
+	return Promise.new(function(resolve, reject, onCancel)
+		const existing = self:FromInstance(instance)
+		if existing and Keys.inst(existing).started then
+			resolve(existing)
+			return
+		end
 
-			const janitor = Janitor.new()
-			onCancel(function()
+		const janitor = Janitor.new()
+		onCancel(function()
+			janitor:Destroy()
+		end)
+		janitor:Add(self.Started:Connect(function(component)
+			if component.Instance == instance then
 				janitor:Destroy()
-			end)
-			janitor:Add(
-				self.Started:Connect(function(component)
-					if component.Instance == instance then
-						janitor:Destroy()
-						resolve(component)
-					end
-				end),
-				"Disconnect"
-			)
-			janitor:Add(
-				Keys.class(self).failed:Connect(function(failedInstance, reason)
-					if failedInstance == instance then
-						janitor:Destroy()
-						reject(`Component '{self.Tag}' did not start on instance: {reason}`)
-					end
-				end),
-				"Disconnect"
-			)
+				resolve(component)
+			end
+		end))
+		janitor:Add(Keys.class(self).failed:Connect(function(failedInstance, reason)
+			if failedInstance == instance then
+				janitor:Destroy()
+				reject(`Component '{self.Tag}' did not start on instance: {reason}`)
+			end
+		end))
 
-			if not CollectionService:HasTag(instance, self.Tag) then
-				CollectionService:AddTag(instance, self.Tag)
-			end
-			self:_startWatching(instance)
-			if self:_isInAncestorList(instance) then
-				Lifecycle.Request(self, instance)
-			end
-		end) :: unknown
-	) :: Types.PromiseLike
+		if not CollectionService:HasTag(instance, self.Tag) then
+			CollectionService:AddTag(instance, self.Tag)
+		end
+		self:_startWatching(instance)
+		if self:_isInAncestorList(instance) then
+			Lifecycle.Request(self, instance)
+		end
+	end)
 end
-
---- @deprecated v1.0.0 -- Renamed to [Component:CreateFromInstance].
-ComponentClassMethods.GetOrCreateFromInstance = ComponentClassMethods.CreateFromInstance
 
 --[=[
 	@tag Component Class
 	Updates the valid ancestors of this class and re-evaluates watched instances.
 ]=]
-function ComponentClassMethods.UpdateAncestors(self: Class_Internal, newAncestors: { Instance })
+function Component.prototype.UpdateAncestors(self: Class_Internal, newAncestors: { Instance })
 	const ci = Keys.class(self)
 	const lastAncestors = ci.ancestors
 	ci.ancestors = newAncestors
@@ -532,7 +522,7 @@ end
 	@tag Component Class
 	Returns a copy of the current valid ancestors.
 ]=]
-function ComponentClassMethods.GetAncestors(self: Class_Internal): { Instance }
+function Component.prototype.GetAncestors(self: Class_Internal): { Instance }
 	return table.clone(Keys.class(self).ancestors)
 end
 
@@ -541,14 +531,14 @@ end
 	Called before the component starts, to initialize it. May yield or return a
 	Promise.
 ]=]
-function ComponentClassMethods.Construct(_self: Instance_Internal) end
+function Component.prototype.Construct(_self: Instance_Internal) end
 
 --[=[
 	@tag Component Class
 	Called when the component starts. Sibling components on the same instance are
 	safe to access here. May yield or return a Promise.
 ]=]
-function ComponentClassMethods.Start(_self: Instance_Internal) end
+function Component.prototype.Start(_self: Instance_Internal) end
 
 --[=[
 	@tag Component Class
@@ -557,7 +547,7 @@ function ComponentClassMethods.Start(_self: Instance_Internal) end
 	`reason`. Anything added via `self:AddTask` is cleaned up automatically after
 	this returns.
 ]=]
-function ComponentClassMethods.Stop(_self: Instance_Internal, _reason: StopReason) end
+function Component.prototype.Stop(_self: Instance_Internal, _reason: StopReason) end
 
 --------------------------------------------------------------------------------
 -- Public instance API
@@ -569,7 +559,7 @@ function ComponentClassMethods.Stop(_self: Instance_Internal, _reason: StopReaso
 	@return Component?
 	Retrieves another component bound to the same Roblox instance.
 ]=]
-function ComponentClassMethods.GetComponent(self: Instance_Internal, componentClass: Class_Internal): Instance_Internal?
+function Component.prototype.GetComponent(self: Instance_Internal, componentClass: Class_Internal): Instance_Internal?
 	return Keys.class(componentClass).instToComponents[self.Instance]
 end
 
@@ -578,7 +568,7 @@ end
 	@return boolean
 	Whether the component has fully started.
 ]=]
-function ComponentClassMethods.IsStarted(self: Instance_Internal): boolean
+function Component.prototype.IsStarted(self: Instance_Internal): boolean
 	return Keys.inst(self).started == true
 end
 
@@ -591,7 +581,7 @@ end
 	Adds a task to the component's core Janitor, cleaned up when the component
 	stops (on every teardown path). Returns the task.
 ]=]
-function ComponentClassMethods.AddTask<T>(
+function Component.prototype.AddTask<T>(
 	self: Instance_Internal,
 	task_: T,
 	cleanupMethod: (string | boolean)?,
@@ -608,11 +598,11 @@ end
 	Adds a Promise to the component's core Janitor. An optional string `index`
 	names it so it can be removed/cancelled via [Component:RemoveTask].
 ]=]
-function ComponentClassMethods.AddPromise(
+function Component.prototype.AddPromise<T...>(
 	self: Instance_Internal,
-	promise: Types.PromiseLike,
+	promise: Promise<T...>,
 	index: unknown?
-): Types.PromiseLike
+): Promise<T...>
 	return Keys.inst(self).janitor:AddPromise(promise, index)
 end
 
@@ -622,7 +612,7 @@ end
 	@param dontClean boolean?
 	Removes a task from the core Janitor, cleaning it unless `dontClean` is true.
 ]=]
-function ComponentClassMethods.RemoveTask(self: Instance_Internal, index: unknown, dontClean: boolean?)
+function Component.prototype.RemoveTask(self: Instance_Internal, index: unknown, dontClean: boolean?)
 	const janitor = Keys.inst(self).janitor
 	if dontClean then
 		janitor:RemoveNoClean(index)
@@ -637,7 +627,7 @@ end
 	@return any
 	Gets a task previously added with an index.
 ]=]
-function ComponentClassMethods.GetTask(self: Instance_Internal, index: unknown): unknown
+function Component.prototype.GetTask(self: Instance_Internal, index: unknown): unknown
 	return Keys.inst(self).janitor:Get(index)
 end
 
@@ -671,7 +661,7 @@ end
 	Destroys the component class: stops all its components (with reason
 	`"ClassDestroyed"`), disconnects from CollectionService, and clears all state.
 ]=]
-function ComponentClassMethods.Destroy(self: Class_Internal)
+function Component.prototype.Destroy(self: Class_Internal)
 	const idx = table.find(UNSETUP_COMPONENTS, self)
 	if idx then
 		table.remove(UNSETUP_COMPONENTS, idx)
