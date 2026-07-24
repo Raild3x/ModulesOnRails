@@ -19,11 +19,13 @@
 const Packages = script.Parent.Parent
 const Signal = require(Packages.Signal)
 const Promise = require(Packages.Promise)
+const Janitor = require(Packages.Janitor)
 
-const Keys = require(script.Parent.Keys)
-const TypeFunctions = require(script.Parent.TypeFunctions)
+const Keys = require("./Keys")
+const TypeFunctions = require("./TypeFunctions")
 
-type Promise<T... = ()> = Promise.TypedPromise<T...>
+export type Janitor = Janitor.Janitor
+export type Promise<T... = ()> = Promise.TypedPromise<T...>
 export type LifecyclePhase = Keys.LifecyclePhase
 export type StopReason = Keys.StopReason
 

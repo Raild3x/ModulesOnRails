@@ -438,6 +438,88 @@ return function(t: any)
 		end)
 	end)
 
+	describe("track", function()
+		test("a tracked query maintains a join across live adds and removes", function()
+			local A, aTag = H.makeClass()
+			local B, bTag = H.makeClass()
+			local q = Component.query(A):with(B)
+			local tracked = q:track()
+
+			local function has(inst)
+				for _, m in q:GetMatches() do
+					if m == inst then
+						return true
+					end
+				end
+				return false
+			end
+
+			local p = part { aTag, bTag }
+			expect(H.waitUntil(function()
+				return has(p)
+			end, 3)).is(true)
+			expect(q:contains(p)).is(true)
+			expect(q:count()).is(1)
+
+			-- Removing a required component drops it from the maintained set.
+			CollectionService:RemoveTag(p, bTag)
+			expect(H.waitUntil(function()
+				return not has(p)
+			end, 3)).is(true)
+			expect(q:contains(p)).is(false)
+
+			tracked:Disconnect()
+			A:Destroy()
+			B:Destroy()
+			p:Destroy()
+		end)
+
+		test("Disconnect releases the engine; reads still work cold", function()
+			local A, aTag = H.makeClass()
+			local q = Component.query(A)
+			local tracked = q:track()
+			local p = part { aTag }
+			expect(H.waitUntil(function()
+				return q:contains(p)
+			end, 3)).is(true)
+
+			tracked:Disconnect()
+			expect(tracked.IsConnected).is(false)
+			-- Cold read (no engine) still reports the current truth.
+			expect(#q:GetMatches()).is(1)
+			expect(q:GetMatches()[1]).is(p)
+
+			-- Disconnect is idempotent.
+			tracked:Disconnect()
+
+			A:Destroy()
+			p:Destroy()
+		end)
+
+		test("a tracked query and an observer of the same shape share one engine", function()
+			local A, aTag = H.makeClass()
+			local tracked = Component.query(A):track()
+			local seen = {}
+			local obs = Component.query(A):observe(function(i)
+				seen[i] = true
+			end)
+
+			local p = part { aTag }
+			-- The observer fires (engine is shared/eager) and the tracked read sees it.
+			expect(H.waitUntil(function()
+				return seen[p] == true
+			end, 3)).is(true)
+			expect(Component.query(A):contains(p)).is(true)
+
+			obs:Disconnect()
+			-- Engine survives on the tracker; reads stay correct.
+			expect(Component.query(A):contains(p)).is(true)
+			tracked:Disconnect()
+			A:Destroy()
+			p:Destroy()
+		end)
+	end)
+
 	describe("started sparse set", function()
 		test("cold GetMatches excludes constructing and stopped components", function()
 			local gate = false

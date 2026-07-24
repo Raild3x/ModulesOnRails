@@ -174,8 +174,8 @@ return function(t: any)
 
 			-- Both calls land before the deferred driver runs; the second must
 			-- find the slot already reserved rather than start a second chain.
-			class:CreateFromInstance(part)
-			class:CreateFromInstance(part)
+			class:GetOrCreateFromInstance(part)
+			class:GetOrCreateFromInstance(part)
 
 			expect(waitUntil(function()
 				return class:Has(part)

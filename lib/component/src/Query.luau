@@ -97,6 +97,7 @@ export type Query = {
 	where: (self: Query, predicate: (Instance) -> boolean, recheckSignal: unknown?) -> Query,
 	observe: (self: Query, callback: (Instance, Janitor) -> ()) -> QueryConnection,
 	observeUnyielding: (self: Query, callback: (Instance, Janitor) -> ()) -> QueryConnection,
+	track: (self: Query) -> QueryConnection,
 	get: (self: Query) -> { Instance },
 	iter: (self: Query) -> () -> Instance?,
 	contains: (self: Query, instance: Instance) -> boolean,
@@ -1351,6 +1352,49 @@ end
 ]=]
 function Query.observeUnyielding(self: QueryInternal, callback: (Instance, Janitor) -> ()): QueryConnection
 	return attachObserver(self, callback, true, "observeUnyielding")
+end
+
+--[=[
+	@within Query
+	@return QueryConnection
+
+	Keeps this query's match set maintained for cheap repeated reads, WITHOUT
+	running a per-match callback. While tracked, [Query:get] / [Query:iter] /
+	[Query:count] / [Query:first] / [Query:contains] all answer from the live
+	reactive engine (an O(matches) clone or O(1) lookup) instead of re-enumerating
+	the candidate set each call — the read path for an ECS-style system that polls
+	a join every frame:
+
+	```lua
+	local tracked = Component.query(Physics, Velocity):track()
+	game:GetService("RunService").Heartbeat:Connect(function(dt)
+		for instance in tracked:iter() do ... end
+	end)
+	-- when the system shuts down:
+	tracked:Disconnect()
+	```
+
+	This is [Query:observe] minus the per-match Janitor and callback: it maintains
+	the same engine (structurally-equal tracked and observed queries share it), so
+	tracking is strictly cheaper than observing when you only need to read. The
+	returned handle MUST be disconnected to release the engine — unlike a one-shot
+	[Query:get], a tracked query holds live subscriptions until then.
+]=]
+function Query.track(self: QueryInternal): QueryConnection
+	self:_validate()
+	self:_activate()
+
+	const connProxy = {} :: QueryConnection
+	connProxy.IsConnected = true
+	function connProxy.Disconnect()
+		if not connProxy.IsConnected then
+			return
+		end
+		connProxy.IsConnected = false
+		self:_deactivate()
+	end
+	connProxy.Destroy = connProxy.Disconnect
+	return connProxy
 end
 
 -- The sole positive requirement when the query is the ECS hot shape -- exactly
