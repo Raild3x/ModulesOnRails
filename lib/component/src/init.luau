@@ -1,182 +1,75 @@
+--!strict
 -- Component
 -- Stephen Leitnick, Logan Hunt
--- November 26, 2021
-
-type AncestorList = { Instance }
+-- November 26, 2021 (rewritten for v1.0.0)
 
 --[=[
-	@type ExtensionFn (component) -> ()
-	@within Component
+	@class Component
+
+	## Overview
+
+	Bind reusable, class-based behavior to Roblox instances using CollectionService
+	tags. This is a fork of Stephen Leitnick's Component that adds a robust,
+	yield-tolerant lifecycle, a per-instance cleanup Janitor, world-level queries,
+	and cross-class instance lookups.
+
+	To avoid confusion of terms:
+	- `Component` refers to this module.
+	- `Component Class` (e.g. `MyComponent`) refers to a class made via `Component.new`.
+	- `Component Instance` refers to an instance of a component class.
+	- `Roblox Instance` refers to the Roblox instance a component instance is bound to.
+
+	## Lifecycle
+
+	1. **ShouldConstruct** — extensions may veto construction (sync).
+	2. **Constructing** — extension hooks (see barrier note below).
+	3. **Construct()** — component initialization.
+	4. **Constructed** — extension hooks. The component is now tracked.
+	5. **Starting** — extension hooks.
+	6. **Start()** — component startup.
+	7. **Started** — extension hooks, then update loops connect and `Started` fires.
+
+	Teardown always runs `Stopping` → `Stop(reason)` → `Stopped` → **Janitor
+	destroy**, in that order, on *every* removal path (untag, ancestry exit,
+	instance destroyed, class destroyed, or construction cancelled). Anything added
+	via `self:AddTask(...)` is therefore guaranteed to be cleaned up.
+
+	### Yielding and the phase barrier
+
+	Lifecycle hooks may yield or return a Promise. Within a single phase, every
+	active extension's hook is gated on dependency order: an extension's hook does
+	not start until the hooks of the extensions it depends on have *finished*.
+	Hooks with no dependency edge between them still run concurrently, so an
+	unrelated sibling never blocks a hook. The phase completes (and the next one
+	begins) only once every hook has finished and every returned Promise has
+	resolved. `Construct()`/`Start()` may likewise yield or return a Promise.
+
+	Only the construct phases (`Constructing` → `Construct()` → `Constructed`) run
+	inline and hold up the construction chain. The start phases run after a
+	`task.defer` boundary and teardown is deferred as a whole, so neither ever
+	runs on the thread that triggered it and teardown never blocks its caller.
+	Stop hooks are gated in *reverse* dependency order — a dependency stops only
+	after everything depending on it has stopped.
+
+	Hooks that neither yield nor return a Promise run inline in dependency order
+	and cost no Promise at all; the machinery only materializes for hooks that
+	actually suspend (see `Lifecycle.luau`).
+
+	If the instance leaves its valid ancestors, is untagged, or is superseded while
+	a hook is still waiting, the in-flight work is cancelled and the component is
+	torn down.
+
+	The lifecycle engine itself (construction chain + teardown) lives in
+	`Lifecycle.luau`; the public/internal types live in `Types.luau`. This module
+	owns class creation, tag/ancestry watching, and the public API.
 ]=]
-type ExtensionFn = (any) -> ()
-
---[=[
-	@type ExtensionShouldFn (component) -> boolean
-	@within Component
-]=]
-type ExtensionShouldFn = (any) -> boolean
-
---[=[
-	@interface Extension
-	@within Component
-	.ShouldExtend ExtensionShouldFn?
-	.ShouldConstruct ExtensionShouldFn?
-	.Constructing ExtensionFn?
-	.Constructed ExtensionFn?
-	.Starting ExtensionFn?
-	.Started ExtensionFn?
-	.Stopping ExtensionFn?
-	.Stopped ExtensionFn?
-	.Extensions {Extension}?
-	.Methods {[string]: function}?
-
-	An extension allows the ability to extend the behavior of
-	components. This is useful for adding injection systems or
-	extending the behavior of components by wrapping around
-	component lifecycle methods.
-
-	The `ShouldConstruct` function can be used to indicate
-	if the component should actually be created. This must
-	return `true` or `false`. A component with multiple
-	`ShouldConstruct` extension functions must have them _all_
-	return `true` in order for the component to be constructed.
-	The `ShouldConstruct` function runs _before_ all other
-	extension functions and component lifecycle methods.
-
-	The `ShouldExtend` function can be used to indicate if
-	the extension itself should be used. This can be used in
-	order to toggle an extension on/off depending on whatever
-	logic is appropriate. If no `ShouldExtend` function is
-	provided, the extension will always be used if provided
-	as an extension to the component.
-
-	As an example, an extension could be created to simply log
-	when the various lifecycle stages run on the component:
-
-	```lua
-	local Logger = {}
-	function Logger.Constructing(component) print("Constructing", component) end
-	function Logger.Constructed(component) print("Constructed", component) end
-	function Logger.Starting(component) print("Starting", component) end
-	function Logger.Started(component) print("Started", component) end
-	function Logger.Stopping(component) print("Stopping", component) end
-	function Logger.Stopped(component) print("Stopped", component) end
-
-	local MyComponent = Component.new({Tag = "MyComponent", Extensions = {Logger}})
-	```
-
-	Sometimes it is useful for an extension to control whether or
-	not a component should be constructed. For instance, if a
-	component on the client should only be instantiated for the
-	local player, an extension might look like this, assuming the
-	instance has an attribute linking it to the player's UserId:
-	```lua
-	local player = game:GetService("Players").LocalPlayer
-
-	local OnlyLocalPlayer = {}
-	function OnlyLocalPlayer.ShouldConstruct(component)
-		local ownerId = component.Instance:GetAttribute("OwnerId")
-		return ownerId == player.UserId
-	end
-
-	local MyComponent = Component.new({Tag = "MyComponent", Extensions = {OnlyLocalPlayer}})
-	```
-
-	It can also be useful for an extension itself to turn on/off
-	depending on various contexts. For example, let's take the
-	Logger from the first example, and only use that extension
-	if the bound instance has a Log attribute set to `true`:
-	```lua
-	function Logger.ShouldExtend(component)
-		return component.Instance:GetAttribute("Log") == true
-	end
-	```
-
-	In this forked version of component, extensions can also add methods
-	to the component class and extend other extensions via giving an extension
-	a `Methods` table. For example:
-	
-	```lua
-	local ExtendedComponentMethods = {}
-	function ExtendedComponentMethods.DoSomething(component)
-		print("Hello World!")
-	end
-
-	local MyComponentExtension = {}
-	MyComponentExtension.Methods = ExtendedComponentMethods
-	```
-	This will add a method called `DoSomething` to the component class.
-	:::caution Be careful when using with ShouldExtend
-	It is important to note that these methods are added to the `Component Class`
-	and not the `Component Instance`. This means that these methods will be availible
-	regardless of whether the extension passes its shouldExtend function or not. If
-	your code is dependent on extension methods existing only when they pass their 
-	shouldExtend function, you may want to avoid using this feature.
-	:::
-
-	If you want to utilize other extensions within your extension or guarantee that the
-	given extension is loaded onto the component before your extension, you can use
-	the `Extensions` table. For example:
-	```lua
-	local SomeOtherExtension = require(somewhere.SomeOtherExtension)
-
-	local MyComponentExtension = {}
-	MyComponentExtension.Extensions = {SomeOtherExtension}
-	```
-	This will guarantee that `SomeOtherExtension` is added to the component and
-	loaded before `MyComponentExtension`.
-	:::info
-	The ShouldExtend function of `SomeOtherExtension` will still be called
-	independently of the ShouldExtend function of `MyExtension`. Under the hood this
-	just adds the extension to the components original extension array.
-	:::
-]=]
-type Extension = {
-	ShouldExtend: ExtensionShouldFn?,
-	ShouldConstruct: ExtensionShouldFn?,
-	Constructing: ExtensionFn?,
-	Constructed: ExtensionFn?,
-	Starting: ExtensionFn?,
-	Started: ExtensionFn?,
-	Stopping: ExtensionFn?,
-	Stopped: ExtensionFn?,
-	Extensions: { Extension },
-	Methods: { [string]: (component: any, ...any) -> ...any }?,
-}
-
---[=[
-	@interface ComponentConfig
-	@within Component
-	.Tag string -- CollectionService tag to use
-	.Ancestors {Instance}? -- Optional array of ancestors in which components will be started
-	.Extensions {Extension}? -- Optional array of extension objects
-	.DelaySetup boolean? -- Optional flag to delay the setup of the component until a later specified time. If true, `:_setup()` must be called manually.
-
-	Component configuration passed to `Component.new`.
-
-	- If no Ancestors option is included, it defaults to `{workspace, game.Players}`.
-	- If no Extensions option is included, it defaults to a blank table `{}`.
-]=]
-type ComponentConfig = {
-	Tag: string,
-	Ancestors: AncestorList?,
-	Extensions: { Extension }?,
-	DelaySetup: boolean?,
-}
 
 --[=[
 	@within Component
 	@prop Started Signal
 	@tag Event
 	@tag Component Class
-
-	Fired when a new instance of a component is started.
-
-	```lua
-	local MyComponent = Component.new({Tag = "MyComponent"})
-
-	MyComponent.Started:Connect(function(component) end)
-	```
+	Fired when a component instance finishes starting. Passes the component.
 ]=]
 
 --[=[
@@ -184,283 +77,223 @@ type ComponentConfig = {
 	@prop Stopped Signal
 	@tag Event
 	@tag Component Class
-
-	Fired when an instance of a component is stopped.
-
-	```lua
-	local MyComponent = Component.new({Tag = "MyComponent"})
-
-	MyComponent.Stopped:Connect(function(component) end)
-	```
+	Fired when a started (or mid-start) component instance is stopped. Passes the
+	component. Not fired for components torn down before they began starting.
 ]=]
 
 --[=[
 	@within Component
 	@prop Instance Instance
 	@tag Component Instance
-	
-	A reference back to the _Roblox_ instance from within a _component_ instance. When
-	a component instance is created, it is bound to a specific Roblox instance, which
-	will always be present through the `Instance` property.
-
-	```lua
-	MyComponent.Started:Connect(function(component)
-		local robloxInstance: Instance = component.Instance
-		print("Component is bound to " .. robloxInstance:GetFullName())
-	end)
-	```
+	The Roblox instance a component instance is bound to.
 ]=]
 
 --// Services //--
-local CollectionService = game:GetService("CollectionService")
-local RunService = game:GetService("RunService")
+const CollectionService = game:GetService("CollectionService")
 
 --// Dependencies //--
-local Packages = script.Parent
-local Promise = require(Packages.Promise)
-local Janitor = require(Packages.Janitor)
-local RailUtil = require(Packages.RailUtil)
-local Symbol = require(Packages.Symbol)
-local Signal = require(Packages.Signal)
-local Trove = require(Packages.Trove)
+const Packages = script.Parent
+const Promise = require(Packages.Promise)
+const Janitor = require(Packages.Janitor)
+const Signal = require(Packages.Signal)
 
-type Janitor = Janitor.Janitor
-type table = {[any]: any}
-type Component = table
-type ComponentClass = table
+--// Internal //--
+const Keys = require(script.Keys)
+const Extensions = require(script.Extensions)
+const Query = require(script.Query)
+const Lifecycle = require(script.Lifecycle)
+const Types = require(script.Types)
+const TypeFunctions = require(script.TypeFunctions)
 
-local IS_SERVER = RunService:IsServer()
-local DEFAULT_ANCESTORS = { workspace, game:GetService("Players") }
-local DEFAULT_TIMEOUT = 60
-local UNSETUP_COMPONENTS = {}
+--// Public type surface (declared in Types.luau / Keys.luau) //--
+export type LifecyclePhase = Keys.LifecyclePhase
+export type StopReason = Keys.StopReason
+export type Extension = Types.Extension
+export type ComponentConfig = Types.ComponentConfig
+export type ComponentClass = Types.ComponentClass
+export type TypedClass<M> = Types.TypedClass<M>
+export type Query = Query.Query
+export type Queryable = Query.Queryable
+export type Filter = Query.Filter
+export type Combinator = Query.Combinator
+export type Matcher = Query.Matcher
+export type RecheckSignal = Query.RecheckSignal
 
--- Symbol keys:
-local KEY_ANCESTORS = Symbol("Ancestors")
-local KEY_INST_TO_COMPONENTS = Symbol("InstancesToComponents")
-local KEY_LOCK_CONSTRUCT = Symbol("LockConstruct")
-local KEY_COMPONENTS = Symbol("Components")
-local KEY_TROVE = Symbol("Trove")
-local KEY_EXTENSIONS = Symbol("Extensions")
-local KEY_ACTIVE_EXTENSIONS = Symbol("ActiveExtensions")
-local KEY_STARTING = Symbol("Starting")
-local KEY_STARTED = Symbol("Started")
-local KEY_CLASS_ACTIVE_EXTENSIONS = Symbol("ClassActiveExtensions")
+-- Type functions (NEW type solver only) live in TypeFunctions.luau; re-exported
+-- here so users can compose `Component.extensionMethods<typeof(myExtension)>`
+-- into their typed-path self alias.
+export type extensionMethods<E> = TypeFunctions.extensionMethods<E>
 
-local renderId = 0
-local function NextRenderName(): string
-	renderId += 1
-	return "ComponentRender" .. tostring(renderId)
-end
+type Janitor = Types.Janitor
+type Promise<T...> = Types.Promise<T...>
+type Class_Internal = Types.ComponentClass_Internal
+type Instance_Internal = Types.ComponentInstance_Internal
 
-local function InvokeExtensionFn(component, fnName: string)
-	for _, extension in ipairs(component[KEY_ACTIVE_EXTENSIONS]) do
-		local fn = extension[fnName]
-		if type(fn) == "function" then
-			fn(component)
-		end
-	end
-end
+const DEFAULT_ANCESTORS: { Instance } = { workspace, game:GetService("Players") }
+const DEFAULT_TIMEOUT = 60
+const UNSETUP_COMPONENTS: { Class_Internal } = {}
 
-local function ShouldConstruct(component): boolean
-	for _, extension in ipairs(component[KEY_ACTIVE_EXTENSIONS]) do
-		local fn = extension.ShouldConstruct
-		if type(fn) == "function" then
-			local shouldConstruct = fn(component)
-			if not shouldConstruct then
-				return false
-			end
-		end
-	end
-	return true
-end
+-- Typed view over the vendored `Promise.fromEvent`, whose inferred signature
+-- rejects our typed signals/predicates; the value bridges through `unknown` once.
+type FromEventFn = <T...>(event: unknown, predicate: ((T...) -> boolean)?) -> Promise<T...>
+const fromEvent = (Promise.fromEvent :: unknown) :: FromEventFn
 
--- Handles which extensions should be applied and in what order.
-local function GetActiveExtensions(component, extensionList, activeExtensions, isClass)
-	activeExtensions = activeExtensions or {}
-	extensionList = extensionList or {}
-
-	for _, extension in ipairs(extensionList) do
-		local idx = table.find(activeExtensions, extension)
-		local shouldExtend = false
-
-		if not idx then
-			local fn = extension.ShouldExtend
-
-			if not fn then
-				shouldExtend = true
-			elseif not isClass and type(fn) == "function" then
-				shouldExtend = fn(component)
-			end
-		end
-
-		if idx or shouldExtend then
-			if idx then
-				table.remove(activeExtensions, idx)
-				table.insert(activeExtensions, 1, extension)
-			else
-				table.insert(activeExtensions, extension)
-			end
-			GetActiveExtensions(component, extension.Extensions, activeExtensions, isClass)
-		end
-	end
-
-	if not isClass then
-        for i = #activeExtensions, 1, -1 do
-            local extension = activeExtensions[i]
-            local fn = extension.ShouldExtend
-            if type(fn) == "function" and not fn(component) then
-                table.remove(activeExtensions, i)
-            end
-        end
-    end
-
-	return activeExtensions
-end
-
--- Added by Raildex
-local function BindExtensionMethod(component, extension)
-	if extension.Methods then
-		for key, value in extension.Methods do
-			if type(value) == "function" then
-				component[key] = value
-			else
-				error("Invalid extension method: " .. tostring(key))
-			end
-		end
-	end
-end
-
-local function BindExtensionMethods(component, extensionList)
-	for _, extension in ipairs(extensionList) do
-		BindExtensionMethod(component, extension)
-	end
-end
-
---[=[
-    @class Component
-
-    This is a fork of the original Component module by Stephen Leitnick. This fork expands upon the functionality of
-    extensions and provides several new useful methods.
-
-
-    Bind components to Roblox instances using the Component class and CollectionService tags.
-
-    To avoid confusion of terms:
-    - `Component` refers to this module.
-    - `Component Class` (e.g. `MyComponent` through this documentation) refers to a class created via `Component.new`
-    - `Component Instance` refers to an instance of a component class.
-    - `Roblox Instance` refers to the Roblox instance to which the component instance is bound.
-
-    Methods and properties are tagged with the above terms to help clarify the level at which they are used.
-]=]
-local Component = {}
-Component.__index = Component
+const Component = {}
+Component.prototype = {}
+Component.__index = Component.prototype
 
 --[=[
 	@within Component
 	@prop DelaySetup boolean
 	@tag Component
 
-	Controls the global default for whether or not components should delay their setup. Overridden by the `DelaySetup` 
-	property if set in the component configuration table passed to `Component.new`. This is useful for when you want
-	to ensure some other systems that the components may utilize are set up before the components themselves.
-
-	This value is initialized to the `DelaySetup` attribute of the script, which defaults to `false`.
-
-	:::caution
-	When set to `true`, the component class will not automatically call `:_setup()` when created and expects
-	you to call it when desired. Failing to do so will result in the component never starting to listen
-	for tagged instances and thus never starting any component instances.
-	:::
+	Global default for delaying component setup. When true, `Component.new` will not
+	begin listening for tagged instances until `_setup()` is called manually.
+	Initialized from the script's `DelaySetup` attribute (default false).
 ]=]
 Component.DelaySetup = script:GetAttribute("DelaySetup") or false
 
 --[=[
-	@tag Component
 	@within Component
-	@prop Tag string
+	@function query
+	@param ... Queryable -- component classes, tag strings, sub-queries, and/or Query.Attr/Prop/Pred/And/Or/Not nodes
+	@return Query
+	Creates a world-level [Query] over tagged instances. See the [Query] class.
 
-	The tag used to identify the component class. This is used with CollectionService to bind component instances
-	to Roblox instances.
-
-	```lua
-	local MyComponent = Component.new({Tag = "MyComponent"})
-	print(MyComponent.Tag) -- "MyComponent"
-	```
+	`Component.query` / `Component.Query` are the callable Query module itself:
+	`Component.Query(A, B)` builds a query, and the static node constructors
+	(`Component.Query.Attr`, `.Prop`, `.Pred`, `.And`, `.Or`, `.Not`) build
+	composable requirement nodes.
 ]=]
-
+Component.query = Query
+Component.Query = Query
 
 --[=[
+	@tag Component
+	@return {ComponentClass}
+	Returns a copy of all component classes that have not yet been set up.
+]=]
+function Component.getUnsetupComponents(): { ComponentClass }
+	return (table.clone(UNSETUP_COMPONENTS) :: unknown) :: { ComponentClass }
+end
+
+--[=[
+	@within Component
+	@function GetAllComponentsForInstance
+	@tag Component
+	@param instance Instance
+	@return {Component}
+	Returns every component bound to `instance`, across all component classes. A
+	component appears here from the moment it finishes constructing.
+]=]
+Component.GetAllComponentsForInstance = Lifecycle.GetAllForInstance
+
+--------------------------------------------------------------------------------
+-- Construction of a component class
+--------------------------------------------------------------------------------
+
+--[=[
+	@function new
+	@within Component
 	@tag Component
 	@param config ComponentConfig
 	@return ComponentClass
 
-	Create a new custom Component class.
+	Create a new component class bound to a CollectionService tag.
 
 	```lua
-	local MyComponent = Component.new({Tag = "MyComponent"})
+	local MyComponent = Component.new({ Tag = "MyComponent", Ancestors = {workspace} })
+
+	function MyComponent:Construct() self.Data = "Hello" end
+	function MyComponent:Start() print(self.Data) end
+	function MyComponent:Stop(reason) print("stopped:", reason) end
 	```
 
-	A full example might look like this:
+	Lifecycle methods may be defined post-hoc on the returned class (above), but
+	custom methods and fields go in the config's `Methods` / `Fields` — the class
+	type has no `[string]: any` indexer, so a brand-new name assigned post-hoc is
+	a type error by design. Extension `Methods` from the config's `Extensions`
+	array are merged in with full argument checking (new type solver).
+
+	`Fields` are deep-copied onto every component instance before `Construct`, so
+	a table default is never shared; `InitFields` is called once per instance for
+	fields that must be built at runtime. `self` annotations close the circular
+	type:
 
 	```lua
+	local Methods = {}
+	type MyComponent = Component.TypedClass<typeof(Methods)>
+
+	function Methods.Greet(self: MyComponent, msg: string)
+		print(self.Instance, msg)
+	end
+
+	function Methods.Start(self: MyComponent)
+		self:Greet("hello") -- fully checked
+		print(self.Count) -- from Fields
+	end
+
 	local MyComponent = Component.new({
 		Tag = "MyComponent",
-		Ancestors = {workspace},
-		Extensions = {Logger}, -- See Logger example within the example for the Extension type
+		Methods = Methods,
+		Fields = { Count = 0 },
+		InitFields = function() return { Janitor = Janitor.new() } end,
 	})
-
-	local AnotherComponent = require(somewhere.AnotherComponent)
-
-	-- Optional if UpdateRenderStepped should use BindToRenderStep:
-	MyComponent.RenderPriority = Enum.RenderPriority.Camera.Value
-
-	function MyComponent:Construct()
-		self.MyData = "Hello"
-	end
-
-	function MyComponent:Start()
-		local another = self:GetComponent(AnotherComponent)
-		another:DoSomething()
-	end
-
-	function MyComponent:Stop()
-		self.MyData = "Goodbye"
-	end
-
-	function MyComponent:HeartbeatUpdate(dt)
-	end
-
-	function MyComponent:SteppedUpdate(dt)
-	end
-	
-	function MyComponent:RenderSteppedUpdate(dt)
-	end
 	```
 ]=]
-function Component.new(config: ComponentConfig)
-	local customComponent = {}
-	customComponent.__index = customComponent
-	-- customComponent.__tostring = function()
-	-- 	return "Component<" .. config.Tag .. ">"
-	-- end
-	customComponent[KEY_ANCESTORS] = config.Ancestors or DEFAULT_ANCESTORS
-	customComponent[KEY_INST_TO_COMPONENTS] = {}
-	customComponent[KEY_COMPONENTS] = {}
-	customComponent[KEY_LOCK_CONSTRUCT] = {}
-	customComponent[KEY_TROVE] = Trove.new()
-	customComponent[KEY_EXTENSIONS] = config.Extensions or {}
-	customComponent[KEY_STARTED] = false
-	customComponent.Tag = config.Tag
-	customComponent.AncestorsChanged = customComponent[KEY_TROVE]:Construct(Signal)
-	customComponent.Started = customComponent[KEY_TROVE]:Construct(Signal)
-	customComponent.Stopped = customComponent[KEY_TROVE]:Construct(Signal)
-	setmetatable(customComponent, Component)
+const function componentNew(config: Types.ComponentConfig): Class_Internal
+	-- Built dynamically (symbol slot, signals, user methods) under `any`, then
+	-- viewed as ClassAny; the public type comes from the NewFn cast below. The
+	-- `:: any` on the RHS keeps the solver from stamping `@metatable` onto the
+	-- local and defeating the annotation.
+	const classAny: any = setmetatable({}, Component) :: any
+	classAny.__index = classAny
+	const janitor = Janitor.new()
+	const ci: Keys.ClassInternal = {
+		ancestors = config.Ancestors or DEFAULT_ANCESTORS,
+		instToComponents = {},
+		components = {},
+		startedInstances = {},
+		startedList = {},
+		lockConstruct = {},
+		watching = {},
+		pending = {},
+		extensions = config.Extensions or {},
+		classActiveExtensions = {},
+		extensionsVaryPerInstance = false,
+		fields = config.Fields,
+		initFields = config.InitFields,
+		janitor = janitor,
+		failed = janitor:Add(Signal.new(), "Destroy"),
+		teardownsInFlight = 0,
+		destroyJanitorWhenIdle = false,
+	}
+	classAny[Keys.Internal] = ci
+	classAny.Tag = config.Tag
+	classAny.AncestorsChanged = Signal.new(janitor)
+	classAny.Started = Signal.new(janitor)
+	classAny.Stopped = Signal.new(janitor)
+
+	-- Copy user methods before _setup so extension-method collision checks in
+	-- Extensions.BindMethods also fire against them.
+	const methods: { [string]: unknown }? = config.Methods
+	if methods then
+		for name, fn in methods do
+			if rawget(classAny, name) ~= nil then
+				error(`[Component] Method '{name}' collides with an existing class member`, 2)
+			end
+			classAny[name] = fn
+		end
+	end
+
+	const customComponent = classAny :: Class_Internal
 
 	table.insert(UNSETUP_COMPONENTS, customComponent)
-	local delaySetup = if config.DelaySetup then config.DelaySetup else customComponent.DelaySetup
+	-- `Component.DelaySetup`, not `customComponent.DelaySetup`: the global default
+	-- lives on the module table, which classes do not inherit from.
+	const delaySetup = if config.DelaySetup ~= nil then config.DelaySetup else Component.DelaySetup
 	if not delaySetup then
-		Component._setup(customComponent)
+		customComponent:_setup()
 	else
 		task.delay(30, function()
 			if table.find(UNSETUP_COMPONENTS, customComponent) then
@@ -470,600 +303,360 @@ function Component.new(config: ComponentConfig)
 	end
 	return customComponent
 end
+Component.new = (componentNew :: any) :: Types.NewFn
 
---[=[
-	@tag Component
-	@return {ComponentClass}
+--------------------------------------------------------------------------------
+-- Tag / ancestry watching
+--------------------------------------------------------------------------------
 
-	Gets a table array of all unsetup component classes. This allows you to call `:_setup()` on them later.
-
-	```lua
-	local unsetupComponents = Component.getUnsetupComponents()
-	for _, componentClass in unsetupComponents do
-		Component._setup(componentClass)
+--[[
+	Returns true if `instance` is a descendant of any valid ancestor.
+]]
+function Component.prototype._isInAncestorList(self: Class_Internal, instance: Instance): boolean
+	for _, parent in Keys.class(self).ancestors do
+		if instance:IsDescendantOf(parent) then
+			return true
+		end
 	end
-	```
-]=]
-function Component.getUnsetupComponents(): {ComponentClass}
-	return table.clone(UNSETUP_COMPONENTS) :: any
+	return false
 end
 
+--[[
+	Begins watching `instance` for ancestry changes, constructing/deconstructing as
+	it enters or leaves the valid ancestor list. Idempotent.
+]]
+function Component.prototype._startWatching(self: Class_Internal, instance: Instance)
+	const ci = Keys.class(self)
+	if ci.watching[instance] then
+		return
+	end
 
-function Component:_instantiate(instance: Instance)
-	local component = setmetatable({}, self)
-	component.Instance = instance
-
-	component[KEY_ACTIVE_EXTENSIONS] = GetActiveExtensions(component, self[KEY_EXTENSIONS], table.clone(self[KEY_CLASS_ACTIVE_EXTENSIONS] :: any))
-	for _, extension in ipairs(component[KEY_ACTIVE_EXTENSIONS]) do
-		if not table.find(self[KEY_CLASS_ACTIVE_EXTENSIONS], extension) then
-			BindExtensionMethod(component, extension)
+	const function evaluate()
+		if self:_isInAncestorList(instance) then
+			Lifecycle.Request(self, instance)
+		else
+			const reason: StopReason = if instance:IsDescendantOf(game) then "LeftAncestry" else "InstanceDestroyed"
+			Lifecycle.Release(self, instance, reason)
 		end
 	end
 
-	if not ShouldConstruct(component) then
-		return nil
+	ci.watching[instance] = {
+		instance.AncestryChanged:Connect(evaluate),
+		self.AncestorsChanged:Connect(evaluate),
+	}
+
+	if self:_isInAncestorList(instance) then
+		Lifecycle.Request(self, instance)
 	end
-	InvokeExtensionFn(component, "Constructing")
-	if type(component.Construct) == "function" then
-		component:Construct()
-	end
-	InvokeExtensionFn(component, "Constructed")
-	return component
 end
 
---[=[
-	@tag Component Class
-	@within Component
-	@method _setup
+function Component.prototype._stopWatching(self: Class_Internal, instance: Instance)
+	const ci = Keys.class(self)
+	const connections = ci.watching[instance]
+	if connections then
+		ci.watching[instance] = nil
+		for _, conn in connections do
+			conn:Disconnect()
+		end
+	end
+end
 
-	This is an internal method that is called to set up the component class.
-	It is automatically called when the component class is created, unless the
-	`DelaySetup` option is set to `true` in the component configuration.
-	If `DelaySetup` is `true`, then this method must be called manually.
-]=]
-function Component:_setup()
-	local idx = table.find(UNSETUP_COMPONENTS, self)
+--[[
+	Wires the component class to CollectionService and begins processing tagged
+	instances. Called automatically unless `DelaySetup` is set.
+]]
+function Component.prototype._setup(self: Class_Internal)
+	const idx = table.find(UNSETUP_COMPONENTS, self)
 	if idx then
 		table.remove(UNSETUP_COMPONENTS, idx)
 	else
 		warn(self, ":_setup was already called for this component.")
-	end
-	
-	local watchingInstances = {}
-
-	self[KEY_CLASS_ACTIVE_EXTENSIONS] = GetActiveExtensions(self, self[KEY_EXTENSIONS], {}, true)
-	BindExtensionMethods(self, self[KEY_CLASS_ACTIVE_EXTENSIONS]) -- Added by Raildex
-
-	local function StartComponent(component)
-		component[KEY_STARTING] = coroutine.running()
-
-		InvokeExtensionFn(component, "Starting")
-
-		component:Start()
-		if component[KEY_STARTING] == nil then
-			-- Component's Start method stopped the component
-			return
-		end
-
-		InvokeExtensionFn(component, "Started")
-
-		local hasHeartbeatUpdate = typeof(component.HeartbeatUpdate) == "function"
-		local hasSteppedUpdate = typeof(component.SteppedUpdate) == "function"
-		local hasRenderSteppedUpdate = typeof(component.RenderSteppedUpdate) == "function"
-
-		if hasHeartbeatUpdate then
-			component._heartbeatUpdate = RunService.Heartbeat:Connect(function(dt)
-				component:HeartbeatUpdate(dt)
-			end)
-		end
-
-		if hasSteppedUpdate then
-			component._steppedUpdate = RunService.Stepped:Connect(function(_, dt)
-				component:SteppedUpdate(dt)
-			end)
-		end
-
-		if hasRenderSteppedUpdate and not IS_SERVER then
-			if component.RenderPriority then
-				component._renderName = NextRenderName()
-				RunService:BindToRenderStep(component._renderName, component.RenderPriority, function(dt)
-					component:RenderSteppedUpdate(dt)
-				end)
-			else
-				component._renderSteppedUpdate = RunService.RenderStepped:Connect(function(dt)
-					component:RenderSteppedUpdate(dt)
-				end)
-			end
-		end
-
-		component[KEY_STARTED] = true
-		component[KEY_STARTING] = nil
-
-		self.Started:Fire(component)
+		return
 	end
 
-	local function StopComponent(component)
-		if component[KEY_STARTING] then
-			-- Stop the component during its start method invocation:
-			local startThread = component[KEY_STARTING] :: thread
-			if coroutine.status(startThread) ~= "normal" then
-				pcall(function()
-					task.cancel(startThread)
-				end)
-			else
-				task.defer(function()
-					pcall(function()
-						task.cancel(startThread)
-					end)
-				end)
-			end
-			component[KEY_STARTING] = nil
-		end
+	const ci = Keys.class(self)
+	const classActiveExtensions = Extensions.Resolve(self, ci.extensions, true)
+	ci.classActiveExtensions = classActiveExtensions
+	Extensions.BindMethods(self, classActiveExtensions)
 
-		if component._heartbeatUpdate then
-			component._heartbeatUpdate:Disconnect()
+	-- Without a `ShouldExtend` anywhere, every instance resolves to exactly this
+	-- list, so the lifecycle engine can share it instead of re-sorting per instance.
+	for _, extension in classActiveExtensions do
+		if type(extension.ShouldExtend) == "function" then
+			ci.extensionsVaryPerInstance = true
+			break
 		end
-
-		if component._steppedUpdate then
-			component._steppedUpdate:Disconnect()
-		end
-
-		if component._renderSteppedUpdate then
-			component._renderSteppedUpdate:Disconnect()
-		elseif component._renderName then
-			RunService:UnbindFromRenderStep(component._renderName)
-		end
-
-		InvokeExtensionFn(component, "Stopping")
-		component:Stop()
-		InvokeExtensionFn(component, "Stopped")
-		self.Stopped:Fire(component)
 	end
 
-	local function SafeConstruct(instance, id)
-		if self[KEY_LOCK_CONSTRUCT][instance] ~= id then
-			return nil
-		end
-		local component = self:_instantiate(instance)
-		if self[KEY_LOCK_CONSTRUCT][instance] ~= id then
-			return nil
-		end
-		return component
-	end
+	ci.janitor:Add(CollectionService:GetInstanceAddedSignal(self.Tag):Connect(function(instance)
+		self:_startWatching(instance)
+	end))
+	ci.janitor:Add(CollectionService:GetInstanceRemovedSignal(self.Tag):Connect(function(instance)
+		self:_stopWatching(instance)
+		Lifecycle.Release(self, instance, "Untagged")
+	end))
 
-	local function TryConstructComponent(instance)
-		if self[KEY_INST_TO_COMPONENTS][instance] then
-			return
-		end
-		local id = self[KEY_LOCK_CONSTRUCT][instance] or 0
-		id += 1
-		self[KEY_LOCK_CONSTRUCT][instance] = id
+	for _, instance in CollectionService:GetTagged(self.Tag) do
 		task.defer(function()
-			local component = SafeConstruct(instance, id)
-			if not component then
-				return
-			end
-			self[KEY_INST_TO_COMPONENTS][instance] = component
-			table.insert(self[KEY_COMPONENTS] :: table, component)
-			task.defer(function()
-				if self[KEY_INST_TO_COMPONENTS][instance] == component then
-					StartComponent(component)
-				end
-			end)
+			self:_startWatching(instance)
 		end)
-	end
-
-	local function TryDeconstructComponent(instance)
-		local component = self[KEY_INST_TO_COMPONENTS][instance]
-		if not component then
-			return
-		end
-		self[KEY_INST_TO_COMPONENTS][instance] = nil
-		self[KEY_LOCK_CONSTRUCT][instance] = nil
-		local components = self[KEY_COMPONENTS] :: table
-		local index = table.find(components, component)
-		if index then
-			local n = #components
-			components[index] = components[n]
-			components[n] = nil
-		end
-		if component[KEY_STARTED] or component[KEY_STARTING] then
-			task.spawn(StopComponent, component)
-		end
-	end
-
-	local function StartWatchingInstance(instance)
-		if watchingInstances[instance] then
-			return
-		end
-		local function IsInAncestorList(): boolean
-			for _, parent in ipairs(self[KEY_ANCESTORS] :: {Instance}) do
-				if instance:IsDescendantOf(parent) then
-					return true
-				end
-			end
-			return false
-		end
-		local ancestryChangedHandle = self[KEY_TROVE]:Connect(RailUtil.Signal.combine({
-			instance.AncestryChanged,
-			self.AncestorsChanged,
-		}), function(_, parent)
-			if parent and IsInAncestorList() then
-				TryConstructComponent(instance)
-			else
-				TryDeconstructComponent(instance)
-			end
-		end)
-		watchingInstances[instance] = ancestryChangedHandle
-		if IsInAncestorList() then
-			TryConstructComponent(instance)
-		end
-	end
-
-	local function InstanceTagged(instance: Instance)
-		StartWatchingInstance(instance)
-	end
-
-	local function InstanceUntagged(instance: Instance)
-		local watchHandle = watchingInstances[instance]
-		if watchHandle then
-			watchingInstances[instance] = nil
-			self[KEY_TROVE]:Remove(watchHandle)
-		end
-		TryDeconstructComponent(instance)
-	end
-
-	self[KEY_TROVE]:Connect(CollectionService:GetInstanceAddedSignal(self.Tag), InstanceTagged)
-	self[KEY_TROVE]:Connect(CollectionService:GetInstanceRemovedSignal(self.Tag), InstanceUntagged)
-
-	local tagged = CollectionService:GetTagged(self.Tag)
-	for _, instance in ipairs(tagged) do
-		task.defer(InstanceTagged, instance)
 	end
 end
+
+--------------------------------------------------------------------------------
+-- Public class API
+--------------------------------------------------------------------------------
 
 --[=[
 	@tag Component Class
 	@return {Component}
-	Gets a table array of all existing component objects. For example,
-	if there was a component class linked to the "MyComponent" tag,
-	and three Roblox instances in your game had that same tag, then
-	calling `GetAll` would return the three component instances.
-
-	```lua
-	local MyComponent = Component.new({Tag = "MyComponent"})
-
-	-- ...
-
-	local components = MyComponent:GetAll()
-	for _,component in ipairs(components) do
-		component:DoSomethingHere()
-	end
-	```
+	Returns a copy of all active component instances of this class.
 ]=]
-function Component:GetAll()
-	return self[KEY_COMPONENTS]
+function Component.prototype.GetAll(self: Class_Internal): { Instance_Internal }
+	return table.clone(Keys.class(self).components)
 end
 
 --[=[
 	@tag Component Class
+	@param instance Instance
 	@return Component?
-
-	Gets an instance of a component class from the given Roblox
-	instance. Returns `nil` if not found.
-
-	```lua
-	local MyComponent = require(somewhere.MyComponent)
-
-	local myComponentInstance = MyComponent:FromInstance(workspace.SomeInstance)
-	```
+	Returns the component of this class bound to `instance`, or nil. The component
+	may still be constructing; use [Component:GetLifecycleStatus] to check.
 ]=]
-function Component:FromInstance(instance: Instance)
-	return self[KEY_INST_TO_COMPONENTS][instance]
+function Component.prototype.FromInstance(self: Class_Internal, instance: Instance): Instance_Internal?
+	return Keys.class(self).instToComponents[instance]
 end
 
 --[=[
 	@tag Component Class
-	@return Promise<ComponentInstance>
-
-	Resolves a promise once the component instance is present on a given
-	Roblox instance.
-
-	An optional `timeout` can be provided to reject the promise if it
-	takes more than `timeout` seconds to resolve. If no timeout is
-	supplied, `timeout` defaults to 60 seconds.
-
-	```lua
-	local MyComponent = require(somewhere.MyComponent)
-
-	MyComponent:WaitForInstance(workspace.SomeInstance):andThen(function(myComponentInstance)
-		-- Do something with the component class
-	end)
-	```
+	@param instance Instance
+	@return boolean
+	Whether a *started* component of this class is bound to `instance`. Use
+	[Component:FromInstance] if a still-constructing component should count.
 ]=]
-function Component:WaitForInstance(instance: Instance, timeout: number?)
-	local componentInstance = self:FromInstance(instance)
-	if componentInstance and componentInstance[KEY_STARTED] then
+function Component.prototype.Has(self: Class_Internal, instance: Instance): boolean
+	return Keys.class(self).startedInstances[instance] ~= nil
+end
+
+--[=[
+	@tag Component Class
+	@param instanceOrComponent Instance | Component
+	@return LifecyclePhase
+	Returns the lifecycle phase of the component bound to the given instance (or the
+	phase of the given component). `"None"` if there is no such component.
+]=]
+function Component.prototype.GetLifecycleStatus(
+	self: Class_Internal,
+	instanceOrComponent: Instance | Types.AnyComponent
+): LifecyclePhase
+	return Lifecycle.GetPhase(self, instanceOrComponent)
+end
+
+--[=[
+	@tag Component Class
+	@param instance Instance
+	@param timeout number?
+	@return Promise<Component>
+	Resolves once a *started* component of this class exists on `instance`.
+	Defaults to a 60 second timeout.
+]=]
+function Component.prototype.WaitForInstance(
+	self: Class_Internal,
+	instance: Instance,
+	timeout: number?
+): Promise<Types.AnyComponent>
+	const componentInstance = self:FromInstance(instance)
+	if componentInstance and Keys.inst(componentInstance).started then
 		return Promise.resolve(componentInstance)
 	end
-	return Promise.fromEvent(self.Started, function(c)
-		local match = c.Instance == instance
-		if match then
-			componentInstance = c
-		end
-		return match
-	end)
-		:andThen(function()
-			return componentInstance
-		end)
-		:timeout(if type(timeout) == "number" then timeout else DEFAULT_TIMEOUT)
+	return fromEvent(self.Started, function(c: Instance_Internal)
+		return c.Instance == instance
+	end):timeout(if type(timeout) == "number" then timeout else DEFAULT_TIMEOUT)
 end
 
 --[=[
 	@tag Component Class
-
-	Allows for you to update the valid ancestors of a component class. This is useful if you want to
-	give a valid ancestor that may not exist when the component is first created.
-
-	```lua
-	local MyComponent = Component.new({
-		Tag = "MyComponent",
-		Ancestors = {workspace},
-	})
-
-	task.defer(function()
-		local newAncestors = {workspace:WaitForChild("SomeFolder")}
-		MyComponent:UpdateAncestors(newAncestors)
-	end)
-	```
+	@param instance Instance
+	@return Promise<Component>
+	Resolves with the started component on `instance`. If none exists, tags the
+	instance and constructs one directly (without waiting on the CollectionService
+	round-trip). Rejects if construction is vetoed by `ShouldConstruct` or is
+	stopped before it starts.
 ]=]
-function Component:UpdateAncestors(newAncestors: {Instance})
-	local lastAncestors = self[KEY_ANCESTORS]
-	self[KEY_ANCESTORS] = newAncestors
+function Component.prototype.GetCreateFromInstance(
+	self: Class_Internal,
+	instance: Instance
+): Promise<Types.AnyComponent>
+	return Promise.new(function(resolve, reject, onCancel)
+		const existing = self:FromInstance(instance)
+		if existing and Keys.inst(existing).started then
+			resolve(existing)
+			return
+		end
+
+		const janitor = Janitor.new()
+		onCancel(function()
+			janitor:Destroy()
+		end)
+		janitor:Add(self.Started:Connect(function(component)
+			if component.Instance == instance then
+				janitor:Destroy()
+				resolve(component)
+			end
+		end))
+		janitor:Add(Keys.class(self).failed:Connect(function(failedInstance, reason)
+			if failedInstance == instance then
+				janitor:Destroy()
+				reject(`Component '{self.Tag}' did not start on instance: {reason}`)
+			end
+		end))
+
+		if not CollectionService:HasTag(instance, self.Tag) then
+			CollectionService:AddTag(instance, self.Tag)
+		end
+		self:_startWatching(instance)
+		if self:_isInAncestorList(instance) then
+			Lifecycle.Request(self, instance)
+		end
+	end)
+end
+
+--- @deprecated v1.0.0 -- Renamed to [Component:GetCreateFromInstance].
+Component.prototype.GetOrCreateFromInstance = Component.prototype.GetCreateFromInstance
+
+--[=[
+	@tag Component Class
+	Updates the valid ancestors of this class and re-evaluates watched instances.
+]=]
+function Component.prototype.UpdateAncestors(self: Class_Internal, newAncestors: { Instance })
+	const ci = Keys.class(self)
+	const lastAncestors = ci.ancestors
+	ci.ancestors = newAncestors
 	self.AncestorsChanged:Fire(newAncestors, lastAncestors)
 end
 
 --[=[
 	@tag Component Class
-
-	Gets the current valid ancestors of a component class.
+	Returns a copy of the current valid ancestors.
 ]=]
-function Component:GetAncestors(): {Instance}
-	return table.clone(self[KEY_ANCESTORS])
+function Component.prototype.GetAncestors(self: Class_Internal): { Instance }
+	return table.clone(Keys.class(self).ancestors)
 end
 
 --[=[
 	@tag Component Class
-	`Construct` is called before the component is started, and should be used
-	to construct the component instance.
-
-	```lua
-	local MyComponent = Component.new({Tag = "MyComponent"})
-
-	function MyComponent:Construct()
-		self.SomeData = 32
-		self.OtherStuff = "HelloWorld"
-	end
-	```
+	Called before the component starts, to initialize it. May yield or return a
+	Promise.
 ]=]
-function Component:Construct() end
+function Component.prototype.Construct(_self: Instance_Internal) end
 
 --[=[
 	@tag Component Class
-	`Start` is called when the component is started. At this point in time, it
-	is safe to grab other components also bound to the same instance.
-
-	```lua
-	local MyComponent = Component.new({Tag = "MyComponent"})
-	local AnotherComponent = require(somewhere.AnotherComponent)
-
-	function MyComponent:Start()
-		-- e.g., grab another component:
-		local another = self:GetComponent(AnotherComponent)
-	end
-	```
+	Called when the component starts. Sibling components on the same instance are
+	safe to access here. May yield or return a Promise.
 ]=]
-function Component:Start() end
+function Component.prototype.Start(_self: Instance_Internal) end
 
 --[=[
 	@tag Component Class
-	`Stop` is called when the component is stopped. This occurs either when the
-	bound instance is removed from one of the whitelisted ancestors _or_ when
-	the matching tag is removed from the instance. This also means that the
-	instance _might_ be destroyed, and thus it is not safe to continue using
-	the bound instance (e.g. `self.Instance`) any longer.
-
-	This should be used to clean up the component.
-
-	```lua
-	local MyComponent = Component.new({Tag = "MyComponent"})
-
-	function MyComponent:Stop()
-		self.SomeStuff:Destroy()
-	end
-	```
+	@param reason StopReason
+	Called when the component stops. The bound instance may already be gone — check
+	`reason`. Anything added via `self:AddTask` is cleaned up automatically after
+	this returns.
 ]=]
-function Component:Stop() end
+function Component.prototype.Stop(_self: Instance_Internal, _reason: StopReason) end
+
+--------------------------------------------------------------------------------
+-- Public instance API
+--------------------------------------------------------------------------------
 
 --[=[
 	@tag Component Instance
 	@param componentClass ComponentClass
 	@return Component?
-
-	Retrieves another component instance bound to the same
-	Roblox instance.
-
-	```lua
-	local MyComponent = Component.new({Tag = "MyComponent"})
-	local AnotherComponent = require(somewhere.AnotherComponent)
-
-	function MyComponent:Start()
-		local another = self:GetComponent(AnotherComponent)
-	end
-	```
+	Retrieves another component bound to the same Roblox instance.
 ]=]
-function Component:GetComponent(componentClass)
-	return componentClass[KEY_INST_TO_COMPONENTS][self.Instance]
+function Component.prototype.GetComponent(self: Instance_Internal, componentClass: Class_Internal): Instance_Internal?
+	return Keys.class(componentClass).instToComponents[self.Instance]
 end
-
 
 --[=[
 	@tag Component Instance
-	@return Connection
-
-	Ties a function to the lifecycle of the calling component and the equivalent component of the given
-	`componentClass`. The function is run whenever a component of the given class is started. The given
-	function passes the sibling component of the given class and a janitor to handle any connections
-	you may make within it. The Janitor is cleaned up whenever either compenent is stopped.
-
-	```lua
-	local AnotherComponentClass = require(somewhere.AnotherComponent)
-
-	local MyComponent = Component.new({Tag = "MyComponent"})
-
-	function MyComponent:Start()
-		self:WhileHasComponent(AnotherComponentClass, function(siblingComponent, jani)
-			print(siblingComponent.SomeProperty)
-			
-			jani:Add(function()
-				print("Sibling component stopped")
-			end)
-		end)
-	end
-	```
+	@return boolean
+	Whether the component has fully started.
 ]=]
-function Component:WhileHasComponent(componentClassOrClasses: ComponentClass | {ComponentClass}, fn: (components: Component | {Component}, jani: Janitor) -> ())
-	local bindJani = Janitor.new()
-
-	local connProxy = {}
-	connProxy.IsConnected = true
-	connProxy.Disconnect = function()
-		if connProxy.IsConnected then
-			connProxy.IsConnected = false
-			bindJani:Destroy()
-		end
-	end
-	connProxy.Destroy = connProxy.Disconnect
-	setmetatable(connProxy, {
-		__call = function(t, ...)
-			return t.Destroy(...)
-		end
-	})
-
-	bindJani:Add(connProxy)
-	bindJani:AddPromise(Promise.fromEvent(self.Stopped, function(c)
-		return c.Instance == self.Instance
-	end):andThen(connProxy.Destroy))
-
-	assert(typeof(componentClassOrClasses) == "table", "Component:WhileHasComponent() expects a component class or an array of component classes.")
-	local isSingleComponentClass = if (componentClassOrClasses :: any).Tag == nil then true else false
-	-- Normalize to array of classes
-	local componentClasses = if isSingleComponentClass then componentClassOrClasses else {componentClassOrClasses}
-
-	-- Helper to get all component instances for self.Instance
-	local function getAllComponents()
-		local components = {}
-		for i, class in ipairs(componentClasses) do
-			local inst = self:GetComponent(class)
-			if not inst then
-				return nil
-			end
-			components[i] = inst
-		end
-		return components
-	end
-
-	-- Track janitors for each set of components
-	local activeJanitors = {}
-
-	local function SetupIfAllPresent()
-		local components = getAllComponents()
-		if not components then return end
-		-- Prevent duplicate setups for the same set
-		if activeJanitors[self.Instance] then return end
-		local currentJani = bindJani:Add(Janitor.new(), "Destroy", self.Instance)
-		activeJanitors[self.Instance] = currentJani
-
-		if isSingleComponentClass then
-			-- If only one component class, just pass it directly to maintain backwards compatibility
-			components = table.unpack(components)
-		end
-		currentJani:Add(task.spawn(fn, components, currentJani))
-
-		-- If any component stops, destroy janitor
-		for i, class in ipairs(componentClasses) do
-			currentJani:AddPromise(Promise.fromEvent(class.Stopped, function(c)
-				return c.Instance == self.Instance
-			end):andThen(function()
-				currentJani:Destroy()
-				activeJanitors[self.Instance] = nil
-			end))
-		end
-	end
-
-	-- Listen for all component start events
-	for _, class in ipairs(componentClasses) do
-		bindJani:Add(class.Started:Connect(function(component)
-			if component.Instance == self.Instance then
-				SetupIfAllPresent()
-			end
-		end))
-	end
-
-	-- Initial check in case all are already present
-	SetupIfAllPresent()
-
-	return connProxy
+function Component.prototype.IsStarted(self: Instance_Internal): boolean
+	return Keys.inst(self).started == true
 end
 
--- DEPRECATED: Use WhileHasComponent instead. Kept for backwards compat
-function Component:ForEachSibling(...)
-	warn("ForEachSibling is deprecated. Use WhileHasComponent instead.")
-	return self:WhileHasComponent(...)
+--[=[
+	@tag Component Instance
+	@param task T
+	@param cleanupMethod (string | true)?
+	@param index any?
+	@return T
+	Adds a task to the component's core Janitor, cleaned up when the component
+	stops (on every teardown path). Returns the task.
+]=]
+function Component.prototype.AddTask<T>(
+	self: Instance_Internal,
+	task_: T,
+	cleanupMethod: (string | boolean)?,
+	index: unknown?
+): T
+	return Keys.inst(self).janitor:Add(task_, cleanupMethod, index)
 end
 
+--[=[
+	@tag Component Instance
+	@param promise Promise
+	@param index any?
+	@return Promise
+	Adds a Promise to the component's core Janitor. An optional string `index`
+	names it so it can be removed/cancelled via [Component:RemoveTask].
+]=]
+function Component.prototype.AddPromise<T...>(self: Instance_Internal, promise: Promise<T...>, index: unknown?): Promise<T...>
+	return Keys.inst(self).janitor:AddPromise(promise, index)
+end
+
+--[=[
+	@tag Component Instance
+	@param index any
+	@param dontClean boolean?
+	Removes a task from the core Janitor, cleaning it unless `dontClean` is true.
+]=]
+function Component.prototype.RemoveTask(self: Instance_Internal, index: unknown, dontClean: boolean?)
+	const janitor = Keys.inst(self).janitor
+	if dontClean then
+		janitor:RemoveNoClean(index)
+	else
+		janitor:Remove(index)
+	end
+end
+
+--[=[
+	@tag Component Instance
+	@param index any
+	@return any
+	Gets a task previously added with an index.
+]=]
+function Component.prototype.GetTask(self: Instance_Internal, index: unknown): unknown
+	return Keys.inst(self).janitor:Get(index)
+end
 
 --[=[
 	@tag Component Class
 	@function HeartbeatUpdate
 	@param dt number
 	@within Component
-
-	If this method is present on a component, then it will be
-	automatically connected to `RunService.Heartbeat`.
-
-	:::note Method
-	This is a method, not a function. This is a limitation
-	of the documentation tool which should be fixed soon.
-	:::
-	
-	```lua
-	local MyComponent = Component.new({Tag = "MyComponent"})
-	
-	function MyComponent:HeartbeatUpdate(dt)
-	end
-	```
+	If present, connected to `RunService.Heartbeat` while the component runs.
 ]=]
 --[=[
 	@tag Component Class
 	@function SteppedUpdate
 	@param dt number
 	@within Component
-
-	If this method is present on a component, then it will be
-	automatically connected to `RunService.Stepped`.
-
-	:::note Method
-	This is a method, not a function. This is a limitation
-	of the documentation tool which should be fixed soon.
-	:::
-	
-	```lua
-	local MyComponent = Component.new({Tag = "MyComponent"})
-	
-	function MyComponent:SteppedUpdate(dt)
-	end
-	```
+	If present, connected to `RunService.Stepped` while the component runs.
 ]=]
 --[=[
 	@tag Component Class
@@ -1071,45 +664,30 @@ end
 	@param dt number
 	@within Component
 	@client
-
-	If this method is present on a component, then it will be
-	automatically connected to `RunService.RenderStepped`. If
-	the `[Component].RenderPriority` field is found, then the
-	component will instead use `RunService:BindToRenderStep()`
-	to bind the function.
-
-	:::note Method
-	This is a method, not a function. This is a limitation
-	of the documentation tool which should be fixed soon.
-	:::
-	
-	```lua
-	-- Example that uses `RunService.RenderStepped` automatically:
-
-	local MyComponent = Component.new({Tag = "MyComponent"})
-	
-	function MyComponent:RenderSteppedUpdate(dt)
-	end
-	```
-	```lua
-	-- Example that uses `RunService:BindToRenderStep` automatically:
-	
-	local MyComponent = Component.new({Tag = "MyComponent"})
-
-	-- Defining a RenderPriority will force the component to use BindToRenderStep instead
-	MyComponent.RenderPriority = Enum.RenderPriority.Camera.Value
-	
-	function MyComponent:RenderSteppedUpdate(dt)
-	end
-	```
+	If present, connected to `RunService.RenderStepped` while the component runs, or
+	to `BindToRenderStep` when `RenderPriority` is set.
 ]=]
 
-function Component:Destroy()
-	local idx = table.find(UNSETUP_COMPONENTS, self)
+--[=[
+	@tag Component Class
+	@within Component
+	Destroys the component class: stops all its components (with reason
+	`"ClassDestroyed"`), disconnects from CollectionService, and clears all state.
+]=]
+function Component.prototype.Destroy(self: Class_Internal)
+	const idx = table.find(UNSETUP_COMPONENTS, self)
 	if idx then
 		table.remove(UNSETUP_COMPONENTS, idx)
 	end
-	self[KEY_TROVE]:Destroy()
+
+	-- Stop watching every instance first, so no new construction begins mid-destroy.
+	const ci = Keys.class(self)
+	for instance in ci.watching do
+		self:_stopWatching(instance)
+	end
+	table.clear(ci.watching)
+
+	Lifecycle.DestroyClass(self)
 end
 
 return Component
