@@ -359,4 +359,123 @@ return function(t: any)
 			p:Destroy()
 		end)
 	end)
+
+	describe("contains", function()
+		test("true only while the instance matches, cold and observed", function()
+			local A, aTag = H.makeClass()
+			local B, bTag = H.makeClass()
+			local q = Component.query(A):without(B)
+			local p = part { aTag }
+			local untagged = part {}
+			expect(H.waitStarted(A, p, 3)).is(true)
+
+			-- Cold membership test (no candidate enumeration).
+			expect(q:contains(p)).is(true)
+			expect(q:contains(untagged)).is(false)
+
+			-- Observed: O(1) engine lookup, same answer.
+			local obs = q:observe(function() end)
+			expect(q:contains(p)).is(true)
+
+			-- Adding the excluded component drops it from the match set.
+			CollectionService:AddTag(p, bTag)
+			expect(H.waitUntil(function()
+				return not q:contains(p)
+			end, 3)).is(true)
+
+			obs:Disconnect()
+			A:Destroy()
+			B:Destroy()
+			p:Destroy()
+			untagged:Destroy()
+		end)
+	end)
+
+	describe("count", function()
+		test("counts current matches, cold and observed", function()
+			local A, aTag = H.makeClass()
+			local q = Component.query(A)
+			expect(q:count()).is(0)
+
+			local p1 = part { aTag }
+			local p2 = part { aTag }
+			expect(H.waitStarted(A, p1, 3)).is(true)
+			expect(H.waitStarted(A, p2, 3)).is(true)
+
+			-- Cold: single-requirement class fast path (#startedList).
+			expect(q:count()).is(2)
+			expect(q:count()).is(#q:GetMatches())
+
+			-- Observed: O(1) off the engine match list.
+			local obs = q:observe(function() end)
+			expect(q:count()).is(2)
+
+			obs:Disconnect()
+			A:Destroy()
+			p1:Destroy()
+			p2:Destroy()
+		end)
+
+		test("counts a join via the general scan, equal to get()", function()
+			local A, aTag = H.makeClass()
+			local B, bTag = H.makeClass()
+			local q = Component.query(A, B)
+			local both = part { aTag, bTag }
+			local onlyA = part { aTag }
+			expect(H.waitUntil(function()
+				return A:Has(both) and B:Has(both) and A:Has(onlyA)
+			end, 3)).is(true)
+
+			expect(q:count()).is(1)
+			expect(q:count()).is(#q:GetMatches())
+
+			A:Destroy()
+			B:Destroy()
+			both:Destroy()
+			onlyA:Destroy()
+		end)
+	end)
+
+	describe("first", function()
+		test("returns a match or nil, cold and observed", function()
+			local A, aTag = H.makeClass()
+			local q = Component.query(A)
+
+			-- Empty: nil.
+			expect(q:first()).never_exists()
+
+			local p = part { aTag }
+			expect(H.waitStarted(A, p, 3)).is(true)
+
+			-- Cold: single-requirement class fast path (startedList[1]).
+			expect(q:first()).is(p)
+
+			-- Observed: O(1) off the engine.
+			local obs = q:observe(function() end)
+			expect(q:first()).is(p)
+
+			obs:Disconnect()
+			A:Destroy()
+			p:Destroy()
+		end)
+
+		test("returns a matching instance on a join via the general scan", function()
+			local A, aTag = H.makeClass()
+			local B, bTag = H.makeClass()
+			local q = Component.query(A, B)
+			local both = part { aTag, bTag }
+			local onlyA = part { aTag }
+			expect(H.waitUntil(function()
+				return A:Has(both) and B:Has(both) and A:Has(onlyA)
+			end, 3)).is(true)
+
+			-- `both` is the only full match; `onlyA` satisfies just one requirement.
+			expect(q:first()).is(both)
+
+			A:Destroy()
+			B:Destroy()
+			both:Destroy()
+			onlyA:Destroy()
+		end)
+	end)
 end

@@ -7,7 +7,8 @@
 
 	A reusable, reactive query over tagged instances. Built with
 	`Component.query(...)` and refined with chain methods, then either observed
-	(`:observe`) or read once (`:GetMatches`).
+	(`:observe`) or read once (`:get`/`:GetMatches`, `:iter`, `:count`, `:first`,
+	`:contains`).
 
 	A *requirement* is a **component class** (satisfied while that component is
 	*started* on the instance), a **tag string** (satisfied while the instance has
@@ -95,6 +96,9 @@ export type Query = {
 	observe: (self: Query, callback: (Instance, Janitor) -> ()) -> QueryConnection,
 	get: (self: Query) -> { Instance },
 	iter: (self: Query) -> () -> Instance?,
+	contains: (self: Query, instance: Instance) -> boolean,
+	count: (self: Query) -> number,
+	first: (self: Query) -> Instance?,
 }
 
 -- satisfiedFn(query, instance): is `instance` currently matching `query`?
@@ -209,6 +213,12 @@ type QueryInternal = Query & {
 		reactive: boolean,
 		subSets: { [QueryInternal]: { [Instance]: boolean } }?
 	) -> { [Instance]: boolean },
+	_singleSource: (self: QueryInternal) -> PlanReq?,
+	_staticSub: (
+		self: QueryInternal,
+		plan: Plan
+	) -> (SatisfiedFn, ((QueryInternal) -> { [Instance]: boolean })?, { [QueryInternal]: { [Instance]: boolean } }?),
+	_collect: (self: QueryInternal, onMatch: (Instance) -> boolean?) -> (),
 }
 
 local EXISTS = newproxy(false) -- sentinel: attribute must merely exist
@@ -1094,90 +1104,96 @@ function Query.observe(self: QueryInternal, callback: (Instance, Janitor) -> ())
 	return connProxy
 end
 
---[=[
-	@within Query
-	@return { Instance }
-	Returns the instances that match right now. A one-shot read: it sets up no
-	subscriptions.
-
-	While the query is actively observed (any live [Query:observe] connection),
-	the read is served straight from the reactive engine's maintained match set —
-	an O(matches) copy, identical to what observers see — making per-frame
-	`GetMatches` loops cheap enough for ECS-style iteration.
-]=]
-function Query.get(self: QueryInternal): { Instance }
-	self:_validate()
-
-	-- Live-engine fast path: the engine already maintains exactly this set.
-	-- An engine built by any structurally equal query serves just as well --
-	-- borrow it read-only via the intern registry.
-	local engine = self._engine or activeEngines[self:_signature()]
-	if engine then
-		return table.clone(engine.matchedList)
-	end
-
+-- The sole positive requirement when the query is the ECS hot shape -- exactly
+-- one required requirement and no anyOf / negative / attribute / predicate
+-- clause -- so a read can answer straight from that one source. `nil` otherwise.
+function Query._singleSource(self: QueryInternal): PlanReq?
 	local plan = self:_plan()
+	if
+		#plan.required == 1
+		and #plan.anyOf == 0
+		and not plan.hasNegative
+		and not plan.hasAttributes
+		and not plan.hasPredicates
+	then
+		return plan.required[1]
+	end
+	return nil
+end
 
-	-- Each sub-query's match-set is computed ONCE per call and then answered by
-	-- lookup. Previously every candidate re-ran the whole sub-query (and
-	-- `_enumerate` ran it again on top), which is quadratic in nested queries.
-	-- The machinery (memo table + two closures) is only built when some clause
-	-- actually references a sub-query; `staticSub` is never consulted otherwise.
-	local subSets: { [QueryInternal]: { [Instance]: boolean } }? = nil
-	local ensureSet: ((QueryInternal) -> { [Instance]: boolean })? = nil
-	local staticSub: SatisfiedFn = neverSub
-	if plan.hasQueryRefs then
-		local sets: { [QueryInternal]: { [Instance]: boolean } } = {}
-		subSets = sets
-		local sub: SatisfiedFn
-		local ensure: (QueryInternal) -> { [Instance]: boolean }
-		function ensure(subQuery: QueryInternal): { [Instance]: boolean }
-			local existing = sets[subQuery]
-			if existing then
-				return existing
-			end
-			-- Seed the entry before recursing so shared sub-queries are computed
-			-- exactly once (recursion depth is finite: queries are immutable, so
-			-- the reference graph is a DAG by construction).
-			local set: { [Instance]: boolean } = {}
-			sets[subQuery] = set
-			-- Deepest first, so this sub-query's own enumeration finds its
-			-- references already memoized.
-			for _, req in subQuery:_allReferences() do
-				if isQuery(req) then
-					ensure(req :: QueryInternal)
-				end
-			end
-			for candidate in subQuery:_enumerate(false, sets) do
-				if subQuery:_fullMatch(candidate, sub) then
-					set[candidate] = true
-				end
-			end
-			return set
+-- Builds the per-call sub-query memoization cold reads use: returns
+-- `(satisfiedFn, ensureSet, subSets)`. Each sub-query's match-set is computed
+-- ONCE and then answered by lookup (re-running it per candidate is quadratic in
+-- nested queries). When the plan references no sub-query, returns the no-op
+-- `neverSub` and nils, so callers allocate nothing.
+function Query._staticSub(
+	self: QueryInternal,
+	plan: Plan
+): (SatisfiedFn, ((QueryInternal) -> { [Instance]: boolean })?, {
+	[QueryInternal]: { [Instance]: boolean },
+}?)
+	if not plan.hasQueryRefs then
+		return neverSub, nil, nil
+	end
+	local sets: { [QueryInternal]: { [Instance]: boolean } } = {}
+	local sub: SatisfiedFn
+	local ensure: (QueryInternal) -> { [Instance]: boolean }
+	function ensure(subQuery: QueryInternal): { [Instance]: boolean }
+		local existing = sets[subQuery]
+		if existing then
+			return existing
 		end
-		function sub(subQuery: QueryInternal, instance: Instance): boolean
-			return ensure(subQuery)[instance] == true
-		end
-		ensureSet = ensure
-		staticSub = sub
-
-		for _, req in self:_allReferences() do
+		-- Seed the entry before recursing so shared sub-queries are computed
+		-- exactly once (recursion depth is finite: queries are immutable, so
+		-- the reference graph is a DAG by construction).
+		local set: { [Instance]: boolean } = {}
+		sets[subQuery] = set
+		-- Deepest first, so this sub-query's own enumeration finds its
+		-- references already memoized.
+		for _, req in subQuery:_allReferences() do
 			if isQuery(req) then
 				ensure(req :: QueryInternal)
 			end
 		end
+		for candidate in subQuery:_enumerate(false, sets) do
+			if subQuery:_fullMatch(candidate, sub) then
+				set[candidate] = true
+			end
+		end
+		return set
 	end
+	function sub(subQuery: QueryInternal, instance: Instance): boolean
+		return ensure(subQuery)[instance] == true
+	end
+	for _, req in self:_allReferences() do
+		if isQuery(req) then
+			ensure(req :: QueryInternal)
+		end
+	end
+	return sub, ensure, sets
+end
+
+-- General cold scan (no live engine): resolves the narrowest seed, orders probes
+-- most-selective first, and invokes `onMatch(instance)` for every match.
+-- `onMatch` may return truthy to STOP the scan early -- how `first()` touches
+-- one candidate, not all. The live-engine path and the single-requirement ECS
+-- shape are cheaper answers the public terminals handle themselves before
+-- falling back here, so this deliberately does NOT special-case them.
+function Query._collect(self: QueryInternal, onMatch: (Instance) -> boolean?)
+	local plan = self:_plan()
+	local staticSub, ensureSet, subSets = self:_staticSub(plan)
 	local required = plan.required
-	local out: { Instance } = {}
 
 	if #required == 0 then
 		-- anyOf-only query: the candidate set genuinely is a union, so build it.
 		for instance in self:_enumerate(false, subSets) do
 			if self:_fullMatch(instance, staticSub) then
-				table.insert(out, instance)
+				if onMatch(instance) then
+					return
+				end
 			end
 		end
-		return out
+		return
 	end
 
 	-- Required requirements intersect, so enumerate ONE of them (the narrowest
@@ -1241,38 +1257,6 @@ function Query.get(self: QueryInternal): { Instance }
 	local chosenSeed: PlanReq = (seed or firstTag or firstQuery or firstClasslike) :: PlanReq
 	local seedKind = chosenSeed.kind
 
-	-- The ECS hot shape — one requirement, nothing else — is a straight dump of
-	-- the seed source, before any per-candidate machinery is even allocated.
-	if
-		#required == 1
-		and #plan.anyOf == 0
-		and not plan.hasNegative
-		and not plan.hasAttributes
-		and not plan.hasPredicates
-	then
-		if seedKind == "class" then
-			return table.clone(chosenSeed.startedList :: { Instance })
-		elseif seedKind == "tag" then
-			-- Both sources are arrays freshly allocated for this call, so they
-			-- are safe to hand out directly.
-			local sized = if tagArrays then (tagArrays :: { [PlanReq]: { Instance } })[chosenSeed] else nil
-			return sized or CollectionService:GetTagged(chosenSeed.tag :: string)
-		elseif seedKind == "query" then
-			local ensure = ensureSet :: (QueryInternal) -> { [Instance]: boolean }
-			for instance in ensure(chosenSeed.query :: QueryInternal) do
-				table.insert(out, instance)
-			end
-			return out
-		else
-			for _, component in (chosenSeed.class :: ComponentClassLike):GetAll() do
-				if Keys.inst(component).phase == "Started" then
-					table.insert(out, component.Instance)
-				end
-			end
-			return out
-		end
-	end
-
 	-- Probes = every required requirement except the seed, most-selective-first
 	-- when populations are known (smaller population rejects more candidates
 	-- sooner, so each later probe runs against fewer survivors). Unknown counts
@@ -1328,18 +1312,18 @@ function Query.get(self: QueryInternal): { Instance }
 	end
 
 	-- Checks everything except the seed requirement (the seed's own iteration
-	-- already proves it) and collects matches. Rest-checks are inlined here so a
-	-- candidate costs no extra method dispatch.
+	-- already proves it). Rest-checks are inlined here so a candidate costs no
+	-- extra method dispatch. Returns whatever `onMatch` returned (truthy = stop).
 	local anyOf = plan.anyOf
-	local function consider(instance: Instance)
+	local function consider(instance: Instance): boolean?
 		for _, req in probes do
 			local set = if probeSets then (probeSets :: { [PlanReq]: { [Instance]: boolean } })[req] else nil
 			if set then
 				if not set[instance] then
-					return
+					return nil
 				end
 			elseif not reqSatisfied(req, instance, staticSub) then
-				return
+				return nil
 			end
 		end
 		for _, group in anyOf do
@@ -1351,49 +1335,182 @@ function Query.get(self: QueryInternal): { Instance }
 				end
 			end
 			if not anySatisfied then
-				return
+				return nil
 			end
 		end
 		if plan.hasNegative then
 			for _, req in plan.negative do
 				if reqSatisfied(req, instance, staticSub) then
-					return
+					return nil
 				end
 			end
 		end
 		if plan.hasAttributes and not self:_attributesMatch(instance) then
-			return
+			return nil
 		end
 		if plan.hasPredicates and not self:_predicatesPass(instance) then
-			return
+			return nil
 		end
-		table.insert(out, instance)
+		return onMatch(instance)
 	end
 
 	if seedKind == "class" then
 		for _, instance in chosenSeed.startedList :: { Instance } do
-			consider(instance)
+			if consider(instance) then
+				return
+			end
 		end
 	elseif seedKind == "tag" then
 		local seedInstances = if tagArrays then (tagArrays :: { [PlanReq]: { Instance } })[chosenSeed] else nil
 		for _, instance in seedInstances or CollectionService:GetTagged(chosenSeed.tag :: string) do
-			consider(instance)
+			if consider(instance) then
+				return
+			end
 		end
 	elseif seedKind == "query" then
 		local ensure = ensureSet :: (QueryInternal) -> { [Instance]: boolean }
 		for instance in ensure(chosenSeed.query :: QueryInternal) do
-			consider(instance)
+			if consider(instance) then
+				return
+			end
 		end
 	else
 		for _, component in (chosenSeed.class :: ComponentClassLike):GetAll() do
 			if Keys.inst(component).phase == "Started" then
-				consider(component.Instance)
+				if consider(component.Instance) then
+					return
+				end
 			end
 		end
 	end
+end
+
+--[=[
+	@within Query
+	@return { Instance }
+	Returns the instances that match right now. A one-shot read: it sets up no
+	subscriptions.
+
+	While the query is actively observed (any live [Query:observe] connection),
+	the read is served straight from the reactive engine's maintained match set —
+	an O(matches) copy, identical to what observers see — making per-frame
+	`GetMatches` loops cheap enough for ECS-style iteration.
+]=]
+function Query.get(self: QueryInternal): { Instance }
+	self:_validate()
+
+	-- Live-engine fast path: the engine already maintains exactly this set.
+	-- An engine built by any structurally equal query serves just as well --
+	-- borrow it read-only via the intern registry.
+	local engine = self._engine or activeEngines[self:_signature()]
+	if engine then
+		return table.clone(engine.matchedList)
+	end
+
+	-- The ECS hot shape — one requirement, nothing else — is a straight dump of
+	-- the seed source, before any per-candidate machinery is even allocated.
+	local single = self:_singleSource()
+	if single then
+		local kind = single.kind
+		if kind == "class" then
+			return table.clone(single.startedList :: { Instance })
+		elseif kind == "tag" then
+			return CollectionService:GetTagged(single.tag :: string)
+		elseif kind == "query" then
+			local out: { Instance } = {}
+			local _, ensure = self:_staticSub(self:_plan())
+			for instance in (ensure :: (QueryInternal) -> { [Instance]: boolean })(single.query :: QueryInternal) do
+				table.insert(out, instance)
+			end
+			return out
+		else
+			local out: { Instance } = {}
+			for _, component in (single.class :: ComponentClassLike):GetAll() do
+				if Keys.inst(component).phase == "Started" then
+					table.insert(out, component.Instance)
+				end
+			end
+			return out
+		end
+	end
+
+	local out: { Instance } = {}
+	self:_collect(function(instance)
+		table.insert(out, instance)
+		return nil
+	end)
 	return out
 end
 Query.GetMatches = Query.get
+
+--[=[
+	@within Query
+	@param instance Instance
+	@return boolean
+	Whether `instance` matches this query right now. A membership test, not a
+	scan: while the query is actively observed it is an O(1) lookup in the
+	reactive engine's match set; cold, it evaluates this one instance against
+	every clause (no candidate enumeration).
+]=]
+function Query.contains(self: QueryInternal, instance: Instance): boolean
+	self:_validate()
+	local engine = self._engine or activeEngines[self:_signature()]
+	if engine then
+		return engine.matched[instance] ~= nil
+	end
+	local staticSub = self:_staticSub(self:_plan())
+	return self:_fullMatch(instance, staticSub)
+end
+
+--[=[
+	@within Query
+	@return number
+	How many instances match right now. While the query is actively observed
+	this is an O(1) read of the engine's match count; cold it scans without
+	building the match array [Query:get] would allocate.
+]=]
+function Query.count(self: QueryInternal): number
+	self:_validate()
+	local engine = self._engine or activeEngines[self:_signature()]
+	if engine then
+		return #engine.matchedList
+	end
+	local single = self:_singleSource()
+	if single and single.kind == "class" then
+		return #(single.startedList :: { Instance })
+	end
+	local n = 0
+	self:_collect(function()
+		n += 1
+		return nil
+	end)
+	return n
+end
+
+--[=[
+	@within Query
+	@return Instance?
+	One instance that matches right now, or `nil` if none do. While the query is
+	actively observed this is an O(1) read of the engine's first match; cold it
+	stops at the first matching candidate instead of collecting them all.
+]=]
+function Query.first(self: QueryInternal): Instance?
+	self:_validate()
+	local engine = self._engine or activeEngines[self:_signature()]
+	if engine then
+		return engine.matchedList[1]
+	end
+	local single = self:_singleSource()
+	if single and single.kind == "class" then
+		return (single.startedList :: { Instance })[1]
+	end
+	local found: Instance? = nil
+	self:_collect(function(instance)
+		found = instance
+		return true
+	end)
+	return found
+end
 
 --[=[
 	@within Query
