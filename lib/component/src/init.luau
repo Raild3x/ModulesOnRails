@@ -111,7 +111,6 @@ export type LifecyclePhase = Keys.LifecyclePhase
 export type StopReason = Keys.StopReason
 export type Extension = Types.Extension
 export type ComponentConfig = Types.ComponentConfig
-export type Connection = Types.Connection
 export type ComponentClass = Types.ComponentClass
 export type TypedClass<M> = Types.TypedClass<M>
 export type Query = Query.Query
@@ -310,60 +309,6 @@ function ComponentClassMethods._isInAncestorList(self: Class_Internal, instance:
 end
 
 --[[
-	Attempts to construct a component for `instance`, unless one already exists or
-	is in flight. Deferred so a batch of tagged instances processes together.
-]]
-function ComponentClassMethods._tryConstruct(self: Class_Internal, instance: Instance)
-	const ci = Keys.class(self)
-	if ci.instToComponents[instance] or ci.pending[instance] then
-		return
-	end
-	const id = (ci.lockConstruct[instance] or 0) + 1
-	ci.lockConstruct[instance] = id
-	-- Reserve the slot synchronously so a second call in the same frame dedupes.
-	ci.pending[instance] = true
-	task.defer(function()
-		if ci.lockConstruct[instance] ~= id then
-			if ci.pending[instance] == true then
-				ci.pending[instance] = nil
-			end
-			return
-		end
-		Lifecycle.Run(self, instance, id)
-	end)
-end
-
---[[
-	Stops and removes the component for `instance`, if any, with the given reason.
-]]
-function ComponentClassMethods._tryDeconstruct(self: Class_Internal, instance: Instance, reason: StopReason)
-	const ci = Keys.class(self)
-	ci.lockConstruct[instance] = (ci.lockConstruct[instance] or 0) + 1
-
-	const record = ci.pending[instance]
-	const component = ci.instToComponents[instance]
-
-	-- Untrack up front so a same-frame re-tag can begin a fresh construction.
-	Lifecycle.Untrack(self, instance)
-	ci.pending[instance] = nil
-
-	-- If the component is still constructing, abort the in-flight driver; it runs
-	-- teardown itself with the reason we hand it.
-	if type(record) == "table" then
-		const pending = record :: Types.PendingRecord
-		const cancel = pending.cancel
-		if cancel then
-			cancel(reason)
-			return
-		end
-	end
-	if component then
-		-- Fully constructed / started: tear down directly.
-		Lifecycle.Teardown(self, component, reason)
-	end
-end
-
---[[
 	Begins watching `instance` for ancestry changes, constructing/deconstructing as
 	it enters or leaves the valid ancestor list. Idempotent.
 ]]
@@ -375,10 +320,10 @@ function ComponentClassMethods._startWatching(self: Class_Internal, instance: In
 
 	const function evaluate()
 		if self:_isInAncestorList(instance) then
-			self:_tryConstruct(instance)
+			Lifecycle.Request(self, instance)
 		else
 			const reason: StopReason = if instance:IsDescendantOf(game) then "LeftAncestry" else "InstanceDestroyed"
-			self:_tryDeconstruct(instance, reason)
+			Lifecycle.Release(self, instance, reason)
 		end
 	end
 
@@ -388,7 +333,7 @@ function ComponentClassMethods._startWatching(self: Class_Internal, instance: In
 	}
 
 	if self:_isInAncestorList(instance) then
-		self:_tryConstruct(instance)
+		Lifecycle.Request(self, instance)
 	end
 end
 
@@ -422,7 +367,7 @@ function ComponentClassMethods._setup(self: Class_Internal)
 	Extensions.BindMethods(self, classActiveExtensions)
 
 	-- Without a `ShouldExtend` anywhere, every instance resolves to exactly this
-	-- list, so `Lifecycle.Run` can share it instead of re-sorting per instance.
+	-- list, so the lifecycle engine can share it instead of re-sorting per instance.
 	for _, extension in classActiveExtensions do
 		if type(extension.ShouldExtend) == "function" then
 			ci.extensionsVaryPerInstance = true
@@ -435,7 +380,7 @@ function ComponentClassMethods._setup(self: Class_Internal)
 	end))
 	ci.janitor:Add(CollectionService:GetInstanceRemovedSignal(self.Tag):Connect(function(instance)
 		self:_stopWatching(instance)
-		self:_tryDeconstruct(instance, "Untagged")
+		Lifecycle.Release(self, instance, "Untagged")
 	end))
 
 	for _, instance in CollectionService:GetTagged(self.Tag) do
@@ -492,25 +437,7 @@ function ComponentClassMethods.GetLifecycleStatus(
 	self: Class_Internal,
 	instanceOrComponent: Instance | Types.AnyComponent
 ): LifecyclePhase
-	local component: Types.AnyComponent? = nil
-	if typeof(instanceOrComponent) == "Instance" then
-		const ci = Keys.class(self)
-		component = ci.instToComponents[instanceOrComponent]
-		if not component then
-			const record = ci.pending[instanceOrComponent]
-			-- `unknown` bridge: InstanceAny (an intersection) is not a subtype of
-			-- the `{[any]: any}` view in the solver's eyes.
-			component = if type(record) == "table"
-				then ((record :: Types.PendingRecord).component :: unknown) :: Types.AnyComponent
-				else nil
-		end
-	else
-		component = instanceOrComponent
-	end
-	if type(component) == "table" and component[Keys.Internal] then
-		return Keys.inst(component).phase
-	end
-	return "None"
+	return Lifecycle.GetPhase(self, instanceOrComponent)
 end
 
 --[=[
@@ -581,7 +508,7 @@ function ComponentClassMethods.CreateFromInstance(self: Class_Internal, instance
 			end
 			self:_startWatching(instance)
 			if self:_isInAncestorList(instance) then
-				self:_tryConstruct(instance)
+				Lifecycle.Request(self, instance)
 			end
 		end) :: unknown
 	) :: Types.PromiseLike
@@ -750,38 +677,14 @@ function ComponentClassMethods.Destroy(self: Class_Internal)
 		table.remove(UNSETUP_COMPONENTS, idx)
 	end
 
+	-- Stop watching every instance first, so no new construction begins mid-destroy.
 	const ci = Keys.class(self)
-
-	-- Stop watching every instance so no new construction begins mid-destroy.
 	for instance in ci.watching do
 		self:_stopWatching(instance)
 	end
-
-	-- Tear down all components (started, constructed, or in-flight) via the one path.
-	for instance, record in ci.pending do
-		if type(record) == "table" and record.component then
-			self:_tryDeconstruct(instance, "ClassDestroyed")
-		end
-	end
-	for instance in ci.instToComponents do
-		self:_tryDeconstruct(instance, "ClassDestroyed")
-	end
-
-	-- The teardowns kicked off above are deferred and still have to fire
-	-- `Stopped` (or `failed`) on this class's signals, which live on this
-	-- Janitor. Destroying it now would silently swallow those fires, so hand the
-	-- destroy to whichever teardown finishes last.
-	if ci.teardownsInFlight > 0 then
-		ci.destroyJanitorWhenIdle = true
-	else
-		ci.janitor:Destroy()
-	end
-
-	table.clear(ci.instToComponents)
-	table.clear(ci.components)
-	table.clear(ci.lockConstruct)
-	table.clear(ci.pending)
 	table.clear(ci.watching)
+
+	Lifecycle.DestroyClass(self)
 end
 
 return Component

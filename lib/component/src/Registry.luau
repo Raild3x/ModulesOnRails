@@ -8,8 +8,8 @@
 	A module-level map of `Roblox Instance -> { [ComponentClass]: componentInstance }`
 	spanning every component class. The original Component only tracked instances
 	per-class, so a cross-class question like "what components does this instance
-	have?" was unanswerable. This registry backs `Component.GetComponents(instance)`
-	and the world-level query engine.
+	have?" was unanswerable. This registry backs
+	`Component.GetAllComponentsForInstance(instance)`.
 
 	A component is registered the moment its construction completes (before it
 	starts) and unregistered during teardown, mirroring the per-class tracking in
@@ -51,15 +51,6 @@ function Registry.Unregister(instance: Instance, class: ComponentClass)
 	if next(classes) == nil then
 		instanceToClasses[instance] = nil
 	end
-end
-
---[=[
-	@within ComponentRegistry
-	Returns the component of `class` bound to `instance`, or `nil`.
-]=]
-function Registry.Get(instance: Instance, class: ComponentClass): Component?
-	local classes = instanceToClasses[instance]
-	return if classes then classes[class] else nil
 end
 
 --[=[

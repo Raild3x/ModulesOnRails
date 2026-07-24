@@ -569,7 +569,7 @@ const function run(class: ClassAny, instance: Instance, constructId: number)
 	end
 
 	-- `run` is already called from a `task.defer`red thread (see
-	-- `_tryConstruct`), so the whole sequence is straight-line code here: it only
+	-- `request`), so the whole sequence is straight-line code here: it only
 	-- parks when a hook actually yields, instead of hopping through a Promise per
 	-- step. Returns a StopReason/error to abort with, or nil on success.
 	const function drive(): any?
@@ -751,8 +751,138 @@ const function run(class: ClassAny, instance: Instance, constructId: number)
 	teardown(class, component, ic.stopReason or "ConstructionCancelled")
 end
 
+--[[
+	request - claim `instance`'s construction slot for `class`.
+
+	Reserving the slot synchronously (with `true`, before the record exists) is
+	what makes a second request in the same frame a no-op; the construct lock is
+	bumped so any request already in flight becomes stale. The driver itself is
+	deferred, so a batch of tagged instances processes together.
+]]
+const function request(class: ClassAny, instance: Instance)
+	const ci = Keys.class(class)
+	if ci.instToComponents[instance] or ci.pending[instance] then
+		return
+	end
+	const id = (ci.lockConstruct[instance] or 0) + 1
+	ci.lockConstruct[instance] = id
+	ci.pending[instance] = true
+	task.defer(function()
+		if ci.lockConstruct[instance] ~= id then
+			-- Superseded before we even began. Only clear the slot if it is still
+			-- the bare reservation: a newer request may already own it.
+			if ci.pending[instance] == true then
+				ci.pending[instance] = nil
+			end
+			return
+		end
+		run(class, instance, id)
+	end)
+end
+
+--[[
+	release - give up `instance`'s slot for `class`, tearing down whatever holds
+	it with `reason`.
+
+	Bumping the lock first is what supersedes a driver that is parked somewhere
+	`cancel` cannot reach it — before its record is published, a yielding
+	`ShouldConstruct` is exactly that case, and the lock check inside `run` is the
+	only thing that catches it.
+
+	Order is load-bearing: untracking happens before the cancel/teardown handoff
+	so a same-frame re-tag finds a free slot and can begin a fresh construction.
+]]
+const function release(class: ClassAny, instance: Instance, reason: StopReason)
+	const ci = Keys.class(class)
+	ci.lockConstruct[instance] = (ci.lockConstruct[instance] or 0) + 1
+
+	const record = ci.pending[instance]
+	const component = ci.instToComponents[instance]
+
+	untrack(class, instance)
+	ci.pending[instance] = nil
+
+	-- Still constructing: abort the in-flight driver, which runs teardown itself
+	-- with the reason we hand it.
+	if type(record) == "table" then
+		const cancel = (record :: Types.PendingRecord).cancel
+		if cancel then
+			cancel(reason)
+			return
+		end
+	end
+	if component then
+		-- Fully constructed / started: tear down directly.
+		teardown(class, component, reason)
+	end
+end
+
+--[[
+	getPhase - the lifecycle phase of the component `class` has on the given
+	instance (or of the given component). `"None"` if there is no such component.
+
+	Reads the pending slot as well as the tracking table, so a component that is
+	still constructing reports its real phase rather than `"None"`.
+]]
+const function getPhase(class: ClassAny, instanceOrComponent: Instance | Types.AnyComponent): Keys.LifecyclePhase
+	local component: Types.AnyComponent? = nil
+	if typeof(instanceOrComponent) == "Instance" then
+		const ci = Keys.class(class)
+		component = ci.instToComponents[instanceOrComponent]
+		if not component then
+			const record = ci.pending[instanceOrComponent]
+			-- `unknown` bridge: InstanceAny (an intersection) is not a subtype of
+			-- the `{[any]: any}` view in the solver's eyes.
+			component = if type(record) == "table"
+				then ((record :: Types.PendingRecord).component :: unknown) :: Types.AnyComponent
+				else nil
+		end
+	else
+		component = instanceOrComponent
+	end
+	if type(component) == "table" and component[Keys.Internal] then
+		return Keys.inst(component).phase
+	end
+	return "None"
+end
+
+--[[
+	destroyClass - release every slot the class holds and dispose of its Janitor.
+
+	The teardowns started here are deferred and still have to fire `Stopped` (or
+	`failed`) on signals that live on the class Janitor, so destroying it now
+	would silently swallow those fires. When any teardown is outstanding the
+	destroy is handed to whichever one finishes last (see `teardown`).
+
+	The caller is expected to have stopped watching for new instances first.
+]]
+const function destroyClass(class: ClassAny)
+	const ci = Keys.class(class)
+
+	for instance, record in ci.pending do
+		if type(record) == "table" and (record :: Types.PendingRecord).component then
+			release(class, instance, "ClassDestroyed")
+		end
+	end
+	for instance in ci.instToComponents do
+		release(class, instance, "ClassDestroyed")
+	end
+
+	if ci.teardownsInFlight > 0 then
+		ci.destroyJanitorWhenIdle = true
+	else
+		ci.janitor:Destroy()
+	end
+
+	table.clear(ci.instToComponents)
+	table.clear(ci.components)
+	table.clear(ci.lockConstruct)
+	table.clear(ci.pending)
+end
+
 return {
-	Run = run,
-	Teardown = teardown,
-	Untrack = untrack,
+	Request = request,
+	Release = release,
+	GetPhase = getPhase,
+	DestroyClass = destroyClass,
 }

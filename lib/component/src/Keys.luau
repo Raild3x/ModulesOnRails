@@ -62,12 +62,20 @@ export type ComponentInternal = {
 
 -- Private state carried by every component CLASS.
 export type ClassInternal = {
+	-- Owned by `init.luau` (tag/ancestry watching).
 	ancestors: { Instance },
+	watching: { [Instance]: { any } }, -- ancestry-watch connections
+	-- Written by `Lifecycle.luau` as components are tracked/untracked; read
+	-- widely (init's lookups, Query's compiled plans).
 	instToComponents: { [Instance]: any },
 	components: { any },
+	--[[ The construction-request protocol. Owned ENTIRELY by `Lifecycle.luau` —
+		nothing else reads or writes these four. `pending` is a three-state slot
+		(absent / `true` reservation / `PendingRecord`) and `lockConstruct` is the
+		monotonic id that supersedes a stale request; keeping them in one module is
+		what makes that protocol reviewable. ]]
 	lockConstruct: { [Instance]: number },
-	watching: { [Instance]: { any } }, -- ancestry-watch connections
-	pending: { [Instance]: any }, -- in-flight construction record (or `true` reservation)
+	pending: { [Instance]: any },
 	extensions: { any },
 	classActiveExtensions: { any },
 	-- True when some extension defines `ShouldExtend`, so the active set genuinely
@@ -78,9 +86,10 @@ export type ClassInternal = {
 	initFields: (() -> { [string]: any })?, -- config.InitFields: called per instance
 	janitor: any, -- class-level Janitor (signals + CollectionService connections)
 	failed: any, -- internal Signal(instance, reason): construction ended without starting
-	-- Teardowns that have begun but not yet finished. `Destroy` must not tear the
-	-- class Janitor down while any are outstanding, or it would destroy the
-	-- `Stopped`/`failed` signals those teardowns still have to fire on.
+	-- Also Lifecycle-owned. Teardowns that have begun but not yet finished:
+	-- `DestroyClass` must not tear the class Janitor down while any are
+	-- outstanding, or it would destroy the `Stopped`/`failed` signals those
+	-- teardowns still have to fire on.
 	teardownsInFlight: number,
 	destroyJanitorWhenIdle: boolean,
 }

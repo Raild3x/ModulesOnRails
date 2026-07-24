@@ -91,7 +91,6 @@ export type Query = {
 	anyOf: (self: Query, ...Queryable) -> Query,
 	without: (self: Query, ...Queryable) -> Query,
 	withAttribute: (self: Query, name: string, matcher: unknown?) -> Query,
-	withProperty: (self: Query, name: string, matcher: unknown) -> Query,
 	where: (self: Query, predicate: (Instance) -> boolean, recheckSignal: unknown?) -> Query,
 	observe: (self: Query, callback: (Instance, Janitor) -> ()) -> QueryConnection,
 	get: (self: Query) -> { Instance },

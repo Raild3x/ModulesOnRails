@@ -17,7 +17,6 @@
 ]=]
 
 const Packages = script.Parent.Parent
-const Janitor = require(Packages.Janitor)
 const Signal = require(Packages.Signal)
 const Promise = require(Packages.Promise)
 
@@ -25,7 +24,6 @@ const Keys = require(script.Parent.Keys)
 const TypeFunctions = require(script.Parent.TypeFunctions)
 
 type Promise<T... = ()> = Promise.TypedPromise<T...>
-type Janitor = Janitor.Janitor
 export type LifecyclePhase = Keys.LifecyclePhase
 export type StopReason = Keys.StopReason
 
@@ -164,21 +162,6 @@ export type ComponentConfigOf<E, M = {}, F = { [any]: any }, IF = {}> = {
 	[string]: any,
 }
 
---[=[
-	@interface Connection
-	@within Component
-	.IsConnected boolean
-	.Disconnect () -> ()
-	.Destroy () -> ()
-	Returned by [Component:WhileHasComponent] / [Component:WhileHasComponents].
-	Also callable (`conn()` is `conn:Destroy()`).
-]=]
-export type Connection = {
-	IsConnected: boolean,
-	Disconnect: () -> (),
-	Destroy: () -> (),
-}
-
 --[[
 	The type returned by `Component.new(config)`: `M` (the config's `Methods`,
 	plus `extensionMethods<E>` when it has Extensions) is merged in, so user
@@ -251,27 +234,14 @@ export type TypedInstance<M = {}, F = {}, I = Instance> = {
 	-- models (a full `TypedInstance<...>` here would need a class -> instance type
 	-- function, and bloats the solver).
 	GetComponent: <T>(self: TypedInstance<M, F, I>, componentClass: T) -> (T & { Instance: Instance })?,
-	-- Generic in the sibling class so the callback sees its real (merged) type.
-	WhileHasComponent: <T>(
-		self: TypedInstance<M, F, I>,
-		componentClass: T,
-		fn: (component: T & { Instance: Instance }, janitor: Janitor) -> ()
-	) -> Connection,
-	WhileHasComponents: (
-		self: TypedInstance<M, F, I>,
-		componentClasses: { any },
-		fn: (components: { any }, janitor: Janitor) -> ()
-	) -> Connection,
 } & TypedClass<M, F, I> & F
 
--- Overloads dispatch on arity. The one-argument form returns the type-function-
--- merged class (base + checked extension methods + indexer); the two-argument
--- form returns the strict merge (base + extension methods + user methods, no
--- indexer). `TypedClass<M>` remains the self-annotation alias for the latter.
+-- The config's `Methods` (`M`) and its extensions' methods are merged into the
+-- returned class as checked props; `Fields`/`InitFields` (`F`/`IF`) land on the
+-- instance type. `TypedClass<M>` is the matching self-annotation alias.
 export type NewFn = <E, M, F, IF>(
 	config: ComponentConfigOf<E, M, F, IF>
-) -> TypedClass<M & TypeFunctions.extensionMethods<E>, F & IF> --TypeFunctions.classWith<TypedClass<M>, E, nil>)
--- & (<E>(config: ComponentConfigOf<E>) -> TypeFunctions.classWith<TypedClass, E, nil>)
+) -> TypedClass<M & TypeFunctions.extensionMethods<E>, F & IF>
 
 --------------------------------------------------------------------------------
 -- Internal implementation views
@@ -302,8 +272,6 @@ export type ComponentInstance = TypedInstance<{}, {}, Instance>
 -- the `Keys` accessors and the constructors' `any` build step.
 type ComponentClass_Internal_Methods = {
 	_isInAncestorList: (self: ComponentClass_Internal, instance: Instance) -> boolean,
-	_tryConstruct: (self: ComponentClass_Internal, instance: Instance) -> (),
-	_tryDeconstruct: (self: ComponentClass_Internal, instance: Instance, reason: StopReason) -> (),
 	_startWatching: (self: ComponentClass_Internal, instance: Instance) -> (),
 	_stopWatching: (self: ComponentClass_Internal, instance: Instance) -> (),
 	_setup: (self: ComponentClass_Internal) -> (),
