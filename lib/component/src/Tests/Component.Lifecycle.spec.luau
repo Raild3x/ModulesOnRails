@@ -325,4 +325,91 @@ return function(t: any)
 			part:Destroy()
 		end)
 	end)
+
+	describe("GetAllComponentsForInstance", function()
+		test("returns every component across classes bound to one instance", function()
+			local classA, tagA = makeClass()
+			local classB, tagB = makeClass()
+			local part = Instance.new("Part")
+			part.Anchored = true
+			CollectionService:AddTag(part, tagA)
+			CollectionService:AddTag(part, tagB)
+			part.Parent = workspace
+
+			expect(waitUntil(function()
+				return classA:Has(part) and classB:Has(part)
+			end, 3)).is(true)
+
+			local all = Component.GetAllComponentsForInstance(part)
+			expect(#all).is(2)
+			local seen = {}
+			for _, component in all do
+				seen[component] = true
+			end
+			expect(seen[classA:FromInstance(part)]).is(true)
+			expect(seen[classB:FromInstance(part)]).is(true)
+
+			classA:Destroy()
+			classB:Destroy()
+			part:Destroy()
+		end)
+
+		test("a component appears only once it finishes constructing", function()
+			local gate = false
+			local class, tag = makeClass {
+				Construct = function(self)
+					while not gate do
+						task.wait()
+					end
+				end,
+			}
+			local part = taggedPart(tag)
+
+			-- Still constructing: not yet globally visible.
+			expect(waitUntil(function()
+				return class:GetLifecycleStatus(part) == "Constructing"
+			end)).is(true)
+			expect(#Component.GetAllComponentsForInstance(part)).is(0)
+
+			gate = true
+			expect(waitUntil(function()
+				return class:Has(part)
+			end, 3)).is(true)
+			expect(#Component.GetAllComponentsForInstance(part)).is(1)
+
+			class:Destroy()
+			part:Destroy()
+		end)
+
+		test("entries drop on teardown, and the instance clears when its last component goes", function()
+			local classA, tagA = makeClass()
+			local classB, tagB = makeClass()
+			local part = Instance.new("Part")
+			part.Anchored = true
+			CollectionService:AddTag(part, tagA)
+			CollectionService:AddTag(part, tagB)
+			part.Parent = workspace
+
+			expect(waitUntil(function()
+				return classA:Has(part) and classB:Has(part)
+			end, 3)).is(true)
+			expect(#Component.GetAllComponentsForInstance(part)).is(2)
+
+			CollectionService:RemoveTag(part, tagA)
+			expect(waitUntil(function()
+				return not classA:Has(part)
+			end)).is(true)
+			expect(#Component.GetAllComponentsForInstance(part)).is(1)
+
+			CollectionService:RemoveTag(part, tagB)
+			expect(waitUntil(function()
+				return not classB:Has(part)
+			end)).is(true)
+			expect(#Component.GetAllComponentsForInstance(part)).is(0)
+
+			classA:Destroy()
+			classB:Destroy()
+			part:Destroy()
+		end)
+	end)
 end

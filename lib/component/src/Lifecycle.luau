@@ -30,7 +30,6 @@ local Promise = require(Packages.Promise)
 local Janitor = require(Packages.Janitor)
 
 local Keys = require(script.Parent.Keys)
-local Registry = require(script.Parent.Registry)
 local Extensions = require(script.Parent.Extensions)
 local Types = require(script.Parent.Types)
 
@@ -40,6 +39,57 @@ type PromiseLike = Types.PromiseLike
 type StopReason = Types.StopReason
 
 const IS_SERVER = RunService:IsServer()
+
+--[[
+	Cross-class instance registry: a module-level map of
+	`Roblox Instance -> { [ComponentClass]: componentInstance }` spanning every
+	component class. Per-class tracking (`ClassInternal.instToComponents`) can
+	only answer "does THIS class have a component here"; the cross-class question
+	"what components does this instance have?" needs this index. It backs the
+	public `Component.GetAllComponentsForInstance`.
+
+	Written only from the tracking sites below — `register` at the Constructed
+	phase, `unregister` inside `untrack` — so a component appears here from the
+	moment it finishes constructing and vanishes during teardown.
+]]
+local instanceToClasses: { [Instance]: { [any]: any } } = {}
+
+const function register(instance: Instance, class: any, component: any)
+	local classes = instanceToClasses[instance]
+	if not classes then
+		classes = {}
+		instanceToClasses[instance] = classes
+	end
+	classes[class] = component
+end
+
+const function unregister(instance: Instance, class: any)
+	const classes = instanceToClasses[instance]
+	if not classes then
+		return
+	end
+	classes[class] = nil
+	-- Drop the instance entry entirely once its last component is gone, so the
+	-- registry never retains destroyed instances.
+	if next(classes) == nil then
+		instanceToClasses[instance] = nil
+	end
+end
+
+--[[
+	Returns a fresh array of every component bound to `instance`, across all
+	classes. Backs `Component.GetAllComponentsForInstance`.
+]]
+const function getAllForInstance(instance: Instance): { any }
+	const out = {}
+	const classes = instanceToClasses[instance]
+	if classes then
+		for _, component in classes do
+			table.insert(out, component)
+		end
+	end
+	return out
+end
 
 -- Sentinel error used to unwind the lifecycle chain on cancellation (as opposed
 -- to a genuine construction error).
@@ -379,8 +429,9 @@ const function disconnectUpdates(component: InstanceAny)
 end
 
 --[[
-	Removes a component from every tracking table (per-class + global registry).
-	Idempotent; safe to call whether or not the component was ever tracked.
+	Removes a component from every tracking table: the per-class arrays and the
+	cross-class registry. Idempotent; safe to call whether or not the component
+	was ever tracked.
 ]]
 const function untrack(class: ClassAny, instance: Instance)
 	const ci = Keys.class(class)
@@ -394,7 +445,7 @@ const function untrack(class: ClassAny, instance: Instance)
 			components[index] = components[n]
 			components[n] = nil
 		end
-		Registry.Unregister(instance, class)
+		unregister(instance, class)
 	end
 end
 
@@ -646,7 +697,7 @@ const function run(class: ClassAny, instance: Instance, constructId: number)
 		ic.phase = "Constructed"
 		cci.instToComponents[instance] = component
 		table.insert(cci.components, component)
-		Registry.Register(instance, class, component)
+		register(instance, class, component)
 
 		-- The one deferral boundary: start phases never run on the thread that
 		-- drove construction.
@@ -885,4 +936,5 @@ return {
 	Release = release,
 	GetPhase = getPhase,
 	DestroyClass = destroyClass,
+	GetAllForInstance = getAllForInstance,
 }

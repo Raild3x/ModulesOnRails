@@ -100,7 +100,6 @@ const Signal = require(Packages.Signal)
 --// Internal //--
 const Keys = require(script.Keys)
 const Extensions = require(script.Extensions)
-const Registry = require(script.Registry)
 const Query = require(script.Query)
 const Lifecycle = require(script.Lifecycle)
 const Types = require(script.Types)
@@ -175,7 +174,7 @@ end
 	Returns every component bound to `instance`, across all component classes. A
 	component appears here from the moment it finishes constructing.
 ]=]
-Component.GetAllComponentsForInstance = Registry.GetAll
+Component.GetAllComponentsForInstance = Lifecycle.GetAllForInstance
 
 --------------------------------------------------------------------------------
 -- Construction of a component class
