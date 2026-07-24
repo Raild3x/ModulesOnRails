@@ -18,24 +18,25 @@
 	- every positional / `:with` requirement is satisfied,
 	- every `:anyOf(...)` group has at least one satisfied,
 	- no `:without` requirement is satisfied,
-	- every `:withAttribute` matches, and
+	- every `:withAttribute` matches,
+	- every `:withProperty` matches, and
 	- every `:where` predicate returns true.
 
 	A query must have at least one positive requirement (component / tag /
 	sub-query in the positional args, `:with`, or `:anyOf`) so its candidate set
-	is bounded; a query built only from `:without` / `:withAttribute` / `:where`
-	errors when observed or read.
+	is bounded; a query built only from `:without` / `:withAttribute` /
+	`:withProperty` / `:where` errors when observed or read.
 
 	See the Component `CONTEXT.md` for the glossary and the `README` for examples.
 ]=]
 
-local CollectionService = game:GetService("CollectionService")
+const CollectionService = game:GetService("CollectionService")
 
-local Packages = script.Parent.Parent
-local Signal = require(Packages.Signal)
-local Janitor = require(Packages.Janitor)
+const Packages = script.Parent.Parent
+const Signal = require(Packages.Signal)
+const Janitor = require(Packages.Janitor)
 
-local Keys = require(script.Parent.Keys)
+const Keys = require(script.Parent.Keys)
 
 type Janitor = Janitor.Janitor
 
@@ -92,8 +93,10 @@ export type Query = {
 	anyOf: (self: Query, ...Queryable) -> Query,
 	without: (self: Query, ...Queryable) -> Query,
 	withAttribute: (self: Query, name: string, matcher: unknown?) -> Query,
+	withProperty: (self: Query, name: string, matcher: unknown?) -> Query,
 	where: (self: Query, predicate: (Instance) -> boolean, recheckSignal: unknown?) -> Query,
 	observe: (self: Query, callback: (Instance, Janitor) -> ()) -> QueryConnection,
+	observeUnyielding: (self: Query, callback: (Instance, Janitor) -> ()) -> QueryConnection,
 	get: (self: Query) -> { Instance },
 	iter: (self: Query) -> () -> Instance?,
 	contains: (self: Query, instance: Instance) -> boolean,
@@ -113,6 +116,15 @@ type AttributeRequirement = {
 	matcher: unknown,
 }
 
+-- One `:withProperty` requirement. `matcher` is the EXISTS sentinel (property
+-- merely present on the Instance), a `(value) -> boolean` predicate, or a value
+-- the property must equal (an explicit `nil` matcher is stored as `nil` and means
+-- "property present AND equal to nil"; the omitted form is the EXISTS sentinel).
+type PropertyRequirement = {
+	name: string,
+	matcher: unknown,
+}
+
 -- One `:where` requirement; `signal` is duck-cast to `RecheckSignalView` when
 -- the engine activates.
 type PredicateRequirement = {
@@ -123,6 +135,9 @@ type PredicateRequirement = {
 type Observer = {
 	callback: (Instance, Janitor) -> (),
 	janitors: { [Instance]: Janitor },
+	-- `observeUnyielding` observers run their callback inline (no per-match
+	-- thread) and must neither yield nor error; a violation is reported loudly.
+	unyielding: boolean,
 }
 
 type ChangedSignal = Signal.Signal<(Instance, boolean) -> (), Instance, boolean>
@@ -151,6 +166,7 @@ type Plan = {
 	negative: { PlanReq },
 	hasNegative: boolean,
 	hasAttributes: boolean,
+	hasProperties: boolean,
 	hasPredicates: boolean,
 	-- True when any clause references a sub-query; `get()` only builds its
 	-- per-call memoization machinery (and a real SatisfiedFn) when it is.
@@ -171,6 +187,7 @@ type Engine = {
 	janitor: Janitor,
 	positiveSet: { [Instance]: boolean }, -- [Instance]: true while positively bounded (candidate universe)
 	attrConns: { [Instance]: ConnectionLike }, -- one AttributeChanged sub per candidate
+	propConns: { [Instance]: { ConnectionLike } }, -- one GetPropertyChangedSignal sub per watched property, per candidate
 	subEngines: { [QueryInternal]: Engine },
 	-- Interning bookkeeping: the canonical signature this engine is registered
 	-- under, total activations across every equivalent query sharing it, and
@@ -186,6 +203,7 @@ type QueryInternal = Query & {
 	_anyOf: { { Queryable } }, -- array of groups
 	_negative: { Queryable },
 	_attributes: { AttributeRequirement },
+	_properties: { PropertyRequirement },
 	_predicates: { PredicateRequirement },
 	_engine: Engine?,
 	_refcount: number,
@@ -203,6 +221,7 @@ type QueryInternal = Query & {
 	_allReferences: (self: QueryInternal) -> { Queryable },
 	_positiveCandidate: (self: QueryInternal, instance: Instance, satisfiedFn: SatisfiedFn) -> boolean,
 	_attributesMatch: (self: QueryInternal, instance: Instance) -> boolean,
+	_propertiesMatch: (self: QueryInternal, instance: Instance) -> boolean,
 	_predicatesPass: (self: QueryInternal, instance: Instance) -> boolean,
 	_matchesRest: (self: QueryInternal, instance: Instance, satisfiedFn: SatisfiedFn) -> boolean,
 	_fullMatch: (self: QueryInternal, instance: Instance, satisfiedFn: SatisfiedFn) -> boolean,
@@ -221,24 +240,24 @@ type QueryInternal = Query & {
 	_collect: (self: QueryInternal, onMatch: (Instance) -> boolean?) -> (),
 }
 
-local EXISTS = newproxy(false) -- sentinel: attribute must merely exist
-local INTERNAL = Keys.Internal -- hoisted for the plan compiler's class probe
+const EXISTS = newproxy(false) -- sentinel: attribute must merely exist
+const INTERNAL = Keys.Internal -- hoisted for the plan compiler's class probe
 
-local Query = {}
+const Query = {}
 Query.__index = Query
 
-local function isQuery(value: unknown): boolean
+const function isQuery(value: unknown): boolean
 	return type(value) == "table" and getmetatable(value) == Query
 end
 
-local function isComponentClass(value: unknown): boolean
+const function isComponentClass(value: unknown): boolean
 	if type(value) ~= "table" or isQuery(value) then
 		return false
 	end
 	return type((value :: { read Tag: unknown }).Tag) == "string"
 end
 
-local function assertQueryable(value: Queryable, method: string)
+const function assertQueryable(value: Queryable, method: string)
 	if type(value) == "string" or isQuery(value) or isComponentClass(value) then
 		return
 	end
@@ -253,7 +272,7 @@ end
 
 	Creates a new query whose positional arguments are all required.
 ]=]
-local function rawNew(): QueryInternal
+const function rawNew(): QueryInternal
 	-- Cast through `any`: without it the solver stamps `@metatable` onto the
 	-- table and rejects the internal type (same as TableManager's constructor).
 	return (
@@ -262,6 +281,7 @@ local function rawNew(): QueryInternal
 			_anyOf = {},
 			_negative = {},
 			_attributes = {},
+			_properties = {},
 			_predicates = {},
 			_engine = nil,
 			_refcount = 0,
@@ -279,18 +299,19 @@ end
 -- them is safe. Queries are therefore immutable values: every builder returns
 -- a NEW query and the receiver is never changed, so chains branch freely --
 -- `qA:with(qB)` and `qA:without(qC)` are independent and `qA` stays `qA`.
-local function derive(self: QueryInternal): QueryInternal
-	local new = rawNew()
+const function derive(self: QueryInternal): QueryInternal
+	const new = rawNew()
 	new._positive = table.clone(self._positive)
 	new._anyOf = table.clone(self._anyOf)
 	new._negative = table.clone(self._negative)
 	new._attributes = table.clone(self._attributes)
+	new._properties = table.clone(self._properties)
 	new._predicates = table.clone(self._predicates)
 	return new
 end
 
 function Query.new(...: Queryable): Query
-	local self = rawNew()
+	const self = rawNew()
 	for _, req in { ... } do
 		assertQueryable(req, "with")
 		table.insert(self._positive, req)
@@ -307,7 +328,7 @@ end
 	`query():with(X)` is equivalent to `query(X)`.
 ]=]
 function Query.with(self: QueryInternal, ...: Queryable): Query
-	local new = derive(self)
+	const new = derive(self)
 	for _, req in { ... } do
 		assertQueryable(req, "with")
 		table.insert(new._positive, req)
@@ -324,14 +345,14 @@ end
 	calls each add an independent group. The receiver is unchanged.
 ]=]
 function Query.anyOf(self: QueryInternal, ...: Queryable): Query
-	local group = { ... }
+	const group = { ... }
 	for _, req in group do
 		assertQueryable(req, "anyOf")
 	end
 	if #group == 0 then
 		return self
 	end
-	local new = derive(self)
+	const new = derive(self)
 	table.insert(new._anyOf, group)
 	return new
 end
@@ -344,7 +365,7 @@ end
 	instance must satisfy none of them. The receiver is unchanged.
 ]=]
 function Query.without(self: QueryInternal, ...: Queryable): Query
-	local new = derive(self)
+	const new = derive(self)
 	for _, req in { ... } do
 		assertQueryable(req, "without")
 		table.insert(new._negative, req)
@@ -364,11 +385,41 @@ end
 ]=]
 function Query.withAttribute(self: QueryInternal, name: string, matcher: unknown?): Query
 	assert(type(name) == "string", "[Component] :withAttribute() expects an attribute name string")
-	local new = derive(self)
+	const new = derive(self)
 	table.insert(new._attributes, {
 		name = name,
 		matcher = if matcher == nil then EXISTS else matcher,
 	})
+	return new
+end
+
+--[=[
+	@within Query
+	@param name string
+	@param matcher any -- a value to equal, a `(value) -> boolean` predicate, or omitted to require the property merely exists
+	@return Query
+	Returns a NEW query that additionally requires an Instance property; the
+	receiver is unchanged. Re-evaluated reactively when the property changes.
+
+	The matcher is REQUIRED but may be an explicit `nil`:
+	- **omitted** (`:withProperty("Anchored")`) — the property must merely *exist*
+	  on the instance (a candidate whose class lacks it never matches);
+	- **explicit `nil`** (`:withProperty("Parent", nil)`) — the property must exist
+	  and equal `nil` (e.g. "unparented");
+	- **a function** — it must return true for the property's value;
+	- **any other value** — the property must equal `matcher`.
+
+	Unlike attributes, a property may not exist on every Instance class a query
+	spans; a class lacking the named property simply does not match.
+]=]
+function Query.withProperty(self: QueryInternal, name: string, ...: unknown): Query
+	assert(type(name) == "string", "[Component] :withProperty() expects a property name string")
+	const new = derive(self)
+	-- Omitted matcher (void) = existence check via the EXISTS sentinel; an EXPLICIT
+	-- `nil` is a real matcher meaning "property == nil". `select("#")` (arg count)
+	-- distinguishes the two, which `matcher == nil` cannot.
+	const matcher = if select("#", ...) == 0 then EXISTS else (...)
+	table.insert(new._properties, { name = name, matcher = matcher })
 	return new
 end
 
@@ -385,7 +436,7 @@ end
 ]=]
 function Query.where(self: QueryInternal, predicate: (Instance) -> boolean, recheckSignal: unknown?): Query
 	assert(type(predicate) == "function", "[Component] :where() expects a predicate function")
-	local new = derive(self)
+	const new = derive(self)
 	table.insert(new._predicates, { fn = predicate, signal = recheckSignal })
 	return new
 end
@@ -397,11 +448,11 @@ end
 -- Flattened positive requirements (positional/:with + every :anyOf member).
 -- These bound the candidate set; a query with none is unbounded and rejected.
 function Query._positiveSources(self: QueryInternal): { Queryable }
-	local cached = self._sources
+	const cached = self._sources
 	if cached then
 		return cached
 	end
-	local sources = {}
+	const sources = {}
 	for _, req in self._positive do
 		table.insert(sources, req)
 	end
@@ -421,7 +472,7 @@ function Query._validate(self: QueryInternal)
 	if self._validated then
 		return
 	end
-	local sources = self:_positiveSources()
+	const sources = self:_positiveSources()
 	if #sources == 0 then
 		error(
 			"[Component] Query has no positive requirement (component / tag / sub-query); "
@@ -439,7 +490,7 @@ end
 
 -- Every requirement across all clauses (positive, anyOf, negative).
 function Query._allReferences(self: QueryInternal): { Queryable }
-	local refs = {}
+	const refs = {}
 	for _, req in self._positive do
 		table.insert(refs, req)
 	end
@@ -458,14 +509,14 @@ end
 -- Satisfaction / matching
 --------------------------------------------------------------------------------
 
-local function compileReq(req: Queryable, buildIndex: number): PlanReq
+const function compileReq(req: Queryable, buildIndex: number): PlanReq
 	if type(req) == "string" then
 		return { kind = "tag" :: "tag", buildIndex = buildIndex, tag = req }
 	end
 	if isQuery(req) then
 		return { kind = "query" :: "query", buildIndex = buildIndex, query = req :: QueryInternal }
 	end
-	local internal = (req :: any)[INTERNAL]
+	const internal = (req :: any)[INTERNAL]
 	if internal then
 		-- Our own class: capture its live started sparse set. Both tables are
 		-- mutated in place (never replaced) by the lifecycle, so the references
@@ -488,23 +539,23 @@ end
 -- evaluation short-circuits on the cheap probes; requirement semantics are
 -- order-independent, so this is free. `buildIndex` keeps the sort deterministic
 -- (`table.sort` is unstable).
-local KIND_COST: { [string]: number } = { class = 1, query = 2, classlike = 3, tag = 4 }
+const KIND_COST: { [string]: number } = { class = 1, query = 2, classlike = 3, tag = 4 }
 
 -- A seed at or below this is narrow enough that hunting for a better one is
 -- not worth fetching more tag arrays: remaining probes run at most this many
 -- times each.
-local TAG_SIZING_EARLY_EXIT = 32
+const TAG_SIZING_EARLY_EXIT = 32
 
 -- `get()` sizes every required tag via `GetTagged` (to pick the narrowest seed
 -- and order probes most-selective-first) only when the best class seed exceeds
 -- this. Below it the candidate set is already small, and sizing a huge tag
 -- would cost an array allocation proportional to its population for at most a
 -- few hundred cheap probes of savings.
-local TAG_SIZING_MIN_SEED = 200
-local function sortBySelectivity(reqs: { PlanReq })
+const TAG_SIZING_MIN_SEED = 200
+const function sortBySelectivity(reqs: { PlanReq })
 	table.sort(reqs, function(x: PlanReq, y: PlanReq): boolean
-		local cx = KIND_COST[x.kind] :: number
-		local cy = KIND_COST[y.kind] :: number
+		const cx = KIND_COST[x.kind] :: number
+		const cy = KIND_COST[y.kind] :: number
 		if cx ~= cy then
 			return cx < cy
 		end
@@ -514,8 +565,8 @@ end
 
 -- Compiled requirement check. `satisfiedFn` is only consulted for sub-query
 -- requirements; tag/class checks are direct.
-local function reqSatisfied(req: PlanReq, instance: Instance, satisfiedFn: SatisfiedFn): boolean
-	local kind = req.kind
+const function reqSatisfied(req: PlanReq, instance: Instance, satisfiedFn: SatisfiedFn): boolean
+	const kind = req.kind
 	if kind == "class" then
 		return (req.startedMap :: { [Instance]: number })[instance] ~= nil
 	elseif kind == "tag" then
@@ -523,43 +574,43 @@ local function reqSatisfied(req: PlanReq, instance: Instance, satisfiedFn: Satis
 	elseif kind == "query" then
 		return satisfiedFn(req.query :: QueryInternal, instance)
 	else
-		local class = req.class :: ComponentClassLike
-		local component = class:FromInstance(instance)
+		const class = req.class :: ComponentClassLike
+		const component = class:FromInstance(instance)
 		return component ~= nil and Keys.inst(component).phase == "Started"
 	end
 end
 
 -- Placeholder SatisfiedFn for plans with no sub-query requirement: nothing can
 -- ever call it (`reqSatisfied` only consults satisfiedFn for "query" kinds).
-local function neverSub(_query: QueryInternal, _instance: Instance): boolean
+const function neverSub(_query: QueryInternal, _instance: Instance): boolean
 	return false
 end
 
 function Query._plan(self: QueryInternal): Plan
-	local cached = self._planned
+	const cached = self._planned
 	if cached then
 		return cached
 	end
-	local required: { PlanReq } = {}
+	const required: { PlanReq } = {}
 	for index, req in self._positive do
 		table.insert(required, compileReq(req, index))
 	end
 	sortBySelectivity(required)
-	local anyOf: { { PlanReq } } = {}
+	const anyOf: { { PlanReq } } = {}
 	for _, group in self._anyOf do
-		local compiled: { PlanReq } = {}
+		const compiled: { PlanReq } = {}
 		for index, req in group do
 			table.insert(compiled, compileReq(req, index))
 		end
 		sortBySelectivity(compiled)
 		table.insert(anyOf, compiled)
 	end
-	local negative: { PlanReq } = {}
+	const negative: { PlanReq } = {}
 	for index, req in self._negative do
 		table.insert(negative, compileReq(req, index))
 	end
 	sortBySelectivity(negative)
-	local function anyQueryReq(reqs: { PlanReq }): boolean
+	const function anyQueryReq(reqs: { PlanReq }): boolean
 		for _, req in reqs do
 			if req.kind == "query" then
 				return true
@@ -576,12 +627,13 @@ function Query._plan(self: QueryInternal): Plan
 			end
 		end
 	end
-	local plan: Plan = {
+	const plan: Plan = {
 		required = required,
 		anyOf = anyOf,
 		negative = negative,
 		hasNegative = #negative > 0,
 		hasAttributes = #self._attributes > 0,
+		hasProperties = #self._properties > 0,
 		hasPredicates = #self._predicates > 0,
 		hasQueryRefs = hasQueryRefs,
 	}
@@ -590,7 +642,7 @@ function Query._plan(self: QueryInternal): Plan
 end
 
 function Query._positiveCandidate(self: QueryInternal, instance: Instance, satisfiedFn: SatisfiedFn): boolean
-	local plan = self:_plan()
+	const plan = self:_plan()
 	for _, req in plan.required do
 		if not reqSatisfied(req, instance, satisfiedFn) then
 			return false
@@ -613,13 +665,13 @@ end
 
 function Query._attributesMatch(self: QueryInternal, instance: Instance): boolean
 	for _, attr in self._attributes do
-		local value = instance:GetAttribute(attr.name)
-		local matcher = attr.matcher
+		const value = instance:GetAttribute(attr.name)
+		const matcher = attr.matcher
 		local ok: boolean
 		if matcher == EXISTS then
 			ok = value ~= nil
 		elseif type(matcher) == "function" then
-			local success, result = pcall(matcher :: (unknown) -> unknown, value)
+			const success, result = pcall(matcher :: (unknown) -> unknown, value)
 			ok = success and result == true
 			if not success then
 				warn(`[Component] Query :withAttribute('{attr.name}') matcher errored: {result}`)
@@ -634,9 +686,39 @@ function Query._attributesMatch(self: QueryInternal, instance: Instance): boolea
 	return true
 end
 
+function Query._propertiesMatch(self: QueryInternal, instance: Instance): boolean
+	for _, prop in self._properties do
+		-- A property missing on this Instance's class throws on read; the pcall
+		-- failing IS the "property absent" signal (there is no reflection API for
+		-- game code). `exists` distinguishes absent from present-but-nil.
+		const exists, value = pcall(function()
+			return (instance :: any)[prop.name]
+		end)
+		const matcher = prop.matcher
+		local ok: boolean
+		if matcher == EXISTS then
+			ok = exists
+		elseif not exists then
+			ok = false
+		elseif type(matcher) == "function" then
+			const success, result = pcall(matcher :: (unknown) -> unknown, value)
+			ok = success and result == true
+			if not success then
+				warn(`[Component] Query :withProperty('{prop.name}') matcher errored: {result}`)
+			end
+		else
+			ok = value == matcher
+		end
+		if not ok then
+			return false
+		end
+	end
+	return true
+end
+
 function Query._predicatesPass(self: QueryInternal, instance: Instance): boolean
 	for _, pred in self._predicates do
-		local success, result = pcall(pred.fn, instance)
+		const success, result = pcall(pred.fn, instance)
 		if not success then
 			warn(`[Component] Query :where() predicate errored: {result}`)
 			return false
@@ -653,7 +735,7 @@ end
 -- engine, and `get()` over a single-source enumeration) do not pay to prove it
 -- twice.
 function Query._matchesRest(self: QueryInternal, instance: Instance, satisfiedFn: SatisfiedFn): boolean
-	local plan = self:_plan()
+	const plan = self:_plan()
 	if plan.hasNegative then
 		for _, req in plan.negative do
 			if reqSatisfied(req, instance, satisfiedFn) then
@@ -662,6 +744,9 @@ function Query._matchesRest(self: QueryInternal, instance: Instance, satisfiedFn
 		end
 	end
 	if plan.hasAttributes and not self:_attributesMatch(instance) then
+		return false
+	end
+	if plan.hasProperties and not self:_propertiesMatch(instance) then
 		return false
 	end
 	if plan.hasPredicates and not self:_predicatesPass(instance) then
@@ -683,10 +768,10 @@ end
 
 -- Stable ids for non-primitive signature atoms (classes, predicate/matcher
 -- functions, recheck signals). Weak keys: a dead class must not leak here.
-local signatureIds: { [any]: number } = setmetatable({}, { __mode = "k" }) :: any
+const signatureIds: { [any]: number } = setmetatable({}, { __mode = "k" }) :: any
 local nextSignatureId = 0
-local function idOf(value: any): string
-	local existing = signatureIds[value]
+const function idOf(value: any): string
+	const existing = signatureIds[value]
 	if existing then
 		return tostring(existing)
 	end
@@ -698,11 +783,16 @@ end
 -- Primitive attribute matchers compare by value, so structurally identical
 -- `withAttribute("Team", "Red")` clauses from different modules share; function
 -- matchers (and predicates) can only share by identity.
-local function matcherToken(matcher: unknown): string
+const function matcherToken(matcher: unknown): string
 	if matcher == EXISTS then
 		return "*"
 	end
-	local kind = type(matcher)
+	-- Only reachable from `:withProperty(name, nil)` — an explicit-nil matcher.
+	-- `idOf(nil)` would error (weak-key table keyed by the value), so short-circuit.
+	if matcher == nil then
+		return "nil"
+	end
+	const kind = type(matcher)
 	if kind == "string" or kind == "number" or kind == "boolean" then
 		return kind .. ":" .. tostring(matcher)
 	end
@@ -715,11 +805,11 @@ end
 	Cached until the query mutates.
 ]]
 function Query._signature(self: QueryInternal): string
-	local cached = self._signatureCache
+	const cached = self._signatureCache
 	if cached then
 		return cached
 	end
-	local function reqToken(req: Queryable): string
+	const function reqToken(req: Queryable): string
 		if type(req) == "string" then
 			return "t:" .. req
 		elseif isQuery(req) then
@@ -727,36 +817,43 @@ function Query._signature(self: QueryInternal): string
 		end
 		return "c:" .. idOf(req)
 	end
-	local function sortedTokens(reqs: { Queryable }): string
-		local tokens = {}
+	const function sortedTokens(reqs: { Queryable }): string
+		const tokens = {}
 		for _, req in reqs do
 			table.insert(tokens, reqToken(req))
 		end
 		table.sort(tokens)
 		return table.concat(tokens, ",")
 	end
-	local groups = {}
+	const groups = {}
 	for _, group in self._anyOf do
 		table.insert(groups, sortedTokens(group))
 	end
 	table.sort(groups)
-	local attrs = {}
+	const attrs = {}
 	for _, attr in self._attributes do
 		table.insert(attrs, attr.name .. "=" .. matcherToken(attr.matcher))
 	end
 	table.sort(attrs)
-	local preds = {}
+	const props = {}
+	for _, prop in self._properties do
+		table.insert(props, prop.name .. "=" .. matcherToken(prop.matcher))
+	end
+	table.sort(props)
+	const preds = {}
 	for _, pred in self._predicates do
 		table.insert(preds, idOf(pred.fn) .. (if pred.signal ~= nil then ">" .. idOf(pred.signal) else ""))
 	end
 	table.sort(preds)
-	local signature = sortedTokens(self._positive)
+	const signature = sortedTokens(self._positive)
 		.. "|"
 		.. table.concat(groups, ";")
 		.. "|"
 		.. sortedTokens(self._negative)
 		.. "|"
 		.. table.concat(attrs, ",")
+		.. "|"
+		.. table.concat(props, ",")
 		.. "|"
 		.. table.concat(preds, ",")
 	self._signatureCache = signature
@@ -766,7 +863,81 @@ end
 -- Live engines interned by signature: equivalent queries observed anywhere in
 -- the process share ONE engine (one set of subscriptions, one matched set, one
 -- re-evaluation per event) instead of each maintaining their own.
-local activeEngines: { [string]: Engine } = {}
+const activeEngines: { [string]: Engine } = {}
+-- Loudly reports a broken `observeUnyielding` contract WITHOUT unwinding the
+-- caller. It is raised on a fresh thread (`task.spawn`) so it surfaces as a red
+-- error with a traceback rather than a swallowed warn or an exception that would
+-- unwind the engine mid-transition — unwinding there corrupts the shared match
+-- set for every observer, i.e. causes the very cross-iteration damage the
+-- message warns about. `yieldedThread` is the suspended coroutine for a yield;
+-- otherwise `err` carries the caught error.
+const function reportUnyieldingViolation(yieldedThread: thread?, err: any)
+	local message: string
+	if yieldedThread then
+		-- Suspended at the yield point; its traceback shows exactly where. The
+		-- coroutine is abandoned — a callback that broke the contract does not
+		-- get to finish, and any matches after it in a batch do not dispatch.
+		const where = debug.traceback(yieldedThread, "unyielding observer callback yielded")
+		message =
+			`[Component] Query:observeUnyielding() callback YIELDED — it must run to completion synchronously; yielding here abandons the callback and skips the rest of this dispatch, and may affect other observers reacting to the same change:\n{where}`
+	else
+		message =
+			`[Component] Query:observeUnyielding() callback errored — it ran inline, so this throw may have affected other observers reacting to the same change: {tostring(
+				err
+			)}`
+	end
+	task.spawn(function()
+		error(message, 0)
+	end)
+end
+
+-- Runs one observer's match callback for `instance`. A yield-tolerant observer
+-- (`observe`) spawns a thread, so a callback that yields simply parks harmlessly
+-- and never blocks the dispatch. An unyielding observer (`observeUnyielding`)
+-- runs it inline in a throwaway coroutine and resumes once: an error or a yield
+-- is a broken contract, reported loudly (see `reportUnyieldingViolation`).
+const function dispatchMatch(obs: Observer, instance: Instance, janitor: Janitor)
+	if not obs.unyielding then
+		task.spawn(obs.callback, instance, janitor)
+		return
+	end
+	const thread = coroutine.create(obs.callback)
+	const ok, err = coroutine.resume(thread, instance, janitor)
+	if ok and coroutine.status(thread) == "dead" then
+		return
+	end
+	reportUnyieldingViolation(if ok then thread else nil, err)
+end
+
+-- Fires one unyielding observer's callback across MANY instances (its already-
+-- matched set at subscribe time) under a SINGLE coroutine, checked once. This is
+-- the amortized form of `dispatchMatch`: the yield-detector is a property of the
+-- thread, so wrapping the whole loop pays for one `coroutine.create` instead of
+-- one per instance (the seed loop was the only place a lone callback ran N
+-- times). Each call is still `pcall`-isolated so one erroring match neither
+-- aborts the rest nor escapes; a YIELD, though, suspends the shared coroutine
+-- and abandons every remaining match in the batch — acceptable because yielding
+-- already broke the contract, and it is reported loudly.
+const function dispatchSeedUnyielding(obs: Observer, instances: { Instance })
+	const callback = obs.callback
+	const janitors = obs.janitors
+	const thread = coroutine.create(function()
+		for _, instance in instances do
+			const matchJanitor = Janitor.new()
+			janitors[instance] = matchJanitor
+			const ok, err = pcall(callback, instance, matchJanitor)
+			if not ok then
+				reportUnyieldingViolation(nil, err)
+			end
+		end
+	end)
+	coroutine.resume(thread)
+	-- Errors are caught inside; only an (unexpected) escape or a yield leaves the
+	-- coroutine alive.
+	if coroutine.status(thread) ~= "dead" then
+		reportUnyieldingViolation(thread, nil)
+	end
+end
 
 --------------------------------------------------------------------------------
 -- Reactive engine (ref-counted; shared across all structurally equal queries)
@@ -774,15 +945,15 @@ local activeEngines: { [string]: Engine } = {}
 
 function Query._activate(self: QueryInternal): Engine
 	self._refcount += 1
-	local attached = self._engine
+	const attached = self._engine
 	if attached then
 		attached.refcount += 1
 		return attached
 	end
 
 	-- An equivalent query may already maintain this exact engine.
-	local signature = self:_signature()
-	local interned = activeEngines[signature]
+	const signature = self:_signature()
+	const interned = activeEngines[signature]
 	if interned then
 		interned.refcount += 1
 		interned.holders[self] = true
@@ -790,12 +961,12 @@ function Query._activate(self: QueryInternal): Engine
 		return interned
 	end
 
-	local janitor = Janitor.new()
+	const janitor = Janitor.new()
 	-- Cast through `unknown`: `Signal.new()` has no inference source for its
 	-- `Function` generic, and Signal's invariant generics reject a direct cast.
-	local changed = (Signal.new() :: unknown) :: ChangedSignal
+	const changed = (Signal.new() :: unknown) :: ChangedSignal
 	janitor:Add(changed, "Destroy")
-	local engine: Engine = {
+	const engine: Engine = {
 		matched = {},
 		matchedList = {},
 		changed = changed,
@@ -803,6 +974,7 @@ function Query._activate(self: QueryInternal): Engine
 		janitor = janitor,
 		positiveSet = {},
 		attrConns = {},
+		propConns = {},
 		subEngines = {},
 		signature = signature,
 		refcount = 1,
@@ -816,29 +988,42 @@ function Query._activate(self: QueryInternal): Engine
 			conn:Disconnect()
 		end
 		table.clear(engine.attrConns)
+		for _, conns in engine.propConns do
+			for _, conn in conns do
+				conn:Disconnect()
+			end
+		end
+		table.clear(engine.propConns)
 	end)
 
-	local function subMatches(subQuery: QueryInternal, instance: Instance): boolean
-		local subEngine = engine.subEngines[subQuery]
+	const function subMatches(subQuery: QueryInternal, instance: Instance): boolean
+		const subEngine = engine.subEngines[subQuery]
 		return subEngine ~= nil and subEngine.matched[instance] ~= nil
 	end
 
 	-- One `AttributeChanged` connection per candidate, filtered by name, instead
 	-- of a Janitor plus a `GetAttributeChangedSignal` connection per attribute:
 	-- activation over a large candidate set was dominated by that allocation.
-	local hasAttributes = #self._attributes > 0
-	local watchedAttributes: { [string]: boolean } = {}
+	const hasAttributes = #self._attributes > 0
+	const watchedAttributes: { [string]: boolean } = {}
 	for _, attr in self._attributes do
 		watchedAttributes[attr.name] = true
 	end
 
-	local function reevaluate(instance: Instance?)
+	-- Properties have no single "any property changed" signal, so each watched
+	-- property gets its own `GetPropertyChangedSignal` connection per candidate.
+	const hasProperties = #self._properties > 0
+	const watchedProperties: { [string]: boolean } = {}
+	for _, prop in self._properties do
+		watchedProperties[prop.name] = true
+	end
+
+	const function reevaluate(instance: Instance?)
 		if not instance then
 			return
 		end
-		local positive = self:_positiveCandidate(instance, subMatches)
-
-		-- Track the candidate universe and (only while bounded) attribute subs.
+		const positive = self:_positiveCandidate(instance, subMatches)
+		-- Track the candidate universe and (only while bounded) attribute/property subs.
 		if positive then
 			engine.positiveSet[instance] = true
 			if hasAttributes and not engine.attrConns[instance] then
@@ -848,43 +1033,70 @@ function Query._activate(self: QueryInternal): Engine
 					end
 				end) :: any
 			end
+			if hasProperties and not engine.propConns[instance] then
+				const conns: { ConnectionLike } = {}
+				for name in watchedProperties do
+					-- `GetPropertyChangedSignal` throws for a property this Instance's
+					-- class lacks; such a candidate simply never gets a sub (and the
+					-- pcall read in `_propertiesMatch` already reports it absent).
+					const ok, signal = pcall(function()
+						return instance:GetPropertyChangedSignal(name)
+					end)
+					if ok then
+						table.insert(
+							conns,
+							signal:Connect(function()
+								reevaluate(instance)
+							end) :: any
+						)
+					end
+				end
+				engine.propConns[instance] = conns
+			end
 		else
 			engine.positiveSet[instance] = nil
-			local attrConn = engine.attrConns[instance]
+			const attrConn = engine.attrConns[instance]
 			if attrConn then
 				engine.attrConns[instance] = nil
 				attrConn:Disconnect()
 			end
+			const propConns = engine.propConns[instance]
+			if propConns then
+				engine.propConns[instance] = nil
+				for _, conn in propConns do
+					conn:Disconnect()
+				end
+			end
 		end
 
-		local isMatch = positive and self:_matchesRest(instance, subMatches)
-		local wasMatch = engine.matched[instance] ~= nil
+		const isMatch = positive and self:_matchesRest(instance, subMatches)
+		const wasMatch = engine.matched[instance] ~= nil
 		if isMatch == wasMatch then
 			return
 		end
 
-		local matchedList = engine.matchedList
+		const matchedList = engine.matchedList
 		if isMatch then
-			local n = #matchedList + 1
+			const n = #matchedList + 1
 			matchedList[n] = instance
 			engine.matched[instance] = n
 			for obs in engine.observers do
-				local matchJanitor = Janitor.new()
+				const matchJanitor = Janitor.new()
 				obs.janitors[instance] = matchJanitor
-				task.spawn(obs.callback, instance, matchJanitor)
+				dispatchMatch(obs, instance, matchJanitor)
 			end
 		else
 			-- Swap-remove: move the tail into the vacated slot. When the
 			-- instance IS the tail, the reassignments are harmless no-ops.
-			local index = engine.matched[instance] :: number
-			local lastIndex = #matchedList
-			local last = matchedList[lastIndex]
+			const index = engine.matched[instance] :: number
+			const lastIndex = #matchedList
+			const last = matchedList[lastIndex]
 			matchedList[index] = last
 			engine.matched[last] = index
 			matchedList[lastIndex] = nil
 			engine.matched[instance] = nil
 			for obs in engine.observers do
-				local matchJanitor = obs.janitors[instance]
+				const matchJanitor = obs.janitors[instance]
 				if matchJanitor then
 					obs.janitors[instance] = nil
 					matchJanitor:Destroy()
@@ -895,9 +1107,9 @@ function Query._activate(self: QueryInternal): Engine
 	end
 
 	-- Subscribe to every referenced input so a change re-evaluates the instance.
-	local connectedClasses: { [ComponentClassLike]: boolean } = {}
-	local connectedTags: { [string]: boolean } = {}
-	local function subscribeRef(req: Queryable)
+	const connectedClasses: { [ComponentClassLike]: boolean } = {}
+	const connectedTags: { [string]: boolean } = {}
+	const function subscribeRef(req: Queryable)
 		if type(req) == "string" then
 			if connectedTags[req] then
 				return
@@ -906,11 +1118,11 @@ function Query._activate(self: QueryInternal): Engine
 			janitor:Add(CollectionService:GetInstanceAddedSignal(req):Connect(reevaluate), "Disconnect")
 			janitor:Add(CollectionService:GetInstanceRemovedSignal(req):Connect(reevaluate), "Disconnect")
 		elseif isQuery(req) then
-			local subQuery = req :: QueryInternal
+			const subQuery = req :: QueryInternal
 			if engine.subEngines[subQuery] then
 				return
 			end
-			local subEngine = subQuery:_activate()
+			const subEngine = subQuery:_activate()
 			engine.subEngines[subQuery] = subEngine
 			janitor:Add(function()
 				subQuery:_deactivate()
@@ -922,13 +1134,13 @@ function Query._activate(self: QueryInternal): Engine
 				"Disconnect"
 			)
 		else -- component class
-			local class = req :: ComponentClassLike
+			const class = req :: ComponentClassLike
 			if connectedClasses[class] then
 				return
 			end
 			connectedClasses[class] = true
-			local started = class.Started :: ClassSignalView
-			local stopped = class.Stopped :: ClassSignalView
+			const started = class.Started :: ClassSignalView
+			const stopped = class.Stopped :: ClassSignalView
 			janitor:Add(
 				started:Connect(function(component)
 					reevaluate(component.Instance)
@@ -951,7 +1163,7 @@ function Query._activate(self: QueryInternal): Engine
 	-- `where` recheck signals force a full re-evaluation of bounded instances.
 	for _, pred in self._predicates do
 		if pred.signal ~= nil then
-			local recheck = pred.signal :: RecheckSignalView
+			const recheck = pred.signal :: RecheckSignalView
 			janitor:Add(
 				recheck:Connect(function()
 					for instance in engine.positiveSet do
@@ -972,7 +1184,7 @@ function Query._activate(self: QueryInternal): Engine
 end
 
 function Query._deactivate(self: QueryInternal)
-	local engine = self._engine
+	const engine = self._engine
 	if not engine then
 		return
 	end
@@ -999,17 +1211,17 @@ function Query._enumerate(
 	reactive: boolean,
 	subSets: { [QueryInternal]: { [Instance]: boolean } }?
 ): { [Instance]: boolean }
-	local set: { [Instance]: boolean } = {}
-	local function addFromRef(req: Queryable)
+	const set: { [Instance]: boolean } = {}
+	const function addFromRef(req: Queryable)
 		if type(req) == "string" then
 			for _, instance in CollectionService:GetTagged(req) do
 				set[instance] = true
 			end
 		elseif isQuery(req) then
-			local subQuery = req :: QueryInternal
+			const subQuery = req :: QueryInternal
 			if reactive then
-				local engine = self._engine :: Engine
-				local subEngine = engine.subEngines[subQuery]
+				const engine = self._engine :: Engine
+				const subEngine = engine.subEngines[subQuery]
 				if subEngine then
 					for _, instance in subEngine.matchedList do
 						set[instance] = true
@@ -1018,7 +1230,7 @@ function Query._enumerate(
 			else
 				-- Reuse the caller's per-call memo when there is one, so a nested
 				-- sub-query is evaluated once per `get()` rather than per candidate.
-				local memo = if subSets then subSets[subQuery] else nil
+				const memo = if subSets then subSets[subQuery] else nil
 				if memo then
 					for instance in memo do
 						set[instance] = true
@@ -1033,8 +1245,8 @@ function Query._enumerate(
 			-- One of ours: its started list already holds exactly the instances
 			-- this source contributes, pre-filtered. Foreign class-likes fall back
 			-- to `GetAll()` + a phase check per component.
-			local class = req :: ComponentClassLike
-			local internal = (class :: any)[Keys.Internal]
+			const class = req :: ComponentClassLike
+			const internal = (class :: any)[Keys.Internal]
 			if internal then
 				for _, instance in internal.startedList do
 					set[instance] = true
@@ -1069,24 +1281,38 @@ end
 	Disconnecting the returned handle destroys all active match janitors and stops
 	watching.
 ]=]
-function Query.observe(self: QueryInternal, callback: (Instance, Janitor) -> ()): QueryConnection
-	assert(type(callback) == "function", "[Component] Query:observe() expects a callback function")
+-- Shared body of `observe` / `observeUnyielding`: register an observer, fire it
+-- for the current matches, and return a disconnect handle. `unyielding` selects
+-- the dispatch strategy (see `dispatchMatch`); `method` names the caller for the
+-- assertion message.
+const function attachObserver(
+	self: QueryInternal,
+	callback: (Instance, Janitor) -> (),
+	unyielding: boolean,
+	method: string
+): QueryConnection
+	assert(type(callback) == "function", `[Component] Query:{method}() expects a callback function`)
 	self:_validate()
-	local engine = self:_activate()
-
-	local obs: Observer = { callback = callback, janitors = {} }
+	const engine = self:_activate()
+	const obs: Observer = { callback = callback, janitors = {}, unyielding = unyielding }
 	engine.observers[obs] = true
 
 	-- Fire for instances already matched at subscribe time. Iterate a SNAPSHOT:
-	-- under Immediate signal behavior a spawned callback can synchronously
-	-- retag/untag and mutate the live match set mid-loop.
-	for _, instance in table.clone(engine.matchedList) do
-		local matchJanitor = Janitor.new()
-		obs.janitors[instance] = matchJanitor
-		task.spawn(callback, instance, matchJanitor)
+	-- under Immediate signal behavior a dispatched callback can synchronously
+	-- retag/untag and mutate the live match set mid-loop. Unyielding observers
+	-- run the whole snapshot under one coroutine (one yield-check for the batch).
+	const snapshot = table.clone(engine.matchedList)
+	if unyielding then
+		dispatchSeedUnyielding(obs, snapshot)
+	else
+		for _, instance in snapshot do
+			const matchJanitor = Janitor.new()
+			obs.janitors[instance] = matchJanitor
+			task.spawn(callback, instance, matchJanitor)
+		end
 	end
 
-	local connProxy = {} :: QueryConnection
+	const connProxy = {} :: QueryConnection
 	connProxy.IsConnected = true
 	function connProxy.Disconnect()
 		if not connProxy.IsConnected then
@@ -1104,11 +1330,34 @@ function Query.observe(self: QueryInternal, callback: (Instance, Janitor) -> ())
 	return connProxy
 end
 
+function Query.observe(self: QueryInternal, callback: (Instance, Janitor) -> ()): QueryConnection
+	return attachObserver(self, callback, false, "observe")
+end
+
+--[=[
+	@within Query
+	@param callback (instance: Instance, janitor: Janitor) -> ()
+	@return QueryConnection
+
+	Like [Query:observe], but each callback runs INLINE on the thread driving the
+	match change instead of on its own spawned thread — no per-match thread
+	allocation, the fast dispatch path for hot bind/unbind work.
+
+	:::danger The callback must run to completion synchronously. If it **yields**
+	or **errors** it is reported loudly (a red error with a traceback) and
+	abandoned mid-run; because it shares the dispatch thread, the violation can
+	also disrupt the other observers and matches reacting to the same change. Use
+	[Query:observe] for any callback that may yield. :::
+]=]
+function Query.observeUnyielding(self: QueryInternal, callback: (Instance, Janitor) -> ()): QueryConnection
+	return attachObserver(self, callback, true, "observeUnyielding")
+end
+
 -- The sole positive requirement when the query is the ECS hot shape -- exactly
 -- one required requirement and no anyOf / negative / attribute / predicate
 -- clause -- so a read can answer straight from that one source. `nil` otherwise.
 function Query._singleSource(self: QueryInternal): PlanReq?
-	local plan = self:_plan()
+	const plan = self:_plan()
 	if
 		#plan.required == 1
 		and #plan.anyOf == 0
@@ -1135,18 +1384,18 @@ function Query._staticSub(
 	if not plan.hasQueryRefs then
 		return neverSub, nil, nil
 	end
-	local sets: { [QueryInternal]: { [Instance]: boolean } } = {}
+	const sets: { [QueryInternal]: { [Instance]: boolean } } = {}
 	local sub: SatisfiedFn
 	local ensure: (QueryInternal) -> { [Instance]: boolean }
 	function ensure(subQuery: QueryInternal): { [Instance]: boolean }
-		local existing = sets[subQuery]
+		const existing = sets[subQuery]
 		if existing then
 			return existing
 		end
 		-- Seed the entry before recursing so shared sub-queries are computed
 		-- exactly once (recursion depth is finite: queries are immutable, so
 		-- the reference graph is a DAG by construction).
-		local set: { [Instance]: boolean } = {}
+		const set: { [Instance]: boolean } = {}
 		sets[subQuery] = set
 		-- Deepest first, so this sub-query's own enumeration finds its
 		-- references already memoized.
@@ -1180,10 +1429,9 @@ end
 -- shape are cheaper answers the public terminals handle themselves before
 -- falling back here, so this deliberately does NOT special-case them.
 function Query._collect(self: QueryInternal, onMatch: (Instance) -> boolean?)
-	local plan = self:_plan()
-	local staticSub, ensureSet, subSets = self:_staticSub(plan)
-	local required = plan.required
-
+	const plan = self:_plan()
+	const staticSub, ensureSet, subSets = self:_staticSub(plan)
+	const required = plan.required
 	if #required == 0 then
 		-- anyOf-only query: the candidate set genuinely is a union, so build it.
 		for instance in self:_enumerate(false, subSets) do
@@ -1209,9 +1457,9 @@ function Query._collect(self: QueryInternal, onMatch: (Instance) -> boolean?)
 	local firstQuery: PlanReq? = nil
 	local firstClasslike: PlanReq? = nil
 	for _, req in required do
-		local kind = req.kind
+		const kind = req.kind
 		if kind == "class" then
-			local size = #(req.startedList :: { Instance })
+			const size = #(req.startedList :: { Instance })
 			if size < seedSize then
 				seed, seedSize = req, size
 			end
@@ -1232,14 +1480,14 @@ function Query._collect(self: QueryInternal, onMatch: (Instance) -> boolean?)
 	local tagSizes: { [PlanReq]: number }? = nil
 	local tagArrays: { [PlanReq]: { Instance } }? = nil
 	if firstTag and (seed == nil or seedSize > TAG_SIZING_MIN_SEED) then
-		local sizes: { [PlanReq]: number } = {}
-		local arrays: { [PlanReq]: { Instance } } = {}
+		const sizes: { [PlanReq]: number } = {}
+		const arrays: { [PlanReq]: { Instance } } = {}
 		tagSizes, tagArrays = sizes, arrays
 		for _, req in required do
 			if req.kind == "tag" then
-				local instances = CollectionService:GetTagged(req.tag :: string)
+				const instances = CollectionService:GetTagged(req.tag :: string)
 				arrays[req] = instances
-				local size = #instances
+				const size = #instances
 				sizes[req] = size
 				if size < seedSize then
 					seed, seedSize = req, size
@@ -1254,33 +1502,32 @@ function Query._collect(self: QueryInternal, onMatch: (Instance) -> boolean?)
 			end
 		end
 	end
-	local chosenSeed: PlanReq = (seed or firstTag or firstQuery or firstClasslike) :: PlanReq
-	local seedKind = chosenSeed.kind
-
+	const chosenSeed: PlanReq = (seed or firstTag or firstQuery or firstClasslike) :: PlanReq
+	const seedKind = chosenSeed.kind
 	-- Probes = every required requirement except the seed, most-selective-first
 	-- when populations are known (smaller population rejects more candidates
 	-- sooner, so each later probe runs against fewer survivors). Unknown counts
 	-- keep the plan's cheap-kind-first order.
-	local probes: { PlanReq } = {}
+	const probes: { PlanReq } = {}
 	for _, req in required do
 		if req ~= chosenSeed then
 			table.insert(probes, req)
 		end
 	end
 	if tagSizes and #probes > 1 then
-		local sizes = tagSizes :: { [PlanReq]: number }
-		local function populationOf(req: PlanReq): number
+		const sizes = tagSizes :: { [PlanReq]: number }
+		const function populationOf(req: PlanReq): number
 			if req.kind == "class" then
 				return #(req.startedList :: { Instance })
 			end
-			local sized = sizes[req]
+			const sized = sizes[req]
 			if sized then
 				return sized
 			end
 			return math.huge
 		end
 		table.sort(probes, function(x: PlanReq, y: PlanReq): boolean
-			local px, py = populationOf(x), populationOf(y)
+			const px, py = populationOf(x), populationOf(y)
 			if px ~= py then
 				return px < py
 			end
@@ -1295,16 +1542,16 @@ function Query._collect(self: QueryInternal, onMatch: (Instance) -> boolean?)
 	-- ever spends allocations already made for sizing.
 	local probeSets: { [PlanReq]: { [Instance]: boolean } }? = nil
 	if tagArrays and tagSizes then
-		local arrays = tagArrays :: { [PlanReq]: { Instance } }
-		local sizes = tagSizes :: { [PlanReq]: number }
+		const arrays = tagArrays :: { [PlanReq]: { Instance } }
+		const sizes = tagSizes :: { [PlanReq]: number }
 		for _, req in probes do
-			local instances = arrays[req]
+			const instances = arrays[req]
 			if instances and seedSize * 3 > (sizes[req] :: number) then
-				local set: { [Instance]: boolean } = {}
+				const set: { [Instance]: boolean } = {}
 				for _, instance in instances do
 					set[instance] = true
 				end
-				local outSets = probeSets or {}
+				const outSets = probeSets or {}
 				probeSets = outSets
 				outSets[req] = set
 			end
@@ -1314,10 +1561,10 @@ function Query._collect(self: QueryInternal, onMatch: (Instance) -> boolean?)
 	-- Checks everything except the seed requirement (the seed's own iteration
 	-- already proves it). Rest-checks are inlined here so a candidate costs no
 	-- extra method dispatch. Returns whatever `onMatch` returned (truthy = stop).
-	local anyOf = plan.anyOf
-	local function consider(instance: Instance): boolean?
+	const anyOf = plan.anyOf
+	const function consider(instance: Instance): boolean?
 		for _, req in probes do
-			local set = if probeSets then (probeSets :: { [PlanReq]: { [Instance]: boolean } })[req] else nil
+			const set = if probeSets then (probeSets :: { [PlanReq]: { [Instance]: boolean } })[req] else nil
 			if set then
 				if not set[instance] then
 					return nil
@@ -1348,6 +1595,9 @@ function Query._collect(self: QueryInternal, onMatch: (Instance) -> boolean?)
 		if plan.hasAttributes and not self:_attributesMatch(instance) then
 			return nil
 		end
+		if plan.hasProperties and not self:_propertiesMatch(instance) then
+			return nil
+		end
 		if plan.hasPredicates and not self:_predicatesPass(instance) then
 			return nil
 		end
@@ -1361,14 +1611,14 @@ function Query._collect(self: QueryInternal, onMatch: (Instance) -> boolean?)
 			end
 		end
 	elseif seedKind == "tag" then
-		local seedInstances = if tagArrays then (tagArrays :: { [PlanReq]: { Instance } })[chosenSeed] else nil
+		const seedInstances = if tagArrays then (tagArrays :: { [PlanReq]: { Instance } })[chosenSeed] else nil
 		for _, instance in seedInstances or CollectionService:GetTagged(chosenSeed.tag :: string) do
 			if consider(instance) then
 				return
 			end
 		end
 	elseif seedKind == "query" then
-		local ensure = ensureSet :: (QueryInternal) -> { [Instance]: boolean }
+		const ensure = ensureSet :: (QueryInternal) -> { [Instance]: boolean }
 		for instance in ensure(chosenSeed.query :: QueryInternal) do
 			if consider(instance) then
 				return
@@ -1402,29 +1652,29 @@ function Query.get(self: QueryInternal): { Instance }
 	-- Live-engine fast path: the engine already maintains exactly this set.
 	-- An engine built by any structurally equal query serves just as well --
 	-- borrow it read-only via the intern registry.
-	local engine = self._engine or activeEngines[self:_signature()]
+	const engine = self._engine or activeEngines[self:_signature()]
 	if engine then
 		return table.clone(engine.matchedList)
 	end
 
 	-- The ECS hot shape — one requirement, nothing else — is a straight dump of
 	-- the seed source, before any per-candidate machinery is even allocated.
-	local single = self:_singleSource()
+	const single = self:_singleSource()
 	if single then
-		local kind = single.kind
+		const kind = single.kind
 		if kind == "class" then
 			return table.clone(single.startedList :: { Instance })
 		elseif kind == "tag" then
 			return CollectionService:GetTagged(single.tag :: string)
 		elseif kind == "query" then
-			local out: { Instance } = {}
-			local _, ensure = self:_staticSub(self:_plan())
+			const out: { Instance } = {}
+			const _, ensure = self:_staticSub(self:_plan())
 			for instance in (ensure :: (QueryInternal) -> { [Instance]: boolean })(single.query :: QueryInternal) do
 				table.insert(out, instance)
 			end
 			return out
 		else
-			local out: { Instance } = {}
+			const out: { Instance } = {}
 			for _, component in (single.class :: ComponentClassLike):GetAll() do
 				if Keys.inst(component).phase == "Started" then
 					table.insert(out, component.Instance)
@@ -1434,7 +1684,7 @@ function Query.get(self: QueryInternal): { Instance }
 		end
 	end
 
-	local out: { Instance } = {}
+	const out: { Instance } = {}
 	self:_collect(function(instance)
 		table.insert(out, instance)
 		return nil
@@ -1453,12 +1703,13 @@ Query.GetMatches = Query.get
 	every clause (no candidate enumeration).
 ]=]
 function Query.contains(self: QueryInternal, instance: Instance): boolean
+	assert(typeof(instance) == "Instance", "[Component] Query:contains() expects an Instance")
 	self:_validate()
-	local engine = self._engine or activeEngines[self:_signature()]
+	const engine = self._engine or activeEngines[self:_signature()]
 	if engine then
 		return engine.matched[instance] ~= nil
 	end
-	local staticSub = self:_staticSub(self:_plan())
+	const staticSub = self:_staticSub(self:_plan())
 	return self:_fullMatch(instance, staticSub)
 end
 
@@ -1471,11 +1722,11 @@ end
 ]=]
 function Query.count(self: QueryInternal): number
 	self:_validate()
-	local engine = self._engine or activeEngines[self:_signature()]
+	const engine = self._engine or activeEngines[self:_signature()]
 	if engine then
 		return #engine.matchedList
 	end
-	local single = self:_singleSource()
+	const single = self:_singleSource()
 	if single and single.kind == "class" then
 		return #(single.startedList :: { Instance })
 	end
@@ -1496,11 +1747,11 @@ end
 ]=]
 function Query.first(self: QueryInternal): Instance?
 	self:_validate()
-	local engine = self._engine or activeEngines[self:_signature()]
+	const engine = self._engine or activeEngines[self:_signature()]
 	if engine then
 		return engine.matchedList[1]
 	end
-	local single = self:_singleSource()
+	const single = self:_singleSource()
 	if single and single.kind == "class" then
 		return (single.startedList :: { Instance })[1]
 	end
@@ -1536,10 +1787,10 @@ end
 ]=]
 function Query.iter(self: QueryInternal): () -> Instance?
 	self:_validate()
-	local engine = self._engine or activeEngines[self:_signature()]
+	const engine = self._engine or activeEngines[self:_signature()]
 	-- Backwards, so the engine's swap-remove (which moves an already-visited
 	-- tail element into the vacated slot) never skips an unvisited instance.
-	local list = if engine then engine.matchedList else self:get()
+	const list = if engine then engine.matchedList else self:get()
 	local index = #list + 1
 	return function(): Instance?
 		index -= 1

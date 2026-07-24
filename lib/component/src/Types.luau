@@ -205,7 +205,6 @@ export type TypedClass<M = {}, F = {}, I = Instance> = {
 	SteppedUpdate: ((self: TypedInstance<M, F, I>, dt: number) -> ())?,
 	RenderSteppedUpdate: ((self: TypedInstance<M, F, I>, dt: number) -> ())?,
 
-	Has: (self: TypedClass<M, F, I>, instance: Instance) -> boolean,
 	GetLifecycleStatus: (self: TypedClass<M, F, I>, instanceOrComponent: any) -> LifecyclePhase,
 	FromInstance: (self: TypedClass<M, F, I>, instance: I & Instance) -> TypedInstance<M, F, I>?,
 	WaitForInstance: (
@@ -213,7 +212,7 @@ export type TypedClass<M = {}, F = {}, I = Instance> = {
 		instance: I & Instance,
 		timeout: number?
 	) -> Promise<TypedInstance<M, F, I>>,
-	CreateFromInstance: (self: TypedClass<M, F, I>, instance: I & Instance) -> Promise<TypedInstance<M, F, I>>,
+	GetOrCreateFromInstance: (self: TypedClass<M, F, I>, instance: I & Instance) -> Promise<TypedInstance<M, F, I>>,
 	GetAll: <T>(self: T) -> { T },
 	UpdateAncestors: (self: TypedClass<M, F, I>, newAncestors: { Instance }) -> (),
 	GetAncestors: (self: TypedClass<M, F, I>) -> { Instance },
@@ -246,22 +245,6 @@ export type NewFn = <E, M, F, IF>(
 --------------------------------------------------------------------------------
 -- Internal implementation views
 --------------------------------------------------------------------------------
-
--- Minimal structural view of an evaera Promise. The implementation types its
--- promise plumbing against this instead of the vendored modules' inferred /
--- generic signatures (which reject our variadic glue); values are cast through
--- `unknown` at the vendor boundary.
--- Callback params are `...any` by necessity: `...unknown` would require every
--- handler to accept arbitrary arguments (contravariance), rejecting plain
--- `() -> ()` handlers; only `any` bridges both directions.
-export type PromiseLike = {
-	andThen: (self: PromiseLike, onResolve: (...any) -> ...any, onReject: ((...any) -> ...any)?) -> PromiseLike,
-	finally: (self: PromiseLike, fn: (...any) -> ...any) -> PromiseLike,
-	catch: (self: PromiseLike, fn: (...any) -> ...any) -> PromiseLike,
-	timeout: (self: PromiseLike, seconds: number) -> PromiseLike,
-	cancel: (self: PromiseLike) -> (),
-	getStatus: (self: PromiseLike) -> string,
-}
 
 export type ComponentClass = TypedClass<{}, {}, Instance>
 export type ComponentInstance = TypedInstance<{}, {}, Instance>

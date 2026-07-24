@@ -138,7 +138,7 @@ function Methods.Start(self)
 end
 
 function Methods.UseSibling(self: ti)
-	self:CreateFromInstance(Instance.new("Model"))
+	self:GetOrCreateFromInstance(Instance.new("Model"))
 
 	local sibling = self:GetComponent(myComponent)
 	if sibling then

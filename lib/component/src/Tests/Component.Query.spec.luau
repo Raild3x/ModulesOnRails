@@ -140,6 +140,96 @@ return function(t: any)
 			p:Destroy()
 		end)
 
+		test("withProperty matches by value and by predicate, reactively", function()
+			local A, aTag = H.makeClass()
+			local namedMatched, clearMatched = {}, {}
+			local obsName = Component.query(A):withProperty("Name", "Target"):observe(function(i)
+				namedMatched[i] = true
+			end)
+			local obsClear = Component.query(A)
+				:withProperty("Transparency", function(v)
+					return type(v) == "number" and v > 0.5
+				end)
+				:observe(function(i)
+					clearMatched[i] = true
+				end)
+
+			local p = part { aTag }
+			p.Name = "Other"
+			p.Transparency = 0
+			expect(H.waitStarted(A, p, 3)).is(true)
+			task.wait(0.1)
+			expect(namedMatched[p]).never_exists()
+			expect(clearMatched[p]).never_exists()
+
+			p.Name = "Target"
+			p.Transparency = 0.8
+			expect(H.waitUntil(function()
+				return namedMatched[p] and clearMatched[p]
+			end, 3)).is(true)
+
+			obsName:Disconnect()
+			obsClear:Disconnect()
+			A:Destroy()
+			p:Destroy()
+		end)
+
+		test("withProperty with no matcher requires the property merely exists", function()
+			local A, aTag = H.makeClass()
+			local matched = {}
+			-- Parts have `Anchored`; the void matcher is a pure existence check.
+			local obs = Component.query(A):withProperty("Anchored"):observe(function(i)
+				matched[i] = true
+			end)
+
+			local p = part { aTag }
+			expect(H.waitUntil(function()
+				return matched[p] == true
+			end, 3)).is(true)
+
+			obs:Disconnect()
+			A:Destroy()
+			p:Destroy()
+		end)
+
+		test("withProperty with an explicit nil matcher matches only while the property is nil", function()
+			-- Use an ObjectValue whose nillable `.Value` is unrelated to ancestry
+			-- (nil-parenting a Part would instead stop the component by leaving its
+			-- ancestor list, muddying what's being tested).
+			local A, aTag = H.makeClass()
+			local live = {}
+			local obs = Component.query(A):withProperty("Value", nil):observe(function(i, jani)
+				live[i] = true
+				jani:Add(function()
+					live[i] = nil
+				end)
+			end)
+
+			local ov = Instance.new("ObjectValue")
+			CollectionService:AddTag(ov, aTag)
+			local target = Instance.new("Folder")
+			ov.Value = target -- starts non-nil -> no match
+			ov.Parent = workspace
+			expect(H.waitStarted(A, ov, 3)).is(true)
+			task.wait(0.1)
+			expect(live[ov]).never_exists()
+
+			ov.Value = nil
+			expect(H.waitUntil(function()
+				return live[ov] == true
+			end, 3)).is(true)
+
+			ov.Value = target
+			expect(H.waitUntil(function()
+				return live[ov] == nil
+			end, 3)).is(true)
+
+			obs:Disconnect()
+			A:Destroy()
+			ov:Destroy()
+			target:Destroy()
+		end)
+
 		test("a sub-query is a valid requirement", function()
 			local A, aTag = H.makeClass()
 			local B, bTag = H.makeClass()
@@ -250,6 +340,101 @@ return function(t: any)
 			A:Destroy()
 			p1:Destroy()
 			p2:Destroy()
+		end)
+	end)
+
+	describe("observeUnyielding", function()
+		-- Captures unhandled errors (including those the reporter raises on a
+		-- fresh thread) whose message contains `needle`, for the duration of `fn`.
+		local function captureError(needle, fn)
+			local ScriptContext = game:GetService("ScriptContext")
+			local caught = nil
+			local conn = ScriptContext.Error:Connect(function(message)
+				if type(message) == "string" and string.find(message, needle, 1, true) then
+					caught = message
+				end
+			end)
+			fn()
+			H.waitUntil(function()
+				return caught ~= nil
+			end, 2)
+			conn:Disconnect()
+			return caught
+		end
+
+		test("fires inline for current and future matches, cleans on unmatch", function()
+			local A, aTag = H.makeClass()
+			local live = {}
+			local obs = Component.query(A):observeUnyielding(function(instance, jani)
+				live[instance] = true
+				jani:Add(function()
+					live[instance] = nil
+				end)
+			end)
+
+			local p = part { aTag }
+			expect(H.waitUntil(function()
+				return live[p] == true
+			end, 3)).is(true)
+
+			CollectionService:RemoveTag(p, aTag)
+			expect(H.waitUntil(function()
+				return live[p] == nil
+			end, 3)).is(true)
+
+			obs:Disconnect()
+			A:Destroy()
+			p:Destroy()
+		end)
+
+		test("a yielding callback is reported loudly and does not break sibling observers", function()
+			local A, aTag = H.makeClass()
+			local siblingSaw = false
+			-- Sibling observer registered FIRST so it dispatches before the
+			-- offending one on the same match event.
+			local sibling = Component.query(A):observe(function()
+				siblingSaw = true
+			end)
+
+			local message = captureError("observeUnyielding() callback YIELDED", function()
+				local bad = Component.query(A):observeUnyielding(function()
+					task.wait(0.05) -- contract violation
+				end)
+				local p = part { aTag }
+				expect(H.waitStarted(A, p, 3)).is(true)
+				task.wait(0.1)
+				bad:Disconnect()
+				p:Destroy()
+			end)
+			expect(message).exists()
+			expect(siblingSaw).is(true)
+
+			sibling:Disconnect()
+			A:Destroy()
+		end)
+
+		test("an erroring callback is reported loudly and is isolated", function()
+			local A, aTag = H.makeClass()
+			local goodSaw = false
+			local good = Component.query(A):observeUnyielding(function()
+				goodSaw = true
+			end)
+
+			local message = captureError("observeUnyielding() callback errored", function()
+				local bad = Component.query(A):observeUnyielding(function()
+					error("boom in observer")
+				end)
+				local p = part { aTag }
+				expect(H.waitStarted(A, p, 3)).is(true)
+				task.wait(0.1)
+				bad:Disconnect()
+				p:Destroy()
+			end)
+			expect(message).exists()
+			expect(goodSaw).is(true)
+
+			good:Disconnect()
+			A:Destroy()
 		end)
 	end)
 
