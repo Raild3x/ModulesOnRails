@@ -94,6 +94,7 @@ export type Query = {
 	where: (self: Query, predicate: (Instance) -> boolean, recheckSignal: unknown?) -> Query,
 	observe: (self: Query, callback: (Instance, Janitor) -> ()) -> QueryConnection,
 	get: (self: Query) -> { Instance },
+	iter: (self: Query) -> () -> Instance?,
 }
 
 -- satisfiedFn(query, instance): is `instance` currently matching `query`?
@@ -123,16 +124,16 @@ type Observer = {
 type ChangedSignal = Signal.Signal<(Instance, boolean) -> (), Instance, boolean>
 
 -- One requirement, compiled: its kind resolved once and, for component classes,
--- the class's live tracking tables captured directly. Checking a class
--- requirement per candidate is then a single table lookup + phase compare
--- instead of a metatable dispatch through `FromInstance` (measured ~2.5x per
--- candidate), and `comps` gives `get()` an O(1)-sized seed source.
+-- the class's live started sparse set captured directly (see
+-- `Keys.ClassInternal`). Checking a class requirement per candidate is then a
+-- SINGLE table lookup — membership in `startedMap` IS "started" — and
+-- `startedList` gives `get()` an O(1)-sized, already-filtered seed source.
 type PlanReq = {
 	kind: "tag" | "class" | "classlike" | "query",
 	buildIndex: number, -- declaration position; tiebreak for the stable sort
 	tag: string?,
-	comps: { any }?, -- class: live components array (seed iteration)
-	instTo: { [Instance]: any }?, -- class: live instance -> component map
+	startedList: { Instance }?, -- class: live dense started-instance array
+	startedMap: { [Instance]: number }?, -- class: live instance -> list index
 	class: ComponentClassLike?, -- foreign class-like: FromInstance fallback
 	query: QueryInternal?,
 }
@@ -147,6 +148,9 @@ type Plan = {
 	hasNegative: boolean,
 	hasAttributes: boolean,
 	hasPredicates: boolean,
+	-- True when any clause references a sub-query; `get()` only builds its
+	-- per-call memoization machinery (and a real SatisfiedFn) when it is.
+	hasQueryRefs: boolean,
 }
 
 -- Reactive state backing an activated query (ref-counted, shared when a query
@@ -208,7 +212,7 @@ type QueryInternal = Query & {
 }
 
 local EXISTS = newproxy(false) -- sentinel: attribute must merely exist
-local INTERNAL = Keys.Internal -- hoisted: the plan checks phases in hot loops
+local INTERNAL = Keys.Internal -- hoisted for the plan compiler's class probe
 
 local Query = {}
 Query.__index = Query
@@ -453,15 +457,15 @@ local function compileReq(req: Queryable, buildIndex: number): PlanReq
 	end
 	local internal = (req :: any)[INTERNAL]
 	if internal then
-		-- Our own class: capture its live tracking tables. Both are mutated in
-		-- place (never replaced) by the lifecycle, so the references stay valid
-		-- for the class's whole life; `Destroy` clears them, which correctly
-		-- reads as "no matches".
+		-- Our own class: capture its live started sparse set. Both tables are
+		-- mutated in place (never replaced) by the lifecycle, so the references
+		-- stay valid for the class's whole life; `Destroy` clears them, which
+		-- correctly reads as "no matches".
 		return {
 			kind = "class" :: "class",
 			buildIndex = buildIndex,
-			comps = internal.components,
-			instTo = internal.instToComponents,
+			startedList = internal.startedList,
+			startedMap = internal.startedInstances,
 		}
 	end
 	return { kind = "classlike" :: "classlike", buildIndex = buildIndex, class = req :: ComponentClassLike }
@@ -503,8 +507,7 @@ end
 local function reqSatisfied(req: PlanReq, instance: Instance, satisfiedFn: SatisfiedFn): boolean
 	local kind = req.kind
 	if kind == "class" then
-		local component = (req.instTo :: { [Instance]: any })[instance]
-		return component ~= nil and component[INTERNAL].phase == "Started"
+		return (req.startedMap :: { [Instance]: number })[instance] ~= nil
 	elseif kind == "tag" then
 		return CollectionService:HasTag(instance, req.tag :: string)
 	elseif kind == "query" then
@@ -514,6 +517,12 @@ local function reqSatisfied(req: PlanReq, instance: Instance, satisfiedFn: Satis
 		local component = class:FromInstance(instance)
 		return component ~= nil and Keys.inst(component).phase == "Started"
 	end
+end
+
+-- Placeholder SatisfiedFn for plans with no sub-query requirement: nothing can
+-- ever call it (`reqSatisfied` only consults satisfiedFn for "query" kinds).
+local function neverSub(_query: QueryInternal, _instance: Instance): boolean
+	return false
 end
 
 function Query._plan(self: QueryInternal): Plan
@@ -540,6 +549,23 @@ function Query._plan(self: QueryInternal): Plan
 		table.insert(negative, compileReq(req, index))
 	end
 	sortBySelectivity(negative)
+	local function anyQueryReq(reqs: { PlanReq }): boolean
+		for _, req in reqs do
+			if req.kind == "query" then
+				return true
+			end
+		end
+		return false
+	end
+	local hasQueryRefs = anyQueryReq(required) or anyQueryReq(negative)
+	if not hasQueryRefs then
+		for _, group in anyOf do
+			if anyQueryReq(group) then
+				hasQueryRefs = true
+				break
+			end
+		end
+	end
 	local plan: Plan = {
 		required = required,
 		anyOf = anyOf,
@@ -547,6 +573,7 @@ function Query._plan(self: QueryInternal): Plan
 		hasNegative = #negative > 0,
 		hasAttributes = #self._attributes > 0,
 		hasPredicates = #self._predicates > 0,
+		hasQueryRefs = hasQueryRefs,
 	}
 	self._planned = plan
 	return plan
@@ -993,14 +1020,20 @@ function Query._enumerate(
 				end
 			end
 		else -- component class
-			-- Iterate the class's live component array directly when it is one of
-			-- ours; `GetAll()` clones it purely to be thrown away here.
+			-- One of ours: its started list already holds exactly the instances
+			-- this source contributes, pre-filtered. Foreign class-likes fall back
+			-- to `GetAll()` + a phase check per component.
 			local class = req :: ComponentClassLike
 			local internal = (class :: any)[Keys.Internal]
-			local components = if internal then internal.components else class:GetAll()
-			for _, component in components do
-				if Keys.inst(component).phase == "Started" then
-					set[component.Instance] = true
+			if internal then
+				for _, instance in internal.startedList do
+					set[instance] = true
+				end
+			else
+				for _, component in class:GetAll() do
+					if Keys.inst(component).phase == "Started" then
+						set[component.Instance] = true
+					end
 				end
 			end
 		end
@@ -1083,47 +1116,57 @@ function Query.get(self: QueryInternal): { Instance }
 		return table.clone(engine.matchedList)
 	end
 
+	local plan = self:_plan()
+
 	-- Each sub-query's match-set is computed ONCE per call and then answered by
 	-- lookup. Previously every candidate re-ran the whole sub-query (and
 	-- `_enumerate` ran it again on top), which is quadratic in nested queries.
-	local subSets: { [QueryInternal]: { [Instance]: boolean } } = {}
-	local staticSub: SatisfiedFn
-	local ensureSet: (QueryInternal) -> { [Instance]: boolean }
-	function ensureSet(subQuery: QueryInternal): { [Instance]: boolean }
-		local existing = subSets[subQuery]
-		if existing then
-			return existing
+	-- The machinery (memo table + two closures) is only built when some clause
+	-- actually references a sub-query; `staticSub` is never consulted otherwise.
+	local subSets: { [QueryInternal]: { [Instance]: boolean } }? = nil
+	local ensureSet: ((QueryInternal) -> { [Instance]: boolean })? = nil
+	local staticSub: SatisfiedFn = neverSub
+	if plan.hasQueryRefs then
+		local sets: { [QueryInternal]: { [Instance]: boolean } } = {}
+		subSets = sets
+		local sub: SatisfiedFn
+		local ensure: (QueryInternal) -> { [Instance]: boolean }
+		function ensure(subQuery: QueryInternal): { [Instance]: boolean }
+			local existing = sets[subQuery]
+			if existing then
+				return existing
+			end
+			-- Seed the entry before recursing so shared sub-queries are computed
+			-- exactly once (recursion depth is finite: queries are immutable, so
+			-- the reference graph is a DAG by construction).
+			local set: { [Instance]: boolean } = {}
+			sets[subQuery] = set
+			-- Deepest first, so this sub-query's own enumeration finds its
+			-- references already memoized.
+			for _, req in subQuery:_allReferences() do
+				if isQuery(req) then
+					ensure(req :: QueryInternal)
+				end
+			end
+			for candidate in subQuery:_enumerate(false, sets) do
+				if subQuery:_fullMatch(candidate, sub) then
+					set[candidate] = true
+				end
+			end
+			return set
 		end
-		-- Seed the entry before recursing so shared sub-queries are computed
-		-- exactly once (recursion depth is finite: queries are immutable, so
-		-- the reference graph is a DAG by construction).
-		local set: { [Instance]: boolean } = {}
-		subSets[subQuery] = set
-		-- Deepest first, so this sub-query's own enumeration finds its
-		-- references already memoized.
-		for _, req in subQuery:_allReferences() do
+		function sub(subQuery: QueryInternal, instance: Instance): boolean
+			return ensure(subQuery)[instance] == true
+		end
+		ensureSet = ensure
+		staticSub = sub
+
+		for _, req in self:_allReferences() do
 			if isQuery(req) then
-				ensureSet(req :: QueryInternal)
+				ensure(req :: QueryInternal)
 			end
 		end
-		for candidate in subQuery:_enumerate(false, subSets) do
-			if subQuery:_fullMatch(candidate, staticSub) then
-				set[candidate] = true
-			end
-		end
-		return set
 	end
-	function staticSub(subQuery: QueryInternal, instance: Instance): boolean
-		return ensureSet(subQuery)[instance] == true
-	end
-
-	for _, req in self:_allReferences() do
-		if isQuery(req) then
-			ensureSet(req :: QueryInternal)
-		end
-	end
-
-	local plan = self:_plan()
 	local required = plan.required
 	local out: { Instance } = {}
 
@@ -1152,7 +1195,7 @@ function Query.get(self: QueryInternal): { Instance }
 	for _, req in required do
 		local kind = req.kind
 		if kind == "class" then
-			local size = #(req.comps :: { any })
+			local size = #(req.startedList :: { Instance })
 			if size < seedSize then
 				seed, seedSize = req, size
 			end
@@ -1198,6 +1241,38 @@ function Query.get(self: QueryInternal): { Instance }
 	local chosenSeed: PlanReq = (seed or firstTag or firstQuery or firstClasslike) :: PlanReq
 	local seedKind = chosenSeed.kind
 
+	-- The ECS hot shape — one requirement, nothing else — is a straight dump of
+	-- the seed source, before any per-candidate machinery is even allocated.
+	if
+		#required == 1
+		and #plan.anyOf == 0
+		and not plan.hasNegative
+		and not plan.hasAttributes
+		and not plan.hasPredicates
+	then
+		if seedKind == "class" then
+			return table.clone(chosenSeed.startedList :: { Instance })
+		elseif seedKind == "tag" then
+			-- Both sources are arrays freshly allocated for this call, so they
+			-- are safe to hand out directly.
+			local sized = if tagArrays then (tagArrays :: { [PlanReq]: { Instance } })[chosenSeed] else nil
+			return sized or CollectionService:GetTagged(chosenSeed.tag :: string)
+		elseif seedKind == "query" then
+			local ensure = ensureSet :: (QueryInternal) -> { [Instance]: boolean }
+			for instance in ensure(chosenSeed.query :: QueryInternal) do
+				table.insert(out, instance)
+			end
+			return out
+		else
+			for _, component in (chosenSeed.class :: ComponentClassLike):GetAll() do
+				if Keys.inst(component).phase == "Started" then
+					table.insert(out, component.Instance)
+				end
+			end
+			return out
+		end
+	end
+
 	-- Probes = every required requirement except the seed, most-selective-first
 	-- when populations are known (smaller population rejects more candidates
 	-- sooner, so each later probe runs against fewer survivors). Unknown counts
@@ -1212,7 +1287,7 @@ function Query.get(self: QueryInternal): { Instance }
 		local sizes = tagSizes :: { [PlanReq]: number }
 		local function populationOf(req: PlanReq): number
 			if req.kind == "class" then
-				return #(req.comps :: { any })
+				return #(req.startedList :: { Instance })
 			end
 			local sized = sizes[req]
 			if sized then
@@ -1251,14 +1326,6 @@ function Query.get(self: QueryInternal): { Instance }
 			end
 		end
 	end
-
-	-- The ECS hot shape — one requirement, nothing else — is a straight dump of
-	-- the seed source: no per-candidate work at all.
-	local trivial = #required == 1
-		and #plan.anyOf == 0
-		and not plan.hasNegative
-		and not plan.hasAttributes
-		and not plan.hasPredicates
 
 	-- Checks everything except the seed requirement (the seed's own iteration
 	-- already proves it) and collects matches. Rest-checks are inlined here so a
@@ -1303,51 +1370,64 @@ function Query.get(self: QueryInternal): { Instance }
 		table.insert(out, instance)
 	end
 
-	local n = 0
 	if seedKind == "class" then
-		for _, component in chosenSeed.comps :: { any } do
-			if component[INTERNAL].phase == "Started" then
-				if trivial then
-					n += 1
-					out[n] = component.Instance
-				else
-					consider(component.Instance)
-				end
-			end
+		for _, instance in chosenSeed.startedList :: { Instance } do
+			consider(instance)
 		end
 	elseif seedKind == "tag" then
 		local seedInstances = if tagArrays then (tagArrays :: { [PlanReq]: { Instance } })[chosenSeed] else nil
 		for _, instance in seedInstances or CollectionService:GetTagged(chosenSeed.tag :: string) do
-			if trivial then
-				n += 1
-				out[n] = instance
-			else
-				consider(instance)
-			end
+			consider(instance)
 		end
 	elseif seedKind == "query" then
-		for instance in ensureSet(chosenSeed.query :: QueryInternal) do
-			if trivial then
-				n += 1
-				out[n] = instance
-			else
-				consider(instance)
-			end
+		local ensure = ensureSet :: (QueryInternal) -> { [Instance]: boolean }
+		for instance in ensure(chosenSeed.query :: QueryInternal) do
+			consider(instance)
 		end
 	else
 		for _, component in (chosenSeed.class :: ComponentClassLike):GetAll() do
 			if Keys.inst(component).phase == "Started" then
-				if trivial then
-					n += 1
-					out[n] = component.Instance
-				else
-					consider(component.Instance)
-				end
+				consider(component.Instance)
 			end
 		end
 	end
 	return out
 end
 Query.GetMatches = Query.get
+
+--[=[
+	@within Query
+	@return () -> Instance?
+	Iterates the instances that match right now, without copying the match set:
+
+	```lua
+	for instance in query:iter() do ... end
+	```
+
+	While the query is actively observed, this walks the reactive engine's live
+	match list directly (newest match first) — the zero-allocation per-frame read
+	path; like engine-backed [Query:get] it reflects the reactive view. An
+	instance that stops matching mid-iteration is handled (it is simply not
+	visited); other match-set mutations made *during* the loop may re-visit an
+	already-seen instance. Without a live observer it iterates a fresh
+	[Query:get] snapshot.
+
+	Trade-off (measured): the per-element iterator call costs more than
+	[Query:get]'s single `table.clone`, so `get()` + a numeric `for` is faster in
+	raw throughput; `iter()` is for hot per-frame loops where avoiding the cloned
+	array's GC garbage matters more than wall time.
+]=]
+function Query.iter(self: QueryInternal): () -> Instance?
+	self:_validate()
+	local engine = self._engine or activeEngines[self:_signature()]
+	-- Backwards, so the engine's swap-remove (which moves an already-visited
+	-- tail element into the vacated slot) never skips an unvisited instance.
+	local list = if engine then engine.matchedList else self:get()
+	local index = #list + 1
+	return function(): Instance?
+		index -= 1
+		return list[index]
+	end
+end
 
 return Query

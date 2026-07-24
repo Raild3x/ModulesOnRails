@@ -477,7 +477,21 @@ const function teardown(class: ClassAny, component: InstanceAny, reason: StopRea
 	const cci = Keys.class(class)
 	cci.teardownsInFlight += 1
 
-	untrack(class, component.Instance)
+	-- Leave the started sparse set synchronously (swap-remove), so probes see
+	-- the component gone the same moment the phase leaves "Started".
+	const instance = component.Instance
+	const startedIndex = cci.startedInstances[instance]
+	if startedIndex then
+		const startedList = cci.startedList
+		const lastIndex = #startedList
+		const last = startedList[lastIndex]
+		startedList[startedIndex] = last
+		cci.startedInstances[last] = startedIndex
+		startedList[lastIndex] = nil
+		cci.startedInstances[instance] = nil
+	end
+
+	untrack(class, instance)
 	disconnectUpdates(component)
 
 	const function warnError(err: any)
@@ -766,6 +780,12 @@ const function run(class: ClassAny, instance: Instance, constructId: number)
 		end
 		ic.phase = "Started"
 		ic.started = true
+		-- Enter the started sparse set BEFORE firing `Started`, so anything the
+		-- signal triggers (query re-evaluation) already sees the membership.
+		const startedList = cci.startedList
+		const startedIndex = #startedList + 1
+		startedList[startedIndex] = instance
+		cci.startedInstances[instance] = startedIndex
 		class.Started:Fire(component)
 		return nil
 	end
@@ -927,6 +947,8 @@ const function destroyClass(class: ClassAny)
 
 	table.clear(ci.instToComponents)
 	table.clear(ci.components)
+	table.clear(ci.startedInstances)
+	table.clear(ci.startedList)
 	table.clear(ci.lockConstruct)
 	table.clear(ci.pending)
 end

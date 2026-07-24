@@ -69,6 +69,14 @@ export type ClassInternal = {
 	-- widely (init's lookups, Query's compiled plans).
 	instToComponents: { [Instance]: any },
 	components: { any },
+	-- Started sparse set, Lifecycle-owned: `startedInstances[instance]` is the
+	-- 1-based index into `startedList` (dense, swap-remove on stop). Membership
+	-- means "phase is Started" — maintained exactly at the Started/Stopping
+	-- transitions. Both tables are mutated in place and never replaced, so
+	-- Query's compiled plans capture them by reference (same guarantee as the
+	-- two tables above).
+	startedInstances: { [Instance]: number },
+	startedList: { Instance },
 	--[[ The construction-request protocol. Owned ENTIRELY by `Lifecycle.luau` —
 		nothing else reads or writes these four. `pending` is a three-state slot
 		(absent / `true` reservation / `PendingRecord`) and `lockConstruct` is the

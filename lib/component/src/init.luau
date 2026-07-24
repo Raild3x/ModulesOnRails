@@ -241,6 +241,8 @@ const function componentNew(config: Types.ComponentConfig): Class_Internal
 		ancestors = config.Ancestors or DEFAULT_ANCESTORS,
 		instToComponents = {},
 		components = {},
+		startedInstances = {},
+		startedList = {},
 		lockConstruct = {},
 		watching = {},
 		pending = {},
@@ -421,8 +423,7 @@ end
 	[Component:FromInstance] if a still-constructing component should count.
 ]=]
 function ComponentClassMethods.Has(self: Class_Internal, instance: Instance): boolean
-	const component = Keys.class(self).instToComponents[instance]
-	return component ~= nil and Keys.inst(component).started == true
+	return Keys.class(self).startedInstances[instance] ~= nil
 end
 
 --[=[

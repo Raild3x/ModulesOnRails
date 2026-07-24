@@ -215,6 +215,80 @@ return function(t: any)
 		end)
 	end)
 
+	describe("iter", function()
+		test("visits every current match, cold and observed", function()
+			local A, aTag = H.makeClass()
+			local q = Component.query(A)
+			local p1 = part { aTag }
+			local p2 = part { aTag }
+			expect(H.waitStarted(A, p1, 3)).is(true)
+			expect(H.waitStarted(A, p2, 3)).is(true)
+
+			-- Cold: falls back to a get() snapshot.
+			local seen = {}
+			local count = 0
+			for inst in q:iter() do
+				seen[inst] = true
+				count += 1
+			end
+			expect(count).is(2)
+			expect(seen[p1]).is(true)
+			expect(seen[p2]).is(true)
+
+			-- Observed: walks the live engine list.
+			local obs = q:observe(function() end)
+			seen, count = {}, 0
+			for inst in q:iter() do
+				seen[inst] = true
+				count += 1
+			end
+			expect(count).is(2)
+			expect(seen[p1]).is(true)
+			expect(seen[p2]).is(true)
+
+			obs:Disconnect()
+			A:Destroy()
+			p1:Destroy()
+			p2:Destroy()
+		end)
+	end)
+
+	describe("started sparse set", function()
+		test("cold GetMatches excludes constructing and stopped components", function()
+			local gate = false
+			local A, aTag = H.makeClass({
+				Construct = function()
+					while not gate do
+						task.wait()
+					end
+				end,
+			})
+			local q = Component.query(A)
+			local p = part { aTag }
+
+			-- Constructing (parked in Construct): not a match yet.
+			expect(H.waitUntil(function()
+				return A:GetLifecycleStatus(p) == "Constructing"
+			end, 3)).is(true)
+			expect(#q:GetMatches()).is(0)
+
+			gate = true
+			expect(H.waitStarted(A, p, 3)).is(true)
+			expect(#q:GetMatches()).is(1)
+			expect(q:GetMatches()[1]).is(p)
+
+			-- Stopped: gone from the match set again.
+			CollectionService:RemoveTag(p, aTag)
+			expect(H.waitUntil(function()
+				return not A:Has(p)
+			end, 3)).is(true)
+			expect(#q:GetMatches()).is(0)
+
+			A:Destroy()
+			p:Destroy()
+		end)
+	end)
+
 	describe("validation", function()
 		test("a query with no positive requirement errors", function()
 			local Bad = H.makeClass()
