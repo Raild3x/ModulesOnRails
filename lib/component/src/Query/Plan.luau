@@ -21,7 +21,6 @@ type MatchSpec = Types.MatchSpec
 type PlanReq = Types.PlanReq
 type Plan = Types.Plan
 type SatisfiedFn = Types.SatisfiedFn
-type ComponentClassLike = Types.ComponentClassLike
 
 const prototype = Build.prototype :: any
 const isQuery = Build.isQuery
@@ -178,9 +177,9 @@ end
 --------------------------------------------------------------------------------
 
 -- Probe cost by kind, measured per candidate: a class check is one direct table
--- lookup (~30ns), a sub-query check is a memo/engine hash lookup, a class-like
--- goes through `FromInstance` (~80ns), and a tag check is a `HasTag` C-call
--- (~150ns). Node kinds follow: an attr read is one `GetAttribute` C-call, a prop
+-- lookup (~30ns), a sub-query check is a memo/engine hash lookup, and a tag check
+-- is a `HasTag` C-call (~150ns). Node kinds follow: an attr read is one
+-- `GetAttribute` C-call, a prop
 -- read a pcall'd index, `where` a user pcall, and combinators recurse into an
 -- unknown number of children — probed last. Every compiled list is sorted
 -- cheapest-first so per-candidate evaluation short-circuits on the cheap probes;
@@ -189,7 +188,6 @@ end
 const KIND_COST: { [string]: number } = {
 	class = 1,
 	query = 2,
-	classlike = 3,
 	tag = 4,
 	attr = 5,
 	prop = 6,
@@ -246,20 +244,23 @@ const function compileReq(req: Queryable, buildIndex: number): PlanReq
 			children = children,
 		}
 	end
+	-- A component class: capture its live started sparse set. Both tables are
+	-- mutated in place (never replaced) by the lifecycle, so the references stay
+	-- valid for the class's whole life; `Destroy` clears them, which correctly
+	-- reads as "no matches". Requires the class to be one of ours (carries the
+	-- Internal state); a foreign look-alike could never match anyway, since
+	-- `Keys.inst` reads that same private key off its instances.
 	const internal = (req :: any)[INTERNAL]
-	if internal then
-		-- Our own class: capture its live started sparse set. Both tables are
-		-- mutated in place (never replaced) by the lifecycle, so the references
-		-- stay valid for the class's whole life; `Destroy` clears them, which
-		-- correctly reads as "no matches".
-		return {
-			kind = "class" :: "class",
-			buildIndex = buildIndex,
-			startedList = internal.startedList,
-			startedMap = internal.startedInstances,
-		}
-	end
-	return { kind = "classlike" :: "classlike", buildIndex = buildIndex, class = req :: ComponentClassLike }
+	assert(
+		internal,
+		"[Component] Query requirement is not a component class, tag string, Query, or filter/combinator node"
+	)
+	return {
+		kind = "class" :: "class",
+		buildIndex = buildIndex,
+		startedList = internal.startedList,
+		startedMap = internal.startedInstances,
+	}
 end
 
 -- Evaluates one MatchSpec. `present` is whether the attribute/property exists at
@@ -348,17 +349,13 @@ const function reqSatisfied(req: PlanReq, instance: Instance, satisfiedFn: Satis
 			end
 		end
 		return false
-	elseif kind == "and" then
+	else -- and
 		for _, child in req.children :: { PlanReq } do
 			if not reqSatisfied(child, instance, satisfiedFn) then
 				return false
 			end
 		end
 		return true
-	else
-		const class = req.class :: ComponentClassLike
-		const component = class:FromInstance(instance)
-		return component ~= nil and Keys.inst(component).phase == "Started"
 	end
 end
 Plan.reqSatisfied = reqSatisfied

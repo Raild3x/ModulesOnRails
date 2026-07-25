@@ -25,8 +25,6 @@ export type ComponentClassLike = {
 	-- signal. Cast to `ClassSignalView` at the connect site.
 	read Started: unknown,
 	read Stopped: unknown,
-	read FromInstance: <T>(self: T, instance: Instance) -> T?,
-	read GetAll: <T>(self: T) -> { T },
 }
 
 -- Runtime connection shape shared by better-signal and RBXScriptSignal.
@@ -163,12 +161,11 @@ export type ChangedSignal = Signal.Signal<(Instance, boolean) -> (), Instance, b
 -- SINGLE table lookup — membership in `startedMap` IS "started" — and
 -- `startedList` gives `get()` an O(1)-sized, already-filtered seed source.
 export type PlanReq = {
-	kind: "tag" | "class" | "classlike" | "query" | "attr" | "prop" | "where" | "not" | "or" | "and",
+	kind: "tag" | "class" | "query" | "attr" | "prop" | "where" | "not" | "or" | "and",
 	buildIndex: number, -- declaration position; tiebreak for the stable sort
 	tag: string?,
 	startedList: { Instance }?, -- class: live dense started-instance array
 	startedMap: { [Instance]: number }?, -- class: live instance -> list index
-	class: ComponentClassLike?, -- foreign class-like: FromInstance fallback
 	query: QueryInternal?,
 	spec: MatchSpec?, -- attr / prop node
 	fn: ((Instance) -> boolean)?, -- where node

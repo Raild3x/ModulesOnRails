@@ -694,19 +694,12 @@ function prototype._enumerate(
 			end
 		else -- component class
 			-- One of ours: its started list already holds exactly the instances
-			-- this source contributes, pre-filtered. Foreign class-likes fall back
-			-- to `GetAll()` + a phase check per component.
-			const class = req :: ComponentClassLike
-			const internal = (class :: any)[Keys.Internal]
+			-- this source contributes, pre-filtered. (A non-class requirement never
+			-- reaches here — the plan compiler rejects it up front.)
+			const internal = (req :: any)[Keys.Internal]
 			if internal then
 				for _, instance in internal.startedList do
 					set[instance] = true
-				end
-			else
-				for _, component in class:GetAll() do
-					if Keys.inst(component).phase == "Started" then
-						set[component.Instance] = true
-					end
 				end
 			end
 		end
@@ -864,7 +857,7 @@ function prototype._singleSource(self: QueryInternal): PlanReq?
 	then
 		const req = plan.required[1]
 		const kind = req.kind
-		if kind == "class" or kind == "tag" or kind == "query" or kind == "classlike" then
+		if kind == "class" or kind == "tag" or kind == "query" then
 			return req
 		end
 	end
@@ -956,7 +949,6 @@ function prototype._collect(self: QueryInternal, onMatch: (Instance) -> boolean?
 	local seedSize = math.huge -- smallest KNOWN population so far
 	local firstTag: PlanReq? = nil
 	local firstQuery: PlanReq? = nil
-	local firstClasslike: PlanReq? = nil
 	for _, req in required do
 		const kind = req.kind
 		if kind == "class" then
@@ -968,8 +960,6 @@ function prototype._collect(self: QueryInternal, onMatch: (Instance) -> boolean?
 			firstTag = firstTag or req
 		elseif kind == "query" then
 			firstQuery = firstQuery or req
-		elseif kind == "classlike" then
-			firstClasslike = firstClasslike or req
 		end
 	end
 
@@ -1006,7 +996,7 @@ function prototype._collect(self: QueryInternal, onMatch: (Instance) -> boolean?
 	-- No direct source among the required reqs (they are all filter/combinator
 	-- nodes; validation guarantees an enumerable one is nested somewhere): fall
 	-- back to the union scan, same as the anyOf-only shape.
-	const fallbackSeed = seed or firstTag or firstQuery or firstClasslike
+	const fallbackSeed = seed or firstTag or firstQuery
 	if not fallbackSeed then
 		for instance in self:_enumerate(false, subSets) do
 			if self:_fullMatch(instance, staticSub) then
@@ -1132,19 +1122,11 @@ function prototype._collect(self: QueryInternal, onMatch: (Instance) -> boolean?
 				return
 			end
 		end
-	elseif seedKind == "query" then
+	else -- query
 		const ensure = ensureSet :: (QueryInternal) -> { [Instance]: boolean }
 		for instance in ensure(chosenSeed.query :: QueryInternal) do
 			if consider(instance) then
 				return
-			end
-		end
-	else
-		for _, component in (chosenSeed.class :: ComponentClassLike):GetAll() do
-			if Keys.inst(component).phase == "Started" then
-				if consider(component.Instance) then
-					return
-				end
 			end
 		end
 	end
@@ -1181,19 +1163,11 @@ function prototype.get(self: QueryInternal): { Instance }
 			return table.clone(single.startedList :: { Instance })
 		elseif kind == "tag" then
 			return CollectionService:GetTagged(single.tag :: string)
-		elseif kind == "query" then
+		else -- query
 			const out: { Instance } = {}
 			const _, ensure = self:_staticSub(self:_plan())
 			for instance in (ensure :: (QueryInternal) -> { [Instance]: boolean })(single.query :: QueryInternal) do
 				table.insert(out, instance)
-			end
-			return out
-		else
-			const out: { Instance } = {}
-			for _, component in (single.class :: ComponentClassLike):GetAll() do
-				if Keys.inst(component).phase == "Started" then
-					table.insert(out, component.Instance)
-				end
 			end
 			return out
 		end
