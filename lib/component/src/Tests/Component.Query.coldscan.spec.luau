@@ -440,4 +440,107 @@ return function(t: any)
 			p:Destroy()
 		end)
 	end)
+
+	describe("compose-by-value invariants", function()
+		-- A raw Query is a valid Queryable ANYWHERE, including nested inside a
+		-- combinator in an atomic (withAny / without) position. There, normalization
+		-- does NOT splice it — `normalizeAnyMember` leaves combinator children
+		-- untouched — so it survives in a requirement list and is compiled and
+		-- evaluated as a by-value sub-query, indistinguishable from wrapping it in
+		-- `Query.Sub`. These nested shapes are the ONLY ones that reach the
+		-- raw-Query arms of compileReq / _signature / _enumerate; the direct
+		-- spellings always splice or lower first. Both invariants are asserted
+		-- across a battery of shapes in one test each to keep the noise down.
+
+		local function matchSet(q)
+			local set = {}
+			for _, inst in q:get() do
+				set[inst] = true
+			end
+			return set
+		end
+
+		test("a raw Query nested in a combinator == the same shape via Query.Sub", function()
+			local A, aTag = H.makeClass()
+			local B, bTag = H.makeClass()
+			local C, cTag = H.makeClass()
+			local inner = Query(B):withAttribute("X", 1)
+
+			-- Each pair is (raw-nested, Sub-nested) and must be indistinguishable in
+			-- both structural signature and match set.
+			local cases = {
+				{
+					Query():withAny(Query.And(inner, aTag), C),
+					Query():withAny(Query.And(Query.Sub(inner), aTag), C),
+				},
+				{
+					Query(A):without(Query.Or(inner, C)),
+					Query(A):without(Query.Or(Query.Sub(inner), C)),
+				},
+			}
+
+			-- Shared world: pAnd satisfies (inner AND aTag); pC has C; pExcluded has
+			-- A and inner (excluded by the without cases); pA has A alone.
+			local pAnd = part { aTag, bTag }
+			pAnd:SetAttribute("X", 1)
+			local pC = part { cTag }
+			local pExcluded = part { aTag, bTag }
+			pExcluded:SetAttribute("X", 1)
+			local pA = part { aTag }
+			expect(H.waitUntil(function()
+				return A:Has(pA) and A:Has(pExcluded) and B:Has(pAnd) and B:Has(pExcluded) and C:Has(pC)
+			end, 3)).is(true)
+
+			for _, spellings in cases do
+				local raw, sub = spellings[1], spellings[2]
+				-- Same structural signature -> they intern to one engine.
+				expect(raw:_signature()).is(sub:_signature())
+				-- Same match set, cold (both non-vacuous).
+				local rawGet = raw:get()
+				expect(#rawGet > 0).is(true)
+				expect(#rawGet).is(#sub:get())
+				local subSet = matchSet(sub)
+				for _, inst in rawGet do
+					expect(subSet[inst]).is(true)
+				end
+				-- count() agrees with get() on the same shape.
+				expect(raw:count()).is(#rawGet)
+			end
+
+			A:Destroy()
+			B:Destroy()
+			C:Destroy()
+			pAnd:Destroy()
+			pC:Destroy()
+			pExcluded:Destroy()
+			pA:Destroy()
+		end)
+
+		test("the compiled plan keeps only enumerable sources in `required`", function()
+			-- required holds only class / tag / sub-query source kinds; combinators
+			-- live in anyOf / negative and filters in the attribute/property/predicate
+			-- fast paths, never in required. Checked across representative shapes.
+			local A, aTag = H.makeClass()
+			local B, bTag = H.makeClass()
+			local sourceKinds = { class = true, tag = true, query = true }
+
+			local shapes = {
+				Query(A, B),
+				Query(A, aTag):with(Query.Sub(Query(B))),
+				Query(A):withAny(B, Query.And(A, B)),
+				Query(A):without(Query.Or(B, aTag)):withAttribute("K", 1):where(function()
+					return true
+				end),
+			}
+			for _, q in shapes do
+				local plan = q:_plan()
+				for _, req in plan.required do
+					expect(sourceKinds[req.kind] == true).is(true)
+				end
+			end
+
+			A:Destroy()
+			B:Destroy()
+		end)
+	end)
 end
