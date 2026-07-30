@@ -82,6 +82,10 @@ section = "Admin Commands [Cmdr]"
 classes = ["CmdrHandler", "PermissionsHandler", "CmdrServer", "CmdrClient", "CmdrTypes"]
 
 [[classOrder]]
+section = "UIParticleEmitter"
+classes = ["UIParticleEmitter"]
+
+[[classOrder]]
 section = "Data Structures"
 classes = ["Queue", "Heap", "LooseTightDoubleGrid", "Quadtree"]
 
