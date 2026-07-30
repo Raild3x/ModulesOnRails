@@ -16,6 +16,10 @@ See `.github/agents/domain.md` for how the engineering skills consume these file
 - [lib/remotecomponent/CONTEXT.md](lib/remotecomponent/CONTEXT.md) — networked
   component remotes: the remote namespace, extension namespaces, internal vs
   exposed remotes, the registration window, and the SRC handshake.
+- [lib/component/CONTEXT.md](lib/component/CONTEXT.md) — tag-bound component
+  classes: the lifecycle phases and phase barrier, extensions and hooks,
+  teardown and stop reasons, the core cleanup Janitor, and the world-level query
+  engine (requirements, matches, observers).
 
 Other packages under `lib/` do not have a `CONTEXT.md` yet; they are created lazily
 (via `/domain-modeling`) when a term or decision actually needs pinning down.

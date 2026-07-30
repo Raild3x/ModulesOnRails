@@ -11,7 +11,8 @@
     "types/tiniest_lib.d.luau"
   ],
   "luau-lsp.fflags.override": {
-    "DebugLuauTimeTracing": "false"
+    "DebugLuauTimeTracing": "false",
+    "LuauSolverV2": "true"
   },
 
   "selene.selenePath": "",
