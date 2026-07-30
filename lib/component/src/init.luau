@@ -408,6 +408,7 @@ end
 --------------------------------------------------------------------------------
 
 --[=[
+	@within Component
 	@tag Component Class
 	@return {Component}
 	Returns a copy of all active component instances of this class.
@@ -417,6 +418,7 @@ function Component.prototype.GetAll(self: Class_Internal): { Instance_Internal }
 end
 
 --[=[
+	@within Component
 	@tag Component Class
 	@param instance Instance
 	@return Component?
@@ -428,6 +430,7 @@ function Component.prototype.FromInstance(self: Class_Internal, instance: Instan
 end
 
 --[=[
+	@within Component
 	@tag Component Class
 	@param instance Instance
 	@return boolean
@@ -439,6 +442,7 @@ function Component.prototype.Has(self: Class_Internal, instance: Instance): bool
 end
 
 --[=[
+	@within Component
 	@tag Component Class
 	@param instanceOrComponent Instance | Component
 	@return LifecyclePhase
@@ -453,6 +457,7 @@ function Component.prototype.GetLifecycleStatus(
 end
 
 --[=[
+	@within Component
 	@tag Component Class
 	@param instance Instance
 	@param timeout number?
@@ -475,6 +480,7 @@ function Component.prototype.WaitForInstance(
 end
 
 --[=[
+	@within Component
 	@tag Component Class
 	@param instance Instance
 	@return Promise<Component>
@@ -521,10 +527,15 @@ function Component.prototype.GetCreateFromInstance(
 	end)
 end
 
---- @deprecated v1.0.0 -- Renamed to [Component:GetCreateFromInstance].
+--[=[
+	@method GetOrCreateFromInstance
+	@within Component
+	@deprecated v1.0.0 -- Renamed to [Component:GetCreateFromInstance].
+]=]
 Component.prototype.GetOrCreateFromInstance = Component.prototype.GetCreateFromInstance
 
 --[=[
+	@within Component
 	@tag Component Class
 	Updates the valid ancestors of this class and re-evaluates watched instances.
 ]=]
@@ -536,6 +547,7 @@ function Component.prototype.UpdateAncestors(self: Class_Internal, newAncestors:
 end
 
 --[=[
+	@within Component
 	@tag Component Class
 	Returns a copy of the current valid ancestors.
 ]=]
@@ -544,6 +556,7 @@ function Component.prototype.GetAncestors(self: Class_Internal): { Instance }
 end
 
 --[=[
+	@within Component
 	@tag Component Class
 	Called before the component starts, to initialize it. May yield or return a
 	Promise.
@@ -551,6 +564,7 @@ end
 function Component.prototype.Construct(_self: Instance_Internal) end
 
 --[=[
+	@within Component
 	@tag Component Class
 	Called when the component starts. Sibling components on the same instance are
 	safe to access here. May yield or return a Promise.
@@ -558,8 +572,9 @@ function Component.prototype.Construct(_self: Instance_Internal) end
 function Component.prototype.Start(_self: Instance_Internal) end
 
 --[=[
+	@within Component
 	@tag Component Class
-	@param reason StopReason
+	@param _reason StopReason
 	Called when the component stops. The bound instance may already be gone — check
 	`reason`. Anything added via `self:AddTask` is cleaned up automatically after
 	this returns.
@@ -571,6 +586,7 @@ function Component.prototype.Stop(_self: Instance_Internal, _reason: StopReason)
 --------------------------------------------------------------------------------
 
 --[=[
+	@within Component
 	@tag Component Instance
 	@param componentClass ComponentClass
 	@return Component?
@@ -581,6 +597,7 @@ function Component.prototype.GetComponent(self: Instance_Internal, componentClas
 end
 
 --[=[
+	@within Component
 	@tag Component Instance
 	@return boolean
 	Whether the component has fully started.
@@ -590,8 +607,9 @@ function Component.prototype.IsStarted(self: Instance_Internal): boolean
 end
 
 --[=[
+	@within Component
 	@tag Component Instance
-	@param task T
+	@param task_ T
 	@param cleanupMethod (string | true)?
 	@param index any?
 	@return T
@@ -608,6 +626,7 @@ function Component.prototype.AddTask<T>(
 end
 
 --[=[
+	@within Component
 	@tag Component Instance
 	@param promise Promise
 	@param index any?
@@ -620,6 +639,7 @@ function Component.prototype.AddPromise<T...>(self: Instance_Internal, promise: 
 end
 
 --[=[
+	@within Component
 	@tag Component Instance
 	@param index any
 	@param dontClean boolean?
@@ -635,6 +655,7 @@ function Component.prototype.RemoveTask(self: Instance_Internal, index: unknown,
 end
 
 --[=[
+	@within Component
 	@tag Component Instance
 	@param index any
 	@return any
@@ -669,8 +690,8 @@ end
 ]=]
 
 --[=[
-	@tag Component Class
 	@within Component
+	@tag Component Class
 	Destroys the component class: stops all its components (with reason
 	`"ClassDestroyed"`), disconnects from CollectionService, and clears all state.
 ]=]

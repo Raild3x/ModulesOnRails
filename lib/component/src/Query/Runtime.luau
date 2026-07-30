@@ -714,17 +714,6 @@ end
 -- Public terminals
 --------------------------------------------------------------------------------
 
---[=[
-	@within Query
-	@param callback (instance: Instance, janitor: Janitor) -> ()
-	@return QueryConnection
-
-	Runs `callback` for every instance that currently matches, and for every
-	instance that matches later, each with a fresh Janitor cleaned up when that
-	instance stops matching. Fetch matched components with `Class:FromInstance`.
-	Disconnecting the returned handle destroys all active match janitors and stops
-	watching.
-]=]
 -- Shared body of `observe` / `observeUnyielding`: register an observer, fire it
 -- for the current matches, and return a disconnect handle. `unyielding` selects
 -- the dispatch strategy (see `dispatchMatch`); `method` names the caller for the
@@ -774,6 +763,17 @@ const function attachObserver(
 	return connProxy
 end
 
+--[=[
+	@within Query
+	@param callback (instance: Instance, janitor: Janitor) -> ()
+	@return QueryConnection
+
+	Runs `callback` for every instance that currently matches, and for every
+	instance that matches later, each with a fresh Janitor cleaned up when that
+	instance stops matching. Fetch matched components with `Class:FromInstance`.
+	Disconnecting the returned handle destroys all active match janitors and stops
+	watching.
+]=]
 function prototype.observe(self: QueryInternal, callback: (Instance, Janitor) -> ()): QueryConnection
 	return attachObserver(self, callback, false, "observe")
 end
