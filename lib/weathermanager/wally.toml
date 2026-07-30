@@ -1,0 +1,17 @@
+[package]
+name = "raild3x/weather-system"
+version = "1.0.0"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+description = "A flexible weather system for Roblox games with client-server synchronization"
+license = "MIT"
+authors = ["raild3x"]
+
+[dependencies]
+Janitor = "howmanysmall/janitor@^1.18.3"
+Signal = "sleitnick/signal@^2.0.3"
+T = "osyrisrblx/t@^3.1.1"
+Fusion = "elttob/fusion@^0.3.0"
+Promise = "evaera/promise@^4.0.0"
+
+[dev-dependencies]
