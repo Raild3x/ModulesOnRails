@@ -1,0 +1,21 @@
+[package]
+name = "raild3x/delaunay"
+description = "A 3D/2D Delaunay implementation"
+authors = ["Logan Hunt (Raildex)"]
+version = "0.1.0"
+license = "MIT"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+
+[custom]
+# The properly capitalized and spaced name of the library
+formattedName = "Delaunay"
+# The intro page for the documentation
+docsLink = "Delaunay"
+
+[dependencies]
+BaseObject = "raild3x/baseobject@0.2.2"
+
+Janitor = "howmanysmall/janitor@1.17.0"
+Promise = "howmanysmall/typed-promise@4.0.3"
+Signal = "howmanysmall/better-signal@2.1.0"
