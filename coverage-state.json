@@ -1,0 +1,41 @@
+{
+  "schema": "coverage-badge-state/1",
+  "last_main_sha": "21e62b7c137274f4023ea9bff2d0c5dfa59ff992",
+  "packages": {
+    "dragdrop": {
+      "pct": 82.3,
+      "lines": 949,
+      "sha": "21e62b7c137274f4023ea9bff2d0c5dfa59ff992"
+    },
+    "graphutil": {
+      "pct": 98.56,
+      "lines": 765,
+      "sha": "21e62b7c137274f4023ea9bff2d0c5dfa59ff992"
+    },
+    "loosetightdoublegrid": {
+      "pct": 82.65,
+      "lines": 830,
+      "sha": "21e62b7c137274f4023ea9bff2d0c5dfa59ff992"
+    },
+    "remotecomponent": {
+      "pct": 77.51,
+      "lines": 209,
+      "sha": "21e62b7c137274f4023ea9bff2d0c5dfa59ff992"
+    },
+    "t": {
+      "pct": 93.62,
+      "lines": 596,
+      "sha": "21e62b7c137274f4023ea9bff2d0c5dfa59ff992"
+    },
+    "tablemanager": {
+      "pct": 96.28,
+      "lines": 3331,
+      "sha": "21e62b7c137274f4023ea9bff2d0c5dfa59ff992"
+    },
+    "tablereplicator": {
+      "pct": 95.95,
+      "lines": 1999,
+      "sha": "21e62b7c137274f4023ea9bff2d0c5dfa59ff992"
+    }
+  }
+}
