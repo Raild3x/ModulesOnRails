@@ -21,7 +21,10 @@ type Pipeline = adapter.Pipeline
 
 local LIB_ROOT = "lib"
 local SPEC_PATTERN = "\\.spec\\.luau$"
-local EXCLUDE = { "src/_Index/**" }
+-- `*.types.luau` are compile-time type-regression tests: `luau-lsp analyze`
+-- coming back clean IS the test, so they are never required at runtime and would
+-- otherwise sit at 0% and drag the denominator. Excluded from instrumentation.
+local EXCLUDE = { "src/_Index/**", "src/**/*.types.luau" }
 local IGNORE_FILES = { ".coverage-ignore", ".covaudit-ignore" }
 local LAST_TESTED = "test/last_tested_package.txt"
 

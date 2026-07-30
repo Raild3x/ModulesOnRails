@@ -129,23 +129,25 @@ fn probe_text(p: &Probe, src: &str, line_starts: &[usize]) -> String {
 /// The require path from a source file to the emitted `_cov` module, which sits
 /// at `<source_root>/_cov.luau`. Uses Luau string-require semantics.
 ///
-/// A root `init.luau` is special: it *represents* the source root directory, and
-/// Roblox's instance-tree require resolves its `./` to the script's siblings (one
-/// level above the directory it represents) rather than its children. `@self`
-/// names "the directory this module represents" identically under both file and
-/// instance semantics, so it is the only spelling that finds `_cov` in both
-/// pipelines.
+/// An `init.luau` is special: it *represents* its own directory, and Roblox's
+/// instance-tree require resolves its `./` to the script's siblings (one level
+/// above the directory it represents) rather than its children — so the folder
+/// module collapses to a single ModuleScript at its parent's level, one climb
+/// shallower than the file tree. `@self` names "the directory this module
+/// represents" identically under both file and instance semantics, so anchoring
+/// at `@self` and climbing to the source root finds `_cov` in both pipelines
+/// regardless of how deeply the folder module is nested. `_cov` sits at the
+/// source root, `depth` directories above the represented directory, so a root
+/// `init.luau` (depth 0) is `@self/_cov` and a nested one climbs from `@self`.
 pub fn cov_require_path(rel: &str, source_root: &str) -> String {
     let prefix = format!("{}/", source_root);
     let within = rel.strip_prefix(&prefix).unwrap_or(rel);
     let depth = within.matches('/').count();
     let file_name = within.rsplit('/').next().unwrap_or(within);
-    if depth == 0 {
-        if file_name == "init.luau" || file_name == "init.lua" {
-            "@self/_cov".to_string()
-        } else {
-            "./_cov".to_string()
-        }
+    if file_name == "init.luau" || file_name == "init.lua" {
+        format!("@self/{}_cov", "../".repeat(depth))
+    } else if depth == 0 {
+        "./_cov".to_string()
     } else {
         format!("{}_cov", "../".repeat(depth))
     }
@@ -263,6 +265,10 @@ mod tests {
         assert_eq!(cov_require_path("src/root.luau", "src"), "./_cov");
         assert_eq!(cov_require_path("src/util/deep.luau", "src"), "../_cov");
         assert_eq!(cov_require_path("src/a/b/c.luau", "src"), "../../_cov");
+        // A nested folder module (`init.luau`) collapses one level in the Roblox
+        // instance tree, so it anchors at `@self` and climbs to the source root.
+        assert_eq!(cov_require_path("src/Query/init.luau", "src"), "@self/../_cov");
+        assert_eq!(cov_require_path("src/a/b/init.luau", "src"), "@self/../../_cov");
     }
 
     #[test]
