@@ -23,7 +23,10 @@ const CONFIG_SCHEMA: { [string]: { default: any, kind: string } } = {
 	GamepadDropKeyCode = { default = Enum.KeyCode.ButtonA, kind = "EnumItem" },
 	GamepadCancelKeyCode = { default = Enum.KeyCode.ButtonB, kind = "EnumItem" },
 	KeyboardLiftKeyCode = { default = Enum.KeyCode.Return, kind = "EnumItem" },
-	KeyboardCancelKeyCode = { kind = "EnumItem" },
+	-- Not Escape: Roblox reserves it for the menu, which cancels drags through
+	-- GuiService.MenuOpened anyway — so Escape-to-cancel works regardless, and
+	-- this key is the one CAS can actually bind.
+	KeyboardCancelKeyCode = { default = Enum.KeyCode.Backspace, kind = "EnumItem" },
 }
 
 -- Overwrite `target` with the schema's defaults (optional keys stay absent).

@@ -55,19 +55,29 @@ end
 
 Reactive.ActivePayload = createObservable(nil :: Payload?)
 Reactive.HoveredTarget = createObservable(nil :: TargetDescriptor?)
+-- The captured press that hasn't resolved into a lift or a click yet. Non-nil
+-- exactly while the machine is Pending — the window a touch hold-progress
+-- indicator wants.
+Reactive.PendingPayload = createObservable(nil :: Payload?)
 
 -- Public change signals, one per observed value. They fire the new value on every
 -- change (nil on drag end) but never on connect, so pair them with
--- GetActivePayload / GetHoveredTarget to read the current value when you subscribe.
+-- GetActivePayload / GetHoveredTarget / GetPendingPayload to read the current
+-- value when you subscribe.
 Reactive.ActivePayloadChanged = Reactive.ActivePayload.changed
 Reactive.HoveredTargetChanged = Reactive.HoveredTarget.changed
+Reactive.PendingPayloadChanged = Reactive.PendingPayload.changed
 
 -- Drag lifecycle signals, typed at their definition so every consumer (Core, the
 -- facade, the backends) sees the same shape without re-asserting it at each hop.
 Reactive.DragStarted = Signal.new() :: Types.Signal<(payload: Payload, source: GuiObject) -> (), Payload, GuiObject>
 Reactive.Dropped =
 	Signal.new() :: Types.Signal<(payload: Payload, target: TargetDescriptor) -> (), Payload, TargetDescriptor>
-Reactive.DragEnded =
-	Signal.new() :: Types.Signal<(payload: Payload, target: TargetDescriptor?) -> (), Payload, TargetDescriptor?>
+Reactive.DragEnded = Signal.new() :: Types.Signal<
+	(payload: Payload, target: TargetDescriptor?, reason: Types.DragEndReason) -> (),
+	Payload,
+	TargetDescriptor?,
+	Types.DragEndReason
+>
 
 return Reactive

@@ -53,6 +53,7 @@ export type TargetOptions = Types.TargetOptions
 export type Config = Types.Config
 export type InputMode = Types.InputMode
 export type DragHandle = Types.DragHandle
+export type DragEndReason = Types.DragEndReason
 
 const DragDrop = {}
 
@@ -148,6 +149,33 @@ DragDrop.RegisterTarget = Core.RegisterTarget
 	```
 ]=]
 DragDrop.BeginDrag = Core.BeginDrag
+
+--[=[
+	@within DragDrop
+	@function BeginCarry
+	@param instance GuiObject -- a registered source (or a descendant of one)
+	@return DragHandle?
+
+	Lifts a registered source as a **carry**: a drag that outlives the gesture
+	that started it, for click-to-pick-up / click-to-place flows (a context
+	menu's "Switch", a bag's "Use"). Everything else about it is a normal drag —
+	same ghost, same hover reporting, same `OnDrop` — so targets cannot tell a
+	carry from a drag, and no parallel "armed payload" state is needed.
+
+	How it ends, by device:
+	- **Pointer**: a click that *begins during the carry* places it — on a
+	  registered target it drops, on anything else it cancels. Releasing the
+	  click that started it does nothing.
+	- **Gamepad/keyboard**: exactly grab mode — drop key drops on the selected
+	  target, cancel key reverts.
+
+	```lua
+	-- A context menu's "Switch" entry: pick the slot's occupant up, then the
+	-- player clicks (or navigates + presses A on) the destination slot.
+	DragDrop.BeginCarry(slotInstance)
+	```
+]=]
+DragDrop.BeginCarry = Core.BeginCarry
 
 --[=[
 	@within DragDrop
@@ -314,6 +342,28 @@ DragDrop.HoveredTargetChanged = Core.HoveredTargetChanged
 
 --[=[
 	@within DragDrop
+	@function GetPendingPayload
+	@return Payload?
+
+	The payload of a captured press that hasn't resolved into a lift or a click
+	yet — non-nil exactly while a press is pending (the touch long-press window,
+	the mouse pre-threshold window). Nil otherwise.
+]=]
+DragDrop.GetPendingPayload = Core.GetPendingPayload
+
+--[=[
+	@within DragDrop
+	@prop PendingPayloadChanged Signal<(payload: Payload?)>
+	Fires when a press is captured on a source (the payload) and again when the
+	pending window resolves — into a lift, a click, or an abort (nil). Drive a
+	touch hold-progress indicator from this.
+
+	Does **not** fire on connect; seed from [DragDrop.GetPendingPayload].
+]=]
+DragDrop.PendingPayloadChanged = Core.PendingPayloadChanged
+
+--[=[
+	@within DragDrop
 	@function ConsumeActivation
 	@return boolean
 
@@ -403,26 +453,28 @@ DragDrop.Dropped = Core.Dropped
 
 --[=[
 	@within DragDrop
-	@prop DragEnded Signal<(payload: Payload, target: TargetDescriptor?)>
-	Fires on every drag end. A nil target means the drag was cancelled or reverted.
+	@prop DragEnded Signal<(payload: Payload, target: TargetDescriptor?, reason: DragEndReason)>
+	Fires on every drag end, with why it ended: `"Dropped"` (landed on a target),
+	`"NoTarget"` (released over nothing that would take it), or `"Cancelled"`
+	(deliberately reverted — cancel key, device switch, source destroyed, focus
+	loss, menu). Target is non-nil only for `"Dropped"`.
 
 	This is the **last** event of a drag. End-of-drag order:
-	1. Reactive state clears — `GetActivePayload`/`GetHoveredTarget` go nil and
-	   [DragDrop.ActivePayloadChanged]/[DragDrop.HoveredTargetChanged] fire
-	   (ghost/scroll-lock teardown has already run).
-	2. The target's `OnDrop` runs, then [DragDrop.Dropped] fires.
+	1. The target's `OnDrop` runs, then [DragDrop.Dropped] fires — while the
+	   reactive state still holds the payload/hover, so anything repainting off
+	   [DragDrop.ActivePayloadChanged]/[DragDrop.HoveredTargetChanged] runs
+	   *after* your data layer mutated.
+	2. Ghost/scroll-lock teardown runs, then reactive state clears (the change
+	   signals fire nil).
 	3. The source's `OnDragEnd` runs, then `DragEnded` fires.
 
-	Because those change signals fire *before* `OnDrop` mutates your data, a view
-	that repaints only from them will still show pre-drop data — repaint on
-	`DragEnded` (or from your own data layer) to pick up the result of the drop.
-
 	```lua
-	DragDrop.DragEnded:Connect(function(payload, target)
-		if target == nil then
-			playRevertSound() -- cancelled or reverted
+	DragDrop.DragEnded:Connect(function(payload, target, reason)
+		if reason == "Cancelled" then
+			playRevertSound()
+		elseif reason == "NoTarget" then
+			playNopeSound() -- released somewhere it doesn't go
 		end
-		repaintInventory() -- OnDrop has already applied the move by now
 	end)
 	```
 ]=]

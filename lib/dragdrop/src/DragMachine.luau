@@ -148,14 +148,24 @@ const function updateHover(rawEntry: TargetEntry?)
 	end
 end
 
--- Shared exit path for both drop and cancel. Order is load-bearing: reset state,
--- restore/teardown via the janitor, then fire user callbacks.
-const function endDrag(dragging: DraggingState, dropDescriptor: TargetDescriptor?)
+-- Shared exit path for drop, no-target release, and cancel. Order is
+-- load-bearing: reset state, then fire OnDrop while the drag's world (reactive
+-- payload/hover, the ghost) still exists — so a handler repainting off
+-- ActivePayloadChanged/HoveredTargetChanged runs *after* the data layer
+-- mutated, and a future landing animation could still read the ghost — then
+-- tear down, then announce the end. Every user callback is pcall-guarded, so a
+-- throwing OnDrop can never skip the janitor and leave a scrolling list locked.
+const function endDrag(dragging: DraggingState, dropDescriptor: TargetDescriptor?, reason: Types.DragEndReason)
 	state = { Kind = "Idle" }
 	lastDragEndClock = Env.Clock()
 	clearPendingWatch()
 
 	const hovered: TargetEntry? = dragging.HoveredTarget
+	if dropDescriptor and hovered then
+		safeCall(hovered.Options.OnDrop, dragging.Payload, dropDescriptor)
+		Dropped:Fire(dragging.Payload, dropDescriptor)
+	end
+
 	dragging.Janitor:Cleanup()
 
 	Reactive.ActivePayload.set(nil)
@@ -164,12 +174,8 @@ const function endDrag(dragging: DraggingState, dropDescriptor: TargetDescriptor
 	if hovered then
 		safeCall(hovered.Options.OnHoverChanged, nil)
 	end
-	if dropDescriptor and hovered then
-		safeCall(hovered.Options.OnDrop, dragging.Payload, dropDescriptor)
-		Dropped:Fire(dragging.Payload, dropDescriptor)
-	end
-	safeCall(dragging.Source.Options.OnDragEnd, dragging.Payload, dropDescriptor ~= nil)
-	DragEnded:Fire(dragging.Payload, dropDescriptor)
+	safeCall(dragging.Source.Options.OnDragEnd, dragging.Payload, reason)
+	DragEnded:Fire(dragging.Payload, dropDescriptor, reason)
 end
 
 const function drop(): boolean
@@ -184,7 +190,7 @@ const function drop(): boolean
 			Metadata = dragging.HoveredTarget.Options.Metadata or {},
 		}
 	end
-	endDrag(dragging, descriptor)
+	endDrag(dragging, descriptor, if descriptor then "Dropped" else "NoTarget")
 	return descriptor ~= nil
 end
 
@@ -193,7 +199,7 @@ const function cancelDrag()
 	if dragging.Kind ~= "Dragging" then
 		return
 	end
-	endDrag(dragging, nil)
+	endDrag(dragging, nil, "Cancelled")
 end
 
 -- Enter Dragging from either a resolved Pending (backend lift) or directly
@@ -260,6 +266,7 @@ const function enterDragging(params: EnterParams)
 		GhostStyle = params.GhostStyle,
 		HoveredTarget = nil :: TargetEntry?,
 		Controlled = params.Controlled,
+		Sticky = params.Sticky,
 		Generation = dragGeneration,
 		Janitor = janitor,
 	}
@@ -300,12 +307,14 @@ const function press(entry: SourceEntry?, absPos: Vector2, inputObject: InputLik
 		InputObject = inputObject,
 		Device = device,
 	}
+	Reactive.PendingPayload.set(payload)
 	-- A device switch during the press aborts the pending lift. Same-class inputs
 	-- (mouse↔keyboard) do not fire this.
 	pendingWatch = Env.ObserveInputClass(function()
 		if state.Kind == "Pending" then
 			clearPendingWatch()
 			state = { Kind = "Idle" }
+			Reactive.PendingPayload.set(nil)
 		end
 	end)
 end
@@ -316,6 +325,7 @@ const function lift()
 		return
 	end
 	clearPendingWatch()
+	Reactive.PendingPayload.set(nil)
 	enterDragging {
 		Source = pending.Source,
 		Payload = pending.Payload,
@@ -323,6 +333,7 @@ const function lift()
 		InputObject = pending.InputObject,
 		GrabPoint = pending.StartPos,
 		Controlled = false,
+		Sticky = false,
 		GhostStyle = ghostStyleForDevice(pending.Device),
 	}
 end
@@ -334,6 +345,7 @@ const function releaseAsClick()
 	end
 	clearPendingWatch()
 	state = { Kind = "Idle" }
+	Reactive.PendingPayload.set(nil)
 	safeCall(pending.Source.Options.OnActivated)
 end
 
@@ -343,6 +355,7 @@ const function abortPending()
 	end
 	clearPendingWatch()
 	state = { Kind = "Idle" }
+	Reactive.PendingPayload.set(nil)
 end
 
 --------------------------------------------------------------------------------
@@ -451,10 +464,16 @@ end
 --------------------------------------------------------------------------------
 
 -- Enter Dragging directly from a resolved source entry (the programmatic
--- BeginDrag path; the caller decides grab point, device, and ownership).
--- Returns the controlling handle, or nil if the machine is busy or the source
--- refuses the lift.
-function DragMachine.Begin(entry: SourceEntry, grabPoint: Vector2, device: Device, controlled: boolean): DragHandle?
+-- BeginDrag / BeginCarry path; the caller decides grab point, device, and
+-- ownership). Returns the controlling handle, or nil if the machine is busy or
+-- the source refuses the lift.
+function DragMachine.Begin(
+	entry: SourceEntry,
+	grabPoint: Vector2,
+	device: Device,
+	controlled: boolean,
+	sticky: boolean?
+): DragHandle?
 	const st = state
 	if st.Kind ~= "Idle" then
 		return nil
@@ -475,6 +494,7 @@ function DragMachine.Begin(entry: SourceEntry, grabPoint: Vector2, device: Devic
 		InputObject = nil,
 		GrabPoint = grabPoint,
 		Controlled = controlled,
+		Sticky = sticky == true,
 		GhostStyle = ghostStyleForDevice(device),
 	}
 	const after = state

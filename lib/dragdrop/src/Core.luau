@@ -100,6 +100,33 @@ function Core.BeginDrag(instance: GuiObject, position: Vector2?): DragHandle?
 	return DragMachine.Begin(entry, grabPoint, device, controlled)
 end
 
+-- Lift `instance`'s payload as a carry: a drag that outlives the gesture that
+-- started it (a menu's "Switch", a bag's "Use"). Identical to a drag in every
+-- way that matters — same ghost, same hover reporting, same drop path — except
+-- the pointer releasing does not drop it: a later click on a target places it,
+-- a click on nothing (or the cancel key) reverts it. On selection devices it
+-- behaves exactly like grab mode. Returns the controlling handle, or nil if
+-- the machine is busy or the source refuses the lift.
+function Core.BeginCarry(instance: GuiObject): DragHandle?
+	const entry = Registry.ResolveSource(instance)
+	if not entry then
+		return nil
+	end
+
+	const inputClass = Env.CurrentInputClass()
+	local device: Device
+	local grabPoint: Vector2
+	if inputClass == "Gamepad" then
+		device = "Gamepad"
+		grabPoint = entry.Instance.AbsolutePosition + entry.Instance.AbsoluteSize / 2
+	else
+		device = if inputClass == "Touch" then "Touch" else "Mouse"
+		grabPoint = Env.PointerLocation()
+	end
+
+	return DragMachine.Begin(entry, grabPoint, device, inputMode == "Scriptable", true)
+end
+
 function Core.SetInputMode(mode: InputMode)
 	if mode ~= "Automatic" and mode ~= "Scriptable" then
 		error(`[DragDrop] Invalid input mode: {tostring(mode)}`, 2)
@@ -123,6 +150,12 @@ end
 function Core.GetHoveredTarget(): TargetDescriptor?
 	return Reactive.HoveredTarget.get()
 end
+
+function Core.GetPendingPayload(): Payload?
+	return Reactive.PendingPayload.get()
+end
+
+Core.PendingPayloadChanged = Reactive.PendingPayloadChanged
 
 --------------------------------------------------------------------------------
 --// Test seam (underscore-private) //--

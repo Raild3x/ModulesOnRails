@@ -51,19 +51,36 @@ export type TargetDescriptor = {
 }
 
 --[=[
+	@type DragEndReason "Dropped" | "Cancelled" | "NoTarget"
+	@within DragDrop
+
+	Why a drag ended, so consumers can tell the three apart instead of inferring
+	them from a bare `dropped = false`:
+
+	  - `Dropped`   — released over a target that accepted it.
+	  - `NoTarget`  — released over nothing (or something that refused it).
+	  - `Cancelled` — reverted deliberately: the cancel key, a device switch, the
+	                  source being destroyed, focus loss, or the Roblox menu.
+
+	A revert animation belongs on `Cancelled`; a "that doesn't go there" nudge
+	belongs on `NoTarget`.
+]=]
+export type DragEndReason = "Dropped" | "Cancelled" | "NoTarget"
+
+--[=[
 	@interface SourceOptions
 	@within DragDrop
 	.GetPayload () -> Payload? -- Returns the payload to lift, or nil to refuse the lift (empty slot, disabled, ...). Called on press.
-	.OnActivated (() -> ())? -- Press + release without crossing the drag threshold (a "click").
+	.OnActivated (() -> ())? -- Press + release without crossing the drag threshold (a "click"). Pointer devices only — see the note on DragDrop.RegisterSource.
 	.OnLift ((payload: Payload) -> ())? -- Fired the moment the payload goes airborne.
-	.OnDragEnd ((payload: Payload, dropped: boolean) -> ())? -- Fired on every drag end. `dropped=false` means cancelled/reverted.
+	.OnDragEnd ((payload: Payload, reason: DragEndReason) -> ())? -- Fired on every drag end.
 	.BuildGhost ((payload: Payload, source: GuiObject) -> GuiObject)? -- Builds the dragged proxy. Strongly recommended; nil falls back to a bare debug plate.
 ]=]
 export type SourceOptions = {
 	GetPayload: () -> Payload?,
 	OnActivated: (() -> ())?,
 	OnLift: ((payload: Payload) -> ())?,
-	OnDragEnd: ((payload: Payload, dropped: boolean) -> ())?,
+	OnDragEnd: ((payload: Payload, reason: DragEndReason) -> ())?,
 	-- Ghost contract: the returned GuiObject is parented into a container sized to
 	-- the source's on-screen footprint. `Size = UDim2.fromScale(1, 1)` matches the
 	-- source; any explicit Size overrides it. All appearance (tilt, transparency,
@@ -112,7 +129,7 @@ export type InputMode = "Automatic" | "Scriptable"
 	.GamepadDropKeyCode Enum.KeyCode? -- Button that drops on the selected target. Default ButtonA.
 	.GamepadCancelKeyCode Enum.KeyCode? -- Button that cancels a drag. Default ButtonB.
 	.KeyboardLiftKeyCode Enum.KeyCode? -- Key that toggles lift/drop in grab mode. Default Return.
-	.KeyboardCancelKeyCode Enum.KeyCode? -- Optional explicit keyboard cancel key. Default nil.
+	.KeyboardCancelKeyCode Enum.KeyCode? -- Keyboard cancel key. Default Backspace (Escape is reserved by Roblox; the menu it opens cancels drags anyway).
 
 	Behavior knobs only — nothing here styles the ghost (that lives in `BuildGhost`).
 ]=]
@@ -270,6 +287,14 @@ export type PendingState = {
 }
 
 -- Payload airborne; ghost + scroll locks live for this state's lifetime.
+--
+-- `Sticky` marks a carry: a drag that outlives the gesture that started it.
+-- Everything else about it is a normal drag — same ghost, same hover, same
+-- targets — but releasing the pointer does not drop it. It ends only when
+-- something explicitly drops it (a click on a target, the gamepad drop key) or
+-- cancels it. This is what makes click-to-pick-up / click-to-place the same
+-- machine as press-and-drag, instead of a parallel "armed payload" path in the
+-- consumer.
 export type DraggingState = {
 	Kind: "Dragging",
 	Source: SourceEntry,
@@ -280,6 +305,7 @@ export type DraggingState = {
 	GhostStyle: GhostStyle,
 	HoveredTarget: TargetEntry?,
 	Controlled: boolean,
+	Sticky: boolean,
 	Generation: number,
 	Janitor: Janitor,
 }
@@ -287,7 +313,8 @@ export type DraggingState = {
 export type DragState = IdleState | PendingState | DraggingState
 
 -- Enter Dragging from either a resolved Pending (backend lift) or directly
--- (BeginDrag). `Controlled` suppresses the automatic cancels.
+-- (BeginDrag / BeginCarry). `Controlled` suppresses the automatic cancels;
+-- `Sticky` makes it a carry (see DraggingState).
 export type EnterParams = {
 	Source: SourceEntry,
 	Payload: Payload,
@@ -295,6 +322,7 @@ export type EnterParams = {
 	InputObject: InputLike?,
 	GrabPoint: Vector2,
 	Controlled: boolean,
+	Sticky: boolean,
 	GhostStyle: GhostStyle,
 }
 
