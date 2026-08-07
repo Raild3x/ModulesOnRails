@@ -6,40 +6,43 @@ local GroupService = game:GetService("GroupService")
 local Players = game:GetService("Players")
 
 --// Imports //--
-local GroupCache = (setmetatable({}, {__mode = "k"}) :: any) :: {[Player]: {{
-    Name: string,
-    Id: number,
-    Rank: number,
-    Role: string,
-    IsPrimary: boolean,
-}}}
+local GroupCache = (setmetatable({}, { __mode = "k" }) :: any) :: {
+	[Player]: {
+		{
+			Name: string,
+			Id: number,
+			Rank: number,
+			Role: string,
+			IsPrimary: boolean,
+		}
+	},
+}
 
 local function RefreshGroupCache(plr: Player)
-    task.spawn(function()
-        local groups = GroupService:GetGroupsAsync(plr.UserId)
-        GroupCache[plr] = groups
-        -- if RunService:IsStudio() then
-        --     print("[Cmdr] Cached Groups for ", plr.Name, ":", groups)
-        -- end
-    end)
+	task.spawn(function()
+		local groups = GroupService:GetGroupsAsync(plr.UserId)
+		GroupCache[plr] = groups
+		-- if RunService:IsStudio() then
+		--     print("[Cmdr] Cached Groups for ", plr.Name, ":", groups)
+		-- end
+	end)
 end
 
 Players.PlayerAdded:Connect(RefreshGroupCache)
 for _, plr in ipairs(Players:GetPlayers()) do
-    RefreshGroupCache(plr)
+	RefreshGroupCache(plr)
 end
 
-
 --------------------------------------------------------------------------------
-    --// Class //--
+--// Class //--
 --------------------------------------------------------------------------------
 
 local Util = {}
 
-function Util.getPlayerPermissions(cmdrWrapper, plr: Player, rawPlayerPerms: {string}): {string}
-    local playerPerms = table.clone(rawPlayerPerms)
+function Util.getPlayerPermissions(cmdrWrapper, plr: Player, rawPlayerPerms: { string }): { string }
+	local playerPerms = table.clone(rawPlayerPerms)
 
-    for _, permissionGroup: string in playerPerms do
+	for _, permissionGroup: string in playerPerms do
 		for _, inheritedPerm in cmdrWrapper:GetPermissionInheritance(permissionGroup) do
 			if not table.find(playerPerms, inheritedPerm) then
 				table.insert(playerPerms, inheritedPerm)
@@ -47,20 +50,25 @@ function Util.getPlayerPermissions(cmdrWrapper, plr: Player, rawPlayerPerms: {st
 		end
 	end
 
-    for _, groupData in GroupCache[plr] or {} do
-        for _, groupPerm in Util.getGroupRankPermissions(cmdrWrapper, groupData.Id, groupData.Rank) do
-            if not table.find(playerPerms, groupPerm) then
-                table.insert(playerPerms, groupPerm)
-            end
-        end
-    end
+	for _, groupData in GroupCache[plr] or {} do
+		for _, groupPerm in Util.getGroupRankPermissions(cmdrWrapper, groupData.Id, groupData.Rank) do
+			if not table.find(playerPerms, groupPerm) then
+				table.insert(playerPerms, groupPerm)
+			end
+		end
+		for _, groupPerm in Util.getGroupRolePermissions(cmdrWrapper, groupData.Id, groupData.Role) do
+			if not table.find(playerPerms, groupPerm) then
+				table.insert(playerPerms, groupPerm)
+			end
+		end
+	end
 
-    return playerPerms
+	return playerPerms
 end
 
-function Util.getGroupRankPermissions(cmdrWrapper, groupId: number, rank: number): {string}
-    local groupData = cmdrWrapper:_getRawGroupPerms(groupId)
-    local rankPerms = {}
+function Util.getGroupRankPermissions(cmdrWrapper, groupId: number, rank: number): { string }
+	local groupData = cmdrWrapper:_getRawGroupPerms(groupId)
+	local rankPerms = {}
 
 	-- This is terribly unoptimized, feel free to optimize it
 	for _, groupPermData in groupData do
@@ -79,6 +87,27 @@ function Util.getGroupRankPermissions(cmdrWrapper, groupId: number, rank: number
 	end
 
 	return rankPerms
+end
+
+function Util.getGroupRolePermissions(cmdrWrapper, groupId: number, role: string): { string }
+	local groupData = cmdrWrapper:_getRawGroupPerms(groupId)
+	local rolePerms = {}
+
+	-- This is terribly unoptimized, feel free to optimize it
+	for _, groupPermData in groupData do
+		for _, permissionGroup: string in groupPermData.Permissions do
+			if not table.find(rolePerms, permissionGroup) then
+				table.insert(rolePerms, permissionGroup)
+			end
+			for _, inheritedPerm in cmdrWrapper:GetPermissionInheritance(permissionGroup) do
+				if not table.find(rolePerms, inheritedPerm) then
+					table.insert(rolePerms, inheritedPerm)
+				end
+			end
+		end
+	end
+
+	return rolePerms
 end
 
 return Util
