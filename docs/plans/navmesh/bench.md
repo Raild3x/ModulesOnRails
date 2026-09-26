@@ -245,6 +245,76 @@ is negligible.
   `Update`, which fits a frame. It costs 12% more triangles than a single tile. 64 studs suits
   meshes that almost never update (4% overhead, but 6-24 ms per update).
 
+## Speed A/B experiments (2026-09-26)
+- **Profile first** (`lune run tools/navmesh/bench/profile_build.luau 256 32`): a 256-stud
+  Build takes about 306 ms.
+  - Snap rounding: 70%. Its hot-pixel routing scan alone is about 180 ms, and the all-pairs
+    crossing scan 39 ms.
+  - `CDT.Triangulate`: 24%. Within it, the walk is 13 ms and the flood 11 ms.
+  - Build's own work: 6%.
+  - `Locate` for heights: 1%.
+- **Harness:** `python tools/navmesh/bench/ab.py <experiment> --runs 3 --rounds 5`, in
+  Studio, with a Lune gauge at `ab_lune.luau`.
+  - Core: `AB.luau`, which interleaves and rotates variants, takes best-of-reps within a
+    round and the median over rounds, and **fingerprints every variant's output against the
+    baseline**.
+  - Experiments live in `ab/`, prototypes in `variants/`. Nothing in `lib/` changes until a
+    winner is chosen.
+  - Every result below had identical output to its baseline.
+
+**1. Snap rounding scans (`ab/snapround`, `variants/SnapRound.luau`).** Crossing candidates
+and hot pixels come from grid buckets or an x sweep. ms, speedup in brackets:
+
+| workload | base | grid256 | grid1024 | **grid2048** | grid4096 | sweep+grid1024 | sweep+grid2048 |
+|---|---|---|---|---|---|---|---|
+| one 32-stud tile | 0.06 | 0.17 | 0.09 | **0.07** | 0.08 | 0.06 | 0.07 |
+| map128 | 17.65 | 5.62 (3.1x) | 3.59 (4.9x) | **3.27 (5.4x)** | 3.62 | 3.31 (5.3x) | 3.46 |
+| map256 | 230.8 | 24.0 (9.6x) | 9.78 (23.6x) | **8.61 (26.8x)** | 11.47 | 11.09 | 10.39 |
+| map512 | 3663 | 156 (23.5x) | 68.5 (53x) | **62.8 (58x)** | 62.8 (58x) | 71.6 (51x) | 70.6 (52x) |
+
+- **Winner: grid buckets of 2048 grid units (8 studs)** for both scans.
+- Cells that are too small lose because tile lines span thousands of cells: grid64 was
+  slower than the baseline under Lune.
+- The sweep never beat the grid.
+- One tile costs about 10 µs more, which is noise.
+
+**2. CDT module-boundary calls (`ab/cdt`).** Variants were generated from the shipped
+source:
+- `CDTLocal`: the Storage accessors as local functions in Triangulator and Classify, which
+  the compiler can inline;
+- `CDTLocalPred`: that, plus the predicate float filters as local functions;
+- `CDTInline`: that, plus hand-written buffer reads in the walk and legalize loops.
+
+| workload | base | local | local+pred | inline |
+|---|---|---|---|---|
+| tiles256 (every real tile input) | 74.8 | 56.1 (1.3x) | 55.7 (1.3x) | 52.7 (1.4x) |
+| tiles512 | 424.7 | 272.8 (1.6x) | 270.1 (1.6x) | 253.6 (1.7x) |
+| floor256 (one large CDT) | 54.1 | 32.8 (1.6x) | 32.3 (1.7x) | 33.2 (1.6x) |
+
+- **Winner: `local`.** The compiler's inlining takes nearly all of the gain.
+- Hand inlining adds 0-7% for a readability cost.
+- Local predicates add nothing measurable.
+
+**3. Local re-snap for `Update` (`ab/localsnap`, prototype for ticket 18).**
+- **Setup:** a door across a tile line on the 256-stud floor.
+- **Timing:**
+  - A, re-snapping the whole floor (already using the grid variant): 12.1 ms;
+  - B, re-snapping only the dirty tiles: 0.61 ms (20x). The gap grows with floor size.
+- **Checks on B, all passing:**
+  - no crossings;
+  - the outer-border vertices are unchanged, so clean neighbours need no work;
+  - removing the door reproduces the baseline exactly (SR14);
+  - B equals A inside the dirty region.
+- **Negative control:** a region too narrow to hold the door's tile crossing breaks the
+  border check. The SR13 one-pixel dirty rule is what makes B correct.
+
+**4. Global Lawson pass** (measured earlier): 3.3 ms, 4% of Triangulate. Skipping it gave
+identical results on all 94 tile inputs, but it's not worth the risk. **Rejected.**
+
+**Projected Build** (256 map, 32-stud tiles, after 1 and 2 land): snap rounding about 9 ms
+plus Triangulate about 50 ms plus glue about 18 ms, so about 80 ms instead of 306 ms. The
+TileSize benchmark should be re-run after they land, because the per-tile costs change.
+
 ## Not measured (flagged)
 - Remote transfer time and payload size per layout (needs a live server/client session).
 - Locality on a real CDT's vertex and triangle ordering. The grid mesh has near-ideal locality,

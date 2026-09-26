@@ -142,4 +142,4 @@ local function run(o: Options)
 	print("[MARK] done")
 end
 
-return { Run = run, Map = map }
+return { Run = run, Map = map, Crop = crop }
