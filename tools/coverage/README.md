@@ -164,6 +164,31 @@ packages):
 lune run coverage.luau package=self --adapter=./tools/coverage/lune/adapters/coverage_self
 ```
 
+**Adapter specs** (`lune/adapters/Tests/`: runner scaffolding and the in-repo sibling
+refresh in `materialize`). These are outside the self adapter's `core/` source root, so they
+have their own runner:
+
+```sh
+lune run tools/coverage/lune/adapters/Tests/run.luau
+```
+
+**Ignore rule forms** (`.coverage-ignore` at a package root; one rule per line, no inline
+comments):
+- `Qualified.Name`: a function and its body.
+- `src/path.luau:LINE`: any site on that line.
+- `site:<key>`: one exact site.
+- `src/path.luau`: the **whole file**. It is dropped from the metrics and its mutants are
+  excluded (for fixture data and test helpers).
+
+`lib/*/.coverage-ignore` is re-included by `.gitignore`.
+
+**Mutation gating:** a mutant runs when its line executed. A line counts as executed when a
+statement probe *or a decision probe* on it was reached, so `elseif` conditions are mutated.
+
+**Known gap:** mutants on continuation lines of multi-line statements (e.g. a multi-line
+table constructor or wrapped arithmetic) still report "no coverage". The map records only a
+statement's start line.
+
 **Self-coverage** — the pipeline can measure its own Lune core via the
 `coverage_self` adapter (specs live under the source root, so the runner picks
 them up like any package's):
