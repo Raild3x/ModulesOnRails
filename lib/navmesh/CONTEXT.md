@@ -19,5 +19,10 @@ A layered 2.5D navigation mesh for pathfinding queries, built on ConstrainedDela
 - **Clearance**: the widest agent that can pass through a place. It lets one mesh serve any
   agent radius.
 - **Snap**: placing a query point onto the nearest floor surface.
+- **Grid**: the fixed 1/256-stud lattice that every authored coordinate is rounded to before a
+  build.
+- **Snap rounding**: bending every authored edge through grid points so that no two edges cross.
+  It happens at build time, to authored edges. Not to be confused with **Snap**, which works on
+  query points.
 - **Waypoint**: one point of a returned path. It carries a link's label when a link starts
   there.
