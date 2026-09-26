@@ -272,11 +272,34 @@ and hot pixels come from grid buckets or an x sweep. ms, speedup in brackets:
 | map256 | 230.8 | 24.0 (9.6x) | 9.78 (23.6x) | **8.61 (26.8x)** | 11.47 | 11.09 | 10.39 |
 | map512 | 3663 | 156 (23.5x) | 68.5 (53x) | **62.8 (58x)** | 62.8 (58x) | 71.6 (51x) | 70.6 (52x) |
 
-- **Winner: grid buckets of 2048 grid units (8 studs)** for both scans.
+- **Winner on this map: grid buckets of 2048 grid units (8 studs)** for both scans. The cell
+  should adapt to the scene, though; see 1b.
 - Cells that are too small lose because tile lines span thousands of cells: grid64 was
   slower than the baseline under Lune.
 - The sweep never beat the grid.
 - One tile costs about 10 µs more, which is noise.
+
+**1b. Does the best cell depend on the scene? Yes (`ab/cellsize`).** Fixed cells were swept
+over four contrasting scenes, against a density rule that picks the cell from the input:
+`cell = nextPow2(K * sqrt(boundsArea / segmentCount))`, clamped to [64, 32768] grid units.
+The sqrt term is the typical spacing between segments. In the table, `+x%` is the gap to
+the best cell for that scene; Studio, 3 runs x 5 rounds, identical output everywhere.
+
+| scene | best fixed cell | fixed 8 studs (grid2048) | density K=1 | density K=2 |
+|---|---|---|---|---|
+| props: 64-stud room, 512 props of 0.3-2 studs | 2 studs: 6.62 ms | 7.99 (+21%) | **6.60 (best)** | 8.20 |
+| bench: the TileSize map | 8 studs: 11.25 ms | 11.25 (best) | 12.45 (+11%) | 11.48 (+2%) |
+| terrain: 1024 studs of sparse 15-60 stud rocks, TileSize 128 | 32 studs: 5.97 ms | 9.17 (+54%) | 6.19 (+4%) | 6.99 |
+| walls: 256 studs of long thin maze walls | 4 studs: 5.86 ms | 7.97 (+36%) | **5.67 (best)** | 7.56 |
+
+- **Why the cell size matters:**
+  - Each query visits every cell its bounding box overlaps, so long segments favour big cells.
+  - Each cell's items are all checked, so dense scenes favour small cells.
+  - The best cell tracks segment spacing, and spans 2 to 32 studs across these scenes.
+- **A bad fixed size is costly.** 1-stud cells on sparse terrain are 4x *slower* than no grid
+  at all, and 64-stud cells in the props room are 1.6x slower.
+- **Winner: the density rule with K = 1.** It is best or within 11% of each scene's best.
+  Fixed 8 studs is up to 54% off.
 
 **2. CDT module-boundary calls (`ab/cdt`).** Variants were generated from the shipped
 source:
