@@ -32,11 +32,19 @@ function Mesh.make(side: number, seed: number)
 			local a, b, c, d = id(i, j), id(i + 1, j), id(i + 1, j + 1), id(i, j + 1)
 			-- Split along a-c unless d lies inside circle(a, b, c).
 			if incircle(xs[a], ys[a], xs[b], ys[b], xs[c], ys[c], xs[d], ys[d]) > 0 then
-				table.insert(tris, a); table.insert(tris, b); table.insert(tris, d)
-				table.insert(tris, b); table.insert(tris, c); table.insert(tris, d)
+				table.insert(tris, a)
+				table.insert(tris, b)
+				table.insert(tris, d)
+				table.insert(tris, b)
+				table.insert(tris, c)
+				table.insert(tris, d)
 			else
-				table.insert(tris, a); table.insert(tris, b); table.insert(tris, c)
-				table.insert(tris, a); table.insert(tris, c); table.insert(tris, d)
+				table.insert(tris, a)
+				table.insert(tris, b)
+				table.insert(tris, c)
+				table.insert(tris, a)
+				table.insert(tris, c)
+				table.insert(tris, d)
 			end
 		end
 	end
