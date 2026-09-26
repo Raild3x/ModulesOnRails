@@ -19,6 +19,7 @@
 
 local Predicates = require("./Predicates")
 local Storage = require("./Storage")
+local Classify = require("./Classify")
 local Types = require("./Types")
 
 type State = Storage.State
@@ -584,6 +585,9 @@ function Triangulator.Build(input: Types.TriangulateInput): State
 		hint = near
 	end
 
+	-- Winding groups >= 1 must be closed loops (U-d); fail before any constraint work.
+	Classify.CheckBalanced(s, input)
+
 	-- Constraint edge k is the k-th index pair; its id is k.
 	for k = 1, #edges // 2 do
 		local u = Storage.VertexOfInput(s, edges[2 * k - 1])
@@ -615,6 +619,7 @@ function Triangulator.Build(input: Types.TriangulateInput): State
 	Storage.Compact(s, keep)
 	Storage.DropLeadingVertices(s, SUPER_VERTICES)
 	Storage.AllocWinding(s)
+	Classify.Flood(s, input)
 	return s
 end
 

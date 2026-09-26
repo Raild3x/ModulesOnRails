@@ -26,6 +26,15 @@ return function(t: tiniest)
 		return tri
 	end
 
+	-- Open (non-loop) constraints must use winding group 0 (U-d).
+	local function open(input: CDT.TriangulateInput): CDT.TriangulateInput
+		local groups = {}
+		for k = 1, #(input.Edges or {}) // 2 do
+			groups[k] = 0
+		end
+		return { Coords = input.Coords, Edges = input.Edges, EdgeGroups = groups }
+	end
+
 	local function steinerCount(tri: CDT.Triangulation): number
 		local count = 0
 		for v = 1, CDT.VertexCount(tri) do
@@ -61,13 +70,13 @@ return function(t: tiniest)
 		test("a constraint that is not Delaunay is forced in", function()
 			-- A thin rhombus: Delaunay picks the short diagonal (2-4); constrain the long one (1-3).
 			local input = { Coords = { 0, 0, 10, 1, 20, 0, 10, -1 }, Edges = { 1, 3 } }
-			local tri = checked(input, "long diagonal")
+			local tri = checked(open(input), "long diagonal")
 			expect(coveredEdges(tri, 1)).is(2) -- one edge, seen from both sides
 		end)
 
 		test("crossing constraints meet at a Steiner vertex", function()
 			local input = { Coords = { 0, 0, 10, 10, 0, 10, 10, 0 }, Edges = { 1, 2, 3, 4 } }
-			local tri = checked(input, "X")
+			local tri = checked(open(input), "X")
 			expect(steinerCount(tri)).is(1)
 			local steiner = CDT.VertexCount(tri)
 			local x, y = CDT.GetVertex(tri, steiner)
@@ -77,14 +86,14 @@ return function(t: tiniest)
 
 		test("a constraint through collinear vertices covers each sub-edge", function()
 			local input = { Coords = { 0, 0, 3, 0, 6, 0, 9, 0, 4, 5, 4, -5 }, Edges = { 1, 4 } }
-			local tri = checked(input, "collinear")
+			local tri = checked(open(input), "collinear")
 			expect(coveredEdges(tri, 1)).is(6) -- 3 sub-edges x 2 sides
 			expect(steinerCount(tri)).is(0)
 		end)
 
 		test("overlapping collinear constraints share covered edges", function()
 			local input = { Coords = { 0, 0, 4, 0, 8, 0, 12, 0, 6, 4, 6, -4 }, Edges = { 1, 3, 2, 4 } }
-			local tri = checked(input, "overlap")
+			local tri = checked(open(input), "overlap")
 			-- Edge 2-3 (x 4..8) is covered by both constraints.
 			local both = 0
 			for tt = 1, CDT.TriangleCount(tri) do
@@ -121,7 +130,7 @@ return function(t: tiniest)
 				table.insert(edges, a)
 				table.insert(edges, b)
 			end
-			local tri = checked({ Coords = coords, Edges = edges }, "grid of bars")
+			local tri = checked(open({ Coords = coords, Edges = edges }), "grid of bars")
 			expect(steinerCount(tri)).is(36)
 		end)
 
@@ -146,8 +155,22 @@ return function(t: tiniest)
 					table.insert(edges, math.floor(rng(1, pointCount + 0.999)))
 					table.insert(edges, math.floor(rng(1, pointCount + 0.999)))
 				end
-				checked({ Coords = coords, Edges = edges }, `soup {trial}`)
+				checked(open({ Coords = coords, Edges = edges }), `soup {trial}`)
 			end
+		end)
+	end)
+
+	describe("winding groups (U-d)", function()
+		test("an open polyline in a winding group errors, naming the group", function()
+			local ok, message = pcall(CDT.Triangulate, { Coords = { 0, 0, 10, 0, 5, 5 }, Edges = { 1, 2 }, EdgeGroups = { 2 } })
+			expect(ok).never_is_true()
+			expect(tostring(message):find("winding group 2") ~= nil).is_true()
+		end)
+
+		test("the default group is 1, so open edges without groups also error", function()
+			expect(function()
+				CDT.Triangulate({ Coords = { 0, 0, 10, 0, 5, 5 }, Edges = { 1, 2 } })
+			end).fails()
 		end)
 	end)
 
@@ -167,7 +190,7 @@ return function(t: tiniest)
 		end)
 
 		test("crossing constraints", function()
-			snapshot(CDT.ToDrawList(CDT.Triangulate({ Coords = { 0, 0, 10, 10, 0, 10, 10, 0 }, Edges = { 1, 2, 3, 4 } })))
+			snapshot(CDT.ToDrawList(CDT.Triangulate(open({ Coords = { 0, 0, 10, 10, 0, 10, 10, 0 }, Edges = { 1, 2, 3, 4 } }))))
 		end)
 	end)
 end
