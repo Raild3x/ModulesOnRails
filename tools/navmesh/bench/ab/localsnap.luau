@@ -104,10 +104,10 @@ return function(env: any)
 		end
 		-- Every tile line inside the region (the tile grid stays a constraint).
 		for x = rx0, rx1, S do
-			ring({ x, rz0, x, rz1 })
+			ring { x, rz0, x, rz1 }
 		end
 		for z = rz0, rz1, S do
-			ring({ rx0, z, rx1, z })
+			ring { rx0, z, rx1, z }
 		end
 		return c, e
 	end
@@ -201,8 +201,7 @@ return function(env: any)
 	-- Informational: does B agree with A inside the region?
 	local aCoords, aEdges = snap(globalIn, globalEdges)
 	local aRegionCoords, aRegionEdges = regionFragments(aCoords, aEdges)
-	local agrees = sortedEdges(aRegionCoords, aRegionEdges)
-		== sortedEdges(regionFragments(bCoords, bEdges))
+	local agrees = sortedEdges(aRegionCoords, aRegionEdges) == sortedEdges(regionFragments(bCoords, bEdges))
 
 	print(
 		string.format(

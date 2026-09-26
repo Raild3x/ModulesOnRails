@@ -5,73 +5,11 @@
 	itself:
 		cell = nextPow2(K * sqrt(boundsArea / segmentCount)), clamped to [64, 32768] grid units,
 	for K = 1, 2 and 4.
-	Scenes (TileSize 32 unless noted):
-	- `props`: a 64-stud room packed with small props (0.3-2 studs, one per 8 square studs);
-	- `bench`: the TileSize benchmark map (256 studs, 2-8 stud boxes, one per 100 square studs);
-	- `terrain`: 1024 studs of sparse large rocks (15-60 studs, one per 4000 square studs),
-	  TileSize 128;
-	- `walls`: 256 studs of long thin wall segments (20-120 studs x 0.5), a maze-like layout.
+	Scenes: every scene in Scenes.luau, at its `SnapTile` tile size.
 	Every variant must reproduce `base` exactly; the best cell per scene is the answer.
 ]=]
 
-local function makeRng(seed: number): (number, number) -> number
-	local state = seed
-	return function(lo: number, hi: number): number
-		state = (state * 1103515245 + 12345) % 2147483648
-		return lo + (state / 2147483648) * (hi - lo)
-	end
-end
-
-local function box(cx: number, cz: number, w: number, d: number, angle: number): { vector }
-	local c, s = math.cos(angle), math.sin(angle)
-	local ring = {}
-	for _, corner in { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } } do
-		local x, z = corner[1] * w / 2, corner[2] * d / 2
-		table.insert(ring, vector.create(cx + x * c - z * s, 0, cz + x * s + z * c))
-	end
-	return ring
-end
-
-local function scene(size: number, count: number, seed: number, shape: (rng: (number, number) -> number) -> { vector }): any
-	local rng = makeRng(seed)
-	local obstacles = {}
-	for _ = 1, count do
-		table.insert(obstacles, shape(rng))
-	end
-	local walkable = {
-		{ vector.create(0, 0, 0), vector.create(size, 0, 0), vector.create(size, 0, size), vector.create(0, 0, size) },
-	}
-	return { Floors = { Ground = { Walkable = { walkable[1] }, Obstacles = obstacles } } }
-end
-
 return function(env: any)
-	local scenes = {
-		{
-			"props",
-			32,
-			scene(64, 512, 3, function(rng)
-				return box(rng(0, 64), rng(0, 64), rng(0.3, 2), rng(0.3, 2), rng(0, math.pi))
-			end),
-		},
-		{ "bench", 32, env.TileSize.Map(256, 7) },
-		{
-			"terrain",
-			128,
-			scene(1024, 262, 5, function(rng)
-				return box(rng(0, 1024), rng(0, 1024), rng(15, 60), rng(15, 60), rng(0, math.pi))
-			end),
-		},
-		{
-			"walls",
-			32,
-			scene(256, 160, 9, function(rng)
-				local horizontal = rng(0, 1) < 0.5
-				local length = rng(20, 120)
-				return box(rng(0, 256), rng(0, 256), if horizontal then length else 0.5, if horizontal then 0.5 else length, 0)
-			end),
-		},
-	}
-
 	local captured
 	local original = env.Quantize.SnapRound
 	env.Quantize.SnapRound = function(coords, edges)
@@ -79,11 +17,11 @@ return function(env: any)
 		return original(coords, edges)
 	end
 	local workloads = {}
-	for _, s in scenes do
-		local desc = s[3]
-		desc.TileSize = s[2]
+	for _, scene in env.Scenes do
+		local desc = scene.Make()
+		desc.TileSize = scene.SnapTile
 		env.NavMesh.Build(desc)
-		table.insert(workloads, { Name = s[1], Input = captured, Reps = 3 })
+		table.insert(workloads, { Name = scene.Name, Input = captured, Reps = 3 })
 		env.Yield()
 	end
 	env.Quantize.SnapRound = original
@@ -109,8 +47,16 @@ return function(env: any)
 	end
 	for _, w in workloads do
 		local input = w.Input
-		print(string.format("[INFO] %s: %d segments, density cell K=1 %d, K=2 %d, K=4 %d", w.Name, #input[2] // 2,
-			densityCell(input[1], input[2], 1), densityCell(input[1], input[2], 2), densityCell(input[1], input[2], 4)))
+		print(
+			string.format(
+				"[INFO] %s: %d segments, density cell K=1 %d, K=2 %d, K=4 %d",
+				w.Name,
+				#input[2] // 2,
+				densityCell(input[1], input[2], 1),
+				densityCell(input[1], input[2], 2),
+				densityCell(input[1], input[2], 4)
+			)
+		)
 	end
 
 	local variants = {
@@ -137,7 +83,7 @@ return function(env: any)
 			end,
 		})
 	end
-	env.AB({
+	env.AB {
 		Variants = variants,
 		Workloads = workloads,
 		Fingerprint = function(out: any): string
@@ -155,5 +101,5 @@ return function(env: any)
 		Clock = env.Clock,
 		Yield = env.Yield,
 		Deadline = env.Deadline,
-	})
+	}
 end

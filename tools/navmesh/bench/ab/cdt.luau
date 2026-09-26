@@ -7,7 +7,9 @@
 	    benchmark map at 256 and 512 studs (TileSize 32), run in sequence;
 	  - `floor256`: the same map as one 1024-stud tile, a single large triangulation.
 	- **Variants:**
-	  - `base`: the shipped CDT;
+	  - `base`: the shipped CDT (since the landing, with local accessor copies);
+	  - `pre`: the CDT as it was before the landing (variants/CDTPre, from git), for the
+	    before/after confirmation;
 	  - `local`: the Storage accessors copied as local functions in Triangulator and Classify,
 	    so the compiler can inline them (variants/CDTLocal);
 	  - `local+pred`: `local`, plus the predicates' floating-point filters as local functions
@@ -52,9 +54,10 @@ return function(env: any)
 			end,
 		}
 	end
-	env.AB({
+	env.AB {
 		Variants = {
 			variant("base", env.CDT),
+			variant("pre", env.Variants.CDTPre),
 			variant("local", env.Variants.CDTLocal),
 			variant("local+pred", env.Variants.CDTLocalPred),
 			variant("inline", env.Variants.CDTInline),
@@ -82,5 +85,5 @@ return function(env: any)
 		Clock = env.Clock,
 		Yield = env.Yield,
 		Deadline = env.Deadline,
-	})
+	}
 end

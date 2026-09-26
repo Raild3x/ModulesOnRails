@@ -15,11 +15,15 @@ for _, entry in fs.readDir("tools/navmesh/bench/variants") do
 	end
 end
 
-dynRequire("./ab/" .. assert(process.args[1], "usage: ab_lune.luau <experiment> [rounds]"))({
+dynRequire("./ab/" .. assert(process.args[1], "usage: ab_lune.luau <experiment> [rounds]")) {
 	NavMesh = require("../../../lib/navmesh/src/NavMesh"),
 	Quantize = require("../../../lib/navmesh/src/Quantize"),
+	NavMeshStorage = require("../../../lib/navmesh/src/Storage"),
+	Heap = require("../../../lib/heap/src"),
 	CDT = require("../../../lib/navmesh/ConstrainedDelaunay"),
 	TileSize = require("./TileSize"),
+	Scenes = require("./Scenes"),
+	OpenLists = require("./OpenLists"),
 	AB = require("./AB"),
 	Variants = variants,
 	Rounds = tonumber(process.args[2]) or 1,
@@ -27,4 +31,4 @@ dynRequire("./ab/" .. assert(process.args[1], "usage: ab_lune.luau <experiment> 
 	Yield = function() end,
 	Deadline = os.clock() + 1800,
 	NarrowRegion = process.env.NARROW_REGION == "1",
-})
+}

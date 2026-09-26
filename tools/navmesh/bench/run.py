@@ -48,9 +48,9 @@ require(Bench.Harness).run({config})
 """
 
 
-def run(cmd, **kw):
+def run(cmd, check=True, **kw):
     print("$", " ".join(str(c) for c in cmd), flush=True)
-    return subprocess.run(cmd, check=True, **kw)
+    return subprocess.run(cmd, check=check, **kw)
 
 
 def build(out: Path, layouts, rounds: int, budget: int) -> Path:
@@ -105,7 +105,7 @@ def main() -> int:
 
     texts = []
     for i in range(1, args.runs + 1):
-        result = run(["run-in-roblox", "--place", str(place), "--script", str(out / "run.luau")],
+        result = run(["run-in-roblox", "--place", str(place), "--script", str(out / "run.luau")], check=False,
                      capture_output=True, text=True, encoding="utf-8", errors="replace",
                      timeout=args.budget + 300)
         texts.append(result.stdout + result.stderr)

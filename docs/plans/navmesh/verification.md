@@ -166,6 +166,36 @@ Later tickets cite these as their test seams. Commands run from the repo root.
   - empty output: FAIL;
   - the real run: PASS.
 
+### A/B harness (speed work): prototypes against the shipped code
+- **Commands** (from the repo root, after `npm run setup navmesh`):
+  ```sh
+  python tools/navmesh/bench/ab.py <experiment> --runs 3 --rounds 5   # Studio, native: decides
+  lune run tools/navmesh/bench/ab_lune.luau <experiment> [rounds]      # quick gauge + correctness
+  python tools/navmesh/bench/tilesize.py --runs 3 --rounds 3           # TileSize over the scenes
+  lune run tools/navmesh/bench/profile_build.luau [mapSize] [tileSize] # Build phase profile
+  ```
+- **Layout:**
+  - `AB.luau`: the core;
+  - `ab/<experiment>.luau`: one experiment each (`snapround`, `cellsize`, `cdt`, `localsnap`,
+    `openlist`);
+  - `variants/`: prototypes. A single file takes its dependencies as arguments; a folder is a
+    whole CDT copy.
+  - `Scenes.luau`: the shared contrasting scenes (`props`, `bench`, `terrain`, `walls`).
+- **Method:**
+  - Variant order is rotated each round, with best-of-reps per round and the median over
+    rounds, per run; `ab.py` then takes the median over runs.
+  - **Every variant's output is fingerprinted against the first (baseline) variant.**
+    `ab.py` exits 1 on any difference or on a run that doesn't finish.
+- **Negative controls:**
+  - The fingerprint check itself: `lune run tools/navmesh/bench/ab_lune.luau control` reports
+    `same` for an identical variant and `DIFFERENT` for one that changes a single element.
+  - Correctness: each experiment's variants were first checked under Lune (`[CHECK] ...
+    same`).
+  - `localsnap` checks the dirty-rule border property. With `NARROW_REGION=1` the check fails,
+    as it should.
+  - The CDT accessor copies' load-time layout `assert` fails the require when
+    `Storage.Layout` changes.
+
 ## F10: unpublished sibling dependencies (ruling D2: simplest in-repo mechanism)
 - **Declare:** `[custom] siblings = "a,b"` in the dependent's `wally.toml`, kept out of
   `[dependencies]` until publish.

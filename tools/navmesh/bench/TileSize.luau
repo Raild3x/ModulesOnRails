@@ -7,8 +7,7 @@
 --           TileSize S, ms. That is the unit of work Update will redo per dirty tile.
 -- Prints [R] lines that tilesize.py aggregates; every loop checks the deadline.
 
-type Options =
-	{ NavMesh: any, Clock: () -> number, Sizes: { number }, MapSize: number, Rounds: number, Deadline: number }
+type Options = { NavMesh: any, Clock: () -> number, Yield: () -> (), Scenes: { any }, Rounds: number, Deadline: number }
 
 -- Deterministic LCG, high bits.
 local function makeRng(seed: number): (number, number) -> number
@@ -66,7 +65,7 @@ local function crop(full: any, x0: number, z0: number, size: number): any
 			table.insert(obstacles, ring)
 		end
 	end
-	for _, area in floor.Areas do
+	for _, area in floor.Areas or {} do
 		if centredIn(area.Polygon) then
 			table.insert(areas, area)
 		end
@@ -88,21 +87,23 @@ local function median(xs: { number }): number
 	return s[(#s + 1) // 2]
 end
 
-local function run(o: Options)
+-- One scene: every tile size in rotated order per round, then [R] lines tagged with the scene.
+local function runScene(o: Options, scene: any)
 	local NavMesh, clock = o.NavMesh, o.Clock
-	local full = map(o.MapSize, 7)
+	local full = scene.Make()
+	local sizes = scene.Sizes
 	local buildMs, tileMs, shape = {}, {}, {}
-	for _, size in o.Sizes do
+	for _, size in sizes do
 		buildMs[size], tileMs[size] = {}, {}
 	end
-	print(`[MARK] map {o.MapSize} studs, {#full.Floors.Ground.Obstacles} obstacles`)
+	print(`[MARK] scene {scene.Name}: {scene.Side} studs, {#full.Floors.Ground.Obstacles} obstacles`)
 	for round = 1, o.Rounds do
-		for k = 0, #o.Sizes - 1 do
+		for k = 0, #sizes - 1 do
 			if clock() > o.Deadline then
 				print("[MARK] deadline hit")
-				return
+				return false
 			end
-			local size = o.Sizes[(round + k - 1) % #o.Sizes + 1] -- rotated order
+			local size = sizes[(round + k - 1) % #sizes + 1] -- rotated order
 			local desc = table.clone(full)
 			desc.TileSize = size
 			local t0 = clock()
@@ -111,8 +112,8 @@ local function run(o: Options)
 			local storage = mesh :: any
 			shape[size] = { storage.TriangleCount, storage.VertexCount, #storage.TileFloor }
 
-			-- Every tile of the map in turn (bounded), so the median covers dense and sparse ones.
-			local perSide = math.max(1, o.MapSize // size)
+			-- Tiles across the map in turn (bounded), so the median covers dense and sparse ones.
+			local perSide = math.max(1, scene.Side // size)
 			local samples = math.min(perSide * perSide, 16)
 			for i = 0, samples - 1 do
 				local cell = (i * 7 + round) % (perSide * perSide)
@@ -121,15 +122,16 @@ local function run(o: Options)
 				NavMesh.Build(patch)
 				table.insert(tileMs[size], (clock() - t0) * 1000)
 			end
+			o.Yield()
 		end
-		print(`[MARK] round {round}`)
+		print(`[MARK] {scene.Name} round {round}`)
 	end
-	print("[HDR] size | build_ms | tris | verts | tiles | tile_ms")
-	for _, size in o.Sizes do
+	for _, size in sizes do
 		local sh = shape[size]
 		print(
 			string.format(
-				"[R] %d | %.1f | %d | %d | %d | %.2f",
+				"[R] %s | %d | %.1f | %d | %d | %d | %.3f",
+				scene.Name,
 				size,
 				median(buildMs[size]),
 				sh[1],
@@ -138,6 +140,16 @@ local function run(o: Options)
 				median(tileMs[size])
 			)
 		)
+	end
+	return true
+end
+
+local function run(o: Options)
+	print("[HDR] scene | size | build_ms | tris | verts | tiles | tile_ms")
+	for _, scene in o.Scenes do
+		if not runScene(o, scene) then
+			return
+		end
 	end
 	print("[MARK] done")
 end

@@ -24,7 +24,10 @@ return function(env: any)
 		local desc = env.TileSize.Map(size, 7)
 		desc.TileSize = 32
 		env.NavMesh.Build(desc)
-		table.insert(workloads, { Name = `map{size}`, Input = captured[#captured], Reps = if size >= 512 then 1 else 3 })
+		table.insert(
+			workloads,
+			{ Name = `map{size}`, Input = captured[#captured], Reps = if size >= 512 then 1 else 3 }
+		)
 		env.Yield()
 	end
 	env.NavMesh.Build(env.TileSize.Crop(env.TileSize.Map(256, 7), 96, 96, 32))
@@ -41,7 +44,7 @@ return function(env: any)
 			end,
 		}
 	end
-	env.AB({
+	env.AB {
 		Variants = {
 			variant("base", original),
 			variant("grid256", make(Orient2D, { Cell = 256, Crossings = "grid" })),
@@ -68,5 +71,5 @@ return function(env: any)
 		Clock = env.Clock,
 		Yield = env.Yield,
 		Deadline = env.Deadline,
-	})
+	}
 end

@@ -30,8 +30,12 @@ print("[MARK] start")
 require(Bench.Experiment)({{
 \tNavMesh = require(NavMesh.src.NavMesh),
 \tQuantize = require(NavMesh.src.Quantize),
+\tNavMeshStorage = require(NavMesh.src.Storage),
+\tHeap = require(ReplicatedStorage:WaitForChild("Heap", 10)),
 \tCDT = require(NavMesh.ConstrainedDelaunay),
 \tTileSize = require(Bench.TileSize),
+\tScenes = require(Bench.Scenes),
+\tOpenLists = require(Bench.OpenLists),
 \tAB = require(Bench.AB),
 \tVariants = variants,
 \tRounds = {rounds},
@@ -57,11 +61,14 @@ def main() -> int:
     bench.mkdir(parents=True)
     shutil.copy(HERE / "AB.luau", bench / "AB.luau")
     shutil.copy(HERE / "TileSize.luau", bench / "TileSize.luau")
+    shutil.copy(HERE / "Scenes.luau", bench / "Scenes.luau")
+    shutil.copy(HERE / "OpenLists.luau", bench / "OpenLists.luau")
     shutil.copy(HERE / "ab" / f"{args.experiment}.luau", bench / "Experiment.luau")
     shutil.copytree(HERE / "variants", bench / "Variants")
     project = {"name": "navmesh-ab", "tree": {"$className": "DataModel", "ReplicatedStorage": {
         "$className": "ReplicatedStorage",
         "NavMesh": {"$path": (Path.cwd() / "lib/navmesh").as_posix()},
+        "Heap": {"$path": (Path.cwd() / "lib/heap/src").as_posix()},
         "Bench": {"$path": "Bench"}}}}
     (out / "place.project.json").write_text(json.dumps(project, indent=2), encoding="utf-8")
     (out / "run.luau").write_text(SCRIPT.format(rounds=args.rounds, budget=args.budget), encoding="utf-8")
@@ -72,7 +79,7 @@ def main() -> int:
     order: list = []
     ok = True
     for i in range(1, args.runs + 1):
-        result = run(["run-in-roblox", "--place", str(place), "--script", str(out / "run.luau")],
+        result = run(["run-in-roblox", "--place", str(place), "--script", str(out / "run.luau")], check=False,
                      capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=args.budget + 300)
         text = result.stdout + result.stderr
         (out / f"run{i}.txt").write_text(text, encoding="utf-8")
