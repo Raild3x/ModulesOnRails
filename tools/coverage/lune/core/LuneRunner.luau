@@ -7,6 +7,7 @@
 ]=]
 
 local fs = require("@lune/fs")
+local process = require("@lune/process")
 
 local tiniest_coverage = require("@tiniest/tiniest_coverage")
 
@@ -56,7 +57,9 @@ function LuneRunner.run(spec: PackageSpec, buildDir: string, options: { timeout:
 
 	local tiniest = dynRequire(ROOT .. "test/tiniest/tiniest_for_lune").configure {
 		snapshot_path = "./test/__snapshots__",
-		save_snapshots = false,
+		-- Opt-in only: `SAVE_SNAPSHOTS=1` writes new/changed snapshots to disk. Never set in CI;
+		-- mutant_run stays read-only so a mutant can never overwrite a golden.
+		save_snapshots = process.env.SAVE_SNAPSHOTS == "1",
 		plugins = { coveragePlugin },
 		pretty = {
 			trim_duplicate_trace = true,

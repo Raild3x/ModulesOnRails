@@ -92,7 +92,40 @@ local DEP_SECTIONS: { [string]: boolean } = {
 	["[dev-dependencies]"] = true,
 }
 
+-- Unpublished in-repo dependencies: `[custom] siblings = "a,b"` in wally.toml. Setup vendors
+-- them as `_Index/raild3x_<name>@local/<name>` (scripts/setup_package_for_testing.py);
+-- `materialize` refreshes their `src` on every run so tests never see a stale sibling.
+local SIBLING_SCOPE_PREFIX = "raild3x_"
+local SIBLING_VERSION = "local"
+
+local function readSiblings(root: string): { string }
+	local wallyPath = `{root}/wally.toml`
+	if not fs.isFile(wallyPath) then
+		return {}
+	end
+	local inCustom = false
+	for rawLine in fs.readFile(wallyPath):gmatch("[^\r\n]+") do
+		local line = rawLine:gsub("#.*", ""):gsub("^%s+", ""):gsub("%s+$", "")
+		if line:sub(1, 1) == "[" then
+			inCustom = line == "[custom]"
+		elseif inCustom then
+			local value = line:match('^siblings%s*=%s*"([^"]*)"')
+			if value then
+				local names = {}
+				for name in value:gmatch("[^,%s]+") do
+					table.insert(names, name)
+				end
+				return names
+			end
+		end
+	end
+	return {}
+end
+
 local function hasWallyDependencies(root: string): boolean
+	if #readSiblings(root) > 0 then
+		return true
+	end
 	local wallyPath = `{root}/wally.toml`
 	if not fs.isFile(wallyPath) then
 		return false
@@ -202,11 +235,32 @@ end
 
 -- Copy the entire package dir (src, specs, wally.toml, sibling vendored deps,
 -- _Index) so relative string requires resolve identically in the copy.
+-- Overwrite each vendored sibling's `src` in the copy with the current `lib/<sibling>/src`
+-- (recursing into the sibling's own siblings), so an edit is seen without re-running setup.
+local function refreshSiblings(packageRoot: string, copyRoot: string)
+	for _, sibling in readSiblings(packageRoot) do
+		local siblingRoot = `{LIB_ROOT}/{sibling}`
+		local dest = `{copyRoot}/_Index/{SIBLING_SCOPE_PREFIX}{sibling}@{SIBLING_VERSION}/{sibling}`
+		if not fs.isDir(dest) then
+			error(
+				`sibling '{sibling}' is not vendored into {packageRoot}; run: npm run setup {packageRoot:match("[^/]+$")}`,
+				0
+			)
+		end
+		if fs.isDir(`{dest}/src`) then
+			fs.removeDir(`{dest}/src`)
+		end
+		fs.copy(`{siblingRoot}/src`, `{dest}/src`)
+		refreshSiblings(siblingRoot, dest)
+	end
+end
+
 function M.materialize(spec: PackageSpec, buildDir: string)
 	if fs.isDir(buildDir) then
 		fs.removeDir(buildDir)
 	end
 	fs.copy(spec.root, buildDir)
+	refreshSiblings(spec.root, buildDir)
 end
 
 function M.luneFramework(_spec: PackageSpec, _buildDir: string): adapter.LuneFrameworkConfig

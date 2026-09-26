@@ -75,7 +75,7 @@ def create_init_spec_luau(src_dir: Path, formatted_name: str) -> None:
 ]]
 
 return function(t: tiniest)
-    local {formatted_name} = require(./\"{formatted_name}\")
+    local {formatted_name} = require("./{formatted_name}")
 
     local FOCUS = t.FOCUS
     local describe = t.describe

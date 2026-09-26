@@ -16,7 +16,7 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 # Insert scripts/ onto sys.path so _common is importable regardless of cwd.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _common import SRC_DIR, WALLY_IGNORE_LIST, find_project_root, clear_package_dir, run_command
+from _common import SRC_DIR, WALLY_IGNORE_LIST, find_project_root, clear_package_dir, parse_wally_toml, run_command
 
 
 def _first_project_path(node) -> str | None:
@@ -75,6 +75,59 @@ def generate_lune_index_shims(index_dir: Path) -> None:
         print(f"Generated Lune require shim: {shim}")
 
 
+# Unpublished in-repo dependencies are declared as `[custom] siblings = "a,b"` in wally.toml
+# (kept out of [dependencies] so `wally install` never looks for them in the registry). Setup
+# vendors each one in Wally's layout; the coverage adapter refreshes their `src` on every run.
+SIBLING_SCOPE_PREFIX = "raild3x_"
+SIBLING_VERSION = "local"
+_siblings_in_progress: set[str] = set()
+
+
+def read_siblings(package_dir: Path) -> list[str]:
+    """Return the package's `[custom] siblings` names (comma-separated string)."""
+    wally_toml = package_dir / "wally.toml"
+    if not wally_toml.is_file():
+        return []
+    raw = parse_wally_toml(wally_toml).get("custom", {}).get("siblings", "")
+    return [name.strip() for name in raw.split(",") if name.strip()]
+
+
+def link_siblings(package_dir: Path) -> bool:
+    """Set up each sibling, then vendor it as `_Index/raild3x_<name>@local/<name>` plus a
+    `<FormattedName>.lua` link module at the package root, mirroring a Wally install."""
+    for sibling in read_siblings(package_dir):
+        sibling_dir = SRC_DIR / sibling
+        if not (sibling_dir / "src").is_dir():
+            print(f"Error: sibling '{sibling}' of '{package_dir.name}' has no {sibling_dir / 'src'}")
+            return False
+        if sibling in _siblings_in_progress:
+            print(f"Error: sibling cycle through '{sibling}'")
+            return False
+        _siblings_in_progress.add(sibling)
+        ok = setup_package(sibling_dir)
+        _siblings_in_progress.discard(sibling)
+        if not ok:
+            return False
+
+        formatted = parse_wally_toml(sibling_dir / "wally.toml").get("custom", {}).get("formattedName") or sibling
+        dest = package_dir / "_Index" / f"{SIBLING_SCOPE_PREFIX}{sibling}@{SIBLING_VERSION}" / sibling
+        if dest.exists():
+            shutil.rmtree(dest)
+        shutil.copytree(
+            sibling_dir,
+            dest,
+            ignore=shutil.ignore_patterns("sourcemap.json", "wally.lock", "*.md", "Packages"),
+        )
+        # Lune resolves the folder through init.luau; Rojo turns the folder into a ModuleScript.
+        (dest / "init.luau").write_text(f'return require("@self/src/{formatted}")\n', encoding="utf-8")
+        (package_dir / f"{formatted}.lua").write_text(
+            f'return require("./_Index/{SIBLING_SCOPE_PREFIX}{sibling}@{SIBLING_VERSION}/{sibling}")\n',
+            encoding="utf-8",
+        )
+        print(f"Linked sibling '{sibling}' into {package_dir.name} as {formatted}")
+    return True
+
+
 def setup_package(package_dir: Path) -> bool:
     """Setup a single package directory."""
     raw_name = package_dir.name
@@ -129,6 +182,11 @@ def setup_package(package_dir: Path) -> bool:
         # Remove the empty Packages directory
         print("Removing original Packages directory...")
         packages_dir.rmdir()
+
+    # Vendor unpublished in-repo siblings LAST: the move above would otherwise nest the
+    # registry `_Index` inside an `_Index` that link_siblings already created.
+    if not link_siblings(package_dir):
+        return False
 
     return True
 

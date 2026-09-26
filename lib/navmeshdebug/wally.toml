@@ -1,0 +1,21 @@
+[package]
+name = "raild3x/navmeshdebug"
+description = "Interactive NavMesh / CDT editor (debug tooling)."
+authors = ["Logan Hunt (Raildex)"]
+version = "0.1.0"
+license = "MIT"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+
+[custom]
+# Marks the package as beta in the generated README (existing convention)
+unreleased = true
+# The properly capitalized and spaced name of the library
+formattedName = "NavMeshDebug"
+# Unpublished in-repo dependencies, vendored by setup (see scripts/setup_package_for_testing.py)
+siblings = "navmesh,constraineddelaunaydebug"
+# The intro page for the documentation
+docsLink = "NavMeshDebug"
+
+[dependencies]
+Signal = "howmanysmall/better-signal@2.1.0"

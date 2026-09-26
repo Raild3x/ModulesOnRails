@@ -1,0 +1,18 @@
+[package]
+name = "raild3x/constraineddelaunay"
+description = "Constrained Delaunay triangulation with winding-group classification."
+authors = ["Logan Hunt (Raildex)"]
+version = "0.1.0"
+license = "MIT"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+
+[custom]
+# Marks the package as beta in the generated README (existing convention)
+unreleased = true
+# The properly capitalized and spaced name of the library
+formattedName = "ConstrainedDelaunay"
+# The intro page for the documentation
+docsLink = "ConstrainedDelaunay"
+
+[dependencies]

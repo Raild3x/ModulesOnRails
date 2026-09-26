@@ -32,21 +32,25 @@ _DEP_SECTIONS = {"[dependencies]", "[server-dependencies]", "[dev-dependencies]"
 
 
 def _has_wally_dependencies(package_dir: Path) -> bool:
-    """Return True if wally.toml declares at least one dependency."""
+    """Return True if wally.toml declares at least one dependency, including
+    unpublished in-repo `[custom] siblings` (vendored by setup)."""
     wally_toml = package_dir / "wally.toml"
     if not wally_toml.is_file():
         return False
 
-    in_dep_section = False
+    section = ""
     for raw_line in wally_toml.read_text(encoding="utf-8").splitlines():
         line = raw_line.split("#", 1)[0].strip()
         if not line:
             continue
         if line.startswith("["):
-            in_dep_section = line in _DEP_SECTIONS
+            section = line
             continue
-        if in_dep_section and "=" in line:
+        if section in _DEP_SECTIONS and "=" in line:
             return True
+        if section == "[custom]" and line.startswith("siblings") and "=" in line:
+            if line.split("=", 1)[1].strip().strip("\"'"):
+                return True
     return False
 
 

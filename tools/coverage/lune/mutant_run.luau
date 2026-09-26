@@ -63,11 +63,16 @@ local tiniest = dynRequire(ROOT .. "test/tiniest/tiniest_for_lune").configure {
 local specFiles: { string } = {}
 collectSpecs((buildDir :: string) .. "/" .. sourceRoot, specFiles)
 
+-- Label specs relative to the build dir (e.g. "src/Tests/X.spec"), exactly as LuneRunner
+-- does: tiniest snapshot keys are derived from test labels, so a different label here makes
+-- every snapshot() look new and turns the mutation baseline red.
+local buildPrefix = (buildDir :: string) .. "/"
 local tests = tiniest.collect_tests(function()
 	local describe = tiniest.describe
 	for _, file in specFiles do
 		local requirePath = ROOT .. (file:gsub("%.luau$", ""))
-		describe(file, function()
+		local label = (file:gsub("^" .. buildPrefix:gsub("([%-%.%+])", "%%%1"), ""):gsub("%.luau$", ""))
+		describe(label, function()
 			dynRequire(requirePath)(tiniest)
 		end)
 	end

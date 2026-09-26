@@ -16,6 +16,11 @@ See `.github/agents/domain.md` for how the engineering skills consume these file
 - [lib/remotecomponent/CONTEXT.md](lib/remotecomponent/CONTEXT.md) — networked
   component remotes: the remote namespace, extension namespaces, internal vs
   exposed remotes, the registration window, and the SRC handshake.
+- [lib/constraineddelaunay/CONTEXT.md](lib/constraineddelaunay/CONTEXT.md) — constrained
+  Delaunay triangulation: constraint and input edges, Steiner vertices, winding groups,
+  refinement, plain state.
+- [lib/navmesh/CONTEXT.md](lib/navmesh/CONTEXT.md) — layered 2.5D navigation mesh: floors,
+  rings, obstacles, areas, seams, links, tiles, clearance, snapping.
 
 Other packages under `lib/` do not have a `CONTEXT.md` yet; they are created lazily
 (via `/domain-modeling`) when a term or decision actually needs pinning down.

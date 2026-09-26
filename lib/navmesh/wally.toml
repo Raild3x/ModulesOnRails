@@ -1,0 +1,20 @@
+[package]
+name = "raild3x/navmesh"
+description = "Layered 2.5D navigation mesh with clearance-aware pathfinding."
+authors = ["Logan Hunt (Raildex)"]
+version = "0.1.0"
+license = "MIT"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+
+[custom]
+# Marks the package as beta in the generated README (existing convention)
+unreleased = true
+# The properly capitalized and spaced name of the library
+formattedName = "NavMesh"
+# Unpublished in-repo dependencies, vendored by setup (see scripts/setup_package_for_testing.py)
+siblings = "constraineddelaunay"
+# The intro page for the documentation
+docsLink = "NavMesh"
+
+[dependencies]
