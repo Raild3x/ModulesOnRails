@@ -47,6 +47,21 @@ return function(t: tiniest)
 		return ring
 	end
 
+	-- The twisted quad's surface: diagonal B(12,0)-D(0,8) splits it into ABD (all at y = 0)
+	-- and BCD with C = (10, 10) lifted to 5.
+	local function twistedHeight(x: number, z: number): number
+		if CDT.Orient2D(12, 0, 0, 8, x, z) >= 0 then -- A's side of BD (C's side is negative)
+			return 0
+		end
+		local det = (10 - 12) * (8 - 0) - (0 - 12) * (10 - 0)
+		local wc = ((x - 12) * (8 - 0) - (0 - 12) * (z - 0)) / det
+		return 5 * wc
+	end
+	local function straddles(pa: any, pb: any, pc: any): boolean
+		local cx, cz = (pa.X + pb.X + pc.X) / 3, (pa.Z + pb.Z + pc.Z) / 3
+		return math.abs((pa.Y + pb.Y + pc.Y) / 3 - twistedHeight(cx, cz)) > 1e-4
+	end
+
 	describe("Build fixtures", function()
 		test("every fixture builds into structurally valid, network-safe state", function()
 			for _, scenario in Fixtures.All do
@@ -105,21 +120,6 @@ return function(t: tiniest)
 				expect(math.abs(p.Y - expected) < 1e-5).with_context(`vertex {v} at ({p.X}, {p.Z}): {p.Y}`).is_true()
 			end
 		end)
-
-		-- The twisted quad's surface: diagonal B(12,0)-D(0,8) splits it into ABD (all at y = 0)
-		-- and BCD with C = (10, 10) lifted to 5.
-		local function twistedHeight(x: number, z: number): number
-			if CDT.Orient2D(12, 0, 0, 8, x, z) >= 0 then -- A's side of BD (C's side is negative)
-				return 0
-			end
-			local det = (10 - 12) * (8 - 0) - (0 - 12) * (10 - 0)
-			local wc = ((x - 12) * (8 - 0) - (0 - 12) * (z - 0)) / det
-			return 5 * wc
-		end
-		local function straddles(pa: any, pb: any, pc: any): boolean
-			local cx, cz = (pa.X + pb.X + pc.X) / 3, (pa.Z + pb.Z + pc.Z) / 3
-			return math.abs((pa.Y + pb.Y + pc.Y) / 3 - twistedHeight(cx, cz)) > 1e-4
-		end
 
 		test("a non-planar ring's diagonal is a crease no triangle crosses", function()
 			local mesh = NavMesh.Build(Fixtures.TwistedQuad.Desc)
@@ -395,6 +395,168 @@ return function(t: tiniest)
 		end)
 	end)
 
+	describe("Tiling (SR3)", function()
+		local function totalArea(mesh: any): number
+			local total = 0
+			for tri = 1, Storage.TriangleCount(mesh) do
+				local a, b, c = Storage.GetTriangle(mesh, tri)
+				local pa, pb, pc = Storage.GetVertex(mesh, a), Storage.GetVertex(mesh, b), Storage.GetVertex(mesh, c)
+				total += ((pb.X - pa.X) * (pc.Z - pa.Z) - (pc.X - pa.X) * (pb.Z - pa.Z)) / 2
+			end
+			return total
+		end
+		local function withTileSize(desc: any, size: number): any
+			local copy = table.clone(desc)
+			copy.TileSize = size
+			return copy
+		end
+
+		test("fixtures split into tiles keep structure, region, walls and total area", function()
+			for _, scenario in Fixtures.All do
+				local single = NavMesh.Build(withTileSize(scenario.Desc, 1024))
+				for _, size in { 3, 5.5, 8 } do
+					local context = `{scenario.Name} TileSize {size}`
+					local mesh = NavMesh.Build(withTileSize(scenario.Desc, size))
+					expect(Storage.TileCount(mesh) > 1).with_context(context).is_true()
+					local floor = scenario.Desc.Floors.Ground
+					for _, bad in
+						{
+							MeshChecks.Structure(mesh),
+							MeshChecks.Region(mesh, 1, floor, 1 / 128, 0.37),
+							MeshChecks.Walls(mesh, 1, floor, 1 / 128),
+							MeshChecks.InTiles(mesh),
+						}
+					do
+						expect(#bad).with_context(`{context}: {bad[1]}`).is(0)
+					end
+					-- Tile lines add hot pixels, and rerouting through one moves an edge by at most
+					-- half a grid pixel, so the area may drift by up to perimeter x 1/512.
+					local perimeter = 0
+					local rings = table.clone(floor.Walkable)
+					table.move(floor.Obstacles or {}, 1, #(floor.Obstacles or {}), #rings + 1, rings)
+					for _, ring in rings do
+						for i, p in ring do
+							local q = ring[i % #ring + 1]
+							perimeter += vector.magnitude(vector.create(q.X - p.X, 0, q.Z - p.Z))
+						end
+					end
+					local drift = math.abs(totalArea(mesh) - totalArea(single))
+					expect(drift <= perimeter / 512).with_context(`{context}: area drift {drift}`).is_true()
+				end
+			end
+		end)
+
+		test("heights and creases survive tiling", function()
+			local mesh = NavMesh.Build(withTileSize(Fixtures.SplitLevel.Desc, 3))
+			for v = 1, Storage.VertexCount(mesh) do
+				local p = Storage.GetVertex(mesh, v)
+				expect(math.abs(p.Y - math.max(0, (p.X - 10) * 0.5)) < 1e-5).with_context(`vertex {v}`).is_true()
+			end
+			local twisted = NavMesh.Build(withTileSize(Fixtures.TwistedQuad.Desc, 3))
+			for tri = 1, Storage.TriangleCount(twisted) do
+				local a, b, c = Storage.GetTriangle(twisted, tri)
+				expect(
+						straddles(
+							Storage.GetVertex(twisted, a),
+							Storage.GetVertex(twisted, b),
+							Storage.GetVertex(twisted, c)
+						)
+					)
+					.with_context(`TwistedQuad triangle {tri}`)
+					.never_is_true()
+			end
+		end)
+
+		test("tiles line up on the world grid, and empty tiles are skipped", function()
+			-- An L-shaped floor: its bounding box has a 4x4 grid of 5-stud tiles, of which the
+			-- empty top-right corner holds none.
+			local mesh = NavMesh.Build {
+				TileSize = 5,
+				Floors = { Ground = { Walkable = { flat(0, { 0, 0, 20, 0, 20, 10, 10, 10, 10, 20, 0, 20 }) } } },
+			}
+			expect(Storage.TileCount(mesh)).is(12)
+			for tile = 1, Storage.TileCount(mesh) do
+				local x0, z0, x1, z1 = Storage.GetTileBounds(mesh, tile)
+				expect(x0 % 5 == 0 and z0 % 5 == 0 and x1 - x0 == 5 and z1 - z0 == 5)
+					.with_context(`tile {tile}`)
+					.is_true()
+			end
+		end)
+
+		test("random sloped floors with random tile sizes", function()
+			-- Every walkable ring lies on y = 0.2x - 0.1z, so heights have one exact answer.
+			local function plane(ring: { vector }): { vector }
+				local out = {}
+				for i, p in ring do
+					out[i] = vector.create(p.X, 0.2 * p.X - 0.1 * p.Z, p.Z)
+				end
+				return out
+			end
+			for seed = 1, 30 do
+				local rng = makeRng(seed + 100)
+				local floor = { Walkable = {}, Obstacles = {}, Areas = {} }
+				for _ = 1, math.floor(rng(1, 4)) do
+					table.insert(floor.Walkable, plane(star(rng, rng(0, 20), rng(0, 20), 4, 14)))
+				end
+				for _ = 1, math.floor(rng(0, 5)) do
+					table.insert(floor.Obstacles, star(rng, rng(0, 20), rng(0, 20), 1, 5))
+				end
+				for _ = 1, math.floor(rng(0, 3)) do
+					table.insert(floor.Areas, { Polygon = star(rng, rng(0, 20), rng(0, 20), 2, 6), Area = 2 })
+				end
+				local size = math.floor(rng(2, 12) * 256) / 256
+				local mesh = NavMesh.Build { TileSize = size, Floors = { Ground = floor } }
+				for _, bad in
+					{
+						MeshChecks.Structure(mesh),
+						MeshChecks.Region(mesh, 1, floor, 1 / 128, 0.9),
+						MeshChecks.Walls(mesh, 1, floor, 1 / 128),
+						MeshChecks.InTiles(mesh),
+					}
+				do
+					expect(#bad).with_context(`seed {seed} TileSize {size}: {bad[1]}`).is(0)
+				end
+				for v = 1, Storage.VertexCount(mesh) do
+					local p = Storage.GetVertex(mesh, v)
+					expect(math.abs(p.Y - (0.2 * p.X - 0.1 * p.Z)) < 1e-3)
+						.with_context(`seed {seed} vertex ({p.X}, {p.Z}) height {p.Y}`)
+						.is_true()
+				end
+			end
+		end)
+
+		test("the wall check catches an unlinked tile border (negative control)", function()
+			local mesh = NavMesh.Build(withTileSize(Fixtures.SplitLevel.Desc, 5))
+			expect(#MeshChecks.Walls(mesh, 1, Fixtures.SplitLevel.Desc.Floors.Ground, 1 / 128)).is(0)
+			-- Cut one cross-tile link, on both sides.
+			for tri = 1, Storage.TriangleCount(mesh) do
+				for e = 1, 3 do
+					local n = Storage.GetNeighbor(mesh, tri, e)
+					if n ~= 0 and Storage.GetTriangleTile(mesh, n) ~= Storage.GetTriangleTile(mesh, tri) then
+						Storage.SetNeighbor(mesh, tri, e, 0)
+						for e2 = 1, 3 do
+							if Storage.GetNeighbor(mesh, n, e2) == tri then
+								Storage.SetNeighbor(mesh, n, e2, 0)
+							end
+						end
+						expect(#MeshChecks.Walls(mesh, 1, Fixtures.SplitLevel.Desc.Floors.Ground, 1 / 128) > 0).is_true()
+						return
+					end
+				end
+			end
+			error("no cross-tile link found")
+		end)
+
+		test("TileSize must be a positive number of studs within range", function()
+			local floors = { Ground = { Walkable = { flat(0, { 0, 0, 10, 0, 10, 10 }) } } }
+			for _, bad in { 0, -4, 40000, "8" :: any } do
+				expect(function()
+					NavMesh.Build { TileSize = bad, Floors = floors }
+				end).fails_with("TileSize must be a number of studs")
+			end
+		end)
+	end)
+
 	describe("ToDrawList", function()
 		test("draws triangles per floor, walls on open edges, and tile bounds on request", function()
 			local mesh = NavMesh.Build(Fixtures.SplitLevel.Desc)
@@ -409,7 +571,7 @@ return function(t: tiniest)
 				xs[primitive.Points[1]] = true
 				xs[primitive.Points[3]] = true
 			end
-			expect(xs[0] and xs[20] and xs[10]).is_true() -- tile bounds 0..20 x 0..10 studs
+			expect(xs[0] and xs[32]).is_true() -- one default 32-stud tile at the origin
 			expect(counts.Walls > 0).is_true()
 			expect(#NavMesh.ToDrawList(mesh, { Triangles = false })).is(0)
 		end)

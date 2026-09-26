@@ -206,6 +206,45 @@ is negligible.
   layout avoids conversions at the boundary. This is unmeasured.
 - The independent audit has been asked to add vector-idiomatic variants.
 
+## Default TileSize (ticket 13, 2026-09-26)
+- **Command:** `python tools/navmesh/bench/tilesize.py --runs 3 --rounds 3 --map 256`, in
+  Studio. The core is `tools/navmesh/bench/TileSize.luau`; a Lune gauge is at
+  `tilesize_lune.luau`.
+- **Map:** 256×256 studs, flat, with 655 randomly rotated box obstacles (2-8 studs across,
+  one per 100 square studs) and 64 area patches. The seed is fixed.
+- **Method:** medians of 3 Studio runs, each the median of 3 interleaved rounds with the order
+  rotated.
+- **Columns:**
+  - **build:** the full-map `NavMesh.Build`, which is the one-off load cost;
+  - **tris** (triangles) and **verts** (vertices): the mesh size, which drives search and
+    memory;
+  - **tile:** the one-tile rebuild proxy. It is a `Build` of one tile's worth of the same
+    map: the walkable tile square plus the obstacles centred in it. The median is over up to
+    16 tiles per round. This is roughly what `Update` redoes per dirty tile, without the
+    clearance recompute (P4).
+- **Cross-check:** the triangle and vertex counts are identical in Studio and in the Lune gauge.
+
+| TileSize (studs) | build ms | tris | verts | tiles | tile ms | build spread (per run) |
+|---|---|---|---|---|---|---|
+| 8 | 849 | 7,823 (+91%) | 5,898 | 1,024 | 0.24 | 849/830/850 |
+| 16 | 470 | 5,477 (+34%) | 4,292 | 256 | 0.80 | 470/449/479 |
+| 32 | 324 | 4,605 (+12%) | 3,628 | 64 | 1.90 | 329/320/324 |
+| 64 | 281 | 4,255 (+4%) | 3,359 | 16 | 5.92 | 283/278/281 |
+| 128 | 265 | 4,094 (base) | 3,220 | 4 | 29.34 | 265/251/265 |
+
+**Reading:**
+- **Tile borders cost triangles.** Every border splits the triangles crossing it, so the mesh
+  grows by 91% at 8 studs and 34% at 16. That cost is paid by every search and in memory.
+- **Rebuild cost grows faster than the tile area**, about 3x per doubling and 5x from 64 to
+  128. Snap rounding is all-pairs within the rebuilt region. At 128 studs, one dirty tile
+  (29 ms) blows a 16 ms frame on its own.
+- **Build** is dominated by the floor-wide snap rounding (265 ms even with 4 tiles). Small
+  tiles add per-tile triangulation overhead on top of that. The floor-wide snap rounding is
+  its own perf item: its all-pairs scan is the `ponytail:` ceiling in `Quantize.luau`.
+- **Recommendation: 32 studs.** A door-sized obstacle dirties 1-4 tiles, about 2-8 ms per
+  `Update`, which fits a frame. It costs 12% more triangles than a single tile. 64 studs suits
+  meshes that almost never update (4% overhead, but 6-24 ms per update).
+
 ## Not measured (flagged)
 - Remote transfer time and payload size per layout (needs a live server/client session).
 - Locality on a real CDT's vertex and triangle ordering. The grid mesh has near-ideal locality,

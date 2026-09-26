@@ -148,4 +148,58 @@ function MeshChecks.Region(mesh: any, floorId: number, floor: any, tolerance: nu
 	return found
 end
 
+--[=[
+	Every wall (an edge with no neighbour) lies on an authored walkable or obstacle edge, within
+	`tolerance`. A tile border left unlinked, or split differently on its two sides (a
+	T-junction), shows up as a wall off every authored edge.
+]=]
+function MeshChecks.Walls(mesh: any, floorId: number, floor: any, tolerance: number): { string }
+	local found = {}
+	local rings = table.clone(floor.Walkable)
+	for _, ring in floor.Obstacles or {} do
+		table.insert(rings, ring)
+	end
+	for t = 1, Storage.TriangleCount(mesh) do
+		if Storage.GetTriangleFloor(mesh, t) ~= floorId then
+			continue
+		end
+		for e = 1, 3 do
+			if Storage.GetNeighbor(mesh, t, e) ~= 0 then
+				continue
+			end
+			local a, b = edgeVerts(mesh, t, e)
+			local pa, pb = Storage.GetVertex(mesh, a), Storage.GetVertex(mesh, b)
+			for _, fraction in { 0.25, 0.5, 0.75 } do
+				local x, z = pa.X + (pb.X - pa.X) * fraction, pa.Z + (pb.Z - pa.Z) * fraction
+				local best = math.huge
+				for _, ring in rings do
+					best = math.min(best, MeshChecks.EdgeDistance(ring, x, z))
+				end
+				if best > tolerance then
+					table.insert(found, `triangle {t} edge {e} is a wall off every authored edge near ({x}, {z})`)
+					break
+				end
+			end
+		end
+	end
+	return found
+end
+
+--[=[
+	Every triangle lies within its tile's bounds.
+]=]
+function MeshChecks.InTiles(mesh: any): { string }
+	local found = {}
+	for t = 1, Storage.TriangleCount(mesh) do
+		local x0, z0, x1, z1 = Storage.GetTileBounds(mesh, Storage.GetTriangleTile(mesh, t))
+		for _, v in { Storage.GetTriangle(mesh, t) } do
+			local p = Storage.GetVertex(mesh, v)
+			if p.X < x0 or p.X > x1 or p.Z < z0 or p.Z > z1 then
+				table.insert(found, `triangle {t} leaves its tile at ({p.X}, {p.Z})`)
+			end
+		end
+	end
+	return found
+end
+
 return MeshChecks
