@@ -36,7 +36,12 @@ local function classified(name: string, input: CDT.TriangulateInput)
 		local keep = CDT.GetWinding(tri, t, 1) > 0
 			and (groups < 2 or CDT.GetWinding(tri, t, 2) == 0)
 			and (groups < 3 or CDT.GetWinding(tri, t, 3) > 0)
-		table.insert(list, { Kind = "Tri", Points = { ax, 0, ay, bx, 0, by, cx, 0, cy }, Color = if keep then KEPT else EXCLUDED, Layer = "Triangles" })
+		table.insert(list, {
+			Kind = "Tri",
+			Points = { ax, 0, ay, bx, 0, by, cx, 0, cy },
+			Color = if keep then KEPT else EXCLUDED,
+			Layer = "Triangles",
+		})
 	end
 	-- Constraints and vertices on top, from the standard view (its triangles are dropped).
 	for _, primitive in CDT.ToDrawList(tri) do
@@ -54,17 +59,20 @@ for _, scenario in CDT.Fixtures.All do
 end
 
 -- A walkable courtyard with overlapping obstacles and a hole, clipped to a tile.
-classified("Classified_Courtyard", CDT.Fixtures.ToInput({
-	Name = "Courtyard",
-	Rings = {
-		{ Group = 1, Points = { 0, 0, 30, 0, 30, 20, 18, 20, 18, 30, 0, 30 } }, -- L-shaped walkable
-		{ Group = 1, Points = { 4, 4, 4, 8, 8, 8, 8, 4 } }, -- CW hole in the walkable ring
-		{ Group = 2, Points = { 12, 3, 20, 3, 20, 9, 12, 9 } }, -- obstacle
-		{ Group = 2, Points = { 16, 6, 24, 6, 26, 14, 16, 12 } }, -- overlapping obstacle
-		{ Group = 2, Points = { 5, 18, 11, 16, 13, 24, 7, 26 } }, -- rotated obstacle
-		{ Group = 3, Points = { -2, -2, 26, -2, 26, 32, -2, 32 } }, -- tile clip (x < 26)
-	},
-}))
+classified(
+	"Classified_Courtyard",
+	CDT.Fixtures.ToInput {
+		Name = "Courtyard",
+		Rings = {
+			{ Group = 1, Points = { 0, 0, 30, 0, 30, 20, 18, 20, 18, 30, 0, 30 } }, -- L-shaped walkable
+			{ Group = 1, Points = { 4, 4, 4, 8, 8, 8, 8, 4 } }, -- CW hole in the walkable ring
+			{ Group = 2, Points = { 12, 3, 20, 3, 20, 9, 12, 9 } }, -- obstacle
+			{ Group = 2, Points = { 16, 6, 24, 6, 26, 14, 16, 12 } }, -- overlapping obstacle
+			{ Group = 2, Points = { 5, 18, 11, 16, 13, 24, 7, 26 } }, -- rotated obstacle
+			{ Group = 3, Points = { -2, -2, 26, -2, 26, 32, -2, 32 } }, -- tile clip (x < 26)
+		},
+	}
+)
 
 add("CrossingX", { Coords = { 0, 0, 10, 10, 0, 10, 10, 0 }, Edges = { 1, 2, 3, 4 }, EdgeGroups = { 0, 0 } })
 

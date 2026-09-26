@@ -1,0 +1,151 @@
+-- Authors: Logan Hunt (Raildex)
+-- September 25, 2026
+-- Independent checks over built mesh state, for the NavMesh specs. Reads go through Storage
+-- accessors only (never raw fields), so a layout swap keeps these valid. Each check returns a
+-- list of violations; empty means it holds.
+
+local Storage = require("../../Storage")
+local CDT = require("../../../ConstrainedDelaunay")
+
+local Orient2D = CDT.Orient2D
+
+local MeshChecks = {}
+
+local function edgeVerts(mesh: any, t: number, e: number): (number, number)
+	local verts = { Storage.GetTriangle(mesh, t) }
+	return verts[e % 3 + 1], verts[(e + 1) % 3 + 1]
+end
+
+--[=[
+	Every triangle is CCW with positive area in stored (X, Z), and neighbours are symmetric:
+	each neighbour points back across the same edge, with the edge's vertices reversed.
+]=]
+function MeshChecks.Structure(mesh: any): { string }
+	local found = {}
+	for t = 1, Storage.TriangleCount(mesh) do
+		local a, b, c = Storage.GetTriangle(mesh, t)
+		local pa, pb, pc = Storage.GetVertex(mesh, a), Storage.GetVertex(mesh, b), Storage.GetVertex(mesh, c)
+		if Orient2D(pa.X, pa.Z, pb.X, pb.Z, pc.X, pc.Z) <= 0 then
+			table.insert(found, `triangle {t} is not CCW`)
+		end
+		for e = 1, 3 do
+			local n = Storage.GetNeighbor(mesh, t, e)
+			if n == 0 then
+				continue
+			end
+			local p, q = edgeVerts(mesh, t, e)
+			local back = false
+			for e2 = 1, 3 do
+				if Storage.GetNeighbor(mesh, n, e2) == t then
+					local p2, q2 = edgeVerts(mesh, n, e2)
+					back = p2 == q and q2 == p
+				end
+			end
+			if not back then
+				table.insert(found, `triangle {t} edge {e}: neighbour {n} does not point back across the same edge`)
+			end
+		end
+	end
+	return found
+end
+
+-- Even-odd point in polygon.
+function MeshChecks.Inside(ring: { any }, x: number, z: number): boolean
+	local inside = false
+	local n = #ring
+	for i = 1, n do
+		local p, q = ring[i], ring[i % n + 1]
+		if (p.Z > z) ~= (q.Z > z) and x < p.X + (z - p.Z) * (q.X - p.X) / (q.Z - p.Z) then
+			inside = not inside
+		end
+	end
+	return inside
+end
+
+-- Distance from (x, z) to the ring's boundary.
+function MeshChecks.EdgeDistance(ring: { any }, x: number, z: number): number
+	local best = math.huge
+	local n = #ring
+	for i = 1, n do
+		local p, q = ring[i], ring[i % n + 1]
+		local dx, dz = q.X - p.X, q.Z - p.Z
+		local len2 = dx * dx + dz * dz
+		local s = if len2 > 0 then math.clamp(((x - p.X) * dx + (z - p.Z) * dz) / len2, 0, 1) else 0
+		local ex, ez = p.X + s * dx - x, p.Z + s * dz - z
+		best = math.min(best, math.sqrt(ex * ex + ez * ez))
+	end
+	return best
+end
+
+-- Whether the point is in walkable minus obstacles, and its distance to any of their edges.
+local function classify(floor: any, x: number, z: number): (boolean, number)
+	local near = math.huge
+	local walk = false
+	for _, ring in floor.Walkable do
+		walk = walk or MeshChecks.Inside(ring, x, z)
+		near = math.min(near, MeshChecks.EdgeDistance(ring, x, z))
+	end
+	local blocked = false
+	for _, ring in floor.Obstacles or {} do
+		blocked = blocked or MeshChecks.Inside(ring, x, z)
+		near = math.min(near, MeshChecks.EdgeDistance(ring, x, z))
+	end
+	return walk and not blocked, near
+end
+
+--[=[
+	The kept region matches the authored one (walkable rings minus obstacles), away from ring
+	edges by more than `tolerance` (snapping moves edges by up to half a grid pixel):
+	- every triangle's centroid is inside it;
+	- every sample point on a `step` lattice that is inside it lies in some triangle of `floor`.
+]=]
+function MeshChecks.Region(mesh: any, floorId: number, floor: any, tolerance: number, step: number): { string }
+	local found = {}
+	local minX, minZ, maxX, maxZ = math.huge, math.huge, -math.huge, -math.huge
+	local tris = {}
+	for t = 1, Storage.TriangleCount(mesh) do
+		if Storage.GetTriangleFloor(mesh, t) ~= floorId then
+			continue
+		end
+		local a, b, c = Storage.GetTriangle(mesh, t)
+		local pa, pb, pc = Storage.GetVertex(mesh, a), Storage.GetVertex(mesh, b), Storage.GetVertex(mesh, c)
+		table.insert(tris, { pa, pb, pc })
+		local cx, cz = (pa.X + pb.X + pc.X) / 3, (pa.Z + pb.Z + pc.Z) / 3
+		local keep, near = classify(floor, cx, cz)
+		if not keep and near > tolerance then
+			table.insert(found, `triangle {t} centroid ({cx}, {cz}) is outside the walkable region`)
+		end
+	end
+	for _, ring in floor.Walkable do
+		for _, p in ring do
+			minX, maxX = math.min(minX, p.X), math.max(maxX, p.X)
+			minZ, maxZ = math.min(minZ, p.Z), math.max(maxZ, p.Z)
+		end
+	end
+	for x = minX + step / 2, maxX, step do
+		for z = minZ + step / 2, maxZ, step do
+			local keep, near = classify(floor, x, z)
+			if not keep or near <= tolerance then
+				continue
+			end
+			local covered = false
+			for _, tri in tris do
+				local pa, pb, pc = tri[1], tri[2], tri[3]
+				if
+					Orient2D(pa.X, pa.Z, pb.X, pb.Z, x, z) >= 0
+					and Orient2D(pb.X, pb.Z, pc.X, pc.Z, x, z) >= 0
+					and Orient2D(pc.X, pc.Z, pa.X, pa.Z, x, z) >= 0
+				then
+					covered = true
+					break
+				end
+			end
+			if not covered then
+				table.insert(found, `walkable point ({x}, {z}) is not covered by any triangle`)
+			end
+		end
+	end
+	return found
+end
+
+return MeshChecks

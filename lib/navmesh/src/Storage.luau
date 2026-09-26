@@ -1,0 +1,260 @@
+--!strict
+--!native
+-- Authors: Logan Hunt (Raildex)
+-- September 25, 2026
+--[=[
+	@class NavMeshStorage
+	@private
+
+	The ONLY module that knows the mesh state's memory layout (ruling S1). Everything else goes
+	through these accessors, so the layout can be swapped by replacing this file. The contract
+	suite in `Tests/NavMesh.Storage.spec.luau` must pass. Inlined copies of these accessors, if
+	any are ever made for speed, carry a `-- inlined: Storage.<fn>` tag: grep for it before
+	changing the layout.
+
+	**Layout (R4b):**
+	- vertices are native `vector` values (X, height, Z), with f32 components;
+	- i32 buffers hold the triangle vertices, the neighbours, and each triangle's floor, area and
+	  tile;
+	- plain arrays hold the floor names and the tile table.
+
+	**Conventions:**
+	- Triangles are CCW in the (X, Z) plane, i.e. `Orient2D(ax, az, bx, bz, cx, cz) > 0`.
+	- Edge i is the edge opposite vertex i, and neighbour 0 means none.
+	- Each tile owns one contiguous triangle range.
+
+	The state is plain data and passes `PlainData.Check`. Accessors arrive with the tickets that
+	need them: links, obstacles, clearance and freeing slabs come later.
+]=]
+
+local I32 = 4
+local TRI_SLOTS = 3
+local MIN_CAPACITY = 16
+
+export type State = {
+	FloorNames: { string },
+	VertexCount: number,
+	Vertices: { vector },
+	TriangleCount: number,
+	TriangleCapacity: number,
+	TriVerts: buffer, -- i32 x3 per triangle (CCW in X, Z)
+	TriNeighbors: buffer, -- i32 x3 per triangle; across edge i (opposite vertex i); 0 = none
+	TriFloor: buffer, -- i32 per triangle
+	TriArea: buffer, -- i32 per triangle
+	TriTile: buffer, -- i32 per triangle
+	TileFloor: { number },
+	TileBounds: { number }, -- minX, minZ, maxX, maxZ per tile (studs)
+	TileFirst: { number }, -- first triangle of the tile's range
+	TileTriangles: { number }, -- triangle count of the tile's range
+}
+
+local Storage = {}
+
+local function grown(old: buffer, usedBytes: number, newBytes: number): buffer
+	local fresh = buffer.create(newBytes)
+	buffer.copy(fresh, 0, old, 0, usedBytes)
+	return fresh
+end
+
+local function ensureTriangles(s: State, needed: number)
+	if needed <= s.TriangleCapacity then
+		return
+	end
+	local capacity = s.TriangleCapacity
+	while capacity < needed do
+		capacity *= 2
+	end
+	local used = s.TriangleCount
+	s.TriVerts = grown(s.TriVerts, used * TRI_SLOTS * I32, capacity * TRI_SLOTS * I32)
+	s.TriNeighbors = grown(s.TriNeighbors, used * TRI_SLOTS * I32, capacity * TRI_SLOTS * I32)
+	s.TriFloor = grown(s.TriFloor, used * I32, capacity * I32)
+	s.TriArea = grown(s.TriArea, used * I32, capacity * I32)
+	s.TriTile = grown(s.TriTile, used * I32, capacity * I32)
+	s.TriangleCapacity = capacity
+end
+
+--[=[
+	@within NavMeshStorage
+	Creates an empty state.
+]=]
+function Storage.New(): State
+	return {
+		FloorNames = {},
+		VertexCount = 0,
+		Vertices = {},
+		TriangleCount = 0,
+		TriangleCapacity = MIN_CAPACITY,
+		TriVerts = buffer.create(MIN_CAPACITY * TRI_SLOTS * I32),
+		TriNeighbors = buffer.create(MIN_CAPACITY * TRI_SLOTS * I32),
+		TriFloor = buffer.create(MIN_CAPACITY * I32),
+		TriArea = buffer.create(MIN_CAPACITY * I32),
+		TriTile = buffer.create(MIN_CAPACITY * I32),
+		TileFloor = {},
+		TileBounds = {},
+		TileFirst = {},
+		TileTriangles = {},
+	}
+end
+
+--[=[
+	@within NavMeshStorage
+	Pre-sizes storage for at least this many triangles (vertices live in a plain array).
+]=]
+function Storage.Reserve(s: State, triangleCount: number)
+	ensureTriangles(s, triangleCount)
+end
+
+function Storage.VertexCount(s: State): number
+	return s.VertexCount
+end
+
+function Storage.TriangleCount(s: State): number
+	return s.TriangleCount
+end
+
+function Storage.TileCount(s: State): number
+	return #s.TileFloor
+end
+
+function Storage.FloorCount(s: State): number
+	return #s.FloorNames
+end
+
+--[=[
+	@within NavMeshStorage
+	Appends a vertex (X, height, Z in studs) and returns its id.
+]=]
+function Storage.AddVertex(s: State, position: vector): number
+	local v = s.VertexCount + 1
+	s.Vertices[v] = position
+	s.VertexCount = v
+	return v
+end
+
+function Storage.GetVertex(s: State, v: number): vector
+	return s.Vertices[v]
+end
+
+function Storage.GetTriangle(s: State, t: number): (number, number, number)
+	local o = (t - 1) * TRI_SLOTS * I32
+	local b = s.TriVerts
+	return buffer.readi32(b, o), buffer.readi32(b, o + I32), buffer.readi32(b, o + 2 * I32)
+end
+
+function Storage.SetTriangle(s: State, t: number, a: number, b: number, c: number)
+	local o = (t - 1) * TRI_SLOTS * I32
+	local buf = s.TriVerts
+	buffer.writei32(buf, o, a)
+	buffer.writei32(buf, o + I32, b)
+	buffer.writei32(buf, o + 2 * I32, c)
+end
+
+--[=[
+	@within NavMeshStorage
+	The triangle across edge `e` (1..3, opposite vertex `e`) of `t`, or 0.
+]=]
+function Storage.GetNeighbor(s: State, t: number, e: number): number
+	return buffer.readi32(s.TriNeighbors, ((t - 1) * TRI_SLOTS + e - 1) * I32)
+end
+
+function Storage.SetNeighbor(s: State, t: number, e: number, n: number)
+	buffer.writei32(s.TriNeighbors, ((t - 1) * TRI_SLOTS + e - 1) * I32, n)
+end
+
+function Storage.GetTriangleFloor(s: State, t: number): number
+	return buffer.readi32(s.TriFloor, (t - 1) * I32)
+end
+
+function Storage.SetTriangleFloor(s: State, t: number, floor: number)
+	buffer.writei32(s.TriFloor, (t - 1) * I32, floor)
+end
+
+function Storage.GetTriangleArea(s: State, t: number): number
+	return buffer.readi32(s.TriArea, (t - 1) * I32)
+end
+
+function Storage.SetTriangleArea(s: State, t: number, area: number)
+	buffer.writei32(s.TriArea, (t - 1) * I32, area)
+end
+
+function Storage.GetTriangleTile(s: State, t: number): number
+	return buffer.readi32(s.TriTile, (t - 1) * I32)
+end
+
+function Storage.SetTriangleTile(s: State, t: number, tile: number)
+	buffer.writei32(s.TriTile, (t - 1) * I32, tile)
+end
+
+--[=[
+	@within NavMeshStorage
+	Registers a floor by name and returns its id.
+]=]
+function Storage.InsertFloor(s: State, name: string): number
+	table.insert(s.FloorNames, name)
+	return #s.FloorNames
+end
+
+function Storage.GetFloorName(s: State, floor: number): string
+	return s.FloorNames[floor]
+end
+
+--[=[
+	@within NavMeshStorage
+	Registers a tile of `floor` with its bounds in studs, and an empty triangle range. Returns
+	its id.
+]=]
+function Storage.InsertTile(s: State, floor: number, minX: number, minZ: number, maxX: number, maxZ: number): number
+	table.insert(s.TileFloor, floor)
+	table.insert(s.TileBounds, minX)
+	table.insert(s.TileBounds, minZ)
+	table.insert(s.TileBounds, maxX)
+	table.insert(s.TileBounds, maxZ)
+	table.insert(s.TileFirst, 0)
+	table.insert(s.TileTriangles, 0)
+	return #s.TileFloor
+end
+
+function Storage.GetTileFloor(s: State, tile: number): number
+	return s.TileFloor[tile]
+end
+
+function Storage.GetTileBounds(s: State, tile: number): (number, number, number, number)
+	local o = (tile - 1) * 4
+	local b = s.TileBounds
+	return b[o + 1], b[o + 2], b[o + 3], b[o + 4]
+end
+
+--[=[
+	@within NavMeshStorage
+	Gives `tile` a fresh range of `count` zeroed triangles, each tagged with the tile and its
+	floor, and returns the first triangle id.
+]=]
+function Storage.AllocTileRange(s: State, tile: number, count: number): number
+	-- ponytail: always appends. Freeing and reusing ranges arrives with Update (ticket 18).
+	local first = s.TriangleCount + 1
+	ensureTriangles(s, s.TriangleCount + count)
+	s.TriangleCount += count
+	local floor = s.TileFloor[tile]
+	for t = first, first + count - 1 do
+		Storage.SetTriangle(s, t, 0, 0, 0)
+		for e = 1, 3 do
+			Storage.SetNeighbor(s, t, e, 0)
+		end
+		Storage.SetTriangleFloor(s, t, floor)
+		Storage.SetTriangleArea(s, t, 0)
+		Storage.SetTriangleTile(s, t, tile)
+	end
+	s.TileFirst[tile] = first
+	s.TileTriangles[tile] = count
+	return first
+end
+
+--[=[
+	@within NavMeshStorage
+	The tile's triangle range: first id and count.
+]=]
+function Storage.GetTileRange(s: State, tile: number): (number, number)
+	return s.TileFirst[tile], s.TileTriangles[tile]
+end
+
+return Storage
