@@ -171,6 +171,18 @@ jobs:
         with:
           name: changed-packages
 
+      # Last guard before anything publishes (publish-checks already went red pre-merge). It must
+      # stay outside the publish action: a refusal mid-loop would strand earlier publishes.
+      - name: Check packages are publishable
+        if: needs.detect-changes.outputs.has_changes == 'true' && needs.resolve-version.outputs.version_change != 'none'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/workflow_actions/validate_publish_setup.py \
+            --check publishable \
+            --version-change "${{ needs.resolve-version.outputs.version_change }}" \
+            --changed-packages-file changed-packages.txt
+
       # Bump versions, authenticate with Wally, and publish each changed package.
       # Also commits the updated wally.toml version lines back to main.
       - name: Publish and persist versions

@@ -10,6 +10,8 @@ realm = "shared"
 [custom]
 # Marks the package as beta in the generated README (existing convention)
 unreleased = true
+# Blocks semver-labelled PRs touching this package (validate_publish_setup.py --check publishable)
+publishable = "false"
 # The properly capitalized and spaced name of the library
 formattedName = "NavMeshDebug"
 # Unpublished in-repo dependencies, vendored by setup (see scripts/setup_package_for_testing.py)

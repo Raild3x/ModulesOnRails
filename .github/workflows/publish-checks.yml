@@ -165,6 +165,16 @@ jobs:
             --pr-number "${{ github.event.pull_request.number || 0 }}" \
             --changed-packages-file changed-packages.txt
 
+      # Red before merge when a semver label would publish a [custom] publishable = "false" package.
+      - name: Check packages are publishable
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/workflow_actions/validate_publish_setup.py \
+            --check publishable \
+            --version-change "${{ steps.version_preview.outputs.version_change }}" \
+            --changed-packages-file changed-packages.txt
+
       # Print a dry-run summary: "Will update X from 1.2.3 to 1.2.4".
       - name: Preview package version updates
         shell: bash

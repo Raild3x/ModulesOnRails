@@ -16,7 +16,7 @@ from typing import List, Optional, Tuple
 # ---------------------------------------------------------------------------
 # Insert scripts/ onto sys.path so _common is importable from this subdirectory.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from _common import increment_version
+from _common import increment_version, parse_wally_toml
 
 
 def validate_wally_ready() -> bool:
@@ -317,6 +317,33 @@ def validate_version_preview(version_change: str, changed_packages_file: str) ->
     return all_valid
 
 
+def validate_publishable(version_change: str, changed_packages_file: str) -> bool:
+    """Fail when a semver-labelled change touches a package that must not publish yet.
+
+    A package opts out with ``[custom] publishable = "false"``. This runs before the publish
+    action starts, never inside its per-package loop: the loop publishes irreversibly, so a
+    refusal halfway would strand earlier publishes without their version-bump commit.
+    """
+    if version_change == "none":
+        return True
+
+    blocked = []
+    for pkg in read_changed_packages(changed_packages_file):
+        wally_file = Path("lib") / pkg / "wally.toml"
+        if wally_file.is_file():
+            custom = parse_wally_toml(wally_file)["custom"]
+            if custom.get("publishable", "").lower() == "false":
+                blocked.append(pkg)
+
+    if blocked:
+        for pkg in blocked:
+            print(f'✗ {pkg} has [custom] publishable = "false" and cannot be published')
+        print(f"Remove the '{version_change}' label, or move these packages to another PR.")
+        return False
+    print("✓ No unpublishable packages in this change")
+    return True
+
+
 def run_all_checks() -> int:
     """Run all validation checks."""
     print("\n" + "="*60)
@@ -350,7 +377,7 @@ def main():
     parser = argparse.ArgumentParser(description="Validate publish setup configuration.")
     parser.add_argument(
         "--check",
-        choices=["packages", "action-inputs", "workflow-inputs", "version-preview", "wally-ready", "all"],
+        choices=["packages", "action-inputs", "workflow-inputs", "version-preview", "publishable", "wally-ready", "all"],
         default="all",
         help="Which check to run (default: all)"
     )
@@ -385,6 +412,9 @@ def main():
             return 0 if result else 1
         elif args.check == "version-preview":
             result = validate_version_preview(args.version_change, args.changed_packages_file)
+            return 0 if result else 1
+        elif args.check == "publishable":
+            result = validate_publishable(args.version_change, args.changed_packages_file)
             return 0 if result else 1
         elif args.check == "wally-ready":
             result = validate_wally_ready()
