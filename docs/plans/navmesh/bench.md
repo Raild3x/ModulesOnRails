@@ -5,6 +5,8 @@
 - **Method:** 3 separate Studio runs × 5 interleaved rounds (layout order rotated each round).
   Each cell is the best of 3 reps per round, then the median over rounds, then the median over
   runs.
+- **Re-run:** the audited harness now lives in `tools/navmesh/bench/`. Run it with
+  `python tools/navmesh/bench/run.py` (verification.md, F9).
 - **Harness:** a scratchpad copy of `gen.py`, `bench/Mesh.luau` and `b1.luau`. One workload
   template is expanded per layout, so each layout gets monomorphic code and no layout pays for
   another's abstraction.

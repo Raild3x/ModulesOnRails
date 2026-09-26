@@ -134,6 +134,38 @@ Later tickets cite these as their test seams. Commands run from the repo root.
   interpreted module, so the Open Cloud fallback is not needed. `debug.dumpcodesize()` is
   CommandBar-only, so the on/off delta is the native check.
 
+### In-repo harness (ticket 04): the command for every later performance fork
+- **Command** (from the repo root; it launches Studio):
+  ```sh
+  python tools/navmesh/bench/run.py --suite 2d|3d --runs 3 --rounds 5   # audited B1 method
+  python tools/navmesh/bench/run.py --suite 2d --runs 1 --rounds 1      # smoke, about 1 min
+  ```
+- **What it does:**
+  - `gen_layouts.py` expands one workload template per layout, so the code is monomorphic.
+  - It builds a place in `.bench/navmesh/<suite>/` (gitignored), runs Studio N times, and saves
+    the raw `run<i>.txt` output.
+  - It prints the median table for the grid mesh and the shuffled-id mesh.
+- **Harness files:** `Harness.luau` (interleaved rotated rounds, best-of-3, deadline plus
+  `[MARK]`) and `Mesh.luau` (jittered grid plus a shuffle).
+- **Gates:** it exits 1 when any of these fails:
+  - a run misses `[MARK] done` or hits its deadline;
+  - layouts disagree on the topology-only flood;
+  - the audited ranking does not reproduce. On the shuffled mesh, the group median of
+    table-topology locate divided by the buffer-topology group median must be at least 1.3.
+    Audited: about 1.9x. Studio drift is 10-30%, so 1.3 only fails when the ranking flips.
+- **To add a fork:** add a storage class or layout entry in `gen_layouts.py`, and list it under
+  `buffer` or `table` in `run.py`'s `SUITES`.
+- **Smoke (2026-09-25):**
+  - 2D: 1.91x (C64 shuffled locate 20.7 ms, audited 21.2; typed Vector3 plus buffer-topology
+    dijkstra 27.4, audited 27.2).
+  - 3D: 1.89x.
+- **Negative controls** (the saved run replayed through `report()`, 5/5):
+  - swapped groups: FAIL at 0.52x;
+  - a tampered flood check: FAIL;
+  - a deadline marker: FAIL;
+  - empty output: FAIL;
+  - the real run: PASS.
+
 ## F10: unpublished sibling dependencies (ruling D2: simplest in-repo mechanism)
 - **Declare:** `[custom] siblings = "a,b"` in the dependent's `wally.toml`, kept out of
   `[dependencies]` until publish.
