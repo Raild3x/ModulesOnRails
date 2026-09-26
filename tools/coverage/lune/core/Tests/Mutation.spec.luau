@@ -64,6 +64,16 @@ return function(tiniest)
 			expect(#plan.sampledOut).is(0)
 		end)
 
+		test("mutants in whole-file-ignored files are dropped, not counted as no-coverage", function()
+			local plan = Mutation.plan({
+				mutant(1, "src/a.luau", 3),
+				mutant(2, "src/fixtures.luau", 1), -- ignored file
+				mutant(3, "src/fixtures.luau", 2),
+			}, COVERED, { ignoredFiles = { ["src/fixtures.luau"] = true } })
+			expect(#plan.toRun).is(1)
+			expect(#plan.noCoverage).is(0)
+		end)
+
 		test("the ops filter drops other operators entirely", function()
 			local plan = Mutation.plan({
 				mutant(1, "src/a.luau", 3, "ror"),

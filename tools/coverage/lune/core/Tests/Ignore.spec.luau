@@ -34,6 +34,15 @@ return function(tiniest)
 			expect(rules.sites["stmt:src/a.luau:3:1"]).is_true()
 		end)
 
+		test("parses whole-file rules (a .luau path without a line)", function()
+			local rules = Ignore.load(FIXTURE_DIR, IGNORE_FILES)
+			expect(rules.files["src/Fixtures.luau"]).is_true()
+			expect(Ignore.matchFile(rules, "src/Fixtures.luau")).is_true()
+			-- negative controls: a file-line rule is not a whole-file rule; other files don't match
+			expect(rules.files["src/a.luau:12"]).never_exists()
+			expect(Ignore.matchFile(rules, "src/a.luau")).never_is_true()
+		end)
+
 		test("a whitespace-only line creates no rule", function()
 			local rules = Ignore.load(FIXTURE_DIR, IGNORE_FILES)
 			expect(rules.names[""]).never_exists()

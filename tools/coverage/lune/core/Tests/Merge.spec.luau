@@ -62,6 +62,41 @@ return function(tiniest)
 	local test = tiniest.test
 	local expect = tiniest.expect
 
+	describe("Merge.merge whole-file rules and decision lines", function()
+		test("a whole-file rule drops the file from the metrics and lists it once", function()
+			local rules = Ignore.empty()
+			rules.files["src/a.luau"] = true
+			rules.isEmpty = false
+			local merged = merge({ [1] = 1, [4] = 1 }, rules)
+			expect(#merged.files).is(0)
+			expect(merged.ignoredFiles["src/a.luau"]).is_true()
+			expect(merged.totals.statements.total).is(0)
+			local fileEntries = 0
+			for _, entry in merged.suppressed.ignored do
+				if entry.kind == "file" then
+					fileEntries += 1
+				end
+			end
+			expect(fileEntries).is(1)
+		end)
+
+		test("without a file rule the file is measured (negative control)", function()
+			local merged = merge({ [1] = 1 }, nil)
+			expect(#merged.files).is(1)
+			expect(merged.ignoredFiles["src/a.luau"]).never_exists()
+		end)
+
+		test("a reached decision marks its line executed for mutation gating", function()
+			-- line 8 holds decision 5/6 and no statement probe (the `elseif` shape)
+			local reached = merge({ [5] = 1 }, nil)
+			expect(reached.files[1].coveredLines[8]).is_true()
+			local unreached = merge({ [1] = 1 }, nil)
+			expect(unreached.files[1].coveredLines[8]).never_exists()
+			-- the Lines metric is unchanged: it only counts statement-probe lines
+			expect(reached.files[1].lines.total).is(unreached.files[1].lines.total)
+		end)
+	end)
+
 	describe("Merge.merge basics", function()
 		test("rejects a hit buffer with the wrong slot count", function()
 			expect(function()

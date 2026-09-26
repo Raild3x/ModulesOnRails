@@ -111,6 +111,7 @@ end
 
 	@param coveredLines -- file path -> { line -> true } from the coverage run
 	@param opts.ops -- optional allow-set of operator names
+	@param opts.ignoredFiles -- optional set of whole-file-ignored paths; their mutants are dropped
 	@param opts.limit -- optional budget; excess mutants are dropped by
 	  deterministic stride sampling over the (file, line, id)-sorted list, so a
 	  capped run still spreads across files instead of saturating the first one.
@@ -118,12 +119,16 @@ end
 function Mutation.plan(
 	mutants: { Mutant },
 	coveredLines: { [string]: { [number]: boolean } },
-	opts: { ops: { [string]: boolean }?, limit: number? }
+	opts: { ops: { [string]: boolean }?, limit: number?, ignoredFiles: { [string]: boolean }? }
 ): Plan
 	local toRun: { Mutant } = {}
 	local noCoverage: { Mutant } = {}
 	for _, m in mutants do
 		if opts.ops ~= nil and not opts.ops[m.op] then
+			continue
+		end
+		-- Files excluded whole by a `.coverage-ignore` file rule are not scored at all.
+		if opts.ignoredFiles ~= nil and opts.ignoredFiles[m.file] then
 			continue
 		end
 		local lines = coveredLines[m.file]

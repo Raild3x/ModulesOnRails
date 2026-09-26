@@ -10,6 +10,8 @@
 	  * `Qualified.Name`      -- a function's qualified name (also `"quoted name"`);
 	                             suppresses that function AND its whole body.
 	  * `src/path.luau:LINE`  -- any site anchored on that file + line.
+	  * `src/path.luau`       -- the WHOLE file: dropped from the metrics and its
+	                             mutants excluded (fixture data, test helpers).
 	  * `site:<key>`          -- an exact site key (`<kind>:<relpath>:<line>:<col>`).
 
 	Policy lives here (in Lune); the Rust engine stays ignore-agnostic.
@@ -26,6 +28,8 @@ export type Rules = {
 	fileLines: { [string]: boolean },
 	-- exact site keys -> true
 	sites: { [string]: boolean },
+	-- whole files ("src/path.luau") -> true
+	files: { [string]: boolean },
 	-- true when no rules loaded (lets callers skip matching entirely)
 	isEmpty: boolean,
 }
@@ -35,7 +39,7 @@ local function trim(s: string): string
 end
 
 function Ignore.empty(): Rules
-	return { names = {}, fileLines = {}, sites = {}, isEmpty = true }
+	return { names = {}, fileLines = {}, sites = {}, files = {}, isEmpty = true }
 end
 
 local function parseInto(text: string, rules: Rules)
@@ -48,6 +52,8 @@ local function parseInto(text: string, rules: Rules)
 			rules.sites[trim(line:sub(6))] = true
 		elseif line:match("%.luau:%d+$") then
 			rules.fileLines[line] = true
+		elseif line:match("%.luau$") then
+			rules.files[line] = true
 		else
 			-- bare or quoted qualified function name
 			local unquoted = line:match('^"(.*)"$') or line:match("^'(.*)'$") or line
@@ -69,7 +75,10 @@ function Ignore.load(root: string, fileNames: { string }): Rules
 			parseInto(fs.readFile(path), rules)
 		end
 	end
-	rules.isEmpty = next(rules.names) == nil and next(rules.fileLines) == nil and next(rules.sites) == nil
+	rules.isEmpty = next(rules.names) == nil
+		and next(rules.fileLines) == nil
+		and next(rules.sites) == nil
+		and next(rules.files) == nil
 	return rules
 end
 
@@ -98,6 +107,13 @@ function Ignore.matchDirect(
 		return "name rule"
 	end
 	return nil
+end
+
+--[=[
+	Whether a whole-file rule excludes `filePath` (e.g. `src/Fixtures.luau`).
+]=]
+function Ignore.matchFile(rules: Rules, filePath: string): boolean
+	return rules.files[filePath] == true
 end
 
 return Ignore

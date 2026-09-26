@@ -111,6 +111,9 @@ export type Merged = {
 	loops: { LoopFinding },
 	-- locals that could be `const` (only when the map was built with the flag)
 	constCandidates: { ConstCandidate },
+	-- files excluded whole by a `.coverage-ignore` file rule (path -> true); mutation
+	-- skips their mutants entirely
+	ignoredFiles: { [string]: boolean },
 }
 
 local function metric(): Metric
@@ -181,7 +184,20 @@ function Merge.merge(
 		conditions = metric(),
 	}
 
+	local ignoredFiles: { [string]: boolean } = {}
 	for _, file in map.files do
+		if Ignore.matchFile(ignoreRules, file.path) then
+			ignoredFiles[file.path] = true
+			table.insert(suppressed.ignored, {
+				file = file.path,
+				line = 0,
+				site = "file:" .. file.path,
+				kind = "file",
+				label = "",
+				detail = "file rule",
+			})
+			continue
+		end
 		local stmts = metric()
 		local fns = metric()
 		local branches = metric()
@@ -286,6 +302,12 @@ function Merge.merge(
 					branches.covered += 1
 				end
 				decisions.total += 1
+				-- A reached decision means its line ran. `elseif` conditions carry a decision
+				-- probe but no statement probe, so without this their mutants were gated out
+				-- as "no coverage". (The Lines metric only iterates statement-probe lines.)
+				if trueHits > 0 or falseHits > 0 then
+					lineCovered[probe.line] = true
+				end
 				if trueHits > 0 and falseHits > 0 then
 					decisions.covered += 1
 				elseif trueHits > 0 or falseHits > 0 then
@@ -395,6 +417,7 @@ function Merge.merge(
 		suppressed = suppressed,
 		loops = loops,
 		constCandidates = constCandidates,
+		ignoredFiles = ignoredFiles,
 	}
 end
 

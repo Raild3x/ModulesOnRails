@@ -8,3 +8,4 @@ M.doThing
    Padded.Name
 src/a.luau:12
 site:stmt:src/a.luau:3:1
+src/Fixtures.luau

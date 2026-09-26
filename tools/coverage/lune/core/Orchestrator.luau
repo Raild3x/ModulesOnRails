@@ -129,6 +129,7 @@ local function runMutation(
 	local plan = Mutation.plan(Mutation.flatten(mutantsDoc), coveredLines, {
 		ops = parseOpsCsv(options.mutateOps),
 		limit = options.mutateLimit,
+		ignoredFiles = merged.ignoredFiles,
 	})
 
 	-- Poll-based watchdog: task.delay + task.cancel leaves Lune's scheduler

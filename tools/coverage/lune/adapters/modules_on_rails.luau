@@ -238,8 +238,10 @@ end
 -- Overwrite each vendored sibling's `src` in the copy with the current `lib/<sibling>/src`
 -- (recursing into the sibling's own siblings), so an edit is seen without re-running setup.
 local function refreshSiblings(packageRoot: string, copyRoot: string)
+	-- Siblings live next to the package (normally under lib/).
+	local libDir = packageRoot:match("^(.*)/[^/]+$") or LIB_ROOT
 	for _, sibling in readSiblings(packageRoot) do
-		local siblingRoot = `{LIB_ROOT}/{sibling}`
+		local siblingRoot = `{libDir}/{sibling}`
 		local dest = `{copyRoot}/_Index/{SIBLING_SCOPE_PREFIX}{sibling}@{SIBLING_VERSION}/{sibling}`
 		if not fs.isDir(dest) then
 			error(
