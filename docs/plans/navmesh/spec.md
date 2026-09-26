@@ -225,8 +225,9 @@ Four in-repo packages:
   - coordinates: an f64 buffer (16 B/vertex);
   - topology: i32 buffers (triangle vertices, neighbours);
   - winding: i32 buffer, T × (G+1);
-  - constraint coverage: a variable-length CSR pair of i32 buffers (per-edge offset + input-edge
-    ids);
+  - constraint coverage: an i32 linked-list node pool (a head per triangle edge, plus
+    next/edge-id buffers). The build (ticket 06) changed this from CSR, because coverage must
+    move between edges during construction; the public Count/Get readers are unchanged;
   - the input↔vertex maps: i32. Duplicate merge means vertex ids are **not** input ids.
 - **NavMesh layout:**
   - vertices: native `vector` (16 B);
