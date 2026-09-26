@@ -2,7 +2,7 @@
 -- Negative control for the A/B harness: a variant whose output differs from the baseline in
 -- one element must be reported DIFFERENT (and fail ab.py); an identical one must read "same".
 return function(env: any)
-	env.AB({
+	env.AB {
 		Variants = {
 			{
 				Name = "base",
@@ -33,5 +33,5 @@ return function(env: any)
 		Clock = env.Clock,
 		Yield = env.Yield,
 		Deadline = env.Deadline,
-	})
+	}
 end

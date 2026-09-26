@@ -36,7 +36,7 @@ return function(env: any)
 			Run = function(input: any)
 				local search = searches[input.Graph]
 				if search == nil then
-					search = OpenLists.MakeSearch(input.Graph, candidate.Make(input.Graph, env.Heap))
+					search = candidate.Search(input.Graph, env)
 					searches[input.Graph] = search
 				end
 				local costs = table.create(#input.Ends // 2)
@@ -47,7 +47,7 @@ return function(env: any)
 			end,
 		})
 	end
-	env.AB({
+	env.AB {
 		Variants = variants,
 		Workloads = workloads,
 		Fingerprint = function(costs: { number }): string
@@ -61,5 +61,5 @@ return function(env: any)
 		Clock = env.Clock,
 		Yield = env.Yield,
 		Deadline = env.Deadline,
-	})
+	}
 end

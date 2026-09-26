@@ -31,6 +31,7 @@ require(Bench.Experiment)({{
 \tNavMesh = require(NavMesh.src.NavMesh),
 \tQuantize = require(NavMesh.src.Quantize),
 \tNavMeshStorage = require(NavMesh.src.Storage),
+\tNavMeshOpenList = require(NavMesh.src.OpenList),
 \tHeap = require(ReplicatedStorage:WaitForChild("Heap", 10)),
 \tCDT = require(NavMesh.ConstrainedDelaunay),
 \tTileSize = require(Bench.TileSize),

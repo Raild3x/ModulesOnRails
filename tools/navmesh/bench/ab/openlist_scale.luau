@@ -28,55 +28,9 @@ return function(env: any)
 		local desc = env.TileSize.Map(side, 7)
 		desc.TileSize = 32
 		local graph = OpenLists.Flatten(env.NavMeshStorage, env.NavMesh.Build(desc))
-		-- Queries run corner to corner inside the largest connected component (a corner triangle
-		-- can sit in a pocket sealed off by obstacles): the QUERIES triangles nearest (0, 0) to
-		-- those nearest (side, side), paired in order.
-		local component, best = table.create(graph.N, 0), 0
-		local sizes = {}
-		for seed = 1, graph.N do
-			if component[seed] == 0 then
-				local id = #sizes + 1
-				local stack, count = { seed }, 0
-				component[seed] = id
-				while #stack > 0 do
-					local t = table.remove(stack) :: number
-					count += 1
-					for e = 1, 3 do
-						local m = graph.Nbr[3 * (t - 1) + e]
-						if m ~= 0 and component[m] == 0 then
-							component[m] = id
-							table.insert(stack, m)
-						end
-					end
-				end
-				sizes[id] = count
-				if count > (sizes[best] or 0) then
-					best = id
-				end
-			end
-		end
-		local members = {}
-		for t = 1, graph.N do
-			if component[t] == best then
-				table.insert(members, t)
-			end
-		end
-		local function nearest(cx: number, cz: number): { number }
-			local sorted = table.clone(members)
-			table.sort(sorted, function(a: number, b: number): boolean
-				local da = (graph.X[a] - cx) ^ 2 + (graph.Z[a] - cz) ^ 2
-				local db = (graph.X[b] - cx) ^ 2 + (graph.Z[b] - cz) ^ 2
-				return da < db or (da == db and a < b)
-			end)
-			return sorted
-		end
-		local low, high = nearest(0, 0), nearest(side, side)
-		local ends = table.create(2 * QUERIES)
-		for q = 1, QUERIES do
-			ends[2 * q - 1], ends[2 * q] = low[q], high[q]
-		end
+		local ends = OpenLists.CornerQueries(graph, side, QUERIES)
 		-- The chart's x axis: open-list size and pops per query (through `binary`).
-		local open, stats = OpenLists.Counted(OpenLists.Candidates[3].Make(graph, env.Heap))
+		local open, stats = OpenLists.Counted(OpenLists.Binary())
 		local search = OpenLists.MakeSearch(graph, open)
 		local peaks, pops = {}, {}
 		for q = 1, QUERIES do
@@ -84,16 +38,11 @@ return function(env: any)
 			table.insert(peaks, stats.Peak)
 			table.insert(pops, stats.Pops)
 		end
-		print(
-			string.format(
-				"[SCALE] side%d | %d | %d | %d",
-				side,
-				graph.N,
-				median(peaks),
-				median(pops)
-			)
+		print(string.format("[SCALE] side%d | %d | %d | %d", side, graph.N, median(peaks), median(pops)))
+		table.insert(
+			workloads,
+			{ Name = `side{side}`, Input = { Graph = graph, Ends = ends }, Reps = if side >= 512 then 1 else 3 }
 		)
-		table.insert(workloads, { Name = `side{side}`, Input = { Graph = graph, Ends = ends }, Reps = if side >= 512 then 1 else 3 })
 		env.Yield()
 	end
 
@@ -105,7 +54,7 @@ return function(env: any)
 			Run = function(input: any)
 				local search = searches[input.Graph]
 				if search == nil then
-					search = OpenLists.MakeSearch(input.Graph, candidate.Make(input.Graph, env.Heap))
+					search = candidate.Search(input.Graph, env)
 					searches[input.Graph] = search
 				end
 				local costs = table.create(QUERIES)
@@ -116,7 +65,7 @@ return function(env: any)
 			end,
 		})
 	end
-	env.AB({
+	env.AB {
 		Variants = variants,
 		Workloads = workloads,
 		Fingerprint = function(costs: { number }): string
@@ -130,5 +79,5 @@ return function(env: any)
 		Clock = env.Clock,
 		Yield = env.Yield,
 		Deadline = env.Deadline,
-	})
+	}
 end

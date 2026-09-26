@@ -20,6 +20,7 @@ dynRequire("./ab/" .. assert(process.args[1], "usage: ab_lune.luau <experiment> 
 	Quantize = require("../../../lib/navmesh/src/Quantize"),
 	NavMeshStorage = require("../../../lib/navmesh/src/Storage"),
 	Heap = require("../../../lib/heap/src"),
+	NavMeshOpenList = require("../../../lib/navmesh/src/OpenList"),
 	CDT = require("../../../lib/navmesh/ConstrainedDelaunay"),
 	TileSize = require("./TileSize"),
 	Scenes = require("./Scenes"),

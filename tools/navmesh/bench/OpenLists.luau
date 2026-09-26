@@ -10,6 +10,8 @@
 	    pushed again and skipped on pop.
 	  - `binaryDK`: a binary heap with a position index and in-place decrease-key.
 	  - `libheap`: `lib/heap` with stale entries, since its `UpdateCost` is a linear scan.
+	  - `shipped`: the shipped `lib/navmesh` OpenList (4-ary), called directly, the way FindPath
+	    will use it (`MakeSearchModule`).
 	- `Counted` wraps any open list to record the peak size and the pops, per query.
 ]=]
 
@@ -34,6 +36,57 @@ function OpenLists.Flatten(Storage: any, mesh: any): Graph
 		end
 	end
 	return { N = n, Nbr = nbr, X = xs, Y = ys, Z = zs }
+end
+
+-- Corner-to-corner query pairs inside the largest connected component (a corner triangle can
+-- sit in a pocket sealed off by obstacles): the `count` triangles nearest (0, 0) paired, in
+-- order, with the `count` nearest (side, side). Returns a flat {start1, goal1, ...}.
+function OpenLists.CornerQueries(graph: Graph, side: number, count: number): { number }
+	local component, best = table.create(graph.N, 0), 0
+	local sizes = {}
+	for seed = 1, graph.N do
+		if component[seed] == 0 then
+			local id = #sizes + 1
+			local stack, members = { seed }, 0
+			component[seed] = id
+			while #stack > 0 do
+				local t = table.remove(stack) :: number
+				members += 1
+				for e = 1, 3 do
+					local m = graph.Nbr[3 * (t - 1) + e]
+					if m ~= 0 and component[m] == 0 then
+						component[m] = id
+						table.insert(stack, m)
+					end
+				end
+			end
+			sizes[id] = members
+			if members > (sizes[best] or 0) then
+				best = id
+			end
+		end
+	end
+	local members = {}
+	for t = 1, graph.N do
+		if component[t] == best then
+			table.insert(members, t)
+		end
+	end
+	local function nearest(cx: number, cz: number): { number }
+		local sorted = table.clone(members)
+		table.sort(sorted, function(a: number, b: number): boolean
+			local da = (graph.X[a] - cx) ^ 2 + (graph.Z[a] - cz) ^ 2
+			local db = (graph.X[b] - cx) ^ 2 + (graph.Z[b] - cz) ^ 2
+			return da < db or (da == db and a < b)
+		end)
+		return sorted
+	end
+	local low, high = nearest(0, 0), nearest(side, side)
+	local ends = table.create(2 * count)
+	for q = 1, count do
+		ends[2 * q - 1], ends[2 * q] = low[q], high[q]
+	end
+	return ends
 end
 
 -- One A* shared by every candidate. Lazy open lists may return stale entries, which the closed
@@ -77,6 +130,56 @@ function OpenLists.MakeSearch(graph: Graph, open: OpenList): (number, number) ->
 					if seen[m] ~= stamp or ng < g[m] then
 						g[m], seen[m] = ng, stamp
 						open.Push(m, ng + h(m))
+					end
+				end
+			end
+		end
+	end
+end
+
+-- The same A*, calling the shipped lib/navmesh OpenList module directly (the way FindPath will
+-- use it), instead of through the OpenList interface's closures.
+function OpenLists.MakeSearchModule(graph: Graph, M: any): (number, number) -> number
+	local n = graph.N
+	local nbr, xs, ys, zs = graph.Nbr, graph.X, graph.Y, graph.Z
+	local g = table.create(n, 0)
+	local seen = table.create(n, 0)
+	local closed = table.create(n, 0)
+	local stamp = 0
+	local open = M.new()
+	local push, pop = M.Push, M.Pop
+	return function(start: number, goal: number): number
+		stamp += 1
+		M.Clear(open)
+		local gx, gy, gz = xs[goal], ys[goal], zs[goal]
+		local function h(t: number): number
+			local dx, dy, dz = xs[t] - gx, ys[t] - gy, zs[t] - gz
+			return math.sqrt(dx * dx + dy * dy + dz * dz)
+		end
+		g[start], seen[start] = 0, stamp
+		push(open, start, h(start))
+		while true do
+			local t = pop(open)
+			if t == 0 then
+				return math.huge
+			end
+			if closed[t] == stamp then
+				continue
+			end
+			closed[t] = stamp
+			if t == goal then
+				return g[t]
+			end
+			local base = 3 * (t - 1)
+			local tx, ty, tz, gt = xs[t], ys[t], zs[t], g[t]
+			for e = 1, 3 do
+				local m = nbr[base + e]
+				if m ~= 0 and closed[m] ~= stamp then
+					local dx, dy, dz = xs[m] - tx, ys[m] - ty, zs[m] - tz
+					local ng = gt + math.sqrt(dx * dx + dy * dy + dz * dz)
+					if seen[m] ~= stamp or ng < g[m] then
+						g[m], seen[m] = ng, stamp
+						push(open, m, ng + h(m))
 					end
 				end
 			end
@@ -289,22 +392,46 @@ local function libheap(Heap: any): OpenList
 end
 
 OpenLists.Candidates = {
-	{ Name = "libheap", Make = function(_graph: Graph, Heap: any): OpenList
-		return libheap(Heap)
-	end },
-	{ Name = "linear", Make = function(): OpenList
-		return linear()
-	end },
-	{ Name = "binary", Make = function(): OpenList
-		return binary()
-	end },
-	{ Name = "quad", Make = function(): OpenList
-		return quad()
-	end },
-	{ Name = "binaryDK", Make = function(graph: Graph): OpenList
-		return binaryDK(graph.N)
-	end },
+	{
+		Name = "libheap",
+		Search = function(graph: Graph, env: any)
+			return OpenLists.MakeSearch(graph, libheap(env.Heap))
+		end,
+	},
+	{
+		Name = "linear",
+		Search = function(graph: Graph)
+			return OpenLists.MakeSearch(graph, linear())
+		end,
+	},
+	{
+		Name = "binary",
+		Search = function(graph: Graph)
+			return OpenLists.MakeSearch(graph, binary())
+		end,
+	},
+	{
+		Name = "quad",
+		Search = function(graph: Graph)
+			return OpenLists.MakeSearch(graph, quad())
+		end,
+	},
+	{
+		Name = "binaryDK",
+		Search = function(graph: Graph)
+			return OpenLists.MakeSearch(graph, binaryDK(graph.N))
+		end,
+	},
+	-- The shipped lib/navmesh/src/OpenList (4-ary), called directly.
+	{
+		Name = "shipped",
+		Search = function(graph: Graph, env: any)
+			return OpenLists.MakeSearchModule(graph, env.NavMeshOpenList)
+		end,
+	},
 }
+
+OpenLists.Binary = binary
 
 -- Wraps an open list to count, per query, the peak size and the pops.
 function OpenLists.Counted(open: OpenList): (OpenList, { Peak: number, Pops: number })
