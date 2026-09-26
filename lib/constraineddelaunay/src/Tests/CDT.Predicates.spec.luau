@@ -106,7 +106,18 @@ return function(t: tiniest)
 
 		test("translation invariance at a 2^40 offset (incl. exactly cocircular)", function()
 			-- Integer points on the circle of radius 5 around the origin.
-			local circle = { { 5, 0 }, { 4, 3 }, { 3, 4 }, { 0, 5 }, { -3, 4 }, { -4, 3 }, { -5, 0 }, { -4, -3 }, { 0, -5 }, { 3, -4 } }
+			local circle = {
+				{ 5, 0 },
+				{ 4, 3 },
+				{ 3, 4 },
+				{ 0, 5 },
+				{ -3, 4 },
+				{ -4, 3 },
+				{ -5, 0 },
+				{ -4, -3 },
+				{ 0, -5 },
+				{ 3, -4 },
+			}
 			local rng = makeRng(11)
 			local wrong, zeros, naiveWrong = 0, 0, 0
 			for trial = 1, 1500 do
@@ -126,7 +137,8 @@ return function(t: tiniest)
 					zeros += 1
 				end
 				local o = OFFSET
-				local actual = CDT.InCircle(a[1] + o, a[2] + o, b[1] + o, b[2] + o, c[1] + o, c[2] + o, d[1] + o, d[2] + o)
+				local actual =
+					CDT.InCircle(a[1] + o, a[2] + o, b[1] + o, b[2] + o, c[1] + o, c[2] + o, d[1] + o, d[2] + o)
 				if actual ~= expected then
 					wrong += 1
 				end

@@ -51,6 +51,17 @@ export type State = {
 
 local Storage = {}
 
+--[=[
+	@within CDTStorage
+	The layout constants that inlined accessor copies must read (never literals), so a layout
+	change and its `-- inlined: Storage.<fn>` copies move together.
+]=]
+Storage.Layout = table.freeze {
+	COORD_BYTES = COORD_BYTES, -- per vertex: x then y, f64
+	I32 = I32, -- bytes per slot of the triangle, neighbour, cover-head and winding buffers
+	TRI_SLOTS = TRI_SLOTS, -- slots per triangle
+}
+
 local function grown(old: buffer, usedBytes: number, newBytes: number): buffer
 	local fresh = buffer.create(newBytes)
 	buffer.copy(fresh, 0, old, 0, usedBytes)
@@ -197,7 +208,9 @@ end
 
 function Storage.GetTriangle(s: State, t: number): (number, number, number)
 	local offset = (t - 1) * TRI_SLOTS * I32
-	return buffer.readi32(s.TriVerts, offset), buffer.readi32(s.TriVerts, offset + I32), buffer.readi32(s.TriVerts, offset + 2 * I32)
+	return buffer.readi32(s.TriVerts, offset),
+		buffer.readi32(s.TriVerts, offset + I32),
+		buffer.readi32(s.TriVerts, offset + 2 * I32)
 end
 
 function Storage.SetTriangle(s: State, t: number, a: number, b: number, c: number)

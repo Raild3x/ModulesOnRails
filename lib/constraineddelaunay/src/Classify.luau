@@ -21,6 +21,43 @@ local Types = require("./Types")
 
 type State = Storage.State
 
+-- Hot-path copies of the Storage accessors (bench.md, experiment 2: Triangulate 1.3-1.6x
+-- faster). Local functions let the compiler inline them, and literal strides let it fold them
+-- (reading them from Storage.Layout at runtime cost 7-19%). Each copy is tagged, and the load
+-- check below fails loudly if Storage's layout ever changes without these copies.
+local COORD_BYTES = 16
+local I32 = 4
+local TRI_BYTES = 12
+assert(
+	COORD_BYTES == Storage.Layout.COORD_BYTES
+		and I32 == Storage.Layout.I32
+		and TRI_BYTES == Storage.Layout.TRI_SLOTS * Storage.Layout.I32,
+	"inlined Storage accessor copies are out of date with Storage.Layout"
+)
+-- inlined: Storage.GetTriangle
+local function GetTriangle(s: State, t: number): (number, number, number)
+	local o = (t - 1) * TRI_BYTES
+	local b = s.TriVerts
+	return buffer.readi32(b, o), buffer.readi32(b, o + I32), buffer.readi32(b, o + 2 * I32)
+end
+-- inlined: Storage.GetVertex
+local function GetVertex(s: State, v: number): (number, number)
+	local o = (v - 1) * COORD_BYTES
+	return buffer.readf64(s.Coords, o), buffer.readf64(s.Coords, o + 8)
+end
+-- inlined: Storage.GetNeighbor
+local function GetNeighbor(s: State, t: number, e: number): number
+	return buffer.readi32(s.TriNeighbors, (t - 1) * TRI_BYTES + (e - 1) * I32)
+end
+-- inlined: Storage.GetWinding
+local function GetWinding(s: State, t: number, group: number): number
+	return buffer.readi32(s.Winding, ((t - 1) * (s.GroupCount + 1) + group) * I32)
+end
+-- inlined: Storage.SetWinding
+local function SetWinding(s: State, t: number, group: number, value: number)
+	buffer.writei32(s.Winding, ((t - 1) * (s.GroupCount + 1) + group) * I32, value)
+end
+
 local Classify = {}
 
 local function groupOf(input: Types.TriangulateInput, k: number): number
@@ -100,10 +137,10 @@ function Classify.Flood(s: State, input: Types.TriangulateInput)
 		if count == 0 then
 			return
 		end
-		local a, b, c = Storage.GetTriangle(s, t)
+		local a, b, c = GetTriangle(s, t)
 		local verts = { a, b, c }
-		local ux, uy = Storage.GetVertex(s, verts[e % 3 + 1])
-		local vx, vy = Storage.GetVertex(s, verts[(e + 1) % 3 + 1])
+		local ux, uy = GetVertex(s, verts[e % 3 + 1])
+		local vx, vy = GetVertex(s, verts[(e + 1) % 3 + 1])
 		for k = 1, count do
 			local id = Storage.GetCoveringEdge(s, t, e, k)
 			local group = edgeGroup[id]
@@ -118,7 +155,7 @@ function Classify.Flood(s: State, input: Types.TriangulateInput)
 	local seed, seedSlot = 0, 0
 	for t = 1, triangleCount do
 		for e = 1, 3 do
-			if Storage.GetNeighbor(s, t, e) == 0 then
+			if GetNeighbor(s, t, e) == 0 then
 				seed, seedSlot = t, e
 				break
 			end
@@ -129,7 +166,7 @@ function Classify.Flood(s: State, input: Types.TriangulateInput)
 	end
 	computeDelta(seed, seedSlot)
 	for g = 1, groupCount do
-		Storage.SetWinding(s, seed, g, delta[g] or 0)
+		SetWinding(s, seed, g, delta[g] or 0)
 	end
 
 	local visited = table.create(triangleCount, false)
@@ -140,7 +177,7 @@ function Classify.Flood(s: State, input: Types.TriangulateInput)
 		local t = queue[head]
 		head += 1
 		for e = 1, 3 do
-			local n = Storage.GetNeighbor(s, t, e)
+			local n = GetNeighbor(s, t, e)
 			if n == 0 or visited[n] then
 				continue
 			end
@@ -148,7 +185,7 @@ function Classify.Flood(s: State, input: Types.TriangulateInput)
 			computeDelta(t, e)
 			for g = 1, groupCount do
 				-- Leaving t across e is the reverse of entering t across e.
-				Storage.SetWinding(s, n, g, Storage.GetWinding(s, t, g) - (delta[g] or 0))
+				SetWinding(s, n, g, GetWinding(s, t, g) - (delta[g] or 0))
 			end
 			table.insert(queue, n)
 		end

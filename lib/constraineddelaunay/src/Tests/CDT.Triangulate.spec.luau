@@ -22,7 +22,7 @@ return function(t: tiniest)
 	end
 
 	local function checked(coords: { number }, label: string)
-		local tri = CDT.Triangulate({ Coords = coords })
+		local tri = CDT.Triangulate { Coords = coords }
 		local ok, reason = Invariants.Check(tri, coords)
 		expect(ok).with_context(`{label}: {reason}`).is_true()
 		return tri
@@ -65,7 +65,7 @@ return function(t: tiniest)
 		end)
 
 		test("collinear points only give no triangles", function()
-			local tri = CDT.Triangulate({ Coords = { 0, 0, 1, 1, 2, 2, 5, 5 } })
+			local tri = CDT.Triangulate { Coords = { 0, 0, 1, 1, 2, 2, 5, 5 } }
 			expect(CDT.TriangleCount(tri)).is(0)
 			expect(CDT.VertexCount(tri)).is(4)
 		end)
@@ -98,10 +98,10 @@ return function(t: tiniest)
 
 		test("malformed edges are rejected", function()
 			expect(function()
-				CDT.Triangulate({ Coords = { 0, 0, 1, 0, 0, 1 }, Edges = { 1, 9 } })
+				CDT.Triangulate { Coords = { 0, 0, 1, 0, 0, 1 }, Edges = { 1, 9 } }
 			end).fails()
 			expect(function()
-				CDT.Triangulate({ Coords = { 0, 0, 1, 0, 0, 1 }, Edges = { 1 } })
+				CDT.Triangulate { Coords = { 0, 0, 1, 0, 0, 1 }, Edges = { 1 } }
 			end).fails()
 		end)
 	end)
@@ -114,7 +114,7 @@ return function(t: tiniest)
 				table.insert(coords, rng(0, 100))
 				table.insert(coords, rng(0, 100))
 			end
-			local tri = CDT.Triangulate({ Coords = coords })
+			local tri = CDT.Triangulate { Coords = coords }
 			local misses = 0
 			local hint = nil
 			for _ = 1, 500 do
@@ -134,14 +134,14 @@ return function(t: tiniest)
 			end
 			expect(misses).is(0)
 			expect(CDT.Locate(tri, -1000, -1000)).is(0)
-			expect(CDT.Locate(CDT.Triangulate({ Coords = {} }), 0, 0)).is(0)
+			expect(CDT.Locate(CDT.Triangulate { Coords = {} }, 0, 0)).is(0)
 		end)
 	end)
 
 	describe("invariant checker (negative controls)", function()
 		test("catches a clockwise triangle", function()
 			local coords = { 0, 0, 4, 0, 0, 4, 4, 4 }
-			local tri = CDT.Triangulate({ Coords = coords })
+			local tri = CDT.Triangulate { Coords = coords }
 			local a, b, c = CDT.GetTriangle(tri, 1)
 			Storage.SetTriangle(tri, 1, a, c, b)
 			local ok, reason = Invariants.Check(tri, coords)
@@ -151,7 +151,7 @@ return function(t: tiniest)
 
 		test("catches a broken neighbour link", function()
 			local coords = { 0, 0, 4, 0, 0, 4, 4, 4 }
-			local tri = CDT.Triangulate({ Coords = coords })
+			local tri = CDT.Triangulate { Coords = coords }
 			for e = 1, 3 do
 				if CDT.GetNeighbor(tri, 1, e) ~= 0 then
 					Storage.SetNeighbor(tri, 1, e, 0)
@@ -164,11 +164,11 @@ return function(t: tiniest)
 
 	describe("ToDrawList goldens", function()
 		test("square with hole points", function()
-			snapshot(CDT.ToDrawList(CDT.Triangulate({ Coords = pointsOnly(CDT.Fixtures.SquareWithHole) })))
+			snapshot(CDT.ToDrawList(CDT.Triangulate { Coords = pointsOnly(CDT.Fixtures.SquareWithHole) }))
 		end)
 
 		test("small lattice", function()
-			snapshot(CDT.ToDrawList(CDT.Triangulate({ Coords = { 0, 0, 1, 0, 2, 0, 0, 1, 1, 1, 2, 1 } })))
+			snapshot(CDT.ToDrawList(CDT.Triangulate { Coords = { 0, 0, 1, 0, 2, 0, 0, 1, 1, 1, 2, 1 } }))
 		end)
 	end)
 end

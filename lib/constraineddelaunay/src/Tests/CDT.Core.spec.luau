@@ -18,7 +18,7 @@ return function(t: tiniest)
 
 	describe("public module", function()
 		test("exposes PlainData and Fixtures", function()
-			expect(CDT.PlainData.Check({ 1, 2 })).is_true()
+			expect(CDT.PlainData.Check { 1, 2 }).is_true()
 			expect(#CDT.Fixtures.All > 0).is_true()
 		end)
 	end)

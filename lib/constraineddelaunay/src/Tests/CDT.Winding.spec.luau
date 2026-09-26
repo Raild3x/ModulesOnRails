@@ -41,7 +41,7 @@ return function(t: tiniest)
 	end
 
 	local function toInput(rings: { Ring }): CDT.TriangulateInput
-		return CDT.Fixtures.ToInput({ Name = "", Rings = rings })
+		return CDT.Fixtures.ToInput { Name = "", Rings = rings }
 	end
 
 	-- Steiner vertices at constraint crossings are rounded, so the triangulated constraint
@@ -52,12 +52,27 @@ return function(t: tiniest)
 	local SLIVER = 1e-6
 	local skippedSlivers = 0
 
-	local function isSteinerSliver(tri: CDT.Triangulation, a: number, b: number, c: number, ax, ay, bx, by, cx, cy): boolean
+	local function isSteinerSliver(
+		tri: CDT.Triangulation,
+		a: number,
+		b: number,
+		c: number,
+		ax,
+		ay,
+		bx,
+		by,
+		cx,
+		cy
+	): boolean
 		if CDT.InputVertexOf(tri, a) and CDT.InputVertexOf(tri, b) and CDT.InputVertexOf(tri, c) then
 			return false
 		end
 		local area2 = math.abs((bx - ax) * (cy - ay) - (by - ay) * (cx - ax))
-		local longest = math.max(math.sqrt((bx - ax) ^ 2 + (by - ay) ^ 2), math.sqrt((cx - bx) ^ 2 + (cy - by) ^ 2), math.sqrt((ax - cx) ^ 2 + (ay - cy) ^ 2))
+		local longest = math.max(
+			math.sqrt((bx - ax) ^ 2 + (by - ay) ^ 2),
+			math.sqrt((cx - bx) ^ 2 + (cy - by) ^ 2),
+			math.sqrt((ax - cx) ^ 2 + (ay - cy) ^ 2)
+		)
 		return area2 / longest < SLIVER
 	end
 

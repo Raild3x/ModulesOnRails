@@ -283,7 +283,9 @@ Four in-repo packages:
   harness first.
 - **Inlining** is a later, profiling-driven step. Its rules:
   - inlined sites read strides and offsets from constants that `Storage` exports (never
-    literals);
+    literals). *Built (speed landing, bench.md):* reading them at runtime cost 7-19%, so the
+    CDT copies use literal strides the compiler folds. A load-time `assert` against the exported
+    `Storage.Layout` makes a layout change fail loudly at require, which keeps the intent;
   - they carry an `-- inlined: Storage.<fn>` tag, so a future swap starts with a grep;
   - no inlining across a package boundary: NavMesh never reads CDT raw fields.
 - **Capacity:** grows by doubling; `Reserve` pre-sizes when counts are known (the audit showed

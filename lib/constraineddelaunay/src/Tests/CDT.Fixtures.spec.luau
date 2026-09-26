@@ -43,14 +43,14 @@ return function(t: tiniest)
 	describe("Fixtures.ToInput", function()
 		test("emits every ring as closed directed edges tagged with its group", function()
 			local input = Fixtures.ToInput(Fixtures.SquareWithHole)
-			expect(input.Coords).is_shallow_equal({ 0, 0, 10, 0, 10, 10, 0, 10, 4, 4, 4, 6, 6, 6, 6, 4 })
-			expect(input.Edges).is_shallow_equal({ 1, 2, 2, 3, 3, 4, 4, 1, 5, 6, 6, 7, 7, 8, 8, 5 })
-			expect(input.EdgeGroups).is_shallow_equal({ 1, 1, 1, 1, 1, 1, 1, 1 })
+			expect(input.Coords).is_shallow_equal { 0, 0, 10, 0, 10, 10, 0, 10, 4, 4, 4, 6, 6, 6, 6, 4 }
+			expect(input.Edges).is_shallow_equal { 1, 2, 2, 3, 3, 4, 4, 1, 5, 6, 6, 7, 7, 8, 8, 5 }
+			expect(input.EdgeGroups).is_shallow_equal { 1, 1, 1, 1, 1, 1, 1, 1 }
 		end)
 
 		test("keeps each ring's group", function()
 			local input = Fixtures.ToInput(Fixtures.OverlappingObstacles)
-			expect(input.EdgeGroups).is_shallow_equal({ 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2 })
+			expect(input.EdgeGroups).is_shallow_equal { 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2 }
 		end)
 	end)
 

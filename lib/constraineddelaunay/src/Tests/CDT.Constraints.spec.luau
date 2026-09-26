@@ -130,7 +130,7 @@ return function(t: tiniest)
 				table.insert(edges, a)
 				table.insert(edges, b)
 			end
-			local tri = checked(open({ Coords = coords, Edges = edges }), "grid of bars")
+			local tri = checked(open { Coords = coords, Edges = edges }, "grid of bars")
 			expect(steinerCount(tri)).is(36)
 		end)
 
@@ -155,21 +155,22 @@ return function(t: tiniest)
 					table.insert(edges, math.floor(rng(1, pointCount + 0.999)))
 					table.insert(edges, math.floor(rng(1, pointCount + 0.999)))
 				end
-				checked(open({ Coords = coords, Edges = edges }), `soup {trial}`)
+				checked(open { Coords = coords, Edges = edges }, `soup {trial}`)
 			end
 		end)
 	end)
 
 	describe("winding groups (U-d)", function()
 		test("an open polyline in a winding group errors, naming the group", function()
-			local ok, message = pcall(CDT.Triangulate, { Coords = { 0, 0, 10, 0, 5, 5 }, Edges = { 1, 2 }, EdgeGroups = { 2 } })
+			local ok, message =
+				pcall(CDT.Triangulate, { Coords = { 0, 0, 10, 0, 5, 5 }, Edges = { 1, 2 }, EdgeGroups = { 2 } })
 			expect(ok).never_is_true()
 			expect(tostring(message):find("winding group 2") ~= nil).is_true()
 		end)
 
 		test("the default group is 1, so open edges without groups also error", function()
 			expect(function()
-				CDT.Triangulate({ Coords = { 0, 0, 10, 0, 5, 5 }, Edges = { 1, 2 } })
+				CDT.Triangulate { Coords = { 0, 0, 10, 0, 5, 5 }, Edges = { 1, 2 } }
 			end).fails()
 		end)
 	end)
@@ -177,7 +178,7 @@ return function(t: tiniest)
 	describe("invariant (b) negative control", function()
 		test("a constraint left uncovered is caught", function()
 			local input = { Coords = { 0, 0, 10, 1, 20, 0, 10, -1 }, Edges = { 1, 3 } }
-			local plain = CDT.Triangulate({ Coords = input.Coords }) -- built WITHOUT the constraint
+			local plain = CDT.Triangulate { Coords = input.Coords } -- built WITHOUT the constraint
 			local ok, reason = Invariants.Check(plain, input.Coords, input.Edges)
 			expect(ok).never_is_true()
 			expect((reason or ""):find("covered chain") ~= nil).is_true()
@@ -190,7 +191,11 @@ return function(t: tiniest)
 		end)
 
 		test("crossing constraints", function()
-			snapshot(CDT.ToDrawList(CDT.Triangulate(open({ Coords = { 0, 0, 10, 10, 0, 10, 10, 0 }, Edges = { 1, 2, 3, 4 } }))))
+			snapshot(
+				CDT.ToDrawList(
+					CDT.Triangulate(open { Coords = { 0, 0, 10, 10, 0, 10, 10, 0 }, Edges = { 1, 2, 3, 4 } })
+				)
+			)
 		end)
 	end)
 end

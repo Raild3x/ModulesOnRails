@@ -26,13 +26,54 @@ type State = Storage.State
 
 local Orient2D = Predicates.Orient2D
 local InCircle = Predicates.InCircle
-local GetTriangle = Storage.GetTriangle
-local SetTriangle = Storage.SetTriangle
-local GetNeighbor = Storage.GetNeighbor
-local SetNeighbor = Storage.SetNeighbor
-local GetCoverHead = Storage.GetCoverHead
-local SetCoverHead = Storage.SetCoverHead
-local GetVertex = Storage.GetVertex
+-- Hot-path copies of the Storage accessors (bench.md, experiment 2: Triangulate 1.3-1.6x
+-- faster). Local functions let the compiler inline them, and literal strides let it fold them
+-- (reading them from Storage.Layout at runtime cost 7-19%). Each copy is tagged, and the load
+-- check below fails loudly if Storage's layout ever changes without these copies.
+local COORD_BYTES = 16
+local I32 = 4
+local TRI_BYTES = 12
+assert(
+	COORD_BYTES == Storage.Layout.COORD_BYTES
+		and I32 == Storage.Layout.I32
+		and TRI_BYTES == Storage.Layout.TRI_SLOTS * Storage.Layout.I32,
+	"inlined Storage accessor copies are out of date with Storage.Layout"
+)
+-- inlined: Storage.GetTriangle
+local function GetTriangle(s: State, t: number): (number, number, number)
+	local o = (t - 1) * TRI_BYTES
+	local b = s.TriVerts
+	return buffer.readi32(b, o), buffer.readi32(b, o + I32), buffer.readi32(b, o + 2 * I32)
+end
+-- inlined: Storage.SetTriangle
+local function SetTriangle(s: State, t: number, a: number, b: number, c: number)
+	local o = (t - 1) * TRI_BYTES
+	local buf = s.TriVerts
+	buffer.writei32(buf, o, a)
+	buffer.writei32(buf, o + I32, b)
+	buffer.writei32(buf, o + 2 * I32, c)
+end
+-- inlined: Storage.GetNeighbor
+local function GetNeighbor(s: State, t: number, e: number): number
+	return buffer.readi32(s.TriNeighbors, (t - 1) * TRI_BYTES + (e - 1) * I32)
+end
+-- inlined: Storage.SetNeighbor
+local function SetNeighbor(s: State, t: number, e: number, n: number)
+	buffer.writei32(s.TriNeighbors, (t - 1) * TRI_BYTES + (e - 1) * I32, n)
+end
+-- inlined: Storage.GetCoverHead
+local function GetCoverHead(s: State, t: number, e: number): number
+	return buffer.readi32(s.CoverHeads, (t - 1) * TRI_BYTES + (e - 1) * I32)
+end
+-- inlined: Storage.SetCoverHead
+local function SetCoverHead(s: State, t: number, e: number, head: number)
+	buffer.writei32(s.CoverHeads, (t - 1) * TRI_BYTES + (e - 1) * I32, head)
+end
+-- inlined: Storage.GetVertex
+local function GetVertex(s: State, v: number): (number, number)
+	local o = (v - 1) * COORD_BYTES
+	return buffer.readf64(s.Coords, o), buffer.readf64(s.Coords, o + 8)
+end
 
 local SUPER_VERTICES = 3
 -- Bounding-triangle size relative to the input extent. Large enough that hull points are
@@ -77,7 +118,19 @@ end
 local VertexTriangle: { number } = {}
 
 -- Writes a triangle's vertices, neighbours and cover heads in slot order.
-local function write(s: State, t: number, a: number, b: number, c: number, n1: number, n2: number, n3: number, c1: number, c2: number, c3: number)
+local function write(
+	s: State,
+	t: number,
+	a: number,
+	b: number,
+	c: number,
+	n1: number,
+	n2: number,
+	n3: number,
+	c1: number,
+	c2: number,
+	c3: number
+)
 	VertexTriangle[a], VertexTriangle[b], VertexTriangle[c] = t, t, t
 	SetTriangle(s, t, a, b, c)
 	SetNeighbor(s, t, 1, n1)
@@ -560,7 +613,10 @@ function Triangulator.Build(input: Types.TriangulateInput): State
 	local minX, minY, maxX, maxY = math.huge, math.huge, -math.huge, -math.huge
 	for i = 1, count do
 		local x, y = coords[2 * i - 1], coords[2 * i]
-		assert(x == x and y == y and math.abs(x) ~= math.huge and math.abs(y) ~= math.huge, "Triangulate: coordinates must be finite")
+		assert(
+			x == x and y == y and math.abs(x) ~= math.huge and math.abs(y) ~= math.huge,
+			"Triangulate: coordinates must be finite"
+		)
 		minX, maxX = math.min(minX, x), math.max(maxX, x)
 		minY, maxY = math.min(minY, y), math.max(maxY, y)
 	end

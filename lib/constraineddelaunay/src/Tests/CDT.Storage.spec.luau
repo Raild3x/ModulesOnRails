@@ -59,7 +59,15 @@ return function(t: tiniest)
 		end)
 
 		test("triangles, neighbours and coverage round-trip", function()
-			cases("AddTriangle", "GetTriangle", "SetTriangle", "GetNeighbor", "SetNeighbor", "GetCoverHead", "SetCoverHead")
+			cases(
+				"AddTriangle",
+				"GetTriangle",
+				"SetTriangle",
+				"GetNeighbor",
+				"SetNeighbor",
+				"GetCoverHead",
+				"SetCoverHead"
+			)
 			local s = Storage.New(0, 1)
 			local tri = Storage.AddTriangle(s, 1, 2, 3)
 			local a, b, c = Storage.GetTriangle(s, tri)

@@ -79,7 +79,10 @@ function DrawListModule.ToDrawList(s: Storage.State, options: CDTDrawOptions?): 
 		if opts.ColorByGroup ~= nil and Storage.GetWinding(s, t, opts.ColorByGroup) <= 0 then
 			color = COLOR_OUTSIDE
 		end
-		table.insert(list, { Kind = "Tri", Points = { ax, 0, ay, bx, 0, by, cx, 0, cy }, Color = color, Layer = "Triangles" })
+		table.insert(
+			list,
+			{ Kind = "Tri", Points = { ax, 0, ay, bx, 0, by, cx, 0, cy }, Color = color, Layer = "Triangles" }
+		)
 		if opts.ShowCircumcircles then
 			-- Debug only: circumcentre in plain floating point.
 			local d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by))
@@ -87,7 +90,13 @@ function DrawListModule.ToDrawList(s: Storage.State, options: CDTDrawOptions?): 
 			local ux = (a2 * (by - cy) + b2 * (cy - ay) + c2 * (ay - by)) / d
 			local uy = (a2 * (cx - bx) + b2 * (ax - cx) + c2 * (bx - ax)) / d
 			local radius = math.sqrt((ax - ux) ^ 2 + (ay - uy) ^ 2)
-			table.insert(list, { Kind = "Circle", Points = { ux, 0, uy }, Radius = radius, Color = COLOR_CIRCLE, Layer = "Circumcircles" })
+			table.insert(list, {
+				Kind = "Circle",
+				Points = { ux, 0, uy },
+				Radius = radius,
+				Color = COLOR_CIRCLE,
+				Layer = "Circumcircles",
+			})
 		end
 	end
 
@@ -102,7 +111,12 @@ function DrawListModule.ToDrawList(s: Storage.State, options: CDTDrawOptions?): 
 					local u, v = verts[e % 3 + 1], verts[(e + 1) % 3 + 1]
 					local ux, uy = Storage.GetVertex(s, u)
 					local vx, vy = Storage.GetVertex(s, v)
-					table.insert(list, { Kind = "Line", Points = { ux, 0, uy, vx, 0, vy }, Color = COLOR_CONSTRAINT, Layer = "Constraints" })
+					table.insert(list, {
+						Kind = "Line",
+						Points = { ux, 0, uy, vx, 0, vy },
+						Color = COLOR_CONSTRAINT,
+						Layer = "Constraints",
+					})
 				end
 			end
 		end
@@ -112,7 +126,10 @@ function DrawListModule.ToDrawList(s: Storage.State, options: CDTDrawOptions?): 
 		local x, y = Storage.GetVertex(s, v)
 		local steiner = Storage.InputVertexOf(s, v) == nil
 		local color = if steiner and showSteiner then COLOR_STEINER else COLOR_VERTEX
-		table.insert(list, { Kind = "Point", Points = { x, 0, y }, Color = color, Layer = if steiner then "Steiner" else "Vertices" })
+		table.insert(
+			list,
+			{ Kind = "Point", Points = { x, 0, y }, Color = color, Layer = if steiner then "Steiner" else "Vertices" }
+		)
 	end
 
 	return list

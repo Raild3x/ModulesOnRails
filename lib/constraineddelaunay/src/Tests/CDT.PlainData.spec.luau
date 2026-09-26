@@ -23,11 +23,17 @@ return function(t: tiniest)
 		end)
 
 		test("native vector values (Roblox Vector3)", function()
-			expect(PlainData.Check({ Positions = { vector.create(1, 2, 3), vector.create(-4, 0, 5) } })).is_true()
+			expect(PlainData.Check { Positions = { vector.create(1, 2, 3), vector.create(-4, 0, 5) } }).is_true()
 		end)
 
 		test("flat arrays, string dictionaries, buffers, empty tables and infinities", function()
-			expect(PlainData.Check({ Coords = { 0, 1.5, -2 }, Name = "x", Blob = buffer.create(8), Empty = {}, Far = math.huge })).is_true()
+			expect(PlainData.Check {
+				Coords = { 0, 1.5, -2 },
+				Name = "x",
+				Blob = buffer.create(8),
+				Empty = {},
+				Far = math.huge,
+			}).is_true()
 		end)
 	end)
 

@@ -39,6 +39,10 @@ local BOUNDARY_EPS = 1e-6
 -- Each level of rerouting is a fragment between two distinct hot pixels, so a correct run is
 -- shallow. Hitting this means a bug, not a hard input.
 local MAX_DEPTH = 256
+-- Grid-bucket cell bounds in grid units (1/4 stud to 128 studs), and the cell key packing:
+-- cell indices stay within 2^17 of zero for coordinates within 2^23 and cells of at least 64.
+local MIN_CELL, MAX_CELL = 64, 32768
+local CELL_KEY_OFFSET, CELL_KEY_STRIDE = 1048576, 2097152
 
 local Quantize = {}
 
@@ -162,46 +166,99 @@ function Quantize.SnapRound(coords: { number }, edges: { number }): ({ number },
 		addHot(coords[2 * b - 1], coords[2 * b])
 	end
 
-	-- ponytail: all-pairs crossing scan, O(n^2). Swap in a sweep or grid buckets if a tile's
-	-- segment count makes this show up in the bench.
+	-- Grid buckets for both scans (bench.md, experiments 1 and 1b). A cell is about the typical
+	-- spacing between segments, sqrt(bounds area / segment count), rounded up to a power of
+	-- two: dense scenes get small cells and sparse ones large. Any fixed size was up to 54% off
+	-- the best on some scene; this rule stayed within 11%.
+	local segMinX, segMaxX = table.create(segCount), table.create(segCount)
+	local segMinY, segMaxY = table.create(segCount), table.create(segCount)
+	local boundsX0, boundsY0, boundsX1, boundsY1 = math.huge, math.huge, -math.huge, -math.huge
+	for k = 1, segCount do
+		local a, b = edges[2 * k - 1], edges[2 * k]
+		local ax, ay, bx, by = coords[2 * a - 1], coords[2 * a], coords[2 * b - 1], coords[2 * b]
+		segMinX[k], segMaxX[k] = math.min(ax, bx), math.max(ax, bx)
+		segMinY[k], segMaxY[k] = math.min(ay, by), math.max(ay, by)
+		boundsX0, boundsX1 = math.min(boundsX0, segMinX[k]), math.max(boundsX1, segMaxX[k])
+		boundsY0, boundsY1 = math.min(boundsY0, segMinY[k]), math.max(boundsY1, segMaxY[k])
+	end
+	local spacing = math.sqrt(math.max(1, (boundsX1 - boundsX0) * (boundsY1 - boundsY0)) / math.max(1, segCount))
+	local cell = math.clamp(2 ^ math.ceil(math.log(spacing, 2)), MIN_CELL, MAX_CELL)
+	local function cellKey(cx: number, cy: number): number
+		return (cx + CELL_KEY_OFFSET) * CELL_KEY_STRIDE + (cy + CELL_KEY_OFFSET)
+	end
+
+	-- Crossing candidates: segments sharing a cell, each pair tested once.
+	local segCells: { [number]: { number } } = {}
+	for k = 1, segCount do
+		for cx = segMinX[k] // cell, segMaxX[k] // cell do
+			for cy = segMinY[k] // cell, segMaxY[k] // cell do
+				local key = cellKey(cx, cy)
+				local list = segCells[key]
+				if list == nil then
+					list = {}
+					segCells[key] = list
+				end
+				table.insert(list, k)
+			end
+		end
+	end
+	local stamp = table.create(segCount, 0)
 	for i = 1, segCount do
 		local a, b = edges[2 * i - 1], edges[2 * i]
 		local ax, ay, bx, by = coords[2 * a - 1], coords[2 * a], coords[2 * b - 1], coords[2 * b]
-		for j = i + 1, segCount do
-			local c, d = edges[2 * j - 1], edges[2 * j]
-			local cx, cy, dx, dy = coords[2 * c - 1], coords[2 * c], coords[2 * d - 1], coords[2 * d]
-			if
-				math.max(ax, bx) < math.min(cx, dx)
-				or math.max(cx, dx) < math.min(ax, bx)
-				or math.max(ay, by) < math.min(cy, dy)
-				or math.max(cy, dy) < math.min(ay, by)
-			then
-				continue
-			end
-			-- Only proper crossings add hot pixels. Touching, T-junction and collinear overlap
-			-- all meet at a segment endpoint, which is already hot.
-			local o1, o2 = Orient2D(ax, ay, bx, by, cx, cy), Orient2D(ax, ay, bx, by, dx, dy)
-			if o1 * o2 >= 0 then
-				continue
-			end
-			local o3, o4 = Orient2D(cx, cy, dx, dy, ax, ay), Orient2D(cx, cy, dx, dy, bx, by)
-			if o3 * o4 >= 0 then
-				continue
-			end
-			local ex, ey = bx - ax, by - ay
-			local fx, fy = dx - cx, dy - cy
-			local t = ((cx - ax) * fy - (cy - ay) * fx) / (ex * fy - ey * fx)
-			local x0, x1 = pixelRange(ax + t * ex)
-			local y0, y1 = pixelRange(ay + t * ey)
-			for x = x0, x1 do
-				for y = y0, y1 do
-					addHot(x, y)
+		for cx = segMinX[i] // cell, segMaxX[i] // cell do
+			for cy = segMinY[i] // cell, segMaxY[i] // cell do
+				for _, j in segCells[cellKey(cx, cy)] do
+					if j <= i or stamp[j] == i then
+						continue
+					end
+					stamp[j] = i
+					if
+						segMaxX[i] < segMinX[j]
+						or segMaxX[j] < segMinX[i]
+						or segMaxY[i] < segMinY[j]
+						or segMaxY[j] < segMinY[i]
+					then
+						continue
+					end
+					local c, d = edges[2 * j - 1], edges[2 * j]
+					local cx2, cy2, dx, dy = coords[2 * c - 1], coords[2 * c], coords[2 * d - 1], coords[2 * d]
+					-- Only proper crossings add hot pixels. Touching, T-junction and collinear
+					-- overlap all meet at a segment endpoint, which is already hot.
+					local o1, o2 = Orient2D(ax, ay, bx, by, cx2, cy2), Orient2D(ax, ay, bx, by, dx, dy)
+					if o1 * o2 >= 0 then
+						continue
+					end
+					local o3, o4 = Orient2D(cx2, cy2, dx, dy, ax, ay), Orient2D(cx2, cy2, dx, dy, bx, by)
+					if o3 * o4 >= 0 then
+						continue
+					end
+					local ex, ey = bx - ax, by - ay
+					local fx, fy = dx - cx2, dy - cy2
+					local t = ((cx2 - ax) * fy - (cy2 - ay) * fx) / (ex * fy - ey * fx)
+					local x0, x1 = pixelRange(ax + t * ex)
+					local y0, y1 = pixelRange(ay + t * ey)
+					for x = x0, x1 do
+						for y = y0, y1 do
+							addHot(x, y)
+						end
+					end
 				end
 			end
 		end
 	end
 
 	local hotCount = #hotX
+	local hotCells: { [number]: { number } } = {}
+	for h = 1, hotCount do
+		local key = cellKey(hotX[h] // cell, hotY[h] // cell)
+		local list = hotCells[key]
+		if list == nil then
+			list = {}
+			hotCells[key] = list
+		end
+		table.insert(list, h)
+	end
 	local hotVertex = table.create(hotCount, 0)
 	local function vertexOfHot(h: number): number
 		local v = hotVertex[h]
@@ -233,21 +290,27 @@ function Quantize.SnapRound(coords: { number }, edges: { number }): ({ number },
 		local minX, maxX = math.min(px, qx), math.max(px, qx)
 		local minY, maxY = math.min(py, qy), math.max(py, qy)
 
-		-- ponytail: linear scan over hot pixels per fragment. Bucket them by grid cell if the
-		-- bench shows it.
 		local hits: { { number } }? = nil
-		for h = 1, hotCount do
-			local hx, hy = hotX[h], hotY[h]
-			if hx < minX or hx > maxX or hy < minY or hy > maxY then
-				continue
-			end
-			if (hx == px and hy == py) or (hx == qx and hy == qy) then
-				continue
-			end
-			local hit, n, d, open = hitPixel(2 * px, 2 * py, 2 * qx, 2 * qy, 2 * hx, 2 * hy)
-			if hit then
-				hits = hits or {}
-				table.insert(hits :: { { number } }, { h, n, d, open })
+		for cx = minX // cell, maxX // cell do
+			for cy = minY // cell, maxY // cell do
+				local list = hotCells[cellKey(cx, cy)]
+				if list == nil then
+					continue
+				end
+				for _, h in list do
+					local hx, hy = hotX[h], hotY[h]
+					if hx < minX or hx > maxX or hy < minY or hy > maxY then
+						continue
+					end
+					if (hx == px and hy == py) or (hx == qx and hy == qy) then
+						continue
+					end
+					local hit, n, d, open = hitPixel(2 * px, 2 * py, 2 * qx, 2 * qy, 2 * hx, 2 * hy)
+					if hit then
+						hits = hits or {}
+						table.insert(hits :: { { number } }, { h, n, d, open })
+					end
+				end
 			end
 		end
 
