@@ -20,7 +20,7 @@ end
 	Checks (a) CCW + neighbour symmetry, (c) local constrained Delaunay, the convex hull,
 	Euler's count, input mapping and plain data. `coords` is the TriangulateInput.Coords.
 ]=]
-function Invariants.Check(tri: Triangulation, coords: { number }): (boolean, string?)
+function Invariants.Check(tri: Triangulation, coords: { number }, edges: { number }?): (boolean, string?)
 	local triangleCount = CDT.TriangleCount(tri)
 	local vertexCount = CDT.VertexCount(tri)
 	local boundaryEdges = {}
@@ -90,6 +90,47 @@ function Invariants.Check(tri: Triangulation, coords: { number }): (boolean, str
 		local x, y = CDT.GetVertex(tri, v)
 		if x ~= coords[2 * i - 1] or y ~= coords[2 * i] then
 			return false, `input point {i} moved`
+		end
+	end
+
+	-- (b) Every input constraint is a chain of edges covered by its id, endpoint to endpoint.
+	if edges and #edges > 0 then
+		local adjacency: { [number]: { [number]: { number } } } = {}
+		for t = 1, triangleCount do
+			for e = 1, 3 do
+				for k = 1, CDT.GetCoveringEdgeCount(tri, t, e) do
+					local id = CDT.GetCoveringEdge(tri, t, e, k)
+					local u, v = edgeVertices(tri, t, e)
+					local byVertex = adjacency[id] or {}
+					adjacency[id] = byVertex
+					byVertex[u] = byVertex[u] or {}
+					byVertex[v] = byVertex[v] or {}
+					table.insert(byVertex[u], v)
+					table.insert(byVertex[v], u)
+				end
+			end
+		end
+		for k = 1, #edges // 2 do
+			local from = CDT.VertexOfInput(tri, edges[2 * k - 1])
+			local to = CDT.VertexOfInput(tri, edges[2 * k])
+			if from == to then
+				continue
+			end
+			local byVertex = adjacency[k] or {}
+			local seen = { [from] = true }
+			local frontier = { from }
+			while #frontier > 0 do
+				local current = table.remove(frontier) :: number
+				for _, nextVertex in byVertex[current] or {} do
+					if not seen[nextVertex] then
+						seen[nextVertex] = true
+						table.insert(frontier, nextVertex)
+					end
+				end
+			end
+			if not seen[to] then
+				return false, `constraint {k} (vertex {from} -> {to}) is not a covered chain`
+			end
 		end
 	end
 

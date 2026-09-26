@@ -23,7 +23,24 @@ end
 
 for _, scenario in CDT.Fixtures.All do
 	add(`Points_{scenario.Name}`, { Coords = CDT.Fixtures.ToInput(scenario).Coords })
+	add(`Constrained_{scenario.Name}`, CDT.Fixtures.ToInput(scenario))
 end
+
+add("CrossingX", { Coords = { 0, 0, 10, 10, 0, 10, 10, 0 }, Edges = { 1, 2, 3, 4 } })
+
+local barCoords, barEdges = {}, {}
+for i = 0, 5 do
+	for _, p in { { i * 2, -1 }, { i * 2, 11 }, { -1, i * 2 + 0.5 }, { 11, i * 2 + 0.5 } } do
+		table.insert(barCoords, p[1])
+		table.insert(barCoords, p[2])
+	end
+	local base = i * 4
+	table.insert(barEdges, base + 1)
+	table.insert(barEdges, base + 2)
+	table.insert(barEdges, base + 3)
+	table.insert(barEdges, base + 4)
+end
+add("GridOfBars", { Coords = barCoords, Edges = barEdges })
 
 local rng = makeRng(42)
 local random = {}

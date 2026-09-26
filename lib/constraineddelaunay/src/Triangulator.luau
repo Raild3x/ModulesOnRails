@@ -71,8 +71,13 @@ local function relink(s: State, n: number, from: number, to: number)
 	end
 end
 
+-- Some triangle containing each vertex, maintained by `write` during a build (edge lookups
+-- rotate around a vertex from here). Builds are synchronous, so one table is reused.
+local VertexTriangle: { number } = {}
+
 -- Writes a triangle's vertices, neighbours and cover heads in slot order.
 local function write(s: State, t: number, a: number, b: number, c: number, n1: number, n2: number, n3: number, c1: number, c2: number, c3: number)
+	VertexTriangle[a], VertexTriangle[b], VertexTriangle[c] = t, t, t
 	SetTriangle(s, t, a, b, c)
 	SetNeighbor(s, t, 1, n1)
 	SetNeighbor(s, t, 2, n2)
@@ -106,7 +111,11 @@ function Triangulator.Flip(s: State, t: number, i: number): (number, number, num
 	return t, 1, n, 3
 end
 
-local function legalize(s: State, stack: { number })
+-- Lawson flips until every stacked edge (triangle, slot) is locally Delaunay.
+-- After inserting a point only the two edges opposite it need re-checking after a flip;
+-- `allSides` re-checks all four outer edges of the flipped quad, which general edge
+-- restoration (after constraint recovery) requires.
+local function legalize(s: State, stack: { number }, allSides: boolean?)
 	while #stack > 0 do
 		local slot = table.remove(stack) :: number
 		local t = table.remove(stack) :: number
@@ -126,6 +135,13 @@ local function legalize(s: State, stack: { number })
 			table.insert(stack, s1)
 			table.insert(stack, t2)
 			table.insert(stack, s2)
+			if allSides then
+				-- The flipped quad's other two outer edges: t1 slot 3 and t2 slot 1.
+				table.insert(stack, t1)
+				table.insert(stack, 3)
+				table.insert(stack, t2)
+				table.insert(stack, 1)
+			end
 		end
 	end
 end
@@ -246,6 +262,267 @@ local function mortonOrder(coords: { number }, count: number, minX: number, minY
 	return order
 end
 
+-- Inserts (x, y): merges into an exact duplicate, or splits an edge / a triangle, then
+-- restores Delaunay. Returns the vertex and a nearby triangle (walk hint).
+local function insertPoint(s: State, x: number, y: number, hint: number, stack: { number }): (number, number)
+	local t, o1, o2, o3 = Triangulator.Walk(s, x, y, hint)
+	assert(t ~= 0, "Triangulate: point outside the bounding triangle")
+	local zeros = (if o1 == 0 then 1 else 0) + (if o2 == 0 then 1 else 0) + (if o3 == 0 then 1 else 0)
+	if zeros >= 2 then
+		-- Exact duplicate of an existing vertex: the vertex whose opposite edge is non-zero.
+		local slot = if o1 ~= 0 then 1 elseif o2 ~= 0 then 2 else 3
+		return vertexAt(s, t, slot), t
+	end
+	local p = Storage.AddVertex(s, x, y)
+	if zeros == 1 then
+		local e = if o1 == 0 then 1 elseif o2 == 0 then 2 else 3
+		splitEdge(s, t, e, p, stack)
+	else
+		splitTriangle(s, t, p, stack)
+	end
+	legalize(s, stack)
+	return p, VertexTriangle[p]
+end
+
+-- The slot of triangle t that is neither vertex x nor vertex y (the edge (x, y) is opposite it).
+local function slotOpposite(s: State, t: number, x: number, y: number): number
+	local a, b, c = GetTriangle(s, t)
+	if a ~= x and a ~= y then
+		return 1
+	end
+	if b ~= x and b ~= y then
+		return 2
+	end
+	return 3
+end
+
+-- Calls visit(t, i) for every triangle around vertex x (i = x's slot) until it returns true.
+local function aroundVertex(s: State, x: number, visit: (number, number) -> boolean): boolean
+	local start = VertexTriangle[x]
+	local slotOfX = function(t: number): number
+		local a, b = GetTriangle(s, t)
+		if a == x then
+			return 1
+		end
+		if b == x then
+			return 2
+		end
+		return 3
+	end
+	-- One direction across the edge after x, then (if the fan is open) the other direction.
+	for _, step in { 1, 2 } do
+		local t = start
+		local guard = Storage.TriangleCount(s) + 1
+		while t ~= 0 and guard > 0 do
+			guard -= 1
+			local i = slotOfX(t)
+			if visit(t, i) then
+				return true
+			end
+			local nextSlot = if step == 1 then (i + 1) % 3 + 1 else i % 3 + 1
+			t = GetNeighbor(s, t, nextSlot)
+			if t == start then
+				return false
+			end
+		end
+	end
+	return false
+end
+
+-- A triangle having edge (x, y) and the slot opposite it, or 0 when the edge doesn't exist.
+local function findEdge(s: State, x: number, y: number): (number, number)
+	local found, foundSlot = 0, 0
+	aroundVertex(s, x, function(t: number, i: number): boolean
+		local a, b, c = GetTriangle(s, t)
+		if a == y or b == y or c == y then
+			found, foundSlot = t, slotOpposite(s, t, x, y)
+			return true
+		end
+		return false
+	end)
+	return found, foundSlot
+end
+
+local function coverEdge(s: State, t: number, slot: number, ids: { number })
+	local head = GetCoverHead(s, t, slot)
+	for _, id in ids do
+		head = Storage.PushCover(s, head, id)
+	end
+	SetCoverHead(s, t, slot, head)
+	local n = GetNeighbor(s, t, slot)
+	if n ~= 0 then
+		SetCoverHead(s, n, slotOf(s, n, t), head)
+	end
+end
+
+local function uncoverEdge(s: State, t: number, slot: number): { number }
+	local ids = {}
+	for k = 1, Storage.GetCoveringEdgeCount(s, t, slot) do
+		table.insert(ids, Storage.GetCoveringEdge(s, t, slot, k))
+	end
+	SetCoverHead(s, t, slot, 0)
+	local n = GetNeighbor(s, t, slot)
+	if n ~= 0 then
+		SetCoverHead(s, n, slotOf(s, n, t), 0)
+	end
+	return ids
+end
+
+local function dot(s: State, a: number, b: number, c: number): number
+	local ax, ay = GetVertex(s, a)
+	local bx, by = GetVertex(s, b)
+	local cx, cy = GetVertex(s, c)
+	return (bx - ax) * (cx - ax) + (by - ay) * (cy - ay)
+end
+
+local function orient(s: State, a: number, b: number, c: number): number
+	local ax, ay = GetVertex(s, a)
+	local bx, by = GetVertex(s, b)
+	local cx, cy = GetVertex(s, c)
+	return Orient2D(ax, ay, bx, by, cx, cy)
+end
+
+type WalkResult = {
+	Kind: "Vertex" | "Constraint",
+	Stop: number, -- Vertex: the vertex reached on the segment
+	Right: number, -- Constraint: the crossed constrained edge (right, left) and a triangle holding it
+	Left: number,
+	Triangle: number,
+	Crossings: { { number } }, -- crossed unconstrained edges before the stop, as {right, left}
+}
+
+-- Walks the segment a -> b from a, collecting crossed edges until it reaches a vertex exactly
+-- on the segment (possibly b) or a constrained edge it would cross.
+local function walkSegment(s: State, a: number, b: number): WalkResult
+	local crossings: { { number } } = {}
+	local startT, right, left = 0, 0, 0
+	local hitVertex = 0
+	aroundVertex(s, a, function(t: number, i: number): boolean
+		local r, l = vertexAt(s, t, i % 3 + 1), vertexAt(s, t, (i + 1) % 3 + 1)
+		local oR, oL = orient(s, a, r, b), orient(s, a, l, b)
+		if oR == 0 and dot(s, a, r, b) > 0 then
+			hitVertex = r
+			return true
+		end
+		if oL == 0 and dot(s, a, l, b) > 0 then
+			hitVertex = l
+			return true
+		end
+		if oR > 0 and oL < 0 then
+			startT, right, left = t, r, l
+			return true
+		end
+		return false
+	end)
+	if hitVertex ~= 0 then
+		return { Kind = "Vertex", Stop = hitVertex, Right = 0, Left = 0, Triangle = 0, Crossings = crossings }
+	end
+	assert(startT ~= 0, "Triangulate: no triangle around the segment start (degenerate input)")
+	local t = startT
+	while true do
+		local slot = slotOpposite(s, t, right, left)
+		if GetCoverHead(s, t, slot) ~= 0 then
+			return { Kind = "Constraint", Stop = 0, Right = right, Left = left, Triangle = t, Crossings = crossings }
+		end
+		table.insert(crossings, { right, left })
+		local n = GetNeighbor(s, t, slot)
+		local c = vertexAt(s, n, slotOf(s, n, t))
+		local o = orient(s, a, b, c)
+		if o == 0 then
+			return { Kind = "Vertex", Stop = c, Right = 0, Left = 0, Triangle = 0, Crossings = crossings }
+		end
+		if o < 0 then
+			right = c
+		else
+			left = c
+		end
+		t = n
+	end
+end
+
+-- Sloan's edge recovery: flip crossed edges (when their quad is convex) until (a, w) exists.
+-- Returns the edges created by flips that don't cross the segment (to re-legalize).
+local function recoverEdge(s: State, a: number, w: number, crossings: { { number } }): { { number } }
+	local queue = crossings
+	local fresh: { { number } } = {}
+	local guard = 64 * (#queue + 1) * (#queue + 1)
+	while #queue > 0 do
+		guard -= 1
+		assert(guard > 0, "Triangulate: constraint recovery did not converge")
+		local edge = table.remove(queue, 1) :: { number }
+		local x, y = edge[1], edge[2]
+		local t, slot = findEdge(s, x, y)
+		local p = vertexAt(s, t, slot)
+		local n = GetNeighbor(s, t, slot)
+		local q = vertexAt(s, n, slotOf(s, n, t))
+		-- Flip only when p-q properly crosses x-y (the quad p, x, q, y is strictly convex).
+		if orient(s, p, q, x) * orient(s, p, q, y) < 0 then
+			Triangulator.Flip(s, t, slot)
+			local crosses = p ~= a and p ~= w and q ~= a and q ~= w and orient(s, a, w, p) * orient(s, a, w, q) < 0
+			if crosses then
+				table.insert(queue, { p, q })
+			else
+				table.insert(fresh, { p, q })
+			end
+		else
+			table.insert(queue, edge)
+		end
+	end
+	return fresh
+end
+
+-- Inserts constraint segment u -> v covering `ids`, splitting at collinear vertices and at
+-- crossings with existing constraints (Steiner vertices).
+local function insertConstraint(s: State, u: number, v: number, ids: { number }, stack: { number })
+	local work: { { any } } = { { u, v, ids } }
+	while #work > 0 do
+		local item = table.remove(work) :: { any }
+		local a, b, segmentIds = item[1] :: number, item[2] :: number, item[3] :: { number }
+		if a == b then
+			continue
+		end
+		local t, slot = findEdge(s, a, b)
+		if t ~= 0 then
+			coverEdge(s, t, slot, segmentIds)
+			continue
+		end
+		local result = walkSegment(s, a, b)
+		if result.Kind == "Vertex" then
+			local w = result.Stop
+			local fresh = recoverEdge(s, a, w, result.Crossings)
+			local et, eslot = findEdge(s, a, w)
+			coverEdge(s, et, eslot, segmentIds)
+			for _, edge in fresh do
+				local ft, fslot = findEdge(s, edge[1], edge[2])
+				if ft ~= 0 then
+					table.insert(stack, ft)
+					table.insert(stack, fslot)
+				end
+			end
+			legalize(s, stack, true)
+			table.insert(work, { w, b, segmentIds })
+			continue
+		end
+		-- Crossing an existing constraint (r, l): insert the intersection as a Steiner vertex,
+		-- then route both constraints through it.
+		local r, l = result.Right, result.Left
+		local cslot = slotOpposite(s, result.Triangle, r, l)
+		local crossedIds = uncoverEdge(s, result.Triangle, cslot)
+		local ax, ay = GetVertex(s, a)
+		local bx, by = GetVertex(s, b)
+		local rx, ry = GetVertex(s, r)
+		local lx, ly = GetVertex(s, l)
+		local den = (bx - ax) * (ly - ry) - (by - ay) * (lx - rx)
+		local along = ((rx - ax) * (ly - ry) - (ry - ay) * (lx - rx)) / den
+		local px, py = ax + along * (bx - ax), ay + along * (by - ay)
+		local p = insertPoint(s, px, py, result.Triangle, stack)
+		table.insert(work, { r, p, crossedIds })
+		table.insert(work, { p, l, crossedIds })
+		table.insert(work, { p, b, segmentIds })
+		table.insert(work, { a, p, segmentIds })
+	end
+end
+
 local function groupCountOf(input: Types.TriangulateInput): number
 	local groups = input.EdgeGroups
 	local edges = input.Edges
@@ -264,17 +541,19 @@ end
 
 --[=[
 	@within Triangulator
-	Builds the Delaunay triangulation of the input points (constraints: ticket 08).
+	Builds the constrained Delaunay triangulation of the input points and edges.
 ]=]
 function Triangulator.Build(input: Types.TriangulateInput): State
 	local coords = input.Coords
 	assert(#coords % 2 == 0, "Triangulate: Coords must hold x,y pairs")
 	local count = #coords // 2
-	local edges = input.Edges
-	if edges and #edges > 0 then
-		error("Triangulate: constraint edges are not supported yet (ticket 08)", 2)
+	local edges = input.Edges or {}
+	assert(#edges % 2 == 0, "Triangulate: Edges must hold index pairs")
+	for _, index in edges do
+		assert(index >= 1 and index <= count and index % 1 == 0, "Triangulate: edge endpoint out of range")
 	end
 	local s = Storage.New(count, groupCountOf(input))
+	table.clear(VertexTriangle)
 	Storage.Reserve(s, count + SUPER_VERTICES, 2 * count + 8)
 
 	local minX, minY, maxX, maxY = math.huge, math.huge, -math.huge, -math.huge
@@ -295,31 +574,36 @@ function Triangulator.Build(input: Types.TriangulateInput): State
 	Storage.AddVertex(s, centerX + 2 * m, centerY - m)
 	Storage.AddVertex(s, centerX, centerY + 2 * m)
 	Storage.AddTriangle(s, 1, 2, 3)
+	write(s, 1, 1, 2, 3, 0, 0, 0, 0, 0, 0)
 
 	local stack: { number } = {}
 	local hint = 1
 	for _, i in mortonOrder(coords, count, minX, minY, span) do
-		local x, y = coords[2 * i - 1], coords[2 * i]
-		local t, o1, o2, o3 = Triangulator.Walk(s, x, y, hint)
-		assert(t ~= 0, "Triangulate: point outside the bounding triangle")
-		local zeros = (if o1 == 0 then 1 else 0) + (if o2 == 0 then 1 else 0) + (if o3 == 0 then 1 else 0)
-		if zeros >= 2 then
-			-- Exact duplicate of an existing vertex: the vertex whose opposite edge is non-zero.
-			local slot = if o1 ~= 0 then 1 elseif o2 ~= 0 then 2 else 3
-			Storage.SetInputVertex(s, i, vertexAt(s, t, slot))
-			hint = t
-			continue
-		end
-		local p = Storage.AddVertex(s, x, y)
+		local p, near = insertPoint(s, coords[2 * i - 1], coords[2 * i], hint, stack)
 		Storage.SetInputVertex(s, i, p)
-		if zeros == 1 then
-			local e = if o1 == 0 then 1 elseif o2 == 0 then 2 else 3
-			splitEdge(s, t, e, p, stack)
-		else
-			splitTriangle(s, t, p, stack)
+		hint = near
+	end
+
+	-- Constraint edge k is the k-th index pair; its id is k.
+	for k = 1, #edges // 2 do
+		local u = Storage.VertexOfInput(s, edges[2 * k - 1])
+		local v = Storage.VertexOfInput(s, edges[2 * k])
+		insertConstraint(s, u, v, { k }, stack)
+	end
+	if #edges > 0 then
+		-- Global Lawson pass: a constrained edge may be non-Delaunay, and un-constraining one
+		-- to route a crossing through a Steiner vertex can leave it (or its surroundings)
+		-- non-Delaunay. Flipping every unconstrained edge to convergence yields the CDT.
+		for t = 1, Storage.TriangleCount(s) do
+			for e = 1, 3 do
+				local n = GetNeighbor(s, t, e)
+				if n > t and GetCoverHead(s, t, e) == 0 then
+					table.insert(stack, t)
+					table.insert(stack, e)
+				end
+			end
 		end
-		legalize(s, stack)
-		hint = t
+		legalize(s, stack, true)
 	end
 
 	-- Remove the bounding triangle's vertices and every triangle touching them.
