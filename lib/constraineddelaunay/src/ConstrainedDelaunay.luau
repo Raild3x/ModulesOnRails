@@ -14,6 +14,7 @@
 local DrawListTypes = require("./DrawList")
 local Fixtures = require("./Fixtures")
 local PlainData = require("./PlainData")
+local Predicates = require("./Predicates")
 
 export type DrawPrimitive = DrawListTypes.DrawPrimitive
 export type DrawList = DrawListTypes.DrawList
@@ -33,5 +34,9 @@ ConstrainedDelaunay.PlainData = PlainData
 	Shared scenarios used by specs, the render script and benchmarks.
 ]=]
 ConstrainedDelaunay.Fixtures = Fixtures
+
+-- Exact predicates (stable public API; NavMesh's snap rounding uses the same implementation).
+ConstrainedDelaunay.Orient2D = Predicates.Orient2D
+ConstrainedDelaunay.InCircle = Predicates.InCircle
 
 return ConstrainedDelaunay
