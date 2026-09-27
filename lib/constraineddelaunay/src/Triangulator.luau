@@ -246,6 +246,53 @@ local function splitEdge(s: State, t: number, e: number, p: number, stack: { num
 	end
 end
 
+-- Splits hull edge (slot e of t, no neighbour) at new vertex p: t := (p,b,c), t2 := (a,p,c).
+local function splitHullEdge(s: State, t: number, e: number, p: number, stack: { number })
+	local c = vertexAt(s, t, e)
+	local a, b = vertexAt(s, t, e % 3 + 1), vertexAt(s, t, (e + 1) % 3 + 1)
+	local tN1, tN2 = GetNeighbor(s, t, e % 3 + 1), GetNeighbor(s, t, (e + 1) % 3 + 1) -- across (b,c), (c,a)
+	local tC1, tC2 = GetCoverHead(s, t, e % 3 + 1), GetCoverHead(s, t, (e + 1) % 3 + 1)
+	local shared = GetCoverHead(s, t, e)
+	local t2 = Storage.AddTriangle(s, a, p, c)
+	write(s, t, p, b, c, tN1, t2, 0, tC1, 0, shared)
+	write(s, t2, a, p, c, t, tN2, 0, 0, tC2, shared)
+	relink(s, tN2, t, t2)
+	table.insert(stack, t)
+	table.insert(stack, 1)
+	table.insert(stack, t2)
+	table.insert(stack, 2)
+end
+
+--[=[
+	@within Triangulator
+	Splits the edge opposite slot `e` of `t` (interior or hull) at a new vertex (x, y), which
+	must lie on or extremely near the edge, then restores Delaunay. Constraint coverage carries
+	over to both halves. Returns the new vertex. For Refine.
+]=]
+function Triangulator.SplitSegment(s: State, t: number, e: number, x: number, y: number): number
+	local p = Storage.AddVertex(s, x, y)
+	local stack: { number } = {}
+	local n = GetNeighbor(s, t, e)
+	local before = Storage.TriangleCount(s)
+	if n == 0 then
+		splitHullEdge(s, t, e, p, stack)
+	else
+		splitEdge(s, t, e, p, stack)
+	end
+	-- A point not exactly on the segment bends it slightly. The edges at p are then not
+	-- guaranteed Delaunay either, so every side of the new triangles is re-checked.
+	for _, tri in { t, n, before + 1, before + 2 } do
+		if tri ~= 0 and tri <= Storage.TriangleCount(s) then
+			for slot = 1, 3 do
+				table.insert(stack, tri)
+				table.insert(stack, slot)
+			end
+		end
+	end
+	legalize(s, stack, true)
+	return p
+end
+
 --[=[
 	@within Triangulator
 	Visibility walk from triangle `t` towards (x, y). Returns the containing triangle and the
@@ -336,6 +383,18 @@ local function insertPoint(s: State, x: number, y: number, hint: number, stack: 
 	end
 	legalize(s, stack)
 	return p, VertexTriangle[p]
+end
+
+--[=[
+	@within Triangulator
+	Inserts (x, y), which must lie inside the triangulation and not on a constrained or hull
+	edge, walking from `hint`, then restores Delaunay. Returns the vertex and whether it is new
+	(false: an exact duplicate of an existing vertex). For Refine.
+]=]
+function Triangulator.InsertAt(s: State, x: number, y: number, hint: number): (number, boolean)
+	local before = Storage.VertexCount(s)
+	local p = insertPoint(s, x, y, hint, {})
+	return p, Storage.VertexCount(s) > before
 end
 
 -- The slot of triangle t that is neither vertex x nor vertex y (the edge (x, y) is opposite it).

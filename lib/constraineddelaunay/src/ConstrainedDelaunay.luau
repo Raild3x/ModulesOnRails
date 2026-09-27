@@ -25,6 +25,7 @@ local Fixtures = require("./Fixtures")
 local Locate = require("./Locate")
 local PlainData = require("./PlainData")
 local Predicates = require("./Predicates")
+local Refine = require("./Refine")
 local Storage = require("./Storage")
 local Triangulator = require("./Triangulator")
 local Types = require("./Types")
@@ -33,6 +34,7 @@ export type DrawPrimitive = DrawListModule.DrawPrimitive
 export type DrawList = DrawListModule.DrawList
 export type CDTDrawOptions = DrawListModule.CDTDrawOptions
 export type TriangulateInput = Types.TriangulateInput
+export type RefineOptions = Refine.RefineOptions
 --[=[
 	@within ConstrainedDelaunay
 	@type Triangulation {}
@@ -65,6 +67,30 @@ ConstrainedDelaunay.GetCoveringEdge = Storage.GetCoveringEdge
 ConstrainedDelaunay.GetWinding = Storage.GetWinding
 
 ConstrainedDelaunay.Locate = Locate.Locate
+
+--[=[
+	@within ConstrainedDelaunay
+	@interface RefineOptions
+	.MinAngle number? -- degrees, from 0 to below 60 (default 0). Termination is guaranteed only up to about 20.7 with no input angle below 60; triangles whose small angle comes from the input are skipped (P6)
+	.MaxArea number? -- default unlimited
+	.MaxSteiner number? -- vertices this call may add; default max(1024, 4 * input point count)
+]=]
+
+--[=[
+	@within ConstrainedDelaunay
+	Refines the triangulation in place (Ruppert) until every triangle meets `MinAngle` and
+	`MaxArea`. Constrained and hull edges act as segments (SR8): they are split, never crossed,
+	so new vertices stay inside the hull. Every triangle is refined, whatever its winding (the
+	caller filters). Winding and constraint coverage are kept. Returns false when `MaxSteiner`
+	vertices were added before the bounds were met.
+
+	```lua
+	local done = CDT.Refine(triangulation, { MinAngle = 20, MaxArea = 4 })
+	```
+]=]
+function ConstrainedDelaunay.Refine(triangulation: Triangulation, options: RefineOptions): boolean
+	return Refine.Refine(triangulation, options)
+end
 ConstrainedDelaunay.ToDrawList = DrawListModule.ToDrawList
 
 --[=[
