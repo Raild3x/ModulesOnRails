@@ -40,7 +40,7 @@ export type FloorDesc = {
 	@within NavMesh
 	@interface NavMeshDesc
 	.Floors { [string]: FloorDesc }
-	.TileSize number? -- studs, from 1/256 to 32768; tiles are aligned to the world origin (default 32)
+	.TileSize number? -- studs, from 1/256 to 32768; tiles are aligned to the world origin (default: per floor, about 36 edges per tile, a power of two from 4 to 256)
 
 	The authored description a mesh is built from. Part→polygon conversion belongs in a separate
 	adapter package (Q1).

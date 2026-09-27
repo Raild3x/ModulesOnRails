@@ -334,9 +334,140 @@ source:
 **4. Global Lawson pass** (measured earlier): 3.3 ms, 4% of Triangulate. Skipping it gave
 identical results on all 94 tile inputs, but it's not worth the risk. **Rejected.**
 
-**Projected Build** (256 map, 32-stud tiles, after 1 and 2 land): snap rounding about 9 ms
+**Projected Build** (256 map, 32-stud tiles, after 1 and 2 land; measured afterwards: 94 ms): snap rounding about 9 ms
 plus Triangulate about 50 ms plus glue about 18 ms, so about 80 ms instead of 306 ms. The
 TileSize benchmark should be re-run after they land, because the per-tile costs change.
+
+## Landed (2026-09-26): adaptive snap-round grid, CDT accessor copies
+- **`Quantize.SnapRound`:** grid buckets for both scans, sized per call by the density rule
+  (K = 1).
+  - Studio confirmation, with outputs identical to the variants:
+    - map128: 17.6 -> 3.1 ms;
+    - map256: 231 -> 8.9 ms;
+    - map512: 3663 -> 61 ms;
+    - one tile: 0.06 ms either way.
+  - The landed rule is best or tied among all fixed cells on every workload.
+- **CDT `Triangulator` and `Classify`:** tagged local copies of the Storage accessors
+  (`-- inlined: Storage.<fn>`).
+  - The strides are literals, so the compiler folds them. A load-time `assert` against the new
+    `Storage.Layout` fails loudly on a layout change (negative control: changing
+    `Storage.Layout.COORD_BYTES` makes the require fail).
+  - Reading the strides from `Storage.Layout` at runtime instead cost 7-19%, as measured.
+  - Studio before -> after:
+    - tiles256: 76.6 -> 56.5 ms (1.36x);
+    - tiles512: 432.9 -> 268.8 ms (1.61x);
+    - floor256: 55.2 -> 30.1 ms (1.83x).
+- **Build**, bench scene, 32-stud tiles: 324 -> 94 ms (Studio).
+
+## TileSize re-run over scenes (2026-09-26, after the landing)
+- **Command:** `python tools/navmesh/bench/tilesize.py --runs 3 --rounds 3`. Scenes are in
+  `tools/navmesh/bench/Scenes.luau`.
+- **Method:** Studio, medians of 3 runs x 3 rounds.
+- **Columns:** `tile` is the one-tile rebuild proxy (see above). `over` is the triangle
+  overhead against the scene's largest measured tile size.
+
+| scene | size | build ms | tris | over | tile ms |
+|---|---|---|---|---|---|
+| props | 4 | 95.8 | 3809 | +37% | 0.60 |
+| props | **8** | 53.9 | 3152 | +13% | **0.94** |
+| props | 16 | 44.0 | 2939 | +5% | 2.82 |
+| props | 32 | 36.1 | 2837 | +2% | 8.87 |
+| props | 64 | 36.8 | 2786 | - | 33.4 |
+| bench | 8 | 282.9 | 7823 | +91% | 0.27 |
+| bench | 16 | 146.5 | 5477 | +34% | 0.77 |
+| bench | **32** | 94.4 | 4605 | +12% | **1.69** |
+| bench | 64 | 82.8 | 4255 | +4% | 4.48 |
+| bench | 128 | 68.5 | 4094 | - | 15.96 |
+| terrain | 32 | 207.4 | 3676 | +183% | 0.24 |
+| terrain | 64 | 89.2 | 2024 | +56% | 0.48 |
+| terrain | 128 | 44.6 | 1493 | +15% | 0.89 |
+| terrain | **256** | 31.3 | 1297 | - | **2.17** |
+| walls | 8 | 211.8 | 3572 | +497% | 0.20 |
+| walls | 16 | 98.3 | 1560 | +161% | 0.23 |
+| walls | 32 | 54.9 | 918 | +54% | 0.58 |
+| walls | **64** | 35.8 | 692 | +16% | **1.81** |
+| walls | 128 | 30.8 | 598 | - | 5.39 |
+
+**Reading: the right TileSize depends on content density too.**
+- Rebuild cost scales with the content per tile, and the triangle overhead with the borders
+  cut through sparse triangles.
+- The bold rows balance the two: about 1-2 ms per rebuilt tile for about 15% more triangles.
+  In every scene that is **about 30-40 constraint edges per tile**.
+- A fixed 32 studs is fine for `bench`, but costs 8.9 ms per rebuild in `props`, and 3x the
+  triangles (and 4.6x the Build time) in `terrain`.
+- **Candidate default (awaiting the user's ruling):** per floor,
+  `TileSize = nearestPow2(sqrt(36 x floorArea / edgeCount))` studs, clamped to 4-256. An
+  explicit `TileSize` overrides it. For these scenes it picks 8 / 32 / 256 / 64, the bold
+  rows.
+
+## A* open list (ticket 14 fork, 2026-09-26)
+- **Experiments:** `ab/openlist` (the four scenes, random pairs) and `ab/openlist_scale`
+  (bench-density floors of 64-1024 studs, 12 corner-to-corner queries in the largest
+  connected component). Candidates are in `tools/navmesh/bench/OpenLists.luau`, sharing one
+  A* and its scratch. All found identical optimal costs.
+- **Chart:** the published "Open List Scaling" page.
+
+Studio, ms per 12 queries (2 of 3 runs; the first hit the run-in-roblox closed-channel
+error before measuring):
+
+| floor | peak open | pops/query | lib/heap | no heap | binary | **4-ary** | binary + decrease-key |
+|---|---|---|---|---|---|---|---|
+| 64 | 19 | 107 | 0.72 | **0.40** | 0.43 | 0.43 | 0.48 |
+| 128 | 52 | 868 | 6.00 | 4.89 | 4.05 | **3.87** | 4.22 |
+| 256 | 98 | 3188 | 24.36 | 27.22 | 16.48 | **15.68** | 18.26 |
+| 512 | 225 | 14908 | 130.69 | 232.59 | 96.56 | **84.03** | 96.00 |
+| 1024 | 447 | 59606 | 548.22 | 1711.63 | 391.83 | **372.88** | 422.19 |
+
+- **Why the 4-ary heap wins.** It halves the tree depth: about 0.6 moves per push (binary
+  1.25) and 2.3 per pop (3.9), for about 15% more comparisons. In Luau each move is two table
+  writes.
+- **No decrease-key.** Only 2-7% of pops are stale, and a position index costs more than it
+  saves.
+- **The no-heap array** is best only below about 25 entries. Its cost per expansion grows with
+  the list: 0.31 -> 2.39 µs, 4.6x slower than the 4-ary heap at 447 entries.
+- **`lib/heap`** carries a steady 1.5-1.7x overhead: method calls, an index indirection and a
+  free-index stack.
+
+**Landed: `lib/navmesh/src/OpenList.luau`**, a 4-ary min-heap as plain module functions on a
+state table.
+- **Spec (`NavMesh.OpenList.spec`):** a sorted-reference model over 60 seeded interleaved
+  push/pop sequences, the node multiset, every depth from 1 to 90 entries, and `Clear`.
+  - Negative control: a wrong parent index fails 4 tests.
+- **Studio confirmation** (`shipped`, called directly as FindPath will):
+  - vs the closure prototype: 0.42 -> 0.29, 3.84 -> 2.54, 15.53 -> 9.94, 81.6 -> 52.6 and
+    363 -> 232 ms, 1.46-1.57x faster;
+  - 2.3-2.5x faster than `lib/heap`.
+  - Identical costs everywhere.
+
+## How FindPath reads the mesh (ticket 14 fork, 2026-09-26)
+- **Experiment:** `ab/searchgraph`, on the `openlist_scale` floors with 12 corner-to-corner
+  queries each.
+- **Setup:** every variant uses the shipped OpenList directly and the same A*; only the graph
+  access differs.
+
+Studio, ms per 12 queries, medians of 3 runs x 5 rounds:
+
+| floor | flat (cached graph copy) | storage (accessors, no cache) | storage + cached centroids | buffer + cached centroids | **buffer + {vector} centroids** |
+|---|---|---|---|---|---|
+| 64 | 0.29 | 0.54 | 0.33 | 0.29 | **0.25** |
+| 128 | 2.51 | 4.26 | 2.78 | 2.55 | **2.24** |
+| 256 | 10.18 | 18.25 | 11.32 | 10.12 | **8.96** |
+| 512 | 54.86 | 89.56 | 60.00 | 54.38 | **49.91** |
+| 1024 | 248.0 | 383.7 | 253.5 | 236.7 | **211.0** |
+
+- **Centroids must be precomputed.** Recomputing each centroid from 3 vertices on every visit
+  is 1.5-1.9x slower.
+- **Neighbours need no copy.** Reading Storage's i32 buffer directly (a tagged inlined copy)
+  matches or beats a flat table copy, so the search doesn't have to duplicate the adjacency.
+- **Winner: centroids as one {vector} array** (vector-library distances): 1.1-1.2x faster than
+  the flat copy.
+  - It is a different precision class (f32). Path costs differ from f64 by at most 3.4e-4
+    studs, 1.7e-7 relative. That is rounding, not a different route, and it is why the harness
+    reports DIFFERENT for this variant only.
+- **Implication for ticket 14:** store a per-triangle centroid `vector` in NavMesh Storage.
+  - Compute it at Build and on tile rebuild, so there is no separate cache to invalidate on
+    `Update`. It costs 16 B per triangle.
+  - The search reads neighbours from the buffer and centroids from that array.
 
 ## Not measured (flagged)
 - Remote transfer time and payload size per layout (needs a live server/client session).

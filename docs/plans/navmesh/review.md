@@ -39,6 +39,19 @@ the const question are deliberately open, gated on benchmarks.
 - **U-d (API limits):** accept both: open polylines need group 0, and NavMesh coordinates are
   limited to ±32,768 studs. User: "Accept both (Recommended)".
 
+### Rulings during the build (2026-09-26)
+- **Speed work:** prototype and A/B test every speed opportunity before choosing. User: "Start
+  doing prototypes with AB testing to determine the best choices for each".
+- **Landing:** land the adaptive snap-round grid and the CDT accessor copies, then re-run the
+  TileSize benchmark across scenes. User: "yes".
+- **Open list:** ship the 4-ary heap (bench.md, "A* open list"). User: "implement the 4 ary
+  heap".
+- **Default TileSize:** per floor from density, about 36 edges per tile, a power of two from 4 to
+  256 studs; an explicit `TileSize` overrides it (bench.md, "TileSize re-run over scenes"). User:
+  "1 - yes".
+- **`Update` re-snap:** local to the dirty tiles, from each tile's static baseline (spec SR13,
+  bench.md 3). User: "2- yes".
+
 ## Rounds (plan debate, rounds 1-4 above; spec debate below under "Spec debate")
 ### Round 1
 | Lens | Category | Score |

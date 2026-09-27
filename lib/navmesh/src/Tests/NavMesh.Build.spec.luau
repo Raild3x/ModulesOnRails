@@ -547,6 +547,52 @@ return function(t: tiniest)
 			error("no cross-tile link found")
 		end)
 
+		-- The tile size a built floor ended up with (every tile of a floor is the same size).
+		local function tileSizeOf(mesh: any, floorName: string): number
+			for tile = 1, Storage.TileCount(mesh) do
+				if Storage.GetFloorName(mesh, Storage.GetTileFloor(mesh, tile)) == floorName then
+					local x0, _, x1 = Storage.GetTileBounds(mesh, tile)
+					return x1 - x0
+				end
+			end
+			error(`no tile on floor {floorName}`)
+		end
+		-- A square floor of `side` studs with `count` small boxes scattered on it.
+		local function boxes(side: number, count: number, size: number): any
+			local rng = makeRng(side * 1000 + count)
+			local obstacles = {}
+			for _ = 1, count do
+				local x, z = rng(size, side - size), rng(size, side - size)
+				table.insert(obstacles, flat(0, { x, z, x + size, z, x + size, z + size, x, z + size }))
+			end
+			return { Walkable = { flat(0, { 0, 0, side, 0, side, side, 0, side }) }, Obstacles = obstacles }
+		end
+
+		test("the default TileSize adapts to each floor: about 36 edges per tile, a power of two", function()
+			local cases = {
+				-- sqrt(36 x area / edges), rounded to a power of two and clamped to 4-256 studs.
+				{ "plain 10-stud square: sqrt(36 x 100 / 4) = 30", boxes(10, 0, 1), 32 },
+				{ "plain 2-stud square: sqrt(36 x 4 / 4) = 6", boxes(2, 0, 0.5), 8 },
+				{ "dense props: sqrt(36 x 4096 / 2052) = 8.5", boxes(64, 512, 1), 8 },
+				{ "denser than 4 studs clamps to 4", boxes(8, 200, 0.2), 4 },
+				{ "a huge plain square clamps to 256", boxes(2000, 0, 1), 256 },
+			}
+			for _, case in cases do
+				local mesh = NavMesh.Build { Floors = { Ground = case[2] } }
+				expect(tileSizeOf(mesh, "Ground")).with_context(case[1]).is(case[3])
+			end
+		end)
+
+		test("each floor gets its own default; an explicit TileSize applies to every floor", function()
+			local floors = { Dense = boxes(64, 512, 1), Plain = boxes(10, 0, 1) }
+			local adaptive = NavMesh.Build { Floors = floors }
+			expect(tileSizeOf(adaptive, "Dense")).is(8)
+			expect(tileSizeOf(adaptive, "Plain")).is(32)
+			local fixed = NavMesh.Build { TileSize = 16, Floors = floors }
+			expect(tileSizeOf(fixed, "Dense")).is(16)
+			expect(tileSizeOf(fixed, "Plain")).is(16)
+		end)
+
 		test("TileSize must be a positive number of studs within range", function()
 			local floors = { Ground = { Walkable = { flat(0, { 0, 0, 10, 0, 10, 10 }) } } }
 			for _, bad in { 0, -4, 40000, "8" :: any } do
@@ -554,6 +600,14 @@ return function(t: tiniest)
 					NavMesh.Build { TileSize = bad, Floors = floors }
 				end).fails_with("TileSize must be a number of studs")
 			end
+			-- Both ends of the range are allowed: one grid pixel, and the coordinate limit.
+			local tiny = { Ground = { Walkable = { flat(0, { 0, 0, 1 / 64, 0, 1 / 64, 1 / 64 }) } } }
+			expect(function()
+				NavMesh.Build { TileSize = 1 / 256, Floors = tiny }
+			end).never_fails()
+			expect(function()
+				NavMesh.Build { TileSize = 32768, Floors = floors }
+			end).never_fails()
 		end)
 	end)
 

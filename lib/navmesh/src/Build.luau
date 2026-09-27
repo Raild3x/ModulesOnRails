@@ -53,8 +53,18 @@ local HEIGHT_TOLERANCE = 0.05
 -- heights are f32 (Vector3), so a tilted planar ring misses its plane by f32 rounding; a crease
 -- this small is invisible and well under HEIGHT_TOLERANCE.
 local PLANAR_TOLERANCE = 1e-3
--- Studs. Provisional: the default is set by the TileSize benchmark (ticket 13).
-local DEFAULT_TILE_SIZE = 32
+-- The default TileSize adapts to each floor (bench.md, "TileSize re-run over scenes"): about 36
+-- constraint edges per tile balanced a tile's rebuild time (1-2 ms) against the triangles its
+-- borders add (about 15%) in every scene. Rounded to a power of two from 4 to 256 studs.
+local EDGES_PER_TILE = 36
+local MIN_TILE_POW, MAX_TILE_POW = 2, 8
+
+-- Default tile size in grid units for a floor whose rings span `areaStuds` and have
+-- `edgeCount` edges.
+local function adaptiveTileSize(areaStuds: number, edgeCount: number): number
+	local studs = math.sqrt(EDGES_PER_TILE * math.max(areaStuds, 1) / math.max(edgeCount, 1))
+	return 2 ^ math.clamp(math.round(math.log(studs, 2)), MIN_TILE_POW, MAX_TILE_POW) * GRID
+end
 
 -- A ring after quantization: grid X and Z, authored height, CCW, no repeated consecutive point.
 type Ring = { X: { number }, Z: { number }, Y: { number } }
@@ -324,7 +334,7 @@ local function clipToRect(
 	return outX, outZ
 end
 
-local function buildFloor(s: Storage.State, name: string, floor: FloorDesc, tileSize: number)
+local function buildFloor(s: Storage.State, name: string, floor: FloorDesc, explicitTileSize: number?)
 	local floorContext = `floor '{name}'`
 	if type(floor) ~= "table" or type(floor.Walkable) ~= "table" or #floor.Walkable == 0 then
 		fail(floorContext, "needs at least one Walkable ring")
@@ -386,6 +396,8 @@ local function buildFloor(s: Storage.State, name: string, floor: FloorDesc, tile
 	for i, ring in areas do
 		addRing(ring, GROUP_FIRST_AREA + i - 1)
 	end
+	local tileSize: number = explicitTileSize
+		or adaptiveTileSize((maxX - minX) * (maxZ - minZ) / (GRID * GRID), #edges // 2)
 	local creaseFirst = #edges // 2 + 1
 	for i, surface in surfaces do
 		if surface.Planar then
@@ -745,14 +757,14 @@ function Build.Build(desc: NavMeshDesc): Storage.State
 			error(`NavMesh.Build: {field} are not implemented yet`, 2)
 		end
 	end
-	local tileStuds = if desc.TileSize == nil then DEFAULT_TILE_SIZE else desc.TileSize
-	if type(tileStuds) ~= "number" or not (tileStuds >= 1 / GRID and tileStuds <= LIMIT) then
+	local tileStuds = desc.TileSize
+	if tileStuds ~= nil and (type(tileStuds) ~= "number" or not (tileStuds >= 1 / GRID and tileStuds <= LIMIT)) then
 		error(`NavMesh.Build: TileSize must be a number of studs from 1/{GRID} to {LIMIT}, got {tileStuds}`, 2)
 	end
 	table.sort(names)
 	local s = Storage.New()
 	for _, name in names do
-		buildFloor(s, name, desc.Floors[name], Quantize.ToGrid(tileStuds))
+		buildFloor(s, name, desc.Floors[name], if tileStuds == nil then nil else Quantize.ToGrid(tileStuds))
 	end
 	return s
 end
