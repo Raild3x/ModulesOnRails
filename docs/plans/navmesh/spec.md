@@ -458,6 +458,10 @@ if not NavMesh.IsPathValid(mesh, path) then path = NavMesh.FindPath(mesh, npcFee
   widths and bumps those tiles' stamps.
 - **Funnel:** the corridor is string-pulled, with offsets only at wall corners. Links become
   waypoints carrying `Label`.
+- **Search nodes (ticket 14, bench.md "Where A\* puts a triangle's node"):** a triangle's node
+  sits at the midpoint of the edge it was entered by, and the end triangles' nodes sit at the
+  snapped points. Crossing into a triangle costs the 3D distance between nodes times the mean
+  of the two area multipliers. `Partial` and `Budget` end at the reached point nearest the goal.
 - **Budget:** `MaxExpansions` returns `Budget` with waypoints to the best point found. The
   search is synchronous (Q8).
 - **Scratch:** a per-mesh pool in a module-level weak table (`Search.luau`). It never

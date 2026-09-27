@@ -468,6 +468,43 @@ Studio, ms per 12 queries, medians of 3 runs x 5 rounds:
   - Compute it at Build and on tile rebuild, so there is no separate cache to invalidate on
     `Update`. It costs 16 B per triangle.
   - The search reads neighbours from the buffer and centroids from that array.
+- **Superseded (2026-09-27), see the next section:** nodes no longer sit at centroids, so no
+  centroid is stored. Reading neighbours straight from the buffer still holds.
+
+## Where A* puts a triangle's node (ticket 14, 2026-09-27)
+- **Why:** the first FindPath spec found that nodes at triangle centres bend a clear straight
+  line. On the Courtyard, (6, 18) to (6, 29.5) crosses the area-2 patch, whose 2 large triangles
+  have centres far off the line. The corridor went round them through small triangles, so the
+  path came out 30% long (15.0 vs 11.5 studs).
+- **Probe:** `tools/navmesh/bench/nodes_probe.luau` (Lune, `os.clock`; an informal probe, not
+  the audited harness). It uses seeded random snapped query pairs, and the three variants share
+  the same A*, OpenList and Funnel.
+  - `centre`: the node sits at the triangle centre.
+  - `entry`: the node sits at the midpoint of the edge the triangle was entered by, as in
+    Recast. Its position depends on the parent.
+  - `edges`: one node per (triangle, entry edge), at that edge's midpoint. Positions are fixed,
+    so this is an exact A* over a fixed graph.
+- **Metric:** each funnelled path's length divided by the shortest of the three for the same
+  query. The lengths are deterministic; the timings are single-run and indicative only.
+
+| floor (triangles, queries) | centre: mean / worst | **entry**: mean / worst | edges: mean / worst | ms/query centre / entry / edges |
+|---|---|---|---|---|
+| Courtyard (32, 300) | 1.0162 / 1.561 | **1.0001 / 1.018** | 1.0021 / 1.227 | 0.008 / 0.009 / 0.023 |
+| Map64 (244, 200) | 1.0201 / 1.418 | **1.0055 / 1.202** | 1.0104 / 1.255 | 0.037 / 0.044 / 0.125 |
+| Map128 (1096, 200) | 1.0356 / 1.260 | **1.0101 / 1.251** | 1.0078 / 1.129 | 0.146 / 0.150 / 0.444 |
+| Map256 (4605, 100) | 1.0321 / 1.175 | **1.0066 / 1.113** | 1.0038 / 1.057 | 0.527 / 0.512 / 1.471 |
+
+- **Shipped: `entry`.** It runs at centre's speed and expands fewer triangles (589 vs 820 per
+  query on Map256). Its mean excess is 3-5x smaller than centre's, and its worst case is never
+  worse.
+- **Not shipped: `edges`.** It is about 3x slower, with 2.3x the expansions, and gains only on
+  the larger maps.
+- **Consequence:** the heuristic is still admissible (SR7), but a node's position depends on its
+  parent. The result is therefore the best corridor A* finds, not a proven optimum over a fixed
+  graph. The SR7 spec still checks A* against Dijkstra on the Courtyard, plus a cheap-detour
+  floor that an unscaled heuristic fails (negative control run).
+- **Remaining excess** comes from triangle corridors, not node placement. Up to 11-25% on single
+  queries; a real fix would be a corridor-aware refinement, which is not planned.
 
 ## Not measured (flagged)
 - Remote transfer time and payload size per layout (needs a live server/client session).

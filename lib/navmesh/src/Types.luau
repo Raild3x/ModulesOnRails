@@ -63,4 +63,49 @@ export type NavMeshDrawOptions = {
 	Tiles: boolean?,
 }
 
+--[=[
+	@within NavMesh
+	@interface QueryFilter
+	.AreaCosts { [number]: number }? -- cost multiplier per area id (default 1, >= 0); math.huge excludes the area
+	.MaxExpansions number? -- stop with "Budget" after expanding this many triangles (default unlimited)
+	.SnapExtents Vector3? -- half-size of the snap box around a feet position (default (0.5, 4, 0.5))
+
+	`AgentRadius` arrives with clearance (ticket 15).
+]=]
+export type QueryFilter = {
+	AreaCosts: { [number]: number }?,
+	MaxExpansions: number?,
+	SnapExtents: Vector3?,
+}
+
+--[=[
+	@within NavMesh
+	@interface Waypoint
+	.Position Vector3
+	.Floor string
+	.Label string? -- set where a link starts (ticket 16)
+]=]
+export type Waypoint = { Position: Vector3, Floor: string, Label: string? }
+
+--[=[
+	@within NavMesh
+	@type PathStatus "Success" | "Partial" | "Budget" | "NoStart" | "NoGoal"
+	- `Success`: reached the goal.
+	- `Partial`: the goal is unreachable; the waypoints end at the reachable point nearest it.
+	- `Budget`: `MaxExpansions` was hit; the waypoints end at the point nearest the goal found so
+	  far.
+	- `NoStart` / `NoGoal`: that end could not be snapped onto the mesh (no waypoints).
+]=]
+export type PathStatus = "Success" | "Partial" | "Budget" | "NoStart" | "NoGoal"
+
+--[=[
+	@within NavMesh
+	@interface PathResult
+	.Status PathStatus
+	.Waypoints { Waypoint } -- from the snapped start
+	.Cost number -- the search cost: 3D length times area multipliers, measured through the midpoints of the edges crossed
+	.TileStamps { number } -- opaque; filled once Update lands (ticket 18)
+]=]
+export type PathResult = { Status: PathStatus, Waypoints: { Waypoint }, Cost: number, TileStamps: { number } }
+
 return {}

@@ -20,6 +20,7 @@ local FLOOR_COLORS = { "#43a047", "#1e88e5", "#fb8c00", "#8e24aa", "#00897b", "#
 local AREA_COLORS = { "#9e9e9e", "#8d6e63", "#29b6f6", "#ffca28", "#ab47bc", "#66bb6a" }
 local WALL_COLOR = "#212121"
 local TILE_COLOR = "#ff7043"
+local PATH_COLOR = "#d81b60"
 
 local DrawList = {}
 
@@ -27,7 +28,7 @@ local function paletteColor(palette: { string }, id: number): string
 	return palette[(id - 1) % #palette + 1]
 end
 
-function DrawList.ToDrawList(s: Storage.State, options: Types.NavMeshDrawOptions?): DrawList
+function DrawList.ToDrawList(s: Storage.State, options: Types.NavMeshDrawOptions?, path: Types.PathResult?): DrawList
 	local opts: Types.NavMeshDrawOptions = options or {}
 	local list: DrawList = {}
 
@@ -76,6 +77,21 @@ function DrawList.ToDrawList(s: Storage.State, options: Types.NavMeshDrawOptions
 					Layer = "Tiles",
 				})
 			end
+		end
+	end
+
+	if path then
+		local waypoints = path.Waypoints
+		for i, w in waypoints do
+			local p = w.Position
+			if i > 1 then
+				local q = waypoints[i - 1].Position
+				table.insert(
+					list,
+					{ Kind = "Line", Points = { q.X, q.Y, q.Z, p.X, p.Y, p.Z }, Color = PATH_COLOR, Layer = "Path" }
+				)
+			end
+			table.insert(list, { Kind = "Point", Points = { p.X, p.Y, p.Z }, Color = PATH_COLOR, Layer = "Path" })
 		end
 	end
 	return list
