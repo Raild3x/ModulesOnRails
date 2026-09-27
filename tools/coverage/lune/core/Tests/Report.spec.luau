@@ -355,6 +355,14 @@ return function(tiniest)
 			local lines = renderMutation(totals, {})
 			expect(anyLineContains(lines, "stopped early: 4 planned mutant(s) not run")).is_true()
 		end)
+
+		test("a --mutate-files run is labelled a filtered subset; a whole-package run is not", function()
+			local totals = table.clone(TOTALS)
+			totals.files_filter = "src/a.luau,src/b/*.luau"
+			local lines = renderMutation(totals, {})
+			expect(anyLineContains(lines, "filtered subset: only --mutate-files=src/a.luau,src/b/*.luau")).is_true()
+			expect(anyLineContains(renderMutation(TOTALS, {}), "filtered subset")).never_is_true()
+		end)
 	end)
 
 	describe("Report.recommendations", function()

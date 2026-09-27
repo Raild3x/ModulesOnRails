@@ -40,6 +40,10 @@ export type Options = {
 	mutateLimit: number?,
 	mutateOps: string?,
 	mutateTimeout: number?,
+	-- Mutants run on this many parallel workers, each in its own build copy.
+	mutateJobs: number?,
+	-- Comma-separated package-relative paths/globs; only their mutants are run.
+	mutateFiles: string?,
 	recommend: boolean?,
 	luneOnly: boolean?,
 	-- Skip Lune-pipeline packages; run only Roblox-pipeline ones (mirror of
@@ -90,6 +94,31 @@ local function ensureDir(path: string)
 	end
 end
 
+-- Logical CPU count, read without spawning a process: Windows exports it in
+-- the environment and Linux lists each processor in /proc/cpuinfo. nil
+-- elsewhere (macOS).
+local function logicalCores(): number?
+	local fromEnv = tonumber(process.env.NUMBER_OF_PROCESSORS)
+	if fromEnv ~= nil then
+		return fromEnv
+	end
+	if fs.isFile("/proc/cpuinfo") then
+		local count = 0
+		for _ in ("\n" .. fs.readFile("/proc/cpuinfo")):gmatch("\nprocessor%s*:") do
+			count += 1
+		end
+		return if count > 0 then count else nil
+	end
+	return nil
+end
+
+-- Default --mutate-jobs: half the logical cores (about one worker per physical
+-- core on SMT machines), or 1 when the count is unknown.
+local function defaultMutateJobs(): number
+	local cores = logicalCores()
+	return if cores ~= nil then math.max(1, cores // 2) else 1
+end
+
 local function parseOpsCsv(csv: string?): { [string]: boolean }?
 	if csv == nil or csv == "" then
 		return nil
@@ -106,8 +135,10 @@ end
 	mutants against a pristine copy, plan against the coverage just measured,
 	then per mutant apply -> child suite run -> restore. Each mutant gets a
 	fresh `lune` process (cold require cache, and a hung mutant can be killed)
-	with a `task.delay` watchdog. Returns the summary embedded in coverage.json,
-	or nil when the phase could not run.
+	with a polled timeout. With `--mutate-jobs=<n>`, n workers run mutants
+	concurrently, each in its own pristine copy (`mutbuild/`, `mutbuild-2/`, ...),
+	and the extra copies are deleted afterwards. Returns the summary embedded in
+	coverage.json, or nil when the phase could not run.
 ]=]
 local function runMutation(
 	adapter: RepoAdapter,
@@ -126,22 +157,42 @@ local function runMutation(
 	for _, f in merged.files do
 		coveredLines[f.path] = f.coveredLines or {}
 	end
+	local fileGlobs = Mutation.parseFileGlobs(options.mutateFiles)
 	local plan = Mutation.plan(Mutation.flatten(mutantsDoc), coveredLines, {
 		ops = parseOpsCsv(options.mutateOps),
 		limit = options.mutateLimit,
 		ignoredFiles = merged.ignoredFiles,
+		files = fileGlobs,
 	})
+	if fileGlobs ~= nil and #plan.toRun + #plan.noCoverage == 0 then
+		print(
+			`[mutation] warning: --mutate-files={options.mutateFiles} matched no mutants (paths are package-relative, e.g. src/Foo.luau)`
+		)
+	end
+
+	-- Worker 1 mutates the historical `mutbuild/`; workers 2..n get copies.
+	local jobs = math.max(1, math.min(options.mutateJobs or defaultMutateJobs(), #plan.toRun))
+	local function workerBuild(worker: number): string
+		return if worker == 1 then mutBuild else `{mutBuild}-{worker}`
+	end
+	local function removeWorkerCopies()
+		for _, entry in fs.readDir(workDir) do
+			if entry:match("^mutbuild%-%d+$") then
+				fs.removeDir(`{workDir}/{entry}`)
+			end
+		end
+	end
 
 	-- Poll-based watchdog: task.delay + task.cancel leaves Lune's scheduler
 	-- waiting out the full delay after the work is done (the process lingers at
 	-- exit for minutes), so the wait/kill decision is a task.wait poll instead —
-	-- nothing outlives the child.
-	local function runSuite(timeoutSec: number?): Mutation.ChildOutcome
+	-- nothing outlives the child. Parallel workers each poll their own child.
+	local function runSuite(timeoutSec: number?, buildDir: string): Mutation.ChildOutcome
 		local start = os.clock()
 		local child = process.create("lune", {
 			"run",
 			MUTANT_RUN_SCRIPT,
-			"buildDir=" .. mutBuild,
+			"buildDir=" .. buildDir,
 			"sourceRoot=" .. spec.sourceRoot,
 		})
 		local timedOut = false
@@ -176,7 +227,7 @@ local function runMutation(
 	end
 
 	print(`[mutation] {spec.name}: baseline run (unmutated)...`)
-	local baseline = runSuite(options.mutateTimeout or BASELINE_TIMEOUT_SECONDS)
+	local baseline = runSuite(options.mutateTimeout or BASELINE_TIMEOUT_SECONDS, mutBuild)
 	local baseTally = baseline.tally
 	if not baseline.ok or baseTally == nil or baseTally.fail > 0 then
 		print("[mutation] baseline suite is not green -- skipping mutation; scores on a red suite are meaningless")
@@ -196,25 +247,41 @@ local function runMutation(
 	end
 	print(`[mutation] to stop early and keep partial results: create {stopPath}`)
 
+	-- Stale copies from an interrupted run would be harmless but waste disk.
+	removeWorkerCopies()
+	for worker = 2, jobs do
+		fs.copy(mutBuild, workerBuild(worker))
+	end
+	local jobsNote = if options.mutateJobs == nil then " (default; set --mutate-jobs=<n>)" else ""
+	print(`[mutation] running on {jobs} worker(s){jobsNote}`)
+
 	local loopStart = os.clock()
-	local outcomes, stopped = Mutation.run(plan.toRun, {
-		filePath = function(rel: string)
-			return mutBuild .. "/" .. rel
+	local outcomes: { Mutation.MutantOutcome }, stopped = {}, false
+	local deps: Mutation.RunDeps = {
+		jobs = jobs,
+		spawn = function(fn: () -> ())
+			task.spawn(fn)
+		end,
+		wait = function()
+			task.wait(0.05)
+		end,
+		filePath = function(rel: string, worker: number)
+			return workerBuild(worker) .. "/" .. rel
 		end,
 		readFile = fs.readFile,
 		writeFile = fs.writeFile,
-		applyMutant = function(id: number)
-			return Engine.applyMutant(mutantsPath, id, mutBuild)
+		applyMutant = function(id: number, worker: number)
+			return Engine.applyMutant(mutantsPath, id, workerBuild(worker))
 		end,
-		runSuite = function()
-			return runSuite(timeoutSec)
+		runSuite = function(worker: number)
+			return runSuite(timeoutSec, workerBuild(worker))
 		end,
-		progress = function(index: number, total: number, outcome: Mutation.MutantOutcome)
+		progress = function(completed: number, total: number, outcome: Mutation.MutantOutcome)
 			local elapsed = os.clock() - loopStart
-			local eta = elapsed / index * (total - index)
+			local eta = elapsed / completed * (total - completed)
 			print(string.format(
 				"[mutation] %d/%d  %-8s %s:%d %s  (%.1fs, ~%.0fs left)",
-				index,
+				completed,
 				total,
 				outcome.status,
 				outcome.mutant.file,
@@ -227,7 +294,15 @@ local function runMutation(
 		shouldStop = function()
 			return fs.isFile(stopPath)
 		end,
-	})
+	}
+	local ok, err = pcall(function()
+		outcomes, stopped = Mutation.run(plan.toRun, deps)
+	end)
+	-- The copies go even when the loop threw; worker 1's mutbuild/ stays pristine.
+	removeWorkerCopies()
+	if not ok then
+		error(err, 0)
+	end
 	if stopped then
 		fs.removeFile(stopPath)
 		print(`[mutation] stopped early via {stopPath}; summarizing the {#outcomes} mutant(s) already run`)

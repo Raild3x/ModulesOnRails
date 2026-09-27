@@ -275,6 +275,11 @@ function Report.mutation(packageName: string, totals: any, survivors: { any }, o
 			totals.error
 		)
 	)
+	if totals.files_filter ~= nil then
+		emit(
+			string.format("  filtered subset: only --mutate-files=%s (not a whole-package score)", totals.files_filter)
+		)
+	end
 	emit(string.format("  %-11s %5.1f%%  %s", "Score", totals.score_covered, bar(totals.score_covered)))
 	if totals.no_coverage > 0 then
 		emit(

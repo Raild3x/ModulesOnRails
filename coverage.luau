@@ -30,6 +30,8 @@ type Options = {
 	mutateLimit: number?,
 	mutateOps: string?,
 	mutateTimeout: number?,
+	mutateJobs: number?,
+	mutateFiles: string?,
 	recommend: boolean?,
 	luneOnly: boolean?,
 	robloxOnly: boolean?,
@@ -49,6 +51,8 @@ local options: Options = {
 	mutateLimit = nil,
 	mutateOps = nil,
 	mutateTimeout = nil,
+	mutateJobs = nil,
+	mutateFiles = nil,
 	recommend = false,
 	luneOnly = false,
 	robloxOnly = false,
@@ -155,6 +159,33 @@ local FLAGS: { FlagSpec } = {
 		takesValue = true,
 		apply = function(value)
 			options.mutateTimeout = parseNumberFlag("--mutate-timeout=<sec>", value)
+		end,
+	},
+	{
+		match = "--mutate-jobs=",
+		usage = "--mutate-jobs=<n>",
+		description = "Run mutants on n parallel workers, each in its own copy of the build; results are identical to a serial run. Default: half the logical CPU cores (1 when the count is unknown).",
+		takesValue = true,
+		apply = function(value)
+			local n = parseNumberFlag("--mutate-jobs=<n>", value)
+			if n < 1 or n ~= math.floor(n) then
+				print(
+					("Invalid value for --mutate-jobs=<n>: expected a positive integer, got %s"):format(
+						value or "<none>"
+					)
+				)
+				process.exit(1)
+			end
+			options.mutateJobs = n
+		end,
+	},
+	{
+		match = "--mutate-files=",
+		usage = "--mutate-files=<csv>",
+		description = "Only mutate these package-relative files (comma-separated paths or globs: * and ? within a segment, ** across dirs), e.g. src/Tiles.luau,src/Clearance.luau. Coverage still runs the whole package; the score is reported as a filtered subset.",
+		takesValue = true,
+		apply = function(value)
+			options.mutateFiles = value
 		end,
 	},
 	{

@@ -130,6 +130,70 @@ return function(tiniest)
 			local plan = Mutation.plan({ mutant(1, "src/a.luau", 3), mutant(2, "src/a.luau", 9) }, COVERED, {})
 			expect(#plan.toRun).is(2)
 			expect(#plan.sampledOut).is(0)
+			expect(plan.filesFilter).never_exists()
+		end)
+
+		test("a files filter drops other files entirely, before no-coverage and the limit", function()
+			local plan = Mutation.plan({
+				mutant(1, "src/a.luau", 3),
+				mutant(2, "src/a.luau", 50), -- uncovered, but in a kept file
+				mutant(3, "src/b.luau", 1), -- covered, but filtered out
+				mutant(4, "src/c.luau", 1), -- uncovered and filtered out
+			}, COVERED, { files = { "src/a.luau" }, limit = 5 })
+			expect(#plan.toRun).is(1)
+			expect(plan.toRun[1].id).is(1)
+			expect(#plan.noCoverage).is(1)
+			expect(plan.noCoverage[1].id).is(2)
+			expect(#plan.sampledOut).is(0)
+			expect(plan.filesFilter).is_shallow_equal({ "src/a.luau" })
+		end)
+	end)
+
+	describe("Mutation.parseFileGlobs", function()
+		test("splits the csv, trims, and normalizes ./ and backslashes", function()
+			expect(Mutation.parseFileGlobs(" src/Tiles.luau, ./src/Snap.luau ,src\\Deep\\*.luau")).is_shallow_equal({
+				"src/Tiles.luau",
+				"src/Snap.luau",
+				"src/Deep/*.luau",
+			})
+		end)
+
+		test("nil or an empty list means no filter", function()
+			expect(Mutation.parseFileGlobs(nil)).never_exists()
+			expect(Mutation.parseFileGlobs("")).never_exists()
+			expect(Mutation.parseFileGlobs(" , ")).never_exists()
+		end)
+	end)
+
+	describe("Mutation.matchesFile", function()
+		test("a plain path matches only itself", function()
+			expect(Mutation.matchesFile({ "src/Snap.luau" }, "src/Snap.luau")).is_true()
+			expect(Mutation.matchesFile({ "src/Snap.luau" }, "src/SnapX.luau")).never_is_true()
+			expect(Mutation.matchesFile({ "src/Snap.luau" }, "src/sub/Snap.luau")).never_is_true()
+			-- `.` and `-` are literal, not pattern magic.
+			expect(Mutation.matchesFile({ "src/a-b.luau" }, "src/a-b.luau")).is_true()
+			expect(Mutation.matchesFile({ "src/a.luau" }, "src/aXluau")).never_is_true()
+		end)
+
+		test("* and ? stay inside one segment", function()
+			expect(Mutation.matchesFile({ "src/*.luau" }, "src/Tiles.luau")).is_true()
+			expect(Mutation.matchesFile({ "src/*.luau" }, "src/Tests/X.luau")).never_is_true()
+			expect(Mutation.matchesFile({ "src/Ti?es.luau" }, "src/Tiles.luau")).is_true()
+			expect(Mutation.matchesFile({ "src/Ti?es.luau" }, "src/Tis.luau")).never_is_true()
+		end)
+
+		test("** spans zero or more directories", function()
+			expect(Mutation.matchesFile({ "src/**/*.luau" }, "src/Tiles.luau")).is_true()
+			expect(Mutation.matchesFile({ "src/**/*.luau" }, "src/a/b/Tiles.luau")).is_true()
+			expect(Mutation.matchesFile({ "**/Snap.luau" }, "src/deep/Snap.luau")).is_true()
+			expect(Mutation.matchesFile({ "src/**" }, "src/a/b.luau")).is_true()
+			expect(Mutation.matchesFile({ "src/**/*.luau" }, "lib/Tiles.luau")).never_is_true()
+		end)
+
+		test("any glob in the list is enough", function()
+			local globs = { "src/Tiles.luau", "src/Clearance.luau" }
+			expect(Mutation.matchesFile(globs, "src/Clearance.luau")).is_true()
+			expect(Mutation.matchesFile(globs, "src/Snap.luau")).never_is_true()
 		end)
 	end)
 
@@ -267,6 +331,165 @@ return function(tiniest)
 			expect(#seen).is(2)
 			expect(seen[2].index).is(2)
 			expect(seen[2].total).is(2)
+		end)
+	end)
+
+	describe("Mutation.run with jobs > 1", function()
+		-- A deterministic cooperative scheduler standing in for task.spawn /
+		-- task.wait: spawn runs a worker until its first yield, and each wait
+		-- resumes every live worker once.
+		local function scheduler()
+			local threads: { thread } = {}
+			local function resume(co: thread)
+				local ok, err = coroutine.resume(co)
+				assert(ok, err)
+			end
+			return {
+				spawn = function(fn: () -> ())
+					local co = coroutine.create(fn)
+					table.insert(threads, co)
+					resume(co)
+				end,
+				wait = function()
+					for _, co in table.clone(threads) do
+						if coroutine.status(co) == "suspended" then
+							resume(co)
+						end
+					end
+				end,
+			}
+		end
+
+		-- Suite runs that take `ticks[id]` scheduler turns and end in `status[id]`,
+		-- tracking which worker's build each mutant was applied in and restored to.
+		local function parallelDeps(jobs: number, ticks: { [number]: number }, statusOf: { [number]: string })
+			local sched = scheduler()
+			local current: { [number]: number } = {}
+			local log = { finished = {}, appliedBy = {}, restoredBy = {}, maxInFlight = 0 }
+			local inFlight = 0
+			local deps = {
+				jobs = jobs,
+				spawn = sched.spawn,
+				wait = sched.wait,
+				filePath = function(rel, worker)
+					return `W{worker}/{rel}`
+				end,
+				readFile = function(path)
+					return "ORIGINAL:" .. path
+				end,
+				writeFile = function(path, contents)
+					expect(contents).is("ORIGINAL:" .. path)
+					table.insert(log.restoredBy, path)
+				end,
+				applyMutant = function(id, worker)
+					current[worker] = id
+					log.appliedBy[id] = worker
+					return "ok"
+				end,
+				runSuite = function(worker)
+					local id = current[worker]
+					inFlight += 1
+					log.maxInFlight = math.max(log.maxInFlight, inFlight)
+					for _ = 1, ticks[id] do
+						coroutine.yield()
+					end
+					inFlight -= 1
+					table.insert(log.finished, id)
+					local tally = { pass = 1, fail = if statusOf[id] == "killed" then 1 else 0, skipped = 0 }
+					return { timedOut = false, ok = true, tally = tally, duration = ticks[id] }
+				end,
+			}
+			return deps, log
+		end
+
+		local MUTANTS = {
+			mutant(1, "src/a.luau", 1),
+			mutant(2, "src/a.luau", 2),
+			mutant(3, "src/b.luau", 1),
+			mutant(4, "src/b.luau", 2),
+			mutant(5, "src/c.luau", 1),
+		}
+		local TICKS = { [1] = 5, [2] = 1, [3] = 1, [4] = 3, [5] = 1 }
+		local STATUS = { [1] = "killed", [2] = "survived", [3] = "killed", [4] = "survived", [5] = "killed" }
+
+		test("outcomes merge back in plan order, identical to a serial run", function()
+			-- The serial run's suites yield too, so drive it to completion in its own thread.
+			local serial = {}
+			local co = coroutine.create(function()
+				serial = Mutation.run(MUTANTS, (parallelDeps(1, TICKS, STATUS)))
+			end)
+			repeat
+				local ok, err = coroutine.resume(co)
+				assert(ok, err)
+			until coroutine.status(co) == "dead"
+			expect(#serial).is(5)
+			local deps, log = parallelDeps(3, TICKS, STATUS)
+			local parallel, stopped = Mutation.run(MUTANTS, deps)
+			expect(stopped).never_is_true()
+			-- Workers really overlapped and finished out of order...
+			expect(log.maxInFlight).is(3)
+			expect(log.finished[1] ~= 1).is_true()
+			-- ...yet the merged result is the serial one, mutant for mutant.
+			expect(#parallel).is(#serial)
+			for i, o in serial do
+				expect(parallel[i].mutant.id).is(o.mutant.id)
+				expect(parallel[i].status).is(o.status)
+			end
+		end)
+
+		test("each mutant is applied and restored inside one worker's own build", function()
+			local deps, log = parallelDeps(2, TICKS, STATUS)
+			Mutation.run(MUTANTS, deps)
+			expect(#log.restoredBy).is(5)
+			local restored = {}
+			for _, path in log.restoredBy do
+				restored[path] = (restored[path] or 0) + 1
+			end
+			for _, m in MUTANTS do
+				local worker = log.appliedBy[m.id]
+				expect(worker == 1 or worker == 2).is_true()
+				expect(restored[`W{worker}/{m.file}`] ~= nil).is_true()
+			end
+		end)
+
+		test("more jobs than mutants spawns only as many workers as needed", function()
+			local deps, log = parallelDeps(8, TICKS, STATUS)
+			local outcomes = Mutation.run({ MUTANTS[1], MUTANTS[2] }, deps)
+			expect(#outcomes).is(2)
+			expect(log.maxInFlight).is(2)
+		end)
+
+		test("a stop keeps a plan-order prefix: in-flight mutants finish, none are claimed after", function()
+			local deps, log = parallelDeps(2, TICKS, STATUS)
+			local stop = false
+			deps.shouldStop = function()
+				return stop
+			end
+			deps.progress = function()
+				stop = true
+			end
+			local outcomes, stopped = Mutation.run(MUTANTS, deps)
+			expect(stopped).is_true()
+			-- Worker 2 finished mutant 2 first; worker 1 was still inside mutant 1.
+			expect(#outcomes).is(2)
+			expect(outcomes[1].mutant.id).is(1)
+			expect(outcomes[2].mutant.id).is(2)
+			expect(#log.restoredBy).is(2)
+		end)
+
+		test("a worker failure outside the per-mutant guard drains the others, then rethrows", function()
+			local deps, log = parallelDeps(2, TICKS, STATUS)
+			deps.readFile = function(path)
+				if path == "W2/src/a.luau" then
+					error("disk gone")
+				end
+				return "ORIGINAL:" .. path
+			end
+			local ok, err = pcall(Mutation.run, MUTANTS, deps)
+			expect(ok).never_is_true()
+			expect(tostring(err):find("disk gone", 1, true) ~= nil).is_true()
+			-- Worker 1's in-flight mutant still finished and was restored.
+			expect(log.restoredBy[1]).is("W1/src/a.luau")
 		end)
 	end)
 

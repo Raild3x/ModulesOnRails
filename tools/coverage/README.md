@@ -25,6 +25,8 @@ Flags:
 | `--mutate-limit=<n>` | cap the number of mutants run (deterministic sampling across files) |
 | `--mutate-ops=<csv>` | only run these operators (`ror`, `lor`, `aor`, `not`, `lit`) |
 | `--mutate-timeout=<sec>` | per-mutant suite timeout (default 3x the baseline duration, min 5s) |
+| `--mutate-jobs=<n>` | run mutants on `n` parallel workers, each in its own build copy (default: half the logical cores, 1 if unknown; results identical to serial) |
+| `--mutate-files=<csv>` | only mutate these package-relative files/globs, e.g. `src/Tiles.luau,src/**/Snap*.luau` |
 | `--recommend` | end the report with a ranked list of concrete next steps |
 | `--lune-only` | skip Roblox-pipeline packages; run only Lune ones (used by the fast CI job) |
 | `--roblox-only` | skip Lune-pipeline packages; run only Roblox ones (used by the Open Cloud CI job) |
@@ -37,7 +39,9 @@ Outputs land in `.coverage/<package>/`: `map.json` (probe registry), `hits.json`
 (runtime counters), `coverage.json` (merged report), plus the instrumented
 `build/` copy — and with `--mutate`, `mutants.json` (enumerated sites),
 `mutation.json` (per-mutant results), and a pristine `mutbuild/` copy the loop
-mutates and restores. Everything is gitignored.
+mutates and restores (plus `mutbuild-2/`..`mutbuild-<n>/` while a
+`--mutate-jobs=<n>` run is in flight; they are deleted when it ends). Everything
+is gitignored.
 
 ## Metrics
 
@@ -77,6 +81,26 @@ mutant is killed at the timeout), classifies the result, and restores the file.
 * Progress prints per mutant with an ETA. To **stop early and keep partial
   results**, create the stop file the run announces
   (`.coverage/<package>/mutation.stop`).
+* **Parallel runs** (`--mutate-jobs=<n>`): `n` workers pull mutants from one
+  queue in plan order. Each has its own pristine build copy, so applying a
+  mutant in place never races another worker, and each restores its own file
+  after every mutant. Outcomes are merged back in plan order, so
+  `mutation.json` matches a serial run apart from the `duration` fields. The
+  stop file halts every worker after its current mutant. The timeout is per
+  child; its default comes from a serial baseline, so with many workers on a
+  busy machine pass a larger `--mutate-timeout` if slow mutants start timing out.
+  The default is half the logical cores, read from `NUMBER_OF_PROCESSORS`
+  (Windows) or `/proc/cpuinfo` (Linux), or 1 where neither exists (macOS).
+  `--mutate-jobs=1` restores the old serial loop. On a 16-core/24-thread
+  machine, navmesh (`--mutate-files=src/OpenList.luau,src/Snap.luau`, 172
+  mutants) took 434 s serial, 119 s with 4 jobs, 68 s with 8, and 43 s with 16,
+  with identical results each time.
+* **File filter** (`--mutate-files=<csv>`): only mutants in matching files are
+  run or counted (`*`/`?` match within a path segment, `**` spans directories;
+  paths are package-relative, e.g. `src/Snap.luau`). Coverage still runs the
+  whole package. The report and `totals.files_filter` in `mutation.json` /
+  `coverage.json` mark the score as a filtered subset, and a filter that
+  matches nothing prints a warning.
 * Roblox-pipeline packages are skipped (one Studio launch per mutant).
 
 ### Recommendations (`--recommend`)

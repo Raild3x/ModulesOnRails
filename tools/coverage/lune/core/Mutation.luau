@@ -1,10 +1,11 @@
 --!strict
 --[=[
 	Mutation-testing logic: plan which mutants to run (coverage filter, operator
-	filter, deterministic budget sampling), classify child-run outcomes, and
-	summarize scores. Pure — all IO (applying mutants, spawning the child suite,
-	stashing/restoring files) is injected through `RunDeps`, so the whole loop is
-	testable without processes.
+	and file filters, deterministic budget sampling), classify child-run
+	outcomes, and summarize scores. Pure — all IO (applying mutants, spawning the
+	child suite, stashing/restoring files, and the worker threads of a parallel
+	run) is injected through `RunDeps`, so the whole loop is testable without
+	processes.
 
 	Status vocabulary:
 	  killed      the suite failed -> the tests detect this mutation
@@ -48,6 +49,8 @@ export type Plan = {
 	toRun: { Mutant },
 	noCoverage: { Mutant },
 	sampledOut: { Mutant },
+	-- The `--mutate-files` globs the plan was restricted to, when any.
+	filesFilter: { string }?,
 }
 
 export type Totals = {
@@ -65,22 +68,34 @@ export type Totals = {
 	-- percentages 0..100; detected = killed + timeout + error
 	score_covered: number, -- detected / run
 	score_total: number, -- detected / (run + no_coverage)
+	-- The `--mutate-files` globs (comma-joined) when the scores cover only a
+	-- filtered subset of the package's mutants.
+	files_filter: string?,
 }
 
+-- `worker` (1..jobs) names the pristine build copy an IO call must touch: a
+-- worker only ever applies, runs, and restores inside its own copy, so
+-- parallel workers never race on a file.
 export type RunDeps = {
-	-- Joined path of a mutant's file inside the pristine mutation build.
-	filePath: (rel: string) -> string,
+	-- Joined path of a mutant's file inside the worker's pristine mutation build.
+	filePath: (rel: string, worker: number) -> string,
 	readFile: (path: string) -> string,
 	writeFile: (path: string, contents: string) -> (),
 	-- Applies one mutant in place; "invalid" when the engine refused (exit 3).
-	applyMutant: (id: number) -> string,
+	applyMutant: (id: number, worker: number) -> string,
 	-- Runs the suite in a fresh child process, honoring the configured timeout.
-	runSuite: () -> ChildOutcome,
-	-- Optional progress callback after each mutant.
-	progress: ((index: number, total: number, outcome: MutantOutcome) -> ())?,
+	runSuite: (worker: number) -> ChildOutcome,
+	-- Optional progress callback after each mutant, in completion order.
+	progress: ((completed: number, total: number, outcome: MutantOutcome) -> ())?,
 	-- Optional early-exit check, polled before each mutant. Returning true stops
 	-- the loop cleanly: results so far are kept and summarized.
 	shouldStop: (() -> boolean)?,
+	-- Worker count (default 1). Above 1, `spawn` and `wait` are required.
+	jobs: number?,
+	-- Starts a worker thread that runs concurrently with the caller (Lune: task.spawn).
+	spawn: ((fn: () -> ()) -> ())?,
+	-- Yields the coordinator so running workers can make progress (Lune: task.wait).
+	wait: (() -> ())?,
 }
 
 --[=[
@@ -107,10 +122,67 @@ function Mutation.flatten(doc: any): { Mutant }
 end
 
 --[=[
+	Parses a `--mutate-files` csv into its globs (nil when empty). A leading
+	`./` and Windows backslashes are normalized away so globs compare against
+	the engine's `/`-separated package-relative paths.
+]=]
+function Mutation.parseFileGlobs(csv: string?): { string }?
+	if csv == nil then
+		return nil
+	end
+	local globs: { string } = {}
+	for raw in csv:gmatch("[^,]+") do
+		local glob = raw:gsub("^%s+", ""):gsub("%s+$", ""):gsub("\\", "/"):gsub("^%./", "")
+		if glob ~= "" then
+			table.insert(globs, glob)
+		end
+	end
+	return if #globs > 0 then globs else nil
+end
+
+-- One glob segment -> an anchored Lua pattern: `*` and `?` stay inside the segment.
+local function segmentPattern(segment: string): string
+	local escaped = segment:gsub("[%^%$%(%)%%%.%[%]%+%-]", "%%%0")
+	return "^" .. escaped:gsub("%*", "[^/]*"):gsub("%?", "[^/]") .. "$"
+end
+
+local function matchSegments(glob: { string }, gi: number, path: { string }, pi: number): boolean
+	if gi > #glob then
+		return pi > #path
+	end
+	if glob[gi] == "**" then
+		-- `**` spans zero or more whole segments.
+		for k = pi, #path + 1 do
+			if matchSegments(glob, gi + 1, path, k) then
+				return true
+			end
+		end
+		return false
+	end
+	return pi <= #path and path[pi]:match(segmentPattern(glob[gi])) ~= nil and matchSegments(glob, gi + 1, path, pi + 1)
+end
+
+--[=[
+	True when the package-relative `path` matches any glob. Segments are
+	`/`-separated: `*` and `?` match within one segment, a whole `**` segment
+	matches any number of segments, and a glob without wildcards is an exact path.
+]=]
+function Mutation.matchesFile(globs: { string }, path: string): boolean
+	local segments = path:split("/")
+	for _, glob in globs do
+		if matchSegments(glob:split("/"), 1, segments, 1) then
+			return true
+		end
+	end
+	return false
+end
+
+--[=[
 	Splits mutants into run / no-coverage / sampled-out buckets.
 
 	@param coveredLines -- file path -> { line -> true } from the coverage run
 	@param opts.ops -- optional allow-set of operator names
+	@param opts.files -- optional `--mutate-files` globs; mutants in other files are dropped
 	@param opts.ignoredFiles -- optional set of whole-file-ignored paths; their mutants are dropped
 	@param opts.limit -- optional budget; excess mutants are dropped by
 	  deterministic stride sampling over the (file, line, id)-sorted list, so a
@@ -119,12 +191,20 @@ end
 function Mutation.plan(
 	mutants: { Mutant },
 	coveredLines: { [string]: { [number]: boolean } },
-	opts: { ops: { [string]: boolean }?, limit: number?, ignoredFiles: { [string]: boolean }? }
+	opts: {
+		ops: { [string]: boolean }?,
+		limit: number?,
+		ignoredFiles: { [string]: boolean }?,
+		files: { string }?,
+	}
 ): Plan
 	local toRun: { Mutant } = {}
 	local noCoverage: { Mutant } = {}
 	for _, m in mutants do
 		if opts.ops ~= nil and not opts.ops[m.op] then
+			continue
+		end
+		if opts.files ~= nil and not Mutation.matchesFile(opts.files, m.file) then
 			continue
 		end
 		-- Files excluded whole by a `.coverage-ignore` file rule are not scored at all.
@@ -168,7 +248,7 @@ function Mutation.plan(
 		toRun = sampled
 	end
 
-	return { toRun = toRun, noCoverage = noCoverage, sampledOut = sampledOut }
+	return { toRun = toRun, noCoverage = noCoverage, sampledOut = sampledOut, filesFilter = opts.files }
 end
 
 --[=[
@@ -211,38 +291,96 @@ end
 	child process, classify, and ALWAYS restore the pristine bytes before moving
 	on — even when something throws mid-mutant.
 
+	With `deps.jobs` > 1, that many workers pull mutants from one shared queue
+	in plan order, each inside its own build copy. Outcomes are merged back in
+	plan order whatever order they finished in, so a parallel run returns
+	exactly what a serial one would. A worker failure outside the per-mutant
+	guard lets the other workers finish (and restore) their current mutant,
+	then rethrows.
+
 	Returns the outcomes plus whether the loop was stopped early via
 	`deps.shouldStop`; partial outcomes are still valid for summarizing.
 ]=]
 function Mutation.run(toRun: { Mutant }, deps: RunDeps): ({ MutantOutcome }, boolean)
-	local outcomes: { MutantOutcome } = {}
+	local jobs = math.max(1, math.min(deps.jobs or 1, #toRun))
+	local results: { [number]: MutantOutcome } = {}
+	local nextIndex = 1
+	local completed = 0
+	local finished = 0
 	local stopped = false
-	for index, m in toRun do
-		if deps.shouldStop ~= nil and (deps.shouldStop :: any)() then
-			stopped = true
-			break
-		end
-		local path = deps.filePath(m.file)
+	local failure: any = nil
+
+	local function runOne(m: Mutant, worker: number): MutantOutcome
+		local path = deps.filePath(m.file, worker)
 		local original = deps.readFile(path)
 		local ok, result = pcall(function(): MutantOutcome
-			if deps.applyMutant(m.id) ~= "ok" then
+			if deps.applyMutant(m.id, worker) ~= "ok" then
 				return { mutant = m, status = "invalid", duration = 0 }
 			end
-			local outcome = deps.runSuite()
+			local outcome = deps.runSuite(worker)
 			return { mutant = m, status = Mutation.classify(outcome), duration = outcome.duration }
 		end)
 		-- Restore before anything else; a mutant must never leak into the next
 		-- run (or into a later coverage pass over the same build).
 		deps.writeFile(path, original)
-		local outcome: MutantOutcome = if ok
-			then result :: MutantOutcome
-			else { mutant = m, status = "error", duration = 0 }
-		table.insert(outcomes, outcome)
-		if deps.progress ~= nil then
-			(deps.progress :: any)(index, #toRun, outcome)
+		return if ok then result :: MutantOutcome else { mutant = m, status = "error", duration = 0 }
+	end
+
+	local function work(worker: number)
+		local ok, err = pcall(function()
+			while failure == nil and not stopped do
+				if deps.shouldStop ~= nil and (deps.shouldStop :: any)() then
+					stopped = true
+					break
+				end
+				-- Claim the next mutant with no yield between the check and the
+				-- claim, so two workers can never take the same one.
+				if nextIndex > #toRun then
+					break
+				end
+				local index = nextIndex
+				nextIndex += 1
+				local outcome = runOne(toRun[index], worker)
+				results[index] = outcome
+				completed += 1
+				if deps.progress ~= nil then
+					(deps.progress :: any)(completed, #toRun, outcome)
+				end
+			end
+		end)
+		if not ok and failure == nil then
+			failure = err
+		end
+		finished += 1
+	end
+
+	if jobs == 1 then
+		work(1)
+	else
+		assert(deps.spawn ~= nil and deps.wait ~= nil, "Mutation.run: jobs > 1 needs spawn and wait")
+		for worker = 1, jobs do
+			deps.spawn(function()
+				work(worker)
+			end)
+		end
+		while finished < jobs do
+			deps.wait()
 		end
 	end
-	return outcomes, stopped
+	if failure ~= nil then
+		error(failure, 0)
+	end
+
+	-- Mutants are claimed in plan order and every claimed one completes, so
+	-- the results are a prefix of the plan; walk it in order.
+	local outcomes: { MutantOutcome } = {}
+	for index = 1, #toRun do
+		if results[index] ~= nil then
+			table.insert(outcomes, results[index])
+		end
+	end
+	-- A stop signal seen after the queue was already drained stopped nothing.
+	return outcomes, stopped and #outcomes < #toRun
 end
 
 --[=[
@@ -280,6 +418,7 @@ function Mutation.summarize(plan: Plan, outcomes: { MutantOutcome }): Totals
 		not_run = notRun,
 		score_covered = pct(detected, run),
 		score_total = pct(detected, run + noCoverage),
+		files_filter = if plan.filesFilter ~= nil then table.concat(plan.filesFilter, ",") else nil,
 	}
 end
 
