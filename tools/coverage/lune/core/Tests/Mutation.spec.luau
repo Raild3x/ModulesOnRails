@@ -94,7 +94,7 @@ return function(tiniest)
 			for _, m in plan.toRun do
 				table.insert(ids, m.id)
 			end
-			expect(ids).is_shallow_equal({ 2, 9, 5 })
+			expect(ids).is_shallow_equal { 2, 9, 5 }
 		end)
 
 		test("a limit stride-samples deterministically across the list", function()
@@ -145,17 +145,17 @@ return function(tiniest)
 			expect(#plan.noCoverage).is(1)
 			expect(plan.noCoverage[1].id).is(2)
 			expect(#plan.sampledOut).is(0)
-			expect(plan.filesFilter).is_shallow_equal({ "src/a.luau" })
+			expect(plan.filesFilter).is_shallow_equal { "src/a.luau" }
 		end)
 	end)
 
 	describe("Mutation.parseFileGlobs", function()
 		test("splits the csv, trims, and normalizes ./ and backslashes", function()
-			expect(Mutation.parseFileGlobs(" src/Tiles.luau, ./src/Snap.luau ,src\\Deep\\*.luau")).is_shallow_equal({
+			expect(Mutation.parseFileGlobs(" src/Tiles.luau, ./src/Snap.luau ,src\\Deep\\*.luau")).is_shallow_equal {
 				"src/Tiles.luau",
 				"src/Snap.luau",
 				"src/Deep/*.luau",
-			})
+			}
 		end)
 
 		test("nil or an empty list means no filter", function()
@@ -202,17 +202,17 @@ return function(tiniest)
 		local FAIL = { pass = 4, fail = 1, skipped = 0 }
 
 		test("a timed-out child is a timeout even though its exit is bad", function()
-			expect(Mutation.classify({ timedOut = true, ok = false, tally = nil, duration = 5 })).is("timeout")
+			expect(Mutation.classify { timedOut = true, ok = false, tally = nil, duration = 5 }).is("timeout")
 		end)
 
 		test("a crashed child (bad exit or missing sentinel) is an error", function()
-			expect(Mutation.classify({ timedOut = false, ok = false, tally = PASS, duration = 1 })).is("error")
-			expect(Mutation.classify({ timedOut = false, ok = true, tally = nil, duration = 1 })).is("error")
+			expect(Mutation.classify { timedOut = false, ok = false, tally = PASS, duration = 1 }).is("error")
+			expect(Mutation.classify { timedOut = false, ok = true, tally = nil, duration = 1 }).is("error")
 		end)
 
 		test("failing tests kill the mutant; a green suite lets it survive", function()
-			expect(Mutation.classify({ timedOut = false, ok = true, tally = FAIL, duration = 1 })).is("killed")
-			expect(Mutation.classify({ timedOut = false, ok = true, tally = PASS, duration = 1 })).is("survived")
+			expect(Mutation.classify { timedOut = false, ok = true, tally = FAIL, duration = 1 }).is("killed")
+			expect(Mutation.classify { timedOut = false, ok = true, tally = PASS, duration = 1 }).is("survived")
 		end)
 	end)
 
@@ -260,12 +260,12 @@ return function(tiniest)
 		end
 
 		test("applies, runs, classifies and restores per mutant", function()
-			local deps, calls = fakeDeps({})
+			local deps, calls = fakeDeps {}
 			local outcomes = Mutation.run({ mutant(1, "src/a.luau", 3), mutant(2, "src/b.luau", 1) }, deps)
 			expect(#outcomes).is(2)
 			expect(outcomes[1].status).is("killed")
 			expect(calls.suites).is(2)
-			expect(calls.applied).is_shallow_equal({ 1, 2 })
+			expect(calls.applied).is_shallow_equal { 1, 2 }
 			-- Every mutant restored its file's pristine bytes.
 			expect(#calls.writes).is(2)
 			expect(calls.writes[1].path).is("BUILD/src/a.luau")
@@ -273,11 +273,11 @@ return function(tiniest)
 		end)
 
 		test("an invalid mutant skips the suite but still restores", function()
-			local deps, calls = fakeDeps({
+			local deps, calls = fakeDeps {
 				applyMutant = function()
 					return "invalid"
 				end,
-			})
+			}
 			local outcomes = Mutation.run({ mutant(1, "src/a.luau", 3) }, deps)
 			expect(outcomes[1].status).is("invalid")
 			expect(calls.suites).is(0)
@@ -285,18 +285,18 @@ return function(tiniest)
 		end)
 
 		test("an error thrown mid-mutant is caught, marked, and still restores", function()
-			local deps, calls = fakeDeps({
+			local deps, calls = fakeDeps {
 				runSuite = function()
 					error("engine exploded")
 				end,
-			})
+			}
 			local outcomes = Mutation.run({ mutant(1, "src/a.luau", 3) }, deps)
 			expect(outcomes[1].status).is("error")
 			expect(#calls.writes).is(1)
 		end)
 
 		test("shouldStop halts the loop before the next mutant, keeping results", function()
-			local deps, calls = fakeDeps({})
+			local deps, calls = fakeDeps {}
 			local stopAfterFirst = false
 			deps.shouldStop = function()
 				return stopAfterFirst
@@ -316,14 +316,14 @@ return function(tiniest)
 		end)
 
 		test("a completed loop reports stopped = false", function()
-			local deps = fakeDeps({})
+			local deps = fakeDeps {}
 			local _, stopped = Mutation.run({ mutant(1, "src/a.luau", 3) }, deps)
 			expect(stopped).never_is_true()
 		end)
 
 		test("progress fires once per mutant with the outcome", function()
 			local seen = {}
-			local deps = fakeDeps({})
+			local deps = fakeDeps {}
 			deps.progress = function(index, total, outcome)
 				table.insert(seen, { index = index, total = total, status = outcome.status })
 			end
@@ -553,6 +553,154 @@ return function(tiniest)
 			expect(#survivors).is(2)
 			expect(survivors[1].file).is("src/a.luau")
 			expect(survivors[2].file).is("src/b.luau")
+		end)
+	end)
+
+	describe("Mutation.selectTests", function()
+		-- src/a.luau: line 1 is module level; function 10 spans lines 2-4 (a stmt
+		-- on 3, a decision on 4 with false slot 13); function 20 is on line 6 and
+		-- its body stmt on line 7; line 9 holds a module-level statement and a
+		-- one-line function. src/b.luau line 1 is module level too (another
+		-- module initializing).
+		local MAP = {
+			files = {
+				{
+					path = "src/a.luau",
+					probes = {
+						{ id = 1, kind = "stmt", line = 1 },
+						{ id = 10, kind = "fn", line = 2 },
+						{ id = 11, kind = "stmt", line = 3, fn = 10 },
+						{ id = 12, kind = "decision", line = 4, fn = 10, false_id = 13 },
+						{ id = 20, kind = "fn", line = 6 },
+						{ id = 21, kind = "stmt", line = 7, fn = 20 },
+						-- line 9: `local f = function() return x + 1 end`
+						{ id = 40, kind = "stmt", line = 9 },
+						{ id = 41, kind = "fn", line = 9 },
+						{ id = 42, kind = "stmt", line = 9, fn = 41 },
+					},
+				},
+				{ path = "src/b.luau", probes = { { id = 30, kind = "stmt", line = 1 } } },
+			},
+		}
+		local LOAD = { id = "<module load>", probes = { 1, 30 } }
+		local T1 = { id = "S1 > one", probes = { 10, 11 } }
+		local T2 = { id = "S1 > two", probes = { 20, 21 } }
+		local T3 = { id = "S2 > three", probes = { 10, 12 } }
+		local T4 = { id = "S2 > four", probes = {} }
+
+		test("picks the tests that entered the mutant's function, in run order", function()
+			local sel = Mutation.selectTests({ mutant(1, "src/a.luau", 3) }, MAP, { LOAD, T3, T1, T2 })
+			expect(sel[1]).is_shallow_equal { "S2 > three", "S1 > one" }
+		end)
+
+		test("the unit is the function: a test that entered it but skipped the line still runs", function()
+			-- T1 never hit line 4's decision, but it entered function 10.
+			local sel = Mutation.selectTests({ mutant(1, "src/a.luau", 4) }, MAP, { T1, T2, T3 })
+			expect(sel[1]).is_shallow_equal { "S1 > one", "S2 > three" }
+		end)
+
+		test("a module-level line runs the whole suite, even when a function shares it", function()
+			local entered = { id = "S1 > f", probes = { 41, 42 } }
+			local sel = Mutation.selectTests(
+				{ mutant(1, "src/a.luau", 1), mutant(2, "src/a.luau", 9) },
+				MAP,
+				{ T1, entered }
+			)
+			expect(sel[1]).never_exists()
+			expect(sel[2]).never_exists()
+		end)
+
+		test("a line with no probe, or a function no test entered, runs the whole suite", function()
+			local sel = Mutation.selectTests({ mutant(1, "src/a.luau", 99), mutant(2, "src/a.luau", 7) }, MAP, { T1 })
+			expect(sel[1]).never_exists()
+			expect(sel[2]).never_exists()
+		end)
+
+		test("without collect data, a function hit at <module load> runs the whole suite", function()
+			local load = { id = "<module load>", probes = { 1, 10, 11 } }
+			local sel = Mutation.selectTests({ mutant(1, "src/a.luau", 3) }, MAP, { load, T1 })
+			expect(sel[1]).never_exists()
+		end)
+
+		test("with collect data, a describe-time hit selects the whole spec that made it", function()
+			local load = { id = "<module load>", probes = { 1, 10, 11 } }
+			local collect = { outside = { 1 }, bySpec = { S2 = { 10, 11 } } }
+			local sel = Mutation.selectTests({ mutant(1, "src/a.luau", 3) }, MAP, { load, T1, T2, T3, T4 }, collect)
+			-- T1 entered it at run time; S2's tests share the describe-level setup.
+			expect(sel[1]).is_shallow_equal { "S1 > one", "S2 > three", "S2 > four" }
+		end)
+
+		test("a function hit outside any describe body (module init) runs the whole suite", function()
+			local collect = { outside = { 1, 10 }, bySpec = {} }
+			local sel = Mutation.selectTests({ mutant(1, "src/a.luau", 3) }, MAP, { LOAD, T1 }, collect)
+			expect(sel[1]).never_exists()
+		end)
+
+		test("a describe body that initialized a module runs the whole suite for what it hit", function()
+			local collect = { outside = {}, bySpec = { S2 = { 30, 10 } } }
+			local sel = Mutation.selectTests({ mutant(1, "src/a.luau", 3) }, MAP, { T1, T3 }, collect)
+			expect(sel[1]).never_exists()
+		end)
+
+		test("a test that initialized a module (lazy require) runs the whole suite for what it hit", function()
+			local lazy = { id = "S1 > lazy", probes = { 13, 20, 21 } }
+			local sel = Mutation.selectTests({ mutant(1, "src/a.luau", 7) }, MAP, { lazy, T2 })
+			expect(sel[1]).is_shallow_equal { "S1 > lazy", "S1 > two" }
+			local lazyInit = { id = "S1 > lazy", probes = { 30, 20, 21 } }
+			expect(Mutation.selectTests({ mutant(1, "src/a.luau", 7) }, MAP, { lazyInit, T2 })[1]).never_exists()
+		end)
+	end)
+
+	describe("Mutation.resume", function()
+		local function record(m, status)
+			return {
+				id = m.id,
+				site = m.site,
+				replacement = m.replacement,
+				status = status,
+				duration = 0.5,
+			}
+		end
+
+		test("skips decided mutants and keeps their outcomes", function()
+			local planned = { mutant(1, "src/a.luau", 1), mutant(2, "src/a.luau", 2), mutant(3, "src/a.luau", 3) }
+			local remaining, decided = Mutation.resume(planned, { record(planned[2], "survived") })
+			expect(#remaining).is(2)
+			expect(remaining[1].id).is(1)
+			expect(remaining[2].id).is(3)
+			expect(decided[2].status).is("survived")
+			expect(decided[2].mutant).is(planned[2])
+		end)
+
+		test("a record whose site or replacement changed is run again", function()
+			local m = mutant(1, "src/a.luau", 1)
+			local moved = record(m, "killed")
+			moved.site = "mut:ror:src/a.luau:2:1"
+			local swapped = record(m, "killed")
+			swapped.replacement = "<"
+			local remaining = Mutation.resume({ m }, { moved, swapped })
+			expect(#remaining).is(1)
+		end)
+
+		test("inPlanOrder merges resumed and new outcomes back into plan order", function()
+			-- Plan order is not id order, so neither id nor completion order passes.
+			local planned = { mutant(3, "src/a.luau", 1), mutant(1, "src/a.luau", 2), mutant(2, "src/a.luau", 3) }
+			local decided = { [1] = outcomeOf("survived", planned[2]) }
+			local all = Mutation.inPlanOrder(
+				planned,
+				decided,
+				{ outcomeOf("killed", planned[3]), outcomeOf("killed", planned[1]) }
+			)
+			expect(#all).is(3)
+			expect(all[1].mutant.id).is(3)
+			expect(all[2].status).is("survived")
+			expect(all[3].mutant.id).is(2)
+		end)
+
+		test("inPlanOrder leaves out mutants nothing decided (a stopped run)", function()
+			local planned = { mutant(1, "src/a.luau", 1), mutant(2, "src/a.luau", 2) }
+			local all = Mutation.inPlanOrder(planned, {}, { outcomeOf("killed", planned[1]) })
+			expect(#all).is(1)
 		end)
 	end)
 end

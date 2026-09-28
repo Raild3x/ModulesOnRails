@@ -28,6 +28,34 @@ local function countKind(list: { any }, layer: string?): number
 	return n
 end
 
+-- Whether a path's segments, grown by `radius`, meet a region Update returned (in plan; a
+-- square-grown box, so never a miss where the round one meets).
+local function meetsRegions(path: any, regions: { any }, radius: number): boolean
+	local points = path.Waypoints
+	for i = 1, math.max(#points - 1, 1) do
+		local a, b = points[i], points[math.min(i + 1, #points)]
+		for _, r in regions do
+			if r.Floor == a.Floor or r.Floor == b.Floor then
+				local t0, t1, hit = 0, 1, true
+				for _, axis in { "X", "Z" } do
+					local p, d = a.Position[axis], b.Position[axis] - a.Position[axis]
+					local lo, hi = r.Min[axis] - radius, r.Max[axis] + radius
+					if d == 0 then
+						hit = hit and p >= lo and p <= hi
+					else
+						local u0, u1 = (lo - p) / d, (hi - p) / d
+						t0, t1 = math.max(t0, math.min(u0, u1)), math.min(t1, math.max(u0, u1))
+					end
+				end
+				if hit and t0 <= t1 then
+					return true
+				end
+			end
+		end
+	end
+	return false
+end
+
 local seed = 1
 local function rng(): number
 	seed = (seed * 1103515245 + 12345) % 2147483648
@@ -37,14 +65,15 @@ end
 print("== demo level: a door toggle vs TileSize")
 print(
 	string.format(
-		"%-9s %6s %6s %9s %11s %11s %12s",
+		"%-9s %6s %6s %9s %11s %11s %12s %12s",
 		"TileSize",
 		"tiles",
 		"tris",
 		"build ms",
 		"Update ms",
 		"FindPath ms",
-		"paths broken"
+		"paths broken",
+		"in regions"
 	)
 )
 for _, size in { 0, 32, 16, 8, 4 } do
@@ -55,7 +84,8 @@ for _, size in { 0, 32, 16, 8, 4 } do
 		mesh = NavMesh.Build(desc)
 	end)
 	local list = NavMesh.ToDrawList(mesh, { Tiles = true })
-	-- 200 random paths, then close the door once and count the ones IsPathValid rejects.
+	-- 200 random paths, then close the door once and count the ones IsPathValid rejects, and
+	-- the ones that meet a region Update returned (ticket 22).
 	local paths, findTimes = {}, {}
 	for _ = 1, 200 do
 		local a = NavMesh.FindRandomPoint(mesh, { Rng = rng })
@@ -72,13 +102,17 @@ for _, size in { 0, 32, 16, 8, 4 } do
 		end
 	end
 	local door = NavMesh.AddObstacle(mesh, "Ground", Level.DOOR)
+	local regions
 	local updates = { ms(function()
-		NavMesh.Update(mesh)
+		regions = NavMesh.Update(mesh)
 	end) }
-	local broken = 0
+	local broken, touched = 0, 0
 	for _, path in paths do
 		if not NavMesh.IsPathValid(mesh, path) then
 			broken += 1
+		end
+		if meetsRegions(path, regions, 0.5) then
+			touched += 1
 		end
 	end
 	for i = 1, 40 do
@@ -97,7 +131,7 @@ for _, size in { 0, 32, 16, 8, 4 } do
 	end
 	print(
 		string.format(
-			"%-9s %6d %6d %9.2f %11.3f %11.4f %9d/%d",
+			"%-9s %6d %6d %9.2f %11.3f %11.4f %9d/%d %9d/%d",
 			if size > 0 then tostring(size) else "default",
 			countKind(list, "Tiles") // 4,
 			countKind(list),
@@ -105,6 +139,8 @@ for _, size in { 0, 32, 16, 8, 4 } do
 			median(updates),
 			median(findTimes),
 			broken,
+			#paths,
+			touched,
 			#paths
 		)
 	)

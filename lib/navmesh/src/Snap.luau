@@ -115,12 +115,11 @@ local function eachTriangle(
 		end
 	end
 	local index = indexOf(s)
-	for floor, cells in index.Cells do
+	for floor in index.Cells do
 		local size = index.Size[floor]
-		-- Closed tiles: a box edge on a tile line reaches the tiles on both sides of it.
-		local i0, i1 = math.ceil(lx / size) - 1, math.floor(hx / size)
-		local j0, j1 = math.ceil(lz / size) - 1, math.floor(hz / size)
-		if (i1 - i0 + 1) * (j1 - j0 + 1) > index.Count then
+		local cells = (math.floor(hx / size) - math.ceil(lx / size) + 2)
+			* (math.floor(hz / size) - math.ceil(lz / size) + 2)
+		if cells > index.Count then
 			for tile = 1, index.Count do
 				if Storage.GetTileFloor(s, tile) == floor then
 					scan(tile)
@@ -128,15 +127,33 @@ local function eachTriangle(
 			end
 			continue
 		end
-		for i = i0, i1 do
-			for j = j0, j1 do
-				local tile = cells[(i + CELL_OFFSET) * 2 ^ 24 + j + CELL_OFFSET]
-				if tile then
-					scan(tile)
-				end
+		for _, tile in Snap.TilesIn(s, floor, lx, lz, hx, hz) do
+			scan(tile)
+		end
+	end
+end
+
+--[=[
+	@within NavMeshSnap
+	The tiles of `floor` whose closed rectangle meets the closed box (studs), through the tile
+	hash: a box edge on a tile line reaches the tiles on both sides of it.
+]=]
+function Snap.TilesIn(s: Storage.State, floor: number, lx: number, lz: number, hx: number, hz: number): { number }
+	local index = indexOf(s)
+	local size, cells = index.Size[floor], index.Cells[floor]
+	local out = {}
+	if cells == nil then
+		return out
+	end
+	for i = math.ceil(lx / size) - 1, math.floor(hx / size) do
+		for j = math.ceil(lz / size) - 1, math.floor(hz / size) do
+			local tile = cells[(i + CELL_OFFSET) * 2 ^ 24 + j + CELL_OFFSET]
+			if tile then
+				table.insert(out, tile)
 			end
 		end
 	end
+	return out
 end
 
 --[=[

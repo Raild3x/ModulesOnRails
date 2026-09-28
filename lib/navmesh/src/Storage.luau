@@ -847,4 +847,153 @@ function Storage.RemoveObstacleRecord(s: State, slot: number)
 	end
 end
 
+-- Bulk range operations for Update (ticket 22).
+
+--[=[
+	@within NavMeshStorage
+	Sets the triangle count (growing capacity as needed); new triangles are uninitialized.
+]=]
+function Storage.SetTriangleCount(s: State, count: number)
+	ensureTriangles(s, count)
+	s.TriangleCount = count
+end
+
+--[=[
+	@within NavMeshStorage
+	Copies `count` triangles from `src` (starting at `srcFirst`) to `dst` (at `dstFirst`):
+	vertices, neighbours, floor, area, tile and widths, verbatim. Open edges and extra heads are
+	not copied: Connect rebuilds them. `src` may be `dst`; overlapping ranges are fine.
+]=]
+function Storage.CopyTriangleRange(dst: State, dstFirst: number, src: State, srcFirst: number, count: number)
+	local d, o = (dstFirst - 1), (srcFirst - 1)
+	local S3, S1, F3 = TRI_SLOTS * I32, I32, TRI_SLOTS * F64
+	buffer.copy(dst.TriVerts, d * S3, src.TriVerts, o * S3, count * S3)
+	buffer.copy(dst.TriNeighbors, d * S3, src.TriNeighbors, o * S3, count * S3)
+	buffer.copy(dst.TriFloor, d * S1, src.TriFloor, o * S1, count * S1)
+	buffer.copy(dst.TriArea, d * S1, src.TriArea, o * S1, count * S1)
+	buffer.copy(dst.TriTile, d * S1, src.TriTile, o * S1, count * S1)
+	buffer.copy(dst.CornerWidths, d * F3, src.CornerWidths, o * F3, count * F3)
+	buffer.copy(dst.PortalWidths, d * F3, src.PortalWidths, o * F3, count * F3)
+end
+
+--[=[
+	@within NavMeshStorage
+	Renumbers the vertices and neighbours of triangles `first`..`last` in place. Vertices go
+	through `vertexMap` (absent = unchanged). A neighbour id m falls in segment i when
+	`segStart[i] <= m < segStart[i + 1]`, and becomes `m + segDelta[i]`, or 0 when
+	`segDelta[i]` is false (a removed range).
+]=]
+function Storage.RemapTriangles(
+	s: State,
+	first: number,
+	last: number,
+	vertexMap: { [number]: number },
+	segStart: { number },
+	segDelta: { number | false }
+)
+	local verts, nbrs = s.TriVerts, s.TriNeighbors
+	local segments = #segStart
+	local anyVertex = next(vertexMap) ~= nil
+	for o = (first - 1) * TRI_SLOTS * I32, (last * TRI_SLOTS - 1) * I32, I32 do
+		if anyVertex then
+			local v = buffer.readi32(verts, o)
+			local r = vertexMap[v]
+			if r then
+				buffer.writei32(verts, o, r)
+			end
+		end
+		local m = buffer.readi32(nbrs, o)
+		if m ~= 0 and m >= segStart[1] then
+			local i = 1
+			while i < segments and m >= segStart[i + 1] do
+				i += 1
+			end
+			local delta = segDelta[i]
+			if delta == false then
+				buffer.writei32(nbrs, o, 0)
+			elseif delta ~= 0 then
+				buffer.writei32(nbrs, o, m + (delta :: number))
+			end
+		end
+	end
+end
+
+--[=[
+	@within NavMeshStorage
+	Sets the triangle range of `tile` without touching the triangles.
+]=]
+function Storage.SetTileRange(s: State, tile: number, first: number, count: number)
+	s.TileFirst[tile] = first
+	s.TileTriangles[tile] = count
+end
+
+--[=[
+	@within NavMeshStorage
+	Sets vertex `v`'s position (a freed slot reused, or a moved vertex).
+]=]
+function Storage.SetVertex(s: State, v: number, position: vector)
+	s.Vertices[v] = position
+end
+
+--[=[
+	@within NavMeshStorage
+	Sets the vertex count: vertices above it are dropped (they must be unreferenced), and new
+	slots up to it must be filled with SetVertex.
+]=]
+function Storage.SetVertexCount(s: State, count: number)
+	for v = s.VertexCount, count + 1, -1 do
+		s.Vertices[v] = nil
+		s.WallVertex[v] = nil
+	end
+	s.VertexCount = count
+end
+
+--[=[
+	@within NavMeshStorage
+	A fresh state for an Update commit: it shares `s`'s data that an Update never changes
+	(floors, tiles, rebuild sources, seams), holds copies of the stamps, tile ranges, vertices
+	and wall flags, and has no triangles, extras, links, pieces or obstacle records yet. `s` must not be used after the new state is swapped in.
+]=]
+function Storage.ShellFrom(s: State): State
+	local n = Storage.New()
+	for _, key in
+		{
+			"FloorNames",
+			"TileFloor",
+			"TileBounds",
+			"TileSrcCoordFirst",
+			"TileSrcCoordCount",
+			"TileSrcEdgeFirst",
+			"TileSrcEdgeCount",
+			"SrcCoords",
+			"SrcEdges",
+			"SrcGroups",
+			"SrcSeams",
+			"FloorTileSize",
+			"FloorDefaultArea",
+			"FloorAreaFirst",
+			"FloorAreaCount",
+			"AreaIds",
+			"FloorRingFirst",
+			"FloorRingCount",
+			"RingPointFirst",
+			"RingPointCount",
+			"RingX",
+			"RingZ",
+			"RingY",
+			"SeamFloorA",
+			"SeamFloorB",
+			"SeamEnds",
+		}
+	do
+		(n :: any)[key] = (s :: any)[key]
+	end
+	for _, key in { "TileStamp", "TileFirst", "TileTriangles", "Vertices", "WallVertex" } do
+		(n :: any)[key] = table.clone((s :: any)[key])
+	end
+	n.VertexCount = s.VertexCount
+	n.MaxAgentRadius = s.MaxAgentRadius
+	return n
+end
+
 return Storage

@@ -66,6 +66,7 @@ export type NavPoint = Types.NavPoint
 export type MoveStatus = Types.MoveStatus
 export type MoveResult = Types.MoveResult
 export type RandomPointOptions = Types.RandomPointOptions
+export type ChangedRegion = Types.ChangedRegion
 export type SeamDesc = Types.SeamDesc
 export type LinkDesc = Types.LinkDesc
 export type NavMeshData = Storage.State
@@ -414,19 +415,25 @@ end
 --[=[
 	@within NavMesh
 	Applies every obstacle added or removed since the last `Update`, rebuilding only the tiles
-	they touch, plus clearance within reach of them. Paths through changed tiles then fail
-	`IsPathValid`. Atomic (SR13): on an error the mesh is unchanged, the pending obstacle changes
+	they touch, plus the clearance within reach of the walls that changed. Paths through changed
+	tiles then fail `IsPathValid`. The cost follows the tiles the change touches (smaller tiles,
+	cheaper updates), plus a copy of the rest of the mesh at about 0.1-0.2 ms per 1,000 triangles
+	under Lune; a `MaxAgentRadius` cap makes the clearance part much cheaper.
+
+	Returns the changed regions (`ChangedRegion`), empty when nothing was pending: a path that
+	stays outside every box, fattened by its `AgentRadius`, is unaffected, which is finer than
+	`IsPathValid`'s per-tile stamps. Atomic (SR13): on an error the mesh is unchanged, the pending obstacle changes
 	are rolled back, and the error is raised again. Triangle and vertex ids are only stable until
 	the next `Update` (SR14).
 
 	```lua
 	local door = NavMesh.AddObstacle(mesh, "Ground", doorFootprint)
-	NavMesh.Update(mesh)
+	local regions = NavMesh.Update(mesh) -- { { Floor, Min, Max } }
 	if not NavMesh.IsPathValid(mesh, path) then path = NavMesh.FindPath(mesh, npcFeet, goal) end
 	```
 ]=]
-function NavMesh.Update(mesh: NavMeshData)
-	Tiles.Update(mesh)
+function NavMesh.Update(mesh: NavMeshData): { ChangedRegion }
+	return Tiles.Update(mesh)
 end
 
 --[=[
