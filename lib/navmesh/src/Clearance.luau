@@ -551,7 +551,7 @@ end
 	mesh has none, as after a load) and flags wall vertices of the rebuilt tiles and their
 	neighbours. Every triangle within its own reach of a changed wall then joins `recompute`
 	(tiles are culled first by their largest width), and those widths are computed. Returns the
-	tiles holding a recomputed triangle. It must be the commit's last step that can fail: an error
+	tiles the reach test added triangles from (the dirty tiles are the caller's to add). It must be the commit's last step that can fail: an error
 	after it would leave the index ahead of the mesh.
 ]=]
 function Clearance.Refresh(
@@ -581,7 +581,6 @@ function Clearance.Refresh(
 				table.insert(changed, { floor, w[1], w[2], w[3], w[4] })
 			end
 		end
-		touched[tile] = true
 	end
 	for _, c in old do
 		table.insert(changed, c)
@@ -650,8 +649,12 @@ function Clearance.Refresh(
 		end
 	end
 	computeWidths(n, Storage.GetMaxAgentRadius(n), recompute, index)
+	-- Widths changed in these tiles: their bounds are measured again when next needed.
+	for _, tile in dirty do
+		reaches[tile] = nil
+	end
 	for tile in touched do
-		reaches[tile] = nil -- its widths changed: measured again when next needed
+		reaches[tile] = nil
 	end
 	indexes[mesh] = index
 	tileReaches[mesh] = reaches

@@ -98,6 +98,9 @@ return function(t: tiniest)
 		if Storage.TriangleCount(mesh) ~= Storage.TriangleCount(fresh) then
 			return `{Storage.TriangleCount(mesh)} triangles vs {Storage.TriangleCount(fresh)}`
 		end
+		if Storage.VertexCount(mesh) ~= Storage.VertexCount(fresh) then
+			return `{Storage.VertexCount(mesh)} vertices vs {Storage.VertexCount(fresh)}`
+		end
 		local updated, expected = byTriangle(mesh), byTriangle(fresh)
 		for key, widths in expected do
 			if updated[key] ~= widths then
@@ -231,6 +234,134 @@ return function(t: tiniest)
 					.with_context(`b; dz {dz}`)
 					.is("")
 			end
+		end)
+
+		test(
+			"a run of updates among static props equals fresh Builds, and changed tiles get new stamps (ticket 22)",
+			function()
+				-- 18 small props on a 24 x 24 floor in 6-stud tiles, and four crates clear of them.
+				local seed = 11
+				local function rnd(lo: number, hi: number): number
+					seed = (seed * 1103515245 + 12345) % 2147483648
+					return lo + seed / 2147483648 * (hi - lo)
+				end
+				local props = {}
+				for _ = 1, 18 do
+					local cx, cz, w, d, a = rnd(1, 23), rnd(1, 23), rnd(0.4, 2), rnd(0.4, 2), rnd(0, math.pi)
+					local c, sn = math.cos(a), math.sin(a)
+					local ring = {}
+					for _, k in { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } } do
+						local x, z = k[1] * w / 2, k[2] * d / 2
+						table.insert(ring, v(cx + x * c - z * sn, 0, cz + x * sn + z * c))
+					end
+					table.insert(props, ring)
+				end
+				local desc: any = {
+					TileSize = 6,
+					Floors = { Ground = { Walkable = { flat(0, { 0, 0, 24, 0, 24, 24, 0, 24 }) }, Obstacles = props } },
+				}
+				local crates = {
+					A = flat(0, { 5.1, 5.2, 7.8, 5.3, 7.7, 7.5, 5.15, 7.5 }),
+					B = flat(0, { 10.9, 16.5, 13.6, 16.6, 13.5, 18.8, 10.95, 18.8 }),
+					C = flat(0, { 7.1, 8.2, 9.8, 8.3, 9.7, 10.5, 7.15, 10.5 }),
+					D = flat(0, { 13.9, 13.7, 16.6, 13.8, 16.5, 16, 13.95, 16 }),
+				}
+				-- Triangles by grid points with their widths and wall flags, and their tiles.
+				local function snapshot(mesh: any): ({ [string]: string }, { [string]: number }, { number })
+					local tiles = {}
+					for t = 1, Storage.TriangleCount(mesh) do
+						local keys = {}
+						for k, id in { Storage.GetTriangle(mesh, t) } do
+							local p = Storage.GetVertex(mesh, id)
+							keys[k] = math.round(p.X * 256) * 1e7 + math.round(p.Z * 256)
+						end
+						local first = if keys[1] < keys[2] and keys[1] < keys[3]
+							then 1
+							elseif keys[2] < keys[3] then 2
+							else 3
+						tiles[`{keys[first]}:{keys[first % 3 + 1]}:{keys[(first + 1) % 3 + 1]}`] =
+							Storage.GetTriangleTile(mesh, t)
+					end
+					local stamps = {}
+					for tile = 1, Storage.TileCount(mesh) do
+						stamps[tile] = Storage.GetTileStamp(mesh, tile)
+					end
+					return byTriangle(mesh), tiles, stamps
+				end
+				local mesh = NavMesh.Build(desc)
+				local ids, live = {}, {}
+				for step, change in { "+A", "+B", "-A", "+C", "+D", "-B", "-D", "-C" } do
+					local name = string.sub(change, 2)
+					local before, beforeTiles, stamps = snapshot(mesh)
+					if string.sub(change, 1, 1) == "+" then
+						ids[name] = NavMesh.AddObstacle(mesh, "Ground", crates[name])
+						live[name] = true
+					else
+						NavMesh.RemoveObstacle(mesh, ids[name])
+						live[name] = nil
+					end
+					NavMesh.Update(mesh)
+					local list = {}
+					for _, key in { "A", "B", "C", "D" } do
+						if live[key] then
+							table.insert(list, crates[key])
+						end
+					end
+					local context = `step {step} ({change})`
+					expect(differsFromFresh(mesh, NavMesh.Build(baked(desc, "Ground", list))))
+						.with_context(context)
+						.is("")
+					-- Every tile holding a triangle that is new, gone, or has new widths gets a new stamp.
+					local after, afterTiles = snapshot(mesh)
+					local stale = {}
+					for key, widths in after do
+						if
+							before[key] ~= widths
+							and Storage.GetTileStamp(mesh, afterTiles[key]) == stamps[afterTiles[key]]
+						then
+							table.insert(stale, key)
+						end
+					end
+					for key in before do
+						if
+							after[key] == nil
+							and Storage.GetTileStamp(mesh, beforeTiles[key]) == stamps[beforeTiles[key]]
+						then
+							table.insert(stale, key)
+						end
+					end
+					expect(#stale).with_context(`{context}: {stale[1]}`).is(0)
+				end
+			end
+		)
+
+		test("an update over a seam's tile equals a fresh Build (ticket 22)", function()
+			-- The crate sits in the Ground tile holding the Ground side of the seam at x = 10 but
+			-- leaves the seam open: its pieces are rebuilt, the rest are renumbered.
+			local desc: any = table.clone(Fixtures.ThreeFloorStairs.Desc)
+			desc.TileSize = 2
+			local crate = flat(0, { 8.3, 2.3, 9.4, 2.4, 9.3, 3.6, 8.4, 3.5 })
+			local mesh = NavMesh.Build(desc)
+			local id = NavMesh.AddObstacle(mesh, "Ground", crate)
+			NavMesh.Update(mesh)
+			expect(differsFromFresh(mesh, NavMesh.Build(baked(desc, "Ground", { crate })))).with_context("added").is("")
+			NavMesh.RemoveObstacle(mesh, id)
+			NavMesh.Update(mesh)
+			expect(differsFromFresh(mesh, NavMesh.Build(desc))).with_context("removed").is("")
+		end)
+
+		test("an obstacle one pixel from a tile line dirties the tile beyond it too", function()
+			-- Its west side is at x = 16 + 1/256: the tile west of the line x = 16 is within the
+			-- one-pixel margin, so a path kept inside it is invalidated too (SR13).
+			local desc = table.clone(open)
+			desc.TileSize = 8
+			local mesh = NavMesh.Build(desc)
+			local west = NavMesh.FindPath(mesh, v(9, 0, 9), v(15, 0, 14))
+			local farther = NavMesh.FindPath(mesh, v(1, 0, 9), v(7, 0, 14))
+			NavMesh.AddObstacle(mesh, "Ground", flat(0, { 16 + 1 / 256, 10, 18, 10, 18, 12, 16 + 1 / 256, 12 }))
+			NavMesh.Update(mesh)
+			expect(NavMesh.IsPathValid(mesh, west)).is(false)
+			expect(NavMesh.IsPathValid(mesh, farther)).is_true()
 		end)
 
 		test("widths follow a static wall the obstacle tilts, beyond its box (ticket 22)", function()

@@ -316,8 +316,9 @@ local function prepare(s: State): Plan
 		end
 	end
 
-	-- Dirty tiles through the tile hash (O(dirty), not O(tiles)), then their clean neighbours:
-	-- the tiles whose closed rectangle touches a dirty one.
+	-- Dirty tiles through the tile hash (O(dirty), not O(tiles)): the tiles meeting the snapped
+	-- box grown by a pixel. Then their clean neighbours: the tiles whose closed rectangle touches
+	-- a dirty one.
 	local dirty: { [number]: boolean } = {}
 	local dirtyByFloor: { [number]: { number } } = {}
 	for floor, boxes in pendingFloors do
@@ -325,7 +326,7 @@ local function prepare(s: State): Plan
 			local x0, z0 = (box[1] - 1) / GRID, (box[2] - 1) / GRID
 			local x1, z1 = (box[3] + 1) / GRID, (box[4] + 1) / GRID
 			for _, tile in Snap.TilesIn(s, floor, x0, z0, x1, z1) do
-				if not dirty[tile] and touches(s, tile, box[1], box[2], box[3], box[4]) then
+				if not dirty[tile] then
 					dirty[tile] = true
 					local list = dirtyByFloor[floor] or {}
 					dirtyByFloor[floor] = list
@@ -631,7 +632,6 @@ local function apply(s: State): State
 			Storage.SetTriangleArea(n, t, out.Areas[i])
 			Storage.SetTriangleTile(n, t, tile)
 		end
-		Storage.ClearTriangleFlags(n, first, #out.Areas)
 		Storage.SetTileRange(n, tile, first, #out.Areas)
 	end
 
@@ -761,6 +761,9 @@ local function apply(s: State): State
 		end
 	end
 	local changedTiles = Clearance.Refresh(s, n, plan.DirtyList, plan.NearList, recompute)
+	for tile in dirty do
+		changedTiles[tile] = true
+	end
 
 	for tile in changedTiles do
 		Storage.BumpTileStamp(n, tile)

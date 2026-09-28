@@ -862,12 +862,9 @@ end
 	@within NavMeshStorage
 	Copies `count` triangles from `src` (starting at `srcFirst`) to `dst` (at `dstFirst`):
 	vertices, neighbours, floor, area, tile and widths, verbatim. Open edges and extra heads are
-	zeroed (Connect rebuilds them). `src` may be `dst`; overlapping ranges are fine.
+	not copied: Connect rebuilds them. `src` may be `dst`; overlapping ranges are fine.
 ]=]
 function Storage.CopyTriangleRange(dst: State, dstFirst: number, src: State, srcFirst: number, count: number)
-	if count <= 0 then
-		return
-	end
 	local d, o = (dstFirst - 1), (srcFirst - 1)
 	local S3, S1, F3 = TRI_SLOTS * I32, I32, TRI_SLOTS * F64
 	buffer.copy(dst.TriVerts, d * S3, src.TriVerts, o * S3, count * S3)
@@ -877,8 +874,6 @@ function Storage.CopyTriangleRange(dst: State, dstFirst: number, src: State, src
 	buffer.copy(dst.TriTile, d * S1, src.TriTile, o * S1, count * S1)
 	buffer.copy(dst.CornerWidths, d * F3, src.CornerWidths, o * F3, count * F3)
 	buffer.copy(dst.PortalWidths, d * F3, src.PortalWidths, o * F3, count * F3)
-	buffer.fill(dst.TriOpenEdges, d * S1, 0, count * S1)
-	buffer.fill(dst.TriExtraHead, d * S1, 0, count * S1)
 end
 
 --[=[
@@ -999,17 +994,6 @@ function Storage.ShellFrom(s: State): State
 	n.VertexCount = s.VertexCount
 	n.MaxAgentRadius = s.MaxAgentRadius
 	return n
-end
-
---[=[
-	@within NavMeshStorage
-	Clears the open-edge flags and extra heads of triangles `first`..`first + count - 1`.
-]=]
-function Storage.ClearTriangleFlags(s: State, first: number, count: number)
-	if count > 0 then
-		buffer.fill(s.TriOpenEdges, (first - 1) * I32, 0, count * I32)
-		buffer.fill(s.TriExtraHead, (first - 1) * I32, 0, count * I32)
-	end
 end
 
 return Storage

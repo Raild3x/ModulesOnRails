@@ -347,12 +347,13 @@ return function(t: tiniest)
 			expect(Storage.VertexCount(n)).is(2)
 			expect(Storage.GetVertex(n, 3)).is(nil)
 
-			cases("ClearTriangleFlags")
-			Storage.SetEdgeOpen(n, 1, 2)
-			Storage.AddExtra(n, 1, 2, Storage.EXTRA_LINK, 1, vector.zero, vector.zero)
-			Storage.ClearTriangleFlags(n, 1, 1)
-			expect(Storage.IsEdgeOpen(n, 1, 2)).is(false)
-			expect(Storage.GetExtraHead(n, 1)).is(0)
+			-- Ids below the first segment stay as they are.
+			Storage.SetNeighbor(n, 1, 1, 1)
+			Storage.RemapTriangles(n, 1, 1, {}, { 2 }, { 5 })
+			expect(Storage.GetNeighbor(n, 1, 1)).is(1)
+			-- A one-triangle range is copied too.
+			Storage.CopyTriangleRange(n, 2, n, 1, 1)
+			expect(Storage.GetNeighbor(n, 2, 1)).is(1)
 		end)
 
 		test("state is plain, network-safe data", function()
