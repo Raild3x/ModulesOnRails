@@ -6,8 +6,8 @@
 
 **Status:** ready-for-agent
 
-- [ ] Atomic `Update` with rollback (SR13), tile and vertex reclamation (SR14), snapped-bbox dirtying, clearance refresh
-- [ ] Add then remove equals a fresh Build; toggling doesn't grow memory
+- [x] Atomic `Update` with rollback (SR13), tile and vertex reclamation (SR14), snapped-bbox dirtying, clearance refresh
+- [x] Add then remove equals a fresh Build; toggling doesn't grow memory
 
 Spec: [../spec.md](../spec.md). Gates: the spec's "Gates for every ticket".
 
@@ -23,3 +23,61 @@ Spec: [../spec.md](../spec.md). Gates: the spec's "Gates for every ticket".
 - **Tile size is per floor:** Build picks it from density unless `TileSize` is given, so
   `Update` must read each floor's tile size (from its tile bounds, or a stored per-floor
   value) rather than assume one.
+
+## Built (2026-09-27)
+- **Build refactor, output byte-identical:**
+  - The per-tile pipeline is now `triangulateTile` plus `copyOut`, shared with `Update`.
+  - Build records what `Update` needs in Storage as plain arrays: each tile's exact
+    triangulation input, and each floor's tile size, areas and walkable rings (for heights).
+  - It also records seam records and seam pieces. Every extra link (seams, then links
+    re-snapped) is rebuilt by one `connect` step.
+- **`Tiles.luau`:**
+  - `AddObstacle` and `RemoveObstacle` are validated eagerly and stay pending until `Update`.
+  - **Dirty tiles:** the rectangle grown by one pixel overlaps the snapped box.
+  - **Rebuild:** a dirty tile with no active obstacle rebuilds from its baseline verbatim. The
+    rest of a floor's dirty tiles are re-snapped together with the active obstacles (the local
+    re-snap), and each gets its own fragments, the clipped obstacle chains, and its border
+    vertices.
+- **Commit model, simpler than slabs and free lists:**
+  - `Update` builds a fresh compact state. Clean tiles are copied and renumbered, and vertices
+    are re-interned by grid point. Then it swaps the state into the caller's table.
+  - SR14 already makes ids stable only until the next `Update`. So there are no dead slots and
+    no free lists, and memory can't grow: 20 toggles keep every array the same size.
+  - Atomicity is free: an error before the swap leaves the mesh untouched, and the pending
+    records are rolled back.
+- **Clearance refresh:**
+  - A rebuilt triangle with the same grid points as an old one keeps its widths, matched by
+    vertex.
+  - Triangles whose reach r* touches a changed obstacle box are recomputed (ruling U-a), and
+    so are new triangles.
+  - **Oracle:** `Update` with a door equals a fresh Build with the door baked in as a static
+    obstacle: the same triangles and the same widths to 6 decimals, on all four bench scenes.
+    It is also a spec on the Courtyard and ShallowObstacles.
+- **Cost** (Lune, a 3 x 1.5 door, medians of 5 add/remove toggles):
+
+| scene | Build | Update add / remove | first version |
+|---|---|---|---|
+| props (3152 tris) | 779 ms | 26 / 24 ms | 71 / 68 |
+| bench (4605) | 650 ms | 27 / 20 ms | 66 / 59 |
+| terrain (1297) | 255 ms | 13 / 11 ms | 88 / 85 |
+| walls (692) | 155 ms | 20 / 10 ms | 63 / 55 |
+
+  - The two speedups: reach is measured from the changed obstacle boxes rather than whole
+    dirty tiles (1.7x), and unchanged rebuilt triangles keep their widths (a further 1.5-3x).
+  - What remains is roughly clearance for new triangles, the O(T) copy, and re-triangulation.
+- **Specs** (`NavMesh.Obstacles.spec`, 13):
+  - pending changes until `Update`, and `IsPathValid` flipping;
+  - add-then-remove equal to a fresh Build (canonical DrawList) on three fixtures;
+  - the baked-obstacle oracle;
+  - 20 toggles without growth;
+  - the pixel margin at a tile line, and straddling a tile line;
+  - local stamps, and clearance following obstacles;
+  - seams and links across an update, and link ends through a renumbering;
+  - a no-op update, eager validation, and rollback on an injected failure.
+  - Negative controls, each failing the right test: no pixel margin, no clearance refresh, no
+    stamp bumps, no rollback, stale link triangles, and no reach refresh.
+  - "Always re-snap" passes on purpose: re-snapping an obstacle-free baseline is idempotent,
+    so the verbatim path is a fast path.
+- **Known limits:**
+  - An obstacle over a link end takes that link out until it is removed.
+  - Clearance near a seam still counts only its own floor's walls.

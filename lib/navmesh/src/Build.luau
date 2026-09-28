@@ -340,13 +340,236 @@ local function clipToRect(
 	return outX, outZ
 end
 
+-- What triangulating a tile needs to know about its floor.
+type FloorData = {
+	Context: string,
+	Surfaces: { Surface },
+	AreaIds: { number },
+	DefaultArea: number,
+	-- Heights by grid point key, shared by the floor's tiles, so a vertex gets one height.
+	Heights: { [number]: number },
+	HeightFrom: { [number]: number },
+}
+
+-- A kept triangle of a tile: its vertices as grid points (CCW), its area, and its neighbours
+-- within the tile (indices into the tile's list, 0 = none).
+type TileTriangle = { X: { number }, Z: { number }, Keys: { number }, Area: number, Neighbors: { number } }
+
+-- Triangulates one tile's input and applies the keep rule, areas and heights (SR6). Errors
+-- (with the floor's context) on an authoring mistake. Used by Build and by Update.
+local function triangulateTile(tc: { number }, te: { number }, tg: { number }, floor: FloorData): { TileTriangle }
+	local floorContext = floor.Context
+	local surfaces, vertexHeight, vertexFrom = floor.Surfaces, floor.Heights, floor.HeightFrom
+	local tri = CDT.Triangulate { Coords = tc, Edges = te, EdgeGroups = tg }
+	for v = 1, CDT.VertexCount(tri) do
+		if CDT.InputVertexOf(tri, v) == nil then
+			fail(floorContext, "internal error: the triangulator added a vertex, so snap rounding missed a crossing")
+		end
+	end
+
+	-- Keep rule and areas.
+	local kept: { number } = {}
+	local keptArea: { number } = {}
+	-- A tile only has the area groups up to the highest one clipped into it.
+	local lastArea = math.min(#floor.AreaIds, CDT.GroupCount(tri) - GROUP_FIRST_AREA + 1)
+	for t = 1, CDT.TriangleCount(tri) do
+		if
+			CDT.GetWinding(tri, t, GROUP_WALKABLE) > 0
+			and CDT.GetWinding(tri, t, GROUP_OBSTACLE) == 0
+			and CDT.GetWinding(tri, t, GROUP_TILE) > 0
+		then
+			local area = floor.DefaultArea
+			for i = lastArea, 1, -1 do
+				if CDT.GetWinding(tri, t, GROUP_FIRST_AREA + i - 1) > 0 then
+					area = floor.AreaIds[i]
+					break
+				end
+			end
+			table.insert(kept, t)
+			table.insert(keptArea, area)
+		end
+	end
+
+	-- Heights. Each kept triangle takes its heights from the first walkable surface that
+	-- contains it. Every other surface containing it must agree, and so must every triangle
+	-- sharing a vertex, in any tile (a step inside one floor is an error).
+	for _, t in kept do
+		local a, b, c = CDT.GetTriangle(tri, t)
+		local ax, az = CDT.GetVertex(tri, a)
+		local bx, bz = CDT.GetVertex(tri, b)
+		local cx, cz = CDT.GetVertex(tri, c)
+		local px, pz = (ax + bx + cx) / 3, (az + bz + cz) / 3
+		local h1, h2, h3, from = nil :: number?, 0, 0, 0
+		for i, surface in surfaces do
+			local s1, s2, s3, inside = surfaceHeights(surface, px, pz, ax, az, bx, bz, cx, cz)
+			if s1 == nil or not inside then
+				continue
+			end
+			if h1 == nil then
+				h1, h2, h3, from = s1, s2, s3, i
+			elseif
+				math.abs(s1 - h1) > HEIGHT_TOLERANCE
+				or math.abs(s2 - h2) > HEIGHT_TOLERANCE
+				or math.abs(s3 - h3) > HEIGHT_TOLERANCE
+			then
+				fail(
+					floorContext,
+					`walkable rings {from} and {i} overlap with different heights near ({fmt(px / GRID)}, {fmt(
+						pz / GRID
+					)}); split them into separate floors`
+				)
+			end
+		end
+		if h1 == nil then
+			-- A sliver whose centre snapped just outside every ring (by under half a grid
+			-- pixel): extend the plane of the nearest inside surface triangle.
+			-- ponytail: linear scan; slivers are rare.
+			local best, bestSurface, bestTriangle = math.huge, 1, 1
+			for i, surface in surfaces do
+				local stri = surface.Tri
+				for st = 1, CDT.TriangleCount(stri) do
+					if CDT.GetWinding(stri, st, GROUP_WALKABLE) > 0 then
+						local sa, sb, sc = CDT.GetTriangle(stri, st)
+						local sax, saz = CDT.GetVertex(stri, sa)
+						local sbx, sbz = CDT.GetVertex(stri, sb)
+						local scx, scz = CDT.GetVertex(stri, sc)
+						local dx, dz = (sax + sbx + scx) / 3 - px, (saz + sbz + scz) / 3 - pz
+						if dx * dx + dz * dz < best then
+							best, bestSurface, bestTriangle = dx * dx + dz * dz, i, st
+						end
+					end
+				end
+			end
+			h1, h2, h3 = surfaceHeights(surfaces[bestSurface], px, pz, ax, az, bx, bz, cx, cz, bestTriangle)
+			from = bestSurface
+		end
+		for k, v in { a, b, c } do
+			local h = if k == 1 then h1 :: number elseif k == 2 then h2 else h3
+			local vx, vz = CDT.GetVertex(tri, v)
+			local key = pointKey(vx, vz)
+			local previous = vertexHeight[key]
+			if previous == nil then
+				vertexHeight[key] = h
+				vertexFrom[key] = from
+			elseif math.abs(previous - h) > HEIGHT_TOLERANCE then
+				fail(
+					floorContext,
+					`walkable rings {vertexFrom[key]} and {from} meet at different heights at ({fmt(vx / GRID)}, {fmt(
+						vz / GRID
+					)}); split them into separate floors joined by a seam`
+				)
+			end
+		end
+	end
+
+	local index: { [number]: number } = {}
+	for i, t in kept do
+		index[t] = i
+	end
+	local out: { TileTriangle } = table.create(#kept)
+	for i, t in kept do
+		local xs, zs, keys = {}, {}, {}
+		for k, v in { CDT.GetTriangle(tri, t) } do
+			xs[k], zs[k] = CDT.GetVertex(tri, v)
+			keys[k] = pointKey(xs[k], zs[k])
+		end
+		out[i] = {
+			X = xs,
+			Z = zs,
+			Keys = keys,
+			Area = keptArea[i],
+			Neighbors = {
+				index[CDT.GetNeighbor(tri, t, 1)] or 0,
+				index[CDT.GetNeighbor(tri, t, 2)] or 0,
+				index[CDT.GetNeighbor(tri, t, 3)] or 0,
+			},
+		}
+	end
+	return out
+end
+
+-- Copies a tile's triangles into storage as tile `tile` of floor `floorId`, interning vertices
+-- per floor by grid point, and records open edges for cross-tile linking and seam pieces
+-- (edges whose grid ends match a seam fragment in `seamOfFragment`).
+local function copyOut(
+	s: Storage.State,
+	floorContext: string,
+	tile: number,
+	triangles: { TileTriangle },
+	heights: { [number]: number },
+	meshVertex: { [number]: number },
+	openEdges: { [number]: number },
+	seamOfFragment: { [string]: number }
+)
+	local first = Storage.AllocTileRange(s, tile, #triangles)
+	for i, tri in triangles do
+		local id = first + i - 1
+		local ids = {}
+		for k = 1, 3 do
+			local key = tri.Keys[k]
+			local m = meshVertex[key]
+			if m == nil then
+				m = Storage.AddVertex(s, vector.create(tri.X[k] / GRID, heights[key], tri.Z[k] / GRID))
+				meshVertex[key] = m
+			end
+			ids[k] = m
+		end
+		Storage.SetTriangle(s, id, ids[1], ids[2], ids[3])
+		Storage.SetTriangleArea(s, id, tri.Area)
+		if next(seamOfFragment) ~= nil then
+			for e = 1, 3 do
+				local ka, kb = tri.Keys[e % 3 + 1], tri.Keys[(e + 1) % 3 + 1]
+				local seamId = seamOfFragment[if ka < kb then `{ka}:{kb}` else `{kb}:{ka}`]
+				if seamId ~= nil then
+					Storage.InsertPiece(s, seamId, id, e)
+				end
+			end
+		end
+		for e = 1, 3 do
+			local n = tri.Neighbors[e]
+			Storage.SetNeighbor(s, id, e, if n == 0 then 0 else first + n - 1)
+			if n == 0 then
+				openEdges[ids[e % 3 + 1] * EDGE_KEY + ids[(e + 1) % 3 + 1]] = id * 4 + e
+			end
+		end
+		-- Degeneracy guard (SR2): CCW with positive area in stored coordinates.
+		local pa, pb, pc = Storage.GetVertex(s, ids[1]), Storage.GetVertex(s, ids[2]), Storage.GetVertex(s, ids[3])
+		if Orient2D(pa.X, pa.Z, pb.X, pb.Z, pc.X, pc.Z) <= 0 then
+			fail(floorContext, `a triangle degenerates after quantization near ({fmt(pa.X)}, {fmt(pa.Z)})`)
+		end
+	end
+end
+
+-- Links cross-tile neighbours: each open edge meets the reversed open edge of the next tile.
+local function linkOpenEdges(s: Storage.State, openEdges: { [number]: number })
+	for key, packed in openEdges do
+		local other = openEdges[(key % EDGE_KEY) * EDGE_KEY + key // EDGE_KEY]
+		if other ~= nil then
+			Storage.SetNeighbor(s, packed // 4, packed % 4, other // 4)
+		end
+	end
+end
+
+-- The seam fragments of a tile input, by unordered grid-end key.
+local function seamFragments(tc: { number }, te: { number }, ts: { number }): { [string]: number }
+	local out = {}
+	for k, seamId in ts do
+		if seamId ~= 0 then
+			local a, b = te[2 * k - 1], te[2 * k]
+			local ka, kb = pointKey(tc[2 * a - 1], tc[2 * a]), pointKey(tc[2 * b - 1], tc[2 * b])
+			out[if ka < kb then `{ka}:{kb}` else `{kb}:{ka}`] = seamId
+		end
+	end
+	return out
+end
+
 local function buildFloor(
 	s: Storage.State,
 	name: string,
 	floor: FloorDesc,
 	explicitTileSize: number?,
 	seams: { FloorSeam }
-): { [number]: { SeamPiece } }
+)
 	local floorContext = `floor '{name}'`
 	if type(floor) ~= "table" or type(floor.Walkable) ~= "table" or #floor.Walkable == 0 then
 		fail(floorContext, "needs at least one Walkable ring")
@@ -474,17 +697,6 @@ local function buildFloor(
 		end
 		fragLast[k] = f
 	end
-	-- Each seam fragment, by its (unordered) grid end points.
-	local seamOfFragment: { [string]: number } = {}
-	for f, k in source do
-		local seamId = seamOfEdge[k]
-		if seamId ~= nil then
-			local a, b = fragments[2 * f - 1], fragments[2 * f]
-			local ka, kb = pointKey(snapped[2 * a - 1], snapped[2 * a]), pointKey(snapped[2 * b - 1], snapped[2 * b])
-			seamOfFragment[if ka < kb then `{ka}:{kb}` else `{kb}:{ka}`] = seamId
-		end
-	end
-	local pieces: { [number]: { SeamPiece } } = {}
 	-- Each ring as its snapped closed chain (grid coordinates).
 	local chainX, chainZ = {}, {}
 	for r = 1, #ringGroup do
@@ -557,15 +769,22 @@ local function buildFloor(
 
 	-- 4-5. Per tile: triangulate, keep, heights, copy out.
 	local floorId = Storage.InsertFloor(s, name)
-	local vertexHeight: { [number]: number } = {} -- by grid point key
-	local vertexFrom: { [number]: number } = {}
+	Storage.SetFloorSources(s, floorId, tileSize, defaultArea, areaIds, walkable)
+	local floorData: FloorData = {
+		Context = floorContext,
+		Surfaces = surfaces,
+		AreaIds = areaIds,
+		DefaultArea = defaultArea,
+		Heights = {},
+		HeightFrom = {},
+	}
 	local meshVertex: { [number]: number } = {} -- grid point key -> mesh vertex (interned per floor)
 	local openEdges: { [number]: number } = {} -- directed edge key -> triangle * 4 + edge
 	for tj = iz0, iz1 - 1 do
 		for ti = ix0, ix1 - 1 do
 			local x0, z0 = ti * tileSize, tj * tileSize
 			local x1, z1 = x0 + tileSize, z0 + tileSize
-			local tc, te, tg = {}, {}, {}
+			local tc, te, tg, ts = {}, {}, {}, {}
 			local hasWalkable = false
 			local function addPoints(xs: { number }, zs: { number }, group: number?)
 				local offset = #tc // 2
@@ -577,6 +796,7 @@ local function buildFloor(
 					ringEdges(#xs, offset, te)
 					for _ = 1, #xs do
 						table.insert(tg, group)
+						table.insert(ts, 0)
 					end
 				end
 			end
@@ -599,6 +819,7 @@ local function buildFloor(
 					table.insert(te, #tc // 2 - 1)
 					table.insert(te, #tc // 2)
 					table.insert(tg, GROUP_OPEN)
+					table.insert(ts, seamOfEdge[source[f]] or 0)
 				end
 			end
 			addPoints({ x0, x1, x1, x0 }, { z0, z0, z1, z1 }, GROUP_TILE)
@@ -612,174 +833,26 @@ local function buildFloor(
 			end
 			addPoints(borderX, borderZ)
 
-			local tri = CDT.Triangulate { Coords = tc, Edges = te, EdgeGroups = tg }
-			for v = 1, CDT.VertexCount(tri) do
-				if CDT.InputVertexOf(tri, v) == nil then
-					fail(
-						floorContext,
-						"internal error: the triangulator added a vertex, so snap rounding missed a crossing"
-					)
-				end
-			end
-
-			-- Keep rule and areas.
-			local kept: { number } = {}
-			local keptArea: { number } = {}
-			-- A tile only has the area groups up to the highest one clipped into it.
-			local lastArea = math.min(#areas, CDT.GroupCount(tri) - GROUP_FIRST_AREA + 1)
-			for t = 1, CDT.TriangleCount(tri) do
-				if
-					CDT.GetWinding(tri, t, GROUP_WALKABLE) > 0
-					and CDT.GetWinding(tri, t, GROUP_OBSTACLE) == 0
-					and CDT.GetWinding(tri, t, GROUP_TILE) > 0
-				then
-					local area = defaultArea
-					for i = lastArea, 1, -1 do
-						if CDT.GetWinding(tri, t, GROUP_FIRST_AREA + i - 1) > 0 then
-							area = areaIds[i]
-							break
-						end
-					end
-					table.insert(kept, t)
-					table.insert(keptArea, area)
-				end
-			end
-			if #kept == 0 then
+			local triangles = triangulateTile(tc, te, tg, floorData)
+			if #triangles == 0 then
 				continue
 			end
-
-			-- Heights. Each kept triangle takes its heights from the first walkable surface that
-			-- contains it. Every other surface containing it must agree, and so must every
-			-- triangle sharing a vertex, in any tile (a step inside one floor is an error).
-			for _, t in kept do
-				local a, b, c = CDT.GetTriangle(tri, t)
-				local ax, az = CDT.GetVertex(tri, a)
-				local bx, bz = CDT.GetVertex(tri, b)
-				local cx, cz = CDT.GetVertex(tri, c)
-				local px, pz = (ax + bx + cx) / 3, (az + bz + cz) / 3
-				local h1, h2, h3, from = nil :: number?, 0, 0, 0
-				for i, surface in surfaces do
-					local s1, s2, s3, inside = surfaceHeights(surface, px, pz, ax, az, bx, bz, cx, cz)
-					if s1 == nil or not inside then
-						continue
-					end
-					if h1 == nil then
-						h1, h2, h3, from = s1, s2, s3, i
-					elseif
-						math.abs(s1 - h1) > HEIGHT_TOLERANCE
-						or math.abs(s2 - h2) > HEIGHT_TOLERANCE
-						or math.abs(s3 - h3) > HEIGHT_TOLERANCE
-					then
-						fail(
-							floorContext,
-							`walkable rings {from} and {i} overlap with different heights near ({fmt(px / GRID)}, {fmt(
-								pz / GRID
-							)}); split them into separate floors`
-						)
-					end
-				end
-				if h1 == nil then
-					-- A sliver whose centre snapped just outside every ring (by under half a
-					-- grid pixel): extend the plane of the nearest inside surface triangle.
-					-- ponytail: linear scan; slivers are rare.
-					local best, bestSurface, bestTriangle = math.huge, 1, 1
-					for i, surface in surfaces do
-						local stri = surface.Tri
-						for st = 1, CDT.TriangleCount(stri) do
-							if CDT.GetWinding(stri, st, GROUP_WALKABLE) > 0 then
-								local sa, sb, sc = CDT.GetTriangle(stri, st)
-								local sax, saz = CDT.GetVertex(stri, sa)
-								local sbx, sbz = CDT.GetVertex(stri, sb)
-								local scx, scz = CDT.GetVertex(stri, sc)
-								local dx, dz = (sax + sbx + scx) / 3 - px, (saz + sbz + scz) / 3 - pz
-								if dx * dx + dz * dz < best then
-									best, bestSurface, bestTriangle = dx * dx + dz * dz, i, st
-								end
-							end
-						end
-					end
-					h1, h2, h3 = surfaceHeights(surfaces[bestSurface], px, pz, ax, az, bx, bz, cx, cz, bestTriangle)
-					from = bestSurface
-				end
-				for k, v in { a, b, c } do
-					local h = if k == 1 then h1 :: number elseif k == 2 then h2 else h3
-					local vx, vz = CDT.GetVertex(tri, v)
-					local key = pointKey(vx, vz)
-					local previous = vertexHeight[key]
-					if previous == nil then
-						vertexHeight[key] = h
-						vertexFrom[key] = from
-					elseif math.abs(previous - h) > HEIGHT_TOLERANCE then
-						fail(
-							floorContext,
-							`walkable rings {vertexFrom[key]} and {from} meet at different heights at ({fmt(vx / GRID)}, {fmt(
-								vz / GRID
-							)}); split them into separate floors joined by a seam`
-						)
-					end
-				end
-			end
-
-			-- Copy out. Vertices are interned per floor by grid point, so a shared border's
-			-- vertices are the same mesh vertices on both sides.
 			local tile = Storage.InsertTile(s, floorId, x0 / GRID, z0 / GRID, x1 / GRID, z1 / GRID)
-			local first = Storage.AllocTileRange(s, tile, #kept)
-			local meshTriangle: { [number]: number } = {}
-			for i, t in kept do
-				meshTriangle[t] = first + i - 1
-			end
-			for i, t in kept do
-				local id = first + i - 1
-				local ids, keys = {}, {}
-				for k, v in { CDT.GetTriangle(tri, t) } do
-					local gx, gz = CDT.GetVertex(tri, v)
-					local key = pointKey(gx, gz)
-					keys[k] = key
-					local m = meshVertex[key]
-					if m == nil then
-						m = Storage.AddVertex(s, vector.create(gx / GRID, vertexHeight[key], gz / GRID))
-						meshVertex[key] = m
-					end
-					ids[k] = m
-				end
-				Storage.SetTriangle(s, id, ids[1], ids[2], ids[3])
-				Storage.SetTriangleArea(s, id, keptArea[i])
-				if next(seamOfFragment) ~= nil then
-					for e = 1, 3 do
-						local ka, kb = keys[e % 3 + 1], keys[(e + 1) % 3 + 1]
-						local seamId = seamOfFragment[if ka < kb then `{ka}:{kb}` else `{kb}:{ka}`]
-						if seamId ~= nil then
-							local list = pieces[seamId] or {}
-							pieces[seamId] = list
-							table.insert(list, { Tri = id, Edge = e })
-						end
-					end
-				end
-				for e = 1, 3 do
-					local n = meshTriangle[CDT.GetNeighbor(tri, t, e)] or 0
-					Storage.SetNeighbor(s, id, e, n)
-					if n == 0 then
-						openEdges[ids[e % 3 + 1] * EDGE_KEY + ids[(e + 1) % 3 + 1]] = id * 4 + e
-					end
-				end
-				-- Degeneracy guard (SR2): CCW with positive area in stored coordinates.
-				local pa, pb, pc =
-					Storage.GetVertex(s, ids[1]), Storage.GetVertex(s, ids[2]), Storage.GetVertex(s, ids[3])
-				if Orient2D(pa.X, pa.Z, pb.X, pb.Z, pc.X, pc.Z) <= 0 then
-					fail(floorContext, `a triangle degenerates after quantization near ({fmt(pa.X)}, {fmt(pa.Z)})`)
-				end
-			end
+			Storage.SetTileSources(s, tile, tc, te, tg, ts)
+			copyOut(
+				s,
+				floorContext,
+				tile,
+				triangles,
+				floorData.Heights,
+				meshVertex,
+				openEdges,
+				seamFragments(tc, te, ts)
+			)
 		end
 	end
 
-	-- Cross-tile adjacency: an open edge meets the reversed open edge of the next tile.
-	for key, packed in openEdges do
-		local other = openEdges[(key % EDGE_KEY) * EDGE_KEY + key // EDGE_KEY]
-		if other ~= nil then
-			Storage.SetNeighbor(s, packed // 4, packed % 4, other // 4)
-		end
-	end
-	return pieces
+	linkOpenEdges(s, openEdges)
 end
 
 -- The ends of edge e of triangle t.
@@ -793,13 +866,15 @@ end
 -- other side of it, so walking across leads onto the other floor. Each pairing is a portal in
 -- both directions, on the crossing triangle's own edge. Seam edges without a neighbour become
 -- open (walkable, not walls).
-local function joinSeam(s: Storage.State, id: number, desc: any, a: { SeamPiece }?, b: { SeamPiece }?, seam: FloorSeam)
+local function joinSeam(s: Storage.State, id: number, a: { SeamPiece }?, b: { SeamPiece }?)
 	local context = `seam {id}`
+	local floorA, floorB, ax, az, bx, bz = Storage.GetSeam(s, id)
+	local desc = { FloorA = Storage.GetFloorName(s, floorA), FloorB = Storage.GetFloorName(s, floorB) }
 	if a == nil or b == nil then
 		fail(context, `does not lie on floor '{if a == nil then desc.FloorA else desc.FloorB}'`)
 	end
-	local sx, sz = seam.AX / GRID, seam.AZ / GRID
-	local dx, dz = seam.BX / GRID - sx, seam.BZ / GRID - sz
+	local sx, sz = ax / GRID, az / GRID
+	local dx, dz = bx / GRID - sx, bz / GRID - sz
 	local len2 = dx * dx + dz * dz
 	local function param(p: vector): number
 		return ((p.X - sx) * dx + (p.Z - sz) * dz) / len2
@@ -901,10 +976,37 @@ local function addLink(s: Storage.State, id: number, link: any)
 		fail(context, "Bidirectional must be a boolean")
 	end
 	local from, to = ends[1], ends[2]
-	local linkId = Storage.InsertLink(s, from.Tri, from.Point, to.Tri, to.Point, cost, area, label or "", both ~= false)
-	Storage.AddExtra(s, from.Tri, to.Tri, Storage.EXTRA_LINK, linkId, from.Point, to.Point)
-	if both ~= false then
-		Storage.AddExtra(s, to.Tri, from.Tri, Storage.EXTRA_LINK, linkId, to.Point, from.Point)
+	Storage.InsertLink(s, from.Tri, from.Point, to.Tri, to.Point, cost, area, label or "", both ~= false)
+end
+
+-- (Re)builds every extra link: seam portals from the stored seam pieces, then links from their
+-- stored ends. A link end snapped off the mesh (by an obstacle, after an Update) leaves that
+-- link out until it is back on the mesh.
+local function connect(s: Storage.State)
+	Storage.ClearExtras(s)
+	local bySeam: { [number]: { [number]: { SeamPiece } } } = {}
+	for piece = 1, Storage.PieceCount(s) do
+		local seam, tri, edge = Storage.GetPiece(s, piece)
+		local floor = Storage.GetTriangleFloor(s, tri)
+		local lists = bySeam[seam] or {}
+		bySeam[seam] = lists
+		local list = lists[floor] or {}
+		lists[floor] = list
+		table.insert(list, { Tri = tri, Edge = edge })
+	end
+	for seam = 1, Storage.SeamCount(s) do
+		local floorA, floorB = Storage.GetSeam(s, seam)
+		local lists = bySeam[seam] or {}
+		joinSeam(s, seam, lists[floorA], lists[floorB])
+	end
+	for id = 1, Storage.LinkCount(s) do
+		local fromTri, from, toTri, to, _, _, _, both = Storage.GetLink(s, id)
+		if fromTri ~= 0 and toTri ~= 0 then
+			Storage.AddExtra(s, fromTri, toTri, Storage.EXTRA_LINK, id, from, to)
+			if both then
+				Storage.AddExtra(s, toTri, fromTri, Storage.EXTRA_LINK, id, to, from)
+			end
+		end
 	end
 end
 
@@ -979,25 +1081,44 @@ function Build.Build(desc: NavMeshDesc): Storage.State
 	end
 	table.sort(names)
 	local s = Storage.New()
-	local pieces: { [string]: { [number]: { SeamPiece } } } = {}
+	local floorIds: { [string]: number } = {}
 	for _, name in names do
-		pieces[name] = buildFloor(
+		buildFloor(
 			s,
 			name,
 			desc.Floors[name],
 			if tileStuds == nil then nil else Quantize.ToGrid(tileStuds),
 			floorSeams[name] or {}
 		)
+		floorIds[name] = Storage.FloorCount(s)
 	end
 	for i, seam in seamDescs do
-		joinSeam(s, i, seam, pieces[seam.FloorA][i], pieces[seam.FloorB][i], seamRecords[i])
+		local record = seamRecords[i]
+		Storage.InsertSeam(s, floorIds[seam.FloorA], floorIds[seam.FloorB], record.AX, record.AZ, record.BX, record.BZ)
 	end
 	local linkDescs: { Types.LinkDesc } = desc.Links or {}
 	for i, link in linkDescs do
 		addLink(s, i, link)
 	end
+	connect(s)
 	Clearance.Compute(s, cap or 0)
 	return s
 end
+
+-- The pieces `Update` (Tiles.luau) reuses, so a rebuilt tile goes through exactly Build's steps.
+Build.Internal = {
+	GRID = GRID,
+	GROUP_OBSTACLE = GROUP_OBSTACLE,
+	Fail = fail,
+	QuantizeRing = quantizeRing,
+	MakeSurface = makeSurface,
+	TriangulateTile = triangulateTile,
+	CopyOut = copyOut,
+	LinkOpenEdges = linkOpenEdges,
+	SeamFragments = seamFragments,
+	ClipToRect = clipToRect,
+	PointKey = pointKey,
+	Connect = connect,
+}
 
 return Build

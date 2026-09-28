@@ -277,10 +277,11 @@ end
 
 --[=[
 	@within NavMeshClearance
-	Computes every triangle's corner and portal widths and every vertex's wall flag. `cap` is the
+	Computes every vertex's wall flag and the corner and portal widths of every triangle, or only
+	of the triangles in `only` (Update: the rest keep widths the caller copied in). `cap` is the
 	MaxAgentRadius (0 = none).
 ]=]
-function Clearance.Compute(s: Storage.State, cap: number)
+function Clearance.Compute(s: Storage.State, cap: number, only: { [number]: boolean }?)
 	Storage.SetMaxAgentRadius(s, cap)
 	local n = Storage.TriangleCount(s)
 
@@ -321,6 +322,9 @@ function Clearance.Compute(s: Storage.State, cap: number)
 	-- ponytail: every triangle, once per Build; Update (ticket 18) must pass a subset, and a
 	-- per-edge wall-chain merge or a cheaper link bound is the next lever if that is too slow.
 	for t = 1, n do
+		if only and not only[t] then
+			continue
+		end
 		local verts = { Storage.GetTriangle(s, t) }
 		local floor = Storage.GetTriangleFloor(s, t)
 		local P = { Storage.GetVertex(s, verts[1]), Storage.GetVertex(s, verts[2]), Storage.GetVertex(s, verts[3]) }
@@ -333,6 +337,11 @@ function Clearance.Compute(s: Storage.State, cap: number)
 		local minX, maxX = math.min(P[1].X, P[2].X, P[3].X), math.max(P[1].X, P[2].X, P[3].X)
 		local minZ, maxZ = math.min(P[1].Z, P[2].Z, P[3].Z), math.max(P[1].Z, P[2].Z, P[3].Z)
 		local across = { Storage.GetNeighbor(s, t, 1), Storage.GetNeighbor(s, t, 2), Storage.GetNeighbor(s, t, 3) }
+		-- Whether t computes the portal across edge k (and writes it for both sides).
+		local function owns(k: number): boolean
+			local nb = across[k]
+			return nb == 0 or nb > t or (only ~= nil and not only[nb])
+		end
 		local crossable = {
 			not Storage.IsWallEdge(s, t, 1),
 			not Storage.IsWallEdge(s, t, 2),
@@ -375,9 +384,9 @@ function Clearance.Compute(s: Storage.State, cap: number)
 				if crossable[k % 3 + 1] and crossable[(k + 1) % 3 + 1] then
 					r[k] = chain(feats, toTri, edges, triLinks, gaps, P[k].X, P[k].Z, edges[k])
 				end
-				-- A portal is shared: the lower-numbered triangle computes it (see below). A seam
-				-- edge (open, no neighbour) is its own triangle's alone.
-				if crossable[k] and (across[k] > t or across[k] == 0) then
+				-- A portal is shared: the lower-numbered triangle computes it (see below), unless
+				-- that one is outside `only`. A seam edge (open, no neighbour) is its own alone.
+				if crossable[k] and owns(k) then
 					local u = P[k % 3 + 1]
 					local sink = { edges[k][3], edges[k][4], edges[k][3], edges[k][4] }
 					r[3 + k] = chain(feats, toEdge[k], { edges[k] }, {}, gaps, u.X, u.Z, sink)
@@ -390,7 +399,7 @@ function Clearance.Compute(s: Storage.State, cap: number)
 				for k = 1, 3 do
 					Storage.SetCornerWidth(s, t, k, 2 * math.min(r[k], limitCap))
 					local nb = across[k]
-					if nb > t then
+					if nb ~= 0 and owns(k) then
 						local width = 2 * math.min(r[3 + k], limitCap)
 						Storage.SetPortalWidth(s, t, k, width)
 						local back = if Storage.GetNeighbor(s, nb, 1) == t

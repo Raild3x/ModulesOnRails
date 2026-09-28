@@ -20,6 +20,7 @@ local Queries = require("./Queries")
 local Search = require("./Search")
 local Snap = require("./Snap")
 local Storage = require("./Storage")
+local Tiles = require("./Tiles")
 local Types = require("./Types")
 
 export type Polygon = Types.Polygon
@@ -262,11 +263,51 @@ function NavMesh.SetLinkEnabled(mesh: NavMeshData, linkId: number, enabled: bool
 	end
 	local fromTri, _, toTri = Storage.GetLink(mesh, linkId)
 	Storage.SetLinkFlag(mesh, linkId, enabled)
-	Storage.BumpTileStamp(mesh, Storage.GetTriangleTile(mesh, fromTri))
-	local toTile = Storage.GetTriangleTile(mesh, toTri)
-	if toTile ~= Storage.GetTriangleTile(mesh, fromTri) then
-		Storage.BumpTileStamp(mesh, toTile)
+	-- An end covered by an obstacle has no triangle (0): nothing to bump there.
+	local bumped = {}
+	for _, t in { fromTri, toTri } do
+		local tile = if t ~= 0 then Storage.GetTriangleTile(mesh, t) else 0
+		if tile ~= 0 and not bumped[tile] then
+			bumped[tile] = true
+			Storage.BumpTileStamp(mesh, tile)
+		end
 	end
+end
+
+--[=[
+	@within NavMesh
+	Adds a dynamic obstacle (a door, a crate) on floor `floor`, as a ring in (X, Z). It takes
+	effect at the next `Update`. Errors at the call on a bad polygon (SR13). Returns its id,
+	which is never reused.
+]=]
+function NavMesh.AddObstacle(mesh: NavMeshData, floor: string, polygon: Polygon): number
+	return Tiles.AddObstacle(mesh, floor, polygon)
+end
+
+--[=[
+	@within NavMesh
+	Removes dynamic obstacle `obstacleId`; it takes effect at the next `Update`.
+]=]
+function NavMesh.RemoveObstacle(mesh: NavMeshData, obstacleId: number)
+	Tiles.RemoveObstacle(mesh, obstacleId)
+end
+
+--[=[
+	@within NavMesh
+	Applies every obstacle added or removed since the last `Update`, rebuilding only the tiles
+	they touch, plus clearance within reach of them. Paths through changed tiles then fail
+	`IsPathValid`. Atomic (SR13): on an error the mesh is unchanged, the pending obstacle changes
+	are rolled back, and the error is raised again. Triangle and vertex ids are only stable until
+	the next `Update` (SR14).
+
+	```lua
+	local door = NavMesh.AddObstacle(mesh, "Ground", doorFootprint)
+	NavMesh.Update(mesh)
+	if not NavMesh.IsPathValid(mesh, path) then path = NavMesh.FindPath(mesh, npcFeet, goal) end
+	```
+]=]
+function NavMesh.Update(mesh: NavMeshData)
+	Tiles.Update(mesh)
 end
 
 --[=[
