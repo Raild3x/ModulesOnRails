@@ -9,11 +9,22 @@
 	String-pulls a triangle corridor into the shortest path through it in (X, Z): the "simple
 	stupid funnel" (Mononen). Corners are mesh vertices, so they keep their heights.
 
-	**Agent radius (SR4):** each portal end that is a wall vertex is moved r along the portal,
-	towards its other end, so corners are passed at distance r. Free-space vertices (tile, area,
+	**Agent radius (SR4):** each portal end that is a wall vertex is moved along the portal,
+	towards its other end, by min(r, half the portal's length). Free-space vertices (tile, area,
 	seam) are not offset, but a seam portal's end that is a wall vertex on either of its floors
-	is: the corner where a seam meets a wall. Between two offset corners the straight segment may cut inside the
-	r-circle by up to r (1 - cos(half the turn)).
+	is: the corner where a seam meets a wall.
+
+	That is the whole guarantee: where the path crosses a portal ending at a wall corner, it
+	crosses at least that far from the corner, measured along the portal. It is not a distance
+	to the walls:
+	- the offset runs along the portal, not away from the wall, so at a crossing the path can be
+	  as close as r sin(a) to a wall edge leaving the corner at angle a to the portal;
+	- between crossings the straight segment is not offset at all, and can cut past a corner.
+	No fixed fraction of r holds on every mesh. The measured worst clearance over random paths
+	(ends at least 2r from walls) was 0.23-0.71 r on the Courtyard fixture and 0.06-0.11 r on
+	the bench `walls` scene. Whether an agent fits is decided by the search's clearance widths
+	(SR4); the offset only keeps turns off the corners. Offsetting along the corner's bisector
+	instead is a ticket 25 option.
 ]=]
 
 local CDT = require("../ConstrainedDelaunay")

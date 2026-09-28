@@ -194,8 +194,9 @@ return function(t: tiniest)
 						expect(d >= r - 1e-6).with_context(`case {i}: waypoint {k} is {d} from {c}`).is_true()
 					end
 				end
-				-- Between two turns the straight segment may cut into an r-circle (Funnel docs), but
-				-- never down to the wall.
+				-- Between two turns the straight segment is not offset (Funnel docs: no general bound
+				-- holds there). On this fixture it stays at least r/2 from the walls; before the fix
+				-- it touched the corner.
 				for k = 1, #w - 1 do
 					for _, wall in walls do
 						local d = segDistance(w[k].Position :: any, w[k + 1].Position :: any, wall[1], wall[2])
