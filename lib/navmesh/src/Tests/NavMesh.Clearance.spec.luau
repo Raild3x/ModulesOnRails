@@ -118,10 +118,10 @@ return function(t: tiniest)
 
 		test("an open floor across a tile corner admits its true free width (SR4)", function()
 			-- 40 x 40 with 8-stud tiles: the middle triangles have only free (tile) vertices.
-			local mesh = NavMesh.Build({
+			local mesh = NavMesh.Build {
 				TileSize = 8,
 				Floors = { Ground = { Walkable = { flat(0, { 0, 0, 40, 0, 40, 40, 0, 40 }) } } },
-			})
+			}
 			local wallList = walls(mesh)
 			local checked = 0
 			for tri = 1, Storage.TriangleCount(mesh) do

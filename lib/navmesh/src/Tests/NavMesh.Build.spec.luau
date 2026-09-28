@@ -138,9 +138,9 @@ return function(t: tiniest)
 		end)
 
 		test("overlapping rings that agree in height build", function()
-			local mesh = NavMesh.Build(oneFloor({
+			local mesh = NavMesh.Build(oneFloor {
 				Walkable = { flat(2, { 0, 0, 10, 0, 10, 10, 0, 10 }), flat(2, { 5, 5, 15, 5, 15, 15, 5, 15 }) },
-			}))
+			})
 			for v = 1, Storage.VertexCount(mesh) do
 				expect(Storage.GetVertex(mesh, v).Y).is(2)
 			end
@@ -177,7 +177,7 @@ return function(t: tiniest)
 			local repeated = { 0, 0, 10, 0, 10, 0, 10, 4, 4, 4, 4, 10, 0, 10 }
 			for _, xz in { L, reversed, closed, collinear, collinearReversed, repeated } do
 				local mesh = NavMesh.Build(
-					oneFloor({ Walkable = { flat(0, xz) }, Obstacles = { flat(0, { 1, 1, 2, 1, 2, 2 }) } })
+					oneFloor { Walkable = { flat(0, xz) }, Obstacles = { flat(0, { 1, 1, 2, 1, 2, 2 }) } }
 				)
 				expect(area(mesh)).is(64 - 0.5)
 				expect(#MeshChecks.Structure(mesh)).is(0)
@@ -194,7 +194,7 @@ return function(t: tiniest)
 				for i = 1, #xyz, 3 do
 					table.insert(ring, vector.create(xyz[i], xyz[i + 1], xyz[i + 2]))
 				end
-				local mesh = NavMesh.Build(oneFloor({ Walkable = { ring } }))
+				local mesh = NavMesh.Build(oneFloor { Walkable = { ring } })
 				for _, p in ring do
 					local found = false
 					for v = 1, Storage.VertexCount(mesh) do
@@ -220,8 +220,8 @@ return function(t: tiniest)
 			-- The first three points are collinear, so the plane comes from a later point.
 			local xz = { 3, 2, 8, 2, 13, 2, 13, 12, 3, 12 } -- away from the origin, so x - x1 ~= x + x1
 			local obstacle = { flat(0, { 6, 5, 10, 6, 8, 9 }) }
-			local flatMesh = NavMesh.Build(oneFloor({ Walkable = { flat(0, xz) }, Obstacles = obstacle }))
-			local tiltedMesh = NavMesh.Build(oneFloor({ Walkable = { tilted(xz) }, Obstacles = obstacle }))
+			local flatMesh = NavMesh.Build(oneFloor { Walkable = { flat(0, xz) }, Obstacles = obstacle })
+			local tiltedMesh = NavMesh.Build(oneFloor { Walkable = { tilted(xz) }, Obstacles = obstacle })
 			expect(Storage.TriangleCount(tiltedMesh)).is(Storage.TriangleCount(flatMesh))
 			for v = 1, Storage.VertexCount(tiltedMesh) do
 				local p = Storage.GetVertex(tiltedMesh, v)
@@ -232,7 +232,7 @@ return function(t: tiniest)
 		test("a raised pad inside another ring's concave notch builds (no false overlap)", function()
 			local yard = flat(0, { 0, 0, 20, 0, 20, 20, 12, 20, 12, 8, 8, 8, 8, 20, 0, 20 })
 			local pad = flat(5, { 9, 12, 11, 12, 11, 18, 9, 18 })
-			local mesh = NavMesh.Build(oneFloor({ Walkable = { yard, pad } }))
+			local mesh = NavMesh.Build(oneFloor { Walkable = { yard, pad } })
 			local raised = 0
 			for v = 1, Storage.VertexCount(mesh) do
 				local p = Storage.GetVertex(mesh, v)
@@ -252,17 +252,17 @@ return function(t: tiniest)
 				{ vector.create(10, 0, 0), vector.create(20, 5, 0), vector.create(20, 4, 10), vector.create(12, 0, 10) }
 			local obstacle = flat(0, { 10.31, 4.137, 11.73, 4.291, 11.83, 5.917, 10.42, 5.633 })
 			expect(function()
-				NavMesh.Build(oneFloor({ Walkable = { pad, ramp }, Obstacles = { obstacle } }))
+				NavMesh.Build(oneFloor { Walkable = { pad, ramp }, Obstacles = { obstacle } })
 			end).never_fails()
 		end)
 
 		test("area ids: an explicit floor default and area 1 are accepted", function()
 			local square = flat(0, { 0, 0, 10, 0, 10, 10, 0, 10 })
-			local mesh = NavMesh.Build(oneFloor({
+			local mesh = NavMesh.Build(oneFloor {
 				Walkable = { square },
 				Area = 3,
 				Areas = { { Polygon = flat(0, { 0, 0, 5, 0, 5, 10, 0, 10 }), Area = 1 } },
-			}))
+			})
 			local seen = {}
 			for tri = 1, Storage.TriangleCount(mesh) do
 				seen[Storage.GetTriangleArea(mesh, tri)] = true
@@ -272,11 +272,11 @@ return function(t: tiniest)
 
 		test("a coordinate of exactly 32,768 studs is accepted", function()
 			expect(function()
-				NavMesh.Build(oneFloor({ Walkable = { flat(0, { 32758, 0, 32768, 0, 32768, 10 }) } }))
+				NavMesh.Build(oneFloor { Walkable = { flat(0, { 32758, 0, 32768, 0, 32768, 10 }) } })
 			end).never_fails()
 			-- Seam ends too, in X and in Z.
 			expect(function()
-				NavMesh.Build({
+				NavMesh.Build {
 					Floors = {
 						A = { Walkable = { flat(0, { 32758, 0, 32768, 0, 32768, 5, 32758, 5 }) } },
 						B = { Walkable = { flat(0, { 32758, 5, 32768, 5, 32768, 10, 32758, 10 }) } },
@@ -289,8 +289,8 @@ return function(t: tiniest)
 							To = vector.create(32768, 0, 5),
 						},
 					},
-				})
-				NavMesh.Build({
+				}
+				NavMesh.Build {
 					Floors = {
 						A = { Walkable = { flat(0, { 0, 32758, 5, 32758, 5, 32768, 0, 32768 }) } },
 						B = { Walkable = { flat(0, { 5, 32758, 10, 32758, 10, 32768, 5, 32768 }) } },
@@ -303,14 +303,14 @@ return function(t: tiniest)
 							To = vector.create(5, 0, 32768),
 						},
 					},
-				})
+				}
 			end).never_fails()
 		end)
 
 		test("a U-shaped ring, whose two top edges lie on one line, builds", function()
 			-- Collinear but apart: they neither cross nor touch.
 			local mesh =
-				NavMesh.Build(oneFloor({ Walkable = { flat(0, { 0, 0, 3, 0, 3, 3, 2, 3, 2, 1, 1, 1, 1, 3, 0, 3 }) } }))
+				NavMesh.Build(oneFloor { Walkable = { flat(0, { 0, 0, 3, 0, 3, 3, 2, 3, 2, 1, 1, 1, 1, 3, 0, 3 }) } })
 			local total = 0
 			for tri = 1, Storage.TriangleCount(mesh) do
 				local a, b, c = Storage.GetTriangle(mesh, tri)
@@ -329,69 +329,69 @@ return function(t: tiniest)
 			{ "a non-string floor name", { Floors = { square } }, "floor names must be strings" },
 			{
 				"a ring with fewer than 3 points",
-				oneFloor({ Walkable = { flat(0, { 0, 0, 1, 1 }) } }),
+				oneFloor { Walkable = { flat(0, { 0, 0, 1, 1 }) } },
 				"walkable ring 1: a ring needs at least 3 points",
 			},
-			{ "no walkable ring", oneFloor({ Walkable = {} }), "floor 'Ground': needs at least one Walkable ring" },
+			{ "no walkable ring", oneFloor { Walkable = {} }, "floor 'Ground': needs at least one Walkable ring" },
 			{
 				"a self-intersecting walkable ring",
-				oneFloor({ Walkable = { flat(0, { 0, 0, 10, 10, 10, 0, 0, 10 }) } }),
+				oneFloor { Walkable = { flat(0, { 0, 0, 10, 10, 10, 0, 0, 10 }) } },
 				"walkable ring 1: the ring intersects itself",
 			},
 			{
 				"a self-intersecting obstacle",
-				oneFloor({ Walkable = { square }, Obstacles = { flat(0, { 1, 1, 4, 4, 4, 1, 1, 4 }) } }),
+				oneFloor { Walkable = { square }, Obstacles = { flat(0, { 1, 1, 4, 4, 4, 1, 1, 4 }) } },
 				"obstacle 1: the ring intersects itself",
 			},
 			{
 				"a ring folding back on itself",
-				oneFloor({ Walkable = { flat(0, { 0, 0, 10, 0, 5, 0, 5, 5 }) } }),
+				oneFloor { Walkable = { flat(0, { 0, 0, 10, 0, 5, 0, 5, 5 }) } },
 				"folds back on itself at point 2",
 			},
 			{
 				"a ring that degenerates on the grid",
-				oneFloor({ Walkable = { flat(0, { 0, 0, 0.001, 0, 0, 0.001 }) } }),
+				oneFloor { Walkable = { flat(0, { 0, 0, 0.001, 0, 0, 0.001 }) } },
 				"degenerates after quantization",
 			},
 			{
 				"a coordinate beyond 32,768 studs (U-d)",
-				oneFloor({ Walkable = { flat(0, { 0, 0, 40000, 0, 0, 10 }) } }),
+				oneFloor { Walkable = { flat(0, { 0, 0, 40000, 0, 0, 10 }) } },
 				"walkable ring 1: point 2 %(40000, 0%) is outside the supported range",
 			},
 			{
 				"a z coordinate beyond 32,768 studs",
-				oneFloor({ Walkable = { flat(0, { 0, 0, 10, 0, 0, -40000 }) } }),
+				oneFloor { Walkable = { flat(0, { 0, 0, 10, 0, 0, -40000 }) } },
 				"walkable ring 1: point 3",
 			},
 			{
 				"a ring touching itself at a vertex",
-				oneFloor({ Walkable = { flat(0, { 0, 0, 10, 0, 5, 5, 10, 10, 0, 10, 5, 5 }) } }),
+				oneFloor { Walkable = { flat(0, { 0, 0, 10, 0, 5, 5, 10, 10, 0, 10, 5, 5 }) } },
 				"the ring intersects itself",
 			},
 			{ "a non-table floor", { Floors = { Ground = true } }, "floor 'Ground': needs at least one Walkable ring" },
 			{
 				"a fractional area id",
-				oneFloor({ Walkable = { square }, Areas = { { Polygon = square, Area = 1.5 } } }),
+				oneFloor { Walkable = { square }, Areas = { { Polygon = square, Area = 1.5 } } },
 				"area id must be an integer",
 			},
 			{
 				"a non-finite height",
-				oneFloor({ Walkable = { flat(0 / 0, { 0, 0, 10, 0, 0, 10 }) } }),
+				oneFloor { Walkable = { flat(0 / 0, { 0, 0, 10, 0, 0, 10 }) } },
 				"non%-finite height",
 			},
 			{
 				"overlapping rings at different heights",
-				oneFloor({ Walkable = { square, flat(1, { 5, 5, 15, 5, 15, 15, 5, 15 }) } }),
+				oneFloor { Walkable = { square, flat(1, { 5, 5, 15, 5, 15, 15, 5, 15 }) } },
 				"walkable rings 1 and 2 overlap with different heights",
 			},
 			{
 				"rings meeting at a step",
-				oneFloor({ Walkable = { square, flat(2, { 10, 0, 20, 0, 20, 10, 10, 10 }) } }),
+				oneFloor { Walkable = { square, flat(2, { 10, 0, 20, 0, 20, 10, 10, 10 }) } },
 				"meet at different heights",
 			},
 			{
 				"a bad area id",
-				oneFloor({ Walkable = { square }, Areas = { { Polygon = square, Area = 0 } } }),
+				oneFloor { Walkable = { square }, Areas = { { Polygon = square, Area = 0 } } },
 				"area 1: area id must be an integer",
 			},
 			{
@@ -462,18 +462,18 @@ return function(t: tiniest)
 				expect(ok).is(false)
 				expect(tostring(err):find("Build.spec", 1, true) ~= nil).with_context(`desc {i}: {err}`).is_true()
 			end
-			local ok, err = pcall(NavMesh.Build, oneFloor({ Walkable = { flat(0, { 0, 0, 10, 10, 10, 0, 0, 10 }) } }))
+			local ok, err = pcall(NavMesh.Build, oneFloor { Walkable = { flat(0, { 0, 0, 10, 10, 10, 0, 0, 10 }) } })
 			expect(ok).is(false)
 			expect(string.sub(tostring(err), 1, 14)).is("NavMesh.Build:")
 			-- The largest MaxAgentRadius, like the largest coordinate, is accepted.
 			expect(function()
-				NavMesh.Build({ MaxAgentRadius = 32768, Floors = { Ground = { Walkable = { square } } } })
+				NavMesh.Build { MaxAgentRadius = 32768, Floors = { Ground = { Walkable = { square } } } }
 			end).never_fails()
 		end)
 
 		test("a folding ring's message names the point in studs", function()
 			expect(function()
-				NavMesh.Build(oneFloor({ Walkable = { flat(0, { 0, 0, 10, 0, 5.5, 0, 5.5, 5 }) } }))
+				NavMesh.Build(oneFloor { Walkable = { flat(0, { 0, 0, 10, 0, 5.5, 0, 5.5, 5 }) } })
 			end).fails_with("at point 2 %(10%.000, 0%.000%)")
 		end)
 	end)
@@ -583,10 +583,10 @@ return function(t: tiniest)
 		test("tiles line up on the world grid, and empty tiles are skipped", function()
 			-- An L-shaped floor: its bounding box has a 4x4 grid of 5-stud tiles, of which the
 			-- empty top-right corner holds none.
-			local mesh = NavMesh.Build({
+			local mesh = NavMesh.Build {
 				TileSize = 5,
 				Floors = { Ground = { Walkable = { flat(0, { 0, 0, 20, 0, 20, 10, 10, 10, 10, 20, 0, 20 }) } } },
-			})
+			}
 			expect(Storage.TileCount(mesh)).is(12)
 			for tile = 1, Storage.TileCount(mesh) do
 				local x0, z0, x1, z1 = Storage.GetTileBounds(mesh, tile)
@@ -618,7 +618,7 @@ return function(t: tiniest)
 					table.insert(floor.Areas, { Polygon = star(rng, rng(0, 20), rng(0, 20), 2, 6), Area = 2 })
 				end
 				local size = math.floor(rng(2, 12) * 256) / 256
-				local mesh = NavMesh.Build({ TileSize = size, Floors = { Ground = floor } })
+				local mesh = NavMesh.Build { TileSize = size, Floors = { Ground = floor } }
 				for _, bad in
 					{
 						MeshChecks.Structure(mesh),
@@ -691,17 +691,17 @@ return function(t: tiniest)
 				{ "a huge plain square clamps to 256", boxes(2000, 0, 1), 256 },
 			}
 			for _, case in cases do
-				local mesh = NavMesh.Build({ Floors = { Ground = case[2] } })
+				local mesh = NavMesh.Build { Floors = { Ground = case[2] } }
 				expect(tileSizeOf(mesh, "Ground")).with_context(case[1]).is(case[3])
 			end
 		end)
 
 		test("each floor gets its own default; an explicit TileSize applies to every floor", function()
 			local floors = { Dense = boxes(64, 512, 1), Plain = boxes(10, 0, 1) }
-			local adaptive = NavMesh.Build({ Floors = floors })
+			local adaptive = NavMesh.Build { Floors = floors }
 			expect(tileSizeOf(adaptive, "Dense")).is(8)
 			expect(tileSizeOf(adaptive, "Plain")).is(32)
-			local fixed = NavMesh.Build({ TileSize = 16, Floors = floors })
+			local fixed = NavMesh.Build { TileSize = 16, Floors = floors }
 			expect(tileSizeOf(fixed, "Dense")).is(16)
 			expect(tileSizeOf(fixed, "Plain")).is(16)
 		end)
@@ -710,16 +710,16 @@ return function(t: tiniest)
 			local floors = { Ground = { Walkable = { flat(0, { 0, 0, 10, 0, 10, 10 }) } } }
 			for _, bad in { 0, -4, 40000, "8" :: any } do
 				expect(function()
-					NavMesh.Build({ TileSize = bad, Floors = floors })
+					NavMesh.Build { TileSize = bad, Floors = floors }
 				end).fails_with("TileSize must be a number of studs")
 			end
 			-- Both ends of the range are allowed: one grid pixel, and the coordinate limit.
 			local tiny = { Ground = { Walkable = { flat(0, { 0, 0, 1 / 64, 0, 1 / 64, 1 / 64 }) } } }
 			expect(function()
-				NavMesh.Build({ TileSize = 1 / 256, Floors = tiny })
+				NavMesh.Build { TileSize = 1 / 256, Floors = tiny }
 			end).never_fails()
 			expect(function()
-				NavMesh.Build({ TileSize = 32768, Floors = floors })
+				NavMesh.Build { TileSize = 32768, Floors = floors }
 			end).never_fails()
 		end)
 	end)

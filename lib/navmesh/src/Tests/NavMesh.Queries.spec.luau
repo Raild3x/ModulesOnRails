@@ -50,14 +50,18 @@ return function(t: tiniest)
 			expect((NavMesh.FindNearestPoint(mesh, v(30, 5.2, 10)) :: NavMesh.NavPoint).Floor).is("Upper")
 			expect((NavMesh.FindNearestPoint(mesh, v(30, 0.2, 10)) :: NavMesh.NavPoint).Floor).is("Ground")
 			expect(NavMesh.FindNearestPoint(mesh, v(60, 0, 10))).never_exists()
+			-- Snap's documented miss: triangle 0 and no point (link re-snapping relies on it).
+			local missT, missP = Snap.Snap(mesh, v(60, 0, 10), v(0.5, 4, 0.5), {})
+			expect(missT).is(0)
+			expect(missP).never_exists()
 		end)
 
 		test("a snap box whose edge lies on a tile line still reaches that tile", function()
 			-- 2-stud tiles: from x = 4.5 the box's left edge is exactly the tile line x = 4.
-			local mesh = NavMesh.Build({
+			local mesh = NavMesh.Build {
 				TileSize = 2,
 				Floors = { Ground = { Walkable = { flat(0, { 0, 0, 4, 0, 4, 4, 0, 4 }) } } },
-			})
+			}
 			local east = NavMesh.FindNearestPoint(mesh, v(4.5, 0, 1)) :: NavMesh.NavPoint
 			expect(fmt(east.Position)).is("4.0000,0.0000,1.0000")
 			local south = NavMesh.FindNearestPoint(mesh, v(1, 0, -0.5)) :: NavMesh.NavPoint
@@ -119,7 +123,7 @@ return function(t: tiniest)
 			-- Two floors meeting along the slanted line (10, 0) - (14, 10); 4-stud tiles cut the
 			-- seam into several portals, and a sliver on the Deck touching the seam at (12, 5)
 			-- splits the Deck's side there only: one Ground edge faces two portals.
-			local deck = NavMesh.Build({
+			local deck = NavMesh.Build {
 				TileSize = 4,
 				Floors = {
 					Ground = { Walkable = { flat(0, { 0, 0, 10, 0, 14, 10, 0, 10 }) } },
@@ -129,7 +133,7 @@ return function(t: tiniest)
 					},
 				},
 				Seams = { { FloorA = "Ground", FloorB = "Deck", From = v(10, 0, 0), To = v(14, 0, 10) } },
-			})
+			}
 			for _, z in { 0.7, 3.3, 4.6, 6.2, 8.9 } do
 				local over, at = NavMesh.Raycast(deck, v(2, 0, z), v(18, 0, z))
 				expect(over).with_context(`z {z}`).is(false)
@@ -210,9 +214,9 @@ return function(t: tiniest)
 
 	describe("FindDistanceToWall", function()
 		test("finds the nearest wall with a normal pointing away from it", function()
-			local mesh = NavMesh.Build({
+			local mesh = NavMesh.Build {
 				Floors = { Ground = { Walkable = { flat(0, { 0, 0, 20, 0, 20, 10, 0, 10 }) } } },
-			})
+			}
 			local d, hit, normal = NavMesh.FindDistanceToWall(mesh, v(5, 0, 3), 10)
 			expect(d).is(3)
 			expect(fmt(hit)).is("5.0000,0.0000,0.0000")
@@ -286,10 +290,10 @@ return function(t: tiniest)
 		end)
 
 		test("is uniform in plan: halves of a floor get about half the points", function()
-			local mesh = NavMesh.Build({
+			local mesh = NavMesh.Build {
 				Floors = { Ground = { Walkable = { flat(0, { 0, 0, 20, 0, 20, 10, 0, 10 }) } } },
 				TileSize = 4,
-			})
+			}
 			local rng, left = seeded(3), 0
 			for _ = 1, 2000 do
 				if (NavMesh.FindRandomPoint(mesh, nil, nil, nil, rng) :: NavMesh.NavPoint).Position.X < 10 then
@@ -337,10 +341,10 @@ return function(t: tiniest)
 		end)
 
 		test("points in a circle fill it evenly, out to its edge", function()
-			local mesh = NavMesh.Build({
+			local mesh = NavMesh.Build {
 				Floors = { Ground = { Walkable = { flat(0, { 0, 0, 20, 0, 20, 10, 0, 10 }) } } },
 				TileSize = 4,
-			})
+			}
 			-- Uniform in a radius-4 disc: three quarters of the points lie beyond radius 2.
 			local rng, outer = seeded(11), 0
 			for _ = 1, 800 do

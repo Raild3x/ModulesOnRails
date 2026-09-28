@@ -427,11 +427,11 @@ return function(t: tiniest)
 			-- the warp's ends lie many triangles away from the start and the goal.)
 			-- The same scene shifted to straddle the origin must give the same costs.
 			for _, dx in { 0, -20 } do
-				local mesh = NavMesh.Build({
+				local mesh = NavMesh.Build {
 					TileSize = 4,
 					Floors = { Ground = { Walkable = { flat(0, { dx, 0, dx + 40, 0, dx + 40, 4, dx, 4 }) } } },
 					Links = { { From = v(dx + 1, 0, 2), To = v(dx + 39, 0, 2), Cost = 2, Area = 3 } },
-				})
+				}
 				local path = NavMesh.FindPath(mesh, v(dx + 15, 0, 2), v(dx + 38, 0, 2))
 				expect(math.abs(path.Cost - 17) < 1e-6).with_context(`dx {dx}: cost {path.Cost}`).is_true()
 				-- At 0.2 per unit of Cost the warp costs 0.4: the scale must use the multiplied price
@@ -502,14 +502,14 @@ return function(t: tiniest)
 
 		test("a small agent fits a small gap up to half its width, and no wider", function()
 			-- The Clearance spec's walled room at a tenth of the size: a 0.5-stud gap.
-			local small = NavMesh.Build({
+			local small = NavMesh.Build {
 				Floors = {
 					Ground = {
 						Walkable = { flat(0, { 0, 0, 2, 0, 2, 2, 0, 2 }) },
 						Obstacles = { flat(0, { 0.8, -0.1, 1.2, -0.1, 1.2, 1.5, 0.8, 1.5 }) },
 					},
 				},
-			})
+			}
 			expect(NavMesh.FindPath(small, v(0.2, 0, 0.2), v(1.8, 0, 0.2), { AgentRadius = 0.24 }).Status).is("Success")
 			expect(NavMesh.FindPath(small, v(0.2, 0, 0.2), v(1.8, 0, 0.2), { AgentRadius = 0.26 }).Status).is("Partial")
 		end)
@@ -519,7 +519,7 @@ return function(t: tiniest)
 			-- start triangle borders the gap (the tile line x = 10), so leaving it reads a portal
 			-- width (it has no entry edge). (With one big tile a sliver start triangle spans the
 			-- gap itself, and SR4's start rule never looks inside it: see the triage notes.)
-			local gap = NavMesh.Build({
+			local gap = NavMesh.Build {
 				TileSize = 2,
 				Floors = {
 					Ground = {
@@ -527,7 +527,7 @@ return function(t: tiniest)
 						Obstacles = { flat(0, { 10, -1, 11, -1, 11, 9, 10, 9 }) },
 					},
 				},
-			})
+			}
 			for _, start in { v(9.6, 0, 9.5), v(9.9, 0, 9.2) } do
 				expect(NavMesh.FindPath(gap, start, v(15, 0, 9.5), { AgentRadius = 0.49 }).Status)
 					.with_context(fmt(start))
