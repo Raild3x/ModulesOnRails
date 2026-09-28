@@ -8,6 +8,10 @@
 
 - [x] Atomic `Update` with rollback (SR13), tile and vertex reclamation (SR14), snapped-bbox dirtying, clearance refresh
 - [x] Add then remove equals a fresh Build; toggling doesn't grow memory
+  - **Correction (2026-09-28, dogfood repro 8):** triangle and vertex storage stays flat, but
+    the removed obstacle *records* are kept forever. After 4,000 toggles, `Update` takes
+    0.6 -> 4 ms and the bake grows from 1.4 KB to 91 KB. A fix is in progress on branch
+    `navmesh-fixes`.
 
 Spec: [../spec.md](../spec.md). Gates: the spec's "Gates for every ticket".
 
