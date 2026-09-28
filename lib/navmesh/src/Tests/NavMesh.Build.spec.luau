@@ -274,6 +274,50 @@ return function(t: tiniest)
 			expect(function()
 				NavMesh.Build(oneFloor { Walkable = { flat(0, { 32758, 0, 32768, 0, 32768, 10 }) } })
 			end).never_fails()
+			-- Seam ends too, in X and in Z.
+			expect(function()
+				NavMesh.Build {
+					Floors = {
+						A = { Walkable = { flat(0, { 32758, 0, 32768, 0, 32768, 5, 32758, 5 }) } },
+						B = { Walkable = { flat(0, { 32758, 5, 32768, 5, 32768, 10, 32758, 10 }) } },
+					},
+					Seams = {
+						{
+							FloorA = "A",
+							FloorB = "B",
+							From = vector.create(32758, 0, 5),
+							To = vector.create(32768, 0, 5),
+						},
+					},
+				}
+				NavMesh.Build {
+					Floors = {
+						A = { Walkable = { flat(0, { 0, 32758, 5, 32758, 5, 32768, 0, 32768 }) } },
+						B = { Walkable = { flat(0, { 5, 32758, 10, 32758, 10, 32768, 5, 32768 }) } },
+					},
+					Seams = {
+						{
+							FloorA = "A",
+							FloorB = "B",
+							From = vector.create(5, 0, 32758),
+							To = vector.create(5, 0, 32768),
+						},
+					},
+				}
+			end).never_fails()
+		end)
+
+		test("a U-shaped ring, whose two top edges lie on one line, builds", function()
+			-- Collinear but apart: they neither cross nor touch.
+			local mesh =
+				NavMesh.Build(oneFloor { Walkable = { flat(0, { 0, 0, 3, 0, 3, 3, 2, 3, 2, 1, 1, 1, 1, 3, 0, 3 }) } })
+			local total = 0
+			for tri = 1, Storage.TriangleCount(mesh) do
+				local a, b, c = Storage.GetTriangle(mesh, tri)
+				local pa, pb, pc = Storage.GetVertex(mesh, a), Storage.GetVertex(mesh, b), Storage.GetVertex(mesh, c)
+				total += ((pb.X - pa.X) * (pc.Z - pa.Z) - (pc.X - pa.X) * (pb.Z - pa.Z)) / 2
+			end
+			expect(total).is(7)
 		end)
 	end)
 
@@ -355,6 +399,44 @@ return function(t: tiniest)
 				{ Floors = { Ground = { Walkable = { square } } }, Seams = { {} } },
 				"seam 1: FloorA 'nil' is not a floor",
 			},
+			{
+				"a seam naming an unknown floor",
+				{
+					Floors = { Ground = { Walkable = { square } } },
+					Seams = {
+						{
+							FloorA = "Ground",
+							FloorB = "Roof",
+							From = vector.create(0, 0, 0),
+							To = vector.create(5, 0, 0),
+						},
+					},
+				},
+				"seam 1: FloorB 'Roof' is not a floor",
+			},
+			{
+				"a seam end that is not a vector",
+				{
+					Floors = { Ground = { Walkable = { square } }, Upper = { Walkable = { square } } },
+					Seams = { { FloorA = "Ground", FloorB = "Upper", From = 5, To = vector.create(5, 0, 0) } },
+				},
+				"seam 1: From must be a Vector3",
+			},
+			{
+				"a seam end beyond 32,768 studs in X",
+				{
+					Floors = { Ground = { Walkable = { square } }, Upper = { Walkable = { square } } },
+					Seams = {
+						{
+							FloorA = "Ground",
+							FloorB = "Upper",
+							From = vector.create(40000, 0, 0),
+							To = vector.create(5, 0, 0),
+						},
+					},
+				},
+				"seam 1: From is outside the supported range",
+			},
 		}
 		for _, case in cases do
 			test(`errors on {case[1]}`, function()
@@ -363,6 +445,37 @@ return function(t: tiniest)
 				end).fails_with(case[3])
 			end)
 		end
+
+		test("argument errors point at the caller's line; authoring errors carry no position", function()
+			for i, desc in
+				{
+					{},
+					{ Floors = {} },
+					{ Floors = { square } },
+					{ TileSize = 0, Floors = { Ground = { Walkable = { square } } } },
+					{ MaxAgentRadius = 0, Floors = { Ground = { Walkable = { square } } } },
+				}
+			do
+				local ok, err = pcall(function()
+					NavMesh.Build(desc :: any)
+				end)
+				expect(ok).is(false)
+				expect(tostring(err):find("Build.spec", 1, true) ~= nil).with_context(`desc {i}: {err}`).is_true()
+			end
+			local ok, err = pcall(NavMesh.Build, oneFloor { Walkable = { flat(0, { 0, 0, 10, 10, 10, 0, 0, 10 }) } })
+			expect(ok).is(false)
+			expect(string.sub(tostring(err), 1, 14)).is("NavMesh.Build:")
+			-- The largest MaxAgentRadius, like the largest coordinate, is accepted.
+			expect(function()
+				NavMesh.Build { MaxAgentRadius = 32768, Floors = { Ground = { Walkable = { square } } } }
+			end).never_fails()
+		end)
+
+		test("a folding ring's message names the point in studs", function()
+			expect(function()
+				NavMesh.Build(oneFloor { Walkable = { flat(0, { 0, 0, 10, 0, 5.5, 0, 5.5, 5 }) } })
+			end).fails_with("at point 2 %(10%.000, 0%.000%)")
+		end)
 	end)
 
 	describe("Build over random floors (SR2)", function()

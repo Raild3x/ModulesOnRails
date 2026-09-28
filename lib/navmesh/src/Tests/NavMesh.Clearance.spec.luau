@@ -145,6 +145,199 @@ return function(t: tiniest)
 			expect(path.Status).is("Success")
 		end)
 
+		-- Brute force, independent of Clearance: a width is blocked at radius r exactly when the
+		-- points of the triangle within r of a wall (the union of the cut discs) connect the
+		-- corner to the far edge (for a portal: cover the whole edge). Sample the triangle on a
+		-- barycentric grid, add the points in order of their distance to the floor's walls, and
+		-- read off the distance at which the corner's component first touches the far edge.
+		-- Exact up to the grid spacing h, so compare within about h.
+		local function bruteWidths(mesh: any, tri: number, wallList: { { vector } }): ({ number }, { number }, number)
+			local vs = { Storage.GetTriangle(mesh, tri) }
+			local P = { Storage.GetVertex(mesh, vs[1]), Storage.GetVertex(mesh, vs[2]), Storage.GetVertex(mesh, vs[3]) }
+			local longest =
+				math.max(vector.magnitude(P[1] - P[2]), vector.magnitude(P[2] - P[3]), vector.magnitude(P[3] - P[1]))
+			local n = math.clamp(math.ceil(longest / 0.1), 8, 96)
+			local ids, bary, dist = {}, {}, {}
+			for i = 0, n do
+				for j = 0, n - i do
+					local p = (P[1] * i + P[2] * j + P[3] * (n - i - j)) / n
+					local d = math.huge
+					for _, w in wallList do
+						d = math.min(d, pointSeg(p.X, p.Z, w[1], w[2]))
+					end
+					table.insert(bary, { i, j, n - i - j })
+					table.insert(dist, d)
+					ids[i * (n + 1) + j] = #bary
+				end
+			end
+			local order = {}
+			for id = 1, #bary do
+				order[id] = id
+			end
+			table.sort(order, function(a: number, b: number): boolean
+				return dist[a] < dist[b]
+			end)
+			local function neighbours(id: number): { number }
+				local out = {}
+				local i, j = bary[id][1], bary[id][2]
+				for _, step in { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 }, { 1, -1 }, { -1, 1 } } do
+					local ni, nj = i + step[1], j + step[2]
+					if ni >= 0 and nj >= 0 and ni + nj <= n then
+						table.insert(out, ids[ni * (n + 1) + nj])
+					end
+				end
+				return out
+			end
+			local corners = {}
+			for k = 1, 3 do
+				-- Union-find over the added points; the corner is the point with bary[k] = n.
+				local parent, added = {}, {}
+				local function find(x: number): number
+					while parent[x] ~= x do
+						parent[x] = parent[parent[x]]
+						x = parent[x]
+					end
+					return x
+				end
+				local corner = 0
+				for id = 1, #bary do
+					if bary[id][k] == n then
+						corner = id
+					end
+				end
+				local touchesSink = {}
+				local r = math.huge
+				for _, id in order do
+					parent[id], added[id] = id, true
+					touchesSink[id] = bary[id][k] == 0
+					for _, other in neighbours(id) do
+						if added[other] then
+							local a, b = find(id), find(other)
+							if a ~= b then
+								parent[b] = a
+								touchesSink[a] = touchesSink[a] or touchesSink[b]
+							end
+						end
+					end
+					if added[corner] and touchesSink[find(corner)] then
+						r = dist[id]
+						break
+					end
+				end
+				corners[k] = 2 * r
+			end
+			local portals = {}
+			for k = 1, 3 do
+				local u, w = P[k % 3 + 1], P[(k + 1) % 3 + 1]
+				local r = 0
+				for s = 0, 4 * n do
+					local p = u + (w - u) * (s / (4 * n))
+					local d = math.huge
+					for _, wall in wallList do
+						d = math.min(d, pointSeg(p.X, p.Z, wall[1], wall[2]))
+					end
+					r = math.max(r, d)
+				end
+				portals[k] = 2 * r
+			end
+			return corners, portals, 2.2 * longest / n
+		end
+
+		-- Walls of one floor.
+		local function floorWalls(mesh: any, floor: number): { { vector } }
+			local found = {}
+			for tri = 1, Storage.TriangleCount(mesh) do
+				if Storage.GetTriangleFloor(mesh, tri) ~= floor then
+					continue
+				end
+				local vs = { Storage.GetTriangle(mesh, tri) }
+				for e = 1, 3 do
+					if Storage.IsWallEdge(mesh, tri, e) then
+						table.insert(
+							found,
+							{ Storage.GetVertex(mesh, vs[e % 3 + 1]), Storage.GetVertex(mesh, vs[(e + 1) % 3 + 1]) }
+						)
+					end
+				end
+			end
+			return found
+		end
+
+		test("widths match a brute-force flood of the wall discs", function()
+			-- Slanted walls and narrow gaps; two stacked floors with different walls (a floor's
+			-- widths never see another floor's walls); and seams.
+			local slanted: any = {
+				TileSize = 8,
+				Floors = {
+					Ground = {
+						Walkable = { flat(0, { 0, 0, 16, 0, 16, 8, 0, 8 }) },
+						Obstacles = {
+							flat(0, { 3, 1.5, 5.5, 2.25, 4.75, 4.5, 2.5, 3.5 }),
+							flat(0, { 6.25, 3, 9, 1.25, 9.5, 2, 6.75, 4 }),
+							flat(0, { 11, 5, 13.5, 6.5, 12, 7.25 }),
+						},
+					},
+				},
+			}
+			local stackedWalls: any = {
+				TileSize = 8,
+				Floors = {
+					Ground = {
+						Walkable = { flat(0, { 0, 0, 8, 0, 8, 8, 0, 8 }) },
+						Obstacles = { flat(0, { 1, 1, 3, 1, 3, 3, 1, 3 }) },
+					},
+					Upper = {
+						Walkable = { flat(3, { 0, 0, 8, 0, 8, 8, 0, 8 }) },
+						Obstacles = { flat(3, { 5, 4.5, 6.5, 4.5, 6.5, 7, 5, 7 }) },
+					},
+				},
+			}
+			-- The slanted floor at 1/16 scale: the same shapes, sub-stud walls (no absolute
+			-- threshold may leak into the geometry).
+			local tiny: any = { TileSize = 0.5, Floors = { Ground = { Walkable = {}, Obstacles = {} } } }
+			for key, rings in slanted.Floors.Ground do
+				for i, ring in rings do
+					tiny.Floors.Ground[key][i] = {}
+					for j, p in ring do
+						tiny.Floors.Ground[key][i][j] = p / 16
+					end
+				end
+			end
+			local checked = 0
+			for _, desc in
+				{ slanted, tiny, stackedWalls, NavMesh.Fixtures.ThreeFloorStairs.Desc, NavMesh.Fixtures.Courtyard.Desc }
+			do
+				local mesh = NavMesh.Build(desc)
+				local wallsByFloor = {}
+				for tri = 1, Storage.TriangleCount(mesh) do
+					local floor = Storage.GetTriangleFloor(mesh, tri)
+					wallsByFloor[floor] = wallsByFloor[floor] or floorWalls(mesh, floor)
+					local corners, portals, tolerance = bruteWidths(mesh, tri, wallsByFloor[floor])
+					local function near(got: number, want: number): boolean
+						return (got > 1000 and want > 1000) or math.abs(got - want) <= tolerance
+					end
+					for k = 1, 3 do
+						local open1 = not Storage.IsWallEdge(mesh, tri, k % 3 + 1)
+						local open2 = not Storage.IsWallEdge(mesh, tri, (k + 1) % 3 + 1)
+						if open1 and open2 then
+							checked += 1
+							local got = Storage.GetCornerWidth(mesh, tri, k)
+							expect(near(got, corners[k]))
+								.with_context(`triangle {tri} corner {k}: {got} vs brute {corners[k]} (h {tolerance})`)
+								.is_true()
+						end
+						if not Storage.IsWallEdge(mesh, tri, k) then
+							local got = Storage.GetPortalWidth(mesh, tri, k)
+							expect(near(got, portals[k]))
+								.with_context(`triangle {tri} portal {k}: {got} vs brute {portals[k]} (h {tolerance})`)
+								.is_true()
+						end
+					end
+				end
+			end
+			expect(checked > 100).is_true()
+		end)
+
 		test("a wall corner facing a wall edge is bounded by its gap (Demyen)", function()
 			local mesh = NavMesh.Build(walled)
 			for tri = 1, Storage.TriangleCount(mesh) do
@@ -175,16 +368,24 @@ return function(t: tiniest)
 
 		test("corners are passed at the agent's radius", function()
 			local mesh = NavMesh.Build(walled)
-			local r = 1.5
-			local path = NavMesh.FindPath(mesh, v(2, 2), v(18, 2), { AgentRadius = r })
-			expect(path.Status).is("Success")
 			local corners = { v(8, 15), v(12, 15) }
-			local waypoints = path.Waypoints
-			expect(#waypoints).is(4)
-			for i = 2, #waypoints - 1 do
-				local p = waypoints[i].Position :: any
-				local nearest = math.min(vector.magnitude(p - corners[1]), vector.magnitude(p - corners[2]))
-				expect(math.abs(nearest - r) < 1e-6).with_context(`waypoint {i} is {nearest} from its corner`).is_true()
+			-- Both ways round, so the corners are portal lefts one way and rights the other.
+			for _, case in { { 1.5, v(2, 2), v(18, 2) }, { 0.5, v(2, 2), v(18, 2) }, { 0.5, v(18, 2), v(2, 2) } } do
+				local r = case[1]
+				local path = NavMesh.FindPath(mesh, case[2], case[3], { AgentRadius = r })
+				expect(path.Status).is("Success")
+				local waypoints = path.Waypoints
+				expect(#waypoints).is(4)
+				for i = 2, #waypoints - 1 do
+					local p = waypoints[i].Position :: any
+					local nearest = math.min(vector.magnitude(p - corners[1]), vector.magnitude(p - corners[2]))
+					expect(math.abs(nearest - r) < 1e-6)
+						.with_context(`r {r}: waypoint {i} is {nearest} from its corner`)
+						.is_true()
+					-- On the walkable side of the corner: r from the walls, not inside the wall.
+					local d = NavMesh.FindDistanceToWall(mesh, p, 10)
+					expect(math.abs(d - r) < 1e-4).with_context(`r {r}: waypoint {i} is {d} from the walls`).is_true()
+				end
 			end
 			-- Radius 0 still bends exactly at the corners.
 			local tight = NavMesh.FindPath(mesh, v(2, 2), v(18, 2))

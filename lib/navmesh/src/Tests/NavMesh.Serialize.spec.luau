@@ -107,6 +107,90 @@ return function(t: tiniest)
 			expect(NavMesh.IsPathValid(loaded, path)).is(NavMesh.IsPathValid(mesh, path))
 		end)
 
+		test("a loaded mesh answers every query like the original (walls, seams, radius)", function()
+			for _, scenario in { Fixtures.ThreeFloorStairs, Fixtures.Courtyard } do
+				local mesh = NavMesh.Build(scenario.Desc)
+				local loaded = NavMesh.Deserialize(NavMesh.Serialize(mesh))
+				local spots = if scenario == Fixtures.ThreeFloorStairs
+					then { v(2, 0, 2), v(30, 5, 2), v(12.7, 1.3, 2.2), v(38, 5, 18), v(25, 0, 12) }
+					else { v(1, 0, 1), v(29, 0, 1), v(1, 0, 29), v(17, 0, 29), v(6, 0, 10) }
+				local function answers(m: any, a: any, b: any): string
+					local path = NavMesh.FindPath(m, a, b, { AgentRadius = 0.6 })
+					local parts = { path.Status }
+					for _, w in path.Waypoints do
+						table.insert(parts, string.format("%.5f,%.5f,%.5f", w.Position.X, w.Position.Y, w.Position.Z))
+					end
+					local blocked, stop = NavMesh.Raycast(m, a, b)
+					local moved = NavMesh.MoveAlongSurface(m, a, b, { AgentRadius = 0.4 }).Position
+					local d = NavMesh.FindDistanceToWall(m, a, 50)
+					table.insert(
+						parts,
+						string.format(
+							"%s %.5f,%.5f %.5f,%.5f %.5f",
+							tostring(blocked),
+							stop.X,
+							stop.Z,
+							moved.X,
+							moved.Z,
+							d
+						)
+					)
+					return table.concat(parts, " ")
+				end
+				for _, a in spots do
+					for _, b in spots do
+						expect(answers(loaded, a, b)).with_context(scenario.Name).is(answers(mesh, a, b))
+					end
+				end
+				-- An update on the loaded mesh re-derives the same widths (walls and open edges
+				-- come back from the buffer).
+				local crate = flat(0, { 3.1, 12.2, 4.9, 12.4, 4.7, 13.8, 3.3, 13.6 })
+				for _, m in { mesh, loaded } do
+					NavMesh.AddObstacle(m, "Ground", crate)
+					NavMesh.Update(m)
+				end
+				expect(buffer.tostring(NavMesh.Serialize(loaded)) == buffer.tostring(NavMesh.Serialize(mesh)))
+					.with_context(scenario.Name)
+					.is_true()
+			end
+		end)
+
+		test("link toggles and one-way links survive a round trip", function()
+			for _, scenario in { Fixtures.LinkJump, Fixtures.OneWayLink } do
+				for _, enabled in { true, false } do
+					local mesh = NavMesh.Build(scenario.Desc)
+					NavMesh.SetLinkEnabled(mesh, 1, enabled)
+					local loaded = NavMesh.Deserialize(NavMesh.Serialize(mesh))
+					local _, _, _, _, _, _, _, both, on = Storage.GetLink(loaded, 1)
+					local _, _, _, _, _, _, _, wantBoth, wantOn = Storage.GetLink(mesh, 1)
+					expect(both).with_context(`{scenario.Name} {enabled}`).is(wantBoth)
+					expect(on).with_context(`{scenario.Name} {enabled}`).is(wantOn)
+				end
+			end
+		end)
+
+		test("meshes of many sizes round-trip (the writer grows at any byte)", function()
+			-- Each extra crate adds a few hundred bytes, so the buffer's doublings land on every
+			-- kind of field.
+			local crates = {}
+			for i = 0, 40 do
+				local desc: any = {
+					TileSize = 8,
+					Floors = { Ground = { Walkable = { flat(0, { 0, 0, 64, 0, 64, 8, 0, 8 }) }, Obstacles = crates } },
+					Links = if i % 2 == 0
+						then { { From = v(0.5, 0, 0.5), To = v(63.5, 0, 7.5), Label = "L" } }
+						else nil,
+				}
+				local mesh = NavMesh.Build(desc)
+				local data = NavMesh.Serialize(mesh)
+				expect(buffer.tostring(NavMesh.Serialize(NavMesh.Deserialize(data))) == buffer.tostring(data))
+					.with_context(`{i} crates`)
+					.is_true()
+				local x = 1 + i * 1.5
+				table.insert(crates, flat(0, { x, 2 + (i % 3) * 0.3, x + 0.7, 2.1, x + 0.6, 5.4, x + 0.1, 5.2 }))
+			end
+		end)
+
 		test("the frozen v1 bake loads and matches its own frozen snapshot (SR9)", function()
 			local mesh = NavMesh.Deserialize(fromBase64(FROZEN_V1))
 			local list = NavMesh.ToDrawList(mesh, { Tiles = true, Areas = true, Seams = true, Links = true })
@@ -142,6 +226,27 @@ return function(t: tiniest)
 			expect(function()
 				NavMesh.Deserialize("nope" :: any)
 			end).fails_with("expected a buffer")
+			-- Shorter than the header: too short to be a bake; exactly the header: truncated.
+			expect(function()
+				NavMesh.Deserialize(buffer.fromstring("NV"))
+			end).fails_with("not a NavMesh bake")
+			expect(function()
+				NavMesh.Deserialize(buffer.fromstring(string.sub(buffer.tostring(data), 1, 6)))
+			end).fails_with("truncated or corrupt")
+			-- Every message is the module's own, with no source position in front.
+			for _, bad in
+				{
+					v2,
+					buffer.fromstring("HELLO WORLD"),
+					cut,
+					buffer.fromstring(buffer.tostring(data) .. "!"),
+					"nope" :: any,
+				}
+			do
+				local ok, err = pcall(NavMesh.Deserialize, bad)
+				expect(ok).is(false)
+				expect(string.sub(tostring(err), 1, 21)).with_context(tostring(err)).is("NavMesh.Deserialize: ")
+			end
 		end)
 	end)
 end

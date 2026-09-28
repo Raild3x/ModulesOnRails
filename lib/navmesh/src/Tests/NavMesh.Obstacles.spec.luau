@@ -47,6 +47,64 @@ return function(t: tiniest)
 		return table.concat(MeshChecks.Structure(mesh), "\n")
 	end
 
+	-- Triangles by grid points (rotation-normalized), with their corner and portal widths.
+	local function byTriangle(mesh: any): { [string]: string }
+		local out = {}
+		for tri = 1, Storage.TriangleCount(mesh) do
+			local keys = {}
+			for k, id in { Storage.GetTriangle(mesh, tri) } do
+				local p = Storage.GetVertex(mesh, id)
+				keys[k] = math.round(p.X * 256) * 1e7 + math.round(p.Z * 256)
+			end
+			local first = if keys[1] < keys[2] and keys[1] < keys[3] then 1 elseif keys[2] < keys[3] then 2 else 3
+			local widths = {}
+			for i = 0, 2 do
+				local k = (first + i - 1) % 3 + 1
+				table.insert(
+					widths,
+					string.format(
+						"%.6f/%.6f",
+						Storage.GetCornerWidth(mesh, tri, k),
+						Storage.GetPortalWidth(mesh, tri, k)
+					)
+				)
+			end
+			out[`{keys[first]}:{keys[first % 3 + 1]}:{keys[(first + 1) % 3 + 1]}`] = table.concat(widths, " ")
+		end
+		return out
+	end
+
+	-- `desc` with `obstacles` added to floor `floor`'s authored obstacles.
+	local function baked(desc: any, floor: string, obstacles: { any }): any
+		local copy = table.clone(desc)
+		copy.Floors = table.clone(desc.Floors)
+		copy.Floors[floor] = table.clone(desc.Floors[floor])
+		local list = table.clone(desc.Floors[floor].Obstacles or {})
+		for _, obstacle in obstacles do
+			table.insert(list, obstacle)
+		end
+		copy.Floors[floor].Obstacles = list
+		return copy
+	end
+
+	-- The first difference between an updated mesh and a fresh Build (triangles, widths, drawn
+	-- seams and links), or "" when they are the same mesh.
+	local function differsFromFresh(mesh: any, fresh: any): string
+		if Storage.TriangleCount(mesh) ~= Storage.TriangleCount(fresh) then
+			return `{Storage.TriangleCount(mesh)} triangles vs {Storage.TriangleCount(fresh)}`
+		end
+		local updated, expected = byTriangle(mesh), byTriangle(fresh)
+		for key, widths in expected do
+			if updated[key] ~= widths then
+				return `{key}: {updated[key]} vs {widths}`
+			end
+		end
+		if canonical(mesh) ~= canonical(fresh) then
+			return "draw lists differ"
+		end
+		return structureOk(mesh)
+	end
+
 	-- A 40 x 4 corridor in 8-stud tiles, and a door across it at x = 15..17.
 	local corridor: any =
 		{ TileSize = 8, Floors = { Ground = { Walkable = { flat(0, { 0, 0, 40, 0, 40, 4, 0, 4 }) } } } }
@@ -87,35 +145,6 @@ return function(t: tiniest)
 		end)
 
 		test("an update equals a fresh Build with the obstacle baked in, widths included", function()
-			-- Triangles by grid points (rotation-normalized), with their corner and portal widths.
-			local function byTriangle(mesh: any): { [string]: string }
-				local out = {}
-				for tri = 1, Storage.TriangleCount(mesh) do
-					local keys = {}
-					for k, id in { Storage.GetTriangle(mesh, tri) } do
-						local p = Storage.GetVertex(mesh, id)
-						keys[k] = math.round(p.X * 256) * 1e7 + math.round(p.Z * 256)
-					end
-					local first = if keys[1] < keys[2] and keys[1] < keys[3]
-						then 1
-						elseif keys[2] < keys[3] then 2
-						else 3
-					local widths = {}
-					for i = 0, 2 do
-						local k = (first + i - 1) % 3 + 1
-						table.insert(
-							widths,
-							string.format(
-								"%.6f/%.6f",
-								Storage.GetCornerWidth(mesh, tri, k),
-								Storage.GetPortalWidth(mesh, tri, k)
-							)
-						)
-					end
-					out[`{keys[first]}:{keys[first % 3 + 1]}:{keys[(first + 1) % 3 + 1]}`] = table.concat(widths, " ")
-				end
-				return out
-			end
 			local crate = flat(0, { 12.3, 1.1, 15.8, 1.6, 15.2, 3.4, 12.7, 2.9 })
 			for _, scenario in { Fixtures.Courtyard, Fixtures.ShallowObstacles } do
 				local desc: any = table.clone(scenario.Desc)
@@ -139,6 +168,153 @@ return function(t: tiniest)
 					.is(Storage.TriangleCount(NavMesh.Build(baked)))
 				expect(#mismatches).with_context(`{scenario.Name}: {mismatches[1]}`).is(0)
 			end
+		end)
+
+		-- An open 32 x 24 floor: tile lines at every 8 (or 16) studs in both directions.
+		local open: any = { Floors = { Ground = { Walkable = { flat(0, { 0, 0, 32, 0, 32, 24, 0, 24 }) } } } }
+		local placements = {
+			{ "west side on a tile line", flat(0, { 16, 9, 17.5, 9, 17.5, 11, 16, 11 }) },
+			{ "east side on a tile line", flat(0, { 14.5, 9, 16, 9, 16, 11, 14.5, 11 }) },
+			{ "south side on a tile line", flat(0, { 10, 8, 12, 8, 12, 9.5, 10, 9.5 }) },
+			{ "north side on a tile line", flat(0, { 10, 14.5, 12, 14.5, 12, 16, 10, 16 }) },
+			{ "across a tile corner", flat(0, { 15.3, 15.4, 16.8, 15.2, 16.6, 16.7, 15.1, 16.5 }) },
+			{ "inside an upper tile", flat(0, { 26.2, 18.3, 27.9, 18.9, 27.1, 20.4 }) },
+			{ "across the outer wall", flat(0, { 29.3, 3.1, 33, 3.4, 32.8, 5.2, 29.1, 4.9 }) },
+		}
+
+		test("an update equals a fresh Build wherever the obstacle sits against the tiles", function()
+			for _, size in { 8, 16 } do
+				local desc = table.clone(open)
+				desc.TileSize = size
+				for _, placement in placements do
+					local mesh = NavMesh.Build(desc)
+					NavMesh.AddObstacle(mesh, "Ground", placement[2])
+					NavMesh.Update(mesh)
+					local fresh = NavMesh.Build(baked(desc, "Ground", { placement[2] }))
+					expect(differsFromFresh(mesh, fresh)).with_context(`{placement[1]}, tiles of {size}`).is("")
+				end
+			end
+		end)
+
+		test("a run of adds and removes equals a fresh Build of the obstacles left", function()
+			-- Also shifted far along Z, so the floor's X and Z ranges don't overlap.
+			for _, dz in { 0, 64 } do
+				local function shifted(ring: { any }): { any }
+					local out = {}
+					for i, p in ring do
+						out[i] = p + vector.create(0, 0, dz)
+					end
+					return out
+				end
+				local desc: any =
+					{ TileSize = 8, Floors = { Ground = { Walkable = { shifted(open.Floors.Ground.Walkable[1]) } } } }
+				local a, b = shifted(placements[1][2]), shifted(placements[5][2])
+				local mesh = NavMesh.Build(desc)
+				local idA = NavMesh.AddObstacle(mesh, "Ground", a)
+				NavMesh.Update(mesh)
+				NavMesh.AddObstacle(mesh, "Ground", b)
+				NavMesh.Update(mesh)
+				expect(differsFromFresh(mesh, NavMesh.Build(baked(desc, "Ground", { a, b }))))
+					.with_context(`a, b; dz {dz}`)
+					.is("")
+				-- Removing a re-snaps the tiles below the corner with b, which also crosses the tile
+				-- line x = 16 above them, beside clean tiles. (That once failed with "a ring crosses
+				-- a tile line between snapped vertices": the re-snap left the tile lines out.)
+				NavMesh.RemoveObstacle(mesh, idA)
+				NavMesh.Update(mesh)
+				expect(differsFromFresh(mesh, NavMesh.Build(baked(desc, "Ground", { b }))))
+					.with_context(`b; dz {dz}`)
+					.is("")
+			end
+		end)
+
+		test("an update on a ramp, and one narrowing a corridor across a tile line, equal fresh Builds", function()
+			-- A crate on the Stairs ramp: rebuilt vertices take the ramp's heights.
+			local stairs = Fixtures.ThreeFloorStairs.Desc
+			local onRamp = flat(0, { 13.1, 1.3, 14.7, 1.1, 14.9, 2.6, 13.3, 2.9 })
+			local mesh = NavMesh.Build(stairs)
+			NavMesh.AddObstacle(mesh, "Stairs", onRamp)
+			NavMesh.Update(mesh)
+			expect(differsFromFresh(mesh, NavMesh.Build(baked(stairs, "Stairs", { onRamp }))))
+				.with_context("ramp")
+				.is("")
+			-- A 1.5-wide corridor in 4-stud tiles, and a crate just west of the tile line x = 8:
+			-- the clean tile east of it narrows too, so its widths must be recomputed.
+			local narrow: any =
+				{ TileSize = 4, Floors = { Ground = { Walkable = { flat(0, { 0, 0, 40, 0, 40, 1.5, 0, 1.5 }) } } } }
+			local crate = flat(0, { 7.6, 0.3, 7.9, 0.3, 7.9, 0.9, 7.6, 0.9 })
+			local corridorMesh = NavMesh.Build(narrow)
+			NavMesh.AddObstacle(corridorMesh, "Ground", crate)
+			NavMesh.Update(corridorMesh)
+			expect(differsFromFresh(corridorMesh, NavMesh.Build(baked(narrow, "Ground", { crate }))))
+				.with_context("narrow")
+				.is("")
+		end)
+
+		test("a link on a slope stays usable through an update elsewhere", function()
+			local desc: any = table.clone(Fixtures.ThreeFloorStairs.Desc)
+			desc.Links = { { From = v(13.3, 1.65, 2.7), To = v(13.3, 0, 12.1), Label = "Hop" } }
+			local mesh = NavMesh.Build(desc)
+			NavMesh.AddObstacle(mesh, "Ground", flat(0, { 30, 15, 32, 15, 32, 17, 30, 17 }))
+			NavMesh.Update(mesh)
+			local fromTri, _, toTri = Storage.GetLink(mesh, 1)
+			expect(fromTri ~= 0 and toTri ~= 0).is_true()
+		end)
+
+		test("an obstacle beside a seam leaves the seams a fresh Build makes", function()
+			local desc = Fixtures.ThreeFloorStairs.Desc
+			local crate = flat(0, { 8.6, 1.2, 11.4, 1.1, 11.3, 2.7, 8.7, 2.9 })
+			local mesh = NavMesh.Build(desc)
+			NavMesh.AddObstacle(mesh, "Ground", crate)
+			NavMesh.Update(mesh)
+			expect(differsFromFresh(mesh, NavMesh.Build(baked(desc, "Ground", { crate })))).is("")
+		end)
+
+		test("a link end under an obstacle drops out even near the obstacle's edge, and comes back", function()
+			-- Each crate covers one end of the jump, that end lying 0.2 to 0.3 studs inside it:
+			-- within the link snap's 0.5-stud reach of the uncovered ground.
+			for _, crate in
+				{
+					flat(0, { 8.7, 4.6, 10, 4.6, 10, 5.3, 8.7, 5.3 }), -- From (9, 5)
+					flat(0, { 14.5, 4.8, 15.4, 4.8, 15.4, 6, 14.5, 6 }), -- To (15, 5)
+				}
+			do
+				local mesh = NavMesh.Build(Fixtures.LinkJump.Desc)
+				local before = canonical(mesh)
+				local id = NavMesh.AddObstacle(mesh, "Ground", crate)
+				NavMesh.Update(mesh)
+				-- The jump is out: no path crosses the gap (none may route into the crate).
+				expect(NavMesh.FindPath(mesh, v(2, 0, 2), v(22, 0, 8)).Status).is("Partial")
+				NavMesh.RemoveObstacle(mesh, id)
+				NavMesh.Update(mesh)
+				expect(canonical(mesh)).is(before)
+				expect(NavMesh.FindPath(mesh, v(2, 0, 2), v(22, 0, 8)).Status).is("Success")
+			end
+		end)
+
+		test("a change on one floor leaves paths on the floor above it valid", function()
+			local mesh = NavMesh.Build(Fixtures.ThreeFloorStairs.Desc)
+			local upper = NavMesh.FindPath(mesh, v(24, 5, 12), v(36, 5, 14))
+			local ground = NavMesh.FindPath(mesh, v(24, 0, 12), v(36, 0, 14))
+			expect(upper.Waypoints[1].Floor).is("Upper")
+			NavMesh.AddObstacle(mesh, "Ground", flat(0, { 29, 12.5, 31, 12.5, 31, 13.5, 29, 13.5 }))
+			NavMesh.Update(mesh)
+			expect(NavMesh.IsPathValid(mesh, ground)).is(false)
+			expect(NavMesh.IsPathValid(mesh, upper)).is_true()
+		end)
+
+		test("any applied change invalidates paths through the tiles at a link's ends", function()
+			-- Small tiles, so the change's own tiles are far from the link's.
+			local desc: any = table.clone(Fixtures.LinkJump.Desc)
+			desc.TileSize = 4
+			local mesh = NavMesh.Build(desc)
+			-- A path that stays on the far pad, through the link's To end but not over the link.
+			local beside = NavMesh.FindPath(mesh, v(15, 0, 5), v(15.5, 0, 6))
+			NavMesh.Update(mesh) -- nothing pending: nothing changes
+			expect(NavMesh.IsPathValid(mesh, beside)).is_true()
+			NavMesh.AddObstacle(mesh, "Ground", flat(0, { 1, 8, 2, 8, 2, 9, 1, 9 }))
+			NavMesh.Update(mesh)
+			expect(NavMesh.IsPathValid(mesh, beside)).is(false)
 		end)
 
 		test("toggling a door many times never grows the mesh (SR14)", function()
@@ -260,6 +436,44 @@ return function(t: tiniest)
 			expect(function()
 				NavMesh.RemoveObstacle(mesh, id)
 			end).fails_with("already removed")
+		end)
+
+		test("RemoveObstacle rejects anything but a recorded id", function()
+			local mesh = NavMesh.Build(corridor)
+			NavMesh.AddObstacle(mesh, "Ground", door)
+			NavMesh.AddObstacle(mesh, "Ground", flat(0, { 30, 1, 31, 1, 31, 2, 30, 2 }))
+			for _, id in { 0, 1.5, "1", 3 } do
+				expect(function()
+						NavMesh.RemoveObstacle(mesh, id :: any)
+					end)
+					.with_context(tostring(id))
+					.fails_with(`no obstacle {id}`)
+			end
+		end)
+
+		test("obstacle errors point at the caller's line", function()
+			local mesh = NavMesh.Build(corridor)
+			local id = NavMesh.AddObstacle(mesh, "Ground", door)
+			NavMesh.RemoveObstacle(mesh, id)
+			local calls = {
+				function()
+					NavMesh.AddObstacle(mesh, "Upper", door)
+				end,
+				function()
+					NavMesh.AddObstacle(mesh, "Ground", flat(0, { 0, 0, 4, 4, 4, 0, 0, 4 }))
+				end,
+				function()
+					NavMesh.RemoveObstacle(mesh, 7)
+				end,
+				function()
+					NavMesh.RemoveObstacle(mesh, id)
+				end,
+			}
+			for i, call in calls do
+				local ok, err = pcall(call)
+				expect(ok).is(false)
+				expect(tostring(err):find("Obstacles.spec", 1, true) ~= nil).with_context(`call {i}: {err}`).is_true()
+			end
 		end)
 
 		test("a failing Update leaves the mesh as it was and rolls its records back (SR13)", function()
