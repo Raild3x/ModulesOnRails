@@ -1,6 +1,7 @@
 --!strict
--- The Studio side of the demo: builds the level out of Parts, runs Game on the baked mesh,
--- moves a Part per NPC, and draws the mesh and every NPC's path with DrawListRenderer.
+-- The Studio side of the demo: builds the level out of Parts (LevelParts), builds the mesh from
+-- those Parts with NavMeshAdapter, runs Game on it, moves a Part per NPC, and draws the mesh and
+-- every NPC's path with DrawListRenderer.
 -- Used by the run-in-roblox shot script and by the Play-mode LocalScript (see studio.py).
 
 type Options = {
@@ -8,7 +9,9 @@ type Options = {
 	Renderer: any, -- DrawListRenderer
 	Game: any,
 	Level: any,
-	Baked: string,
+	LevelParts: any,
+	Adapter: any, -- NavMeshAdapter
+	Baked: string, -- the bake of Level.luau: timed, and its triangle count printed for comparison
 	Seconds: number, -- how long to run; math.huge in Play mode
 	Camera: string?, -- "top" | "oblique" | nil (leave the camera alone)
 }
@@ -34,65 +37,6 @@ local function part(parent: Instance, name: string, size: Vector3, cframe: CFram
 	p.TopSurface = Enum.SurfaceType.Smooth
 	p.Parent = parent
 	return p
-end
-
--- The polygon's bounding box as (min, max) Vector3s.
-local function box(ring: { any }): (Vector3, Vector3)
-	local lo, hi = Vector3.new(math.huge, 0, math.huge), Vector3.new(-math.huge, 0, -math.huge)
-	for _, p in ring do
-		lo = Vector3.new(math.min(lo.X, p.X), 0, math.min(lo.Z, p.Z))
-		hi = Vector3.new(math.max(hi.X, p.X), 0, math.max(hi.Z, p.Z))
-	end
-	return lo, hi
-end
-
--- HAND-ROLLED (the reverse of the missing Part->polygon adapter): Parts from the polygons.
-local function buildLevel(folder: Folder, Level: any): Part
-	local ground = Level.Desc.Floors.Ground
-	part(folder, "Ground", Vector3.new(60, 1, 40), CFrame.new(30, -0.55, 20), Color3.fromRGB(45, 45, 50))
-	local mudLo, mudHi = box(ground.Areas[1].Polygon)
-	local mudSize = mudHi - mudLo
-	part(
-		folder,
-		"Mud",
-		Vector3.new(mudSize.X, 0.1, mudSize.Z),
-		CFrame.new((mudLo + mudHi) / 2 - Vector3.new(0, 0.1, 0)),
-		Color3.fromRGB(110, 75, 40)
-	)
-	for i, ring in ground.Obstacles do
-		if i == 7 then
-			continue -- the ramp's footprint: the ramp itself stands there
-		end
-		local lo, hi = box(ring)
-		local size = hi - lo
-		local height = if math.min(size.X, size.Z) <= 1 then 10 else 3 -- walls are 1 stud thick
-		part(
-			folder,
-			if height == 10 then "Wall" else "Crate",
-			Vector3.new(size.X, height, size.Z),
-			CFrame.new((lo + hi) / 2 + Vector3.new(0, height / 2, 0)),
-			if height == 10 then Color3.fromRGB(90, 90, 100) else Color3.fromRGB(160, 110, 60)
-		)
-	end
-	-- Ramp: x 20..32 rising 0..6, z 34..40; its top face is the walkable surface.
-	local angle = math.atan2(6, 12)
-	part(
-		folder,
-		"Ramp",
-		Vector3.new(math.sqrt(12 * 12 + 6 * 6), 0.4, 6),
-		CFrame.new(26, 3, 37) * CFrame.Angles(0, 0, angle) * CFrame.new(0, -0.2, 0),
-		Color3.fromRGB(200, 180, 140)
-	)
-	part(folder, "Balcony", Vector3.new(20, 0.4, 6), CFrame.new(42, 5.8, 37), Color3.fromRGB(200, 180, 140))
-	local doorLo, doorHi = box(Level.DOOR)
-	local doorSize = doorHi - doorLo
-	return part(
-		folder,
-		"Door",
-		Vector3.new(doorSize.X, 8, doorSize.Z),
-		CFrame.new((doorLo + doorHi) / 2 + Vector3.new(0, 4, 0)),
-		Color3.fromRGB(200, 40, 40)
-	)
 end
 
 local function npcPart(folder: Folder, npc: any): Part
@@ -133,15 +77,12 @@ local function pathList(world: any): { any }
 		local prev = npc.Position
 		for i = npc.Next, #path.Waypoints do
 			local w = path.Waypoints[i].Position
-			table.insert(
-				list,
-				{
-					Kind = "Line",
-					Points = { prev.X, prev.Y + 0.15, prev.Z, w.X, w.Y + 0.15, w.Z },
-					Color = color,
-					Layer = "Paths",
-				}
-			)
+			table.insert(list, {
+				Kind = "Line",
+				Points = { prev.X, prev.Y + 0.15, prev.Z, w.X, w.Y + 0.15, w.Z },
+				Color = color,
+				Layer = "Paths",
+			})
 			prev = w
 		end
 		if npc.Goal then
@@ -160,11 +101,33 @@ return function(o: Options)
 	local folder = Instance.new("Folder")
 	folder.Name = "NavMeshDemo"
 	folder.Parent = workspace
-	local door = buildLevel(folder, o.Level)
+	local walkable, obstacles, door =
+		o.LevelParts({ Instance = Instance, Vector3 = Vector3, CFrame = CFrame, Color3 = Color3 }, folder)
 
 	local t0 = os.clock()
-	local mesh = NavMesh.Deserialize(buffer.fromstring(o.Baked))
+	local baked = NavMesh.Deserialize(buffer.fromstring(o.Baked))
 	print(string.format("[DEMO] Deserialize %.2f ms", (os.clock() - t0) * 1000))
+	t0 = os.clock()
+	local desc = o.Adapter.FromParts(walkable, obstacles)
+	desc.MaxAgentRadius = o.Level.Desc.MaxAgentRadius
+	desc.Links = o.Level.Desc.Links
+	local mesh = NavMesh.Build(desc)
+	local function triangles(m: any): number
+		local n = 0
+		for _, item in NavMesh.ToDrawList(m) do
+			n += if item.Kind == "Tri" then 1 else 0
+		end
+		return n
+	end
+	print(
+		string.format(
+			"[DEMO] FromParts + Build %.2f ms: %d triangles, %d seams (the bake of Level.luau: %d triangles)",
+			(os.clock() - t0) * 1000,
+			triangles(mesh),
+			#desc.Seams,
+			triangles(baked)
+		)
+	)
 	local world = Game.new(NavMesh, mesh, o.Level, 7, function(line)
 		print("[DEMO] " .. line)
 	end)

@@ -71,6 +71,18 @@ the const question are deliberately open, gated on benchmarks.
 - **Changed regions (ticket 22):** 2026-09-28: `Update` returns the changed regions, a list of
   `{ Floor, Min, Max }` boxes (`ChangedRegion`). `IsPathValid` stays as it is. User: "changed
   regions only", not an exact `IsPathValid`.
+- **Part adapter home (ticket 26):** 2026-09-28: its own package, `lib/navmeshadapter`, as Q1
+  and the spec already said ("adapters stay out of the cores"). Not asked again.
+- **How the adapter picks floors (ticket 26):** 2026-09-28: caller-given lists,
+  `FromParts(walkable, obstacles, options)`. Walkable faces on one plane form one floor, named
+  after its first Part. Rejected: built-in CollectionService tags (Studio-only specs, fixed tag
+  names), every upward face (demo: 5 floors and 60 triangles instead of 3 and 48; crate tops
+  become snap targets), a `NavFloor` attribute (markup on every Part). User: "Caller-given lists
+  (Recommended)".
+- **Unknown `QueryFilter` keys (ticket 26):** 2026-09-28: error at the call (22 ns per query,
+  about 0.01% of a `FindPath`). User: "Error (Recommended)".
+- **`HasPendingChanges(mesh)` (ticket 26):** 2026-09-28: added (the recommendation was to skip
+  it). User: "Add it".
 
 ### Rulings during the build (2026-09-27)
 - **U-a (clearance reach), ruled after the P4 probe (ticket 15 notes):** no cap by default,

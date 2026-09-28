@@ -48,3 +48,11 @@ A layered 2.5D navigation mesh for pathfinding queries, built on ConstrainedDela
 - **Stamp**: a per-tile counter that changes when anything a path through that tile relies on
   changes. `IsPathValid` compares a path's stamps against the current ones.
 - **Bake**: a mesh serialized to a versioned buffer, to ship precomputed.
+- **Pending change**: a dynamic obstacle added or removed but not yet applied by `Update`
+  (`HasPendingChanges`).
+- **Part adapter**: `NavMeshAdapter` (its own package, not the core): it turns anchored Parts
+  into a description.
+  - **Cut**: the footprint of a Part standing within the agent's height above a floor. It
+    becomes an obstacle of that floor. The ground under a solid ramp is cut.
+  - **Weld**: closing a hairline crack between two Parts of one floor by moving a corner onto
+    the other Part's edge. It lives in the adapter because it adds walkable space.

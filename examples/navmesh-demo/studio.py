@@ -1,5 +1,6 @@
 """Studio runs of the NavMesh demo. Run from the repo root after
-`npm run setup navmesh`, `npm run setup navmeshdebug` and `npm run setup constraineddelaunaydebug`,
+`npm run setup navmesh`, `npm run setup navmeshdebug`, `npm run setup navmeshadapter` and
+`npm run setup constraineddelaunaydebug`,
 and after `lune run examples/navmesh-demo/bake.luau`.
 
     python examples/navmesh-demo/studio.py shot [--view oblique|top] [--seconds 25]
@@ -26,11 +27,13 @@ local src = ReplicatedStorage:WaitForChild("src", 10)
 local Demo = ReplicatedStorage:WaitForChild("Demo", 10)
 local NavMesh = require(src.navmesh.src.NavMesh)
 local Renderer = require(src.constraineddelaunaydebug.src.DrawListRenderer)
+local Adapter = require(src.navmeshadapter.src.NavMeshAdapter)
 """
 
 RUN = PRELUDE + """print("[MARK] start")
 require(Demo.StudioDemo)({{
 \tNavMesh = NavMesh, Renderer = Renderer, Game = require(Demo.Game), Level = require(Demo.Level),
+\tLevelParts = require(Demo.LevelParts), Adapter = Adapter,
 \tBaked = require(Demo.Baked), Seconds = {seconds}, Camera = {camera},
 }})
 print("[MARK] done")
@@ -63,6 +66,7 @@ print("[MARK] done")
 SESSION = PRELUDE + """-- Play mode: the whole demo runs on the client (DrawListRenderer fills do not replicate).
 require(Demo.StudioDemo)({
 \tNavMesh = NavMesh, Renderer = Renderer, Game = require(Demo.Game), Level = require(Demo.Level),
+\tLevelParts = require(Demo.LevelParts), Adapter = Adapter,
 \tBaked = require(Demo.Baked), Seconds = math.huge, Camera = nil,
 })
 """
@@ -77,10 +81,10 @@ def build_place(script: str, extra: dict | None = None, name: str = "demo") -> P
     OUT.mkdir(parents=True, exist_ok=True)
     lib = (Path.cwd() / "lib").as_posix()
     demo = {"$className": "Folder"}
-    for module in ("StudioDemo", "Game", "Level", "Baked"):
+    for module in ("StudioDemo", "Game", "Level", "LevelParts", "Baked"):
         demo[module] = {"$path": (HERE / f"{module}.luau").as_posix()}
     src = {"$className": "Folder"}
-    for pkg in ("constraineddelaunay", "constraineddelaunaydebug", "navmesh", "navmeshdebug"):
+    for pkg in ("constraineddelaunay", "constraineddelaunaydebug", "navmesh", "navmeshadapter", "navmeshdebug"):
         src[pkg] = {"$path": f"{lib}/{pkg}"}
     tree = {"$className": "DataModel", "ReplicatedStorage": {"$className": "ReplicatedStorage", "src": src, "Demo": demo}}
     tree.update(extra or {})

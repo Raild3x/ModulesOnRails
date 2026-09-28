@@ -18,6 +18,8 @@ All of them use `AreaCosts = { [2] = 4 }`, so they cross the mud only when that 
 | File | What it is |
 |---|---|
 | `Level.luau` | The `NavMeshDesc` (floors, seams, link) plus the door footprint |
+| `LevelParts.luau` | The same level as Parts; the Studio place builds its mesh from them with `NavMeshAdapter` |
+| `adapter_check.luau` | Checks that the Parts give the same walkable region as `Level.luau` |
 | `Game.luau` | All NPC logic, as pure Luau shared by Lune and Studio. Code marked `HAND-ROLLED` is what the library did not provide. |
 | `bake.luau` | Build, then `Serialize`, into `Baked.luau` (a string literal of the buffer) |
 | `sim.luau` | Headless run: `Deserialize` the bake, step N ticks, print events, tallies and timings |
@@ -32,6 +34,7 @@ From the repo root, after `npm run setup navmesh`, `npm run setup navmeshdebug` 
 
 ```sh
 lune run examples/navmesh-demo/bake.luau            # after any Level.luau change
+lune run examples/navmesh-demo/adapter_check.luau   # after any Level.luau or LevelParts.luau change
 lune run examples/navmesh-demo/sim.luau 3600 7      # ticks (30 Hz), seed; add --quiet to hide events
 lune run examples/navmesh-demo/repros.luau
 lune run examples/navmesh-demo/mistakes.luau
