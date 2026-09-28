@@ -43,6 +43,8 @@
 	  `Clearance.Refresh`, which keeps a wall index across Updates).
 	- Stamps are bumped for every tile whose triangles or widths changed, and for the tiles at
 	  the ends of every link.
+	- The changed regions are returned: per floor, boxes holding everything whose meaning
+	  changed (the rebuilt tiles, and the triangles whose widths were recomputed).
 	- The state is swapped in only when all of that succeeded. On an error the mesh is
 	  untouched, the pending records are rolled back, and the error is raised again.
 
@@ -594,8 +596,89 @@ local function triangleKey(state: State, t: number): (string, number)
 	return `{keys[first]}:{keys[first % 3 + 1]}:{keys[(first + 1) % 3 + 1]}`, first
 end
 
--- Applies every pending change; see the class docs. Errors leave `s` untouched.
-local function apply(s: State): State
+-- The changed regions (ticket 22): per floor, the rebuilt tiles' rectangles and the boxes of
+-- the triangles outside them whose widths were recomputed, merged wherever they touch. Heights
+-- span the triangles on both sides of the change. Everything whose meaning changed lies inside:
+-- triangles, neighbours, wall flags, seam pieces and link ends only change in the rebuilt tiles,
+-- and widths only in recomputed triangles (a portal width a recomputed triangle writes for its
+-- neighbour lies on their shared edge).
+local function changedRegions(s: State, n: State, plan: Plan, recompute: { [number]: boolean }): { Types.ChangedRegion }
+	local boxes: { { number } } = {} -- floor, min x, y, z, max x, y, z
+	local function fit(box: { number }, state: State, t: number)
+		for _, v in { Storage.GetTriangle(state, t) } do
+			local p = Storage.GetVertex(state, v)
+			box[2], box[3], box[4] = math.min(box[2], p.X), math.min(box[3], p.Y), math.min(box[4], p.Z)
+			box[5], box[6], box[7] = math.max(box[5], p.X), math.max(box[6], p.Y), math.max(box[7], p.Z)
+		end
+	end
+	for _, tile in plan.DirtyList do
+		local x0, z0, x1, z1 = Storage.GetTileBounds(n, tile)
+		local box = { Storage.GetTileFloor(n, tile), x0, math.huge, z0, x1, -math.huge, z1 }
+		for _, state in { s, n } do
+			local first, count = Storage.GetTileRange(state, tile)
+			for t = first, first + count - 1 do
+				fit(box, state, t)
+			end
+		end
+		-- The rectangle stays whole: a vertex never lies outside its tile.
+		box[2], box[4], box[5], box[7] = x0, z0, x1, z1
+		table.insert(boxes, box)
+	end
+	local byTile: { [number]: { number } } = {}
+	for t in recompute do
+		local tile = Storage.GetTriangleTile(n, t)
+		if not plan.Dirty[tile] then
+			local box = byTile[tile]
+			if box == nil then
+				box = {
+					Storage.GetTileFloor(n, tile),
+					math.huge,
+					math.huge,
+					math.huge,
+					-math.huge,
+					-math.huge,
+					-math.huge,
+				}
+				byTile[tile] = box
+				table.insert(boxes, box)
+			end
+			fit(box, n, t)
+		end
+	end
+	-- ponytail: pairwise merging, quadratic in the boxes (one per rebuilt or re-widthed tile).
+	local merged = true
+	while merged do
+		merged = false
+		for i = #boxes, 2, -1 do
+			local a = boxes[i]
+			for j = 1, i - 1 do
+				local b = boxes[j]
+				if a[1] == b[1] and a[2] <= b[5] and b[2] <= a[5] and a[4] <= b[7] and b[4] <= a[7] then
+					for k = 2, 4 do
+						b[k] = math.min(a[k], b[k])
+						b[k + 3] = math.max(a[k + 3], b[k + 3])
+					end
+					table.remove(boxes, i)
+					merged = true
+					break
+				end
+			end
+		end
+	end
+	local regions: { Types.ChangedRegion } = {}
+	for _, box in boxes do
+		table.insert(regions, {
+			Floor = Storage.GetFloorName(n, box[1]),
+			Min = vector.create(box[2], box[3], box[4]) :: any, -- a vector is a Vector3 on Roblox
+			Max = vector.create(box[5], box[6], box[7]) :: any,
+		})
+	end
+	return regions
+end
+
+-- Applies every pending change; see the class docs. Errors leave `s` untouched. Returns the new
+-- state and the changed regions.
+local function apply(s: State): (State, { Types.ChangedRegion })
 	local plan = prepare(s)
 	local dirty = plan.Dirty
 
@@ -773,7 +856,7 @@ local function apply(s: State): State
 			Storage.BumpTileStamp(n, tile)
 		end
 	end
-	return n
+	return n, changedRegions(s, n, plan, recompute)
 end
 
 --[=[
@@ -781,7 +864,7 @@ end
 	Applies every pending obstacle change (see the class docs). Atomic: on an error the mesh is
 	unchanged, the pending records are rolled back, and the error is raised again.
 ]=]
-function Tiles.Update(s: State)
+function Tiles.Update(s: State): { Types.ChangedRegion }
 	local pending = false
 	for slot = 1, Storage.ObstacleCount(s) do
 		if Storage.GetObstacleState(s, slot) ~= Storage.OBSTACLE_ACTIVE then
@@ -790,9 +873,9 @@ function Tiles.Update(s: State)
 		end
 	end
 	if not pending then
-		return
+		return {}
 	end
-	local ok, result = pcall(apply, s)
+	local ok, result, regions = pcall(apply, s)
 	if not ok then
 		-- Roll back: pending adds go (their ids stay used), pending removals stay active.
 		for slot = Storage.ObstacleCount(s), 1, -1 do
@@ -810,6 +893,7 @@ function Tiles.Update(s: State)
 	for key, value in result :: any do
 		(s :: any)[key] = value
 	end
+	return regions
 end
 
 return Tiles

@@ -113,6 +113,100 @@ return function(t: tiniest)
 		return structureOk(mesh)
 	end
 
+	-- Each triangle by grid points: its widths and wall flags, floor name and bounding box.
+	type Shape = { Sig: string, Floor: string, Min: vector, Max: vector }
+	local function shapes(mesh: any): { [string]: Shape }
+		local out = {}
+		local sigs = byTriangle(mesh)
+		for tri = 1, Storage.TriangleCount(mesh) do
+			local keys, lo, hi = {}, vector.one * math.huge, -vector.one * math.huge
+			for k, id in { Storage.GetTriangle(mesh, tri) } do
+				local p = Storage.GetVertex(mesh, id)
+				keys[k] = math.round(p.X * 256) * 1e7 + math.round(p.Z * 256)
+				lo, hi = vector.min(lo, p), vector.max(hi, p)
+			end
+			local first = if keys[1] < keys[2] and keys[1] < keys[3] then 1 elseif keys[2] < keys[3] then 2 else 3
+			local key = `{keys[first]}:{keys[first % 3 + 1]}:{keys[(first + 1) % 3 + 1]}`
+			out[key] = {
+				Sig = sigs[key],
+				Floor = Storage.GetFloorName(mesh, Storage.GetTriangleFloor(mesh, tri)),
+				Min = lo,
+				Max = hi,
+			}
+		end
+		return out
+	end
+
+	-- The first triangle that is new, gone or re-widthed between two snapshots and lies outside
+	-- every region (`shrink` studs smaller on each side in plan), or "".
+	local function outsideRegions(
+		before: { [string]: Shape },
+		after: { [string]: Shape },
+		regions: { any },
+		shrink: number
+	): string
+		local function inside(shape: Shape): boolean
+			for _, r in regions do
+				local lo, hi = r.Min + vector.create(shrink, 0, shrink), r.Max - vector.create(shrink, 0, shrink)
+				if
+					r.Floor == shape.Floor
+					and shape.Min.X >= lo.X
+					and shape.Min.Y >= lo.Y
+					and shape.Min.Z >= lo.Z
+					and shape.Max.X <= hi.X
+					and shape.Max.Y <= hi.Y
+					and shape.Max.Z <= hi.Z
+				then
+					return true
+				end
+			end
+			return false
+		end
+		for key, shape in after do
+			if (before[key] == nil or before[key].Sig ~= shape.Sig) and not inside(shape) then
+				return `new {key}`
+			end
+		end
+		for key, shape in before do
+			if after[key] == nil and not inside(shape) then
+				return `gone {key}`
+			end
+		end
+		return ""
+	end
+
+	-- Whether a path's waypoints, or the segments between them grown by `radius`, meet a region
+	-- on their floor (in plan; a square grown box, so never a miss where the round one meets).
+	local function pathMeets(path: any, regions: { any }, radius: number): boolean
+		local points = path.Waypoints
+		for i = 1, math.max(#points - 1, 1) do
+			local a, b = points[i], points[math.min(i + 1, #points)]
+			for _, r in regions do
+				if r.Floor == a.Floor or r.Floor == b.Floor then
+					-- Slab test of segment a-b against the box grown by the radius.
+					local t0, t1 = 0, 1
+					local hit = true
+					for _, axis in { "X", "Z" } do
+						local p, d = a.Position[axis], b.Position[axis] - a.Position[axis]
+						local lo, hi = r.Min[axis] - radius, r.Max[axis] + radius
+						if d == 0 then
+							if p < lo or p > hi then
+								hit = false
+							end
+						else
+							local u0, u1 = (lo - p) / d, (hi - p) / d
+							t0, t1 = math.max(t0, math.min(u0, u1)), math.min(t1, math.max(u0, u1))
+						end
+					end
+					if hit and t0 <= t1 then
+						return true
+					end
+				end
+			end
+		end
+		return false
+	end
+
 	-- A 40 x 4 corridor in 8-stud tiles, and a door across it at x = 15..17.
 	local corridor: any =
 		{ TileSize = 8, Floors = { Ground = { Walkable = { flat(0, { 0, 0, 40, 0, 40, 4, 0, 4 }) } } } }
@@ -359,9 +453,145 @@ return function(t: tiniest)
 			local west = NavMesh.FindPath(mesh, v(9, 0, 9), v(15, 0, 14))
 			local farther = NavMesh.FindPath(mesh, v(1, 0, 9), v(7, 0, 14))
 			NavMesh.AddObstacle(mesh, "Ground", flat(0, { 16 + 1 / 256, 10, 18, 10, 18, 12, 16 + 1 / 256, 12 }))
-			NavMesh.Update(mesh)
+			local regions = NavMesh.Update(mesh)
 			expect(NavMesh.IsPathValid(mesh, west)).is(false)
 			expect(NavMesh.IsPathValid(mesh, farther)).is_true()
+			-- That tile was rebuilt: its whole rectangle is in a returned region.
+			local covered = false
+			for _, r in regions do
+				covered = covered or (r.Min.X <= 8 and r.Min.Z <= 8 and r.Max.X >= 16 and r.Max.Z >= 16)
+			end
+			expect(covered).is_true()
+		end)
+
+		test("Update returns regions holding every changed triangle and width (ticket 22)", function()
+			-- Scenarios: each obstacle placement against the tiles, a door in the corridor, the
+			-- tilted static wall, and a crate over a seam's tile; each added, then removed.
+			local cases = {}
+			for _, size in { 8, 16 } do
+				for _, placement in placements do
+					local desc = table.clone(open)
+					desc.TileSize = size
+					table.insert(cases, { `{placement[1]}, tiles of {size}`, desc, "Ground", placement[2] })
+				end
+			end
+			table.insert(cases, { "corridor door", corridor, "Ground", door })
+			local stairs: any = table.clone(Fixtures.ThreeFloorStairs.Desc)
+			stairs.TileSize = 2
+			table.insert(cases, { "seam tile", stairs, "Ground", flat(0, { 8.3, 2.3, 9.4, 2.4, 9.3, 3.6, 8.4, 3.5 }) })
+			table.insert(cases, {
+				"ramp",
+				Fixtures.ThreeFloorStairs.Desc,
+				"Stairs",
+				flat(0, { 13.1, 1.3, 14.7, 1.1, 14.9, 2.6, 13.3, 2.9 }),
+			})
+			table.insert(cases, {
+				"tilted wall",
+				{
+					TileSize = 4,
+					Floors = {
+						Ground = {
+							Walkable = { flat(0, { 0, 0, 16, 0, 16, 20, 0, 20 }) },
+							Obstacles = { flat(0, { 1.369, 11.018, 11.919, 11.755, 11.919, 11.993, 1.369, 11.256 }) },
+						},
+					},
+				},
+				"Ground",
+				flat(0, { 10, 10, 13, 10, 13, 13, 10, 13 }),
+			})
+			local tight = 0
+			for _, case in cases do
+				local mesh = NavMesh.Build(case[2])
+				expect(#NavMesh.Update(mesh)).with_context(case[1]).is(0) -- nothing pending
+				local id = NavMesh.AddObstacle(mesh, case[3], case[4])
+				for _, step in { "added", "removed" } do
+					if step == "removed" then
+						NavMesh.RemoveObstacle(mesh, id)
+					end
+					local before = shapes(mesh)
+					local regions = NavMesh.Update(mesh)
+					local after = shapes(mesh)
+					expect(#regions > 0).with_context(`{case[1]}, {step}`).is_true()
+					expect(outsideRegions(before, after, regions, 0)).with_context(`{case[1]}, {step}`).is("")
+					-- Negative control: a region a pixel smaller misses something (a rebuilt tile's
+					-- triangles reach its rectangle's edges).
+					if outsideRegions(before, after, regions, 1 / 256) ~= "" then
+						tight += 1
+					end
+				end
+			end
+			expect(tight).is(2 * #cases)
+		end)
+
+		test("a path clear of every returned region is what FindPath returns again (ticket 22)", function()
+			-- Random paths on a floor of scattered props, before each of a run of updates. After
+			-- it, a path whose segments, grown by its radius, miss every region comes back from a
+			-- fresh FindPath unchanged, unless the fresh one goes through a region (a removal can
+			-- open a better way).
+			local seed = 5
+			local function rnd(lo: number, hi: number): number
+				seed = (seed * 1103515245 + 12345) % 2147483648
+				return lo + seed / 2147483648 * (hi - lo)
+			end
+			local props = {}
+			for _ = 1, 14 do
+				local cx, cz = rnd(2, 38), rnd(2, 22)
+				table.insert(
+					props,
+					flat(0, { cx - 0.6, cz - 0.5, cx + 0.7, cz - 0.4, cx + 0.6, cz + 0.6, cx - 0.5, cz + 0.5 })
+				)
+			end
+			-- Capped widths keep the regions tight around the crates (uncapped, an open floor's
+			-- wide triangles all reach them).
+			local desc: any = {
+				TileSize = 8,
+				MaxAgentRadius = 1,
+				Floors = { Ground = { Walkable = { flat(0, { 0, 0, 40, 0, 40, 24, 0, 24 }) }, Obstacles = props } },
+			}
+			local mesh = NavMesh.Build(desc)
+			local crates = {
+				flat(0, { 12.2, 9.1, 15.3, 9.2, 15.2, 13.4, 12.3, 13.3 }),
+				flat(0, { 26.1, 3.2, 29.4, 3.1, 29.3, 7.3, 26.2, 7.2 }),
+			}
+			local ids = {}
+			local checked, rerouted = 0, 0
+			for step, change in { 1, 2, -1, -2 } do
+				local queries = {}
+				for _ = 1, 40 do
+					local from, to = v(rnd(0.5, 39.5), 0, rnd(0.5, 23.5)), v(rnd(0.5, 39.5), 0, rnd(0.5, 23.5))
+					local radius = if #queries % 2 == 0 then 0 else 0.4
+					local path = NavMesh.FindPath(mesh, from, to, { AgentRadius = radius })
+					if path.Status == "Success" then
+						table.insert(queries, { From = from, To = to, Radius = radius, Path = path })
+					end
+				end
+				if change > 0 then
+					ids[change] = NavMesh.AddObstacle(mesh, "Ground", crates[change])
+				else
+					NavMesh.RemoveObstacle(mesh, ids[-change])
+				end
+				local regions = NavMesh.Update(mesh)
+				for _, q in queries do
+					if pathMeets(q.Path, regions, q.Radius) then
+						continue
+					end
+					checked += 1
+					local again = NavMesh.FindPath(mesh, q.From, q.To, { AgentRadius = q.Radius })
+					local same = again.Status == q.Path.Status
+						and #again.Waypoints == #q.Path.Waypoints
+						and math.abs(again.Cost - q.Path.Cost) <= 1e-9 * math.max(1, q.Path.Cost)
+					for i, w in again.Waypoints do
+						same = same and vector.magnitude(w.Position - q.Path.Waypoints[i].Position) <= 1e-9
+					end
+					if not same then
+						rerouted += 1
+						expect(change < 0 and pathMeets(again, regions, q.Radius))
+							.with_context(`step {step}: a path clear of the regions changed`)
+							.is_true()
+					end
+				end
+			end
+			expect(checked > 40).is_true() -- not vacuous
 		end)
 
 		test("widths follow a static wall the obstacle tilts, beyond its box (ticket 22)", function()

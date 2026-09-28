@@ -127,6 +127,21 @@ export type QueryFilter = {
 
 --[=[
 	@within NavMesh
+	@interface ChangedRegion
+	.Floor string
+	.Min Vector3 -- the box's low corner: X and Z in studs, Y the floor's lowest height in it
+	.Max Vector3 -- the high corner
+
+	A box `Update` returns around what it changed on one floor: the rebuilt tiles and every
+	triangle whose clearance widths were recomputed. A path whose waypoints, and the straight
+	segments between them fattened by its `AgentRadius`, stay outside every box on their floors
+	is unaffected: `FindPath` would return it again, unless a removal opened a better route
+	through a box.
+]=]
+export type ChangedRegion = { Floor: string, Min: Vector3, Max: Vector3 }
+
+--[=[
+	@within NavMesh
 	@interface NavPoint
 	.Position Vector3
 	.Floor string
