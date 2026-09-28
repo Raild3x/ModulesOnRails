@@ -123,6 +123,9 @@ end
 	and its cost. On `Partial` (the goal is unreachable) and `Budget` (`maxExpansions` triangles
 	were expanded first), the corridor ends at the reached triangle holding the point nearest
 	the goal, and the cost is that of reaching its node.
+
+	`goalT` 0 (no goal triangle, `GoalFallback`) never succeeds: the search covers everything
+	reachable (or stops at `maxExpansions`) and ends at the reached point nearest `goalP`.
 ]=]
 function Search.Run(
 	s: Storage.State,

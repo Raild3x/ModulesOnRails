@@ -205,10 +205,10 @@ return function(t: tiniest)
 			end
 		end)
 
-		test("errors when it starts off the mesh", function()
-			expect(function()
-				NavMesh.MoveAlongSurface(court, v(50, 0, 50), v(1, 0, 1))
-			end).fails_with("not on the mesh")
+		test("reports NoStart when it starts off the mesh (ticket 24: it no longer throws)", function()
+			local moved = NavMesh.MoveAlongSurface(court, v(50, 0, 50), v(1, 0, 1))
+			expect(moved.Status).is("NoStart")
+			expect(fmt(moved.Position)).is("50.0000,0.0000,50.0000")
 		end)
 	end)
 
@@ -281,8 +281,10 @@ return function(t: tiniest)
 			local mesh = NavMesh.Build(Fixtures.Courtyard.Desc)
 			local a, b = seeded(9), seeded(9)
 			for _ = 1, 50 do
-				local p = NavMesh.FindRandomPoint(mesh, nil, v(20, 0, 5), 3, a) :: NavMesh.NavPoint
-				local q = NavMesh.FindRandomPoint(mesh, nil, v(20, 0, 5), 3, b) :: NavMesh.NavPoint
+				local p =
+					NavMesh.FindRandomPoint(mesh, { Center = v(20, 0, 5), Radius = 3, Rng = a }) :: NavMesh.NavPoint
+				local q =
+					NavMesh.FindRandomPoint(mesh, { Center = v(20, 0, 5), Radius = 3, Rng = b }) :: NavMesh.NavPoint
 				expect(fmt(p.Position)).is(fmt(q.Position))
 				expect(onMesh(mesh, p.Position)).is_true()
 				expect((p.Position.X - 20) ^ 2 + (p.Position.Z - 5) ^ 2 <= 9 + 1e-9).is_true()
@@ -296,7 +298,7 @@ return function(t: tiniest)
 			}
 			local rng, left = seeded(3), 0
 			for _ = 1, 2000 do
-				if (NavMesh.FindRandomPoint(mesh, nil, nil, nil, rng) :: NavMesh.NavPoint).Position.X < 10 then
+				if (NavMesh.FindRandomPoint(mesh, { Rng = rng }) :: NavMesh.NavPoint).Position.X < 10 then
 					left += 1
 				end
 			end
@@ -328,7 +330,7 @@ return function(t: tiniest)
 					total += areas[tri]
 				end
 				for _ = 1, count do
-					local _, tri = Queries.RandomPoint(mesh, costs, nil, 0, rng)
+					local _, tri = Queries.RandomPoint(mesh, costs, nil, 0, 0, rng)
 					hits[tri] = (hits[tri] or 0) + 1
 				end
 				for tri, area in areas do
@@ -348,7 +350,9 @@ return function(t: tiniest)
 			-- Uniform in a radius-4 disc: three quarters of the points lie beyond radius 2.
 			local rng, outer = seeded(11), 0
 			for _ = 1, 800 do
-				local p = (NavMesh.FindRandomPoint(mesh, nil, v(10, 0, 5), 4, rng) :: NavMesh.NavPoint).Position
+				local p = (
+					NavMesh.FindRandomPoint(mesh, { Center = v(10, 0, 5), Radius = 4, Rng = rng }) :: NavMesh.NavPoint
+				).Position
 				if (p.X - 10) ^ 2 + (p.Z - 5) ^ 2 > 4 then
 					outer += 1
 				end
@@ -361,13 +365,13 @@ return function(t: tiniest)
 			for i, call in
 				{
 					function()
-						NavMesh.MoveAlongSurface(mesh, v(50, 0, 50), v(1, 0, 1))
+						NavMesh.FindNearestPoint(mesh, v(50, 0, 50), nil, -1)
 					end,
 					function()
 						NavMesh.FindDistanceToWall(mesh, v(5, 0, 3), 0)
 					end,
 					function()
-						NavMesh.FindRandomPoint(mesh, nil, v(1, 0, 1))
+						NavMesh.FindRandomPoint(mesh, { Center = v(1, 0, 1) })
 					end,
 				}
 			do
@@ -379,7 +383,7 @@ return function(t: tiniest)
 			-- (A small circle may still come back empty: rejection sampling has 32 tries.)
 			local rng = seeded(8)
 			for _, radius in { 0.5, 0 } do
-				expect((pcall(NavMesh.FindRandomPoint, mesh, nil, v(1, 0, 1), radius, rng)))
+				expect((pcall(NavMesh.FindRandomPoint, mesh, { Center = v(1, 0, 1), Radius = radius, Rng = rng })))
 					.with_context(`radius {radius}`)
 					.is_true()
 			end
@@ -390,14 +394,14 @@ return function(t: tiniest)
 			local rng = seeded(5)
 			for _ = 1, 50 do
 				local p =
-					NavMesh.FindRandomPoint(mesh, { AreaCosts = { [1] = math.huge } }, nil, nil, rng) :: NavMesh.NavPoint
+					NavMesh.FindRandomPoint(mesh, { Filter = { AreaCosts = { [1] = math.huge } }, Rng = rng }) :: NavMesh.NavPoint
 				-- Only the area-2 patch (x = 2..10, z = 20..28) is left.
 				expect(p.Position.X >= 2 and p.Position.X <= 10 and p.Position.Z >= 20 and p.Position.Z <= 28).is_true()
 			end
-			expect(NavMesh.FindRandomPoint(mesh, nil, v(100, 0, 100), 5, rng)).never_exists()
+			expect(NavMesh.FindRandomPoint(mesh, { Center = v(100, 0, 100), Radius = 5, Rng = rng })).never_exists()
 			expect(function()
-				NavMesh.FindRandomPoint(mesh, nil, v(1, 0, 1))
-			end).fails_with("needs a radius")
+				NavMesh.FindRandomPoint(mesh, { Center = v(1, 0, 1) })
+			end).fails_with("needs a Radius")
 		end)
 	end)
 end

@@ -51,6 +51,7 @@ local CHASE_REPATH = 0.25 -- seconds between chaser goal checks
 local CHASE_MOVED = 2 -- repath when the target moved this far from the path's goal
 local STUCK_SECONDS = 0.75
 local WANDER_RANGE = 30
+local RESCUE_RADIUS = 4 -- studs: how far to look for the mesh when a door closed on an NPC
 local MUD_COST = 4
 
 -- A tiny seeded LCG in [0, 1), so runs are reproducible (FindRandomPoint takes an rng).
@@ -109,8 +110,8 @@ local function repath(world: World, npc: Npc, goal: vector, why: string): boolea
 	count(world, npc, "status:" .. path.Status)
 	npc.Goal = goal
 	if path.Status == "NoStart" then
-		-- The NPC is off the mesh (a door closed on it). HAND-ROLLED: rescue it with a wider snap.
-		local rescue = NavMesh.FindNearestPoint(world.Mesh, npc.Position, { SnapExtents = vector.create(4, 4, 4) })
+		-- The NPC is off the mesh (a door closed on it): step back onto the nearest floor.
+		local rescue = NavMesh.FindNearestPoint(world.Mesh, npc.Position, npc.Filter, RESCUE_RADIUS)
 		log(
 			world,
 			`{npc.Name}: NoStart at {fmt(npc.Position)}, moved to {rescue and fmt(rescue.Position) or "nowhere"}`
@@ -118,9 +119,6 @@ local function repath(world: World, npc: Npc, goal: vector, why: string): boolea
 		if rescue then
 			npc.Position, npc.Floor = rescue.Position :: any, rescue.Floor
 		end
-		npc.Path = nil
-		return false
-	elseif path.Status == "NoGoal" then
 		npc.Path = nil
 		return false
 	elseif path.Status ~= "Success" then
@@ -137,38 +135,16 @@ local function repath(world: World, npc: Npc, goal: vector, why: string): boolea
 	return #path.Waypoints >= 2
 end
 
--- HAND-ROLLED: FindRandomPoint ignores AgentRadius, so reject points closer to a wall than the
--- NPC is wide, and points too far from it to be worth a stroll.
+-- A point within a stroll where the NPC fits (FindRandomPoint honours AgentRadius).
 local function pickWanderGoal(world: World, npc: Npc): vector?
-	local NavMesh = world.NavMesh
-	for _ = 1, 8 do
-		local point = timed(
-			world,
-			"FindRandomPoint",
-			NavMesh.FindRandomPoint,
-			world.Mesh,
-			npc.Filter,
-			npc.Position,
-			WANDER_RANGE,
-			world.Rng
-		)
-		if point == nil then
-			return nil
-		end
-		local wall = timed(
-			world,
-			"FindDistanceToWall",
-			NavMesh.FindDistanceToWall,
-			world.Mesh,
-			point.Position,
-			npc.Radius + 0.25
-		)
-		if wall > npc.Radius then
-			return point.Position :: any
-		end
-		count(world, npc, "wander:rejected-near-wall")
-	end
-	return nil
+	local point = timed(
+		world,
+		"FindRandomPoint",
+		world.NavMesh.FindRandomPoint,
+		world.Mesh,
+		{ Filter = npc.Filter, Center = npc.Position, Radius = WANDER_RANGE, Rng = world.Rng }
+	)
+	return point and point.Position :: any
 end
 
 -- The patrol route the chased target runs: up the ramp, along the balcony, down the jump into
@@ -239,18 +215,9 @@ local function follow(world: World, npc: Npc, dt: number)
 	local goal: vector = target.Position :: any
 	local remaining = flatDistance(npc.Position, goal)
 	local to = if remaining <= step then goal else npc.Position + (goal - npc.Position) * (step / remaining)
-	local ok, moved = pcall(
-		timed :: any,
-		world,
-		"MoveAlongSurface",
-		NavMesh.MoveAlongSurface,
-		world.Mesh,
-		npc.Position,
-		to,
-		npc.Filter
-	)
-	if not ok then
-		-- MoveAlongSurface errors when the NPC is off the mesh (the door closed on it).
+	local moved = timed(world, "MoveAlongSurface", NavMesh.MoveAlongSurface, world.Mesh, npc.Position, to, npc.Filter)
+	if moved.Status == "NoStart" then
+		-- The NPC is off the mesh (the door closed on it).
 		count(world, npc, "move:off-mesh")
 		repath(world, npc, npc.Goal or npc.Position, "off-mesh")
 		return
@@ -262,8 +229,9 @@ local function follow(world: World, npc: Npc, dt: number)
 		npc.StuckTime = 0
 		return
 	end
-	-- HAND-ROLLED: waypoints (the goal, a Partial path's end) can sit closer to a wall than the
-	-- radius, and MoveAlongSurface keeps us AgentRadius off it, so "arrived" needs a tolerance.
+	-- HAND-ROLLED: a corner waypoint can sit closer to a wall than the radius (the funnel offsets
+	-- it along the portal, SR4), and MoveAlongSurface keeps us AgentRadius off it, so "arrived"
+	-- needs a tolerance. The path's end is already pushed off the walls (ticket 24).
 	if progress < 0.1 * step and remaining <= npc.Radius * math.sqrt(2) + 0.05 then -- sqrt 2: a corner
 		count(world, npc, "arrived-short-of-waypoint")
 		npc.Next += 1
@@ -368,7 +336,8 @@ local function step(world: World, dt: number)
 end
 
 local function spawn(world: World, name: string, kind: Kind, radius: number, speed: number, at: vector)
-	local filter = { AgentRadius = radius, AreaCosts = { [world.Level.MUD] = MUD_COST } }
+	-- GoalFallback: a chased target mid-jump is off the mesh; path to the floor under it instead.
+	local filter = { AgentRadius = radius, AreaCosts = { [world.Level.MUD] = MUD_COST }, GoalFallback = true }
 	local snapped = world.NavMesh.FindNearestPoint(world.Mesh, at, filter)
 	assert(snapped, `{name} spawns off the mesh at {fmt(at)}`)
 	table.insert(world.Npcs, {

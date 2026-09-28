@@ -191,11 +191,29 @@ function Queries.Move(
 		end
 		target = vector.create(p.X + w.X * along, target.Y, p.Z + w.Z * along)
 	end
+	return Queries.Push(s, t, p, radius, costs)
+end
+
+--[=[
+	@within NavMeshQueries
+	Pushes `p` (on triangle `t`) to `radius` from the nearest wall, walking over the surface so
+	it never passes through another wall: twice, so a corner's two walls are both cleared. Where
+	the mesh is narrower than `2 radius` it gets as far as the walls allow. Returns the point
+	and its triangle (unchanged at radius 0). `MoveAlongSurface`, `FindPath`'s end and
+	`RandomPoint` all use it.
+]=]
+function Queries.Push(
+	s: Storage.State,
+	t: number,
+	p: vector,
+	radius: number,
+	costs: { [number]: number }
+): (vector, number)
 	if radius > 0 then
-		-- Keep the agent's radius from the nearest wall, without walking through another.
 		for _ = 1, 2 do
+			-- A wall found is nearer than the radius (DistanceToWall reports none at radius).
 			local d, _, normal = Queries.DistanceToWall(s, t, p, radius, costs)
-			if normal == nil or d >= radius then
+			if normal == nil then
 				break
 			end
 			local push = vector.create(p.X + normal.X * (radius - d), p.Y, p.Z + normal.Z * (radius - d))
@@ -206,23 +224,47 @@ function Queries.Move(
 	return p, t
 end
 
+local TRIES = 32
+local FIT = 1e-6 -- slack on "at least agentRadius from every wall", for the push's rounding
+
 --[=[
 	@within NavMeshQueries
-	A random point on the mesh, uniform in plan (X, Z) over triangles not excluded by `costs`
-	and, when `center` is given, within `radius` of it in plan. `rng` returns [0, 1). Returns the
-	point and its triangle, or nil when nothing qualifies.
+	A random point where an agent of radius `agentRadius` can stand, uniform in plan (X, Z):
+	- over triangles not excluded by `costs` and, when `center` is given, within `radius` of it
+	  in plan;
+	- at `agentRadius > 0`, only triangles the agent can enter (an edge whose portal width is at
+	  least `2 agentRadius`; a wall's is 0), and only points at least `agentRadius` from every
+	  wall.
+	It draws up to 32 points and keeps the first that qualifies, which is exactly uniform over
+	that region. When every draw misses (a region barely wider than the agent), the last one
+	that fell in the circle is pushed off the walls (`Push`) and kept if it then qualifies: that
+	one lands on the region's edge. `rng` returns [0, 1). Returns the point and its triangle, or
+	nil when nothing qualifies.
 ]=]
 function Queries.RandomPoint(
 	s: Storage.State,
 	costs: { [number]: number },
 	center: vector?,
 	radius: number,
+	agentRadius: number,
 	rng: () -> number
 ): (vector?, number)
+	local width = 2 * agentRadius
 	local candidates, cumulative = {}, {}
 	local total = 0
 	for t = 1, Storage.TriangleCount(s) do
 		if (costs[Storage.GetTriangleArea(s, t)] or 1) == math.huge then
+			continue
+		end
+		if
+			width > 0
+			and math.max(
+					Storage.GetPortalWidth(s, t, 1),
+					Storage.GetPortalWidth(s, t, 2),
+					Storage.GetPortalWidth(s, t, 3)
+				)
+				< width
+		then
 			continue
 		end
 		local a, b, c = Storage.GetTriangle(s, t)
@@ -240,8 +282,14 @@ function Queries.RandomPoint(
 	if #candidates == 0 then
 		return nil, 0
 	end
-	-- ponytail: rejection sampling for the circle, 32 tries; a clipped-triangle sampler if that misses.
-	for _ = 1, 32 do
+	local function inCircle(p: vector): boolean
+		return center == nil or (p.X - center.X) ^ 2 + (p.Z - center.Z) ^ 2 <= radius * radius
+	end
+	local function fits(t: number, p: vector): boolean
+		return agentRadius == 0 or Queries.DistanceToWall(s, t, p, agentRadius, costs) >= agentRadius - FIT
+	end
+	local missT, missP = 0, nil :: vector?
+	for _ = 1, TRIES do
 		local pick = rng() * total
 		local lo, hi = 1, #candidates
 		while lo < hi do
@@ -257,7 +305,16 @@ function Queries.RandomPoint(
 		local pa, pb, pc = Storage.GetVertex(s, a), Storage.GetVertex(s, b), Storage.GetVertex(s, c)
 		local r1, r2 = math.sqrt(rng()), rng()
 		local p = pa * (1 - r1) + pb * (r1 * (1 - r2)) + pc * (r1 * r2)
-		if center == nil or (p.X - center.X) ^ 2 + (p.Z - center.Z) ^ 2 <= radius * radius then
+		if inCircle(p) then
+			if fits(t, p) then
+				return p, t
+			end
+			missT, missP = t, p
+		end
+	end
+	if missP then
+		local p, t = Queries.Push(s, missT, missP, agentRadius, costs)
+		if inCircle(p) and fits(t, p) then
 			return p, t
 		end
 	end

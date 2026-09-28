@@ -58,8 +58,8 @@ for _, size in { 0, 32, 16, 8, 4 } do
 	-- 200 random paths, then close the door once and count the ones IsPathValid rejects.
 	local paths, findTimes = {}, {}
 	for _ = 1, 200 do
-		local a = NavMesh.FindRandomPoint(mesh, nil, nil, nil, rng)
-		local b = NavMesh.FindRandomPoint(mesh, nil, nil, nil, rng)
+		local a = NavMesh.FindRandomPoint(mesh, { Rng = rng })
+		local b = NavMesh.FindRandomPoint(mesh, { Rng = rng })
 		if a and b then
 			local path
 			table.insert(

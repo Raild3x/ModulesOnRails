@@ -112,17 +112,25 @@ export type NavMeshDrawOptions = {
 --[=[
 	@within NavMesh
 	@interface QueryFilter
-	.AgentRadius number? -- studs (default 0), up to the mesh's MaxAgentRadius; paths only go where the agent fits, and turn this far from wall corners (straight stretches are not offset from walls). The path's end point is not offset.
+	.AgentRadius number? -- studs (default 0), up to the mesh's MaxAgentRadius; paths only go where the agent fits, and turn this far from wall corners (straight stretches are not offset from walls). The path's end point is pushed this far off the walls, so it can differ from the goal by up to the radius.
 	.AreaCosts { [number]: number }? -- cost multiplier per area id (default 1, >= 0); math.huge excludes the area
 	.MaxExpansions number? -- stop with "Budget" after expanding this many triangles (default unlimited)
 	.SnapExtents Vector3? -- half-size of the snap box around a feet position (default (0.5, 4, 0.5))
+	.GoalFallback boolean? -- FindPath only: a goal that doesn't snap gives "Partial" to the closest reachable point instead of "NoGoal" (default false)
 
+	**Closest reachable point (`GoalFallback`):** the search runs from the start with no goal
+	triangle, over every triangle it can reach for this `AgentRadius` and `AreaCosts` (up to
+	`MaxExpansions`, then `Budget`). Each reached triangle offers its point nearest the goal in
+	plan (X, Z), at its surface height, and the one nearest the goal in 3D wins; the end is then
+	pushed off the walls like any end. There is no distance bound: the whole reachable region is
+	searched, as for any unreachable goal, so bound it with `MaxExpansions` on a big mesh.
 ]=]
 export type QueryFilter = {
 	AgentRadius: number?,
 	AreaCosts: { [number]: number }?,
 	MaxExpansions: number?,
 	SnapExtents: Vector3?,
+	GoalFallback: boolean?,
 }
 
 --[=[
@@ -132,6 +140,38 @@ export type QueryFilter = {
 	.Floor string
 ]=]
 export type NavPoint = { Position: Vector3, Floor: string }
+
+--[=[
+	@within NavMesh
+	@type MoveStatus "Success" | "NoStart"
+	- `Success`: moved (it may have slid along or stopped at a wall).
+	- `NoStart`: `from` did not snap onto the mesh; nothing moved.
+]=]
+export type MoveStatus = "Success" | "NoStart"
+
+--[=[
+	@within NavMesh
+	@interface MoveResult
+	.Status MoveStatus
+	.Position Vector3 -- where the move ended; `from` itself on NoStart
+	.Floor string? -- the floor it ended on; nil on NoStart
+]=]
+export type MoveResult = { Status: MoveStatus, Position: Vector3, Floor: string? }
+
+--[=[
+	@within NavMesh
+	@interface RandomPointOptions
+	.Filter QueryFilter? -- AreaCosts exclusions and AgentRadius apply
+	.Center Vector3? -- pick within Radius of this point, in plan
+	.Radius number? -- studs, >= 0; required with Center
+	.Rng (() -> number)? -- returns [0, 1) (default math.random)
+]=]
+export type RandomPointOptions = {
+	Filter: QueryFilter?,
+	Center: Vector3?,
+	Radius: number?,
+	Rng: (() -> number)?,
+}
 
 --[=[
 	@within NavMesh
@@ -146,10 +186,13 @@ export type Waypoint = { Position: Vector3, Floor: string, Label: string? }
 	@within NavMesh
 	@type PathStatus "Success" | "Partial" | "Budget" | "NoStart" | "NoGoal"
 	- `Success`: reached the goal.
-	- `Partial`: the goal is unreachable; the waypoints end at the reachable point nearest it.
+	- `Partial`: the goal is unreachable (or, with `GoalFallback`, off the mesh); the waypoints
+	  end at the reachable point nearest it.
 	- `Budget`: `MaxExpansions` was hit; the waypoints end at the point nearest the goal found so
 	  far.
 	- `NoStart` / `NoGoal`: that end could not be snapped onto the mesh (no waypoints).
+	Every end is pushed `AgentRadius` off the walls, so it can differ from the goal by up to that
+	even on `Success`.
 ]=]
 export type PathStatus = "Success" | "Partial" | "Budget" | "NoStart" | "NoGoal"
 
@@ -157,7 +200,7 @@ export type PathStatus = "Success" | "Partial" | "Budget" | "NoStart" | "NoGoal"
 	@within NavMesh
 	@interface PathResult
 	.Status PathStatus
-	.Waypoints { Waypoint } -- from the snapped start
+	.Waypoints { Waypoint } -- from the snapped start; the last is pushed AgentRadius off the walls
 	.Cost number -- the search cost: 3D length times area multipliers, measured through the midpoints of the edges crossed
 	.TileStamps { number } -- opaque: for IsPathValid
 ]=]
