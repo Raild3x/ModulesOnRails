@@ -20,6 +20,10 @@ return function(t: tiniest)
 			expect(NavMeshDebug.NavMeshEditor).exists()
 		end)
 
+		test("the public module re-exports DrawListRenderer", function()
+			expect(NavMeshDebug.DrawListRenderer).is(ConstrainedDelaunayDebug.DrawListRenderer)
+		end)
+
 		test("constraineddelaunaydebug sibling", function()
 			local svg = ConstrainedDelaunayDebug.SvgBackend.Render {}
 			expect(svg:find("<svg", 1, true) ~= nil).is_true()
