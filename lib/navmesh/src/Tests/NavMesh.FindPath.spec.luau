@@ -100,7 +100,8 @@ return function(t: tiniest)
 			expect(path.Status).is("Success")
 			expect(route(path)).is("1.0000,0.0000,1.0000 19.0000,0.0000,17.0000")
 			expect(path.Waypoints[1].Floor).is("Ground")
-			expect(#path.TileStamps).is(0)
+			expect(#path.TileStamps).is(2) -- one tile: (tile, stamp)
+			expect(NavMesh.IsPathValid(mesh, path)).is_true()
 		end)
 
 		test("the funnel bends only at the wall's corners", function()
@@ -220,8 +221,8 @@ return function(t: tiniest)
 					for _, b in spots do
 						local st, sp = Snap.Snap(mesh, a, extents, {})
 						local gt, gp = Snap.Snap(mesh, b, extents, {})
-						local _, corridor, endP = Search.Run(mesh, st, sp :: any, gt, gp :: any, {}, math.huge, 0)
-						local points = Funnel.StringPull(mesh, corridor, sp :: any, endP, 0)
+						local _, corridor, vias, endP = Search.Run(mesh, st, sp :: any, gt, gp :: any, {}, math.huge, 0)
+						local points = Funnel.StringPull(mesh, corridor, vias, sp :: any, endP, 0)
 						corners += #points - 2
 						expect(table.concat(funnelViolations(mesh, corridor, points), "\n"))
 							.with_context(`{scenario.Name} {fmt(a)} -> {fmt(b)}`)
@@ -325,7 +326,9 @@ return function(t: tiniest)
 			expect(wide.Status).is("Success")
 			expect(NavMesh.FindPath(mesh, v(22, 0, 5), v(10, 0, 5)).Status).is("NoStart")
 			-- The default extents: 0.5 across in Z too, and exactly 4 vertically.
-			expect(fmt(NavMesh.FindPath(mesh, v(5, 0, -0.4), v(10, 0, 5)).Waypoints[1].Position)).is("5.0000,0.0000,0.0000")
+			expect(fmt(NavMesh.FindPath(mesh, v(5, 0, -0.4), v(10, 0, 5)).Waypoints[1].Position)).is(
+				"5.0000,0.0000,0.0000"
+			)
 			expect(NavMesh.FindPath(mesh, v(5, 0, -0.6), v(10, 0, 5)).Status).is("NoStart")
 			expect(NavMesh.FindPath(mesh, v(5, 4, 5), v(10, 0, 5)).Status).is("Success")
 			expect(NavMesh.FindPath(mesh, v(5, 4.001, 5), v(10, 0, 5)).Status).is("NoStart")

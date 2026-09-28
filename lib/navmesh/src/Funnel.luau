@@ -25,46 +25,12 @@ local function orient(a: vector, b: vector, c: vector): number
 	return (b.X - a.X) * (c.Z - a.Z) - (b.Z - a.Z) * (c.X - a.X)
 end
 
---[=[
-	@within NavMeshFunnel
-	The path from `startP` to `endP` through `corridor`, as points plus the triangle each point
-	was taken from (for its floor).
-]=]
-function Funnel.StringPull(
-	s: Storage.State,
-	corridor: { number },
-	startP: vector,
-	endP: vector,
-	radius: number
-): ({ vector }, { number })
-	-- Portals: the start, each shared edge (left, right as seen when crossing it), the end.
-	local lefts, rights, owners = { startP }, { startP }, { corridor[1] }
-	for i = 1, #corridor - 1 do
-		local t, nextT = corridor[i], corridor[i + 1]
-		local verts = { Storage.GetTriangle(s, t) }
-		for e = 1, 3 do
-			if Storage.GetNeighbor(s, t, e) == nextT then
-				local lv, rv = verts[(e + 1) % 3 + 1], verts[e % 3 + 1]
-				local l, r = Storage.GetVertex(s, lv), Storage.GetVertex(s, rv)
-				if radius > 0 then
-					local length = vector.magnitude(r - l)
-					local shift = math.min(radius, length * 0.5) / length
-					local l2 = if Storage.IsWallVertex(s, lv) then l + (r - l) * shift else l
-					local r2 = if Storage.IsWallVertex(s, rv) then r + (l - r) * shift else r
-					l, r = l2, r2
-				end
-				table.insert(lefts, l)
-				table.insert(rights, r)
-				table.insert(owners, t)
-				break
-			end
-		end
-	end
-	table.insert(lefts, endP)
-	table.insert(rights, endP)
-	table.insert(owners, corridor[#corridor])
-
-	local points, from = { startP }, { corridor[1] }
+-- The simple stupid funnel over one run of portals (lefts[1] = rights[1] = the start, the last
+-- pair = the end), then without exactly zero-turn corners. Returns the points and, for each,
+-- the triangle it was taken from.
+local function pull(lefts: { vector }, rights: { vector }, owners: { number }): ({ vector }, { number })
+	local startP, endP = lefts[1], lefts[#lefts]
+	local points, from = { startP }, { owners[1] }
 	local apex, left, right = startP, startP, startP
 	local apexI, leftI, rightI = 1, 1, 1
 	local i = 2
@@ -107,15 +73,15 @@ function Funnel.StringPull(
 	end
 	if points[#points] ~= endP then
 		table.insert(points, endP)
-		table.insert(from, corridor[#corridor])
+		table.insert(from, owners[#owners])
 	end
 	-- A line that grazes a vertex exactly leaves a zero-turn corner there: drop it (exact test).
 	local kept, keptFrom = { points[1] }, { from[1] }
-	for i = 2, #points - 1 do
-		local p, q, r = kept[#kept], points[i], points[i + 1]
-		if CDT.Orient2D(p.X, p.Z, q.X, q.Z, r.X, r.Z) ~= 0 then
+	for k = 2, #points - 1 do
+		local a, q, c = kept[#kept], points[k], points[k + 1]
+		if CDT.Orient2D(a.X, a.Z, q.X, q.Z, c.X, c.Z) ~= 0 then
 			table.insert(kept, q)
-			table.insert(keptFrom, from[i])
+			table.insert(keptFrom, from[k])
 		end
 	end
 	if #points > 1 then
@@ -123,6 +89,77 @@ function Funnel.StringPull(
 		table.insert(keptFrom, from[#points])
 	end
 	return kept, keptFrom
+end
+
+--[=[
+	@within NavMeshFunnel
+	The path from `startP` to `endP` through `corridor` (entered as `vias` says, see Search),
+	as points, the triangle each point was taken from (for its floor), and the label of each
+	point where a link starts (by point index).
+
+	Seam portals are portals like shared edges (their ends are not offset for radius). A link
+	breaks the string: the path runs to the link's start, which carries its label, then on from
+	where it lands.
+]=]
+function Funnel.StringPull(
+	s: Storage.State,
+	corridor: { number },
+	vias: { number },
+	startP: vector,
+	endP: vector,
+	radius: number
+): ({ vector }, { number }, { [number]: string })
+	local points, from, labels = {}, {}, {}
+	local lefts, rights, owners = { startP }, { startP }, { corridor[1] }
+	local function finish(stop: vector, owner: number)
+		table.insert(lefts, stop)
+		table.insert(rights, stop)
+		table.insert(owners, owner)
+		local segment, segmentFrom = pull(lefts, rights, owners)
+		for k, point in segment do
+			table.insert(points, point)
+			table.insert(from, segmentFrom[k])
+		end
+	end
+	for i = 1, #corridor - 1 do
+		local t, nextT, via = corridor[i], corridor[i + 1], vias[i + 1]
+		if via ~= 0 then
+			local _, _, kind, ref, a, b = Storage.GetExtra(s, via)
+			if kind == Storage.EXTRA_LINK then
+				finish(a, t)
+				local label = select(7, Storage.GetLink(s, ref))
+				if label ~= "" then
+					labels[#points] = label
+				end
+				lefts, rights, owners = { b }, { b }, { nextT }
+			else
+				table.insert(lefts, a)
+				table.insert(rights, b)
+				table.insert(owners, t)
+			end
+			continue
+		end
+		local verts = { Storage.GetTriangle(s, t) }
+		for e = 1, 3 do
+			if Storage.GetNeighbor(s, t, e) == nextT then
+				local lv, rv = verts[(e + 1) % 3 + 1], verts[e % 3 + 1]
+				local l, r = Storage.GetVertex(s, lv), Storage.GetVertex(s, rv)
+				if radius > 0 then
+					local length = vector.magnitude(r - l)
+					local shift = math.min(radius, length * 0.5) / length
+					local l2 = if Storage.IsWallVertex(s, lv) then l + (r - l) * shift else l
+					local r2 = if Storage.IsWallVertex(s, rv) then r + (l - r) * shift else r
+					l, r = l2, r2
+				end
+				table.insert(lefts, l)
+				table.insert(rights, r)
+				table.insert(owners, t)
+				break
+			end
+		end
+	end
+	finish(endP, corridor[#corridor])
+	return points, from, labels
 end
 
 return Funnel

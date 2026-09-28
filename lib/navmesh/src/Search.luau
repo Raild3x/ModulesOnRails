@@ -29,6 +29,17 @@
 	the exit edge's portal width. A corner width already covers both of its portals, so the goal
 	needs no extra check.
 
+	**Seams and links (ticket 16):** after its three edges, a triangle's extra links are tried.
+	- A seam portal crosses like an edge, into another floor's triangle: the node sits at the
+	  portal's midpoint, and the corner width to the seam edge applies.
+	- A link walks to its start point, pays `Cost` times its area's multiplier, and lands at its
+	  end point. Disabled links and excluded areas are skipped; agent radius is not checked on a
+	  link.
+	- A triangle entered by a seam or a link has no entry edge of its own, so leaving it needs
+	  the exit edge's portal width, like the start.
+	The corridor records how each triangle was entered (`Via`: 0 = an edge, else the extra link
+	id), for the funnel.
+
 	**Scratch:** a per-mesh pool in a weak-keyed table, holding only arrays and the open list, so
 	it never keeps a mesh alive.
 ]=]
@@ -43,6 +54,7 @@ type Scratch = {
 	G: { number },
 	Pos: { vector },
 	Entry: { number },
+	Via: { number },
 	Parent: { number },
 	Seen: { number },
 	Closed: { number },
@@ -63,6 +75,7 @@ local function scratchFor(s: Storage.State): Scratch
 			G = table.create(n, 0),
 			Pos = table.create(n, vector.zero),
 			Entry = table.create(n, 0),
+			Via = table.create(n, 0),
 			Parent = table.create(n, 0),
 			Seen = table.create(n, 0),
 			Closed = table.create(n, 0),
@@ -77,12 +90,26 @@ end
 
 --[=[
 	@within NavMeshSearch
-	`min(1, smallest AreaCosts multiplier)`: the SR7 heuristic scale.
+	The SR7 heuristic scale: `min(1, smallest AreaCosts multiplier, smallest enabled link
+	(Cost x its area multiplier) / its 3D length)`, so the heuristic never overestimates.
 ]=]
-function Search.HeuristicScale(costs: { [number]: number }): number
+function Search.HeuristicScale(s: Storage.State, costs: { [number]: number }): number
 	local scale = 1
 	for _, multiplier in costs do
 		scale = math.min(scale, multiplier)
+	end
+	for id = 1, Storage.LinkCount(s) do
+		local _, from, _, to, cost, area, _, _, enabled = Storage.GetLink(s, id)
+		local multiplier = costs[area] or 1
+		if enabled and multiplier ~= math.huge then
+			local length = vector.magnitude(to - from)
+			local price = cost * multiplier
+			if length > 0 then
+				scale = math.min(scale, price / length)
+			elseif price == 0 then
+				scale = 0
+			end
+		end
 	end
 	return scale
 end
@@ -91,8 +118,9 @@ end
 	@within NavMeshSearch
 	Searches from triangle `startT` at point `startP` to `goalT` at `goalP`.
 
-	Returns the status, the triangle corridor from the start, the point the path ends at, and
-	its cost. On `Partial` (the goal is unreachable) and `Budget` (`maxExpansions` triangles
+	Returns the status, the triangle corridor from the start, how each corridor triangle was
+	entered (0 = an edge, else the extra link id; 0 for the first), the point the path ends at,
+	and its cost. On `Partial` (the goal is unreachable) and `Budget` (`maxExpansions` triangles
 	were expanded first), the corridor ends at the reached triangle holding the point nearest
 	the goal, and the cost is that of reaching its node.
 ]=]
@@ -105,20 +133,22 @@ function Search.Run(
 	costs: { [number]: number },
 	maxExpansions: number,
 	radius: number
-): (Status, { number }, vector, number)
+): (Status, { number }, { number }, vector, number)
 	if startT == goalT then
 		return "Success",
 			{ startT },
+			{ 0 },
 			goalP,
 			vector.magnitude(goalP - startP) * (costs[Storage.GetTriangleArea(s, startT)] or 1)
 	end
 	local scratch = scratchFor(s)
 	local stamp = scratch.Stamp + 1
 	scratch.Stamp = stamp
-	local g, pos, entry, parent, seen, closed, closedList, open =
+	local g, pos, entry, via, parent, seen, closed, closedList, open =
 		scratch.G,
 		scratch.Pos,
 		scratch.Entry,
+		scratch.Via,
 		scratch.Parent,
 		scratch.Seen,
 		scratch.Closed,
@@ -132,9 +162,12 @@ function Search.Run(
 	local GetCornerWidth, GetPortalWidth, GetNeighbor =
 		Storage.GetCornerWidth, Storage.GetPortalWidth, Storage.GetNeighbor
 	local nb: buffer = s.TriNeighbors -- inlined: Storage.GetNeighbor (i32 x3 per triangle)
-	local scale = Search.HeuristicScale(costs)
+	local GetExtraHead, GetExtra, GetLink = Storage.GetExtraHead, Storage.GetExtra, Storage.GetLink
+	local EXTRA_LINK = Storage.EXTRA_LINK
+	local scale = Search.HeuristicScale(s, costs)
 
 	g[startT], pos[startT], seen[startT], parent[startT] = 0, startP, stamp, 0
+	entry[startT], via[startT] = 0, 0
 	push(open, startT, vector.magnitude(goalP - startP) * scale)
 	local expansions = 0
 	local status: Status = "Partial"
@@ -173,7 +206,7 @@ function Search.Run(
 			end
 			if width > 0 then
 				-- Edges e and entry[t] meet at the third vertex, 6 - e - entry[t].
-				local clear = if t == startT then GetPortalWidth(s, t, e) else GetCornerWidth(s, t, 6 - e - entry[t])
+				local clear = if entry[t] == 0 then GetPortalWidth(s, t, e) else GetCornerWidth(s, t, 6 - e - entry[t])
 				if clear < width then
 					continue
 				end
@@ -186,10 +219,55 @@ function Search.Run(
 				else (GetVertex(s, ia) + GetVertex(s, ib)) * 0.5
 			local ng = gt + vector.magnitude(mp - tp) * (tm + mm) * 0.5
 			if seen[m] ~= stamp or ng < g[m] then
-				g[m], pos[m], seen[m], parent[m] = ng, mp, stamp, t
+				g[m], pos[m], seen[m], parent[m], via[m] = ng, mp, stamp, t, 0
 				if width > 0 then
 					entry[m] = if GetNeighbor(s, m, 1) == t then 1 elseif GetNeighbor(s, m, 2) == t then 2 else 3
 				end
+				push(open, m, ng + vector.magnitude(goalP - mp) * scale)
+			end
+		end
+		-- Seam portals and links.
+		local id = GetExtraHead(s, t)
+		while id ~= 0 do
+			local nextId, m, kind, ref, a, b = GetExtra(s, id)
+			local extra = id
+			id = nextId
+			if closed[m] == stamp then
+				continue
+			end
+			local mm = costs[GetTriangleArea(s, m)] or 1
+			if mm == math.huge then
+				continue
+			end
+			local mp, ng
+			if kind == EXTRA_LINK then
+				local _, _, _, _, cost, area, _, _, enabled = GetLink(s, ref)
+				local lm = costs[area] or 1
+				if not enabled or lm == math.huge then
+					continue
+				end
+				ng = gt + vector.magnitude(a - tp) * tm + cost * lm
+				if m == goalT then
+					mp = goalP
+					ng += vector.magnitude(goalP - b) * mm
+				else
+					mp = b
+				end
+			else
+				-- A seam portal on edge `ref` of t.
+				if width > 0 then
+					local clear = if entry[t] == 0
+						then GetPortalWidth(s, t, ref)
+						else GetCornerWidth(s, t, 6 - ref - entry[t])
+					if clear < width then
+						continue
+					end
+				end
+				mp = if m == goalT then goalP else (a + b) * 0.5
+				ng = gt + vector.magnitude(mp - tp) * (tm + mm) * 0.5
+			end
+			if seen[m] ~= stamp or ng < g[m] then
+				g[m], pos[m], seen[m], parent[m], via[m], entry[m] = ng, mp, stamp, t, extra, 0
 				push(open, m, ng + vector.magnitude(goalP - mp) * scale)
 			end
 		end
@@ -208,17 +286,19 @@ function Search.Run(
 			end
 		end
 	end
-	local corridor = {}
+	local corridor, vias = {}, {}
 	local t = last
 	while t ~= 0 do
 		table.insert(corridor, t)
+		table.insert(vias, if t == startT then 0 else via[t])
 		t = parent[t]
 	end
 	local n = #corridor
 	for i = 1, n // 2 do
 		corridor[i], corridor[n + 1 - i] = corridor[n + 1 - i], corridor[i]
+		vias[i], vias[n + 1 - i] = vias[n + 1 - i], vias[i]
 	end
-	return status, corridor, endP, g[last]
+	return status, corridor, vias, endP, g[last]
 end
 
 return Search

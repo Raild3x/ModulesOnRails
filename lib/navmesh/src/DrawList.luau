@@ -21,6 +21,8 @@ local AREA_COLORS = { "#9e9e9e", "#8d6e63", "#29b6f6", "#ffca28", "#ab47bc", "#6
 local WALL_COLOR = "#212121"
 local TILE_COLOR = "#ff7043"
 local PATH_COLOR = "#d81b60"
+local SEAM_COLOR = "#00acc1"
+local LINK_COLOR = "#6a1b9a"
 
 local DrawList = {}
 
@@ -66,7 +68,7 @@ function DrawList.ToDrawList(s: Storage.State, options: Types.NavMeshDrawOptions
 		for t = 1, Storage.TriangleCount(s) do
 			local verts = { Storage.GetTriangle(s, t) }
 			for e = 1, 3 do
-				if Storage.GetNeighbor(s, t, e) == 0 then
+				if Storage.IsWallEdge(s, t, e) then
 					local p = Storage.GetVertex(s, verts[e % 3 + 1])
 					local q = Storage.GetVertex(s, verts[(e + 1) % 3 + 1])
 					table.insert(list, {
@@ -91,6 +93,45 @@ function DrawList.ToDrawList(s: Storage.State, options: Types.NavMeshDrawOptions
 					Points = { corners[i], 0, corners[i + 1], corners[j], 0, corners[j + 1] },
 					Color = TILE_COLOR,
 					Layer = "Tiles",
+				})
+			end
+		end
+	end
+
+	if opts.Seams then
+		-- Each portal once (it is stored both ways).
+		for t = 1, Storage.TriangleCount(s) do
+			local id = Storage.GetExtraHead(s, t)
+			while id ~= 0 do
+				local nextId, target, kind, _, a, b = Storage.GetExtra(s, id)
+				if kind == Storage.EXTRA_SEAM and t < target then
+					table.insert(list, {
+						Kind = "Line",
+						Points = { a.X, a.Y, a.Z, b.X, b.Y, b.Z },
+						Color = SEAM_COLOR,
+						Layer = "Seams",
+					})
+				end
+				id = nextId
+			end
+		end
+	end
+
+	if opts.Links then
+		for id = 1, Storage.LinkCount(s) do
+			local _, from, _, to, _, _, _, both = Storage.GetLink(s, id)
+			table.insert(list, {
+				Kind = "Arrow",
+				Points = { from.X, from.Y, from.Z, to.X, to.Y, to.Z },
+				Color = LINK_COLOR,
+				Layer = "Links",
+			})
+			if both then
+				table.insert(list, {
+					Kind = "Arrow",
+					Points = { to.X, to.Y, to.Z, from.X, from.Y, from.Z },
+					Color = LINK_COLOR,
+					Layer = "Links",
 				})
 			end
 		end

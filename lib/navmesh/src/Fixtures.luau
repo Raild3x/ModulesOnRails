@@ -126,6 +126,64 @@ Fixtures.ShallowObstacles = {
 	},
 }
 
+--[=[
+	@within NavMeshFixtures
+	@prop ThreeFloorStairs Scenario
+	Ground (y = 0, 40 x 20) runs on under a ramp. The ramp (Stairs, x = 10..20, z = 0..4) climbs
+	to a mezzanine (Upper, y = 5, x = 20..40). Seams join Ground to Stairs at x = 10 and Stairs to
+	Upper at x = 20. The Ground seam edge keeps its Ground neighbour on both sides, so crossing
+	it can go onto the ramp or on under it.
+]=]
+Fixtures.ThreeFloorStairs = {
+	Name = "ThreeFloorStairs",
+	Desc = {
+		Floors = {
+			Ground = { Walkable = { flat(0, { 0, 0, 40, 0, 40, 20, 0, 20 }) } },
+			Stairs = { Walkable = { points { 10, 0, 0, 20, 5, 0, 20, 5, 4, 10, 0, 4 } } },
+			Upper = { Walkable = { flat(5, { 20, 0, 40, 0, 40, 20, 20, 20 }) } },
+		},
+		Seams = {
+			{ FloorA = "Ground", FloorB = "Stairs", From = vector.create(10, 0, 0), To = vector.create(10, 0, 4) },
+			{ FloorA = "Stairs", FloorB = "Upper", From = vector.create(20, 5, 0), To = vector.create(20, 5, 4) },
+		},
+	},
+}
+
+--[=[
+	@within NavMeshFixtures
+	@prop LinkJump Scenario
+	Two pads with a 4-stud gap, joined by a two-way link labelled "Jump".
+]=]
+Fixtures.LinkJump = {
+	Name = "LinkJump",
+	Desc = {
+		Floors = {
+			Ground = {
+				Walkable = { flat(0, { 0, 0, 10, 0, 10, 10, 0, 10 }), flat(0, { 14, 0, 24, 0, 24, 10, 14, 10 }) },
+			},
+		},
+		Links = { { From = vector.create(9, 0, 5), To = vector.create(15, 0, 5), Label = "Jump" } },
+	},
+}
+
+--[=[
+	@within NavMeshFixtures
+	@prop OneWayLink Scenario
+	A ledge (y = 4) with a one-way drop, labelled "Drop", to the ground beside it.
+]=]
+Fixtures.OneWayLink = {
+	Name = "OneWayLink",
+	Desc = {
+		Floors = {
+			Ledge = { Walkable = { flat(4, { 0, 0, 10, 0, 10, 10, 0, 10 }) } },
+			Ground = { Walkable = { flat(0, { 12, 0, 22, 0, 22, 10, 12, 10 }) } },
+		},
+		Links = {
+			{ From = vector.create(9, 4, 5), To = vector.create(13, 0, 5), Bidirectional = false, Label = "Drop" },
+		},
+	},
+}
+
 -- Every scenario defined above, sorted by name, so a new fixture can never be left out.
 local all: { Scenario } = {}
 for _, value in Fixtures :: { [string]: any } do

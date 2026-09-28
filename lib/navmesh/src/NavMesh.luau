@@ -30,6 +30,8 @@ export type QueryFilter = Types.QueryFilter
 export type Waypoint = Types.Waypoint
 export type PathStatus = Types.PathStatus
 export type PathResult = Types.PathResult
+export type SeamDesc = Types.SeamDesc
+export type LinkDesc = Types.LinkDesc
 export type NavMeshData = Storage.State
 
 local DEFAULT_SNAP_EXTENTS = vector.create(0.5, 4, 0.5)
@@ -102,17 +104,66 @@ function NavMesh.FindPath(mesh: NavMeshData, from: Vector3, to: Vector3, filter:
 	if goalP == nil then
 		return { Status = "NoGoal" :: PathStatus, Waypoints = {}, Cost = 0, TileStamps = {} }
 	end
-	local status, corridor, endP, cost = Search.Run(mesh, startT, startP, goalT, goalP, costs, maxExpansions, radius)
-	local points, owners = Funnel.StringPull(mesh, corridor, startP, endP, radius)
+	local status, corridor, vias, endP, cost =
+		Search.Run(mesh, startT, startP, goalT, goalP, costs, maxExpansions, radius)
+	local points, owners, labels = Funnel.StringPull(mesh, corridor, vias, startP, endP, radius)
 	local waypoints = table.create(#points)
 	for i, p in points do
 		waypoints[i] = {
 			Position = p :: any, -- a vector is a Vector3 on Roblox
 			Floor = Storage.GetFloorName(mesh, Storage.GetTriangleFloor(mesh, owners[i])),
+			Label = labels[i],
 		}
 	end
-	-- ponytail: TileStamps stays empty until Update and IsPathValid land (ticket 18).
-	return { Status = status :: PathStatus, Waypoints = waypoints, Cost = cost, TileStamps = {} }
+	-- Every tile the corridor passes through, with its stamp now (tile, stamp, tile, stamp, ...).
+	local stamps, seen = {}, {}
+	for _, t in corridor do
+		local tile = Storage.GetTriangleTile(mesh, t)
+		if not seen[tile] then
+			seen[tile] = true
+			table.insert(stamps, tile)
+			table.insert(stamps, Storage.GetTileStamp(mesh, tile))
+		end
+	end
+	return { Status = status :: PathStatus, Waypoints = waypoints, Cost = cost, TileStamps = stamps }
+end
+
+--[=[
+	@within NavMesh
+	Whether a path from `FindPath` still holds: false once a link toggle (or, later, an
+	`Update`) touched a tile it passes through (SR5). Deliberately conservative: a change
+	anywhere in such a tile invalidates it.
+]=]
+function NavMesh.IsPathValid(mesh: NavMeshData, path: PathResult): boolean
+	local stamps = path.TileStamps
+	for i = 1, #stamps, 2 do
+		local tile = stamps[i]
+		if tile > Storage.TileCount(mesh) or Storage.GetTileStamp(mesh, tile) ~= stamps[i + 1] then
+			return false
+		end
+	end
+	return true
+end
+
+--[=[
+	@within NavMesh
+	Enables or disables link `linkId` (its 1-based index in `Links`). Paths through either end's
+	tile become invalid (SR5), whether or not they use the link.
+]=]
+function NavMesh.SetLinkEnabled(mesh: NavMeshData, linkId: number, enabled: boolean)
+	if type(linkId) ~= "number" or linkId % 1 ~= 0 or linkId < 1 or linkId > Storage.LinkCount(mesh) then
+		error(`NavMesh.SetLinkEnabled: no link {linkId} (the mesh has {Storage.LinkCount(mesh)})`, 2)
+	end
+	if type(enabled) ~= "boolean" then
+		error("NavMesh.SetLinkEnabled: enabled must be a boolean", 2)
+	end
+	local fromTri, _, toTri = Storage.GetLink(mesh, linkId)
+	Storage.SetLinkFlag(mesh, linkId, enabled)
+	Storage.BumpTileStamp(mesh, Storage.GetTriangleTile(mesh, fromTri))
+	local toTile = Storage.GetTriangleTile(mesh, toTri)
+	if toTile ~= Storage.GetTriangleTile(mesh, fromTri) then
+		Storage.BumpTileStamp(mesh, toTile)
+	end
 end
 
 --[=[

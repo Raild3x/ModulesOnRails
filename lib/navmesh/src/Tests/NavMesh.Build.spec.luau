@@ -351,9 +351,9 @@ return function(t: tiniest)
 				"area 1: area id must be an integer",
 			},
 			{
-				"seams",
+				"a seam naming no floor",
 				{ Floors = { Ground = { Walkable = { square } } }, Seams = { {} } },
-				"Seams are not implemented yet",
+				"seam 1: FloorA 'nil' is not a floor",
 			},
 		}
 		for _, case in cases do

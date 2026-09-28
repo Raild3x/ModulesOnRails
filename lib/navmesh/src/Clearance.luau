@@ -9,8 +9,10 @@
 	Clearance widths (SR4, ruling U-a): the widest agent that can pass each part of a triangle,
 	computed once at Build so any `AgentRadius` works at query time.
 
-	**Walls** are mesh edges with no neighbour: the walkable and obstacle boundaries. Tile, area
-	and seam edges are never walls, so free-space vertices never bound a width.
+	**Walls** are mesh edges with no neighbour that are not open (`Storage.IsWallEdge`): the
+	walkable and obstacle boundaries. Tile, area and seam edges are never walls, so free-space
+	vertices never bound a width. Walls are per floor: near a seam, the other floor's walls are
+	not counted.
 
 	**Corner width** (between the two edges at vertex C of triangle ABC): an agent of radius r
 	passing from CA to CB is blocked exactly when the r-discs around wall edges, cut to the
@@ -292,7 +294,7 @@ function Clearance.Compute(s: Storage.State, cap: number)
 		local verts = { Storage.GetTriangle(s, t) }
 		local floor = Storage.GetTriangleFloor(s, t)
 		for e = 1, 3 do
-			if Storage.GetNeighbor(s, t, e) ~= 0 then
+			if not Storage.IsWallEdge(s, t, e) then
 				continue
 			end
 			local u, v = verts[e % 3 + 1], verts[(e + 1) % 3 + 1]
@@ -331,7 +333,11 @@ function Clearance.Compute(s: Storage.State, cap: number)
 		local minX, maxX = math.min(P[1].X, P[2].X, P[3].X), math.max(P[1].X, P[2].X, P[3].X)
 		local minZ, maxZ = math.min(P[1].Z, P[2].Z, P[3].Z), math.max(P[1].Z, P[2].Z, P[3].Z)
 		local across = { Storage.GetNeighbor(s, t, 1), Storage.GetNeighbor(s, t, 2), Storage.GetNeighbor(s, t, 3) }
-		local crossable = { across[1] ~= 0, across[2] ~= 0, across[3] ~= 0 }
+		local crossable = {
+			not Storage.IsWallEdge(s, t, 1),
+			not Storage.IsWallEdge(s, t, 2),
+			not Storage.IsWallEdge(s, t, 3),
+		}
 		local limit = math.min(FIRST_LIMIT, limitCap)
 		while true do
 			-- Walls within `limit` of the triangle, and how close each comes to it and its edges.
@@ -368,8 +374,9 @@ function Clearance.Compute(s: Storage.State, cap: number)
 				if crossable[k % 3 + 1] and crossable[(k + 1) % 3 + 1] then
 					r[k] = chain(feats, toTri, edges, triLinks, gaps, P[k].X, P[k].Z, edges[k])
 				end
-				-- A portal is shared: the lower-numbered triangle computes it (see below).
-				if crossable[k] and across[k] > t then
+				-- A portal is shared: the lower-numbered triangle computes it (see below). A seam
+				-- edge (open, no neighbour) is its own triangle's alone.
+				if crossable[k] and (across[k] > t or across[k] == 0) then
 					local u = P[k % 3 + 1]
 					local sink = { edges[k][3], edges[k][4], edges[k][3], edges[k][4] }
 					r[3 + k] = chain(feats, toEdge[k], { edges[k] }, {}, gaps, u.X, u.Z, sink)
@@ -381,17 +388,17 @@ function Clearance.Compute(s: Storage.State, cap: number)
 				-- range was searched and nothing blocks).
 				for k = 1, 3 do
 					Storage.SetCornerWidth(s, t, k, 2 * math.min(r[k], limitCap))
-					local n = across[k]
-					if n > t then
+					local nb = across[k]
+					if nb > t then
 						local width = 2 * math.min(r[3 + k], limitCap)
 						Storage.SetPortalWidth(s, t, k, width)
-						local back = if Storage.GetNeighbor(s, n, 1) == t
+						local back = if Storage.GetNeighbor(s, nb, 1) == t
 							then 1
-							elseif Storage.GetNeighbor(s, n, 2) == t then 2
+							elseif Storage.GetNeighbor(s, nb, 2) == t then 2
 							else 3
-						Storage.SetPortalWidth(s, n, back, width)
-					elseif n == 0 then
-						Storage.SetPortalWidth(s, t, k, 0)
+						Storage.SetPortalWidth(s, nb, back, width)
+					elseif nb == 0 then
+						Storage.SetPortalWidth(s, t, k, if crossable[k] then 2 * math.min(r[3 + k], limitCap) else 0)
 					end
 				end
 				break

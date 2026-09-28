@@ -28,11 +28,16 @@
 local CDT = require("../ConstrainedDelaunay")
 local Clearance = require("./Clearance")
 local Quantize = require("./Quantize")
+local Snap = require("./Snap")
 local Storage = require("./Storage")
 local Types = require("./Types")
 
 type Polygon = Types.Polygon
 type FloorDesc = Types.FloorDesc
+-- A seam as one floor sees it: its index and quantized ends (grid units).
+type FloorSeam = { Id: number, AX: number, AZ: number, BX: number, BZ: number }
+-- A triangle edge lying on a seam.
+type SeamPiece = { Tri: number, Edge: number }
 type NavMeshDesc = Types.NavMeshDesc
 type Triangulation = CDT.Triangulation
 
@@ -335,7 +340,13 @@ local function clipToRect(
 	return outX, outZ
 end
 
-local function buildFloor(s: Storage.State, name: string, floor: FloorDesc, explicitTileSize: number?)
+local function buildFloor(
+	s: Storage.State,
+	name: string,
+	floor: FloorDesc,
+	explicitTileSize: number?,
+	seams: { FloorSeam }
+): { [number]: { SeamPiece } }
 	local floorContext = `floor '{name}'`
 	if type(floor) ~= "table" or type(floor.Walkable) ~= "table" or #floor.Walkable == 0 then
 		fail(floorContext, "needs at least one Walkable ring")
@@ -397,6 +408,10 @@ local function buildFloor(s: Storage.State, name: string, floor: FloorDesc, expl
 	for i, ring in areas do
 		addRing(ring, GROUP_FIRST_AREA + i - 1)
 	end
+	for _, seam in seams do
+		minX, maxX = math.min(minX, seam.AX, seam.BX), math.max(maxX, seam.AX, seam.BX)
+		minZ, maxZ = math.min(minZ, seam.AZ, seam.BZ), math.max(maxZ, seam.AZ, seam.BZ)
+	end
 	local tileSize: number = explicitTileSize
 		or adaptiveTileSize((maxX - minX) * (maxZ - minZ) / (GRID * GRID), #edges // 2)
 	local creaseFirst = #edges // 2 + 1
@@ -419,6 +434,17 @@ local function buildFloor(s: Storage.State, name: string, floor: FloorDesc, expl
 				end
 			end
 		end
+	end
+	-- Seams: open constraints like creases, so each seam lines up with triangle edges (ticket 16).
+	local seamOfEdge: { [number]: number } = {}
+	for _, seam in seams do
+		table.insert(coords, seam.AX)
+		table.insert(coords, seam.AZ)
+		table.insert(coords, seam.BX)
+		table.insert(coords, seam.BZ)
+		table.insert(edges, #coords // 2 - 1)
+		table.insert(edges, #coords // 2)
+		seamOfEdge[#edges // 2] = seam.Id
 	end
 	local creaseLast = #edges // 2
 	-- The tile grid, aligned to the world origin, as full-length lines over the floor.
@@ -448,6 +474,17 @@ local function buildFloor(s: Storage.State, name: string, floor: FloorDesc, expl
 		end
 		fragLast[k] = f
 	end
+	-- Each seam fragment, by its (unordered) grid end points.
+	local seamOfFragment: { [string]: number } = {}
+	for f, k in source do
+		local seamId = seamOfEdge[k]
+		if seamId ~= nil then
+			local a, b = fragments[2 * f - 1], fragments[2 * f]
+			local ka, kb = pointKey(snapped[2 * a - 1], snapped[2 * a]), pointKey(snapped[2 * b - 1], snapped[2 * b])
+			seamOfFragment[if ka < kb then `{ka}:{kb}` else `{kb}:{ka}`] = seamId
+		end
+	end
+	local pieces: { [number]: { SeamPiece } } = {}
 	-- Each ring as its snapped closed chain (grid coordinates).
 	local chainX, chainZ = {}, {}
 	for r = 1, #ringGroup do
@@ -693,10 +730,11 @@ local function buildFloor(s: Storage.State, name: string, floor: FloorDesc, expl
 			end
 			for i, t in kept do
 				local id = first + i - 1
-				local ids = {}
+				local ids, keys = {}, {}
 				for k, v in { CDT.GetTriangle(tri, t) } do
 					local gx, gz = CDT.GetVertex(tri, v)
 					local key = pointKey(gx, gz)
+					keys[k] = key
 					local m = meshVertex[key]
 					if m == nil then
 						m = Storage.AddVertex(s, vector.create(gx / GRID, vertexHeight[key], gz / GRID))
@@ -706,6 +744,17 @@ local function buildFloor(s: Storage.State, name: string, floor: FloorDesc, expl
 				end
 				Storage.SetTriangle(s, id, ids[1], ids[2], ids[3])
 				Storage.SetTriangleArea(s, id, keptArea[i])
+				if next(seamOfFragment) ~= nil then
+					for e = 1, 3 do
+						local ka, kb = keys[e % 3 + 1], keys[(e + 1) % 3 + 1]
+						local seamId = seamOfFragment[if ka < kb then `{ka}:{kb}` else `{kb}:{ka}`]
+						if seamId ~= nil then
+							local list = pieces[seamId] or {}
+							pieces[seamId] = list
+							table.insert(list, { Tri = id, Edge = e })
+						end
+					end
+				end
 				for e = 1, 3 do
 					local n = meshTriangle[CDT.GetNeighbor(tri, t, e)] or 0
 					Storage.SetNeighbor(s, id, e, n)
@@ -730,6 +779,133 @@ local function buildFloor(s: Storage.State, name: string, floor: FloorDesc, expl
 			Storage.SetNeighbor(s, packed // 4, packed % 4, other // 4)
 		end
 	end
+	return pieces
+end
+
+-- The ends of edge e of triangle t.
+local function edgeEnds(s: Storage.State, t: number, e: number): (vector, vector)
+	local verts = { Storage.GetTriangle(s, t) }
+	return Storage.GetVertex(s, verts[e % 3 + 1]), Storage.GetVertex(s, verts[(e + 1) % 3 + 1])
+end
+
+-- Joins two floors across seam `id` (ruling: overlap portals). Every piece on floor A pairs
+-- with every piece on floor B that overlaps it along the seam and whose triangle lies on the
+-- other side of it, so walking across leads onto the other floor. Each pairing is a portal in
+-- both directions, on the crossing triangle's own edge. Seam edges without a neighbour become
+-- open (walkable, not walls).
+local function joinSeam(s: Storage.State, id: number, desc: any, a: { SeamPiece }?, b: { SeamPiece }?, seam: FloorSeam)
+	local context = `seam {id}`
+	if a == nil or b == nil then
+		fail(context, `does not lie on floor '{if a == nil then desc.FloorA else desc.FloorB}'`)
+	end
+	local sx, sz = seam.AX / GRID, seam.AZ / GRID
+	local dx, dz = seam.BX / GRID - sx, seam.BZ / GRID - sz
+	local len2 = dx * dx + dz * dz
+	local function param(p: vector): number
+		return ((p.X - sx) * dx + (p.Z - sz) * dz) / len2
+	end
+	local function side(t: number): number
+		local verts = { Storage.GetTriangle(s, t) }
+		local cx, cz = 0, 0
+		for _, v in verts do
+			local p = Storage.GetVertex(s, v)
+			cx += p.X / 3
+			cz += p.Z / 3
+		end
+		return if dx * (cz - sz) - dz * (cx - sx) > 0 then 1 else -1
+	end
+	-- The portal crossing out of piece p, over the seam interval [t0, t1] (left, right).
+	local function portal(piece: SeamPiece, t0: number, t1: number): (vector, vector)
+		local u, v = edgeEnds(s, piece.Tri, piece.Edge)
+		local tu, tv = param(u), param(v)
+		local function at(t: number): vector
+			return u + (v - u) * ((t - tu) / (tv - tu))
+		end
+		-- Crossing out of a CCW triangle, the edge's second end is on the left.
+		if tu < tv then
+			return at(t1), at(t0)
+		end
+		return at(t0), at(t1)
+	end
+	local joined = 0
+	for _, pa in a :: { SeamPiece } do
+		local ua, va = edgeEnds(s, pa.Tri, pa.Edge)
+		local a0, a1 = math.min(param(ua), param(va)), math.max(param(ua), param(va))
+		local sideA = side(pa.Tri)
+		for _, pb in b :: { SeamPiece } do
+			local ub, vb = edgeEnds(s, pb.Tri, pb.Edge)
+			local t0 = math.max(a0, math.min(param(ub), param(vb)))
+			local t1 = math.min(a1, math.max(param(ub), param(vb)))
+			if t1 - t0 <= 1e-9 or side(pb.Tri) == sideA then
+				continue
+			end
+			local leftA, rightA = portal(pa, t0, t1)
+			local leftB, rightB = portal(pb, t0, t1)
+			-- The same seam point on both floors: leftA meets rightB, rightA meets leftB.
+			if math.abs(leftA.Y - rightB.Y) > HEIGHT_TOLERANCE or math.abs(rightA.Y - leftB.Y) > HEIGHT_TOLERANCE then
+				fail(
+					context,
+					`floors '{desc.FloorA}' and '{desc.FloorB}' are at different heights along it near ({fmt(leftA.X)}, {fmt(
+						leftA.Z
+					)})`
+				)
+			end
+			Storage.AddExtra(s, pa.Tri, pb.Tri, Storage.EXTRA_SEAM, pa.Edge, leftA, rightA)
+			Storage.AddExtra(s, pb.Tri, pa.Tri, Storage.EXTRA_SEAM, pb.Edge, leftB, rightB)
+			for _, piece in { pa, pb } do
+				if Storage.GetNeighbor(s, piece.Tri, piece.Edge) == 0 then
+					Storage.SetEdgeOpen(s, piece.Tri, piece.Edge)
+				end
+			end
+			joined += 1
+		end
+	end
+	if joined == 0 then
+		fail(context, `floors '{desc.FloorA}' and '{desc.FloorB}' don't meet across it`)
+	end
+end
+
+local LINK_EXTENTS = vector.create(0.5, 4, 0.5)
+
+-- Snaps and records link `id`, with its extra links (both ways unless one-way).
+local function addLink(s: Storage.State, id: number, link: any)
+	local context = `link {id}`
+	if type(link) ~= "table" then
+		fail(context, "must be a table")
+	end
+	local ends = {}
+	for k, field in { "From", "To" } do
+		local p = link[field]
+		if typeof(p) ~= "Vector3" and type(p) ~= "vector" then
+			fail(context, `{field} must be a Vector3`)
+		end
+		local t, snapped = Snap.Snap(s, vector.create(p.X, p.Y, p.Z), LINK_EXTENTS, {})
+		if snapped == nil then
+			fail(context, `{field} ({fmt(p.X)}, {fmt(p.Y)}, {fmt(p.Z)}) is not on the mesh`)
+		end
+		ends[k] = { Tri = t, Point = snapped :: vector }
+	end
+	local cost = link.Cost
+	if cost == nil then
+		cost = vector.magnitude(ends[2].Point - ends[1].Point)
+	elseif type(cost) ~= "number" or not (cost >= 0 and cost < math.huge) then
+		fail(context, "Cost must be a finite number >= 0")
+	end
+	local area = if link.Area == nil then 1 else checkArea(link.Area, context)
+	local label = link.Label
+	if label ~= nil and type(label) ~= "string" then
+		fail(context, "Label must be a string")
+	end
+	local both = link.Bidirectional
+	if both ~= nil and type(both) ~= "boolean" then
+		fail(context, "Bidirectional must be a boolean")
+	end
+	local from, to = ends[1], ends[2]
+	local linkId = Storage.InsertLink(s, from.Tri, from.Point, to.Tri, to.Point, cost, area, label or "", both ~= false)
+	Storage.AddExtra(s, from.Tri, to.Tri, Storage.EXTRA_LINK, linkId, from.Point, to.Point)
+	if both ~= false then
+		Storage.AddExtra(s, to.Tri, from.Tri, Storage.EXTRA_LINK, linkId, to.Point, from.Point)
+	end
 end
 
 local Build = {}
@@ -752,10 +928,45 @@ function Build.Build(desc: NavMeshDesc): Storage.State
 	if #names == 0 then
 		error("NavMesh.Build: the description has no floors", 2)
 	end
-	for _, field in { "Seams", "Links" } do
-		local value = (desc :: any)[field]
-		if value ~= nil and next(value) ~= nil then
-			error(`NavMesh.Build: {field} are not implemented yet`, 2)
+	-- Seams, quantized, and grouped by the floors they join.
+	local seamDescs: { Types.SeamDesc } = desc.Seams or {}
+	local floorSeams: { [string]: { FloorSeam } } = {}
+	local seamRecords: { FloorSeam } = {}
+	for i, seam in seamDescs do
+		local context = `seam {i}`
+		if type(seam) ~= "table" then
+			fail(context, "must be a table")
+		end
+		for _, field in { "FloorA", "FloorB" } do
+			local floorName = seam[field]
+			if type(floorName) ~= "string" or desc.Floors[floorName] == nil then
+				fail(context, `{field} '{floorName}' is not a floor of this description`)
+			end
+		end
+		if seam.FloorA == seam.FloorB then
+			fail(context, "joins a floor to itself")
+		end
+		local ends = {}
+		for _, field in { "From", "To" } do
+			local p = seam[field]
+			if typeof(p) ~= "Vector3" and type(p) ~= "vector" then
+				fail(context, `{field} must be a Vector3`)
+			end
+			if not (math.abs(p.X) <= LIMIT and math.abs(p.Z) <= LIMIT) then
+				fail(context, `{field} is outside the supported range of ±{LIMIT} studs`)
+			end
+			table.insert(ends, Quantize.ToGrid(p.X))
+			table.insert(ends, Quantize.ToGrid(p.Z))
+		end
+		if ends[1] == ends[3] and ends[2] == ends[4] then
+			fail(context, "has zero length on the 1/256-stud grid")
+		end
+		local record = { Id = i, AX = ends[1], AZ = ends[2], BX = ends[3], BZ = ends[4] }
+		seamRecords[i] = record
+		for _, floorName in { seam.FloorA, seam.FloorB } do
+			local list = floorSeams[floorName] or {}
+			floorSeams[floorName] = list
+			table.insert(list, record)
 		end
 	end
 	local tileStuds = desc.TileSize
@@ -768,8 +979,22 @@ function Build.Build(desc: NavMeshDesc): Storage.State
 	end
 	table.sort(names)
 	local s = Storage.New()
+	local pieces: { [string]: { [number]: { SeamPiece } } } = {}
 	for _, name in names do
-		buildFloor(s, name, desc.Floors[name], if tileStuds == nil then nil else Quantize.ToGrid(tileStuds))
+		pieces[name] = buildFloor(
+			s,
+			name,
+			desc.Floors[name],
+			if tileStuds == nil then nil else Quantize.ToGrid(tileStuds),
+			floorSeams[name] or {}
+		)
+	end
+	for i, seam in seamDescs do
+		joinSeam(s, i, seam, pieces[seam.FloorA][i], pieces[seam.FloorB][i], seamRecords[i])
+	end
+	local linkDescs: { Types.LinkDesc } = desc.Links or {}
+	for i, link in linkDescs do
+		addLink(s, i, link)
 	end
 	Clearance.Compute(s, cap or 0)
 	return s

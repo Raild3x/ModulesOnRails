@@ -38,8 +38,44 @@ export type FloorDesc = {
 
 --[=[
 	@within NavMesh
+	@interface SeamDesc
+	.FloorA string
+	.FloorB string
+	.From Vector3
+	.To Vector3
+
+	A walk-through joint between two floors, such as the foot of a staircase. The segment must
+	lie on the edge of both floors' walkable surfaces (Build errors otherwise).
+]=]
+export type SeamDesc = { FloorA: string, FloorB: string, From: Vector3, To: Vector3 }
+
+--[=[
+	@within NavMesh
+	@interface LinkDesc
+	.From Vector3 -- snapped onto a floor at Build (feet position)
+	.To Vector3
+	.Bidirectional boolean? -- default true
+	.Cost number? -- default the 3D distance From -> To; scaled by the area's cost multiplier
+	.Area number? -- area id for AreaCosts (default 1)
+	.Label string? -- copied onto the waypoint where the link starts
+
+	A jump, ladder or teleport between two points. Link id = its 1-based index in `Links`.
+]=]
+export type LinkDesc = {
+	From: Vector3,
+	To: Vector3,
+	Bidirectional: boolean?,
+	Cost: number?,
+	Area: number?,
+	Label: string?,
+}
+
+--[=[
+	@within NavMesh
 	@interface NavMeshDesc
 	.Floors { [string]: FloorDesc }
+	.Seams { SeamDesc }?
+	.Links { LinkDesc }? -- link id = its 1-based index
 	.TileSize number? -- studs, from 1/256 to 32768; tiles are aligned to the world origin (default: per floor, about 36 edges per tile, a power of two from 4 to 256)
 	.MaxAgentRadius number? -- optional cap on AgentRadius (studs); bounds how far Update recomputes clearance (default: no cap)
 
@@ -48,6 +84,8 @@ export type FloorDesc = {
 ]=]
 export type NavMeshDesc = {
 	Floors: { [string]: FloorDesc },
+	Seams: { SeamDesc }?,
+	Links: { LinkDesc }?,
 	TileSize: number?,
 	MaxAgentRadius: number?,
 }
@@ -58,6 +96,8 @@ export type NavMeshDesc = {
 	.Triangles boolean? -- default true: triangles coloured by floor, plus walls
 	.Areas boolean? -- colour triangles by area id instead of floor
 	.Clearance boolean? -- colour triangles by their widest crossing, red (under 1 stud) to green (8 and over)
+	.Seams boolean? -- seam portals, on the Seams layer
+	.Links boolean? -- links as arrows (both ways when bidirectional), on the Links layer
 	.Tiles boolean? -- tile bounds
 ]=]
 export type NavMeshDrawOptions = {
@@ -65,6 +105,8 @@ export type NavMeshDrawOptions = {
 	Areas: boolean?,
 	Clearance: boolean?,
 	Tiles: boolean?,
+	Seams: boolean?,
+	Links: boolean?,
 }
 
 --[=[
@@ -109,7 +151,7 @@ export type PathStatus = "Success" | "Partial" | "Budget" | "NoStart" | "NoGoal"
 	.Status PathStatus
 	.Waypoints { Waypoint } -- from the snapped start
 	.Cost number -- the search cost: 3D length times area multipliers, measured through the midpoints of the edges crossed
-	.TileStamps { number } -- opaque; filled once Update lands (ticket 18)
+	.TileStamps { number } -- opaque: for IsPathValid
 ]=]
 export type PathResult = { Status: PathStatus, Waypoints: { Waypoint }, Cost: number, TileStamps: { number } }
 
