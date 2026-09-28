@@ -36,3 +36,16 @@ Spec: [../spec.md](../spec.md). Gates: the spec's "Gates for every ticket".
 - **Not done:** `spec.md` still needs a line on midpoint-only splitting (after ticket 14's
   commit). Refinement rescans every triangle on each pass; a work queue can come if it shows up
   in a profile.
+- **After the first gate (83.0%):**
+  - **New tests from the survivors:** the MaxArea boundary; the budget spent while splitting
+    segments; the default budget growing with input size; and seeded random point and
+    constraint soups.
+  - **The soups found real bugs.** Constraint crossings can leave Steiner vertices within
+    1e-12 of an input vertex. Refine then split segments of about 4e-13, whose midpoints aren't
+    exactly on the segment. That broke the hull's convexity, produced inverted triangles, left
+    non-Delaunay edges, and exhausted the budget.
+  - **The fixes:**
+    - A split must be exact: a hull midpoint exactly on its edge, and every new triangle
+      strictly CCW. A segment that fails is left unsplit, and Refine returns false.
+    - `SplitSegment` re-checks every side of the triangles it creates.
+  - **Re-gate:** 82/82, lines 98.9%, mutation 83.7%.
