@@ -84,6 +84,29 @@ end
 
 --[=[
 	@within NavMeshSnap
+	The tiles of `floor` whose closed rectangle meets the closed box (studs), through the tile
+	hash: a box edge on a tile line reaches the tiles on both sides of it.
+]=]
+function Snap.TilesIn(s: Storage.State, floor: number, lx: number, lz: number, hx: number, hz: number): { number }
+	local index = indexOf(s)
+	local size, cells = index.Size[floor], index.Cells[floor]
+	local out = {}
+	if cells == nil then
+		return out
+	end
+	for i = math.ceil(lx / size) - 1, math.floor(hx / size) do
+		for j = math.ceil(lz / size) - 1, math.floor(hz / size) do
+			local tile = cells[(i + CELL_OFFSET) * 2 ^ 24 + j + CELL_OFFSET]
+			if tile then
+				table.insert(out, tile)
+			end
+		end
+	end
+	return out
+end
+
+--[=[
+	@within NavMeshSnap
 	Snaps feet position `p` within half-size `extents`. Returns the triangle and the snapped
 	point on its surface, or `0, nil` when nothing is in range.
 ]=]
@@ -124,19 +147,11 @@ function Snap.Snap(s: Storage.State, p: vector, extents: vector, costs: { [numbe
 			floorPoint[floor] = vector.create(x, h, z)
 		end
 	end
-	local index = indexOf(s)
-	for floor, cells in index.Cells do
-		local size = index.Size[floor]
-		-- Closed tiles: a box edge on a tile line reaches the tiles on both sides of it.
-		for i = math.ceil(lx / size) - 1, math.floor(hx / size) do
-			for j = math.ceil(lz / size) - 1, math.floor(hz / size) do
-				local tile = cells[(i + CELL_OFFSET) * 2 ^ 24 + j + CELL_OFFSET]
-				if tile then
-					local first, count = Storage.GetTileRange(s, tile)
-					for t = first, first + count - 1 do
-						consider(t)
-					end
-				end
+	for floor in indexOf(s).Cells do
+		for _, tile in Snap.TilesIn(s, floor, lx, lz, hx, hz) do
+			local first, count = Storage.GetTileRange(s, tile)
+			for t = first, first + count - 1 do
+				consider(t)
 			end
 		end
 	end

@@ -1115,7 +1115,9 @@ end
 Build.Internal = {
 	GRID = GRID,
 	GROUP_OBSTACLE = GROUP_OBSTACLE,
+	EDGE_KEY = EDGE_KEY,
 	Fail = fail,
+	Fmt = fmt,
 	QuantizeRing = quantizeRing,
 	MakeSurface = makeSurface,
 	TriangulateTile = triangulateTile,
