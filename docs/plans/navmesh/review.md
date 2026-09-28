@@ -63,6 +63,14 @@ the const question are deliberately open, gated on benchmarks.
 - **Obstacle records and the bake format (dogfood bug 3):** 2026-09-28: removed obstacle
   records freed; Serialize v2 (sparse records + next id); v1 bakes rejected with a rebuild
   message. User chose v2 over the fits-v1 variant (which still grew 13 B per removal).
+- **Local Update (ticket 22):** 2026-09-28: ticket 22 = Opt2i (fresh-state commit +
+  incremental clearance); Opt1 in-place commit rejected on atomicity risk, kept as a drop-in for
+  the commit step if the remaining O(T) copy matters; Opt2 alone rejected (still O(map)).
+  Prototypes and numbers: branches `proto/local-update` and `proto/local-update-77`, and
+  bench.md "Local Update".
+- **Changed regions (ticket 22):** 2026-09-28: `Update` returns the changed regions, a list of
+  `{ Floor, Min, Max }` boxes (`ChangedRegion`). `IsPathValid` stays as it is. User: "changed
+  regions only", not an exact `IsPathValid`.
 
 ### Rulings during the build (2026-09-27)
 - **U-a (clearance reach), ruled after the P4 probe (ticket 15 notes):** no cap by default,

@@ -27,17 +27,30 @@
 	  fragments, the obstacle chains clipped to it, and every snapped vertex on its border.
 	- Every dirty tile is triangulated by Build's own `TriangulateTile`.
 
-	**Commit (atomic, SR13/SR14):**
-	- A fresh state is built: clean tiles are copied and renumbered, dirty tiles take their new
-	  triangles, and vertices are re-interned per floor by grid point. Nothing is left behind,
-	  so toggling a door never grows memory, and ids are only stable until the next Update.
-	- Seam portals and links are rebuilt (links re-snap onto the new triangles).
-	- Clearance is recomputed for the dirty tiles and every triangle within its own reach r*
-	  of them (ruling U-a); the rest is copied.
+	**Commit (atomic, SR13/SR14; ticket 22 made it local):**
+	- Everything that can fail runs first, reading the mesh only: the rebuilt tiles are
+	  triangulated and checked in scratch (CopyOut's checks), and their vertices interned by grid
+	  point against the dirty tiles and their neighbours, the only tiles that can share one.
+	- A fresh state is then built. Data an Update never changes (floors, tiles, rebuild sources,
+	  seams) is shared, not copied. Clean tiles are copied as buffer ranges and renumbered in one
+	  pass; rebuilt tiles are written into their new ranges. Freed vertex slots take the new
+	  vertices and the highest live vertices move down into the rest, so nothing is left behind:
+	  toggling a door never grows memory, and ids are only stable until the next Update.
+	- Cross-tile neighbours are relinked around the rebuilt tiles; seam portals and links are
+	  rebuilt (links re-snap onto the new triangles).
+	- Clearance: a rebuilt triangle with an old one's grid points keeps its widths; new ones, and
+	  every triangle within its own reach r* of a changed wall, are recomputed (ruling U-a;
+	  `Clearance.Refresh`, which keeps a wall index across Updates).
 	- Stamps are bumped for every tile whose triangles or widths changed, and for the tiles at
 	  the ends of every link.
+	- The changed regions are returned: per floor, boxes holding everything whose meaning
+	  changed (the rebuilt tiles' triangles, old and new, and the triangles whose widths were
+	  recomputed).
 	- The state is swapped in only when all of that succeeded. On an error the mesh is
 	  untouched, the pending records are rolled back, and the error is raised again.
+
+	**Cost:** the dirty tiles' re-snap, triangulation and clearance, plus an O(T) range copy and
+	renumbering pass (buffer operations, about 0.1-0.2 ms per 1,000 triangles) and O(tiles) loops.
 ]=]
 
 local Build = require("./Build")
@@ -50,6 +63,8 @@ local Types = require("./Types")
 local Internal = Build.Internal
 local GRID = Internal.GRID
 local PointKey = Internal.PointKey
+local EDGE_KEY = Internal.EDGE_KEY
+local Orient2D = require("../ConstrainedDelaunay").Orient2D
 
 type State = Storage.State
 
@@ -255,22 +270,40 @@ local function reSnap(
 	return inputs
 end
 
--- A lower bound on the distance in plan (studs) from triangle t to the box: the gap between
--- the box and the triangle's own bounding box. Never more than the true distance, so a
--- triangle whose width might change is never skipped.
-local function distanceToBox(s: State, t: number, x0: number, z0: number, x1: number, z1: number): number
-	local a, b, c = Storage.GetTriangle(s, t)
-	local pa, pb, pc = Storage.GetVertex(s, a), Storage.GetVertex(s, b), Storage.GetVertex(s, c)
-	local dx = math.max(x0 - math.max(pa.X, pb.X, pc.X), 0, math.min(pa.X, pb.X, pc.X) - x1)
-	local dz = math.max(z0 - math.max(pa.Z, pb.Z, pc.Z), 0, math.min(pa.Z, pb.Z, pc.Z) - z1)
-	return math.sqrt(dx * dx + dz * dz)
-end
+-- A rebuilt tile, validated and ready to write: vertex ids (> 0 an existing vertex, < 0 the
+-- k-th new vertex as -k until slots are assigned), areas, in-tile neighbours and seam pieces.
+type Scratch = {
+	Verts: { number }, -- 3 per triangle
+	Areas: { number },
+	Neighbors: { number }, -- 3 per triangle, tile-local (0 = none)
+	Pieces: { number }, -- seam, local triangle, edge
+}
 
--- Applies every pending change; see the class docs. Errors leave `s` untouched.
-local function apply(s: State): State
-	-- Pending changes and the obstacles active after this commit.
-	local pendingFloors: { [number]: { { number } } } = {} -- floor -> boxes of changed obstacles
-	local active: { [number]: { Obstacle } } = {} -- floor -> obstacles active after commit
+-- What `prepare` hands the commit.
+type Plan = {
+	PendingFloors: { [number]: { { number } } },
+	Dirty: { [number]: boolean },
+	DirtyList: { number }, -- in tile order
+	NearList: { number }, -- the clean tiles touching a dirty one
+	Scratch: { [number]: Scratch },
+	NewVerts: { vector }, -- positions of the new vertices
+	NewSlot: { number }, -- new vertex k -> its id
+	Moved: { [number]: number }, -- live vertex above the final count -> its new id
+	OldDirtyVerts: { [number]: boolean }, -- vertices of the old dirty tiles
+	Freed: { [number]: boolean },
+	FinalVertexCount: number,
+	FinalTriangleCount: number,
+	NewFirst: { number }, -- tile -> first triangle in the new state
+	SegStart: { number }, -- old triangle ids: segment starts...
+	SegDelta: { number | false }, -- ...and their shift (false = a dirty range, removed)
+}
+
+-- Everything up to the commit, reading `s` only: pending changes, dirty tiles and their clean
+-- neighbours, the rebuilt tiles validated in scratch (every check CopyOut makes), the vertex
+-- slots, and how the triangle ranges shift.
+local function prepare(s: State): Plan
+	local pendingFloors: { [number]: { { number } } } = {}
+	local active: { [number]: { Obstacle } } = {}
 	for slot = 1, Storage.ObstacleCount(s) do
 		local id, floor, state, xs, zs = Storage.GetObstacleRecord(s, slot)
 		local x0, z0, x1, z1 = bounds(xs, zs)
@@ -286,51 +319,90 @@ local function apply(s: State): State
 		end
 	end
 
-	-- Dirty tiles.
+	-- Dirty tiles through the tile hash (O(dirty), not O(tiles)): the tiles meeting the snapped
+	-- box grown by a pixel. Then their clean neighbours: the tiles whose closed rectangle touches
+	-- a dirty one.
 	local dirty: { [number]: boolean } = {}
 	local dirtyByFloor: { [number]: { number } } = {}
-	for tile = 1, Storage.TileCount(s) do
-		local floor = Storage.GetTileFloor(s, tile)
-		local boxes: { { number } } = pendingFloors[floor] or {}
+	for floor, boxes in pendingFloors do
 		for _, box in boxes do
-			if touches(s, tile, box[1], box[2], box[3], box[4]) then
-				dirty[tile] = true
-				local list = dirtyByFloor[floor] or {}
-				dirtyByFloor[floor] = list
-				table.insert(list, tile)
-				break
+			local x0, z0 = (box[1] - 1) / GRID, (box[2] - 1) / GRID
+			local x1, z1 = (box[3] + 1) / GRID, (box[4] + 1) / GRID
+			for _, tile in Snap.TilesIn(s, floor, x0, z0, x1, z1) do
+				if not dirty[tile] then
+					dirty[tile] = true
+					local list = dirtyByFloor[floor] or {}
+					dirtyByFloor[floor] = list
+					table.insert(list, tile)
+				end
 			end
 		end
+	end
+	local near: { [number]: boolean } = {}
+	local nearByFloor: { [number]: { number } } = {}
+	local nearList: { number } = {}
+	for floor, tiles in dirtyByFloor do
+		table.sort(tiles)
+		for _, d in tiles do
+			for _, tile in Snap.TilesIn(s, floor, Storage.GetTileBounds(s, d)) do
+				if not dirty[tile] and not near[tile] then
+					near[tile] = true
+					local list = nearByFloor[floor] or {}
+					nearByFloor[floor] = list
+					table.insert(list, tile)
+					table.insert(nearList, tile)
+				end
+			end
+		end
+	end
+
+	-- Heights and vertex ids by grid point, from the dirty tiles and their neighbours only: a
+	-- rebuilt tile's vertices all lie in its closed rectangle, where no other tile has one.
+	local floorHeights: { [number]: { [number]: number } } = {}
+	local floorKeyVertex: { [number]: { [number]: number } } = {}
+	local oldDirtyVerts: { [number]: boolean } = {}
+	local nearVerts: { [number]: boolean } = {}
+	for floor, tiles in dirtyByFloor do
+		local heights, keyVertex = {}, {}
+		local function scan(tile: number, into: { [number]: boolean })
+			local first, count = Storage.GetTileRange(s, tile)
+			for t = first, first + count - 1 do
+				for _, v in { Storage.GetTriangle(s, t) } do
+					local p = Storage.GetVertex(s, v)
+					local key = PointKey(math.round(p.X * GRID), math.round(p.Z * GRID))
+					heights[key] = p.Y
+					keyVertex[key] = v
+					into[v] = true
+				end
+			end
+		end
+		for _, tile in tiles do
+			scan(tile, oldDirtyVerts)
+		end
+		local nearTiles: { number } = nearByFloor[floor] or {}
+		for _, tile in nearTiles do
+			scan(tile, nearVerts)
+		end
+		floorHeights[floor] = heights
+		floorKeyVertex[floor] = keyVertex
 	end
 
 	-- New triangles for each dirty tile.
 	local rebuilt: { [number]: { any } } = {}
 	local rebuiltInput: { [number]: any } = {}
-	local floorHeights: { [number]: { [number]: number } } = {}
 	for floor, tiles in dirtyByFloor do
 		local tileSize, defaultArea, areaIds, rings = Storage.GetFloorSources(s, floor)
 		local surfaces = {}
 		for i, ring in rings do
 			surfaces[i] = Internal.MakeSurface(ring)
 		end
-		-- Every current vertex height of the floor, so rebuilt tiles must agree with them.
-		local heights, from = {}, {}
-		for t = 1, Storage.TriangleCount(s) do
-			if Storage.GetTriangleFloor(s, t) == floor then
-				for _, v in { Storage.GetTriangle(s, t) } do
-					local p = Storage.GetVertex(s, v)
-					heights[PointKey(math.round(p.X * GRID), math.round(p.Z * GRID))] = p.Y
-				end
-			end
-		end
-		floorHeights[floor] = heights
 		local floorData = {
 			Context = `floor '{Storage.GetFloorName(s, floor)}'`,
 			Surfaces = surfaces,
 			AreaIds = areaIds,
 			DefaultArea = defaultArea,
-			Heights = heights,
-			HeightFrom = from,
+			Heights = floorHeights[floor],
+			HeightFrom = {},
 		}
 		-- Tiles with an active obstacle over them are re-snapped together; the rest use their
 		-- baseline verbatim.
@@ -366,83 +438,336 @@ local function apply(s: State): State
 		end
 	end
 
-	-- The fresh state: every tile in order, clean ones copied, dirty ones rebuilt.
-	local n = Storage.New()
-	for f = 1, Storage.FloorCount(s) do
-		Storage.InsertFloor(n, Storage.GetFloorName(s, f))
-		local tileSize, defaultArea, areaIds, rings = Storage.GetFloorSources(s, f)
-		Storage.SetFloorSources(n, f, tileSize, defaultArea, areaIds, rings)
+	-- Scratch: vertices interned by grid point (existing ids reused, new ones numbered -k), and
+	-- CopyOut's checks run before anything is written.
+	local dirtyList: { number } = {}
+	for tile in dirty do
+		table.insert(dirtyList, tile)
 	end
-	local remap: { number } = {} -- old triangle -> new triangle (clean tiles only)
-	local meshVertex: { [number]: { [number]: number } } = {}
-	local openEdges: { [number]: { [number]: number } } = {}
-	for tile = 1, Storage.TileCount(s) do
+	table.sort(dirtyList)
+	local newVerts: { vector } = {}
+	local reused: { [number]: boolean } = {}
+	local scratch: { [number]: Scratch } = {}
+	for _, tile in dirtyList do
 		local floor = Storage.GetTileFloor(s, tile)
-		local x0, z0, x1, z1 = Storage.GetTileBounds(s, tile)
-		assert(Storage.InsertTile(n, floor, x0, z0, x1, z1) == tile, "tile ids must survive a rebuild")
-		local tc, te, tg, ts = Storage.GetTileSources(s, tile)
-		Storage.SetTileSources(n, tile, tc, te, tg, ts)
-		Storage.SetTileStamp(n, tile, Storage.GetTileStamp(s, tile))
-		meshVertex[floor] = meshVertex[floor] or {}
-		openEdges[floor] = openEdges[floor] or {}
 		local context = `floor '{Storage.GetFloorName(s, floor)}'`
-		if dirty[tile] then
-			local input = rebuiltInput[tile]
-			Internal.CopyOut(
-				n,
-				context,
-				tile,
-				rebuilt[tile],
-				floorHeights[floor],
-				meshVertex[floor],
-				openEdges[floor],
-				Internal.SeamFragments(input.Coords, input.Edges, input.Seams)
-			)
-			continue
-		end
-		-- A clean tile: its triangles as they are, with in-tile neighbours kept.
-		local first, count = Storage.GetTileRange(s, tile)
-		local triangles = table.create(count)
-		local heights = {}
-		for i = 1, count do
-			local t = first + i - 1
-			local xs, zs, keys = {}, {}, {}
-			for k, v in { Storage.GetTriangle(s, t) } do
-				local p = Storage.GetVertex(s, v)
-				xs[k], zs[k] = math.round(p.X * GRID), math.round(p.Z * GRID)
-				keys[k] = PointKey(xs[k], zs[k])
-				heights[keys[k]] = p.Y
-			end
-			local nbrs = {}
-			for e = 1, 3 do
-				local m = Storage.GetNeighbor(s, t, e)
-				nbrs[e] = if m >= first and m < first + count then m - first + 1 else 0
-			end
-			triangles[i] = { X = xs, Z = zs, Keys = keys, Area = Storage.GetTriangleArea(s, t), Neighbors = nbrs }
-		end
-		local newFirst = Storage.TriangleCount(n) + 1
-		Internal.CopyOut(n, context, tile, triangles, heights, meshVertex[floor], openEdges[floor], {})
-		for i = 1, count do
-			local old, new = first + i - 1, newFirst + i - 1
-			remap[old] = new
+		local heights, keyVertex = floorHeights[floor], floorKeyVertex[floor]
+		local input = rebuiltInput[tile]
+		local seamOf = Internal.SeamFragments(input.Coords, input.Edges, input.Seams)
+		local hasSeams = next(seamOf) ~= nil
+		local out: Scratch = { Verts = {}, Areas = {}, Neighbors = {}, Pieces = {} }
+		for i, tri in rebuilt[tile] do
+			local ps = {}
 			for k = 1, 3 do
-				Storage.SetCornerWidth(n, new, k, Storage.GetCornerWidth(s, old, k))
-				Storage.SetPortalWidth(n, new, k, Storage.GetPortalWidth(s, old, k))
+				local key = tri.Keys[k]
+				local id = keyVertex[key]
+				if id == nil then
+					table.insert(newVerts, vector.create(tri.X[k] / GRID, heights[key], tri.Z[k] / GRID))
+					id = -#newVerts
+					keyVertex[key] = id
+				elseif id > 0 then
+					reused[id] = true
+				end
+				table.insert(out.Verts, id)
+				ps[k] = if id > 0 then Storage.GetVertex(s, id) else newVerts[-id]
+				table.insert(out.Neighbors, tri.Neighbors[k])
+			end
+			table.insert(out.Areas, tri.Area)
+			if hasSeams then
+				for e = 1, 3 do
+					local ka, kb = tri.Keys[e % 3 + 1], tri.Keys[(e + 1) % 3 + 1]
+					local seamId = seamOf[if ka < kb then `{ka}:{kb}` else `{kb}:{ka}`]
+					if seamId ~= nil then
+						table.move({ seamId, i, e }, 1, 3, #out.Pieces + 1, out.Pieces)
+					end
+				end
+			end
+			-- CopyOut's degeneracy guard (SR2), on the stored (f32) coordinates.
+			local pa, pb, pc = ps[1], ps[2], ps[3]
+			if Orient2D(pa.X, pa.Z, pb.X, pb.Z, pc.X, pc.Z) <= 0 then
+				Internal.Fail(
+					context,
+					`a triangle degenerates after quantization near ({Internal.Fmt(pa.X)}, {Internal.Fmt(pa.Z)})`
+				)
+			end
+		end
+		scratch[tile] = out
+	end
+
+	-- Vertex slots. Freed: the old dirty tiles' vertices that no neighbour or rebuilt tile uses.
+	-- New vertices fill the lowest freed slots, then the highest live vertices move down into
+	-- what is left, so the array stays compact (SR14).
+	local freed: { number } = {}
+	local isFreed: { [number]: boolean } = {}
+	for v in oldDirtyVerts do
+		if not nearVerts[v] and not reused[v] then
+			table.insert(freed, v)
+			isFreed[v] = true
+		end
+	end
+	table.sort(freed)
+	local oldCount = Storage.VertexCount(s)
+	local finalCount = oldCount - #freed + #newVerts
+	local slots = {}
+	for _, v in freed do
+		if v <= finalCount then
+			table.insert(slots, v)
+		end
+	end
+	for v = oldCount + 1, finalCount do
+		table.insert(slots, v)
+	end
+	local newSlot: { number } = table.create(#newVerts)
+	for k = 1, #newVerts do
+		newSlot[k] = slots[k]
+	end
+	local moved: { [number]: number } = {}
+	local nextSlot = #newVerts + 1
+	for v = finalCount + 1, oldCount do
+		if not isFreed[v] then
+			moved[v] = slots[nextSlot]
+			nextSlot += 1
+		end
+	end
+	for _, out in scratch do
+		local verts = out.Verts
+		for i, id in verts do
+			verts[i] = if id < 0 then newSlot[-id] else moved[id] or id
+		end
+	end
+
+	-- The new triangle layout, tile by tile, and old-id segments: each clean run keeps one
+	-- shift, each dirty range goes (false).
+	local segStart: { number } = {}
+	local segDelta: { number | false } = {}
+	local newFirst: { number } = {}
+	local cursor = 1
+	for tile = 1, Storage.TileCount(s) do
+		local first, count = Storage.GetTileRange(s, tile)
+		newFirst[tile] = cursor
+		local delta: number | false = if dirty[tile] then false else cursor - first
+		if count > 0 and (#segDelta == 0 or segDelta[#segDelta] ~= delta) then
+			table.insert(segStart, first)
+			table.insert(segDelta, delta)
+		end
+		cursor += if dirty[tile] then #scratch[tile].Areas else count
+	end
+
+	return {
+		PendingFloors = pendingFloors,
+		Dirty = dirty,
+		DirtyList = dirtyList,
+		NearList = nearList,
+		Scratch = scratch,
+		NewVerts = newVerts,
+		NewSlot = newSlot,
+		Moved = moved,
+		OldDirtyVerts = oldDirtyVerts,
+		Freed = isFreed,
+		FinalVertexCount = finalCount,
+		FinalTriangleCount = cursor - 1,
+		NewFirst = newFirst,
+		SegStart = segStart,
+		SegDelta = segDelta,
+	}
+end
+
+-- Old triangle id -> new, through the plan's segments (0 when it was in a dirty tile).
+local function remapTriangle(plan: Plan, t: number): number
+	local segStart, segDelta = plan.SegStart, plan.SegDelta
+	if #segStart == 0 or t < segStart[1] then
+		return t
+	end
+	local i = 1
+	while i < #segStart and t >= segStart[i + 1] do
+		i += 1
+	end
+	local delta = segDelta[i]
+	return if delta == false then 0 else t + (delta :: number)
+end
+
+-- A triangle's grid points, and its key: those points from the smallest one, in CCW order.
+local function triangleKey(state: State, t: number): (string, number)
+	local keys = {}
+	for k, v in { Storage.GetTriangle(state, t) } do
+		local p = Storage.GetVertex(state, v)
+		keys[k] = PointKey(math.round(p.X * GRID), math.round(p.Z * GRID))
+	end
+	local first = if keys[1] < keys[2] and keys[1] < keys[3] then 1 elseif keys[2] < keys[3] then 2 else 3
+	return `{keys[first]}:{keys[first % 3 + 1]}:{keys[(first + 1) % 3 + 1]}`, first
+end
+
+-- The changed regions (ticket 22): per floor, the boxes of the rebuilt tiles' triangles (old
+-- and new) and of the triangles outside them whose widths were recomputed, merged wherever they
+-- touch. Everything whose meaning changed lies inside:
+-- triangles, neighbours, wall flags, seam pieces and link ends only change in the rebuilt tiles,
+-- and widths only in recomputed triangles (a portal width a recomputed triangle writes for its
+-- neighbour lies on their shared edge).
+local function changedRegions(s: State, n: State, plan: Plan, recompute: { [number]: boolean }): { Types.ChangedRegion }
+	local boxes: { { number } } = {} -- floor, min x, y, z, max x, y, z
+	local function fit(box: { number }, state: State, t: number)
+		for _, v in { Storage.GetTriangle(state, t) } do
+			local p = Storage.GetVertex(state, v)
+			box[2], box[3], box[4] = math.min(box[2], p.X), math.min(box[3], p.Y), math.min(box[4], p.Z)
+			box[5], box[6], box[7] = math.max(box[5], p.X), math.max(box[6], p.Y), math.max(box[7], p.Z)
+		end
+	end
+	for _, tile in plan.DirtyList do
+		local box =
+			{ Storage.GetTileFloor(n, tile), math.huge, math.huge, math.huge, -math.huge, -math.huge, -math.huge }
+		for _, state in { s, n } do
+			local first, count = Storage.GetTileRange(state, tile)
+			for t = first, first + count - 1 do
+				fit(box, state, t)
+			end
+		end
+		table.insert(boxes, box)
+	end
+	local byTile: { [number]: { number } } = {}
+	for t in recompute do
+		local tile = Storage.GetTriangleTile(n, t)
+		if not plan.Dirty[tile] then
+			local box = byTile[tile]
+			if box == nil then
+				box = {
+					Storage.GetTileFloor(n, tile),
+					math.huge,
+					math.huge,
+					math.huge,
+					-math.huge,
+					-math.huge,
+					-math.huge,
+				}
+				byTile[tile] = box
+				table.insert(boxes, box)
+			end
+			fit(box, n, t)
+		end
+	end
+	-- ponytail: pairwise merging, quadratic in the boxes (one per rebuilt or re-widthed tile).
+	local merged = true
+	while merged do
+		merged = false
+		for i = #boxes, 2, -1 do
+			local a = boxes[i]
+			for j = 1, i - 1 do
+				local b = boxes[j]
+				if a[1] == b[1] and a[2] <= b[5] and b[2] <= a[5] and a[4] <= b[7] and b[4] <= a[7] then
+					for k = 2, 4 do
+						b[k] = math.min(a[k], b[k])
+						b[k + 3] = math.max(a[k + 3], b[k + 3])
+					end
+					table.remove(boxes, i)
+					merged = true
+					break
+				end
 			end
 		end
 	end
-	for _, edges in openEdges do
-		Internal.LinkOpenEdges(n, edges)
+	local regions: { Types.ChangedRegion } = {}
+	for _, box in boxes do
+		table.insert(regions, {
+			Floor = Storage.GetFloorName(n, box[1]),
+			Min = vector.create(box[2], box[3], box[4]) :: any, -- a vector is a Vector3 on Roblox
+			Max = vector.create(box[5], box[6], box[7]) :: any,
+		})
 	end
-	-- Seams: clean tiles keep their pieces (renumbered); dirty ones found theirs in CopyOut.
+	return regions
+end
+
+-- Applies every pending change; see the class docs. Errors leave `s` untouched. Returns the new
+-- state and the changed regions.
+local function apply(s: State): (State, { Types.ChangedRegion })
+	local plan = prepare(s)
+	local dirty = plan.Dirty
+
+	-- The fresh state: static data shared, clean tiles copied as ranges and renumbered in one
+	-- pass, rebuilt tiles written from scratch.
+	local n = Storage.ShellFrom(s)
+	Storage.SetTriangleCount(n, plan.FinalTriangleCount)
+	for tile = 1, Storage.TileCount(s) do
+		if not dirty[tile] then
+			local first, count = Storage.GetTileRange(s, tile)
+			local to = plan.NewFirst[tile]
+			Storage.CopyTriangleRange(n, to, s, first, count)
+			Storage.SetTileRange(n, tile, to, count)
+			if count > 0 then
+				Storage.RemapTriangles(n, to, to + count - 1, plan.Moved, plan.SegStart, plan.SegDelta)
+			end
+		end
+	end
+	for _, tile in plan.DirtyList do
+		local out = plan.Scratch[tile]
+		local first = plan.NewFirst[tile]
+		local floor = Storage.GetTileFloor(s, tile)
+		local verts, nbrs = out.Verts, out.Neighbors
+		for i = 1, #out.Areas do
+			local t = first + i - 1
+			Storage.SetTriangle(n, t, verts[3 * i - 2], verts[3 * i - 1], verts[3 * i])
+			for e = 1, 3 do
+				local m = nbrs[3 * (i - 1) + e]
+				Storage.SetNeighbor(n, t, e, if m == 0 then 0 else first + m - 1)
+				Storage.SetCornerWidth(n, t, e, 0)
+				Storage.SetPortalWidth(n, t, e, 0)
+			end
+			Storage.SetTriangleFloor(n, t, floor)
+			Storage.SetTriangleArea(n, t, out.Areas[i])
+			Storage.SetTriangleTile(n, t, tile)
+		end
+		Storage.SetTileRange(n, tile, first, #out.Areas)
+	end
+
+	-- Vertices: moved ones down, new ones into their slots, the array cut to size. Kept vertices
+	-- of the rebuilt tiles lose their wall flags; Clearance.Refresh sets them again.
+	for v, to in plan.Moved do
+		Storage.SetVertex(n, to, Storage.GetVertex(s, v))
+		Storage.SetWallVertex(n, to, Storage.IsWallVertex(s, v))
+	end
+	for k, v in plan.NewSlot do
+		Storage.SetVertex(n, v, plan.NewVerts[k])
+		Storage.SetWallVertex(n, v, false)
+	end
+	for v in plan.OldDirtyVerts do
+		if not plan.Freed[v] then
+			Storage.SetWallVertex(n, plan.Moved[v] or v, false)
+		end
+	end
+	Storage.SetVertexCount(n, plan.FinalVertexCount)
+
+	-- Cross-tile neighbours: the open edges of the rebuilt tiles and their neighbours meet.
+	local open: { [number]: number } = {}
+	local function collect(tile: number)
+		local first, count = Storage.GetTileRange(n, tile)
+		for t = first, first + count - 1 do
+			local ids = { Storage.GetTriangle(n, t) }
+			for e = 1, 3 do
+				if Storage.GetNeighbor(n, t, e) == 0 then
+					open[ids[e % 3 + 1] * EDGE_KEY + ids[(e + 1) % 3 + 1]] = t * 4 + e
+				end
+			end
+		end
+	end
+	for _, tile in plan.DirtyList do
+		collect(tile)
+	end
+	for _, tile in plan.NearList do
+		collect(tile)
+	end
+	Internal.LinkOpenEdges(n, open)
+
+	-- Seams: clean pieces renumbered, rebuilt ones from scratch.
 	for piece = 1, Storage.PieceCount(s) do
 		local seam, tri, edge = Storage.GetPiece(s, piece)
-		if remap[tri] then
-			Storage.InsertPiece(n, seam, remap[tri], edge)
+		local to = remapTriangle(plan, tri)
+		if to ~= 0 then
+			Storage.InsertPiece(n, seam, to, edge)
 		end
 	end
-	for seam = 1, Storage.SeamCount(s) do
-		Storage.InsertSeam(n, Storage.GetSeam(s, seam))
+	for _, tile in plan.DirtyList do
+		local pieces = plan.Scratch[tile].Pieces
+		for k = 1, #pieces, 3 do
+			Storage.InsertPiece(n, pieces[k], plan.NewFirst[tile] + pieces[k + 1] - 1, pieces[k + 2])
+		end
 	end
 	-- Links, re-snapped onto the new triangles (an end under an obstacle drops out for now).
 	local linkTiles: { [number]: boolean } = {}
@@ -484,73 +809,43 @@ local function apply(s: State): State
 	Storage.SetObstacleNextId(n, Storage.GetObstacleNextId(s))
 
 	-- Clearance. A rebuilt triangle with the same three grid points as an old one is the same
-	-- triangle: it keeps its widths like a clean one (corners matched by vertex). Only new
-	-- triangles, and old ones within their own reach of a change, are recomputed.
-	local function gridKeys(state: State, t: number): { number }
-		local keys = {}
-		for k, v in { Storage.GetTriangle(state, t) } do
-			local p = Storage.GetVertex(state, v)
-			keys[k] = PointKey(math.round(p.X * GRID), math.round(p.Z * GRID))
-		end
-		return keys
-	end
-	-- A triangle's key: its grid points from the smallest one, in CCW order.
-	local function triangleKey(keys: { number }): (string, number)
-		local first = if keys[1] < keys[2] and keys[1] < keys[3] then 1 elseif keys[2] < keys[3] then 2 else 3
-		return `{keys[first]}:{keys[first % 3 + 1]}:{keys[(first + 1) % 3 + 1]}`, first
-	end
-	local oldByKey: { [string]: number } = {}
-	local oldFirstVertex: { [number]: number } = {}
-	for tile in dirty do
+	-- triangle: it keeps its widths (corners matched by vertex). New triangles, and any within
+	-- their own reach of a changed wall, are recomputed by Clearance.Refresh.
+	local old: { [string]: { number } } = {}
+	for _, tile in plan.DirtyList do
 		local first, count = Storage.GetTileRange(s, tile)
 		for t = first, first + count - 1 do
-			local key, rotation = triangleKey(gridKeys(s, t))
-			oldByKey[key] = t
-			oldFirstVertex[t] = rotation
+			local key, rotation = triangleKey(s, t)
+			local w = { rotation }
+			for k = 1, 3 do
+				w[1 + k] = Storage.GetCornerWidth(s, t, k)
+				w[4 + k] = Storage.GetPortalWidth(s, t, k)
+			end
+			old[key] = w
 		end
 	end
 	local recompute: { [number]: boolean } = {}
-	for tile in dirty do
+	for _, tile in plan.DirtyList do
 		local first, count = Storage.GetTileRange(n, tile)
 		for t = first, first + count - 1 do
-			local key, rotation = triangleKey(gridKeys(n, t))
-			local old = oldByKey[key]
-			if old == nil then
+			local key, rotation = triangleKey(n, t)
+			local w = old[key]
+			if w == nil then
 				recompute[t] = true
 				continue
 			end
-			remap[old] = t
-			-- Vertex k of t is vertex ((k - rotation + oldRotation - 1) mod 3) + 1 of old.
+			-- Vertex k of t is vertex ((k - rotation + oldRotation - 1) mod 3) + 1 of the old one.
 			for k = 1, 3 do
-				local ok = (k - rotation + oldFirstVertex[old] - 1) % 3 + 1
-				Storage.SetCornerWidth(n, t, k, Storage.GetCornerWidth(s, old, ok))
-				Storage.SetPortalWidth(n, t, k, Storage.GetPortalWidth(s, old, ok))
+				local ok = (k - rotation + w[1] - 1) % 3 + 1
+				Storage.SetCornerWidth(n, t, k, w[1 + ok])
+				Storage.SetPortalWidth(n, t, k, w[4 + ok])
 			end
 		end
 	end
-	-- Walls change only inside the changed obstacles' boxes (plus the pixel margin), so reach
-	-- is measured from those, not from the (much larger) dirty tiles.
-	local changedTiles: { [number]: boolean } = table.clone(dirty)
-	for floor, boxes in pendingFloors do
-		for _, box in boxes do
-			local bx0, bz0 = (box[1] - 1) / GRID, (box[2] - 1) / GRID
-			local bx1, bz1 = (box[3] + 1) / GRID, (box[4] + 1) / GRID
-			for old, new in remap do
-				if Storage.GetTriangleFloor(s, old) ~= floor or recompute[new] then
-					continue
-				end
-				local reach = 0
-				for k = 1, 3 do
-					reach = math.max(reach, Storage.GetCornerWidth(s, old, k), Storage.GetPortalWidth(s, old, k))
-				end
-				if distanceToBox(n, new, bx0, bz0, bx1, bz1) <= reach / 2 then
-					recompute[new] = true
-					changedTiles[Storage.GetTriangleTile(n, new)] = true
-				end
-			end
-		end
+	local changedTiles = Clearance.Refresh(s, n, plan.DirtyList, plan.NearList, recompute)
+	for tile in dirty do
+		changedTiles[tile] = true
 	end
-	Clearance.Compute(n, Storage.GetMaxAgentRadius(s), recompute)
 
 	for tile in changedTiles do
 		Storage.BumpTileStamp(n, tile)
@@ -560,7 +855,7 @@ local function apply(s: State): State
 			Storage.BumpTileStamp(n, tile)
 		end
 	end
-	return n
+	return n, changedRegions(s, n, plan, recompute)
 end
 
 --[=[
@@ -568,7 +863,7 @@ end
 	Applies every pending obstacle change (see the class docs). Atomic: on an error the mesh is
 	unchanged, the pending records are rolled back, and the error is raised again.
 ]=]
-function Tiles.Update(s: State)
+function Tiles.Update(s: State): { Types.ChangedRegion }
 	local pending = false
 	for slot = 1, Storage.ObstacleCount(s) do
 		if Storage.GetObstacleState(s, slot) ~= Storage.OBSTACLE_ACTIVE then
@@ -577,9 +872,9 @@ function Tiles.Update(s: State)
 		end
 	end
 	if not pending then
-		return
+		return {}
 	end
-	local ok, result = pcall(apply, s)
+	local ok, result, regions = pcall(apply, s)
 	if not ok then
 		-- Roll back: pending adds go (their ids stay used), pending removals stay active.
 		for slot = Storage.ObstacleCount(s), 1, -1 do
@@ -597,6 +892,7 @@ function Tiles.Update(s: State)
 	for key, value in result :: any do
 		(s :: any)[key] = value
 	end
+	return regions
 end
 
 return Tiles

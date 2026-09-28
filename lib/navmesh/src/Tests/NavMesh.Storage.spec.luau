@@ -294,6 +294,68 @@ return function(t: tiniest)
 			expect(from == b and to == a).is_true()
 		end)
 
+		test("bulk range operations (Update, ticket 22)", function()
+			cases(
+				"SetTriangleCount",
+				"CopyTriangleRange",
+				"RemapTriangles",
+				"SetTileRange",
+				"SetVertex",
+				"SetVertexCount",
+				"ShellFrom"
+			)
+			local s, tile, first = withTile()
+			for _ = 1, 4 do
+				Storage.AddVertex(s, vector.create(0, 0, 0))
+			end
+			Storage.SetTriangle(s, first, 1, 2, 3)
+			Storage.SetTriangle(s, first + 1, 2, 4, 3)
+			Storage.SetNeighbor(s, first, 1, first + 1)
+			Storage.SetNeighbor(s, first + 1, 3, first)
+			Storage.SetCornerWidth(s, first + 1, 2, 1.5)
+			Storage.SetTriangleArea(s, first + 1, 9)
+			Storage.AddExtra(s, first, first + 1, Storage.EXTRA_LINK, 1, vector.zero, vector.zero)
+
+			local n = Storage.ShellFrom(s)
+			expect(Storage.TileCount(n)).is(1)
+			expect(Storage.VertexCount(n)).is(4)
+			expect(Storage.TriangleCount(n)).is(0)
+			expect(n.Vertices == s.Vertices).is(false)
+			Storage.SetTriangleCount(n, 3)
+			expect(Storage.TriangleCount(n)).is(3)
+			-- Copied one slot up: data verbatim, extra heads cleared.
+			Storage.CopyTriangleRange(n, 2, s, first, 2)
+			expect(table.concat({ Storage.GetTriangle(n, 3) }, ",")).is("2,4,3")
+			expect(Storage.GetCornerWidth(n, 3, 2)).is(1.5)
+			expect(Storage.GetTriangleArea(n, 3)).is(9)
+			expect(Storage.GetTriangleTile(n, 3)).is(tile)
+			expect(Storage.GetExtraHead(n, 2)).is(0)
+			-- Old ids first.. shift by +1; vertex 4 becomes 1; an id in a removed segment -> 0.
+			Storage.RemapTriangles(n, 2, 3, { [4] = 1 }, { first, first + 1 }, { 1, false })
+			expect(table.concat({ Storage.GetTriangle(n, 3) }, ",")).is("2,1,3")
+			expect(Storage.GetNeighbor(n, 2, 1)).is(0)
+			expect(Storage.GetNeighbor(n, 3, 3)).is(first + 1)
+			Storage.SetTileRange(n, tile, 2, 2)
+			expect(table.concat({ Storage.GetTileRange(n, tile) }, ",")).is("2,2")
+			-- Overlapping copy within one state.
+			Storage.CopyTriangleRange(n, 1, n, 2, 2)
+			expect(table.concat({ Storage.GetTriangle(n, 2) }, ",")).is("2,1,3")
+			Storage.SetVertex(n, 1, vector.create(5, 6, 7))
+			expect(Storage.GetVertex(n, 1).Y).is(6)
+			expect(Storage.GetVertex(s, 1).Y).is(0)
+			Storage.SetVertexCount(n, 2)
+			expect(Storage.VertexCount(n)).is(2)
+			expect(Storage.GetVertex(n, 3)).is(nil)
+
+			-- Ids below the first segment stay as they are.
+			Storage.SetNeighbor(n, 1, 1, 1)
+			Storage.RemapTriangles(n, 1, 1, {}, { 2 }, { 5 })
+			expect(Storage.GetNeighbor(n, 1, 1)).is(1)
+			-- A one-triangle range is copied too.
+			Storage.CopyTriangleRange(n, 2, n, 1, 1)
+			expect(Storage.GetNeighbor(n, 2, 1)).is(1)
+		end)
+
 		test("state is plain, network-safe data", function()
 			local s, _, first = withTile()
 			Storage.AddVertex(s, vector.create(1, 2, 3))
