@@ -84,7 +84,7 @@ export type RunDeps = {
 	-- Applies one mutant in place; "invalid" when the engine refused (exit 3).
 	applyMutant: (id: number, worker: number) -> string,
 	-- Runs the suite in a fresh child process, honoring the configured timeout.
-	runSuite: (worker: number) -> ChildOutcome,
+	runSuite: (worker: number, mutant: Mutant) -> ChildOutcome,
 	-- Optional progress callback after each mutant, in completion order.
 	progress: ((completed: number, total: number, outcome: MutantOutcome) -> ())?,
 	-- Optional early-exit check, polled before each mutant. Returning true stops
@@ -251,6 +251,187 @@ function Mutation.plan(
 	return { toRun = toRun, noCoverage = noCoverage, sampledOut = sampledOut, filesFilter = opts.files }
 end
 
+-- One test's probe hits from the coverage run (tiniest_coverage's per_test).
+export type PerTest = { id: string, probes: { number } }
+
+-- Probe hits while the suite was being collected (LuneRunner): inside each
+-- spec's describe bodies (keyed by spec label), and everywhere else (module
+-- init, spec top-level code).
+export type Collect = { outside: { number }, bySpec: { [string]: { number } } }
+
+-- The pseudo-test tiniest_coverage files require-time and describe-time hits under.
+local MODULE_LOAD = "<module load>"
+
+--[=[
+	Per-mutant test selection: which tests can observe each mutant. The unit
+	is the enclosing function, not the line, so a test that reads a cache the
+	function builds still runs even when it skips the mutated line itself. A
+	mutant maps to, in run order:
+
+	* every test that entered one of the functions on its line, and
+	* every test of a spec whose describe bodies (collect time) entered one,
+	  since describe-level setup is shared by that spec's tests.
+
+	A mutant maps to nil (run the whole suite) when a value its line builds can
+	reach tests that never run it: the line has a module-level probe, or one of
+	its functions ran during module init / spec top-level code, or in a
+	describe window or test that also initialized a module (lazy require). Also
+	nil when no probe is on the line or nothing entered its functions.
+
+	@param map -- the engine's map.json document
+	@param perTest -- per_test from the coverage run, in run order
+	@param collect -- collect-time hits; without it every `<module load>` hit counts as module init
+	@return mutant id -> test ids (nil = whole suite)
+]=]
+function Mutation.selectTests(
+	mutants: { Mutant },
+	map: any,
+	perTest: { PerTest },
+	collect: Collect?
+): { [number]: { string }? }
+	-- file -> line -> the function ids of the probes on that line
+	local lineFns: { [string]: { [number]: { [number]: boolean } } } = {}
+	-- file -> lines holding a module-level probe
+	local moduleLines: { [string]: { [number]: boolean } } = {}
+	local fnIds: { [number]: boolean } = {}
+	-- every counter slot of a module-level probe (a hit means some module initialized)
+	local moduleLevel: { [number]: boolean } = {}
+	for _, file in map.files do
+		local lines: { [number]: { [number]: boolean } } = {}
+		local topLines: { [number]: boolean } = {}
+		lineFns[file.path] = lines
+		moduleLines[file.path] = topLines
+		for _, probe in file.probes do
+			-- A function probe stands for its own body; every other probe for its enclosing function.
+			local fn: number? = if probe.kind == "fn" then probe.id else probe.fn
+			if probe.kind == "fn" then
+				fnIds[probe.id] = true
+			elseif fn == nil then
+				moduleLevel[probe.id] = true
+				if probe.false_id ~= nil then
+					moduleLevel[probe.false_id] = true
+				end
+				if probe.kind == "loop" then
+					moduleLevel[probe.id + 1] = true
+					moduleLevel[probe.id + 2] = true
+				end
+			end
+			if fn == nil then
+				topLines[probe.line] = true
+			else
+				local fns = lines[probe.line] or {}
+				fns[fn] = true
+				lines[probe.line] = fns
+			end
+		end
+	end
+
+	local function initializesModule(probes: { number }): boolean
+		for _, id in probes do
+			if moduleLevel[id] then
+				return true
+			end
+		end
+		return false
+	end
+
+	-- function id -> indices into perTest of the tests that entered it
+	local fnTests: { [number]: { number } } = {}
+	local loadFns: { [number]: boolean } = {}
+	local function markLoad(probes: { number })
+		for _, id in probes do
+			if fnIds[id] then
+				loadFns[id] = true
+			end
+		end
+	end
+	for index, t in perTest do
+		if t.id == MODULE_LOAD then
+			if collect == nil then
+				markLoad(t.probes)
+			end
+		elseif initializesModule(t.probes) then
+			markLoad(t.probes)
+		else
+			for _, id in t.probes do
+				if fnIds[id] then
+					local list = fnTests[id] or {}
+					table.insert(list, index)
+					fnTests[id] = list
+				end
+			end
+		end
+	end
+
+	-- function id -> specs whose describe bodies entered it
+	local fnSpecs: { [number]: { string } } = {}
+	if collect ~= nil then
+		markLoad(collect.outside)
+		for spec, probes in collect.bySpec do
+			if initializesModule(probes) then
+				markLoad(probes)
+				continue
+			end
+			for _, id in probes do
+				if fnIds[id] then
+					local list = fnSpecs[id] or {}
+					table.insert(list, spec .. " > ")
+					fnSpecs[id] = list
+				end
+			end
+		end
+	end
+
+	local out: { [number]: { string }? } = {}
+	for _, m in mutants do
+		local lines = lineFns[m.file]
+		local fns = if lines ~= nil then lines[m.line] else nil
+		if fns == nil or moduleLines[m.file][m.line] then
+			continue
+		end
+		local picked: { [number]: boolean } = {}
+		local prefixes: { string } = {}
+		local fromLoad = false
+		for fn in fns do
+			fromLoad = fromLoad or loadFns[fn] == true
+			local tests = fnTests[fn]
+			if tests ~= nil then
+				for _, index in tests do
+					picked[index] = true
+				end
+			end
+			local specs = fnSpecs[fn]
+			if specs ~= nil then
+				for _, prefix in specs do
+					table.insert(prefixes, prefix)
+				end
+			end
+		end
+		if fromLoad then
+			continue
+		end
+		local ids: { string } = {}
+		for index, t in perTest do
+			local keep = picked[index] == true
+			if not keep and t.id ~= MODULE_LOAD then
+				for _, prefix in prefixes do
+					if t.id:sub(1, #prefix) == prefix then
+						keep = true
+						break
+					end
+				end
+			end
+			if keep then
+				table.insert(ids, t.id)
+			end
+		end
+		if #ids > 0 then
+			out[m.id] = ids
+		end
+	end
+	return out
+end
+
 --[=[
 	Classifies one child run. Timeout is checked first: a killed child also
 	reports a bad exit, and the hang is the finding.
@@ -317,7 +498,7 @@ function Mutation.run(toRun: { Mutant }, deps: RunDeps): ({ MutantOutcome }, boo
 			if deps.applyMutant(m.id, worker) ~= "ok" then
 				return { mutant = m, status = "invalid", duration = 0 }
 			end
-			local outcome = deps.runSuite(worker)
+			local outcome = deps.runSuite(worker, m)
 			return { mutant = m, status = Mutation.classify(outcome), duration = outcome.duration }
 		end)
 		-- Restore before anything else; a mutant must never leak into the next
@@ -381,6 +562,55 @@ function Mutation.run(toRun: { Mutant }, deps: RunDeps): ({ MutantOutcome }, boo
 	end
 	-- A stop signal seen after the queue was already drained stopped nothing.
 	return outcomes, stopped and #outcomes < #toRun
+end
+
+local function recordKey(id: number, site: string, replacement: string): string
+	return `{id}|{site}|{replacement}`
+end
+
+--[=[
+	`--resume`: splits the planned mutants into the ones still to run and the
+	outcomes an earlier run already decided (`records` from its
+	`mutation.partial.json`). A record counts only when id, site, and
+	replacement all match, so a changed mutant is run again.
+]=]
+function Mutation.resume(toRun: { Mutant }, records: { any }): ({ Mutant }, { [number]: MutantOutcome })
+	local byKey: { [string]: any } = {}
+	for _, r in records do
+		byKey[recordKey(r.id, r.site, r.replacement)] = r
+	end
+	local remaining: { Mutant } = {}
+	local decided: { [number]: MutantOutcome } = {}
+	for _, m in toRun do
+		local r = byKey[recordKey(m.id, m.site, m.replacement)]
+		if r ~= nil then
+			decided[m.id] = { mutant = m, status = r.status, duration = r.duration }
+		else
+			table.insert(remaining, m)
+		end
+	end
+	return remaining, decided
+end
+
+--[=[
+	Every decided outcome (resumed or just run) in plan order.
+]=]
+function Mutation.inPlanOrder(
+	toRun: { Mutant },
+	decided: { [number]: MutantOutcome },
+	outcomes: { MutantOutcome }
+): { MutantOutcome }
+	local byId = table.clone(decided)
+	for _, o in outcomes do
+		byId[o.mutant.id] = o
+	end
+	local out: { MutantOutcome } = {}
+	for _, m in toRun do
+		if byId[m.id] ~= nil then
+			table.insert(out, byId[m.id])
+		end
+	end
+	return out
 end
 
 --[=[

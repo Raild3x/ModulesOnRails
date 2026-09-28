@@ -32,6 +32,8 @@ type Options = {
 	mutateTimeout: number?,
 	mutateJobs: number?,
 	mutateFiles: string?,
+	mutateAllTests: boolean?,
+	resume: boolean?,
 	recommend: boolean?,
 	luneOnly: boolean?,
 	robloxOnly: boolean?,
@@ -53,12 +55,15 @@ local options: Options = {
 	mutateTimeout = nil,
 	mutateJobs = nil,
 	mutateFiles = nil,
+	mutateAllTests = false,
+	resume = false,
 	recommend = false,
 	luneOnly = false,
 	robloxOnly = false,
 	robloxRunner = nil,
 }
 local adapterPath: string? = nil
+local statusOnly = false
 
 -- Single source of truth for CLI flags: parsing and `help` output both read
 -- from this table, so they can't drift out of sync with each other.
@@ -186,6 +191,33 @@ local FLAGS: { FlagSpec } = {
 		takesValue = true,
 		apply = function(value)
 			options.mutateFiles = value
+		end,
+	},
+	{
+		match = "--mutate-all-tests",
+		usage = "--mutate-all-tests",
+		description = "Run the whole suite for every mutant, to the end. Default: only the tests that entered the mutated function, stopping at the first failure.",
+		takesValue = false,
+		apply = function()
+			options.mutateAllTests = true
+		end,
+	},
+	{
+		match = "--resume",
+		usage = "--resume",
+		description = "Skip mutants an interrupted --mutate run already decided (.coverage/<pkg>/mutation.partial.json), when the code and tests are unchanged.",
+		takesValue = false,
+		apply = function()
+			options.resume = true
+		end,
+	},
+	{
+		match = "--status",
+		usage = "--status",
+		description = "Print the live progress of a --mutate run (from .coverage/<pkg>/progress.json) and exit; flags a dead run by its stale heartbeat.",
+		takesValue = false,
+		apply = function()
+			statusOnly = true
 		end,
 	},
 	{
@@ -320,6 +352,10 @@ if adapterPath then
 	adapter = adapterMod.validate(loaded)
 else
 	adapter = defaultAdapter
+end
+
+if statusOnly then
+	process.exit(Orchestrator.status(adapter, selector :: string))
 end
 
 local summary = Orchestrator.run(adapter, selector :: string, options)
