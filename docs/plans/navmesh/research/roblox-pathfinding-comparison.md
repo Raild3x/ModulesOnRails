@@ -351,8 +351,19 @@ Effort is a rough guess, not a benchmark:
 
 ## 5. Decisions needing a ruling
 
-Each is a real fork where the answer changes what gets built. None needs a benchmark first,
-except where noted.
+**Ruled 2026-09-28.** The user's words are recorded in [review.md](../review.md):
+
+| # | Ruling |
+|---|---|
+| D1 | One-shot adapter only (option 1) |
+| D2 | Core per-triangle headroom plus `QueryFilter.AgentHeight` (option 2), bundled with Track B's v3 format |
+| D3 | Generator plus runtime `AddLink`/`RemoveLink` (option 2) |
+| D4 | Pure `FirstAffectedSegment(path, regions, radius, fromSegment?)` now. `ApplyOps` and a per-Actor Signal module wait for the multithreading work (see [D4 debate](#d4-debate-signals-and-actors)) |
+| D5 | Keep integer ids; the adapter exports a name-to-id table (option 2) |
+| D6 | Measure first: bake size and build time on a 1-4 km map, then rule |
+
+The options as they were presented follow. Each was a real fork where the answer changes what
+gets built.
 
 ### D1. How the world keeps the mesh in sync (G1)
 1. **One-shot adapter only** (ticket 26 as scoped).
@@ -421,6 +432,29 @@ except where noted.
    - Pros: the tile model already fits.
    - Cons: an L-sized effort; border clearance and cross-region seams need rulings.
      Benchmark bake size per km² first.
+
+### D4 debate: Signals and Actors
+The user asked whether a Signal (cheap to consume) and Actor/multithreading support can
+coexist. A subagent argued against the pure-helper position. The outcome:
+
+- **What is incompatible:**
+  - a Signal or connection stored in the mesh or a `PathResult`. It holds functions, so it
+    breaks U1/N1, `Serialize`, `Actor:SendMessage` and SharedTable;
+  - a Signal meant to span Actors. Each Actor is its own VM, so each Actor needs its own
+    Signal.
+- **What works:** an Actor-local Signal fired over the plain `{ ChangedRegion }` that `Update`
+  returns.
+- **A Signal is not cheaper.** The only real saving is skipping unaffected paths, and a
+  bounding-box prefilter per path, O(paths x regions), gets that as plain data.
+- **Multithreading means replaying a log of changes, not shipping regions.**
+  1. The owner commits `AddObstacle`/`Update` first. Broadcasting before the commit would let
+     replicas diverge from the owner if the owner's `Update` rolls back (SR13).
+  2. The owner then broadcasts plain change records.
+  3. Each Actor replays them on its own copy in parallel.
+  4. `Update` is deterministic, so every copy yields the same regions. Obstacle ids come from
+     the bake's next-id counter, so a replay can assert them to catch divergence.
+- **Built now:** only `FirstAffectedSegment` with the `fromSegment` cursor (Roblox's "blocked
+  ahead of me" rule). `ApplyOps`/`Live` wait for the multithreading work.
 
 ## Appendix A: a probe to settle the unverified claims
 

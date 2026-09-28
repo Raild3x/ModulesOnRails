@@ -94,6 +94,31 @@ the const question are deliberately open, gated on benchmarks.
   A, the stateless `Advance(mesh, path, cursor, ...)`: both prototypes behaved identically
   in the sim, but `follow` was 39 lines against A's 55, because A left the stall timer and
   the link arithmetic to the game. User: "B: follower table (Recommended)".
+- **Roblox PathfindingService comparison (research/roblox-pathfinding-comparison.md,
+  decisions D1-D6):** 2026-09-28.
+  - **D1, world sync:** a one-shot Part adapter only (ticket 26 as scoped). There is no Part
+    watcher; games call `AddObstacle`/`Update` themselves. User: "One-shot adapter
+    (Recommended)".
+  - **D2, agent height:** in the core. Per-triangle headroom plus `QueryFilter.AgentHeight`,
+    bundled with Track B's v3 bake format. User: "Core AgentHeight".
+  - **D3, jump and drop links:** a generator plus runtime `AddLink`/`RemoveLink` in the core,
+    with stamp rules like SR5 and the SR7 heuristic recomputed. User: "Generator + runtime
+    AddLink".
+  - **D4, blocked notification:** a pure helper `FirstAffectedSegment(path, regions, radius,
+    fromSegment?)` with a bounding-box prefilter, now (it fits ticket 23).
+    - The user asked whether Signals and Actor support can coexist, and a subagent debate
+      answered it:
+      - Only a Signal stored in the mesh or a `PathResult` is incompatible (U1/N1, Serialize,
+        `SendMessage`).
+      - An Actor-local Signal over the regions `Update` returns works.
+      - For Actors, the owner commits first, then broadcasts plain change records that each
+        replica replays.
+    - `ApplyOps` and an optional per-Actor `Live` Signal module are designed together with the
+      multithreading work, not before. User: "Helper now, the rest with multithreading".
+  - **D5, named areas:** keep integer area ids. The adapter exports a plain name-to-id table.
+    User: "Keep ints + name table (Recommended)".
+  - **D6, large worlds:** measure first. Benchmark bake size and build time on a 1-4 km
+    authored map before ruling on region bakes. User: "Measure first".
 
 ### Rulings during the build (2026-09-27)
 - **U-a (clearance reach), ruled after the P4 probe (ticket 15 notes):** no cap by default,
