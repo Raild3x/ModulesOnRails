@@ -314,7 +314,7 @@ end
 	Applies every obstacle added or removed since the last `Update`, rebuilding only the tiles
 	they touch, plus the clearance within reach of the walls that changed. Paths through changed
 	tiles then fail `IsPathValid`. The cost follows the tiles the change touches (smaller tiles,
-	cheaper updates), plus a copy of the rest of the mesh at about 0.1 ms per 1,000 triangles
+	cheaper updates), plus a copy of the rest of the mesh at about 0.1-0.2 ms per 1,000 triangles
 	under Lune; a `MaxAgentRadius` cap makes the clearance part much cheaper.
 
 	Returns the changed regions (`ChangedRegion`), empty when nothing was pending: a path that

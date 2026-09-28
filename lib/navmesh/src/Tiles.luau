@@ -49,7 +49,7 @@
 	  untouched, the pending records are rolled back, and the error is raised again.
 
 	**Cost:** the dirty tiles' re-snap, triangulation and clearance, plus an O(T) range copy and
-	renumbering pass (buffer operations, about 0.1 ms per 1,000 triangles) and O(tiles) loops.
+	renumbering pass (buffer operations, about 0.1-0.2 ms per 1,000 triangles) and O(tiles) loops.
 ]=]
 
 local Build = require("./Build")

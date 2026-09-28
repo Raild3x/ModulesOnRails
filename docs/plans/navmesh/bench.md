@@ -537,6 +537,61 @@ Studio, ms per 12 queries, medians of 3 runs x 5 rounds:
 - **Not shipped: the quadtree.** It is 10-40x slower, because its query radius has to cover
   the largest triangle.
 
+## Local Update (ticket 22, 2026-09-28)
+- **Bench:** `lune run tools/navmesh/bench/update_lune.luau maps|sweep 15` (interpreted Lune,
+  `os.clock`). One 4 x 4 crate, added then removed, at side / 2 + (run % 5), the dogfood
+  bench's crate.
+  - Base is the Update as of c22136d, kept in `tools/navmesh/bench/update_base/`: it rebuilds a
+    whole fresh state and measures clearance reach from the obstacle box.
+  - Local is the shipped Opt2i: a fresh-state commit with range copies, and incremental
+    clearance.
+  - Each variant updates its own mesh. The runs are interleaved and the order rotated; there is
+    one warm-up. Cells are medians [min-max] over 15 runs, add / remove in ms.
+  - The machine was shared (another agent's specs), so read ratios within a row.
+
+**Scenes, default TileSize:**
+
+| scene | cap | TileSize | triangles | tiles | Base add | Base remove | Local add | Local remove |
+|---|---|---|---|---|---|---|---|---|
+| props | none | default | 3152 | 64 | 26.0 [23.8-31.3] | 27.6 [25.2-30.5] | 20.9 [17.7-22.7] | 21.7 [18.4-25.1] |
+| props | 2 | default | 3152 | 64 | 20.0 [15.7-24.9] | 19.8 [16.9-24.1] | 13.7 [11.8-16.8] | 13.2 [10.1-15.5] |
+| bench | none | default | 4605 | 64 | 31.4 [24.0-36.7] | 24.4 [21.8-26.3] | 18.9 [10.4-23.7] | 13.0 [9.2-14.2] |
+| bench | 2 | default | 4605 | 64 | 21.6 [16.1-25.4] | 16.7 [14.2-18.4] | 10.9 [4.2-13.7] | 5.3 [2.5-7.8] |
+| terrain | none | default | 1297 | 16 | 25.7 [14.6-30.7] | 14.7 [11.3-16.4] | 22.5 [11.4-26.3] | 12.9 [7.5-15.7] |
+| terrain | 2 | default | 1297 | 16 | 18.3 [8.8-20.9] | 10.2 [7.1-14.1] | 16.5 [5.0-18.2] | 8.2 [3.0-9.4] |
+| walls | none | default | 692 | 16 | 45.4 [16.6-49.7] | 17.9 [11.0-18.8] | 46.4 [16.0-51.2] | 18.6 [9.8-19.9] |
+| walls | 2 | default | 692 | 16 | 33.4 [7.4-37.2] | 10.3 [4.2-11.8] | 33.8 [6.0-40.9] | 10.2 [2.8-11.7] |
+
+**TileSize sweep, the 256-stud bench map:**
+
+| scene | cap | TileSize | triangles | tiles | Base add | Base remove | Local add | Local remove |
+|---|---|---|---|---|---|---|---|---|
+| bench | 2 | 64 | 4255 | 16 | 43.0 [20.0-47.6] | 26.5 [15.5-28.9] | 39.1 [11.9-45.7] | 22.3 [7.6-24.0] |
+| bench | 2 | 32 | 4605 | 64 | 21.4 [15.3-22.1] | 16.5 [14.6-19.4] | 10.6 [3.8-12.1] | 5.2 [2.3-6.9] |
+| bench | 2 | 16 | 5477 | 256 | 20.1 [18.0-22.6] | 17.4 [16.5-19.9] | 3.9 [2.0-5.7] | 2.0 [1.3-2.8] |
+| bench | 2 | 8 | 7823 | 1024 | 31.0 [27.3-36.4] | 28.3 [26.2-30.4] | 2.6 [1.5-3.5] | 1.3 [1.1-3.3] |
+| bench | 2 | 4 | 14885 | 4068 | 244.9 [235.8-260.3] | 245.8 [230.5-252.0] | 4.3 [3.8-6.4] | 3.1 [2.5-4.7] |
+| bench | none | 64 | 4255 | 16 | 50.7 [25.8-54.6] | 32.4 [21.5-36.8] | 45.0 [18.3-51.3] | 28.6 [14.8-31.4] |
+| bench | none | 32 | 4605 | 64 | 28.8 [21.5-34.6] | 22.0 [20.0-24.0] | 18.4 [11.1-21.2] | 12.3 [9.0-13.9] |
+| bench | none | 16 | 5477 | 256 | 26.3 [22.6-29.5] | 23.9 [22.1-27.4] | 10.7 [7.1-12.7] | 7.5 [6.1-9.9] |
+| bench | none | 8 | 7823 | 1024 | 35.3 [33.8-41.4] | 33.8 [30.6-36.8] | 9.7 [7.1-11.1] | 7.3 [6.0-9.1] |
+| bench | none | 4 | 14885 | 4068 | 236.8 [230.5-259.1] | 240.1 [223.5-275.5] | 11.8 [9.1-16.2] | 12.1 [10.2-21.0] |
+
+- **What moved:**
+  - The O(map) work is gone: the per-tile copy of clean triangles, the floor-wide height scan,
+    the wall-grid scan in Clearance, and the reach loop over every triangle.
+  - The per-tile source copies are shared rather than copied; they cost 189 ms at 4,068 tiles.
+- **What is left** is the dirty tiles' re-snap, triangulation and clearance, which is why
+  terrain and walls barely move. Their default tiles are 256 and 64 studs, so the four dirty
+  tiles are a quarter of the map.
+  - The remaining O(T) is a buffer range copy and one renumbering pass: about 0.9 ms at 7,800
+    triangles and 2.5 ms at 15,000 (prototype profile, a loaded machine), or 0.1-0.2 ms per
+    1,000 triangles.
+  - Uncapped clearance (about 0.3 ms per recomputed triangle) sets the floor of the uncapped
+    rows at small tiles.
+- **Per-phase profiles and the rejected variants** (Opt1 in-place, Opt2 alone) are on branches
+  `proto/local-update` and `proto/local-update-77`. Ruling: review.md, 2026-09-28.
+
 ## Not measured (flagged)
 - Remote transfer time and payload size per layout (needs a live server/client session).
 - Locality on a real CDT's vertex and triangle ordering. The grid mesh has near-ideal locality,
