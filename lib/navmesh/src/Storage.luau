@@ -38,7 +38,9 @@
 	- Per floor: its tile size, default area, area ids by group, and walkable rings (grid X/Z
 	  with heights) for the height surfaces.
 	- Seam pieces: the (triangle, edge) pairs lying on each seam.
-	- Dynamic obstacles by id: floor, quantized ring, and state (pending or committed).
+	- Dynamic obstacles: the live records in id order (slot 1..`ObstacleCount`), each with its
+	  id, floor, quantized ring and state (pending or committed), plus the next id to hand out.
+	  Removed records are dropped, so ids are sparse; they are never reused.
 
 	The state is plain data and passes `PlainData.Check`.
 ]=]
@@ -115,7 +117,9 @@ export type State = {
 	SeamFloorA: { number },
 	SeamFloorB: { number },
 	SeamEnds: { number }, -- ax, az, bx, bz per seam
-	-- Dynamic obstacles by id (never reused).
+	-- Dynamic obstacles: live records by slot, ids increasing (never reused).
+	ObstacleNextId: number,
+	ObstacleId: { number },
 	ObstacleFloor: { number },
 	ObstacleState: { number }, -- Storage.OBSTACLE_*
 	ObstaclePointFirst: { number },
@@ -129,11 +133,11 @@ local Storage = {}
 Storage.EXTRA_SEAM = 1
 Storage.EXTRA_LINK = 2
 
--- Obstacle states: added or removed since the last Update commit (pending), or committed.
+-- Obstacle states: added or removed since the last Update commit (pending), or committed. A
+-- removed obstacle has no record: Update drops it on commit (a pending add, at once).
 Storage.OBSTACLE_PENDING_ADD = 1
 Storage.OBSTACLE_ACTIVE = 2
 Storage.OBSTACLE_PENDING_REMOVE = 3
-Storage.OBSTACLE_REMOVED = 4
 
 local function grown(old: buffer, usedBytes: number, newBytes: number): buffer
 	local fresh = buffer.create(newBytes)
@@ -230,6 +234,8 @@ function Storage.New(): State
 		SeamFloorA = {},
 		SeamFloorB = {},
 		SeamEnds = {},
+		ObstacleNextId = 1,
+		ObstacleId = {},
 		ObstacleFloor = {},
 		ObstacleState = {},
 		ObstaclePointFirst = {},
@@ -738,39 +744,107 @@ function Storage.GetPiece(s: State, id: number): (number, number, number)
 	return s.PieceSeam[id], s.PieceTri[id], s.PieceEdge[id]
 end
 
+--[=[
+	@within NavMeshStorage
+	The number of obstacle records held (live ones: removed obstacles have none).
+]=]
 function Storage.ObstacleCount(s: State): number
-	return #s.ObstacleFloor
+	return #s.ObstacleId
 end
 
 --[=[
 	@within NavMeshStorage
-	Records a dynamic obstacle (pending add) on `floor` with its quantized ring (grid X, Z).
-	Returns its id; ids are never reused.
+	The id the next new obstacle gets. It only grows, so ids are never reused.
 ]=]
-function Storage.InsertObstacleRecord(s: State, floor: number, xs: { number }, zs: { number }): number
+function Storage.GetObstacleNextId(s: State): number
+	return s.ObstacleNextId
+end
+
+function Storage.SetObstacleNextId(s: State, id: number)
+	assert(id >= s.ObstacleNextId, "obstacle ids are never reused")
+	s.ObstacleNextId = id
+end
+
+--[=[
+	@within NavMeshStorage
+	Records a dynamic obstacle (pending add) on `floor` with its quantized ring (grid X, Z),
+	under `id` (default: the next id; a given id must not be below it). Returns its id.
+]=]
+function Storage.InsertObstacleRecord(s: State, floor: number, xs: { number }, zs: { number }, id: number?): number
+	local given = id or s.ObstacleNextId
+	assert(given >= s.ObstacleNextId, "obstacle ids are never reused")
+	s.ObstacleNextId = given + 1
+	table.insert(s.ObstacleId, given)
 	table.insert(s.ObstacleFloor, floor)
 	table.insert(s.ObstacleState, Storage.OBSTACLE_PENDING_ADD)
 	table.insert(s.ObstaclePointFirst, #s.ObstacleX + 1)
 	table.insert(s.ObstaclePointCount, #xs)
 	table.move(xs, 1, #xs, #s.ObstacleX + 1, s.ObstacleX)
 	table.move(zs, 1, #zs, #s.ObstacleZ + 1, s.ObstacleZ)
-	return #s.ObstacleFloor
+	return given
 end
 
 --[=[
 	@within NavMeshStorage
-	Obstacle `id`: (floor, state, ring X, ring Z) with the ring as fresh arrays.
+	The slot holding obstacle `id`, or 0 when it has no record (removed, or never made).
 ]=]
-function Storage.GetObstacleRecord(s: State, id: number): (number, number, { number }, { number })
-	local p0, pn = s.ObstaclePointFirst[id], s.ObstaclePointCount[id]
-	return s.ObstacleFloor[id],
-		s.ObstacleState[id],
+function Storage.FindObstacle(s: State, id: number): number
+	local ids = s.ObstacleId
+	local lo, hi = 1, #ids
+	while lo <= hi do
+		local mid = (lo + hi) // 2
+		local at = ids[mid]
+		if at == id then
+			return mid
+		elseif at < id then
+			lo = mid + 1
+		else
+			hi = mid - 1
+		end
+	end
+	return 0
+end
+
+--[=[
+	@within NavMeshStorage
+	The record in `slot`: (id, floor, state, ring X, ring Z) with the ring as fresh arrays.
+]=]
+function Storage.GetObstacleRecord(s: State, slot: number): (number, number, number, { number }, { number })
+	local p0, pn = s.ObstaclePointFirst[slot], s.ObstaclePointCount[slot]
+	return s.ObstacleId[slot],
+		s.ObstacleFloor[slot],
+		s.ObstacleState[slot],
 		table.move(s.ObstacleX, p0, p0 + pn - 1, 1, table.create(pn)),
 		table.move(s.ObstacleZ, p0, p0 + pn - 1, 1, table.create(pn))
 end
 
-function Storage.SetObstacleState(s: State, id: number, state: number)
-	s.ObstacleState[id] = state
+function Storage.GetObstacleState(s: State, slot: number): number
+	return s.ObstacleState[slot]
+end
+
+function Storage.SetObstacleState(s: State, slot: number, state: number)
+	s.ObstacleState[slot] = state
+end
+
+--[=[
+	@within NavMeshStorage
+	Drops the record in `slot` and its ring; later records move down a slot. The next id is
+	unchanged.
+]=]
+function Storage.RemoveObstacleRecord(s: State, slot: number)
+	local p0, pn = s.ObstaclePointFirst[slot], s.ObstaclePointCount[slot]
+	for _, points in { s.ObstacleX, s.ObstacleZ } do
+		table.move(points, p0 + pn, #points, p0)
+		for _ = 1, pn do
+			table.remove(points)
+		end
+	end
+	for k = slot + 1, #s.ObstacleId do
+		s.ObstaclePointFirst[k] -= pn
+	end
+	for _, column in { s.ObstacleId, s.ObstacleFloor, s.ObstacleState, s.ObstaclePointFirst, s.ObstaclePointCount } do
+		table.remove(column, slot)
+	end
 end
 
 return Storage

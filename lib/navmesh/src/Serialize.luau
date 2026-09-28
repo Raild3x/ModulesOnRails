@@ -9,7 +9,7 @@
 	accessors only, so it is independent of the in-memory layout: swapping `Storage.luau` never
 	changes old bakes.
 
-	**Layout (v1):** "NVMS", a u16 version, then in order:
+	**Layout (v2):** "NVMS", a u16 version, then in order:
 	- the radius cap (f64);
 	- floors: name, tile size, default area, area ids, walkable rings (grid X/Z as i32, heights
 	  as f64);
@@ -17,12 +17,15 @@
 	- vertices (f32 X/Y/Z, as stored, plus the wall flag);
 	- per tile, its triangles: vertices, neighbours, area, open edges, corner and portal widths
 	  (f64);
-	- seams, seam pieces, links, and obstacle records.
+	- seams, seam pieces, links;
+	- obstacles: the next obstacle id (u32), then the live records only (removed ones are freed),
+	  each with its id (u32), floor, state and quantized ring.
 	Extra links (seam portals and links) are derived data: `Deserialize` rebuilds them exactly
 	as Build does.
 
-	A buffer of another version errors on `Deserialize`; a v2 format adds a v2 reader and a v2
-	bake, and the v1 bake is then expected to error (SR9).
+	A buffer of another version errors on `Deserialize` (SR9). v1 (2026-09-27) wrote every
+	obstacle record ever made, with implicit ids and no next-id counter; a v1 bake now errors
+	with a message to rebuild it. The next format adds a v3 reader and a v3 bake the same way.
 ]=]
 
 local Build = require("./Build")
@@ -31,7 +34,7 @@ local Storage = require("./Storage")
 type State = Storage.State
 
 local MAGIC = "NVMS"
-local VERSION = 1
+local VERSION = 2
 
 local Serialize = {}
 
@@ -209,9 +212,11 @@ function Serialize.Serialize(s: State): buffer
 		u8(w, (if both then 1 else 0) + (if enabled then 2 else 0))
 	end
 
+	u32(w, Storage.GetObstacleNextId(s))
 	u32(w, Storage.ObstacleCount(s))
-	for id = 1, Storage.ObstacleCount(s) do
-		local floor, state, xs, zs = Storage.GetObstacleRecord(s, id)
+	for slot = 1, Storage.ObstacleCount(s) do
+		local id, floor, state, xs, zs = Storage.GetObstacleRecord(s, slot)
+		u32(w, id)
 		u32(w, floor)
 		u8(w, state)
 		list(w, xs, i32)
@@ -226,10 +231,14 @@ end
 -- A byte reader over a buffer.
 type Reader = { Buffer: buffer, At: number }
 
+local function corrupt(): never
+	error("NavMesh.Deserialize: the buffer is truncated or corrupt", 0)
+end
+
 local function take(r: Reader, bytes: number): number
 	local at = r.At
 	if at + bytes > buffer.len(r.Buffer) then
-		error("NavMesh.Deserialize: the buffer is truncated or corrupt", 0)
+		corrupt()
 	end
 	r.At = at + bytes
 	return at
@@ -292,7 +301,14 @@ function Serialize.Deserialize(data: buffer): State
 		error("NavMesh.Deserialize: not a NavMesh bake", 0)
 	end
 	local version = ru16(r)
-	if version ~= VERSION then
+	if version == 1 then
+		error(
+			"NavMesh.Deserialize: this is a format v1 bake, which this build no longer reads (it reads v"
+				.. VERSION
+				.. "); rebuild it: NavMesh.Build the description, then NavMesh.Serialize",
+			0
+		)
+	elseif version ~= VERSION then
 		error(`NavMesh.Deserialize: unsupported format version {version} (this build reads {VERSION})`, 0)
 	end
 	local s = Storage.New()
@@ -360,11 +376,22 @@ function Serialize.Deserialize(data: buffer): State
 		Storage.SetLinkFlag(s, id, bit32.btest(flags, 2))
 	end
 
-	for id = 1, ru32(r) do
-		local floor, state = ru32(r), ru8(r)
-		Storage.InsertObstacleRecord(s, floor, rlist(r, ri32), rlist(r, ri32))
-		Storage.SetObstacleState(s, id, state)
+	local nextId = ru32(r)
+	for slot = 1, ru32(r) do
+		local id, floor, state = ru32(r), ru32(r), ru8(r)
+		-- Ids increase and stay below the next id; a record is pending or active.
+		if
+			id < Storage.GetObstacleNextId(s)
+			or id >= nextId
+			or state < 1
+			or state > Storage.OBSTACLE_PENDING_REMOVE
+		then
+			corrupt()
+		end
+		Storage.InsertObstacleRecord(s, floor, rlist(r, ri32), rlist(r, ri32), id)
+		Storage.SetObstacleState(s, slot, state)
 	end
+	Storage.SetObstacleNextId(s, math.max(nextId, 1))
 
 	if r.At ~= buffer.len(data) then
 		error("NavMesh.Deserialize: the buffer has trailing bytes (corrupt)", 0)

@@ -1,5 +1,6 @@
 --!strict
--- Makes the frozen v1 bake for NavMesh.Serialize.spec (SR9): prints base64 to paste as FROZEN_V1.
+-- Makes the frozen bake for NavMesh.Serialize.spec (SR9): prints base64 to paste as FROZEN_V<n>, for the
+-- format version Serialize writes now (v1 on 2026-09-27, v2 on 2026-09-28).
 -- Run once per format version; the bake must never be regenerated for an existing version.
 --   lune run tools/navmesh/make_bake.luau
 local NavMesh = require("../../lib/navmesh/src/NavMesh")
