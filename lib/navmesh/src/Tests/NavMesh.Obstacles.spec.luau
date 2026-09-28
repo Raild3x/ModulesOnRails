@@ -69,6 +69,11 @@ return function(t: tiniest)
 					)
 				)
 			end
+			-- Wall flags too (ticket 22: an in-place Update must re-flag the vertices it keeps).
+			local ids = { Storage.GetTriangle(mesh, tri) }
+			for i = 0, 2 do
+				table.insert(widths, if Storage.IsWallVertex(mesh, ids[(first + i - 1) % 3 + 1]) then "w" else "-")
+			end
 			out[`{keys[first]}:{keys[first % 3 + 1]}:{keys[(first + 1) % 3 + 1]}`] = table.concat(widths, " ")
 		end
 		return out
@@ -226,6 +231,21 @@ return function(t: tiniest)
 					.with_context(`b; dz {dz}`)
 					.is("")
 			end
+		end)
+
+		test("removing an obstacle cornered on a kept vertex leaves it as a fresh Build does (ticket 22)", function()
+			-- The crate's corner is the tile corner (16, 16): a baseline vertex that is kept through
+			-- the add and the remove, and is a wall vertex only while the crate is there.
+			local desc = table.clone(open)
+			desc.TileSize = 8
+			local crate = flat(0, { 16, 16, 18, 16, 18, 18, 16, 18 })
+			local mesh = NavMesh.Build(desc)
+			local id = NavMesh.AddObstacle(mesh, "Ground", crate)
+			NavMesh.Update(mesh)
+			expect(differsFromFresh(mesh, NavMesh.Build(baked(desc, "Ground", { crate })))).with_context("added").is("")
+			NavMesh.RemoveObstacle(mesh, id)
+			NavMesh.Update(mesh)
+			expect(differsFromFresh(mesh, NavMesh.Build(desc))).with_context("removed").is("")
 		end)
 
 		test("an update on a ramp, and one narrowing a corridor across a tile line, equal fresh Builds", function()
@@ -545,5 +565,29 @@ return function(t: tiniest)
 			NavMesh.Update(mesh)
 			expect(canonical(mesh)).is(before)
 		end)
+		test(
+			"an Update whose seam join fails after the tiles are rebuilt leaves the mesh as it was (ticket 22)",
+			function()
+				-- Covering the Ground side of the Ground-Stairs seam (x = 10) removes every piece of it,
+				-- so Connect fails after the rebuilt tiles are written: an in-place commit must undo.
+				local stairs = Fixtures.ThreeFloorStairs.Desc
+				local mesh = NavMesh.Build(stairs)
+				local before = canonical(mesh)
+				local widths = byTriangle(mesh)
+				NavMesh.AddObstacle(mesh, "Ground", flat(0, { 8.5, -1, 11, -1, 11, 5, 8.5, 5 }))
+				local ok = pcall(NavMesh.Update, mesh)
+				expect(ok).is(false)
+				expect(canonical(mesh)).is(before)
+				local after = byTriangle(mesh)
+				local same = true
+				for key, value in widths do
+					same = same and after[key] == value
+				end
+				expect(same).is_true()
+				expect(structureOk(mesh)).is("")
+				NavMesh.Update(mesh)
+				expect(canonical(mesh)).is(before)
+			end
+		)
 	end)
 end
