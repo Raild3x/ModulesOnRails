@@ -124,7 +124,8 @@ type Obstacle = { Id: number, Floor: number, X: { number }, Z: { number }, Box: 
 local function reSnap(
 	s: State,
 	tiles: { number },
-	obstacles: { Obstacle }
+	obstacles: { Obstacle },
+	tileSize: number
 ): { [number]: { Coords: { number }, Edges: { number }, Groups: { number }, Seams: { number } } }
 	local coords, edges = {}, {}
 	local edgeTile, edgeGroup, edgeSeam = {}, {}, {}
@@ -154,6 +155,26 @@ local function reSnap(
 			table.insert(ids, #edges // 2)
 		end
 		obstacleEdges[index] = ids
+	end
+	-- The floor's tile lines over everything above, as in Build: an obstacle can also cross a
+	-- line beside a clean tile, and clipping needs every crossing at a snapped vertex.
+	local minX, minZ, maxX, maxZ = math.huge, math.huge, -math.huge, -math.huge
+	for i = 1, #coords, 2 do
+		minX, maxX = math.min(minX, coords[i]), math.max(maxX, coords[i])
+		minZ, maxZ = math.min(minZ, coords[i + 1]), math.max(maxZ, coords[i + 1])
+	end
+	local ix0, ix1 = math.floor(minX / tileSize), math.ceil(maxX / tileSize)
+	local iz0, iz1 = math.floor(minZ / tileSize), math.ceil(maxZ / tileSize)
+	local function addLine(ax: number, az: number, bx: number, bz: number)
+		table.move({ ax, az, bx, bz }, 1, 4, #coords + 1, coords)
+		table.insert(edges, #coords // 2 - 1)
+		table.insert(edges, #coords // 2)
+	end
+	for i = ix0, ix1 do
+		addLine(i * tileSize, iz0 * tileSize, i * tileSize, iz1 * tileSize)
+	end
+	for j = iz0, iz1 do
+		addLine(ix0 * tileSize, j * tileSize, ix1 * tileSize, j * tileSize)
 	end
 
 	local snapped, fragments, source = Quantize.SnapRound(coords, edges)
@@ -284,7 +305,6 @@ local function apply(s: State): State
 	local floorHeights: { [number]: { [number]: number } } = {}
 	for floor, tiles in dirtyByFloor do
 		local tileSize, defaultArea, areaIds, rings = Storage.GetFloorSources(s, floor)
-		local _ = tileSize
 		local surfaces = {}
 		for i, ring in rings do
 			surfaces[i] = Internal.MakeSurface(ring)
@@ -330,7 +350,7 @@ local function apply(s: State): State
 				end
 			end
 		end
-		local snappedInputs = if #covered > 0 then reSnap(s, covered, overs) else {}
+		local snappedInputs = if #covered > 0 then reSnap(s, covered, overs, tileSize) else {}
 		for _, tile in tiles do
 			local input = snappedInputs[tile]
 			if input == nil then
@@ -429,8 +449,16 @@ local function apply(s: State): State
 				linkTiles[Storage.GetTriangleTile(s, t)] = true
 			end
 		end
-		local fromTri = Snap.Snap(n, from, LINK_EXTENTS, {})
-		local toTri = Snap.Snap(n, to, LINK_EXTENTS, {})
+		local fromTri, fromAt = Snap.Snap(n, from, LINK_EXTENTS, {})
+		local toTri, toAt = Snap.Snap(n, to, LINK_EXTENTS, {})
+		-- An end the snap moved in plan is under an obstacle (near its edge): it drops out too,
+		-- rather than keep a point off its triangle. (The tolerance only absorbs rounding.)
+		if fromAt == nil or (fromAt.X - from.X) ^ 2 + (fromAt.Z - from.Z) ^ 2 > 1e-12 then
+			fromTri = 0
+		end
+		if toAt == nil or (toAt.X - to.X) ^ 2 + (toAt.Z - to.Z) ^ 2 > 1e-12 then
+			toTri = 0
+		end
 		Storage.InsertLink(n, fromTri, from, toTri, to, cost, area, label, both)
 		Storage.SetLinkFlag(n, id, enabled)
 		for _, t in { fromTri, toTri } do

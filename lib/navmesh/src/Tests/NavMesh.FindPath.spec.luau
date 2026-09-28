@@ -210,13 +210,43 @@ return function(t: tiniest)
 		test("the funnel is the tight string through its corridor", function()
 			local Search = require("../Search")
 			local Funnel = require("../Funnel")
+			-- The Courtyard at 1/16 scale too: sub-stud corners, where no absolute threshold may
+			-- leak into the orientation tests.
+			local function scaled(ring: { any }, k: number): { any }
+				local out = {}
+				for i, p in ring do
+					out[i] = p * k
+				end
+				return out
+			end
+			local court = NavMesh.Fixtures.Courtyard.Desc.Floors.Ground
+			local tiny = {
+				Name = "Courtyard/16",
+				Scale = 1 / 16,
+				Desc = {
+					TileSize = 2,
+					Floors = {
+						Ground = {
+							Walkable = { scaled(court.Walkable[1], 1 / 16) },
+							Obstacles = {},
+						},
+					},
+				},
+			}
+			for i, ring in court.Obstacles do
+				tiny.Desc.Floors.Ground.Obstacles[i] = scaled(ring, 1 / 16)
+			end
 			local corners = 0
-			for _, scenario in { NavMesh.Fixtures.Courtyard, NavMesh.Fixtures.ShallowObstacles } do
+			for _, scenario: any in { NavMesh.Fixtures.Courtyard, NavMesh.Fixtures.ShallowObstacles, tiny } do
 				local mesh = NavMesh.Build(scenario.Desc)
-				local extents = vector.create(0.5, 4, 0.5)
-				local spots = if scenario == NavMesh.Fixtures.Courtyard
-					then { v(1, 0, 1), v(29, 0, 1), v(29, 0, 19), v(1, 0, 29), v(17, 0, 29), v(14, 0, 18), v(6, 0, 10) }
-					else { v(1, 0, 1), v(39, 0, 19), v(20, 0, 2), v(20, 0, 18), v(1, 0, 19), v(39, 0, 1) }
+				local k = scenario.Scale or 1
+				local extents = vector.create(0.5, 4, 0.5) * k
+				local spots = if scenario == NavMesh.Fixtures.ShallowObstacles
+					then { v(1, 0, 1), v(39, 0, 19), v(20, 0, 2), v(20, 0, 18), v(1, 0, 19), v(39, 0, 1) }
+					else scaled(
+						{ v(1, 0, 1), v(29, 0, 1), v(29, 0, 19), v(1, 0, 29), v(17, 0, 29), v(14, 0, 18), v(6, 0, 10) },
+						k
+					)
 				for _, a in spots do
 					for _, b in spots do
 						local st, sp = Snap.Snap(mesh, a, extents, {})
@@ -256,6 +286,280 @@ return function(t: tiniest)
 					end
 				end
 			end
+		end)
+	end)
+
+	describe("FindPath search oracles", function()
+		local Search = require("../Search")
+		local extents = vector.create(0.5, 4, 0.5)
+
+		-- Deterministic points over a box (a plain LCG; a few hundred draws never repeat).
+		local function points(seed: number, count: number, x0: number, z0: number, x1: number, z1: number, y: number)
+			local state = seed
+			local function rand(): number
+				state = (state * 1103515245 + 12345) % 2147483648
+				return state / 2147483648
+			end
+			local out = {}
+			for _ = 1, count do
+				table.insert(out, v(x0 + (x1 - x0) * rand(), y, z0 + (z1 - z0) * rand()))
+			end
+			return out
+		end
+
+		-- The edge of t that borders m (0 when none).
+		local function sharedEdge(mesh: any, t: number, m: number): number
+			for e = 1, 3 do
+				if Storage.GetNeighbor(mesh, t, e) == m then
+					return e
+				end
+			end
+			return 0
+		end
+
+		-- Recomputes a search's cost from its corridor, independently of Search: every step
+		-- walks from the current node to the next (the midpoint of the edge or seam portal
+		-- crossed, the far end of a link, or the goal) at the mean of the two areas' multipliers;
+		-- a link walks to its start at the leaving area's multiplier and pays Cost times its own.
+		local function corridorCost(
+			mesh: any,
+			corridor: { number },
+			vias: { number },
+			startP: vector,
+			goalT: number,
+			goalP: vector,
+			costs: { [number]: number }
+		): number
+			local function mult(tri: number): number
+				return costs[Storage.GetTriangleArea(mesh, tri)] or 1
+			end
+			if #corridor == 1 then
+				return if corridor[1] == goalT then vector.magnitude(goalP - startP) * mult(goalT) else 0
+			end
+			local total, p = 0, startP
+			for i = 2, #corridor do
+				local t, m = corridor[i - 1], corridor[i]
+				local last = m == goalT
+				if vias[i] == 0 then
+					local verts = { Storage.GetTriangle(mesh, t) }
+					local e = sharedEdge(mesh, t, m)
+					local a, b =
+						Storage.GetVertex(mesh, verts[e % 3 + 1]), Storage.GetVertex(mesh, verts[(e + 1) % 3 + 1])
+					local node = if last then goalP else (a + b) * 0.5
+					total += vector.magnitude(node - p) * (mult(t) + mult(m)) * 0.5
+					p = node
+				else
+					local _, _, kind, ref, a, b = Storage.GetExtra(mesh, vias[i])
+					if kind == Storage.EXTRA_LINK then
+						local _, _, _, _, cost, area = Storage.GetLink(mesh, ref)
+						total += vector.magnitude(a - p) * mult(t) + cost * (costs[area] or 1)
+						p = b
+						if last then
+							total += vector.magnitude(goalP - b) * mult(m)
+							p = goalP
+						end
+					else
+						local node = if last then goalP else (a + b) * 0.5
+						total += vector.magnitude(node - p) * (mult(t) + mult(m)) * 0.5
+						p = node
+					end
+				end
+			end
+			return total
+		end
+
+		local cases = {
+			{ Fixtures = NavMesh.Fixtures.Courtyard, Box = { -1, -1, 31, 31, 0 }, Costs = { [2] = 1.7 } },
+			{ Fixtures = NavMesh.Fixtures.ThreeFloorStairs, Box = { -1, -1, 41, 21, 0 }, Costs = {} },
+			{ Fixtures = NavMesh.Fixtures.ThreeFloorStairs, Box = { 9, -1, 41, 21, 5 }, Costs = { [1] = 0.6 } },
+			{ Fixtures = NavMesh.Fixtures.LinkJump, Box = { -1, -1, 25, 11, 0 }, Costs = { [1] = 1.3 } },
+			{ Fixtures = NavMesh.Fixtures.OneWayLink, Box = { -1, -1, 23, 11, 2 }, Costs = {} },
+			{ Fixtures = NavMesh.Fixtures.ShallowObstacles, Box = { -1, -1, 41, 21, 0 }, Costs = {} },
+		}
+		-- Spots on every floor of the stairs, so pairs cross seams both ways.
+		local stairSpots = {
+			v(2, 0, 2),
+			v(15, 0, 15),
+			v(25, 0, 12),
+			v(11, 0.4, 1),
+			v(12.7, 1.3, 2.2),
+			v(18, 4, 3),
+			v(30, 5, 10),
+			v(38, 5, 18),
+		}
+		local function spotsFor(index: number, case: any, count: number, seed: number): { any }
+			local spots = points(seed + index, count, case.Box[1], case.Box[2], case.Box[3], case.Box[4], case.Box[5])
+			if case.Fixtures == NavMesh.Fixtures.ThreeFloorStairs then
+				table.move(stairSpots, 1, #stairSpots, #spots + 1, spots)
+			end
+			return spots
+		end
+
+		test("a path's cost is the cost of its own node chain (seams, links and area costs)", function()
+			local checked = 0
+			for index, case in cases do
+				local mesh = NavMesh.Build(case.Fixtures.Desc)
+				local spots = spotsFor(index, case, 9, 0)
+				for _, a in spots do
+					for _, b in spots do
+						local st, sp = Snap.Snap(mesh, a, extents, case.Costs)
+						local gt, gp = Snap.Snap(mesh, b, extents, case.Costs)
+						if sp == nil or gp == nil then
+							continue
+						end
+						local status, corridor, vias, _, cost =
+							Search.Run(mesh, st, sp :: any, gt, gp :: any, case.Costs, math.huge, 0)
+						local expected = corridorCost(mesh, corridor, vias, sp :: any, gt, gp :: any, case.Costs)
+						checked += 1
+						expect(math.abs(cost - expected) < 1e-6)
+							.with_context(`{case.Fixtures.Name} {fmt(a)} -> {fmt(b)} ({status}): {cost} vs {expected}`)
+							.is_true()
+					end
+				end
+			end
+			expect(checked > 200).is_true()
+		end)
+
+		test("a cheap link behind the start still wins: links lower the heuristic scale", function()
+			-- Walking straight to the goal costs 23; walking back to the warp costs 14, the warp 2
+			-- (for 38 studs), and the last stud 1. Unscaled, the heuristic at the warp's start
+			-- (37 from the goal) would bury that route under the straight one. (4-stud tiles, so
+			-- the warp's ends lie many triangles away from the start and the goal.)
+			-- The same scene shifted to straddle the origin must give the same costs.
+			for _, dx in { 0, -20 } do
+				local mesh = NavMesh.Build({
+					TileSize = 4,
+					Floors = { Ground = { Walkable = { flat(0, { dx, 0, dx + 40, 0, dx + 40, 4, dx, 4 }) } } },
+					Links = { { From = v(dx + 1, 0, 2), To = v(dx + 39, 0, 2), Cost = 2, Area = 3 } },
+				})
+				local path = NavMesh.FindPath(mesh, v(dx + 15, 0, 2), v(dx + 38, 0, 2))
+				expect(math.abs(path.Cost - 17) < 1e-6).with_context(`dx {dx}: cost {path.Cost}`).is_true()
+				-- At 0.2 per unit of Cost the warp costs 0.4: the scale must use the multiplied price
+				-- (dividing instead leaves the scale at the area's 0.2, which overestimates here: from
+				-- x = 18.2 the warp route costs 18.6, the straight one 19.8).
+				local cheap =
+					NavMesh.FindPath(mesh, v(dx + 18.2, 0, 2), v(dx + 38, 0, 2), { AreaCosts = { [3] = 0.2 } })
+				expect(math.abs(cheap.Cost - 18.6) < 1e-6).with_context(`dx {dx}: cost {cheap.Cost}`).is_true()
+			end
+		end)
+
+		test("every step of a path with a radius has the clearance the rule asks for (SR4)", function()
+			-- The rule, derived here from the corridor alone: leaving a triangle over edge e needs
+			-- the corner width between its entry edge and e, or e's portal width when it was the
+			-- start or entered by a seam or link; links themselves need nothing.
+			local function violations(mesh: any, corridor: { number }, vias: { number }, radius: number): { string }
+				local found = {}
+				for i = 1, #corridor - 1 do
+					local t, m = corridor[i], corridor[i + 1]
+					local e
+					if vias[i + 1] == 0 then
+						e = sharedEdge(mesh, t, m)
+					else
+						local _, _, kind, ref = Storage.GetExtra(mesh, vias[i + 1])
+						if kind == Storage.EXTRA_LINK then
+							continue
+						end
+						e = ref
+					end
+					local clear
+					if i == 1 or vias[i] ~= 0 then
+						clear = Storage.GetPortalWidth(mesh, t, e)
+					else
+						clear = Storage.GetCornerWidth(mesh, t, 6 - e - sharedEdge(mesh, t, corridor[i - 1]))
+					end
+					if clear < 2 * radius then
+						table.insert(found, `step {i}: {clear} < {2 * radius}`)
+					end
+				end
+				return found
+			end
+			local successes = 0
+			for index, case in cases do
+				local mesh = NavMesh.Build(case.Fixtures.Desc)
+				local spots = spotsFor(index, case, 8, 100)
+				for _, radius in { 0.2, 0.45, 1.1 } do
+					for _, a in spots do
+						for _, b in spots do
+							local st, sp = Snap.Snap(mesh, a, extents, {})
+							local gt, gp = Snap.Snap(mesh, b, extents, {})
+							if sp == nil or gp == nil then
+								continue
+							end
+							local status, corridor, vias =
+								Search.Run(mesh, st, sp :: any, gt, gp :: any, {}, math.huge, radius)
+							if status == "Success" then
+								successes += 1
+							end
+							expect(table.concat(violations(mesh, corridor, vias, radius), "; "))
+								.with_context(`{case.Fixtures.Name} r {radius} {fmt(a)} -> {fmt(b)}`)
+								.is("")
+						end
+					end
+				end
+			end
+			expect(successes > 200).is_true()
+		end)
+
+		test("a small agent fits a small gap up to half its width, and no wider", function()
+			-- The Clearance spec's walled room at a tenth of the size: a 0.5-stud gap.
+			local small = NavMesh.Build({
+				Floors = {
+					Ground = {
+						Walkable = { flat(0, { 0, 0, 2, 0, 2, 2, 0, 2 }) },
+						Obstacles = { flat(0, { 0.8, -0.1, 1.2, -0.1, 1.2, 1.5, 0.8, 1.5 }) },
+					},
+				},
+			})
+			expect(NavMesh.FindPath(small, v(0.2, 0, 0.2), v(1.8, 0, 0.2), { AgentRadius = 0.24 }).Status).is("Success")
+			expect(NavMesh.FindPath(small, v(0.2, 0, 0.2), v(1.8, 0, 0.2), { AgentRadius = 0.26 }).Status).is("Partial")
+		end)
+
+		test("a start right beside a gap leaves over the gap's own width", function()
+			-- A wall from the south edge to z = 9 leaves a 1-stud gap on top; with 2-stud tiles the
+			-- start triangle borders the gap (the tile line x = 10), so leaving it reads a portal
+			-- width (it has no entry edge). (With one big tile a sliver start triangle spans the
+			-- gap itself, and SR4's start rule never looks inside it: see the triage notes.)
+			local gap = NavMesh.Build({
+				TileSize = 2,
+				Floors = {
+					Ground = {
+						Walkable = { flat(0, { 0, 0, 20, 0, 20, 10, 0, 10 }) },
+						Obstacles = { flat(0, { 10, -1, 11, -1, 11, 9, 10, 9 }) },
+					},
+				},
+			})
+			for _, start in { v(9.6, 0, 9.5), v(9.9, 0, 9.2) } do
+				expect(NavMesh.FindPath(gap, start, v(15, 0, 9.5), { AgentRadius = 0.49 }).Status)
+					.with_context(fmt(start))
+					.is("Success")
+				expect(NavMesh.FindPath(gap, start, v(15, 0, 5), { AgentRadius = 0.51 }).Status)
+					.with_context(fmt(start))
+					.is("Partial")
+			end
+		end)
+
+		test("A* finds Dijkstra's costs between many pairs (the scaled heuristic is admissible)", function()
+			local count = 0
+			for index, case in cases do
+				local mesh = NavMesh.Build(case.Fixtures.Desc)
+				local dijkstra = table.clone(case.Costs)
+				dijkstra[99] = 0 -- a zero multiplier on an unused area scales the heuristic to 0
+				local spots = spotsFor(index, case, 7, 200)
+				for _, a in spots do
+					for _, b in spots do
+						local x = NavMesh.FindPath(mesh, a, b, { AreaCosts = case.Costs })
+						if x.Status ~= "Success" then
+							continue
+						end
+						count += 1
+						local y = NavMesh.FindPath(mesh, a, b, { AreaCosts = dijkstra })
+						expect(math.abs(x.Cost - y.Cost) < 1e-6)
+							.with_context(`{case.Fixtures.Name} {fmt(a)} -> {fmt(b)}: {x.Cost} vs {y.Cost}`)
+							.is_true()
+					end
+				end
+			end
+			expect(count > 100).is_true()
 		end)
 	end)
 
@@ -414,6 +718,39 @@ return function(t: tiniest)
 			expect(function()
 				NavMesh.FindPath(mesh, v(1, 0, 1), v(2, 0, 2), { SnapExtents = v(-1, 1, 1) })
 			end).fails_with("SnapExtents")
+			expect(function()
+				NavMesh.FindPath(mesh, v(1, 0, 1), v(2, 0, 2), { AgentRadius = math.huge })
+			end).fails_with("AgentRadius must be")
+			-- Zero and fractional extents are fine on every axis.
+			for _, extents in { v(1, 0, 1), v(0.5, 0.5, 0.5), v(0, 1, 0) } do
+				expect(NavMesh.FindPath(mesh, v(1, 0, 1), v(2, 0, 2), { SnapExtents = extents }).Status)
+					.with_context(fmt(extents))
+					.is("Success")
+			end
+		end)
+
+		test("filter errors point at the caller's line", function()
+			local mesh = NavMesh.Build(square)
+			local capped: any = table.clone(square)
+			capped.MaxAgentRadius = 1
+			local cappedMesh = NavMesh.Build(capped)
+			for i, filter in
+				{
+					{ AgentRadius = -1 },
+					{ AreaCosts = { [1] = -1 } },
+					{ MaxExpansions = -1 },
+					{ SnapExtents = v(-1, 1, 1) },
+					{ AgentRadius = 2, Capped = true },
+				}
+			do
+				local target = if filter.Capped then cappedMesh else mesh
+				filter.Capped = nil
+				local ok, err = pcall(function()
+					NavMesh.FindPath(target, v(1, 0, 1), v(2, 0, 2), filter :: any)
+				end)
+				expect(ok).is(false)
+				expect(tostring(err):find("FindPath.spec", 1, true) ~= nil).with_context(`filter {i}: {err}`).is_true()
+			end
 		end)
 	end)
 end

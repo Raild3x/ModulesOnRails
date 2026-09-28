@@ -85,6 +85,44 @@ return function(t: tiniest)
 			expect(NavMesh.FindPath(mesh, v(2, 0, 2), v(30, 5, 10), { AgentRadius = 2.5 }).Status).is("Partial")
 		end)
 
+		test("a small agent crosses a narrow seam up to half its width, and no wider", function()
+			-- A 0.75-wide bridge floor between two pads, joined by seams at x = 6 and x = 14.
+			local mesh = NavMesh.Build({
+				Floors = {
+					West = { Walkable = { flat(0, { 0, 0, 6, 0, 6, 6, 0, 6 }) } },
+					Bridge = { Walkable = { flat(0, { 6, 2.625, 14, 2.625, 14, 3.375, 6, 3.375 }) } },
+					East = { Walkable = { flat(0, { 14, 0, 20, 0, 20, 6, 14, 6 }) } },
+				},
+				Seams = {
+					{ FloorA = "West", FloorB = "Bridge", From = v(6, 0, 2.625), To = v(6, 0, 3.375) },
+					{ FloorA = "Bridge", FloorB = "East", From = v(14, 0, 2.625), To = v(14, 0, 3.375) },
+				},
+			})
+			local function status(radius: number): string
+				return NavMesh.FindPath(mesh, v(2, 0, 3), v(18, 0, 3), { AgentRadius = radius }).Status
+			end
+			expect(status(0.3)).is("Success")
+			expect(status(0.375)).is("Success") -- exactly half the width
+			expect(status(0.4)).is("Partial")
+			-- From a start on the bridge itself (entered by no edge): the portal widths apply.
+			expect(NavMesh.FindPath(mesh, v(10, 0, 3), v(18, 0, 3), { AgentRadius = 0.375 }).Status).is("Success")
+			expect(NavMesh.FindPath(mesh, v(10, 0, 3), v(18, 0, 3), { AgentRadius = 0.4 }).Status).is("Partial")
+		end)
+
+		test("a seam at 45 degrees joins its floors like any other", function()
+			local mesh = NavMesh.Build({
+				Floors = {
+					Below = { Walkable = { flat(0, { 0, 0, 10, 0, 10, 10 }) } },
+					Above = { Walkable = { flat(0, { 0, 0, 10, 10, 0, 10 }) } },
+				},
+				Seams = { { FloorA = "Below", FloorB = "Above", From = v(0, 0, 0), To = v(10, 0, 10) } },
+			})
+			local path = NavMesh.FindPath(mesh, v(8, 0, 2), v(2, 0, 8))
+			expect(path.Status).is("Success")
+			expect(floors(path)).is("Below>Above")
+			expect((NavMesh.Raycast(mesh, v(8, 0, 2), v(2, 0, 8)))).is(false)
+		end)
+
 		test("an excluded area on the stairs cuts the floors apart", function()
 			local desc: any = table.clone(Fixtures.ThreeFloorStairs.Desc)
 			desc.Floors = table.clone(desc.Floors)
@@ -121,10 +159,10 @@ return function(t: tiniest)
 		test("a cheap link wins over a long walk, a dear one doesn't (SR7)", function()
 			local corridor = { Walkable = { flat(0, { 0, 0, 40, 0, 40, 4, 0, 4 }) } }
 			local function via(cost: number): NavMesh.PathResult
-				local mesh = NavMesh.Build {
+				local mesh = NavMesh.Build({
 					Floors = { Ground = corridor },
 					Links = { { From = v(1, 0, 2), To = v(39, 0, 2), Cost = cost, Label = "Warp" } },
-				}
+				})
 				return NavMesh.FindPath(mesh, v(1, 0, 2), v(39, 0, 2))
 			end
 			local cheap = via(1)
@@ -137,11 +175,29 @@ return function(t: tiniest)
 			expect(via(0).Cost).is(0)
 		end)
 
+		test("a link defaults to its length as Cost and area 1, and snaps ends authored off the mesh", function()
+			local mesh = NavMesh.Build(Fixtures.LinkJump.Desc)
+			expect(math.abs(NavMesh.FindPath(mesh, v(9, 0, 5), v(15, 0, 5)).Cost - 6) < 1e-6).is_true()
+			-- Area 1's multiplier prices the link (and the pads, walked for zero distance here).
+			local dear = NavMesh.FindPath(mesh, v(9, 0, 5), v(15, 0, 5), { AreaCosts = { [1] = 2 } })
+			expect(math.abs(dear.Cost - 12) < 1e-6).with_context(`cost {dear.Cost}`).is_true()
+			-- Ends 0.3 off the pads in X or Z, 3 above or 2 below: within the link snap.
+			local loose: any = table.clone(Fixtures.LinkJump.Desc)
+			loose.Links = {
+				{ From = v(10.3, 3, 5), To = v(14, -2, 10.3), Label = "Loose" },
+				{ From = v(24.3, 0, 5), To = v(5, 0, -0.3), Bidirectional = false },
+			}
+			local mesh2 = NavMesh.Build(loose)
+			expect(labels(NavMesh.FindPath(mesh2, v(2, 0, 2), v(22, 0, 8)))).is("2:Loose")
+			local _, from, _, to = Storage.GetLink(mesh2, 2)
+			expect(from.X == 24 and to.Z == 0).is_true()
+		end)
+
 		test("a link's area is filtered like a surface area", function()
-			local mesh = NavMesh.Build {
+			local mesh = NavMesh.Build({
 				Floors = { Ground = { Walkable = { flat(0, { 0, 0, 40, 0, 40, 4, 0, 4 }) } } },
 				Links = { { From = v(1, 0, 2), To = v(39, 0, 2), Cost = 1, Area = 5 } },
-			}
+			})
 			expect(NavMesh.FindPath(mesh, v(1, 0, 2), v(39, 0, 2)).Cost).is(1)
 			local walked = NavMesh.FindPath(mesh, v(1, 0, 2), v(39, 0, 2), { AreaCosts = { [5] = math.huge } })
 			expect(math.abs(walked.Cost - 38) < 1e-6).is_true()
@@ -171,6 +227,40 @@ return function(t: tiniest)
 			expect(function()
 				NavMesh.SetLinkEnabled(mesh, 1, "yes" :: any)
 			end).fails_with("must be a boolean")
+			for _, id in { 0, 1.5, "1" } do
+				expect(function()
+						NavMesh.SetLinkEnabled(mesh, id :: any, true)
+					end)
+					.with_context(tostring(id))
+					.fails_with(`no link {id}`)
+			end
+			for i, call in
+				{
+					function()
+						NavMesh.SetLinkEnabled(mesh, 2, true)
+					end,
+					function()
+						NavMesh.SetLinkEnabled(mesh, 1, "yes" :: any)
+					end,
+				}
+			do
+				local ok, err = pcall(call)
+				expect(ok).is(false)
+				expect(tostring(err):find("Floors.spec", 1, true) ~= nil).with_context(`call {i}: {err}`).is_true()
+			end
+		end)
+
+		test("toggling a link with a covered end bumps only its other end's tile", function()
+			local desc: any = table.clone(Fixtures.LinkJump.Desc)
+			desc.TileSize = 4
+			local mesh = NavMesh.Build(desc)
+			NavMesh.AddObstacle(mesh, "Ground", flat(0, { 8, 4, 10, 4, 10, 6, 8, 6 }))
+			NavMesh.Update(mesh)
+			expect((Storage.GetLink(mesh, 1))).is(0) -- the From end is under the crate
+			-- A path in the first tile, far from both ends.
+			local corner = NavMesh.FindPath(mesh, v(1, 0, 1), v(3, 0, 3))
+			NavMesh.SetLinkEnabled(mesh, 1, false)
+			expect(NavMesh.IsPathValid(mesh, corner)).is_true()
 		end)
 	end)
 
@@ -184,6 +274,14 @@ return function(t: tiniest)
 					Seams = { { FloorA = "A", FloorB = "B", From = v(30, 0, 0), To = v(30, 0, 5) } },
 				},
 				"seam 1: does not lie on floor",
+			},
+			{
+				"a seam on one floor's edge but off the other",
+				{
+					Floors = { A = ground, B = { Walkable = { flat(0, { 20, 0, 30, 0, 30, 10, 20, 10 }) } } },
+					Seams = { { FloorA = "A", FloorB = "B", From = v(10, 0, 0), To = v(10, 0, 5) } },
+				},
+				"does not lie on floor 'B'",
 			},
 			{
 				"floors on the same side of a seam",
@@ -231,6 +329,16 @@ return function(t: tiniest)
 				"a bad link label",
 				{ Floors = { A = ground }, Links = { { From = v(1, 0, 1), To = v(5, 0, 1), Label = 3 } } },
 				"Label must be a string",
+			},
+			{
+				"an infinite link cost",
+				{ Floors = { A = ground }, Links = { { From = v(1, 0, 1), To = v(5, 0, 1), Cost = math.huge } } },
+				"Cost must be",
+			},
+			{
+				"a link end that is not a vector",
+				{ Floors = { A = ground }, Links = { { From = 5, To = v(5, 0, 1) } } },
+				"link 1: From must be a Vector3",
 			},
 		}
 		for _, case in cases do
