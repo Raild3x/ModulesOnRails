@@ -233,6 +233,49 @@ return function(t: tiniest)
 			end
 		end)
 
+		test("widths follow a static wall the obstacle tilts, beyond its box (ticket 22)", function()
+			-- The crate cuts a long static sliver. The snapped crossing tilts the sliver's fragment
+			-- back to the tile line x = 8, by under half a pixel, and a narrow gap in the clean tile
+			-- west of it changes width 2 studs from the crate's box. (Ticket 18's reach rule measured
+			-- from the box and kept 0.561135 where a fresh Build gives 0.561115.)
+			local desc: any = {
+				TileSize = 4,
+				Floors = {
+					Ground = {
+						Walkable = { flat(0, { 0, 0, 16, 0, 16, 20, 0, 20 }) },
+						Obstacles = { flat(0, { 1.369, 11.018, 11.919, 11.755, 11.919, 11.993, 1.369, 11.256 }) },
+					},
+				},
+			}
+			local crate = flat(0, { 10, 10, 13, 10, 13, 13, 10, 13 })
+			local mesh = NavMesh.Build(desc)
+			local id = NavMesh.AddObstacle(mesh, "Ground", crate)
+			NavMesh.Update(mesh)
+			expect(differsFromFresh(mesh, NavMesh.Build(baked(desc, "Ground", { crate })))).with_context("added").is("")
+			NavMesh.RemoveObstacle(mesh, id)
+			NavMesh.Update(mesh)
+			expect(differsFromFresh(mesh, NavMesh.Build(desc))).with_context("removed").is("")
+		end)
+
+		test("a wall vertex a clean tile shares with a rebuilt one keeps its flag (ticket 22)", function()
+			-- A static wedge touches the tile line x = 16 at one vertex, (16, 12), from the west: its
+			-- walls are all in the clean west tile. The crate dirties only the east tile, whose
+			-- triangles share that vertex without a wall at it.
+			local desc = table.clone(open)
+			desc.TileSize = 8
+			desc.Floors = {
+				Ground = { Walkable = open.Floors.Ground.Walkable, Obstacles = { flat(0, { 13, 11, 16, 12, 13, 13 }) } },
+			}
+			local crate = flat(0, { 19, 11, 21, 11, 21, 13, 19, 13 })
+			local mesh = NavMesh.Build(desc)
+			local id = NavMesh.AddObstacle(mesh, "Ground", crate)
+			NavMesh.Update(mesh)
+			expect(differsFromFresh(mesh, NavMesh.Build(baked(desc, "Ground", { crate })))).with_context("added").is("")
+			NavMesh.RemoveObstacle(mesh, id)
+			NavMesh.Update(mesh)
+			expect(differsFromFresh(mesh, NavMesh.Build(desc))).with_context("removed").is("")
+		end)
+
 		test("removing an obstacle cornered on a kept vertex leaves it as a fresh Build does (ticket 22)", function()
 			-- The crate's corner is the tile corner (16, 16): a baseline vertex that is kept through
 			-- the add and the remove, and is a wall vertex only while the crate is there.

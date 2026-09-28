@@ -38,6 +38,14 @@
 	what `Update` must recompute. With `MaxAgentRadius` R, the search stops at R and a width is
 	stored as at most 2R.
 
+	**Update (ticket 22):** Build keeps its wall index (walls by floor and grid cell, listed under
+	their tiles) in a weak per-mesh cache. `Refresh` swaps the rebuilt tiles' walls in it and
+	recomputes every triangle within its own reach r* of a *changed wall*: one in the old walls or
+	the new ones, not both. That is more than the obstacle's box. A static wall crossing the
+	obstacle gets a snapped vertex at the crossing, and that tilts the whole fragment back to its
+	previous vertex by up to half a grid pixel. The index is runtime state and never serialized:
+	a loaded mesh builds it on its first `Update`, from the state before the change.
+
 	**Cost (ticket 15 notes):** about 0.1-0.25 ms per triangle on Lune. That is several times the
 	triangulation itself, and dominated by exact link costs.
 ]=]
@@ -275,23 +283,30 @@ local function chain(
 	end
 end
 
---[=[
-	@within NavMeshClearance
-	Computes every vertex's wall flag and the corner and portal widths of every triangle, or only
-	of the triangles in `only` (Update: the rest keep widths the caller copied in). `cap` is the
-	MaxAgentRadius (0 = none).
-]=]
-function Clearance.Compute(s: Storage.State, cap: number, only: { [number]: boolean }?)
-	Storage.SetMaxAgentRadius(s, cap)
-	local n = Storage.TriangleCount(s)
+-- The wall index: wall segments by floor and grid cell, each listed under its tile. Freed ids
+-- are reused, so toggling obstacles never grows it.
+type WallIndex = {
+	Walls: { Seg },
+	WallFloor: { number },
+	TileWalls: { [number]: { number } }, -- tile -> its wall ids
+	Grid: { [number]: { number } }, -- floor and cell -> wall ids
+	Free: { number },
+}
 
-	-- Walls, bucketed by floor and grid cell.
-	local walls: { Seg } = {}
-	local grid: { [number]: { number } } = {}
-	local function key(floor: number, cx: number, cz: number): number
-		return (floor * 65536 + cx + 32768) * 65536 + cz + 32768
-	end
-	for t = 1, n do
+-- Per mesh (weak): the wall index Build made, kept in step by Refresh; and each tile's largest
+-- width, which bounds how far a change can reach into it (nil = not measured yet).
+local indexes: { [Storage.State]: WallIndex } = setmetatable({}, { __mode = "k" }) :: any
+local tileReaches: { [Storage.State]: { [number]: number } } = setmetatable({}, { __mode = "k" }) :: any
+
+local function cellKey(floor: number, cx: number, cz: number): number
+	return (floor * 65536 + cx + 32768) * 65536 + cz + 32768
+end
+
+-- Adds the wall edges of triangles first..last to the index, flagging their vertices when
+-- `flag`, and appending each wall to `added` when given.
+local function addWalls(index: WallIndex, s: Storage.State, first: number, last: number, flag: boolean, added: { Seg }?)
+	local walls, grid = index.Walls, index.Grid
+	for t = first, last do
 		local verts = { Storage.GetTriangle(s, t) }
 		local floor = Storage.GetTriangleFloor(s, t)
 		for e = 1, 3 do
@@ -299,14 +314,28 @@ function Clearance.Compute(s: Storage.State, cap: number, only: { [number]: bool
 				continue
 			end
 			local u, v = verts[e % 3 + 1], verts[(e + 1) % 3 + 1]
-			Storage.SetWallVertex(s, u, true)
-			Storage.SetWallVertex(s, v, true)
+			if flag then
+				Storage.SetWallVertex(s, u, true)
+				Storage.SetWallVertex(s, v, true)
+			end
 			local p, q = Storage.GetVertex(s, u), Storage.GetVertex(s, v)
-			table.insert(walls, { p.X, p.Z, q.X, q.Z })
-			local id = #walls
+			local id = table.remove(index.Free) or #walls + 1
+			local wall = { p.X, p.Z, q.X, q.Z }
+			walls[id] = wall
+			index.WallFloor[id] = floor
+			if added then
+				table.insert(added, wall)
+			end
+			local tile = Storage.GetTriangleTile(s, t)
+			local list = index.TileWalls[tile]
+			if list == nil then
+				list = {}
+				index.TileWalls[tile] = list
+			end
+			table.insert(list, id)
 			for cx = math.floor(math.min(p.X, q.X) / CELL), math.floor(math.max(p.X, q.X) / CELL) do
 				for cz = math.floor(math.min(p.Z, q.Z) / CELL), math.floor(math.max(p.Z, q.Z) / CELL) do
-					local k = key(floor, cx, cz)
+					local k = cellKey(floor, cx, cz)
 					local bucket = grid[k]
 					if bucket == nil then
 						bucket = {}
@@ -317,14 +346,40 @@ function Clearance.Compute(s: Storage.State, cap: number, only: { [number]: bool
 			end
 		end
 	end
+end
+
+local function buildIndex(s: Storage.State, flag: boolean): WallIndex
+	local index: WallIndex = { Walls = {}, WallFloor = {}, TileWalls = {}, Grid = {}, Free = {} }
+	addWalls(index, s, 1, Storage.TriangleCount(s), flag)
+	return index
+end
+
+-- The corner and portal widths of every triangle, or of those in `only` (the rest keep the
+-- widths they have), from the index's walls.
+local function computeWidths(s: Storage.State, cap: number, only: { [number]: boolean }?, index: WallIndex)
+	Storage.SetMaxAgentRadius(s, cap)
+	local n = Storage.TriangleCount(s)
+	local grid = index.Grid
+	local walls = index.Walls
+	local key = cellKey
 
 	local limitCap = if cap > 0 then cap else LAST_LIMIT
-	-- ponytail: every triangle, once per Build; Update (ticket 18) must pass a subset, and a
-	-- per-edge wall-chain merge or a cheaper link bound is the next lever if that is too slow.
-	for t = 1, n do
-		if only and not only[t] then
-			continue
+	-- ponytail: a per-edge wall-chain merge or a cheaper link bound is the next lever if the
+	-- per-triangle cost (the uncapped search above all) is too slow.
+	local order: { number }
+	if only then
+		order = {}
+		for t in only do
+			table.insert(order, t)
 		end
+		table.sort(order)
+	else
+		order = table.create(n)
+		for t = 1, n do
+			order[t] = t
+		end
+	end
+	for _, t in order do
 		local verts = { Storage.GetTriangle(s, t) }
 		local floor = Storage.GetTriangleFloor(s, t)
 		local P = { Storage.GetVertex(s, verts[1]), Storage.GetVertex(s, verts[2]), Storage.GetVertex(s, verts[3]) }
@@ -416,6 +471,191 @@ function Clearance.Compute(s: Storage.State, cap: number, only: { [number]: bool
 			limit = math.min(limit * 2, limitCap)
 		end
 	end
+end
+
+--[=[
+	@within NavMeshClearance
+	Computes every vertex's wall flag and the corner and portal widths of every triangle (Build).
+	`cap` is the MaxAgentRadius (0 = none). The wall index is kept for `Refresh`.
+]=]
+function Clearance.Compute(s: Storage.State, cap: number)
+	local index = buildIndex(s, true)
+	indexes[s] = index
+	tileReaches[s] = {}
+	computeWidths(s, cap, nil, index)
+end
+
+-- A lower bound on the plan distance (studs) between two boxes: their gap.
+local function boxGap(
+	ax0: number,
+	az0: number,
+	ax1: number,
+	az1: number,
+	bx0: number,
+	bz0: number,
+	bx1: number,
+	bz1: number
+): number
+	local dx = math.max(bx0 - ax1, 0, ax0 - bx1)
+	local dz = math.max(bz0 - az1, 0, az0 - bz1)
+	return math.sqrt(dx * dx + dz * dz)
+end
+
+-- The largest width in a tile: nothing further than half of it from the tile can change one.
+local function tileReach(s: Storage.State, tile: number): number
+	local first, count = Storage.GetTileRange(s, tile)
+	local reach = 0
+	for t = first, first + count - 1 do
+		for k = 1, 3 do
+			reach = math.max(reach, Storage.GetCornerWidth(s, t, k), Storage.GetPortalWidth(s, t, k))
+		end
+	end
+	return reach
+end
+
+-- Removes the walls of `tiles` from the index; returns them by "floor:x1,z1,x2,z2".
+local function removeWalls(index: WallIndex, tiles: { number }): { [string]: { number } }
+	local removed: { [string]: { number } } = {}
+	for _, tile in tiles do
+		local ids: { number } = index.TileWalls[tile] or {}
+		for _, id in ids do
+			local w = index.Walls[id]
+			local floor = index.WallFloor[id]
+			removed[`{floor}:{w[1]},{w[2]},{w[3]},{w[4]}`] = { floor, w[1], w[2], w[3], w[4] }
+			for cx = math.floor(math.min(w[1], w[3]) / CELL), math.floor(math.max(w[1], w[3]) / CELL) do
+				for cz = math.floor(math.min(w[2], w[4]) / CELL), math.floor(math.max(w[2], w[4]) / CELL) do
+					local k = cellKey(floor, cx, cz)
+					local bucket = index.Grid[k]
+					local at = table.find(bucket, id) :: number
+					bucket[at] = bucket[#bucket]
+					bucket[#bucket] = nil
+					if #bucket == 0 then
+						index.Grid[k] = nil
+					end
+				end
+			end
+			table.insert(index.Free, id)
+		end
+		index.TileWalls[tile] = nil
+	end
+	return removed
+end
+
+--[=[
+	@within NavMeshClearance
+	Clearance for an `Update` commit. `n` is the new state and `mesh` the caller's (still the old
+	state; `n` is swapped into it afterwards). `dirty` are the rebuilt tiles and `near` their
+	clean neighbours; `recompute` holds the rebuilt triangles that match no old one.
+
+	Swaps the rebuilt tiles' walls in `mesh`'s wall index (built from the old state first if the
+	mesh has none, as after a load) and flags wall vertices of the rebuilt tiles and their
+	neighbours. Every triangle within its own reach of a changed wall then joins `recompute`
+	(tiles are culled first by their largest width), and those widths are computed. Returns the
+	tiles holding a recomputed triangle. It must be the commit's last step that can fail: an error
+	after it would leave the index ahead of the mesh.
+]=]
+function Clearance.Refresh(
+	mesh: Storage.State,
+	n: Storage.State,
+	dirty: { number },
+	near: { number },
+	recompute: { [number]: boolean }
+): { [number]: boolean }
+	local index = indexes[mesh] or buildIndex(mesh, false)
+	local reaches = tileReaches[mesh] or {}
+	local touched: { [number]: boolean } = {}
+
+	-- Changed walls: in the old walls of the rebuilt tiles or in the new ones, not both.
+	local old = removeWalls(index, dirty)
+	local changed: { { number } } = {} -- floor, x1, z1, x2, z2
+	for _, tile in dirty do
+		local first, count = Storage.GetTileRange(n, tile)
+		local added: { Seg } = {}
+		addWalls(index, n, first, first + count - 1, true, added)
+		local floor = Storage.GetTileFloor(n, tile)
+		for _, w in added do
+			local k = `{floor}:{w[1]},{w[2]},{w[3]},{w[4]}`
+			if old[k] then
+				old[k] = nil
+			else
+				table.insert(changed, { floor, w[1], w[2], w[3], w[4] })
+			end
+		end
+		touched[tile] = true
+	end
+	for _, c in old do
+		table.insert(changed, c)
+	end
+	-- A neighbour's walls are unchanged, but a vertex it shares with a rebuilt tile had its flag
+	-- cleared by the caller: flag it again from the neighbour's own walls.
+	for _, tile in near do
+		local first, count = Storage.GetTileRange(n, tile)
+		for t = first, first + count - 1 do
+			local verts = { Storage.GetTriangle(n, t) }
+			for e = 1, 3 do
+				if Storage.IsWallEdge(n, t, e) then
+					Storage.SetWallVertex(n, verts[e % 3 + 1], true)
+					Storage.SetWallVertex(n, verts[(e + 1) % 3 + 1], true)
+				end
+			end
+		end
+	end
+
+	-- Reach: every triangle within half its largest width of a changed wall. Box gaps are lower
+	-- bounds on the distances, so nothing that might change is skipped.
+	local boxes: { [number]: { number } } = {} -- per floor: the changed walls' bounding box
+	for _, c in changed do
+		local b = boxes[c[1]] or { math.huge, math.huge, -math.huge, -math.huge }
+		boxes[c[1]] = b
+		b[1], b[2] = math.min(b[1], c[2], c[4]), math.min(b[2], c[3], c[5])
+		b[3], b[4] = math.max(b[3], c[2], c[4]), math.max(b[4], c[3], c[5])
+	end
+	for tile = 1, Storage.TileCount(n) do
+		local floor = Storage.GetTileFloor(n, tile)
+		local b = boxes[floor]
+		if b == nil then
+			continue
+		end
+		local reach = reaches[tile]
+		if reach == nil then
+			reach = tileReach(n, tile)
+			reaches[tile] = reach
+		end
+		local x0, z0, x1, z1 = Storage.GetTileBounds(n, tile)
+		if boxGap(x0, z0, x1, z1, b[1], b[2], b[3], b[4]) > reach / 2 then
+			continue
+		end
+		local first, count = Storage.GetTileRange(n, tile)
+		for t = first, first + count - 1 do
+			if recompute[t] then
+				continue
+			end
+			local r = 0
+			for k = 1, 3 do
+				r = math.max(r, Storage.GetCornerWidth(n, t, k), Storage.GetPortalWidth(n, t, k))
+			end
+			local va, vb, vc = Storage.GetTriangle(n, t)
+			local pa, pb, pc = Storage.GetVertex(n, va), Storage.GetVertex(n, vb), Storage.GetVertex(n, vc)
+			local tx0, tx1 = math.min(pa.X, pb.X, pc.X), math.max(pa.X, pb.X, pc.X)
+			local tz0, tz1 = math.min(pa.Z, pb.Z, pc.Z), math.max(pa.Z, pb.Z, pc.Z)
+			for _, c in changed do
+				local cx0, cx1 = math.min(c[2], c[4]), math.max(c[2], c[4])
+				local cz0, cz1 = math.min(c[3], c[5]), math.max(c[3], c[5])
+				if c[1] == floor and boxGap(tx0, tz0, tx1, tz1, cx0, cz0, cx1, cz1) <= r / 2 then
+					recompute[t] = true
+					touched[tile] = true
+					break
+				end
+			end
+		end
+	end
+	computeWidths(n, Storage.GetMaxAgentRadius(n), recompute, index)
+	for tile in touched do
+		reaches[tile] = nil -- its widths changed: measured again when next needed
+	end
+	indexes[mesh] = index
+	tileReaches[mesh] = reaches
+	return touched
 end
 
 return Clearance
