@@ -88,8 +88,8 @@ NavMesh.Build = Build.Build
 --[=[
 	@within NavMesh
 	Finds a smoothed path between two **feet** positions (U-b). Each end is snapped within
-	`SnapExtents`: the nearest surface vertically, ties going below. The path is the shortest
-	one through the cheapest triangle corridor.
+	`SnapExtents`: the nearest surface vertically; ties go to a surface under the point, then below.
+	The path is the shortest one through the cheapest triangle corridor.
 
 	```lua
 	local path = NavMesh.FindPath(mesh, npcFeet, goal, { AreaCosts = { [2] = 1.5 } })
@@ -143,7 +143,7 @@ end
 --[=[
 	@within NavMesh
 	Snaps a **feet** position onto the mesh (U-b): within `SnapExtents`, the nearest surface
-	vertically, ties going below. Returns nil when nothing is in range.
+	vertically; ties go to a surface under the point, then below. Returns nil when nothing is in range.
 ]=]
 function NavMesh.FindNearestPoint(mesh: NavMeshData, position: Vector3, filter: QueryFilter?): NavPoint?
 	local costs, _, extents = readFilter(mesh, filter)

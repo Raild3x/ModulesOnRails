@@ -204,6 +204,41 @@ return function(t: tiniest)
 				end
 			end
 		end)
+
+		test("a point on a floor stays on it next to a seam at the same height (snap tie-break)", function()
+			-- Ramp and Top meet at x = 20, both at y = 5 there. A feet point on Top, 0.32 from the
+			-- seam, is at vertical distance 0 from both: it must stay where it is, on Top, not
+			-- slide onto the Ramp's edge (x = 20) inside the 0.5-stud snap box.
+			local mesh = NavMesh.Build {
+				Floors = {
+					Ground = { Walkable = { flat(0, { 0, 0, 10, 0, 10, 20, 0, 20 }) } },
+					Ramp = { Walkable = { { v(10, 0, 8), v(20, 5, 8), v(20, 5, 12), v(10, 0, 12) } } },
+					Top = { Walkable = { flat(5, { 20, 0, 30, 0, 30, 20, 20, 20 }) } },
+				},
+				Seams = {
+					{ FloorA = "Ground", FloorB = "Ramp", From = v(10, 0, 8), To = v(10, 0, 12) },
+					{ FloorA = "Ramp", FloorB = "Top", From = v(20, 5, 8), To = v(20, 5, 12) },
+				},
+			}
+			local feet = v(20.32, 5, 11.62)
+			local function same(p: any): boolean
+				return math.abs(p.X - feet.X) < 1e-4 and math.abs(p.Y - feet.Y) < 1e-4 and math.abs(p.Z - feet.Z) < 1e-4
+			end
+			local snapped = NavMesh.FindNearestPoint(mesh, feet) :: NavMesh.NavPoint
+			expect(snapped.Floor).is("Top")
+			expect(same(snapped.Position)).with_context(`snapped to {snapped.Position}`).is_true()
+			-- The nearest wall is the corner (20, 12), not the Ramp's edge line through it.
+			local d = NavMesh.FindDistanceToWall(mesh, feet, 10)
+			local corner = math.sqrt(0.32 ^ 2 + 0.38 ^ 2) -- 0.4968
+			expect(math.abs(d - corner) < 1e-3).with_context(`distance {d}`).is_true()
+			-- FindPath starts where the agent stands.
+			local path = NavMesh.FindPath(mesh, feet, v(28, 5, 18))
+			expect(path.Waypoints[1].Floor).is("Top")
+			expect(same(path.Waypoints[1].Position)).is_true()
+			-- On the seam itself both floors contain the point: it stays put, on either floor.
+			local onSeam = NavMesh.FindNearestPoint(mesh, v(20, 5, 10)) :: NavMesh.NavPoint
+			expect(vector.magnitude((onSeam.Position :: any) - v(20, 5, 10)) < 1e-4).is_true()
+		end)
 	end)
 
 	describe("Links", function()
