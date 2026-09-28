@@ -94,7 +94,7 @@ return function(tiniest)
 			for _, m in plan.toRun do
 				table.insert(ids, m.id)
 			end
-			expect(ids).is_shallow_equal({ 2, 9, 5 })
+			expect(ids).is_shallow_equal { 2, 9, 5 }
 		end)
 
 		test("a limit stride-samples deterministically across the list", function()
@@ -145,17 +145,17 @@ return function(tiniest)
 			expect(#plan.noCoverage).is(1)
 			expect(plan.noCoverage[1].id).is(2)
 			expect(#plan.sampledOut).is(0)
-			expect(plan.filesFilter).is_shallow_equal({ "src/a.luau" })
+			expect(plan.filesFilter).is_shallow_equal { "src/a.luau" }
 		end)
 	end)
 
 	describe("Mutation.parseFileGlobs", function()
 		test("splits the csv, trims, and normalizes ./ and backslashes", function()
-			expect(Mutation.parseFileGlobs(" src/Tiles.luau, ./src/Snap.luau ,src\\Deep\\*.luau")).is_shallow_equal({
+			expect(Mutation.parseFileGlobs(" src/Tiles.luau, ./src/Snap.luau ,src\\Deep\\*.luau")).is_shallow_equal {
 				"src/Tiles.luau",
 				"src/Snap.luau",
 				"src/Deep/*.luau",
-			})
+			}
 		end)
 
 		test("nil or an empty list means no filter", function()
@@ -202,17 +202,17 @@ return function(tiniest)
 		local FAIL = { pass = 4, fail = 1, skipped = 0 }
 
 		test("a timed-out child is a timeout even though its exit is bad", function()
-			expect(Mutation.classify({ timedOut = true, ok = false, tally = nil, duration = 5 })).is("timeout")
+			expect(Mutation.classify { timedOut = true, ok = false, tally = nil, duration = 5 }).is("timeout")
 		end)
 
 		test("a crashed child (bad exit or missing sentinel) is an error", function()
-			expect(Mutation.classify({ timedOut = false, ok = false, tally = PASS, duration = 1 })).is("error")
-			expect(Mutation.classify({ timedOut = false, ok = true, tally = nil, duration = 1 })).is("error")
+			expect(Mutation.classify { timedOut = false, ok = false, tally = PASS, duration = 1 }).is("error")
+			expect(Mutation.classify { timedOut = false, ok = true, tally = nil, duration = 1 }).is("error")
 		end)
 
 		test("failing tests kill the mutant; a green suite lets it survive", function()
-			expect(Mutation.classify({ timedOut = false, ok = true, tally = FAIL, duration = 1 })).is("killed")
-			expect(Mutation.classify({ timedOut = false, ok = true, tally = PASS, duration = 1 })).is("survived")
+			expect(Mutation.classify { timedOut = false, ok = true, tally = FAIL, duration = 1 }).is("killed")
+			expect(Mutation.classify { timedOut = false, ok = true, tally = PASS, duration = 1 }).is("survived")
 		end)
 	end)
 
@@ -260,12 +260,12 @@ return function(tiniest)
 		end
 
 		test("applies, runs, classifies and restores per mutant", function()
-			local deps, calls = fakeDeps({})
+			local deps, calls = fakeDeps {}
 			local outcomes = Mutation.run({ mutant(1, "src/a.luau", 3), mutant(2, "src/b.luau", 1) }, deps)
 			expect(#outcomes).is(2)
 			expect(outcomes[1].status).is("killed")
 			expect(calls.suites).is(2)
-			expect(calls.applied).is_shallow_equal({ 1, 2 })
+			expect(calls.applied).is_shallow_equal { 1, 2 }
 			-- Every mutant restored its file's pristine bytes.
 			expect(#calls.writes).is(2)
 			expect(calls.writes[1].path).is("BUILD/src/a.luau")
@@ -273,11 +273,11 @@ return function(tiniest)
 		end)
 
 		test("an invalid mutant skips the suite but still restores", function()
-			local deps, calls = fakeDeps({
+			local deps, calls = fakeDeps {
 				applyMutant = function()
 					return "invalid"
 				end,
-			})
+			}
 			local outcomes = Mutation.run({ mutant(1, "src/a.luau", 3) }, deps)
 			expect(outcomes[1].status).is("invalid")
 			expect(calls.suites).is(0)
@@ -285,18 +285,18 @@ return function(tiniest)
 		end)
 
 		test("an error thrown mid-mutant is caught, marked, and still restores", function()
-			local deps, calls = fakeDeps({
+			local deps, calls = fakeDeps {
 				runSuite = function()
 					error("engine exploded")
 				end,
-			})
+			}
 			local outcomes = Mutation.run({ mutant(1, "src/a.luau", 3) }, deps)
 			expect(outcomes[1].status).is("error")
 			expect(#calls.writes).is(1)
 		end)
 
 		test("shouldStop halts the loop before the next mutant, keeping results", function()
-			local deps, calls = fakeDeps({})
+			local deps, calls = fakeDeps {}
 			local stopAfterFirst = false
 			deps.shouldStop = function()
 				return stopAfterFirst
@@ -316,14 +316,14 @@ return function(tiniest)
 		end)
 
 		test("a completed loop reports stopped = false", function()
-			local deps = fakeDeps({})
+			local deps = fakeDeps {}
 			local _, stopped = Mutation.run({ mutant(1, "src/a.luau", 3) }, deps)
 			expect(stopped).never_is_true()
 		end)
 
 		test("progress fires once per mutant with the outcome", function()
 			local seen = {}
-			local deps = fakeDeps({})
+			local deps = fakeDeps {}
 			deps.progress = function(index, total, outcome)
 				table.insert(seen, { index = index, total = total, status = outcome.status })
 			end

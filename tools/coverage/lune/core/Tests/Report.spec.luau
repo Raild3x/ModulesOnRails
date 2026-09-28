@@ -82,7 +82,7 @@ return function(tiniest)
 
 	describe("Report.console header and metrics", function()
 		test("prints the package, pipeline and tally", function()
-			local lines = render(mergedWith({}))
+			local lines = render(mergedWith {})
 			expect(anyLineContains(lines, "fixture_pkg")).is_true()
 			expect(anyLineContains(lines, "[lune: pure Luau]")).is_true()
 			expect(anyLineContains(lines, "3 tests: 2 pass")).is_true()
@@ -90,7 +90,7 @@ return function(tiniest)
 		end)
 
 		test("formats metric rows with counts, percentage and bar", function()
-			local lines = render(mergedWith({}))
+			local lines = render(mergedWith {})
 			expect(anyLineContains(lines, "Lines")).is_true()
 			expect(anyLineContains(lines, "1 / 2")).is_true()
 			expect(anyLineContains(lines, "50.0%")).is_true()
@@ -99,12 +99,12 @@ return function(tiniest)
 		end)
 
 		test("hides the conditions row when no conditions were measured", function()
-			local lines = render(mergedWith({}))
+			local lines = render(mergedWith {})
 			expect(anyLineContains(lines, "Conditions")).never_is_true()
 		end)
 
 		test("shows the conditions row when conditions were measured", function()
-			local merged = mergedWith({})
+			local merged = mergedWith {}
 			merged.totals.conditions = m(1, 4)
 			local lines = render(merged)
 			expect(anyLineContains(lines, "Conditions")).is_true()
@@ -112,7 +112,7 @@ return function(tiniest)
 		end)
 
 		test("the per-file breakdown is hidden by default", function()
-			local lines = render(mergedWith({}))
+			local lines = render(mergedWith {})
 			expect(anyLineContains(lines, "Per-file")).never_is_true()
 		end)
 
@@ -121,7 +121,7 @@ return function(tiniest)
 			fileA.lines = m(9, 10)
 			local fileB = emptyFile("src/b.luau")
 			fileB.lines = m(1, 4)
-			local lines = render(mergedWith({ files = { fileA, fileB } }), perFileInfo())
+			local lines = render(mergedWith { files = { fileA, fileB } }, perFileInfo())
 			expect(anyLineContains(lines, "Per-file lines (worst first):")).is_true()
 			expect(anyLineContains(lines, "90.0%")).is_true()
 			expect(anyLineContains(lines, "25.0%")).is_true()
@@ -142,7 +142,7 @@ return function(tiniest)
 			fileA.lines = m(1, 2)
 			local fileB = emptyFile("src/a.luau")
 			fileB.lines = m(2, 4)
-			local lines = render(mergedWith({ files = { fileA, fileB } }), perFileInfo())
+			local lines = render(mergedWith { files = { fileA, fileB } }, perFileInfo())
 			local rows = {}
 			for _, line in lines do
 				if line:find("^    src/") then
@@ -154,7 +154,7 @@ return function(tiniest)
 		end)
 
 		test("an empty report renders no findings sections", function()
-			local lines = render(mergedWith({}))
+			local lines = render(mergedWith {})
 			expect(anyLineContains(lines, "Functions never entered")).never_is_true()
 			expect(anyLineContains(lines, "Decisions never taken")).never_is_true()
 			expect(anyLineContains(lines, "Loops never iterated")).never_is_true()
@@ -176,7 +176,7 @@ return function(tiniest)
 				{ name = "A.missed", line = 7, hits = 0, isPrivate = false },
 			}
 			-- Deliberately out of path order to exercise the sort.
-			local lines = render(mergedWith({ files = { fileB, fileA } }))
+			local lines = render(mergedWith { files = { fileB, fileA } })
 			expect(anyLineContains(lines, "Functions never entered (3):")).is_true()
 			expect(anyLineContains(lines, "src/a.luau:7  A.missed")).is_true()
 			expect(anyLineContains(lines, "1 private/local function(s) also uncovered")).is_true()
@@ -208,7 +208,7 @@ return function(tiniest)
 				{ file = "src/b.luau", line = 1, ctx = "repeat", src = "done", missing = "never true" },
 			}
 			-- Out of path order to exercise the cross-file sort.
-			local lines = render(mergedWith({ files = { fileB, fileA } }))
+			local lines = render(mergedWith { files = { fileB, fileA } })
 			expect(anyLineContains(lines, "Decisions never taken both ways (3):")).is_true()
 			expect(anyLineContains(lines, "if 'a and b'")).is_true()
 			expect(anyLineContains(lines, string.rep("x", 45) .. "...")).is_true()
@@ -226,7 +226,7 @@ return function(tiniest)
 			fileB.condPartials = {
 				{ file = "src/b.luau", line = 4, src = "c", missing = "never true" },
 			}
-			local lines = render(mergedWith({ files = { fileB, fileA } }))
+			local lines = render(mergedWith { files = { fileB, fileA } })
 			expect(anyLineContains(lines, "Conditions that never varied (3):")).is_true()
 			expect(anyLineContains(lines, "'b'")).is_true()
 			expect(anyLineContains(lines, string.rep("y", 45) .. "...")).is_true()
@@ -236,14 +236,14 @@ return function(tiniest)
 
 	describe("Report.console loops", function()
 		test("describes each iteration pattern", function()
-			local lines = render(mergedWith({
+			local lines = render(mergedWith {
 				-- Two files, out of order, to exercise the cross-file sort.
 				loops = {
 					{ file = "src/b.luau", line = 10, ctx = "for", zero = 0, one = 3, many = 0 },
 					{ file = "src/a.luau", line = 20, ctx = "while", zero = 2, one = 0, many = 0 },
 					{ file = "src/a.luau", line = 30, ctx = "repeat", zero = 1, one = 1, many = 0 },
 				},
-			}))
+			})
 			expect(anyLineContains(lines, "Loops never iterated more than once (3):")).is_true()
 			expect(anyLineContains(lines, "for loop \u{2014} always exactly 1 iteration")).is_true()
 			expect(anyLineContains(lines, "while loop \u{2014} body never ran (0 iterations)")).is_true()
@@ -253,17 +253,31 @@ return function(tiniest)
 
 	describe("Report.console const candidates", function()
 		local CANDS = {
-			{ file = "src/b.luau", line = 4, col = 1, kind = "local", names = { "a", "b" }, site = "const:src/b.luau:4:1" },
-			{ file = "src/a.luau", line = 9, col = 1, kind = "local_function", names = { "helper" }, site = "const:src/a.luau:9:1" },
+			{
+				file = "src/b.luau",
+				line = 4,
+				col = 1,
+				kind = "local",
+				names = { "a", "b" },
+				site = "const:src/b.luau:4:1",
+			},
+			{
+				file = "src/a.luau",
+				line = 9,
+				col = 1,
+				kind = "local_function",
+				names = { "helper" },
+				site = "const:src/a.luau:9:1",
+			},
 		}
 
 		test("hidden when the run produced no candidates", function()
-			local lines = render(mergedWith({}))
+			local lines = render(mergedWith {})
 			expect(anyLineContains(lines, "Const candidates")).never_is_true()
 		end)
 
 		test("lists declarations sorted by file with decl-style labels", function()
-			local lines = render(mergedWith({ constCandidates = CANDS }))
+			local lines = render(mergedWith { constCandidates = CANDS })
 			expect(anyLineContains(lines, "Const candidates \u{2014} locals never reassigned (2):")).is_true()
 			expect(anyLineContains(lines, "src/a.luau:9  local function helper")).is_true()
 			expect(anyLineContains(lines, "src/b.luau:4  local a, b")).is_true()
@@ -279,12 +293,12 @@ return function(tiniest)
 		end)
 
 		test("the lune pipeline gets the const-vs-lune caveat, roblox does not", function()
-			local lines = render(mergedWith({ constCandidates = CANDS }))
+			local lines = render(mergedWith { constCandidates = CANDS })
 			expect(anyLineContains(lines, "Lune cannot parse const yet")).is_true()
 
 			local info = table.clone(INFO)
 			info.pipeline = "roblox"
-			local robloxLines = render(mergedWith({ constCandidates = CANDS }), info)
+			local robloxLines = render(mergedWith { constCandidates = CANDS }, info)
 			expect(anyLineContains(robloxLines, "Lune cannot parse const yet")).never_is_true()
 		end)
 	end)
@@ -320,7 +334,12 @@ return function(tiniest)
 		test("prints the tallies, score bar and skip notes", function()
 			local lines = renderMutation(TOTALS, SURVIVORS)
 			expect(anyLineContains(lines, "mutation \u{2014} fixture_pkg")).is_true()
-			expect(anyLineContains(lines, "12 mutants: 8 run \u{00b7} 5 killed \u{00b7} 2 survived \u{00b7} 1 timeout \u{00b7} 0 error")).is_true()
+			expect(
+				anyLineContains(
+					lines,
+					"12 mutants: 8 run \u{00b7} 5 killed \u{00b7} 2 survived \u{00b7} 1 timeout \u{00b7} 0 error"
+				)
+			).is_true()
 			expect(anyLineContains(lines, "75.0%")).is_true()
 			expect(anyLineContains(lines, "60.0%")).is_true()
 			expect(anyLineContains(lines, "2 mutant(s) on lines no test executes")).is_true()
@@ -381,7 +400,13 @@ return function(tiniest)
 		test("numbers entries, with file:line prefixes when present", function()
 			local lines = renderRecs({
 				{ priority = 1, category = "failing_tests", action = "Fix the 2 failing test(s) first." },
-				{ priority = 3, category = "uncovered_function", file = "src/a.luau", line = 7, action = "Add a test that calls M.add(a, b)." },
+				{
+					priority = 3,
+					category = "uncovered_function",
+					file = "src/a.luau",
+					line = 7,
+					action = "Add a test that calls M.add(a, b).",
+				},
 			}, 2)
 			expect(anyLineContains(lines, "Recommended next steps (2):")).is_true()
 			expect(anyLineContains(lines, "1. Fix the 2 failing test(s) first.")).is_true()
@@ -403,13 +428,13 @@ return function(tiniest)
 			local entry = function(line: number, label: string)
 				return { file = "src/a.luau", line = line, site = "s", kind = "stmt", label = label, detail = "d" }
 			end
-			local lines = render(mergedWith({
+			local lines = render(mergedWith {
 				suppressed = {
 					ignored = { entry(1, "M.doThing") },
 					gated = { entry(2, "service:IsRunning()") },
 					dead = { entry(3, "x = 99") },
 				},
-			}))
+			})
 			expect(anyLineContains(lines, "Suppressed \u{2014} excluded from the metrics above (3):")).is_true()
 			expect(anyLineContains(lines, "ignore rule (1):")).is_true()
 			expect(anyLineContains(lines, "env-gated, unreachable in edit mode (1):")).is_true()
@@ -418,7 +443,7 @@ return function(tiniest)
 		end)
 
 		test("falls back to the probe kind when an entry has no label", function()
-			local lines = render(mergedWith({
+			local lines = render(mergedWith {
 				suppressed = {
 					ignored = {
 						{ file = "src/a.luau", line = 1, site = "s", kind = "stmt", label = "", detail = "d" },
@@ -426,21 +451,28 @@ return function(tiniest)
 					gated = {},
 					dead = {},
 				},
-			}))
+			})
 			expect(anyLineContains(lines, "src/a.luau:1  stmt")).is_true()
 		end)
 
 		test("truncates long suppressed labels", function()
 			local longLabel = string.rep("z", 60)
-			local lines = render(mergedWith({
+			local lines = render(mergedWith {
 				suppressed = {
 					ignored = {},
 					gated = {
-						{ file = "src/a.luau", line = 2, site = "s", kind = "decision", label = longLabel, detail = "d" },
+						{
+							file = "src/a.luau",
+							line = 2,
+							site = "s",
+							kind = "decision",
+							label = longLabel,
+							detail = "d",
+						},
 					},
 					dead = {},
 				},
-			}))
+			})
 			-- Also exercises rendering with an empty ignored group.
 			expect(anyLineContains(lines, "ignore rule")).never_is_true()
 			expect(anyLineContains(lines, string.rep("z", 45) .. "...")).is_true()

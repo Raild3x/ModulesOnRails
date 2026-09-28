@@ -279,17 +279,19 @@ local function runMutation(
 		progress = function(completed: number, total: number, outcome: Mutation.MutantOutcome)
 			local elapsed = os.clock() - loopStart
 			local eta = elapsed / completed * (total - completed)
-			print(string.format(
-				"[mutation] %d/%d  %-8s %s:%d %s  (%.1fs, ~%.0fs left)",
-				completed,
-				total,
-				outcome.status,
-				outcome.mutant.file,
-				outcome.mutant.line,
-				outcome.mutant.op,
-				outcome.duration,
-				eta
-			))
+			print(
+				string.format(
+					"[mutation] %d/%d  %-8s %s:%d %s  (%.1fs, ~%.0fs left)",
+					completed,
+					total,
+					outcome.status,
+					outcome.mutant.file,
+					outcome.mutant.line,
+					outcome.mutant.op,
+					outcome.duration,
+					eta
+				)
+			)
 		end,
 		shouldStop = function()
 			return fs.isFile(stopPath)
