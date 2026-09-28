@@ -117,6 +117,22 @@ Prototype both on the bench maps before presenting them.
     enough for the polyline test used by the specs.
 - **Bench:** `tools/navmesh/bench/update_lune.luau` (Base kept in `update_base/`); tables in
   bench.md "Local Update".
+- **Gates:** 210 specs, and stylua is clean. Mutation (`--mutate-files`, covered-line score):
+
+  | file | hardening | now |
+  |---|---|---|
+  | Tiles | 75.5% | 80.0% |
+  | Clearance | 80.1% | 80.9% |
+  | Storage | 93.5% | 95.3% |
+
+  - Real survivors from the first gate got specs or were deleted as dead code (commit 8a2465a).
+  - The props run found a stale reach bound in a working change.
+  - **Survivors left:**
+    - equivalent: key canonicalisation, merging and ordering helpers, loop starts;
+    - perf-only: conservative reach bounds and extra recomputes;
+    - the pre-existing re-snap and link code;
+    - the one-pixel dirty margin, which is observable only through the internal dirty set,
+      since the stamps and regions already cover that tile.
 - **Open:**
   - **Update vs a fresh Build can differ by one grid pixel (pre-existing, since ticket 18).**
     - It happens where a dynamic obstacle crosses a *static* edge: Update re-snaps the tile's
