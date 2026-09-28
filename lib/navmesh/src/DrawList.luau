@@ -28,6 +28,21 @@ local function paletteColor(palette: { string }, id: number): string
 	return palette[(id - 1) % #palette + 1]
 end
 
+-- Clearance heat: the widest crossing through the triangle, from red (under 1 stud) through
+-- yellow to green (8 studs and over).
+local function clearanceColor(s: Storage.State, t: number): string
+	local widest = 0
+	for k = 1, 3 do
+		if Storage.GetNeighbor(s, t, k % 3 + 1) ~= 0 and Storage.GetNeighbor(s, t, (k + 1) % 3 + 1) ~= 0 then
+			widest = math.max(widest, Storage.GetCornerWidth(s, t, k))
+		end
+	end
+	local u = math.clamp((widest - 1) / 7, 0, 1)
+	local red = math.floor(255 * math.min(1, 2 * (1 - u)) + 0.5)
+	local green = math.floor(200 * math.min(1, 2 * u) + 0.5)
+	return string.format("#%02x%02x40", red, green)
+end
+
 function DrawList.ToDrawList(s: Storage.State, options: Types.NavMeshDrawOptions?, path: Types.PathResult?): DrawList
 	local opts: Types.NavMeshDrawOptions = options or {}
 	local list: DrawList = {}
@@ -40,8 +55,9 @@ function DrawList.ToDrawList(s: Storage.State, options: Types.NavMeshDrawOptions
 			table.insert(list, {
 				Kind = "Tri",
 				Points = { pa.X, pa.Y, pa.Z, pb.X, pb.Y, pb.Z, pc.X, pc.Y, pc.Z },
-				Color = if opts.Areas
-					then paletteColor(AREA_COLORS, Storage.GetTriangleArea(s, t))
+				Color = if opts.Clearance
+					then clearanceColor(s, t)
+					elseif opts.Areas then paletteColor(AREA_COLORS, Storage.GetTriangleArea(s, t))
 					else paletteColor(FLOOR_COLORS, floor),
 				Layer = `Floor:{Storage.GetFloorName(s, floor)}`,
 			})

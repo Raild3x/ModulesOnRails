@@ -23,11 +23,16 @@
 	- Edge i is the edge opposite vertex i, and neighbour 0 means none.
 	- Each tile owns one contiguous triangle range.
 
+	**Clearance (ticket 15, SR4):** per triangle, three corner widths (between the two edges at
+	vertex k) and three portal widths (across edge e), as f64 so exact widths compare exactly;
+	one wall flag per vertex; and the optional `MaxAgentRadius` cap (0 = none, ruling U-a).
+
 	The state is plain data and passes `PlainData.Check`. Accessors arrive with the tickets that
-	need them: links, obstacles, clearance and freeing slabs come later.
+	need them: links, obstacles and freeing slabs come later.
 ]=]
 
 local I32 = 4
+local F64 = 8
 local TRI_SLOTS = 3
 local MIN_CAPACITY = 16
 
@@ -42,6 +47,10 @@ export type State = {
 	TriFloor: buffer, -- i32 per triangle
 	TriArea: buffer, -- i32 per triangle
 	TriTile: buffer, -- i32 per triangle
+	CornerWidths: buffer, -- f64 x3 per triangle: width between the two edges at vertex k
+	PortalWidths: buffer, -- f64 x3 per triangle: width across edge e
+	WallVertex: { boolean }, -- per vertex: on a wall edge
+	MaxAgentRadius: number, -- 0 = uncapped
 	TileFloor: { number },
 	TileBounds: { number }, -- minX, minZ, maxX, maxZ per tile (studs)
 	TileFirst: { number }, -- first triangle of the tile's range
@@ -70,6 +79,8 @@ local function ensureTriangles(s: State, needed: number)
 	s.TriFloor = grown(s.TriFloor, used * I32, capacity * I32)
 	s.TriArea = grown(s.TriArea, used * I32, capacity * I32)
 	s.TriTile = grown(s.TriTile, used * I32, capacity * I32)
+	s.CornerWidths = grown(s.CornerWidths, used * TRI_SLOTS * F64, capacity * TRI_SLOTS * F64)
+	s.PortalWidths = grown(s.PortalWidths, used * TRI_SLOTS * F64, capacity * TRI_SLOTS * F64)
 	s.TriangleCapacity = capacity
 end
 
@@ -89,6 +100,10 @@ function Storage.New(): State
 		TriFloor = buffer.create(MIN_CAPACITY * I32),
 		TriArea = buffer.create(MIN_CAPACITY * I32),
 		TriTile = buffer.create(MIN_CAPACITY * I32),
+		CornerWidths = buffer.create(MIN_CAPACITY * TRI_SLOTS * F64),
+		PortalWidths = buffer.create(MIN_CAPACITY * TRI_SLOTS * F64),
+		WallVertex = {},
+		MaxAgentRadius = 0,
 		TileFloor = {},
 		TileBounds = {},
 		TileFirst = {},
@@ -127,6 +142,7 @@ end
 function Storage.AddVertex(s: State, position: vector): number
 	local v = s.VertexCount + 1
 	s.Vertices[v] = position
+	s.WallVertex[v] = false
 	s.VertexCount = v
 	return v
 end
@@ -187,6 +203,51 @@ end
 
 --[=[
 	@within NavMeshStorage
+	The width between the two edges of `t` at its vertex `k` (1..3): the widest agent that can
+	pass from one to the other.
+]=]
+function Storage.GetCornerWidth(s: State, t: number, k: number): number
+	return buffer.readf64(s.CornerWidths, ((t - 1) * TRI_SLOTS + k - 1) * F64)
+end
+
+function Storage.SetCornerWidth(s: State, t: number, k: number, width: number)
+	buffer.writef64(s.CornerWidths, ((t - 1) * TRI_SLOTS + k - 1) * F64, width)
+end
+
+--[=[
+	@within NavMeshStorage
+	The width across edge `e` of `t`: the widest agent that can cross it.
+]=]
+function Storage.GetPortalWidth(s: State, t: number, e: number): number
+	return buffer.readf64(s.PortalWidths, ((t - 1) * TRI_SLOTS + e - 1) * F64)
+end
+
+function Storage.SetPortalWidth(s: State, t: number, e: number, width: number)
+	buffer.writef64(s.PortalWidths, ((t - 1) * TRI_SLOTS + e - 1) * F64, width)
+end
+
+function Storage.IsWallVertex(s: State, v: number): boolean
+	return s.WallVertex[v]
+end
+
+function Storage.SetWallVertex(s: State, v: number, wall: boolean)
+	s.WallVertex[v] = wall
+end
+
+--[=[
+	@within NavMeshStorage
+	The cap on agent radius the widths were built for; 0 = uncapped.
+]=]
+function Storage.GetMaxAgentRadius(s: State): number
+	return s.MaxAgentRadius
+end
+
+function Storage.SetMaxAgentRadius(s: State, radius: number)
+	s.MaxAgentRadius = radius
+end
+
+--[=[
+	@within NavMeshStorage
 	Registers a floor by name and returns its id.
 ]=]
 function Storage.InsertFloor(s: State, name: string): number
@@ -243,6 +304,10 @@ function Storage.AllocTileRange(s: State, tile: number, count: number): number
 		Storage.SetTriangleFloor(s, t, floor)
 		Storage.SetTriangleArea(s, t, 0)
 		Storage.SetTriangleTile(s, t, tile)
+		for k = 1, 3 do
+			Storage.SetCornerWidth(s, t, k, 0)
+			Storage.SetPortalWidth(s, t, k, 0)
+		end
 	end
 	s.TileFirst[tile] = first
 	s.TileTriangles[tile] = count

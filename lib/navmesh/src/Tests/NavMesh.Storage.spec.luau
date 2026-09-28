@@ -141,6 +141,31 @@ return function(t: tiniest)
 			expect(Storage.GetTriangleArea(s, tiles[40])).is(40)
 		end)
 
+		test("clearance widths, wall flags and the radius cap round-trip", function()
+			cases("GetCornerWidth", "SetCornerWidth", "GetPortalWidth", "SetPortalWidth")
+			cases("IsWallVertex", "SetWallVertex", "GetMaxAgentRadius", "SetMaxAgentRadius")
+			local s, _, first = withTile()
+			for k = 1, 3 do
+				expect(Storage.GetCornerWidth(s, first, k)).is(0)
+				expect(Storage.GetPortalWidth(s, first + 1, k)).is(0)
+			end
+			Storage.SetCornerWidth(s, first, 2, 4.1)
+			Storage.SetPortalWidth(s, first + 1, 3, math.huge)
+			expect(Storage.GetCornerWidth(s, first, 2)).is(4.1) -- f64: exact
+			expect(Storage.GetCornerWidth(s, first, 1)).is(0)
+			expect(Storage.GetPortalWidth(s, first + 1, 3)).is(math.huge)
+			local v = Storage.AddVertex(s, vector.create(0, 0, 0))
+			expect(Storage.IsWallVertex(s, v)).is(false)
+			Storage.SetWallVertex(s, v, true)
+			expect(Storage.IsWallVertex(s, v)).is(true)
+			expect(Storage.GetMaxAgentRadius(s)).is(0)
+			Storage.SetMaxAgentRadius(s, 8)
+			expect(Storage.GetMaxAgentRadius(s)).is(8)
+			-- Widths survive growth.
+			Storage.Reserve(s, 4096)
+			expect(Storage.GetCornerWidth(s, first, 2)).is(4.1)
+		end)
+
 		test("state is plain, network-safe data", function()
 			local s, _, first = withTile()
 			Storage.AddVertex(s, vector.create(1, 2, 3))

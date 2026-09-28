@@ -46,4 +46,8 @@ add("Courtyard_Budget", courtyard, v(1, 1), v(29, 19), { MaxExpansions = 4 })
 add("Loop_Direct", loop, v(2, 1), v(38, 1), nil, { Areas = true })
 add("Loop_CheapDetour", loop, v(2, 1), v(38, 1), { AreaCosts = { [2] = 0.1 } }, { Areas = true })
 add("Shallow", NavMesh.Fixtures.ShallowObstacles.Desc, v(1, 1), v(39, 19))
+-- Clearance (ticket 15): the same query at growing radii, over the clearance heat map.
+for _, radius in { 0.5, 1.5, 2.5 } do
+	add(`Courtyard_Radius{radius}`, courtyard, v(1, 1), v(2, 29), { AgentRadius = radius }, { Clearance = true })
+end
 return scenes

@@ -37,8 +37,16 @@ local DEFAULT_SNAP_EXTENTS = vector.create(0.5, 4, 0.5)
 local NavMesh = {}
 
 -- Validates a filter at the API boundary and returns its parts with defaults applied.
-local function readFilter(filter: QueryFilter?): ({ [number]: number }, number, vector)
+local function readFilter(mesh: NavMeshData, filter: QueryFilter?): ({ [number]: number }, number, vector, number)
 	local f: QueryFilter = filter or {}
+	local radius = f.AgentRadius or 0
+	if type(radius) ~= "number" or not (radius >= 0 and radius < math.huge) then
+		error("QueryFilter.AgentRadius must be a number of studs >= 0", 3)
+	end
+	local cap = Storage.GetMaxAgentRadius(mesh)
+	if cap > 0 and radius > cap then
+		error(`QueryFilter.AgentRadius {radius} is above the mesh's MaxAgentRadius {cap}`, 3)
+	end
 	local costs: { [number]: number } = f.AreaCosts or {}
 	for area, multiplier in costs do
 		if type(multiplier) ~= "number" or not (multiplier >= 0) then
@@ -54,7 +62,7 @@ local function readFilter(filter: QueryFilter?): ({ [number]: number }, number, 
 	if not (extents.X >= 0 and extents.Y >= 0 and extents.Z >= 0) then
 		error("QueryFilter.SnapExtents must not be negative", 3)
 	end
-	return costs, maxExpansions, extents
+	return costs, maxExpansions, extents, radius
 end
 
 --[=[
@@ -85,7 +93,7 @@ NavMesh.Build = Build.Build
 	```
 ]=]
 function NavMesh.FindPath(mesh: NavMeshData, from: Vector3, to: Vector3, filter: QueryFilter?): PathResult
-	local costs, maxExpansions, extents = readFilter(filter)
+	local costs, maxExpansions, extents, radius = readFilter(mesh, filter)
 	local startT, startP = Snap.Snap(mesh, vector.create(from.X, from.Y, from.Z), extents, costs)
 	if startP == nil then
 		return { Status = "NoStart" :: PathStatus, Waypoints = {}, Cost = 0, TileStamps = {} }
@@ -94,8 +102,8 @@ function NavMesh.FindPath(mesh: NavMeshData, from: Vector3, to: Vector3, filter:
 	if goalP == nil then
 		return { Status = "NoGoal" :: PathStatus, Waypoints = {}, Cost = 0, TileStamps = {} }
 	end
-	local status, corridor, endP, cost = Search.Run(mesh, startT, startP, goalT, goalP, costs, maxExpansions)
-	local points, owners = Funnel.StringPull(mesh, corridor, startP, endP)
+	local status, corridor, endP, cost = Search.Run(mesh, startT, startP, goalT, goalP, costs, maxExpansions, radius)
+	local points, owners = Funnel.StringPull(mesh, corridor, startP, endP, radius)
 	local waypoints = table.create(#points)
 	for i, p in points do
 		waypoints[i] = {

@@ -26,6 +26,7 @@
 ]=]
 
 local CDT = require("../ConstrainedDelaunay")
+local Clearance = require("./Clearance")
 local Quantize = require("./Quantize")
 local Storage = require("./Storage")
 local Types = require("./Types")
@@ -761,11 +762,16 @@ function Build.Build(desc: NavMeshDesc): Storage.State
 	if tileStuds ~= nil and (type(tileStuds) ~= "number" or not (tileStuds >= 1 / GRID and tileStuds <= LIMIT)) then
 		error(`NavMesh.Build: TileSize must be a number of studs from 1/{GRID} to {LIMIT}, got {tileStuds}`, 2)
 	end
+	local cap = desc.MaxAgentRadius
+	if cap ~= nil and (type(cap) ~= "number" or not (cap > 0 and cap <= LIMIT)) then
+		error(`NavMesh.Build: MaxAgentRadius must be a number of studs above 0, got {cap}`, 2)
+	end
 	table.sort(names)
 	local s = Storage.New()
 	for _, name in names do
 		buildFloor(s, name, desc.Floors[name], if tileStuds == nil then nil else Quantize.ToGrid(tileStuds))
 	end
+	Clearance.Compute(s, cap or 0)
 	return s
 end
 

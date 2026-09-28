@@ -41,6 +41,7 @@ export type FloorDesc = {
 	@interface NavMeshDesc
 	.Floors { [string]: FloorDesc }
 	.TileSize number? -- studs, from 1/256 to 32768; tiles are aligned to the world origin (default: per floor, about 36 edges per tile, a power of two from 4 to 256)
+	.MaxAgentRadius number? -- optional cap on AgentRadius (studs); bounds how far Update recomputes clearance (default: no cap)
 
 	The authored description a mesh is built from. Part→polygon conversion belongs in a separate
 	adapter package (Q1).
@@ -48,6 +49,7 @@ export type FloorDesc = {
 export type NavMeshDesc = {
 	Floors: { [string]: FloorDesc },
 	TileSize: number?,
+	MaxAgentRadius: number?,
 }
 
 --[=[
@@ -55,24 +57,27 @@ export type NavMeshDesc = {
 	@interface NavMeshDrawOptions
 	.Triangles boolean? -- default true: triangles coloured by floor, plus walls
 	.Areas boolean? -- colour triangles by area id instead of floor
+	.Clearance boolean? -- colour triangles by their widest crossing, red (under 1 stud) to green (8 and over)
 	.Tiles boolean? -- tile bounds
 ]=]
 export type NavMeshDrawOptions = {
 	Triangles: boolean?,
 	Areas: boolean?,
+	Clearance: boolean?,
 	Tiles: boolean?,
 }
 
 --[=[
 	@within NavMesh
 	@interface QueryFilter
+	.AgentRadius number? -- studs (default 0); paths keep this far from walls, and no wider than the mesh's MaxAgentRadius
 	.AreaCosts { [number]: number }? -- cost multiplier per area id (default 1, >= 0); math.huge excludes the area
 	.MaxExpansions number? -- stop with "Budget" after expanding this many triangles (default unlimited)
 	.SnapExtents Vector3? -- half-size of the snap box around a feet position (default (0.5, 4, 0.5))
 
-	`AgentRadius` arrives with clearance (ticket 15).
 ]=]
 export type QueryFilter = {
+	AgentRadius: number?,
 	AreaCosts: { [number]: number }?,
 	MaxExpansions: number?,
 	SnapExtents: Vector3?,

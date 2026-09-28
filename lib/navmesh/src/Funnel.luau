@@ -7,8 +7,12 @@
 	@private
 
 	String-pulls a triangle corridor into the shortest path through it in (X, Z): the "simple
-	stupid funnel" (Mononen). Corners are mesh vertices, so they keep their heights. Radius 0
-	only; offsets at wall corners arrive with clearance (ticket 15, SR4).
+	stupid funnel" (Mononen). Corners are mesh vertices, so they keep their heights.
+
+	**Agent radius (SR4):** each portal end that is a wall vertex is moved r along the portal,
+	towards its other end, so corners are passed at distance r. Free-space vertices (tile, area,
+	seam) are not offset. Between two offset corners the straight segment may cut inside the
+	r-circle by up to r (1 - cos(half the turn)).
 ]=]
 
 local CDT = require("../ConstrainedDelaunay")
@@ -30,7 +34,8 @@ function Funnel.StringPull(
 	s: Storage.State,
 	corridor: { number },
 	startP: vector,
-	endP: vector
+	endP: vector,
+	radius: number
 ): ({ vector }, { number })
 	-- Portals: the start, each shared edge (left, right as seen when crossing it), the end.
 	local lefts, rights, owners = { startP }, { startP }, { corridor[1] }
@@ -39,8 +44,17 @@ function Funnel.StringPull(
 		local verts = { Storage.GetTriangle(s, t) }
 		for e = 1, 3 do
 			if Storage.GetNeighbor(s, t, e) == nextT then
-				table.insert(lefts, Storage.GetVertex(s, verts[(e + 1) % 3 + 1]))
-				table.insert(rights, Storage.GetVertex(s, verts[e % 3 + 1]))
+				local lv, rv = verts[(e + 1) % 3 + 1], verts[e % 3 + 1]
+				local l, r = Storage.GetVertex(s, lv), Storage.GetVertex(s, rv)
+				if radius > 0 then
+					local length = vector.magnitude(r - l)
+					local shift = math.min(radius, length * 0.5) / length
+					local l2 = if Storage.IsWallVertex(s, lv) then l + (r - l) * shift else l
+					local r2 = if Storage.IsWallVertex(s, rv) then r + (l - r) * shift else r
+					l, r = l2, r2
+				end
+				table.insert(lefts, l)
+				table.insert(rights, r)
 				table.insert(owners, t)
 				break
 			end

@@ -52,6 +52,14 @@ the const question are deliberately open, gated on benchmarks.
 - **`Update` re-snap:** local to the dirty tiles, from each tile's static baseline (spec SR13,
   bench.md 3). User: "2- yes".
 
+### Rulings during the build (2026-09-27)
+- **U-a (clearance reach), ruled after the P4 probe (ticket 15 notes):** no cap by default,
+  with an optional cap. Any `AgentRadius` works, and each width's reach r* is stored.
+  - `Update` recomputes a triangle only when it lies within its own r* of the rebuilt tiles.
+  - An optional `NavMeshDesc.MaxAgentRadius` bounds the reach, for large open floors with small
+    hand-set tiles.
+  - User: "No cap + optional cap".
+
 ## Rounds (plan debate, rounds 1-4 above; spec debate below under "Spec debate")
 ### Round 1
 | Lens | Category | Score |

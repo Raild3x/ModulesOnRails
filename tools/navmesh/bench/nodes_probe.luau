@@ -179,9 +179,9 @@ local function probe(name: string, desc: any, lo: number, hi: number, queries: n
 			continue
 		end
 		assert(c2 and c3, "reachability disagrees")
-		lens.centre = length((Funnel.StringPull(mesh, c1, sp, gp)))
-		lens.entry = length((Funnel.StringPull(mesh, c2, sp, gp)))
-		lens.edges = length((Funnel.StringPull(mesh, c3, sp, gp)))
+		lens.centre = length((Funnel.StringPull(mesh, c1, sp, gp, 0)))
+		lens.entry = length((Funnel.StringPull(mesh, c2, sp, gp, 0)))
+		lens.edges = length((Funnel.StringPull(mesh, c3, sp, gp, 0)))
 		pops.centre, pops.entry, pops.edges = p1, p2, p3
 		local best = math.min(lens.centre, lens.entry, lens.edges)
 		if best < 1e-9 then

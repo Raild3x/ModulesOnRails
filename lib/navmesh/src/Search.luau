@@ -24,6 +24,11 @@
 	position depends on how it was reached, the result is the best corridor A* finds, not a
 	proven optimum over a fixed graph.
 
+	**Agent radius (ticket 15, SR4):** passing through a triangle from its entry edge to an exit
+	edge needs the corner width between them to be at least 2r. Leaving the start triangle needs
+	the exit edge's portal width. A corner width already covers both of its portals, so the goal
+	needs no extra check.
+
 	**Scratch:** a per-mesh pool in a weak-keyed table, holding only arrays and the open list, so
 	it never keeps a mesh alive.
 ]=]
@@ -37,6 +42,7 @@ export type Status = "Success" | "Partial" | "Budget"
 type Scratch = {
 	G: { number },
 	Pos: { vector },
+	Entry: { number },
 	Parent: { number },
 	Seen: { number },
 	Closed: { number },
@@ -56,6 +62,7 @@ local function scratchFor(s: Storage.State): Scratch
 		scratch = {
 			G = table.create(n, 0),
 			Pos = table.create(n, vector.zero),
+			Entry = table.create(n, 0),
 			Parent = table.create(n, 0),
 			Seen = table.create(n, 0),
 			Closed = table.create(n, 0),
@@ -96,7 +103,8 @@ function Search.Run(
 	goalT: number,
 	goalP: vector,
 	costs: { [number]: number },
-	maxExpansions: number
+	maxExpansions: number,
+	radius: number
 ): (Status, { number }, vector, number)
 	if startT == goalT then
 		return "Success",
@@ -107,12 +115,22 @@ function Search.Run(
 	local scratch = scratchFor(s)
 	local stamp = scratch.Stamp + 1
 	scratch.Stamp = stamp
-	local g, pos, parent, seen, closed, closedList, open =
-		scratch.G, scratch.Pos, scratch.Parent, scratch.Seen, scratch.Closed, scratch.ClosedList, scratch.Open
+	local g, pos, entry, parent, seen, closed, closedList, open =
+		scratch.G,
+		scratch.Pos,
+		scratch.Entry,
+		scratch.Parent,
+		scratch.Seen,
+		scratch.Closed,
+		scratch.ClosedList,
+		scratch.Open
+	local width = 2 * radius
 	table.clear(closedList)
 	OpenList.Clear(open)
 	local push, pop = OpenList.Push, OpenList.Pop
 	local GetTriangle, GetTriangleArea, GetVertex = Storage.GetTriangle, Storage.GetTriangleArea, Storage.GetVertex
+	local GetCornerWidth, GetPortalWidth, GetNeighbor =
+		Storage.GetCornerWidth, Storage.GetPortalWidth, Storage.GetNeighbor
 	local nb: buffer = s.TriNeighbors -- inlined: Storage.GetNeighbor (i32 x3 per triangle)
 	local scale = Search.HeuristicScale(costs)
 
@@ -153,6 +171,13 @@ function Search.Run(
 			if mm == math.huge then
 				continue
 			end
+			if width > 0 then
+				-- Edges e and entry[t] meet at the third vertex, 6 - e - entry[t].
+				local clear = if t == startT then GetPortalWidth(s, t, e) else GetCornerWidth(s, t, 6 - e - entry[t])
+				if clear < width then
+					continue
+				end
+			end
 			-- Edge e runs between the two vertices other than vertex e.
 			local mp = if m == goalT
 				then goalP
@@ -162,6 +187,9 @@ function Search.Run(
 			local ng = gt + vector.magnitude(mp - tp) * (tm + mm) * 0.5
 			if seen[m] ~= stamp or ng < g[m] then
 				g[m], pos[m], seen[m], parent[m] = ng, mp, stamp, t
+				if width > 0 then
+					entry[m] = if GetNeighbor(s, m, 1) == t then 1 elseif GetNeighbor(s, m, 2) == t then 2 else 3
+				end
 				push(open, m, ng + vector.magnitude(goalP - mp) * scale)
 			end
 		end
