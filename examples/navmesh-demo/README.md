@@ -45,3 +45,9 @@ python examples/navmesh-demo/studio.py play                  # builds a place: p
 `studio.py` writes its output to `.bench/navmesh-demo/` (gitignored). The capture script uses `PrintWindow`, so it saves only Studio's own window, even when another window is on top of it. The `-viewport.png` crop uses a fixed box fitted to one Studio layout. If your panels are arranged differently, change `CROP` in `studio.py`.
 
 `screenshot-oblique.png` is a frame of the demo from the south, looking north. `screenshot-editor.png` shows `NavMeshEditor` open on the level with a radius-1.5 path.
+
+## Shipping the bake in a real place
+
+`Baked.luau` holds the bake as a `\xNN` string literal, so the Lune sim can `require` it. That is 4.1 times the bake's size (28 KB for 7 KB), and a script cannot write a ModuleScript source of 200,000 characters or more: the 256-stud bench map's literal would be 2.4 MB.
+
+A real place should use the recipe in the `NavMesh.Serialize` docs instead: base64 text in StringValues, compressed with zstd when made in Studio. For this level, `NavMeshEditor:SaveBake(parent)` (key B in the editor) writes one 1,468-character StringValue, which is 0.21 times the bake. The recipe's loader decodes it in 0.01 ms. From a Lune script, write plain base64 to `.txt` files for Rojo instead (`tools/navmesh/make_bake.luau` has a small encoder). The measurements are in `docs/plans/navmesh/bench.md` ("Shipping a bake in a place").

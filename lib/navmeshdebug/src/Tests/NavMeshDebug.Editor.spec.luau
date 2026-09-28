@@ -37,7 +37,7 @@ return function(t: tiniest)
 		return (folder:FindFirstChild("Status", true) :: TextLabel).Text
 	end
 
-	-- The loader the NavMesh docs give for a saved bake (keep in sync with NavMesh.Deserialize's
+	-- The loader for a saved bake (keep in sync with NavMeshEditor.SaveBake's
 	-- doc comment): join the chunks, base64-decode, unzstd when compressed.
 	local function loadBake(folder: Instance): buffer
 		local EncodingService = game:GetService("EncodingService")

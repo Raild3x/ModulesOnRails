@@ -293,7 +293,7 @@ local KEYS: { [Enum.KeyCode]: (self: EditorInternal, p: vector) -> EditorState.E
 		self._error = if ok then nil else tostring(result)
 		refresh(self, false)
 		if ok then
-			print(`[NavMeshEditor] saved {result:GetFullName()}: move it into the place (see NavMesh.Deserialize)`)
+			print(`[NavMeshEditor] saved {result:GetFullName()}: move it into the place (see SaveBake)`)
 		end
 		return nil
 	end,
@@ -466,11 +466,32 @@ end
 	Builds the description, serializes the mesh, and saves it under `parent` as a Folder named
 	`NavMeshBake` (replacing an earlier one): the buffer compressed with zstd, base64-encoded,
 	and split across StringValues `1`, `2`, ... (a StringValue holds under 200,000
-	characters). `NavMesh.Deserialize` shows the loader. Errors when the description does not
+	characters). The loader is below. Errors when the description does not
 	build, and in CDT mode.
 
 	In Play mode the bake lands in the client's copy of the game: copy it in the Explorer
 	before stopping, then paste it into the place (for example into ServerStorage).
+
+	Load it in the game (this also reads plain base64 chunks written from files, as
+	`NavMesh.Serialize` describes):
+
+	```lua
+	local EncodingService = game:GetService("EncodingService")
+
+	local function loadBake(folder: Instance): buffer
+		local chunks = {}
+		for i = 1, #folder:GetChildren() do
+			chunks[i] = (folder:FindFirstChild(tostring(i)) :: StringValue).Value
+		end
+		local data = EncodingService:Base64Decode(buffer.fromstring(table.concat(chunks)))
+		if buffer.readu32(data, 0) == 0xFD2FB528 then -- the zstd frame magic
+			data = EncodingService:DecompressBuffer(data, Enum.CompressionAlgorithm.Zstd)
+		end
+		return data
+	end
+
+	local mesh = NavMesh.Deserialize(loadBake(game:GetService("ServerStorage").NavMeshBake))
+	```
 ]=]
 function NavMeshEditor.SaveBake(self: EditorInternal, parent: Instance): Folder
 	if self._state.Mode ~= "NavMesh" then
