@@ -16,6 +16,7 @@ local Build = require("./Build")
 local DrawList = require("./DrawList")
 local Fixtures = require("./Fixtures")
 local Funnel = require("./Funnel")
+local Queries = require("./Queries")
 local Search = require("./Search")
 local Snap = require("./Snap")
 local Storage = require("./Storage")
@@ -30,6 +31,7 @@ export type QueryFilter = Types.QueryFilter
 export type Waypoint = Types.Waypoint
 export type PathStatus = Types.PathStatus
 export type PathResult = Types.PathResult
+export type NavPoint = Types.NavPoint
 export type SeamDesc = Types.SeamDesc
 export type LinkDesc = Types.LinkDesc
 export type NavMeshData = Storage.State
@@ -126,6 +128,107 @@ function NavMesh.FindPath(mesh: NavMeshData, from: Vector3, to: Vector3, filter:
 		end
 	end
 	return { Status = status :: PathStatus, Waypoints = waypoints, Cost = cost, TileStamps = stamps }
+end
+
+local function toVector(p: Vector3): vector
+	return vector.create(p.X, p.Y, p.Z)
+end
+
+local function navPoint(mesh: NavMeshData, p: vector, t: number): NavPoint
+	return { Position = p :: any, Floor = Storage.GetFloorName(mesh, Storage.GetTriangleFloor(mesh, t)) }
+end
+
+--[=[
+	@within NavMesh
+	Snaps a **feet** position onto the mesh (U-b): within `SnapExtents`, the nearest surface
+	vertically, ties going below. Returns nil when nothing is in range.
+]=]
+function NavMesh.FindNearestPoint(mesh: NavMeshData, position: Vector3, filter: QueryFilter?): NavPoint?
+	local costs, _, extents = readFilter(mesh, filter)
+	local t, p = Snap.Snap(mesh, toVector(position), extents, costs)
+	return if p then navPoint(mesh, p, t) else nil
+end
+
+--[=[
+	@within NavMesh
+	Walks straight over the surface from `from` (a feet position, snapped) towards `to` in
+	(X, Z), across tiles and seams. Returns (blocked, stopPoint): blocked when a wall or an
+	excluded area stops the walk before `to`, and the point on the surface where it stopped (or
+	`to`, lifted onto the surface). A `from` that doesn't snap returns (true, from). The ray is a
+	point: `AgentRadius` is not applied.
+]=]
+function NavMesh.Raycast(mesh: NavMeshData, from: Vector3, to: Vector3, filter: QueryFilter?): (boolean, Vector3)
+	local costs, _, extents = readFilter(mesh, filter)
+	local t, p = Snap.Snap(mesh, toVector(from), extents, costs)
+	if p == nil then
+		return true, from
+	end
+	local blocked, stop = Queries.Walk(mesh, t, p, toVector(to), costs)
+	return blocked, stop :: any
+end
+
+--[=[
+	@within NavMesh
+	Moves from `from` towards `to` over the surface, sliding along walls it meets, and keeps the
+	end `AgentRadius` from the nearest wall where there is room (V3, SR4). For per-frame
+	movement. Errors when `from` doesn't snap onto the mesh (snap it with `FindNearestPoint`).
+]=]
+function NavMesh.MoveAlongSurface(mesh: NavMeshData, from: Vector3, to: Vector3, filter: QueryFilter?): NavPoint
+	local costs, _, extents, radius = readFilter(mesh, filter)
+	local t, p = Snap.Snap(mesh, toVector(from), extents, costs)
+	if p == nil then
+		error("NavMesh.MoveAlongSurface: from is not on the mesh (snap it with FindNearestPoint first)", 2)
+	end
+	local stop, at = Queries.Move(mesh, t, p, toVector(to), radius, costs)
+	return navPoint(mesh, stop, at)
+end
+
+--[=[
+	@within NavMesh
+	The distance from a feet position to the nearest wall reachable over the mesh, up to
+	`maxRadius`. Returns (distance, hitPoint, wallNormal), with the normal pointing away from the
+	wall in (X, Z); (maxRadius, nil, nil) when no wall is that close; (0, nil, nil) when the
+	position is off the mesh.
+]=]
+function NavMesh.FindDistanceToWall(
+	mesh: NavMeshData,
+	position: Vector3,
+	maxRadius: number,
+	filter: QueryFilter?
+): (number, Vector3?, Vector3?)
+	if type(maxRadius) ~= "number" or not (maxRadius > 0) then
+		error("NavMesh.FindDistanceToWall: maxRadius must be a number above 0", 2)
+	end
+	local costs, _, extents = readFilter(mesh, filter)
+	local t, p = Snap.Snap(mesh, toVector(position), extents, costs)
+	if p == nil then
+		return 0, nil, nil
+	end
+	local d, hit, normal = Queries.DistanceToWall(mesh, t, p, maxRadius, costs)
+	return d, hit :: any, normal :: any
+end
+
+--[=[
+	@within NavMesh
+	A random point on the mesh, uniform in plan (X, Z) over the areas the filter allows, and
+	within `radius` of `center` (in plan) when given. `rng` returns numbers in [0, 1) (default
+	`math.random`), so a seeded generator gives reproducible points. Returns nil when no allowed
+	surface lies in range.
+]=]
+function NavMesh.FindRandomPoint(
+	mesh: NavMeshData,
+	filter: QueryFilter?,
+	center: Vector3?,
+	radius: number?,
+	rng: (() -> number)?
+): NavPoint?
+	local costs = readFilter(mesh, filter)
+	if center ~= nil and (type(radius) ~= "number" or not (radius >= 0)) then
+		error("NavMesh.FindRandomPoint: a center needs a radius >= 0", 2)
+	end
+	local p, t =
+		Queries.RandomPoint(mesh, costs, if center then toVector(center) else nil, radius or 0, rng or math.random)
+	return if p then navPoint(mesh, p, t) else nil
 end
 
 --[=[

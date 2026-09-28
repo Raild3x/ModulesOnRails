@@ -127,6 +127,14 @@ export type QueryFilter = {
 
 --[=[
 	@within NavMesh
+	@interface NavPoint
+	.Position Vector3
+	.Floor string
+]=]
+export type NavPoint = { Position: Vector3, Floor: string }
+
+--[=[
+	@within NavMesh
 	@interface Waypoint
 	.Position Vector3
 	.Floor string

@@ -347,7 +347,8 @@ function Clearance.Compute(s: Storage.State, cap: number)
 			local seen: { [number]: boolean } = {}
 			for cx = math.floor((minX - limit) / CELL), math.floor((maxX + limit) / CELL) do
 				for cz = math.floor((minZ - limit) / CELL), math.floor((maxZ + limit) / CELL) do
-					for _, id in grid[key(floor, cx, cz)] or {} do
+					local bucket: { number } = grid[key(floor, cx, cz)] or {}
+					for _, id in bucket do
 						if seen[id] then
 							continue
 						end

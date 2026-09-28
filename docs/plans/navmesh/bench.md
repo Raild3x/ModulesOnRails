@@ -506,6 +506,37 @@ Studio, ms per 12 queries, medians of 3 runs x 5 rounds:
 - **Remaining excess** comes from triangle corridors, not node placement. Up to 11-25% on single
   queries; a real fix would be a corridor-aware refinement, which is not planned.
 
+## Locating the snap candidates (ticket 17, 2026-09-27)
+- **Probe:** `tools/navmesh/bench/locate_probe.luau` (Lune, `os.clock`, single runs:
+  indicative). 2000 random points per scene, the default snap box (0.5 x 0.5 studs).
+- **Parity:** every variant runs the same exact candidate test and picks the same triangle on
+  every query.
+
+| scene (triangles, tiles) | scan (was shipped) | tile hash | **tile hash + box reject** | loose-tight double grid | quadtree |
+|---|---|---|---|---|---|
+| props (3152, 64) | 11.8 us | 9.7 | **6.4** | 4.3 | 153 |
+| bench (4605, 64) | 13.0 | 11.2 | **6.1** | 3.2 | 180 |
+| terrain (1297, 16) | 13.1 | 11.2 | **5.6** | 1.8 | 144 |
+| walls (692, 16) | 6.9 | 6.3 | **4.1** | 2.6 | 79 |
+| open16 (2048, 1024) | 27.5 | 0.6 | **1.2** | 5.6 | 34 |
+
+- **The variants:**
+  - `scan`: every tile's bounds, then all triangles of the overlapping tiles.
+  - `tile hash`: the overlapping tiles by a (floor, i, j) lookup (tiles are origin-aligned).
+  - `+ box reject`: each triangle's bounding box is tested before the exact closest-point
+    test.
+  - `double grid`: `lib/loosetightdoublegrid` over triangle boxes (index build 0.5-8 ms).
+  - `quadtree`: `lib/quadtree` over triangle centres, whose search radius must cover the
+    largest triangle.
+- **Shipped: tile hash + box reject.**
+  - It is 2x the old scan on default tiles, and 23x with many small tiles.
+  - The double grid saves another 2-4 us per snap. It would cost a package dependency, an index
+    to maintain on every `Update`, and non-plain state, and it is 5x slower with many small
+    tiles.
+  - A snap runs twice per `FindPath`, beside a search of hundreds of microseconds.
+- **Not shipped: the quadtree.** It is 10-40x slower, because its query radius has to cover
+  the largest triangle.
+
 ## Not measured (flagged)
 - Remote transfer time and payload size per layout (needs a live server/client session).
 - Locality on a real CDT's vertex and triangle ordering. The grid mesh has near-ideal locality,
