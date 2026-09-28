@@ -85,3 +85,31 @@ Spec: [../spec.md](../spec.md). Gates: the spec's "Gates for every ticket".
 - **Known limits:**
   - An obstacle over a link end takes that link out until it is removed.
   - Clearance near a seam still counts only its own floor's walls.
+
+## Amended (2026-09-28): removed obstacle records are freed
+- **The gap:** "memory can't grow" held for the mesh arrays but not for the obstacle records.
+  Every record ever made stayed in the state, and `Update` copied all of them. After 4,000 door
+  toggles `Update` went from 0.64 to 4.0 ms and the bake from 1.4 KB to 91 KB (dogfood report,
+  `examples/navmesh-demo/repros.luau` repro 8).
+- **Now** (ruling in review.md, 2026-09-28):
+  - Storage holds only the live records, in id order, plus a next-id counter.
+  - `Update`'s commit drops the records of removed obstacles, and a pending add that is removed
+    goes at once, so a toggled door keeps one record.
+  - Ids stay monotonic and are never reused. `RemoveObstacle` on a freed id still reports
+    "already removed"; an id never handed out reports "no obstacle".
+  - Rollback deletes the pending adds rather than marking them removed.
+  - `Storage.OBSTACLE_REMOVED` is gone. The new accessors are `FindObstacle`,
+    `GetObstacleState`, `RemoveObstacleRecord` and `Get`/`SetObstacleNextId`, and
+    `GetObstacleRecord` takes a slot and returns the id first.
+- **Spec:** `Obstacles.spec` "a door toggled all day keeps one record, a flat bake and a flat
+  Update". Over 1,000 add/remove cycles the record count returns to 0, the bake returns to the
+  obstacle-free size, and `Update` does not slow down. The negative control, the old
+  Storage/Tiles, fails at the first cycle.
+- **Repro 8 after** (10 / 1,000 / 4,000 toggles):
+
+| | 10 | 1,000 | 4,000 |
+|---|---|---|---|
+| Update, before | 0.40 ms | 0.87 ms | 2.22 ms |
+| Update, after | 0.41 ms | 0.40 ms | 0.39 ms |
+| Bake, before | 1,367 B | 23,642 B | 91,142 B |
+| Bake, after | 696 B | 696 B | 696 B |

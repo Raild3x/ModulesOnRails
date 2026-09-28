@@ -60,6 +60,9 @@ the const question are deliberately open, gated on benchmarks.
 - **Editor deviations (ticket 21):** accept all three and amend the spec: the public
   `ImportSource`, the `constraineddelaunay` sibling, and an `Apply` that updates in place.
   User: "Accept all, amend spec (Recommended)".
+- **Obstacle records and the bake format (dogfood bug 3):** 2026-09-28: removed obstacle
+  records freed; Serialize v2 (sparse records + next id); v1 bakes rejected with a rebuild
+  message. User chose v2 over the fits-v1 variant (which still grew 13 B per removal).
 
 ### Rulings during the build (2026-09-27)
 - **U-a (clearance reach), ruled after the P4 probe (ticket 15 notes):** no cap by default,

@@ -9,7 +9,9 @@
 
 	**Records:** an obstacle is validated and quantized when added (SR13: a bad polygon errors
 	at the call). Adding and removing only record the change; `Update` applies every pending
-	change at once.
+	change at once. A removed obstacle's record is freed when `Update` commits, and a pending add
+	that is removed goes at once, so a door toggled all day keeps one record. Ids come from a
+	counter that only grows: never reused, and a freed id still reads as "already removed".
 
 	**Dirty tiles:** the stored tiles on the obstacle's floor whose rectangle, grown by one grid
 	pixel, overlaps its snapped bounding box (SR13). New hot pixels then never land on a clean
@@ -82,15 +84,17 @@ end
 	Records the removal of obstacle `id` (pending until `Update`).
 ]=]
 function Tiles.RemoveObstacle(s: State, id: number)
-	if type(id) ~= "number" or id % 1 ~= 0 or id < 1 or id > Storage.ObstacleCount(s) then
+	if type(id) ~= "number" or id % 1 ~= 0 or id < 1 or id >= Storage.GetObstacleNextId(s) then
 		error(`NavMesh.RemoveObstacle: no obstacle {id}`, 3)
 	end
-	local _, state = Storage.GetObstacleRecord(s, id)
+	local slot = Storage.FindObstacle(s, id)
+	local state = if slot ~= 0 then Storage.GetObstacleState(s, slot) else 0
 	if state == Storage.OBSTACLE_PENDING_ADD then
-		Storage.SetObstacleState(s, id, Storage.OBSTACLE_REMOVED)
+		Storage.RemoveObstacleRecord(s, slot) -- never applied: nothing for Update to undo
 	elseif state == Storage.OBSTACLE_ACTIVE then
-		Storage.SetObstacleState(s, id, Storage.OBSTACLE_PENDING_REMOVE)
+		Storage.SetObstacleState(s, slot, Storage.OBSTACLE_PENDING_REMOVE)
 	else
+		-- Pending removal, or already dropped by an Update (its record is freed).
 		error(`NavMesh.RemoveObstacle: obstacle {id} is already removed`, 3)
 	end
 end
@@ -267,8 +271,8 @@ local function apply(s: State): State
 	-- Pending changes and the obstacles active after this commit.
 	local pendingFloors: { [number]: { { number } } } = {} -- floor -> boxes of changed obstacles
 	local active: { [number]: { Obstacle } } = {} -- floor -> obstacles active after commit
-	for id = 1, Storage.ObstacleCount(s) do
-		local floor, state, xs, zs = Storage.GetObstacleRecord(s, id)
+	for slot = 1, Storage.ObstacleCount(s) do
+		local id, floor, state, xs, zs = Storage.GetObstacleRecord(s, slot)
 		local x0, z0, x1, z1 = bounds(xs, zs)
 		if state == Storage.OBSTACLE_PENDING_ADD or state == Storage.OBSTACLE_PENDING_REMOVE then
 			local list = pendingFloors[floor] or {}
@@ -468,19 +472,16 @@ local function apply(s: State): State
 		end
 	end
 	Internal.Connect(n)
-	-- Obstacles: every record, with the pending changes committed.
-	for id = 1, Storage.ObstacleCount(s) do
-		local floor, state, xs, zs = Storage.GetObstacleRecord(s, id)
-		Storage.InsertObstacleRecord(n, floor, xs, zs)
-		Storage.SetObstacleState(
-			n,
-			id,
-			if state == Storage.OBSTACLE_PENDING_ADD
-				then Storage.OBSTACLE_ACTIVE
-				elseif state == Storage.OBSTACLE_PENDING_REMOVE then Storage.OBSTACLE_REMOVED
-				else state
-		)
+	-- Obstacles: the pending changes committed. A removed obstacle's record is dropped (its id
+	-- stays used: the next id carries over).
+	for slot = 1, Storage.ObstacleCount(s) do
+		local id, floor, state, xs, zs = Storage.GetObstacleRecord(s, slot)
+		if state ~= Storage.OBSTACLE_PENDING_REMOVE then
+			Storage.InsertObstacleRecord(n, floor, xs, zs, id)
+			Storage.SetObstacleState(n, Storage.ObstacleCount(n), Storage.OBSTACLE_ACTIVE)
+		end
 	end
+	Storage.SetObstacleNextId(n, Storage.GetObstacleNextId(s))
 
 	-- Clearance. A rebuilt triangle with the same three grid points as an old one is the same
 	-- triangle: it keeps its widths like a clean one (corners matched by vertex). Only new
@@ -569,9 +570,8 @@ end
 ]=]
 function Tiles.Update(s: State)
 	local pending = false
-	for id = 1, Storage.ObstacleCount(s) do
-		local _, state = Storage.GetObstacleRecord(s, id)
-		if state == Storage.OBSTACLE_PENDING_ADD or state == Storage.OBSTACLE_PENDING_REMOVE then
+	for slot = 1, Storage.ObstacleCount(s) do
+		if Storage.GetObstacleState(s, slot) ~= Storage.OBSTACLE_ACTIVE then
 			pending = true
 			break
 		end
@@ -581,12 +581,13 @@ function Tiles.Update(s: State)
 	end
 	local ok, result = pcall(apply, s)
 	if not ok then
-		for id = 1, Storage.ObstacleCount(s) do
-			local _, state = Storage.GetObstacleRecord(s, id)
+		-- Roll back: pending adds go (their ids stay used), pending removals stay active.
+		for slot = Storage.ObstacleCount(s), 1, -1 do
+			local state = Storage.GetObstacleState(s, slot)
 			if state == Storage.OBSTACLE_PENDING_ADD then
-				Storage.SetObstacleState(s, id, Storage.OBSTACLE_REMOVED)
+				Storage.RemoveObstacleRecord(s, slot)
 			elseif state == Storage.OBSTACLE_PENDING_REMOVE then
-				Storage.SetObstacleState(s, id, Storage.OBSTACLE_ACTIVE)
+				Storage.SetObstacleState(s, slot, Storage.OBSTACLE_ACTIVE)
 			end
 		end
 		error(result, 0)

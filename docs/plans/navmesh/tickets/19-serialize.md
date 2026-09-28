@@ -34,3 +34,22 @@ Spec: [../spec.md](../spec.md). Gates: the spec's "Gates for every ticket".
     restored.
 - **Also:** `Storage.SetTileStamp`, which `Tiles.luau` now uses in place of writing the field
   directly.
+
+## Amended (2026-09-28): format v2
+- **Why:** freeing removed obstacle records (ticket 18 amendment) makes the ids sparse, and v1
+  could not carry them. Its reader numbered the records 1..count, so the next id could only be
+  kept by storing every record ever made.
+- **v2** (ruling in review.md, 2026-09-28): the obstacle section is the next obstacle id (u32),
+  then only the live records, each with its id (u32), floor, state and ring. Everything else is
+  as in v1.
+- **Load rules:**
+  - A v1 buffer fails with "this is a format v1 bake, which this build no longer reads (it
+    reads v2); rebuild it: NavMesh.Build the description, then NavMesh.Serialize".
+  - Obstacle ids that don't increase, or that reach the next id, and states outside
+    pending/active are rejected as corrupt.
+- **Frozen bakes:**
+  - `FROZEN_V2` was made by `tools/navmesh/make_bake.luau`: the same scene as v1, 3.7 KB. Its
+    new frozen snapshot is identical to the v1 snapshot apart from line endings, so v2 loads
+    exactly the mesh v1 did. The v1 snapshot file is deleted.
+  - `FROZEN_V1` stays in the spec as the rejected-bake test.
+- **Byte-identical round trips:** unchanged, and still pass.

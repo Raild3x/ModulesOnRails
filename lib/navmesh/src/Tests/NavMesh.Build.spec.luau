@@ -332,6 +332,26 @@ return function(t: tiniest)
 				oneFloor { Walkable = { flat(0, { 0, 0, 1, 1 }) } },
 				"walkable ring 1: a ring needs at least 3 points",
 			},
+			{
+				"one ring given as Walkable (a list of points, not of rings)",
+				oneFloor { Walkable = square },
+				"floor 'Ground' walkable ring 1: expected a ring %(a list of points%), got a point",
+			},
+			{
+				"one ring given as Obstacles",
+				oneFloor { Walkable = { square }, Obstacles = flat(0, { 1, 1, 2, 1, 2, 2 }) },
+				"floor 'Ground' obstacle 1: expected a ring %(a list of points%), got a point",
+			},
+			{
+				"a point given as an area's Polygon",
+				oneFloor { Walkable = { square }, Areas = { { Polygon = square[1], Area = 2 } } },
+				"floor 'Ground' area 1: expected a ring %(a list of points%), got a point",
+			},
+			{
+				"a Vector3-like table given as a ring (Lune's Vector3 shim)",
+				oneFloor { Walkable = { { X = 0, Y = 0, Z = 0 } } },
+				"floor 'Ground' walkable ring 1: expected a ring %(a list of points%), got a point",
+			},
 			{ "no walkable ring", oneFloor { Walkable = {} }, "floor 'Ground': needs at least one Walkable ring" },
 			{
 				"a self-intersecting walkable ring",

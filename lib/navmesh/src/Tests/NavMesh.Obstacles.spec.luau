@@ -429,6 +429,11 @@ return function(t: tiniest)
 				NavMesh.AddObstacle(mesh, "Ground", flat(0, { 0, 0, 4, 4, 4, 0, 0, 4 }))
 			end).fails_with("AddObstacle: .*intersects itself")
 			expect(function()
+				NavMesh.AddObstacle(mesh, "Ground", door[1])
+			end).fails_with(
+				"AddObstacle: obstacle on floor 'Ground': expected a ring %(a list of points%), got a point"
+			)
+			expect(function()
 				NavMesh.RemoveObstacle(mesh, 3)
 			end).fails_with("no obstacle 3")
 			local id = NavMesh.AddObstacle(mesh, "Ground", door)
@@ -449,6 +454,50 @@ return function(t: tiniest)
 					.with_context(tostring(id))
 					.fails_with(`no obstacle {id}`)
 			end
+		end)
+
+		test("a door toggled all day keeps one record, a flat bake and a flat Update", function()
+			local mesh = NavMesh.Build(corridor)
+			local bare = buffer.len(NavMesh.Serialize(mesh))
+			local times, ids = {}, {}
+			for cycle = 1, 1000 do
+				local id = NavMesh.AddObstacle(mesh, "Ground", door)
+				local t0 = os.clock()
+				NavMesh.Update(mesh)
+				local added = os.clock() - t0
+				expect(Storage.ObstacleCount(mesh)).with_context(`cycle {cycle}, door closed`).is(1)
+				NavMesh.RemoveObstacle(mesh, id)
+				t0 = os.clock()
+				NavMesh.Update(mesh)
+				table.insert(times, added + os.clock() - t0)
+				expect(Storage.ObstacleCount(mesh)).with_context(`cycle {cycle}, door open`).is(0)
+				table.insert(ids, id)
+			end
+			-- The record is freed, but its id is never reused and still reads as removed.
+			expect(ids[1000]).is(1000)
+			expect(function()
+				NavMesh.RemoveObstacle(mesh, ids[1])
+			end).fails_with("obstacle 1 is already removed")
+			expect(function()
+				NavMesh.RemoveObstacle(mesh, 1001)
+			end).fails_with("no obstacle 1001")
+			-- The bake is back to the obstacle-free size, and still round-trips the next id.
+			local data = NavMesh.Serialize(mesh)
+			expect(buffer.len(data)).is(bare)
+			local loaded = NavMesh.Deserialize(data)
+			expect(NavMesh.AddObstacle(loaded, "Ground", door)).is(1001)
+			-- A pending add that is removed before any Update leaves no record either.
+			NavMesh.RemoveObstacle(loaded, 1001)
+			expect(Storage.ObstacleCount(loaded)).is(0)
+			-- Update does not slow down: the last 100 cycles cost about what the first 100 did
+			-- (before records were freed, 1000 cycles made it about 3x slower).
+			local function median(from: number): number
+				local slice = table.move(times, from, from + 99, 1, {})
+				table.sort(slice)
+				return slice[50]
+			end
+			local first, last = median(1), median(901)
+			expect(last < 2 * first).with_context(`first {first * 1000} ms, last {last * 1000} ms`).is_true()
 		end)
 
 		test("obstacle errors point at the caller's line", function()

@@ -11,7 +11,10 @@
 	Candidates are triangles whose closest (X, Z) point lies inside the extents box and whose
 	surface height there is within the vertical extent. A floor is one surface, so each floor
 	offers one candidate: the triangle under the point's column if there is one, otherwise the
-	nearest in (X, Z). Across floors the nearest by vertical distance wins, and ties go below.
+	nearest in (X, Z). Across floors the nearest by vertical distance wins. On a tie (two floors
+	meeting at a seam at the same height), a floor under the point's column beats one reached
+	only across the snap box, so a point never slides sideways off the floor it stands on; then
+	ties go below.
 	Triangles in an excluded area (cost `math.huge`) are never candidates.
 
 	**Locating (ticket 17 benchmark, bench.md):** tiles are origin-aligned squares per floor, so
@@ -137,11 +140,23 @@ function Snap.Snap(s: Storage.State, p: vector, extents: vector, costs: { [numbe
 			end
 		end
 	end
-	local bestFloor, bestDy = 0, math.huge
+	-- Nearest vertically; on a tie, a floor under the point's column (offset 0) beats one only
+	-- reached across the snap box, then below beats above, then the lower floor id.
+	local bestFloor, bestDy, bestUnder = 0, math.huge, false
 	for floor, dy in floorDy do
 		local ad, ab = math.abs(dy), math.abs(bestDy)
-		if ad < ab or (ad == ab and (dy < bestDy or (dy == bestDy and floor < bestFloor))) then
-			bestFloor, bestDy = floor, dy
+		local under = floorOff[floor] == 0
+		if
+			ad < ab
+			or (
+				ad == ab
+				and (
+					(under and not bestUnder)
+					or (under == bestUnder and (dy < bestDy or (dy == bestDy and floor < bestFloor)))
+				)
+			)
+		then
+			bestFloor, bestDy, bestUnder = floor, dy, under
 		end
 	end
 	if bestFloor == 0 then

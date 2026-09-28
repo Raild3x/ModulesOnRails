@@ -156,6 +156,115 @@ return function(t: tiniest)
 			local path = NavMesh.FindPath(mesh, v(2, 0, 2), v(30, 5, 10), { AreaCosts = { [2] = math.huge } })
 			expect(path.Status).is("Partial")
 		end)
+
+		test("a wall corner at a seam's end is passed at the agent's radius, on either floor (SR4)", function()
+			-- A ramp between two pads, seams at both ends. Every seam end is a wall corner: on both
+			-- floors for the ramp (Ground and Top stop or turn there), on the ramp only for the
+			-- stairs fixture's (10, 4), where Ground runs on under the stairs.
+			local ramp = NavMesh.Build {
+				Floors = {
+					Ground = { Walkable = { flat(0, { 0, 0, 10, 0, 10, 20, 0, 20 }) } },
+					Ramp = { Walkable = { { v(10, 0, 8), v(20, 5, 8), v(20, 5, 12), v(10, 0, 12) } } },
+					Top = { Walkable = { flat(5, { 20, 0, 30, 0, 30, 20, 20, 20 }) } },
+				},
+				Seams = {
+					{ FloorA = "Ground", FloorB = "Ramp", From = v(10, 0, 8), To = v(10, 0, 12) },
+					{ FloorA = "Ramp", FloorB = "Top", From = v(20, 5, 8), To = v(20, 5, 12) },
+				},
+			}
+			local stairs = NavMesh.Build(Fixtures.ThreeFloorStairs.Desc)
+			-- The ramp fixture's floors don't overlap in plan, so its walls can be measured in plan.
+			local rampWalls = {}
+			for tri = 1, Storage.TriangleCount(ramp) do
+				local vs = { Storage.GetTriangle(ramp, tri) }
+				for e = 1, 3 do
+					if Storage.IsWallEdge(ramp, tri, e) then
+						table.insert(
+							rampWalls,
+							{ Storage.GetVertex(ramp, vs[e % 3 + 1]), Storage.GetVertex(ramp, vs[(e + 1) % 3 + 1]) }
+						)
+					end
+				end
+			end
+			-- Plan distance between segments pq and ab (they never cross here: sample pq finely).
+			local function segDistance(p: vector, q: vector, a: vector, b: vector): number
+				local best = math.huge
+				local dx, dz = b.X - a.X, b.Z - a.Z
+				for s = 0, 200 do
+					local x, z = p.X + (q.X - p.X) * s / 200, p.Z + (q.Z - p.Z) * s / 200
+					local u = math.clamp(((x - a.X) * dx + (z - a.Z) * dz) / (dx * dx + dz * dz), 0, 1)
+					best = math.min(best, math.sqrt((a.X + u * dx - x) ^ 2 + (a.Z + u * dz - z) ^ 2))
+				end
+				return best
+			end
+			local cases = {
+				-- mesh, from, to, radius, the seam corners the path turns round, walls to measure the path against
+				{ ramp, v(2, 0, 2), v(28, 5, 18), 1.5, { v(10, 0, 8), v(20, 5, 12) }, rampWalls },
+				{ ramp, v(28, 5, 18), v(2, 0, 2), 1.5, { v(10, 0, 8), v(20, 5, 12) }, rampWalls }, -- lefts and rights swap
+				{ ramp, v(2, 0, 2), v(28, 5, 18), 0.5, { v(10, 0, 8), v(20, 5, 12) }, rampWalls },
+				-- (10, 4) is a wall corner of Stairs only: Ground runs on under the stairs.
+				{ stairs, v(2, 0, 12), v(30, 5, 2), 1, { v(10, 0, 4) }, {} },
+				{ stairs, v(30, 5, 2), v(2, 0, 12), 1, { v(10, 0, 4) }, {} },
+			}
+			for i, case in cases do
+				local mesh, r, corners, walls = case[1], case[4], case[5], case[6]
+				local path = NavMesh.FindPath(mesh, case[2], case[3], { AgentRadius = r })
+				expect(path.Status).with_context(`case {i}`).is("Success")
+				local w = path.Waypoints
+				-- As at a flat corner (Clearance spec): the path turns r from the corner, not at it.
+				for k, waypoint in w do
+					local p = waypoint.Position :: any
+					for _, c in corners do
+						local d = math.sqrt((p.X - c.X) ^ 2 + (p.Z - c.Z) ^ 2)
+						expect(d >= r - 1e-6).with_context(`case {i}: waypoint {k} is {d} from {c}`).is_true()
+					end
+				end
+				-- Between two turns the straight segment is not offset (Funnel docs: no general bound
+				-- holds there). On this fixture it stays at least r/2 from the walls; before the fix
+				-- it touched the corner.
+				for k = 1, #w - 1 do
+					for _, wall in walls do
+						local d = segDistance(w[k].Position :: any, w[k + 1].Position :: any, wall[1], wall[2])
+						expect(d >= r / 2).with_context(`case {i}: segment {k} comes {d} from a wall`).is_true()
+					end
+				end
+			end
+		end)
+
+		test("a point on a floor stays on it next to a seam at the same height (snap tie-break)", function()
+			-- Ramp and Top meet at x = 20, both at y = 5 there. A feet point on Top, 0.32 from the
+			-- seam, is at vertical distance 0 from both: it must stay where it is, on Top, not
+			-- slide onto the Ramp's edge (x = 20) inside the 0.5-stud snap box.
+			local mesh = NavMesh.Build {
+				Floors = {
+					Ground = { Walkable = { flat(0, { 0, 0, 10, 0, 10, 20, 0, 20 }) } },
+					Ramp = { Walkable = { { v(10, 0, 8), v(20, 5, 8), v(20, 5, 12), v(10, 0, 12) } } },
+					Top = { Walkable = { flat(5, { 20, 0, 30, 0, 30, 20, 20, 20 }) } },
+				},
+				Seams = {
+					{ FloorA = "Ground", FloorB = "Ramp", From = v(10, 0, 8), To = v(10, 0, 12) },
+					{ FloorA = "Ramp", FloorB = "Top", From = v(20, 5, 8), To = v(20, 5, 12) },
+				},
+			}
+			local feet = v(20.32, 5, 11.62)
+			local function same(p: any): boolean
+				return math.abs(p.X - feet.X) < 1e-4 and math.abs(p.Y - feet.Y) < 1e-4 and math.abs(p.Z - feet.Z) < 1e-4
+			end
+			local snapped = NavMesh.FindNearestPoint(mesh, feet) :: NavMesh.NavPoint
+			expect(snapped.Floor).is("Top")
+			expect(same(snapped.Position)).with_context(`snapped to {snapped.Position}`).is_true()
+			-- The nearest wall is the corner (20, 12), not the Ramp's edge line through it.
+			local d = NavMesh.FindDistanceToWall(mesh, feet, 10)
+			local corner = math.sqrt(0.32 ^ 2 + 0.38 ^ 2) -- 0.4968
+			expect(math.abs(d - corner) < 1e-3).with_context(`distance {d}`).is_true()
+			-- FindPath starts where the agent stands.
+			local path = NavMesh.FindPath(mesh, feet, v(28, 5, 18))
+			expect(path.Waypoints[1].Floor).is("Top")
+			expect(same(path.Waypoints[1].Position)).is_true()
+			-- On the seam itself both floors contain the point: it stays put, on either floor.
+			local onSeam = NavMesh.FindNearestPoint(mesh, v(20, 5, 10)) :: NavMesh.NavPoint
+			expect(vector.magnitude((onSeam.Position :: any) - v(20, 5, 10)) < 1e-4).is_true()
+		end)
 	end)
 
 	describe("Links", function()
