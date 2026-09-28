@@ -172,8 +172,8 @@ end
 	Unless `--mutate-all-tests`, a child runs only the tests that entered the
 	mutated function (per-test coverage from the run just done; see
 	`Mutation.selectTests`) and stops at the first failure. Each distinct test
-	selection is first run once unmutated, and falls back to the whole suite if
-	it is not green on its own.
+	selection is first run once unmutated (all of them, in parallel, before the
+	loop), and falls back to the whole suite if it is not green on its own.
 
 	While it runs, `progress.json` (heartbeat + counts) and
 	`mutation.partial.json` (every decided mutant) are rewritten every ~2s;
@@ -375,10 +375,10 @@ local function runMutation(
 		local failFast = not options.mutateAllTests
 		local selectedFile: { [number]: string } = {}
 		local selectedCount: { [number]: number } = {}
-		local verdict: { [string]: boolean | string } = {}
 		-- A selection's own timeout: 3x its unmutated duration (min 5s), like the
 		-- whole suite's. Kept at the suite's when --mutate-timeout is given.
 		local selectionTimeout: { [string]: number } = {}
+		local selectionFiles: { string } = {}
 		if not options.mutateAllTests then
 			local selectDir = workDir .. "/select"
 			if fs.isDir(selectDir) then
@@ -395,6 +395,7 @@ local function runMutation(
 					files += 1
 					fileFor[groupKey] = `{selectDir}/{files}.json`
 					fs.writeFile(fileFor[groupKey], serde.encode("json", list))
+					table.insert(selectionFiles, fileFor[groupKey])
 				end
 				selectedFile[id] = fileFor[groupKey]
 				selectedCount[id] = #list
@@ -417,6 +418,52 @@ local function runMutation(
 		end
 		local jobsNote = if options.mutateJobs == nil then " (default; set --mutate-jobs=<n>)" else ""
 		print(`[mutation] running on {jobs} worker(s){jobsNote}`)
+
+		-- Run every distinct selection once, unmutated, spread over the workers'
+		-- pristine copies (all up front: checking lazily stalled every worker that
+		-- reached a new selection behind the one checking it). A selection that is
+		-- red on its own falls back to the whole suite.
+		if #selectionFiles > 0 then
+			print(`[mutation] checking {#selectionFiles} test selection(s) unmutated...`)
+			local checkStart = os.clock()
+			local red: { [string]: boolean } = {}
+			local nextFile, finished = 1, 0
+			local failure: any = nil
+			for worker = 1, jobs do
+				task.spawn(function()
+					local ok, err = pcall(function()
+						while nextFile <= #selectionFiles and failure == nil do
+							local file = selectionFiles[nextFile]
+							nextFile += 1
+							local o = runSuite(timeoutSec, workerBuild(worker), file, true)
+							local tally = o.tally
+							red[file] = o.timedOut or not o.ok or tally == nil or tally.fail > 0
+							selectionTimeout[file] = options.mutateTimeout or math.max(5, 3 * o.duration)
+						end
+					end)
+					failure = failure or (if ok then nil else err)
+					finished += 1
+				end)
+			end
+			while finished < jobs do
+				task.wait(0.05)
+			end
+			if failure ~= nil then
+				error(failure, 0)
+			end
+			print(string.format("[mutation] selections checked in %.1fs", os.clock() - checkStart))
+			for id, file in selectedFile do
+				if red[file] then
+					selectedFile[id] = nil
+					selectedCount[id] = nil
+				end
+			end
+			for file in red do
+				if red[file] then
+					print(`[mutation] test selection {file} is not green unmutated; its mutants run the whole suite`)
+				end
+			end
+		end
 
 		local function record(o: Mutation.MutantOutcome): any
 			return {
@@ -461,36 +508,8 @@ local function runMutation(
 			applyMutant = function(id: number, worker: number)
 				return Engine.applyMutant(mutantsPath, id, workerBuild(worker))
 			end,
-			-- The first time any mutant needs a selection, run it once unmutated on
-			-- this worker's pristine copy; a red selection falls back to the whole
-			-- suite. Other workers wanting the same selection wait for the verdict.
-			prepare = function(m: Mutation.Mutant, worker: number)
-				current[worker] = m.file
-				local file = selectedFile[m.id]
-				if file == nil then
-					return
-				end
-				if verdict[file] == nil then
-					verdict[file] = "pending"
-					local o = runSuite(timeoutSec, workerBuild(worker), file, true)
-					local green = not o.timedOut and o.ok and o.tally ~= nil and (o.tally :: Mutation.Tally).fail == 0
-					verdict[file] = green
-					selectionTimeout[file] = options.mutateTimeout or math.max(5, 3 * o.duration)
-					if not green then
-						print(
-							`[mutation] test selection {file} is not green unmutated; its mutants run the whole suite`
-						)
-					end
-				end
-				while verdict[file] == "pending" do
-					task.wait(0.05)
-				end
-				if verdict[file] ~= true then
-					selectedFile[m.id] = nil
-					selectedCount[m.id] = nil
-				end
-			end,
 			runSuite = function(worker: number, m: Mutation.Mutant)
+				current[worker] = m.file
 				local file = selectedFile[m.id]
 				local timeout = if file ~= nil then selectionTimeout[file] else timeoutSec
 				return runSuite(timeout, workerBuild(worker), file, failFast)

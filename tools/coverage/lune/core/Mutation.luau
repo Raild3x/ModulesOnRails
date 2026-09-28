@@ -85,9 +85,6 @@ export type RunDeps = {
 	applyMutant: (id: number, worker: number) -> string,
 	-- Runs the suite in a fresh child process, honoring the configured timeout.
 	runSuite: (worker: number, mutant: Mutant) -> ChildOutcome,
-	-- Optional hook before a mutant is applied, while the worker's copy is still
-	-- pristine (the orchestrator checks a test selection is green unmutated here).
-	prepare: ((mutant: Mutant, worker: number) -> ())?,
 	-- Optional progress callback after each mutant, in completion order.
 	progress: ((completed: number, total: number, outcome: MutantOutcome) -> ())?,
 	-- Optional early-exit check, polled before each mutant. Returning true stops
@@ -495,9 +492,6 @@ function Mutation.run(toRun: { Mutant }, deps: RunDeps): ({ MutantOutcome }, boo
 	local failure: any = nil
 
 	local function runOne(m: Mutant, worker: number): MutantOutcome
-		if deps.prepare ~= nil then
-			(deps.prepare :: any)(m, worker)
-		end
 		local path = deps.filePath(m.file, worker)
 		local original = deps.readFile(path)
 		local ok, result = pcall(function(): MutantOutcome

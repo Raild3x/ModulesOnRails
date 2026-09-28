@@ -176,9 +176,9 @@ or test that also initialized a module (a lazy `require`).
 The child still collects every spec (so require-time and describe-time code
 runs exactly as in a full run), keeps the selected tests in their original
 order, and exits at the first failing test: one failure kills the mutant.
-Each distinct selection is first run once unmutated. If it is not green on its
-own (a test depending on an earlier, unselected one), its mutants fall back to
-the whole suite. A selection's timeout is 3x that unmutated run (min 5 s),
+Before the loop, every distinct selection is run once unmutated, spread over
+the workers. If one is not green on its own (a test depending on an earlier,
+unselected one), its mutants fall back to the whole suite. A selection's timeout is 3x that unmutated run (min 5 s),
 like the whole suite's. `mutation.json` records `tests` (how many ran) on each
 selected mutant.
 
@@ -200,15 +200,21 @@ Per mutant, the child is `lune` startup (~0.1 s), collecting every spec
 suite is 150 tests and 8-10 s, 6.6 s of it one spec (`NavMesh.Build.spec`),
 so before selection almost all of a run was tests that could not see the
 mutant. Measured on navmesh with `--mutate-jobs=16` on a shared
-16-core/24-thread machine, three interleaved old/new runs each (median, range):
+16-core/24-thread machine, old and new runs interleaved (median, range; the
+loop includes the up-front selection checks):
 
-| subset | mutants | mutant loop, before | after | whole command, before | after |
+| run | mutants | mutant loop, before | after | whole command, before | after |
 |---|---|---|---|---|---|
-| `src/OpenList.luau,src/Snap.luau` | 195 | 138 s (124-142) | 20 s (19-20) | 169 s (153-174) | 51 s (49-52) |
-| `src/Quantize.luau,src/Search.luau` | 445 | 199 s (198-208) | 79 s (76-82) | 233 s (230-241) | 111 s (109-115) |
+| `--mutate-files=src/OpenList.luau,src/Snap.luau` | 195 | 136 s (124-142) | 17 s (17-18) | 168 s (153-174) | 49 s (48-51) |
+| `--mutate-files=src/Quantize.luau,src/Search.luau` | 445 | 202 s (198-208) | 72 s (70-75) | 237 s (230-241) | 107 s (102-109) |
+| whole package (one run each) | 2959 | 1933 s | 568 s | 1981 s | 625 s |
 
-Per-mutant outcomes were identical apart from the two `timeout` -> `killed`
-mutants above (both confirmed to fail a test before hanging). What remains is
+Per-mutant outcomes matched except in two ways, both explained. Twenty
+mutants went `timeout` -> `killed` (they fail a test before hanging, as
+above). Two went `timeout` -> `survived` (`src/Clearance.luau:243` and `:252`,
+`or` -> `and`): unloaded, the whole suite passes with them in 15 s against an
+8.5 s baseline, so the old `timeout` was the 16-worker load pushing a slow
+survivor past a timeout taken from an unloaded baseline. What remains is
 mostly survivors, which must run every selected test, and the fixed ~0.35 s
 per child. Not done, and why: reusing worker processes (Lune cannot evict a
 module from its require cache, and a hung mutant must be killable), running

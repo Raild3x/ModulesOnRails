@@ -703,33 +703,4 @@ return function(tiniest)
 			expect(#all).is(1)
 		end)
 	end)
-
-	describe("Mutation.run prepare hook", function()
-		test("prepare runs before the file is stashed and applied, and runSuite gets the mutant", function()
-			local order = {}
-			local m = mutant(7, "src/a.luau", 3)
-			Mutation.run({ m }, {
-				filePath = function(rel)
-					return rel
-				end,
-				readFile = function()
-					table.insert(order, "read")
-					return ""
-				end,
-				writeFile = function() end,
-				applyMutant = function()
-					table.insert(order, "apply")
-					return "ok"
-				end,
-				prepare = function(got, worker)
-					table.insert(order, `prepare {got.id} w{worker}`)
-				end,
-				runSuite = function(worker, got)
-					table.insert(order, `suite {got.id} w{worker}`)
-					return { timedOut = false, ok = true, tally = { pass = 1, fail = 0, skipped = 0 }, duration = 0 }
-				end,
-			})
-			expect(order).is_shallow_equal { "prepare 7 w1", "read", "apply", "suite 7 w1" }
-		end)
-	end)
 end
