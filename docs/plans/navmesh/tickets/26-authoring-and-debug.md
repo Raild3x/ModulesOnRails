@@ -11,6 +11,14 @@ scene.
   - It produces walkable floors, seams at ramp feet and tops, and the obstacle cut under a
     solid ramp.
   - Today the demo authors its level twice, and a ramp needs three hand-written pieces.
+  - *(Added 2026-09-28, review.md D5 and D1.)*
+    - **Area names:** the adapter maps each Part's `Material` (or an area attribute) to an
+      integer area id, and returns a plain `{ [string]: number }` name-to-id table beside the
+      description. Games write `AreaCosts = { [areas.Mud] = 4 }`. The core keeps integer ids.
+    - **One-shot:** the adapter converts once. Watching Parts for moves is ruled out; games
+      call `AddObstacle`/`Update` themselves.
+    - **Headroom:** when ticket 29 lands, the adapter also emits `FloorDesc.Headroom` rings
+      from the Parts above each floor.
 - [ ] **Types say `vector`,** or a `Vector3 | vector` alias. The runtime already uses `vector`
       throughout, and strict-mode users under both Lune and Roblox currently hit type errors.
 - [ ] **Silent mistakes get errors:**
