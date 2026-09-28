@@ -54,12 +54,18 @@ export type LinkDesc = Types.LinkDesc
 export type NavMeshData = Storage.State
 
 local DEFAULT_SNAP_EXTENTS = vector.create(0.5, 4, 0.5)
+local FILTER_KEYS = { AgentRadius = true, AreaCosts = true, MaxExpansions = true, SnapExtents = true }
 
 local NavMesh = {}
 
 -- Validates a filter at the API boundary and returns its parts with defaults applied.
 local function readFilter(mesh: NavMeshData, filter: QueryFilter?): ({ [number]: number }, number, vector, number)
 	local f: QueryFilter = filter or {}
+	for key in f :: any do
+		if not FILTER_KEYS[key] then
+			error(`unknown QueryFilter key '{key}' (known: AgentRadius, AreaCosts, MaxExpansions, SnapExtents)`, 3)
+		end
+	end
 	local radius = f.AgentRadius or 0
 	if type(radius) ~= "number" or not (radius >= 0 and radius < math.huge) then
 		error("QueryFilter.AgentRadius must be a number of studs >= 0", 3)
@@ -307,6 +313,20 @@ end
 ]=]
 function NavMesh.RemoveObstacle(mesh: NavMeshData, obstacleId: number)
 	Tiles.RemoveObstacle(mesh, obstacleId)
+end
+
+--[=[
+	@within NavMesh
+	True while an obstacle added or removed since the last `Update` is waiting for it: until then,
+	queries still see the mesh without the change.
+]=]
+function NavMesh.HasPendingChanges(mesh: NavMeshData): boolean
+	for slot = 1, Storage.ObstacleCount(mesh) do
+		if Storage.GetObstacleState(mesh, slot) ~= Storage.OBSTACLE_ACTIVE then
+			return true
+		end
+	end
+	return false
 end
 
 --[=[

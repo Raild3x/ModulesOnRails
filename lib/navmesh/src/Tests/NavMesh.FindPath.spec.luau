@@ -721,6 +721,13 @@ return function(t: tiniest)
 			expect(function()
 				NavMesh.FindPath(mesh, v(1, 0, 1), v(2, 0, 2), { AgentRadius = math.huge })
 			end).fails_with("AgentRadius must be")
+			-- A misspelled key would otherwise be ignored in silence (ticket 26).
+			expect(function()
+				NavMesh.FindPath(mesh, v(1, 0, 1), v(2, 0, 2), { AgentRaduis = 1 } :: any)
+			end).fails_with("unknown QueryFilter key 'AgentRaduis'")
+			expect(function()
+				NavMesh.FindNearestPoint(mesh, v(1, 0, 1), { snapExtents = v(1, 1, 1) } :: any)
+			end).fails_with("unknown QueryFilter key 'snapExtents'")
 			-- Zero and fractional extents are fine on every axis.
 			for _, extents in { v(1, 0, 1), v(0.5, 0.5, 0.5), v(0, 1, 0) } do
 				expect(NavMesh.FindPath(mesh, v(1, 0, 1), v(2, 0, 2), { SnapExtents = extents }).Status)
