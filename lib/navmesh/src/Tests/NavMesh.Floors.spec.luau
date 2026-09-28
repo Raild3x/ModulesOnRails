@@ -87,7 +87,7 @@ return function(t: tiniest)
 
 		test("a small agent crosses a narrow seam up to half its width, and no wider", function()
 			-- A 0.75-wide bridge floor between two pads, joined by seams at x = 6 and x = 14.
-			local mesh = NavMesh.Build({
+			local mesh = NavMesh.Build {
 				Floors = {
 					West = { Walkable = { flat(0, { 0, 0, 6, 0, 6, 6, 0, 6 }) } },
 					Bridge = { Walkable = { flat(0, { 6, 2.625, 14, 2.625, 14, 3.375, 6, 3.375 }) } },
@@ -97,7 +97,7 @@ return function(t: tiniest)
 					{ FloorA = "West", FloorB = "Bridge", From = v(6, 0, 2.625), To = v(6, 0, 3.375) },
 					{ FloorA = "Bridge", FloorB = "East", From = v(14, 0, 2.625), To = v(14, 0, 3.375) },
 				},
-			})
+			}
 			local function status(radius: number): string
 				return NavMesh.FindPath(mesh, v(2, 0, 3), v(18, 0, 3), { AgentRadius = radius }).Status
 			end
@@ -110,13 +110,13 @@ return function(t: tiniest)
 		end)
 
 		test("a seam at 45 degrees joins its floors like any other", function()
-			local mesh = NavMesh.Build({
+			local mesh = NavMesh.Build {
 				Floors = {
 					Below = { Walkable = { flat(0, { 0, 0, 10, 0, 10, 10 }) } },
 					Above = { Walkable = { flat(0, { 0, 0, 10, 10, 0, 10 }) } },
 				},
 				Seams = { { FloorA = "Below", FloorB = "Above", From = v(0, 0, 0), To = v(10, 0, 10) } },
-			})
+			}
 			local path = NavMesh.FindPath(mesh, v(8, 0, 2), v(2, 0, 8))
 			expect(path.Status).is("Success")
 			expect(floors(path)).is("Below>Above")
@@ -130,6 +130,79 @@ return function(t: tiniest)
 			local mesh = NavMesh.Build(desc)
 			local path = NavMesh.FindPath(mesh, v(2, 0, 2), v(30, 5, 10), { AreaCosts = { [2] = math.huge } })
 			expect(path.Status).is("Partial")
+		end)
+
+		test("a wall corner at a seam's end is passed at the agent's radius, on either floor (SR4)", function()
+			-- A ramp between two pads, seams at both ends. Every seam end is a wall corner: on both
+			-- floors for the ramp (Ground and Top stop or turn there), on the ramp only for the
+			-- stairs fixture's (10, 4), where Ground runs on under the stairs.
+			local ramp = NavMesh.Build {
+				Floors = {
+					Ground = { Walkable = { flat(0, { 0, 0, 10, 0, 10, 20, 0, 20 }) } },
+					Ramp = { Walkable = { { v(10, 0, 8), v(20, 5, 8), v(20, 5, 12), v(10, 0, 12) } } },
+					Top = { Walkable = { flat(5, { 20, 0, 30, 0, 30, 20, 20, 20 }) } },
+				},
+				Seams = {
+					{ FloorA = "Ground", FloorB = "Ramp", From = v(10, 0, 8), To = v(10, 0, 12) },
+					{ FloorA = "Ramp", FloorB = "Top", From = v(20, 5, 8), To = v(20, 5, 12) },
+				},
+			}
+			local stairs = NavMesh.Build(Fixtures.ThreeFloorStairs.Desc)
+			-- The ramp fixture's floors don't overlap in plan, so its walls can be measured in plan.
+			local rampWalls = {}
+			for tri = 1, Storage.TriangleCount(ramp) do
+				local vs = { Storage.GetTriangle(ramp, tri) }
+				for e = 1, 3 do
+					if Storage.IsWallEdge(ramp, tri, e) then
+						table.insert(
+							rampWalls,
+							{ Storage.GetVertex(ramp, vs[e % 3 + 1]), Storage.GetVertex(ramp, vs[(e + 1) % 3 + 1]) }
+						)
+					end
+				end
+			end
+			-- Plan distance between segments pq and ab (they never cross here: sample pq finely).
+			local function segDistance(p: vector, q: vector, a: vector, b: vector): number
+				local best = math.huge
+				local dx, dz = b.X - a.X, b.Z - a.Z
+				for s = 0, 200 do
+					local x, z = p.X + (q.X - p.X) * s / 200, p.Z + (q.Z - p.Z) * s / 200
+					local u = math.clamp(((x - a.X) * dx + (z - a.Z) * dz) / (dx * dx + dz * dz), 0, 1)
+					best = math.min(best, math.sqrt((a.X + u * dx - x) ^ 2 + (a.Z + u * dz - z) ^ 2))
+				end
+				return best
+			end
+			local cases = {
+				-- mesh, from, to, radius, the seam corners the path turns round, walls to measure the path against
+				{ ramp, v(2, 0, 2), v(28, 5, 18), 1.5, { v(10, 0, 8), v(20, 5, 12) }, rampWalls },
+				{ ramp, v(28, 5, 18), v(2, 0, 2), 1.5, { v(10, 0, 8), v(20, 5, 12) }, rampWalls }, -- lefts and rights swap
+				{ ramp, v(2, 0, 2), v(28, 5, 18), 0.5, { v(10, 0, 8), v(20, 5, 12) }, rampWalls },
+				-- (10, 4) is a wall corner of Stairs only: Ground runs on under the stairs.
+				{ stairs, v(2, 0, 12), v(30, 5, 2), 1, { v(10, 0, 4) }, {} },
+				{ stairs, v(30, 5, 2), v(2, 0, 12), 1, { v(10, 0, 4) }, {} },
+			}
+			for i, case in cases do
+				local mesh, r, corners, walls = case[1], case[4], case[5], case[6]
+				local path = NavMesh.FindPath(mesh, case[2], case[3], { AgentRadius = r })
+				expect(path.Status).with_context(`case {i}`).is("Success")
+				local w = path.Waypoints
+				-- As at a flat corner (Clearance spec): the path turns r from the corner, not at it.
+				for k, waypoint in w do
+					local p = waypoint.Position :: any
+					for _, c in corners do
+						local d = math.sqrt((p.X - c.X) ^ 2 + (p.Z - c.Z) ^ 2)
+						expect(d >= r - 1e-6).with_context(`case {i}: waypoint {k} is {d} from {c}`).is_true()
+					end
+				end
+				-- Between two turns the straight segment may cut into an r-circle (Funnel docs), but
+				-- never down to the wall.
+				for k = 1, #w - 1 do
+					for _, wall in walls do
+						local d = segDistance(w[k].Position :: any, w[k + 1].Position :: any, wall[1], wall[2])
+						expect(d >= r / 2).with_context(`case {i}: segment {k} comes {d} from a wall`).is_true()
+					end
+				end
+			end
 		end)
 	end)
 
@@ -159,10 +232,10 @@ return function(t: tiniest)
 		test("a cheap link wins over a long walk, a dear one doesn't (SR7)", function()
 			local corridor = { Walkable = { flat(0, { 0, 0, 40, 0, 40, 4, 0, 4 }) } }
 			local function via(cost: number): NavMesh.PathResult
-				local mesh = NavMesh.Build({
+				local mesh = NavMesh.Build {
 					Floors = { Ground = corridor },
 					Links = { { From = v(1, 0, 2), To = v(39, 0, 2), Cost = cost, Label = "Warp" } },
-				})
+				}
 				return NavMesh.FindPath(mesh, v(1, 0, 2), v(39, 0, 2))
 			end
 			local cheap = via(1)
@@ -194,10 +267,10 @@ return function(t: tiniest)
 		end)
 
 		test("a link's area is filtered like a surface area", function()
-			local mesh = NavMesh.Build({
+			local mesh = NavMesh.Build {
 				Floors = { Ground = { Walkable = { flat(0, { 0, 0, 40, 0, 40, 4, 0, 4 }) } } },
 				Links = { { From = v(1, 0, 2), To = v(39, 0, 2), Cost = 1, Area = 5 } },
-			})
+			}
 			expect(NavMesh.FindPath(mesh, v(1, 0, 2), v(39, 0, 2)).Cost).is(1)
 			local walked = NavMesh.FindPath(mesh, v(1, 0, 2), v(39, 0, 2), { AreaCosts = { [5] = math.huge } })
 			expect(math.abs(walked.Cost - 38) < 1e-6).is_true()

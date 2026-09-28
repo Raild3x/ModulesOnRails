@@ -11,7 +11,8 @@
 
 	**Agent radius (SR4):** each portal end that is a wall vertex is moved r along the portal,
 	towards its other end, so corners are passed at distance r. Free-space vertices (tile, area,
-	seam) are not offset. Between two offset corners the straight segment may cut inside the
+	seam) are not offset, but a seam portal's end that is a wall vertex on either of its floors
+	is: the corner where a seam meets a wall. Between two offset corners the straight segment may cut inside the
 	r-circle by up to r (1 - cos(half the turn)).
 ]=]
 
@@ -91,13 +92,26 @@ local function pull(lefts: { vector }, rights: { vector }, owners: { number }): 
 	return kept, keptFrom
 end
 
+-- Whether `p` is a wall vertex of triangle `t`, matched in (X, Z) only (a seam point has one
+-- height per floor) and well inside a grid pixel (vertices are on the 1/256 grid).
+local function wallAt(s: Storage.State, t: number, p: vector): boolean
+	for _, v in { Storage.GetTriangle(s, t) } do
+		local q = Storage.GetVertex(s, v)
+		if math.abs(q.X - p.X) < 1e-3 and math.abs(q.Z - p.Z) < 1e-3 then
+			return Storage.IsWallVertex(s, v)
+		end
+	end
+	return false
+end
+
 --[=[
 	@within NavMeshFunnel
 	The path from `startP` to `endP` through `corridor` (entered as `vias` says, see Search),
 	as points, the triangle each point was taken from (for its floor), and the label of each
 	point where a link starts (by point index).
 
-	Seam portals are portals like shared edges (their ends are not offset for radius). A link
+	Seam portals are portals like shared edges, and their wall-corner ends are offset the same
+	way. A link
 	breaks the string: the path runs to the link's start, which carries its label, then on from
 	where it lands.
 ]=]
@@ -121,6 +135,17 @@ function Funnel.StringPull(
 			table.insert(from, segmentFrom[k])
 		end
 	end
+	-- A portal end that is a wall corner moves r along the portal, towards its other end.
+	local function push(l: vector, r: vector, lWall: boolean, rWall: boolean, owner: number)
+		if radius > 0 and (lWall or rWall) then
+			local length = vector.magnitude(r - l)
+			local shift = math.min(radius, length * 0.5) / length
+			l, r = if lWall then l + (r - l) * shift else l, if rWall then r + (l - r) * shift else r
+		end
+		table.insert(lefts, l)
+		table.insert(rights, r)
+		table.insert(owners, owner)
+	end
 	for i = 1, #corridor - 1 do
 		local t, nextT, via = corridor[i], corridor[i + 1], vias[i + 1]
 		if via ~= 0 then
@@ -133,9 +158,15 @@ function Funnel.StringPull(
 				end
 				lefts, rights, owners = { b }, { b }, { nextT }
 			else
-				table.insert(lefts, a)
-				table.insert(rights, b)
-				table.insert(owners, t)
+				-- A seam portal's end is a wall corner when it is a wall vertex on either floor.
+				local offset = radius > 0
+				push(
+					a,
+					b,
+					offset and (wallAt(s, t, a) or wallAt(s, nextT, a)),
+					offset and (wallAt(s, t, b) or wallAt(s, nextT, b)),
+					t
+				)
 			end
 			continue
 		end
@@ -143,17 +174,13 @@ function Funnel.StringPull(
 		for e = 1, 3 do
 			if Storage.GetNeighbor(s, t, e) == nextT then
 				local lv, rv = verts[(e + 1) % 3 + 1], verts[e % 3 + 1]
-				local l, r = Storage.GetVertex(s, lv), Storage.GetVertex(s, rv)
-				if radius > 0 then
-					local length = vector.magnitude(r - l)
-					local shift = math.min(radius, length * 0.5) / length
-					local l2 = if Storage.IsWallVertex(s, lv) then l + (r - l) * shift else l
-					local r2 = if Storage.IsWallVertex(s, rv) then r + (l - r) * shift else r
-					l, r = l2, r2
-				end
-				table.insert(lefts, l)
-				table.insert(rights, r)
-				table.insert(owners, t)
+				push(
+					Storage.GetVertex(s, lv),
+					Storage.GetVertex(s, rv),
+					Storage.IsWallVertex(s, lv),
+					Storage.IsWallVertex(s, rv),
+					t
+				)
 				break
 			end
 		end
