@@ -4,6 +4,8 @@
 -- funnel at radius 0, and all five statuses.
 
 return function(t: tiniest)
+	local Clearance = require("../Clearance")
+	local Flood = require("./Helpers/Flood")
 	local NavMesh = require("../NavMesh")
 	local Snap = require("../Snap")
 	local Storage = require("../Storage")
@@ -518,7 +520,7 @@ return function(t: tiniest)
 			-- A wall from the south edge to z = 9 leaves a 1-stud gap on top; with 2-stud tiles the
 			-- start triangle borders the gap (the tile line x = 10), so leaving it reads a portal
 			-- width (it has no entry edge). (With one big tile a sliver start triangle spans the
-			-- gap itself, and SR4's start rule never looks inside it: see the triage notes.)
+			-- gap itself: ticket 27's specs below.)
 			local gap = NavMesh.Build {
 				TileSize = 2,
 				Floors = {
@@ -560,6 +562,136 @@ return function(t: tiniest)
 				end
 			end
 			expect(count > 100).is_true()
+		end)
+	end)
+
+	describe("FindPath radius inside the start and goal triangles (ticket 27)", function()
+		-- A 20 x 10 room, one tile, with a slab from the south wall to z = 9: a 1-stud gap over it.
+		-- The start and goal points sit in the sliver (0, 10) (10, 9) (20, 10) that spans the gap.
+		local function room(south: number, slabFrom: number): any
+			return NavMesh.Build {
+				TileSize = 64,
+				Floors = {
+					Ground = {
+						Walkable = { flat(0, { 0, south, 20, south, 20, 10, 0, 10 }) },
+						Obstacles = { flat(0, { 10, slabFrom, 11, slabFrom, 11, 9, 10, 9 }) },
+					},
+				},
+			}
+		end
+		local extents = vector.create(0.5, 4, 0.5)
+
+		test("an end in a sliver across a gap can't leave through it (both ends)", function()
+			local mesh = room(0, -1)
+			local sliver, left, right = v(9.6, 0, 9.5), v(9.6, 0, 9.5), v(15, 0, 5)
+			expect(NavMesh.FindPath(mesh, left, right, { AgentRadius = 0.51 }).Status).is("Partial")
+			expect(NavMesh.FindPath(mesh, right, left, { AgentRadius = 0.51 }).Status).is("Partial")
+			expect(NavMesh.FindPath(mesh, left, right, { AgentRadius = 0.49 }).Status).is("Success")
+			expect(NavMesh.FindPath(mesh, right, left, { AgentRadius = 0.49 }).Status).is("Success")
+			-- A Partial path stays on its own side: it ends left of the gap.
+			local partial = NavMesh.FindPath(mesh, sliver, right, { AgentRadius = 0.51 })
+			for _, w in partial.Waypoints do
+				expect((w.Position :: any).X <= 10).with_context(fmt(w.Position)).is_true()
+			end
+		end)
+
+		test("ends parted inside one triangle go round when they can, else stop", function()
+			local a, b = v(9.6, 0, 9.5), v(12, 0, 9.45)
+			-- The slab reaches the south wall: no way round.
+			local closed = room(0, -1)
+			expect(Snap.Snap(closed, a, extents, {})).is(Snap.Snap(closed, b, extents, {}))
+			expect(NavMesh.FindPath(closed, a, b, { AgentRadius = 0.51 }).Status).is("Partial")
+			expect(NavMesh.FindPath(closed, a, b, { AgentRadius = 0.45 }).Status).is("Success")
+			-- A floating slab: the way round goes under it, out of the shared triangle and back.
+			local open = room(-6, -3)
+			expect(Snap.Snap(open, a, extents, {})).is(Snap.Snap(open, b, extents, {}))
+			local round = NavMesh.FindPath(open, a, b, { AgentRadius = 0.51 })
+			expect(round.Status).is("Success")
+			local lowest = math.huge
+			for _, w in round.Waypoints do
+				lowest = math.min(lowest, (w.Position :: any).Z)
+			end
+			expect(lowest < -3).with_context(route(round)).is_true()
+			expect(#offMesh(open, round)).is(0)
+			-- A narrow agent keeps the straight line.
+			expect(#NavMesh.FindPath(open, a, b, { AgentRadius = 0.45 }).Waypoints).is(2)
+		end)
+
+		test("a barrier ending inside a crossable edge doesn't cut an end off", function()
+			-- The start's sliver is parted from its south-west edge by the east slab's disc, but
+			-- the disc ends on the sliver's north edge: the agent steps over the slab through the
+			-- triangle beyond, and back down (a way out and in across one edge).
+			local mesh = NavMesh.Build {
+				TileSize = 16,
+				Floors = {
+					Ground = {
+						Walkable = { flat(0, { 0, 0, 32, 0, 32, 10, 0, 10 }) },
+						Obstacles = {
+							flat(0, { 21.416, -1, 22.578, -1, 22.578, 8.43, 21.416, 8.43 }),
+							flat(0, { 25.64, -1, 26.877, -1, 26.877, 8.178, 25.64, 8.178 }),
+						},
+					},
+				},
+			}
+			local a, b = v(27.522, 0, 8.818), v(23.498, 0, 6.58)
+			expect(NavMesh.FindPath(mesh, a, b, { AgentRadius = 0.805 }).Status).is("Success")
+			-- Over the slab the gap is 1.822: a wider agent is refused.
+			expect(NavMesh.FindPath(mesh, a, b, { AgentRadius = 0.92 }).Status).is("Partial")
+		end)
+
+		test("every Partial the check causes is a real block (a grid flood agrees)", function()
+			-- Slabs standing on the south wall of a long room, each 0.5-2 studs short of the north
+			-- wall, in one tile: many slivers span gaps. Every query that the start or goal check
+			-- turned away and that ends Partial must be parted in the independent flood.
+			math.randomseed(27)
+			local function rnd(lo: number, hi: number): number
+				return lo + math.random() * (hi - lo)
+			end
+			local obstacles = {}
+			local x = 2
+			while x < 60 do
+				local w, gap = rnd(0.5, 2), rnd(0.5, 2)
+				table.insert(obstacles, flat(0, { x, -1, x + w, -1, x + w, 10 - gap, x, 10 - gap }))
+				x += w + rnd(2, 6)
+			end
+			local mesh = NavMesh.Build {
+				TileSize = 64,
+				Floors = { Ground = { Walkable = { flat(0, { 0, 0, 64, 0, 64, 10, 0, 10 }) }, Obstacles = obstacles } },
+			}
+			local oracle = Flood.New(mesh)
+			local fired = false
+			local cutOff, separated = Clearance.CutOff, Clearance.Separated
+			Clearance.CutOff = function(...)
+				local result = cutOff(...)
+				fired = fired or result
+				return result
+			end
+			Clearance.Separated = function(...)
+				local result = separated(...)
+				fired = fired or result
+				return result
+			end
+			local checked, refuted = 0, {}
+			local ok, err = pcall(function()
+				for _ = 1, 400 do
+					local r = rnd(0.2, 1.1)
+					local a, b = v(rnd(0, 64), 0, rnd(7, 10)), v(rnd(0, 64), 0, rnd(0, 10))
+					if not Flood.OnMesh(oracle, a.X, a.Z) or not Flood.OnMesh(oracle, b.X, b.Z) then
+						continue
+					end
+					fired = false
+					if NavMesh.FindPath(mesh, a, b, { AgentRadius = r }).Status == "Partial" and fired then
+						checked += 1
+						if Flood.Connected(oracle, r, a, b) then
+							table.insert(refuted, `r {r}: {fmt(a)} -> {fmt(b)}`)
+						end
+					end
+				end
+			end)
+			Clearance.CutOff, Clearance.Separated = cutOff, separated
+			assert(ok, err)
+			expect(table.concat(refuted, "; ")).is("")
+			expect(checked >= 10).with_context(`{checked} blocked queries`).is_true()
 		end)
 	end)
 

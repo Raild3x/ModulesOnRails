@@ -138,10 +138,10 @@ local function nearestParam(e: Seg, f: Seg): number
 	return bestU
 end
 
--- min over p on edge e of max(d(p, f), d(p, g)). Both distances are convex along e: if one
--- dominates at the other's minimum, that is the answer; otherwise it is their crossing, which
--- lies between the two minima (found by regula falsi, Illinois variant).
-local function edgeMinMax(e: Seg, f: Seg, g: Seg): number
+-- min over p on edge e of max(d(p, f), d(p, g)), and that p. Both distances are convex along
+-- e: if one dominates at the other's minimum, that is the answer; otherwise it is their
+-- crossing, which lies between the two minima (found by regula falsi, Illinois variant).
+local function edgeMinMax(e: Seg, f: Seg, g: Seg): (number, number, number)
 	local ex, ez, dx, dz = e[1], e[2], e[3] - e[1], e[4] - e[2]
 	local function df(u: number): number
 		return pointSeg(ex + u * dx, ez + u * dz, f)
@@ -152,11 +152,11 @@ local function edgeMinMax(e: Seg, f: Seg, g: Seg): number
 	local uf, ug = nearestParam(e, f), nearestParam(e, g)
 	local fAtF, gAtF = df(uf), dg(uf)
 	if fAtF >= gAtF then
-		return fAtF
+		return fAtF, ex + uf * dx, ez + uf * dz
 	end
 	local fAtG, gAtG = df(ug), dg(ug)
 	if gAtG >= fAtG then
-		return gAtG
+		return gAtG, ex + ug * dx, ez + ug * dz
 	end
 	-- h = df - dg is < 0 at uf and > 0 at ug.
 	local a, ha, b, hb = uf, fAtF - gAtF, ug, fAtG - gAtG
@@ -184,7 +184,7 @@ local function edgeMinMax(e: Seg, f: Seg, g: Seg): number
 			side = 1
 		end
 	end
-	return value
+	return value, ex + u * dx, ez + u * dz
 end
 
 local function inRegion(region: Region, px: number, pz: number): boolean
@@ -204,21 +204,25 @@ local function inRegion(region: Region, px: number, pz: number): boolean
 	return true
 end
 
--- The cost of linking walls f and g inside `region`: min over p in it of max(d(p, f), d(p, g)).
--- Convex, so the minimum is the closest-pair midpoint when that lies inside, else on an edge.
-local function linkCost(region: Region, f: Seg, g: Seg): number
+-- The cost of linking walls f and g inside `region`: min over p in it of max(d(p, f), d(p, g)),
+-- and that p. Convex, so the minimum is the closest-pair midpoint when that lies inside, else on
+-- an edge.
+local function linkCost(region: Region, f: Seg, g: Seg): (number, number, number)
 	local mx, mz = closestMidpoint(f, g)
 	if inRegion(region, mx, mz) then
-		return math.max(pointSeg(mx, mz, f), pointSeg(mx, mz, g))
+		return math.max(pointSeg(mx, mz, f), pointSeg(mx, mz, g)), mx, mz
 	end
 	-- Outside: the minimum lies on an edge that faces the midpoint (for a portal, its one edge).
-	local best = math.huge
+	local best, bx, bz = math.huge, mx, mz
 	for _, e in region do
 		if #region == 1 or cross(e[1], e[2], e[3], e[4], mx, mz) < 0 then
-			best = math.min(best, edgeMinMax(e, f, g))
+			local cost, px, pz = edgeMinMax(e, f, g)
+			if cost < best then
+				best, bx, bz = cost, px, pz
+			end
 		end
 	end
-	return best
+	return best, bx, bz
 end
 
 -- Smallest r that chains cut discs from point (sx, sz) to `sink`, with links met inside
@@ -297,6 +301,8 @@ type WallIndex = {
 -- width, which bounds how far a change can reach into it (nil = not measured yet).
 local indexes: { [Storage.State]: WallIndex } = setmetatable({}, { __mode = "k" }) :: any
 local tileReaches: { [Storage.State]: { [number]: number } } = setmetatable({}, { __mode = "k" }) :: any
+-- Per mesh (weak): the last triangle `around` answered for (ticket 27 queries).
+local lastAround: { [Storage.State]: { any } } = setmetatable({}, { __mode = "k" }) :: any
 
 local function cellKey(floor: number, cx: number, cz: number): number
 	return (floor * 65536 + cx + 32768) * 65536 + cz + 32768
@@ -354,14 +360,60 @@ local function buildIndex(s: Storage.State, flag: boolean): WallIndex
 	return index
 end
 
+-- The walls of `floor` within `limit` of the triangle with edges `edges`, how close each comes
+-- to it, and to each of its edges.
+local function nearWalls(
+	index: WallIndex,
+	floor: number,
+	edges: Region,
+	limit: number
+): ({ Seg }, { number }, { { number } })
+	local minX = math.min(edges[1][1], edges[2][1], edges[3][1])
+	local maxX = math.max(edges[1][1], edges[2][1], edges[3][1])
+	local minZ = math.min(edges[1][2], edges[2][2], edges[3][2])
+	local maxZ = math.max(edges[1][2], edges[2][2], edges[3][2])
+	local feats: { Seg } = {}
+	local toTri: { number } = {}
+	local toEdge: { { number } } = { {}, {}, {} }
+	local seen: { [number]: boolean } = {}
+	for cx = math.floor((minX - limit) / CELL), math.floor((maxX + limit) / CELL) do
+		for cz = math.floor((minZ - limit) / CELL), math.floor((maxZ + limit) / CELL) do
+			local bucket: { number } = index.Grid[cellKey(floor, cx, cz)] or {}
+			for _, id in bucket do
+				if seen[id] then
+					continue
+				end
+				seen[id] = true
+				local w = index.Walls[id]
+				-- Box gap first: a wall whose box is further than `limit` from the triangle's is.
+				if
+					math.min(w[1], w[3]) > maxX + limit
+					or math.max(w[1], w[3]) < minX - limit
+					or math.min(w[2], w[4]) > maxZ + limit
+					or math.max(w[2], w[4]) < minZ - limit
+				then
+					continue
+				end
+				local d1, d2, d3 = segSeg(w, edges[1]), segSeg(w, edges[2]), segSeg(w, edges[3])
+				local d = math.min(d1, d2, d3)
+				if d <= limit then
+					table.insert(feats, w)
+					table.insert(toTri, d)
+					table.insert(toEdge[1], d1)
+					table.insert(toEdge[2], d2)
+					table.insert(toEdge[3], d3)
+				end
+			end
+		end
+	end
+	return feats, toTri, toEdge
+end
+
 -- The corner and portal widths of every triangle, or of those in `only` (the rest keep the
 -- widths they have), from the index's walls.
 local function computeWidths(s: Storage.State, cap: number, only: { [number]: boolean }?, index: WallIndex)
 	Storage.SetMaxAgentRadius(s, cap)
 	local n = Storage.TriangleCount(s)
-	local grid = index.Grid
-	local walls = index.Walls
-	local key = cellKey
 
 	local limitCap = if cap > 0 then cap else LAST_LIMIT
 	-- ponytail: a per-edge wall-chain merge or a cheaper link bound is the next lever if the
@@ -389,8 +441,6 @@ local function computeWidths(s: Storage.State, cap: number, only: { [number]: bo
 			local u, v = P[e % 3 + 1], P[(e + 1) % 3 + 1]
 			edges[e] = { u.X, u.Z, v.X, v.Z }
 		end
-		local minX, maxX = math.min(P[1].X, P[2].X, P[3].X), math.max(P[1].X, P[2].X, P[3].X)
-		local minZ, maxZ = math.min(P[1].Z, P[2].Z, P[3].Z), math.max(P[1].Z, P[2].Z, P[3].Z)
 		local across = { Storage.GetNeighbor(s, t, 1), Storage.GetNeighbor(s, t, 2), Storage.GetNeighbor(s, t, 3) }
 		-- Whether t computes the portal across edge k (and writes it for both sides).
 		local function owns(k: number): boolean
@@ -404,32 +454,7 @@ local function computeWidths(s: Storage.State, cap: number, only: { [number]: bo
 		}
 		local limit = math.min(FIRST_LIMIT, limitCap)
 		while true do
-			-- Walls within `limit` of the triangle, and how close each comes to it and its edges.
-			local feats: { Seg } = {}
-			local toTri: { number } = {}
-			local toEdge: { { number } } = { {}, {}, {} }
-			local seen: { [number]: boolean } = {}
-			for cx = math.floor((minX - limit) / CELL), math.floor((maxX + limit) / CELL) do
-				for cz = math.floor((minZ - limit) / CELL), math.floor((maxZ + limit) / CELL) do
-					local bucket: { number } = grid[key(floor, cx, cz)] or {}
-					for _, id in bucket do
-						if seen[id] then
-							continue
-						end
-						seen[id] = true
-						local w = walls[id]
-						local d1, d2, d3 = segSeg(w, edges[1]), segSeg(w, edges[2]), segSeg(w, edges[3])
-						local d = math.min(d1, d2, d3)
-						if d <= limit then
-							table.insert(feats, w)
-							table.insert(toTri, d)
-							table.insert(toEdge[1], d1)
-							table.insert(toEdge[2], d2)
-							table.insert(toEdge[3], d3)
-						end
-					end
-				end
-			end
+			local feats, toTri, toEdge = nearWalls(index, floor, edges, limit)
 			-- Only widths a query reads: a corner between two crossable edges, a crossable portal.
 			-- The rest stay 0 (nothing crosses a wall).
 			local r = table.create(6, 0)
@@ -563,6 +588,7 @@ function Clearance.Refresh(
 ): { [number]: boolean }
 	local index = indexes[mesh] or buildIndex(mesh, false)
 	local reaches = tileReaches[mesh] or {}
+	lastAround[mesh] = nil
 	local touched: { [number]: boolean } = {}
 
 	-- Changed walls: in the old walls of the rebuilt tiles or in the new ones, not both.
@@ -659,6 +685,285 @@ function Clearance.Refresh(
 	indexes[mesh] = index
 	tileReaches[mesh] = reaches
 	return touched
+end
+
+-- Even-odd test: whether (x, z) is inside the closed polygon `poly` (flat x, z pairs).
+local function inside(poly: { number }, x: number, z: number): boolean
+	local odd = false
+	local n = #poly // 2
+	local j = n
+	for i = 1, n do
+		local xi, zi, xj, zj = poly[2 * i - 1], poly[2 * i], poly[2 * j - 1], poly[2 * j]
+		if (zi > z) ~= (zj > z) and x < (xj - xi) * (z - zi) / (zj - zi) + xi then
+			odd = not odd
+		end
+		j = i
+	end
+	return odd
+end
+
+-- Triangle t's edges (edge e opposite vertex e, CCW), which of them are walls, and the walls
+-- within r of it. The last
+-- answer per mesh is kept (a search asks about its start triangle once per exit edge), until the
+-- walls change (Refresh drops it).
+local function around(s: Storage.State, t: number, r: number): (Region, { boolean }, { Seg })
+	local last = lastAround[s]
+	if last and last[1] == t and last[2] == r then
+		return last[3], last[4], last[5]
+	end
+	local index = indexes[s] or buildIndex(s, false)
+	indexes[s] = index
+	local P = {}
+	for i, v in { Storage.GetTriangle(s, t) } do
+		P[i] = Storage.GetVertex(s, v)
+	end
+	local edges: Region = {}
+	for e = 1, 3 do
+		local u, v = P[e % 3 + 1], P[(e + 1) % 3 + 1]
+		edges[e] = { u.X, u.Z, v.X, v.Z }
+	end
+	local walls = { Storage.IsWallEdge(s, t, 1), Storage.IsWallEdge(s, t, 2), Storage.IsWallEdge(s, t, 3) }
+	local feats = nearWalls(index, Storage.GetTriangleFloor(s, t), edges, r)
+	lastAround[s] = { t, r, edges, walls, feats }
+	return edges, walls, feats
+end
+
+-- Whether the segment (ax, az)-(bx, bz) keeps at least r from every wall in `feats`.
+local function clear(feats: { Seg }, r: number, ax: number, az: number, bx: number, bz: number): boolean
+	local seg = { ax, az, bx, bz }
+	for _, f in feats do
+		if segSeg(seg, f) < r then
+			return false
+		end
+	end
+	return true
+end
+
+-- Where an agent of radius r at (x, z) stands once pushed straight out of its nearest wall to
+-- r, or nil when that is still inside a disc, or it touches the wall (its side of a barrier is
+-- then unknown). An end already clear stays put. `feats` must hold every wall within r of the
+-- end's triangle, which the end is in: a pushed point outside the triangle is inside no barrier.
+local function standing(feats: { Seg }, r: number, x: number, z: number): (number?, number?)
+	local best, bx, bz = math.huge, x, z
+	for _, f in feats do
+		local qx, qz = nearestOn(x, z, f)
+		local d = math.sqrt((qx - x) ^ 2 + (qz - z) ^ 2)
+		if d < best then
+			best, bx, bz = d, qx, qz
+		end
+	end
+	if best >= r then
+		return x, z
+	elseif best == 0 then
+		return nil, nil
+	end
+	local px, pz = bx + (x - bx) * r / best, bz + (z - bz) * r / best
+	for _, f in feats do
+		if pointSeg(px, pz, f) < r * (1 - 1e-9) then
+			return nil, nil
+		end
+	end
+	return px, pz
+end
+
+--[[
+	Barriers inside a triangle at radius r (ticket 27). The cut discs (open radius-r discs
+	around the walls in `feats`, cut to the triangle) fall into components, joined where two
+	link inside the triangle (Chain's link rule). A component that touches the boundary path
+	`arc` (a list of consecutive edges) at two places gives a closed polygon: a covered polyline
+	through the component between the two contacts, closed along `arc` between them. Every piece
+	of the polyline lies in one cut disc, so no agent centre of radius r crosses it inside the
+	triangle, and the rest of the polygon is that part of `arc`.
+	- Contacts are the triangle's vertices, and on a wall edge also the point nearest the wall,
+	  when nearer than r (an agent may touch a wall, as widths let it: a width of exactly 2r
+	  passes). A barrier ending inside a crossable edge doesn't close: the agent can step round
+	  its end into the neighbour and back across the same edge, which no corridor can hold;
+	  round a vertex it passes other triangles, which a corridor can;
+	- consecutive polyline points (a contact, then link points, then a contact) share a disc.
+	Per component, the pair is its first and last contact along `arc`, or with `allPairs` (when
+	`arc` is the whole boundary, which has no first) every pair of contacts at different points.
+	ponytail: one path per pair; a pocket that a loop inside a component closes is missed (a
+	missed block, never a false one).
+]]
+local function barriers(
+	edges: Region,
+	walls: { boolean },
+	feats: { Seg },
+	r: number,
+	arc: { number },
+	allPairs: boolean
+): { { number } }
+	local m = #feats
+	-- Contacts: position along the arc (edge slot - 1 + u), point and wall, in wall order.
+	local at, atX, atZ, of = {}, {}, {}, {}
+	local touches = table.create(m, false)
+	for i, f in feats do
+		for slot, j in arc do
+			local edge = edges[j]
+			for _, u in if walls[j] then { 0, 1, nearestParam(edge, f) } else { 0, 1 } do
+				local x, z = edge[1] + u * (edge[3] - edge[1]), edge[2] + u * (edge[4] - edge[2])
+				if pointSeg(x, z, f) < r then
+					table.insert(at, slot - 1 + u)
+					table.insert(atX, x)
+					table.insert(atZ, z)
+					table.insert(of, i)
+					touches[i] = true
+				end
+			end
+		end
+	end
+	local links: { [number]: { number } } = {} -- i * (m + 1) + j -> { cost, x, z }
+	local function link(i: number, j: number): { number }
+		local k = if i < j then i * (m + 1) + j else j * (m + 1) + i
+		local l = links[k]
+		if l == nil then
+			-- Two discs can't meet before r = d(f, g) / 2.
+			l = if segSeg(feats[i], feats[j]) >= 2 * r then { math.huge } else { linkCost(edges, feats[i], feats[j]) }
+			links[k] = l
+		end
+		return l
+	end
+	-- The polygon for contacts a and b (at[a] < at[b]): contact b, the link points back through
+	-- the component to a's wall (breadth first from it), contact a, then the arc's vertices
+	-- between the two.
+	local function polygon(members: { number }, a: number, b: number): { number }
+		local from, to = of[a], of[b]
+		local parent: { [number]: number } = { [from] = 0 }
+		local queue = { from }
+		local head = 1
+		while parent[to] == nil do
+			local i = queue[head]
+			head += 1
+			for _, j in members do
+				if parent[j] == nil and link(i, j)[1] < r then
+					parent[j] = i
+					table.insert(queue, j)
+				end
+			end
+		end
+		local poly = { atX[b], atZ[b] }
+		local i = to
+		while parent[i] ~= 0 do
+			local l = link(i, parent[i])
+			table.insert(poly, l[2])
+			table.insert(poly, l[3])
+			i = parent[i]
+		end
+		table.insert(poly, atX[a])
+		table.insert(poly, atZ[a])
+		for slot = 1, #arc - 1 do
+			if at[a] < slot and slot < at[b] then
+				local edge = edges[arc[slot]]
+				table.insert(poly, edge[3])
+				table.insert(poly, edge[4])
+			end
+		end
+		return poly
+	end
+	-- Components, breadth first from each wall with a contact not yet reached (one without a
+	-- contact bounds nothing).
+	local component = table.create(m, 0)
+	local out = {}
+	for root = 1, m do
+		if component[root] ~= 0 or not touches[root] then
+			continue
+		end
+		local members = { root }
+		component[root] = root
+		local head = 1
+		while head <= #members do
+			local i = members[head]
+			head += 1
+			for j = 1, m do
+				if component[j] == 0 and link(i, j)[1] < r then
+					component[j] = root
+					table.insert(members, j)
+				end
+			end
+		end
+		local mine = {}
+		for c = 1, #at do
+			if component[of[c]] == root then
+				table.insert(mine, c)
+			end
+		end
+		table.sort(mine, function(a: number, b: number): boolean
+			return at[a] < at[b]
+		end)
+		if allPairs then
+			for x = 1, #mine do
+				for y = x + 1, #mine do
+					local a, b = mine[x], mine[y]
+					if atX[a] ~= atX[b] or atZ[a] ~= atZ[b] then
+						table.insert(out, polygon(members, a, b))
+					end
+				end
+			end
+		elseif #mine >= 2 and at[mine[#mine]] > at[mine[1]] then
+			table.insert(out, polygon(members, mine[1], mine[#mine]))
+		end
+	end
+	return out
+end
+
+--[=[
+	@within NavMeshClearance
+	Whether an agent of radius `r` at point (x, z) of triangle `t` is cut off from its edge `e`
+	inside `t` (ticket 27): found at query time, not stored.
+
+	A straight clear line to a point of `e` proves it is not. Otherwise each barrier (see
+	`barriers`) along the other two edges closes a polygon that holds no point of `e` but its
+	ends; a point inside it (odd crossings) can reach `e` only across the barrier. So the test
+	is sound: it never cuts off a point that can pass. It can miss a block.
+]=]
+function Clearance.CutOff(s: Storage.State, t: number, e: number, r: number, px: number, pz: number): boolean
+	local edges, walls, feats = around(s, t, r)
+	local x, z = standing(feats, r, px, pz)
+	if x == nil or z == nil then
+		return false
+	end
+	local edge = edges[e]
+	for _, u in { 0.5, 0.25, 0.75 } do
+		if clear(feats, r, x, z, edge[1] + u * (edge[3] - edge[1]), edge[2] + u * (edge[4] - edge[2])) then
+			return false
+		end
+	end
+	for _, poly in barriers(edges, walls, feats, r, { e % 3 + 1, (e + 1) % 3 + 1 }, false) do
+		if inside(poly, x, z) then
+			return true
+		end
+	end
+	return false
+end
+
+--[=[
+	@within NavMeshClearance
+	Whether two points of triangle `t` are parted inside it for an agent of radius `r` (ticket
+	27, start and goal in one triangle): a clear straight line proves they are not; otherwise
+	they are when their crossing parities differ for some barrier along the whole boundary (the
+	two polygons one barrier closes, either way round, differ by the whole triangle).
+]=]
+function Clearance.Separated(
+	s: Storage.State,
+	t: number,
+	r: number,
+	px: number,
+	pz: number,
+	qx: number,
+	qz: number
+): boolean
+	local edges, walls, feats = around(s, t, r)
+	local ax, az = standing(feats, r, px, pz)
+	local bx, bz = standing(feats, r, qx, qz)
+	if ax == nil or az == nil or bx == nil or bz == nil or clear(feats, r, ax, az, bx, bz) then
+		return false
+	end
+	for _, poly in barriers(edges, walls, feats, r, { 1, 2, 3 }, true) do
+		if inside(poly, ax, az) ~= inside(poly, bx, bz) then
+			return true
+		end
+	end
+	return false
 end
 
 return Clearance

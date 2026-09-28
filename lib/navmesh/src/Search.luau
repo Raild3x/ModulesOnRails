@@ -44,6 +44,7 @@
 	it never keeps a mesh alive.
 ]=]
 
+local Clearance = require("./Clearance")
 local OpenList = require("./OpenList")
 local Snap = require("./Snap")
 local Storage = require("./Storage")
@@ -66,6 +67,20 @@ type Scratch = {
 local pool: { [Storage.State]: Scratch } = setmetatable({}, { __mode = "k" }) :: any
 
 local Search = {}
+
+-- The edge of m on the seam portal it shares with t (the slot its own seam extra back to t
+-- names).
+local function seamEdge(s: Storage.State, m: number, t: number): number
+	local id = Storage.GetExtraHead(s, m)
+	while id ~= 0 do
+		local nextId, to, kind, ref = Storage.GetExtra(s, id)
+		if to == t and kind == Storage.EXTRA_SEAM then
+			return ref
+		end
+		id = nextId
+	end
+	error("NavMesh: internal error: a seam portal has no way back")
+end
 
 local function scratchFor(s: Storage.State): Scratch
 	local scratch = pool[s]
@@ -137,13 +152,30 @@ function Search.Run(
 	maxExpansions: number,
 	radius: number
 ): (Status, { number }, { number }, vector, number)
+	local width = 2 * radius
+	-- Nodes are triangles, the start being startT's. When a wall chain inside the start or goal
+	-- triangle cuts its end off from one of its edges (ticket 27), a path may leave that
+	-- triangle and come back into it past the chain, so two more nodes stand for them entered
+	-- again: the start's and the goal's (passed through). The goal is goalT's node, or a third
+	-- one when the ends share a triangle that a chain parts them in.
+	local n = Storage.TriangleCount(s)
+	local startAgain, goalAgain = n + 1, n + 2
+	local goalNode = goalT
 	if startT == goalT then
-		return "Success",
-			{ startT },
-			{ 0 },
-			goalP,
-			vector.magnitude(goalP - startP) * (costs[Storage.GetTriangleArea(s, startT)] or 1)
+		if width == 0 or not Clearance.Separated(s, startT, radius, startP.X, startP.Z, goalP.X, goalP.Z) then
+			return "Success",
+				{ startT },
+				{ 0 },
+				goalP,
+				vector.magnitude(goalP - startP) * (costs[Storage.GetTriangleArea(s, startT)] or 1)
+		end
+		goalNode = n + 3
 	end
+	local function triangleOf(u: number): number
+		return if u <= n then u elseif u == goalAgain then goalT else startT
+	end
+	local startCut = false
+	local cutOff = Clearance.CutOff
 	local scratch = scratchFor(s)
 	local stamp = scratch.Stamp + 1
 	scratch.Stamp = stamp
@@ -157,7 +189,6 @@ function Search.Run(
 		scratch.Closed,
 		scratch.ClosedList,
 		scratch.Open
-	local width = 2 * radius
 	table.clear(closedList)
 	OpenList.Clear(open)
 	local push, pop = OpenList.Push, OpenList.Pop
@@ -169,64 +200,84 @@ function Search.Run(
 	local EXTRA_LINK = Storage.EXTRA_LINK
 	local scale = Search.HeuristicScale(s, costs)
 
+	-- The node that entering triangle m leads to, given whether the goal is cut off from that
+	-- entry.
+	local function target(m: number, goalCut: boolean): number
+		if m == goalT then
+			return if not goalCut then goalNode elseif m == startT then startAgain else goalAgain
+		end
+		return if m == startT and startCut then startAgain else m
+	end
+
 	g[startT], pos[startT], seen[startT], parent[startT] = 0, startP, stamp, 0
 	entry[startT], via[startT] = 0, 0
 	push(open, startT, vector.magnitude(goalP - startP) * scale)
 	local expansions = 0
 	local status: Status = "Partial"
 	while true do
-		local t = pop(open)
-		if t == 0 then
+		local u = pop(open)
+		if u == 0 then
 			break
 		end
-		if closed[t] == stamp then
-			continue -- a stale entry: t was pushed again with a lower cost and already expanded
+		if closed[u] == stamp then
+			continue -- a stale entry: u was pushed again with a lower cost and already expanded
 		end
-		closed[t] = stamp
-		if t == goalT then
+		closed[u] = stamp
+		if u == goalNode then
 			status = "Success"
 			break
 		end
-		table.insert(closedList, t)
+		table.insert(closedList, u)
 		if expansions >= maxExpansions then
 			status = "Budget"
 			break
 		end
 		expansions += 1
-		local tp = pos[t]
+		local t = triangleOf(u)
+		local tp = pos[u]
 		local tm = costs[GetTriangleArea(s, t)] or 1
-		local gt = g[t]
+		local gt = g[u]
 		local ia, ib, ic = GetTriangle(s, t)
 		local base = (t - 1) * 12
 		for e = 1, 3 do
 			local m = buffer.readi32(nb, base + (e - 1) * 4)
-			if m == 0 or closed[m] == stamp then
-				continue
+			if m == 0 or e == entry[u] then
+				continue -- no neighbour, or back the way it came
 			end
 			local mm = costs[GetTriangleArea(s, m)] or 1
 			if mm == math.huge then
 				continue
 			end
+			local back = 0
+			local goalCut = false
 			if width > 0 then
-				-- Edges e and entry[t] meet at the third vertex, 6 - e - entry[t].
-				local clear = if entry[t] == 0 then GetPortalWidth(s, t, e) else GetCornerWidth(s, t, 6 - e - entry[t])
+				-- Edges e and entry[u] meet at the third vertex, 6 - e - entry[u].
+				local clear = if entry[u] == 0 then GetPortalWidth(s, t, e) else GetCornerWidth(s, t, 6 - e - entry[u])
 				if clear < width then
 					continue
 				end
+				-- Inside the start and goal triangles the ends themselves must reach the edge.
+				if u == startT and cutOff(s, t, e, radius, startP.X, startP.Z) then
+					startCut = true
+					continue
+				end
+				back = if GetNeighbor(s, m, 1) == t then 1 elseif GetNeighbor(s, m, 2) == t then 2 else 3
+				goalCut = m == goalT and cutOff(s, m, back, radius, goalP.X, goalP.Z)
+			end
+			local node = target(m, goalCut)
+			if closed[node] == stamp then
+				continue
 			end
 			-- Edge e runs between the two vertices other than vertex e.
-			local mp = if m == goalT
+			local mp = if node == goalNode
 				then goalP
 				elseif e == 1 then (GetVertex(s, ib) + GetVertex(s, ic)) * 0.5
 				elseif e == 2 then (GetVertex(s, ic) + GetVertex(s, ia)) * 0.5
 				else (GetVertex(s, ia) + GetVertex(s, ib)) * 0.5
 			local ng = gt + vector.magnitude(mp - tp) * (tm + mm) * 0.5
-			if seen[m] ~= stamp or ng < g[m] then
-				g[m], pos[m], seen[m], parent[m], via[m] = ng, mp, stamp, t, 0
-				if width > 0 then
-					entry[m] = if GetNeighbor(s, m, 1) == t then 1 elseif GetNeighbor(s, m, 2) == t then 2 else 3
-				end
-				push(open, m, ng + vector.magnitude(goalP - mp) * scale)
+			if seen[node] ~= stamp or ng < g[node] then
+				g[node], pos[node], seen[node], parent[node], via[node], entry[node] = ng, mp, stamp, u, 0, back
+				push(open, node, ng + vector.magnitude(goalP - mp) * scale)
 			end
 		end
 		-- Seam portals and links.
@@ -235,22 +286,20 @@ function Search.Run(
 			local nextId, m, kind, ref, a, b = GetExtra(s, id)
 			local extra = id
 			id = nextId
-			if closed[m] == stamp then
-				continue
-			end
 			local mm = costs[GetTriangleArea(s, m)] or 1
 			if mm == math.huge then
 				continue
 			end
-			local mp, ng
+			local node, mp, ng
 			if kind == EXTRA_LINK then
 				local _, _, _, _, cost, area, _, _, enabled = GetLink(s, ref)
 				local lm = costs[area] or 1
 				if not enabled or lm == math.huge then
 					continue
 				end
+				node = target(m, false)
 				ng = gt + vector.magnitude(a - tp) * tm + cost * lm
-				if m == goalT then
+				if node == goalNode then
 					mp = goalP
 					ng += vector.magnitude(goalP - b) * mm
 				else
@@ -258,48 +307,61 @@ function Search.Run(
 				end
 			else
 				-- A seam portal on edge `ref` of t.
+				local goalCut = false
 				if width > 0 then
-					local clear = if entry[t] == 0
+					local clear = if entry[u] == 0
 						then GetPortalWidth(s, t, ref)
-						else GetCornerWidth(s, t, 6 - ref - entry[t])
+						else GetCornerWidth(s, t, 6 - ref - entry[u])
 					if clear < width then
 						continue
 					end
+					if u == startT and cutOff(s, t, ref, radius, startP.X, startP.Z) then
+						startCut = true
+						continue
+					end
+					goalCut = m == goalT and cutOff(s, m, seamEdge(s, m, t), radius, goalP.X, goalP.Z)
 				end
-				mp = if m == goalT then goalP else (a + b) * 0.5
+				node = target(m, goalCut)
+				mp = if node == goalNode then goalP else (a + b) * 0.5
 				ng = gt + vector.magnitude(mp - tp) * (tm + mm) * 0.5
 			end
-			if seen[m] ~= stamp or ng < g[m] then
-				g[m], pos[m], seen[m], parent[m], via[m], entry[m] = ng, mp, stamp, t, extra, 0
-				push(open, m, ng + vector.magnitude(goalP - mp) * scale)
+			if closed[node] ~= stamp and (seen[node] ~= stamp or ng < g[node]) then
+				g[node], pos[node], seen[node], parent[node], via[node], entry[node] = ng, mp, stamp, u, extra, 0
+				push(open, node, ng + vector.magnitude(goalP - mp) * scale)
 			end
 		end
 	end
 
-	local last, endP = goalT, goalP
+	local last, endP = goalNode, goalP
 	if status ~= "Success" then
 		-- The reached triangle holding the point nearest the goal (not the nearest node). The
-		-- start is always in the list: it is popped first and is not the goal.
-		local best = math.huge
-		for _, t in closedList do
-			local p = Snap.ClosestOnTriangle(s, t, goalP)
-			local d = vector.magnitude(goalP - p)
-			if d < best then
-				best, last, endP = d, t, p
+		-- start is always in the list: it is popped first and is not the goal. The goal's own
+		-- triangle is left out (reached, it was cut off from the goal), and so is the rest of
+		-- the start's once a chain cut the start off in it: the start then stays put.
+		local best = vector.magnitude(goalP - startP)
+		last, endP = startT, startP
+		for _, u in closedList do
+			local t = triangleOf(u)
+			if t ~= goalT and not (u == startT and startCut) then
+				local p = Snap.ClosestOnTriangle(s, t, goalP)
+				local d = vector.magnitude(goalP - p)
+				if d < best then
+					best, last, endP = d, u, p
+				end
 			end
 		end
 	end
 	local corridor, vias = {}, {}
-	local t = last
-	while t ~= 0 do
-		table.insert(corridor, t)
-		table.insert(vias, if t == startT then 0 else via[t])
-		t = parent[t]
+	local u = last
+	while u ~= 0 do
+		table.insert(corridor, triangleOf(u))
+		table.insert(vias, if u == startT then 0 else via[u])
+		u = parent[u]
 	end
-	local n = #corridor
-	for i = 1, n // 2 do
-		corridor[i], corridor[n + 1 - i] = corridor[n + 1 - i], corridor[i]
-		vias[i], vias[n + 1 - i] = vias[n + 1 - i], vias[i]
+	local count = #corridor
+	for i = 1, count // 2 do
+		corridor[i], corridor[count + 1 - i] = corridor[count + 1 - i], corridor[i]
+		vias[i], vias[count + 1 - i] = vias[count + 1 - i], vias[i]
 	end
 	return status, corridor, vias, endP, g[last]
 end
