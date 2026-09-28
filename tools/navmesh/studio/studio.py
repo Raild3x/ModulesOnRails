@@ -6,6 +6,7 @@ lib/<pkg> with the link modules setup writes).
     python tools/navmesh/studio/studio.py bench --runs 3 --rounds 5   # RendererBench.luau
     python tools/navmesh/studio/studio.py shot courtyard              # F7: Shot.luau + capture.ps1
     python tools/navmesh/studio/studio.py shot bench
+    python tools/navmesh/studio/studio.py shot palette                # three paths + custom palette, dark baseplate
     python tools/navmesh/studio/studio.py shot editor                 # F7 of NavMeshEditor (EditorShot.luau)
     python tools/navmesh/studio/studio.py play                        # Play-mode editor session (ticket 21)
 
@@ -189,7 +190,7 @@ def main() -> int:
     b.add_argument("--reps", type=int, default=3)
     b.add_argument("--budget", type=int, default=480, help="seconds per Studio run")
     s = sub.add_parser("shot")
-    s.add_argument("scene", help="courtyard, a bench scene (props, bench, terrain, walls), or editor[:<Fixture>]")
+    s.add_argument("scene", help="courtyard, palette, a bench scene (props, bench, terrain, walls), or editor[:<Fixture>]")
     s.add_argument("--hold", type=int, default=14, help="seconds Studio stays open after drawing")
     s.add_argument("--settle", type=int, default=7, help="seconds capture.ps1 waits after the window opens")
     pl = sub.add_parser("play")
