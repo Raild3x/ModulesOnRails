@@ -85,8 +85,11 @@ Prototype both on the bench maps before presenting them.
   - A random search over slivers crossing a crate found width-only mismatches in 52/300 cases
     under the old rule, and 0/300 now.
   - The bench-map oracle now gives 48/48, up from 46/48.
-- **Changed regions:** per floor, the rebuilt tiles' rectangles plus the boxes of the triangles
-  whose widths were recomputed, merged where they touch. Y spans the triangles on both sides.
+- **Changed regions:** per floor, the boxes of the rebuilt tiles' triangles (old and new) and of
+  the triangles whose widths were recomputed, merged where they touch. Y spans the triangles on
+  both sides.
+  - Spec: one region per separate change (the corridor door: 1; two crates far apart: 2; side by
+    side: 1).
   - Spec: every changed triangle or width lies in a box, and a box shrunk by a pixel fails that.
   - Spec: a path clear of every box, its segments grown by its `AgentRadius`, is what
     `FindPath` returns again, unless the fresh path goes through a box (a removal can open a

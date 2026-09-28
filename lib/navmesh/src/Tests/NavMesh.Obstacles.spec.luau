@@ -521,6 +521,29 @@ return function(t: tiniest)
 				end
 			end
 			expect(tight).is(2 * #cases)
+			-- One region per separate change: the corridor door gives one, two crates far apart
+			-- on the open floor two, and two side by side one.
+			local mesh = NavMesh.Build(corridor)
+			NavMesh.AddObstacle(mesh, "Ground", door)
+			expect(#NavMesh.Update(mesh)).is(1)
+			local desc = table.clone(open)
+			desc.TileSize = 4
+			desc.MaxAgentRadius = 0.5
+			for _, pair in
+				{
+					{
+						2,
+						{ 2.3, 2.2, 3.4, 2.3, 3.3, 3.5, 2.4, 3.4 },
+						{ 28.3, 20.2, 29.4, 20.3, 29.3, 21.5, 28.4, 21.4 },
+					},
+					{ 1, { 2.3, 2.2, 3.4, 2.3, 3.3, 3.5, 2.4, 3.4 }, { 3.9, 2.2, 5.1, 2.3, 5.0, 3.5, 4.0, 3.4 } },
+				}
+			do
+				mesh = NavMesh.Build(desc)
+				NavMesh.AddObstacle(mesh, "Ground", flat(0, pair[2]))
+				NavMesh.AddObstacle(mesh, "Ground", flat(0, pair[3]))
+				expect(#NavMesh.Update(mesh)).is(pair[1])
+			end
 		end)
 
 		test("a path clear of every returned region is what FindPath returns again (ticket 22)", function()

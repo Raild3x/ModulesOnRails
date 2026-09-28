@@ -44,7 +44,8 @@
 	- Stamps are bumped for every tile whose triangles or widths changed, and for the tiles at
 	  the ends of every link.
 	- The changed regions are returned: per floor, boxes holding everything whose meaning
-	  changed (the rebuilt tiles, and the triangles whose widths were recomputed).
+	  changed (the rebuilt tiles' triangles, old and new, and the triangles whose widths were
+	  recomputed).
 	- The state is swapped in only when all of that succeeded. On an error the mesh is
 	  untouched, the pending records are rolled back, and the error is raised again.
 
@@ -596,9 +597,9 @@ local function triangleKey(state: State, t: number): (string, number)
 	return `{keys[first]}:{keys[first % 3 + 1]}:{keys[(first + 1) % 3 + 1]}`, first
 end
 
--- The changed regions (ticket 22): per floor, the rebuilt tiles' rectangles and the boxes of
--- the triangles outside them whose widths were recomputed, merged wherever they touch. Heights
--- span the triangles on both sides of the change. Everything whose meaning changed lies inside:
+-- The changed regions (ticket 22): per floor, the boxes of the rebuilt tiles' triangles (old
+-- and new) and of the triangles outside them whose widths were recomputed, merged wherever they
+-- touch. Everything whose meaning changed lies inside:
 -- triangles, neighbours, wall flags, seam pieces and link ends only change in the rebuilt tiles,
 -- and widths only in recomputed triangles (a portal width a recomputed triangle writes for its
 -- neighbour lies on their shared edge).
@@ -612,16 +613,14 @@ local function changedRegions(s: State, n: State, plan: Plan, recompute: { [numb
 		end
 	end
 	for _, tile in plan.DirtyList do
-		local x0, z0, x1, z1 = Storage.GetTileBounds(n, tile)
-		local box = { Storage.GetTileFloor(n, tile), x0, math.huge, z0, x1, -math.huge, z1 }
+		local box =
+			{ Storage.GetTileFloor(n, tile), math.huge, math.huge, math.huge, -math.huge, -math.huge, -math.huge }
 		for _, state in { s, n } do
 			local first, count = Storage.GetTileRange(state, tile)
 			for t = first, first + count - 1 do
 				fit(box, state, t)
 			end
 		end
-		-- The rectangle stays whole: a vertex never lies outside its tile.
-		box[2], box[4], box[5], box[7] = x0, z0, x1, z1
 		table.insert(boxes, box)
 	end
 	local byTile: { [number]: { number } } = {}
