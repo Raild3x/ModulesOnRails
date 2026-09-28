@@ -15,6 +15,14 @@ points 2 and 4)
 - [ ] A path whose corridor avoids every changed region stays valid. Today one door toggle
       invalidates 199 of 200 unrelated paths on the demo level.
 - [ ] The oracle "Update equals a fresh Build" still holds, including the hardening cases
+- [ ] **Fix the reach-rule miss that predates this work.**
+  - Found by the ticket 22 prototype oracle, `zz_oracle_proto.luau` on branch
+    `proto/local-update`. The unmodified 8c4fbfe code passes 46/48 bench-map checks.
+  - On props, with the crate at (36, 36), one rebuilt triangle keeps a stale corner width:
+    0.827525 against a fresh Build's 0.827329. The triangle is 0.93 studs from the crate box,
+    with a reach of 0.64.
+  - Forcing a full clearance recompute gives 48/48. So the ticket 18 reach bound misses a
+    width that the change does affect.
 
 ## Evidence
 - **Whole-map cost:** `Tiles.luau` `apply` builds a fresh `Storage.New()` on every call. It
