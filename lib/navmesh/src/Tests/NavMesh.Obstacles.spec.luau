@@ -429,6 +429,11 @@ return function(t: tiniest)
 				NavMesh.AddObstacle(mesh, "Ground", flat(0, { 0, 0, 4, 4, 4, 0, 0, 4 }))
 			end).fails_with("AddObstacle: .*intersects itself")
 			expect(function()
+				NavMesh.AddObstacle(mesh, "Ground", door[1])
+			end).fails_with(
+				"AddObstacle: obstacle on floor 'Ground': expected a ring %(a list of points%), got a point"
+			)
+			expect(function()
 				NavMesh.RemoveObstacle(mesh, 3)
 			end).fails_with("no obstacle 3")
 			local id = NavMesh.AddObstacle(mesh, "Ground", door)

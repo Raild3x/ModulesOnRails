@@ -110,6 +110,12 @@ local function segmentsTouch(
 end
 
 local function quantizeRing(polygon: Polygon, context: string): Ring
+	-- A point where a ring belongs: usually one ring given where a list of rings goes. A point is
+	-- a vector (a Vector3 on Roblox) or, under Lune, a Vector3 shim table with a numeric X.
+	local value = polygon :: any
+	if type(value) == "vector" or (type(value) == "table" and type(value.X) == "number") then
+		fail(context, "expected a ring (a list of points), got a point; Walkable and Obstacles take a list of rings")
+	end
 	if type(polygon) ~= "table" or #polygon < 3 then
 		fail(context, "a ring needs at least 3 points")
 	end
