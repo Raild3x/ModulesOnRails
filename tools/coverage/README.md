@@ -27,6 +27,9 @@ Flags:
 | `--mutate-timeout=<sec>` | per-mutant suite timeout (default 3x the baseline duration, min 5s) |
 | `--mutate-jobs=<n>` | run mutants on `n` parallel workers, each in its own build copy (default: half the logical cores, 1 if unknown; results identical to serial) |
 | `--mutate-files=<csv>` | only mutate these package-relative files/globs, e.g. `src/Tiles.luau,src/**/Snap*.luau` |
+| `--mutate-all-tests` | run the whole suite for every mutant, to the end (default: only the tests that can observe the mutant, stopping at the first failure) |
+| `--resume` | skip mutants an interrupted `--mutate` run already decided (needs unchanged code and tests) |
+| `--status` | print a `--mutate` run's live progress from `progress.json` and exit (exit 1 when there is none or its heartbeat is stale) |
 | `--recommend` | end the report with a ranked list of concrete next steps |
 | `--lune-only` | skip Roblox-pipeline packages; run only Lune ones (used by the fast CI job) |
 | `--roblox-only` | skip Lune-pipeline packages; run only Roblox ones (used by the Open Cloud CI job) |
@@ -40,8 +43,10 @@ Outputs land in `.coverage/<package>/`: `map.json` (probe registry), `hits.json`
 `build/` copy — and with `--mutate`, `mutants.json` (enumerated sites),
 `mutation.json` (per-mutant results), and a pristine `mutbuild/` copy the loop
 mutates and restores (plus `mutbuild-2/`..`mutbuild-<n>/` while a
-`--mutate-jobs=<n>` run is in flight; they are deleted when it ends). Everything
-is gitignored.
+`--mutate-jobs=<n>` run is in flight; they are deleted when it ends), plus
+`progress.json` and `mutation.partial.json` (live progress and every decided
+mutant so far) and `select/` (the per-mutant test lists). Everything is
+gitignored.
 
 ## Metrics
 
@@ -78,9 +83,13 @@ mutant is killed at the timeout), classifies the result, and restores the file.
 * Mutants on lines no test executes are skipped as `no coverage` (reported, not
   run); the gap between the two scores is the plain-coverage story.
 * The baseline suite must be green or the phase aborts.
-* Progress prints per mutant with an ETA. To **stop early and keep partial
-  results**, create the stop file the run announces
-  (`.coverage/<package>/mutation.stop`).
+* **Progress** (see [Watching a long run](#watching-a-long-run)): one status
+  line every 15 s, plus `progress.json` and `mutation.partial.json` rewritten
+  every 2 s. To **stop early and keep partial results**, create the stop file
+  the run announces (`.coverage/<package>/mutation.stop`).
+* **Test selection** (default; `--mutate-all-tests` turns it off): a child runs
+  only the tests that can observe its mutant and exits at the first failure.
+  See [Test selection](#test-selection).
 * **Parallel runs** (`--mutate-jobs=<n>`): `n` workers pull mutants from one
   queue in plan order. Each has its own pristine build copy, so applying a
   mutant in place never races another worker, and each restores its own file
@@ -102,6 +111,110 @@ mutant is killed at the timeout), classifies the result, and restores the file.
   `coverage.json` mark the score as a filtered subset, and a filter that
   matches nothing prints a warning.
 * Roblox-pipeline packages are skipped (one Studio launch per mutant).
+
+#### Watching a long run
+
+A `--mutate` run prints one line every 15 s:
+
+```
+[mutation] 76/195  killed 67  survived 9  timeout 0  error 0  score 88.2%  elapsed 0m15s  eta 0m23s  [src/OpenList.luau, src/Snap.luau]
+```
+
+`score` is detected / run so far, `eta` extrapolates this run's own pace, and
+the brackets list the files the workers are mutating right now.
+
+Another process can poll `.coverage/<package>/progress.json`. It is rewritten
+every 2 s, via a temp file and a rename, so a reader never sees half a file:
+
+```json
+{
+  "schema": "tm-coverage-progress/1", "package": "navmesh", "phase": "mutating",
+  "started_at": 1790567025, "heartbeat": 1790567040, "elapsed": 15,
+  "done": 76, "total": 195, "resumed": 0,
+  "killed": 67, "survived": 9, "timeout": 0, "error": 0, "invalid": 0,
+  "score": 88.16, "eta_seconds": 23,
+  "current": ["src/OpenList.luau", "src/Snap.luau"], "jobs": 16
+}
+```
+
+`phase` is `baseline`, `mutating`, `done`, `stopped` or `failed`. `heartbeat`
+is a Unix time. A `baseline` or `mutating` phase whose heartbeat is more than
+30 s old means the run died. Or just ask:
+
+```sh
+lune run coverage.luau --status package=navmesh
+# navmesh: mutating, heartbeat 1s ago, 16 worker(s)
+# [mutation] 76/195  killed 67 ...
+# (a dead run reads "DEAD? (mutating, no heartbeat for 95s)" and exits 1)
+```
+
+`mutation.partial.json` holds every decided mutant so far (the same records
+as `mutation.json`), so a killed run still leaves its survivors. Run again with
+`--resume` to skip them. The file carries a sha256 of `mutants.json` plus
+every file under the package's source root, specs included, and `--resume`
+only reuses it when that matches. Otherwise it says so and starts fresh.
+
+#### Test selection
+
+The coverage run already records which tests hit which probes (tiniest's
+per-test attribution), so a mutant only needs the tests that can observe it:
+
+* every test that **entered the function** holding the mutated line. The unit
+  is the function, not the line, so a test that reads a cache the function
+  fills still runs when it skips the mutated line itself;
+* every test of a **spec whose describe bodies** entered it: `describe`-level
+  setup (`local mesh = Build(...)` outside any `test`) is shared by that
+  spec's tests. The coverage run gives specs a `describe` that drains the
+  counters on entering and leaving each top-level describe body, to tell this
+  setup apart from module init.
+
+A mutant runs the **whole suite** instead when a value built from it can reach
+tests that never run it: the line is module-level code, or one of its
+functions ran during module init / spec top-level code, or in a describe body
+or test that also initialized a module (a lazy `require`).
+
+The child still collects every spec (so require-time and describe-time code
+runs exactly as in a full run), keeps the selected tests in their original
+order, and exits at the first failing test: one failure kills the mutant.
+Each distinct selection is first run once unmutated. If it is not green on its
+own (a test depending on an earlier, unselected one), its mutants fall back to
+the whole suite. A selection's timeout is 3x that unmutated run (min 5 s),
+like the whole suite's. `mutation.json` records `tests` (how many ran) on each
+selected mutant.
+
+Stopping at the first failure changes one classification: a mutant that fails
+one test and hangs a later one used to be a `timeout` (the whole suite ran
+into the hang) and is now `killed`. Both count as detected, so scores do not
+move. Survived and no-coverage mutants are unaffected.
+
+The one assumption: a test that never entered the mutated function cannot
+fail because of it, except through state that the rules above already route to
+the whole suite. State one test leaves in a module-level cache for a later test
+that does not enter the function is the known gap. `--mutate-all-tests` runs
+the old way.
+
+#### Where the time goes
+
+Per mutant, the child is `lune` startup (~0.1 s), collecting every spec
+(~0.25 s), then the tests. `apply-mutant` is ~0.05 s. On navmesh the whole
+suite is 150 tests and 8-10 s, 6.6 s of it one spec (`NavMesh.Build.spec`),
+so before selection almost all of a run was tests that could not see the
+mutant. Measured on navmesh with `--mutate-jobs=16` on a shared
+16-core/24-thread machine, three interleaved old/new runs each (median, range):
+
+| subset | mutants | mutant loop, before | after | whole command, before | after |
+|---|---|---|---|---|---|
+| `src/OpenList.luau,src/Snap.luau` | 195 | 138 s (124-142) | 20 s (19-20) | 169 s (153-174) | 51 s (49-52) |
+| `src/Quantize.luau,src/Search.luau` | 445 | 199 s (198-208) | 79 s (76-82) | 233 s (230-241) | 111 s (109-115) |
+
+Per-mutant outcomes were identical apart from the two `timeout` -> `killed`
+mutants above (both confirmed to fail a test before hanging). What remains is
+mostly survivors, which must run every selected test, and the fixed ~0.35 s
+per child. Not done, and why: reusing worker processes (Lune cannot evict a
+module from its require cache, and a hung mutant must be killable), running
+likely killers first (killed mutants are at most ~28% of the remaining child
+time, and reordering tests would change inter-test state), and applying
+mutants without the engine (~5%).
 
 ### Recommendations (`--recommend`)
 
@@ -155,7 +268,7 @@ tools/coverage/
     adapters/modules_on_rails.luau   this repo's adapter
     mutant_run.luau           per-mutant child entry (fresh Lune process)
     core/                     Orchestrator, Engine, LuneRunner, RobloxRunner,
-                              StdoutCodec, Merge, Mutation, Recommend,
+                              StdoutCodec, Merge, Mutation, Progress, Recommend,
                               Analyze/Report, CoverageJson
 test/tiniest/tiniest_coverage.luau   the tiniest plugin
 ```
@@ -180,7 +293,7 @@ cd tools/coverage/engine && cargo test
 ```
 
 **Lune core modules** (`Merge`, `Ignore`, `StdoutCodec`, `CoverageJson`,
-`Report`, `Mutation`, `Recommend` specs in `lune/core/Tests/`, run from the
+`Report`, `Mutation`, `Progress`, `Recommend` specs in `lune/core/Tests/`, run from the
 repo root via the self adapter — the default adapter only resolves `lib/`
 packages):
 
