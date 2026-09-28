@@ -34,6 +34,9 @@ A layered 2.5D navigation mesh for pathfinding queries, built on ConstrainedDela
 - **Snap rounding**: bending every authored edge through grid points so that no two edges cross.
   It happens at build time, to authored edges. Not to be confused with **Snap**, which works on
   query points.
+- **Follower**: plain data (`NewFollower`) that `Advance` walks a path with, a step at a time.
+  It reports arriving, reaching a link (which it never walks) and being blocked (stalled, or
+  off the mesh).
 - **Waypoint**: one point of a returned path. It carries a link's label when a link starts
   there.
 - **Corner width**: the widest agent that can pass through a triangle between two of its edges.

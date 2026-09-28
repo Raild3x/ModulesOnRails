@@ -86,6 +86,14 @@ the const question are deliberately open, gated on benchmarks.
   5. `QueryFilter.GoalFallback`: an off-mesh goal gives `Partial` to the closest reachable point
      instead of `NoGoal`. "Closest reachable" is 3D over the whole reachable region, bounded by
      `MaxExpansions` (documented on `QueryFilter`).
+- **Path follower API (ticket 23):** 2026-09-28: shape B, a follower table.
+  `NavMesh.NewFollower(path, stallSteps?)` returns plain data `{ Path, Next, Stalled,
+  StallSteps, Link }`, and `NavMesh.Advance(mesh, follower, position, maxStep, filter) ->
+  (position, floor, event)` updates it in place. `Blocked` is debounced inside (after
+  `stallSteps` steps) and immediate off the mesh; `Link` fills `follower.Link`. Chosen over
+  A, the stateless `Advance(mesh, path, cursor, ...)`: both prototypes behaved identically
+  in the sim, but `follow` was 39 lines against A's 55, because A left the stall timer and
+  the link arithmetic to the game. User: "B: follower table (Recommended)".
 
 ### Rulings during the build (2026-09-27)
 - **U-a (clearance reach), ruled after the P4 probe (ticket 15 notes):** no cap by default,

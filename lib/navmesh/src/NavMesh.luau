@@ -33,6 +33,7 @@
 	|---|---|
 	| `FindPath` | `Status` `"NoStart"`, or `"NoGoal"` (with `GoalFallback`: `"Partial"` to the closest reachable point) |
 	| `MoveAlongSurface` | `Status` `"NoStart"`, `Position` = `from`, no `Floor` |
+	| `Advance` | `"Blocked"` at once, the position unchanged, no floor |
 	| `Raycast` | blocked at `from`: `(true, from)` |
 	| `FindDistanceToWall` | `(0, nil, nil)`: in a wall (a point on a wall gets a hit point and normal) |
 	| `FindNearestPoint` | `nil` |
@@ -65,6 +66,9 @@ export type PathResult = Types.PathResult
 export type NavPoint = Types.NavPoint
 export type MoveStatus = Types.MoveStatus
 export type MoveResult = Types.MoveResult
+export type FollowEvent = Types.FollowEvent
+export type FollowerLink = Types.FollowerLink
+export type Follower = Types.Follower
 export type RandomPointOptions = Types.RandomPointOptions
 export type ChangedRegion = Types.ChangedRegion
 export type SeamDesc = Types.SeamDesc
@@ -278,6 +282,98 @@ function NavMesh.MoveAlongSurface(mesh: NavMeshData, from: Vector3, to: Vector3,
 		Position = stop :: any,
 		Floor = Storage.GetFloorName(mesh, Storage.GetTriangleFloor(mesh, at)),
 	}
+end
+
+--[=[
+	@within NavMesh
+	A `Follower` for `path`, walking from its first waypoint (the snapped start) to its second.
+	`Advance` reports `Blocked` after `stallSteps` steps in a row without progress (default 10).
+]=]
+function NavMesh.NewFollower(path: PathResult, stallSteps: number?): Follower
+	if type(path) ~= "table" or type(path.Waypoints) ~= "table" then
+		error("NavMesh.NewFollower: path must be a PathResult", 2)
+	end
+	local steps = if stallSteps == nil then 10 else stallSteps
+	if type(steps) ~= "number" or not (steps >= 1 and steps < math.huge and steps % 1 == 0) then
+		error("NavMesh.NewFollower: stallSteps must be a whole number >= 1", 2)
+	end
+	return { Path = path, Next = 2, Stalled = 0, StallSteps = steps, Link = nil }
+end
+
+local STALL = 0.1 -- a step that moves less than this fraction of maxStep made no progress
+
+--[=[
+	@within NavMesh
+	Moves an agent at feet `position` up to `maxStep` studs along `follower`'s path with
+	`MoveAlongSurface` (use the same `filter` as the `FindPath` call), and updates `follower`.
+	Returns (position, floor, event); `event` is nil while walking (see `FollowEvent`), and
+	`floor` is nil only when the agent is off the mesh or the path has no waypoints.
+
+	- **Arrival:** a waypoint counts as reached when the step gets to it, or when the agent
+	  stalls within `AgentRadius` of it: the funnel puts corner waypoints on the
+	  portal, which can be nearer a wall than the radius (SR4), and the push keeps the agent
+	  off it. The path's end is already offset.
+	- **Links:** at a waypoint with a `Label`, it returns `"Link"` without moving; move the agent
+	  to `follower.Link.To` yourself, then call again from there.
+	- It never throws for an agent off the mesh (a door closed on it): that is `"Blocked"` at
+	  once, with no floor.
+
+	```lua
+	local follower = NavMesh.NewFollower(NavMesh.FindPath(mesh, feet, goal, filter))
+	-- each frame:
+	local position, floor, event = NavMesh.Advance(mesh, follower, feet, speed * dt, filter)
+	if event == "Link" then
+		hop(follower.Link.To)
+	elseif event == "Blocked" then
+		repath()
+	end
+	```
+]=]
+function NavMesh.Advance(
+	mesh: NavMeshData,
+	follower: Follower,
+	position: Vector3,
+	maxStep: number,
+	filter: QueryFilter?
+): (Vector3, string?, FollowEvent?)
+	if type(maxStep) ~= "number" or not (maxStep >= 0 and maxStep < math.huge) then
+		error("NavMesh.Advance: maxStep must be a number of studs >= 0", 2)
+	end
+	follower.Link = nil
+	local waypoints = follower.Path.Waypoints
+	local target = waypoints[follower.Next]
+	if target == nil then
+		local last = waypoints[#waypoints]
+		return position, last and last.Floor, "Arrived" :: FollowEvent
+	end
+	local here = waypoints[follower.Next - 1]
+	if here.Label then
+		-- The next waypoint is the link's landing: never walk that segment.
+		follower.Next += 1
+		follower.Link = { Label = here.Label, From = here.Position, To = target.Position }
+		return position, here.Floor, "Link" :: FollowEvent
+	end
+	local p, goal = toVector(position), toVector(target.Position)
+	local remaining = math.sqrt((goal.X - p.X) ^ 2 + (goal.Z - p.Z) ^ 2)
+	local to = if remaining <= maxStep then goal else p + (goal - p) * (maxStep / remaining)
+	local moved = NavMesh.MoveAlongSurface(mesh, position, to :: any, filter)
+	if moved.Status == "NoStart" then
+		return position, nil, "Blocked" :: FollowEvent
+	end
+	local stop = toVector(moved.Position)
+	local stalled = math.sqrt((stop.X - p.X) ^ 2 + (stop.Z - p.Z) ^ 2) < STALL * maxStep
+	local radius = if filter then filter.AgentRadius or 0 else 0
+	-- The allowance is f32 rounding: an ulp is 0.004 at 32768 studs.
+	local near = math.sqrt((goal.X - stop.X) ^ 2 + (goal.Z - stop.Z) ^ 2) <= radius + 0.01
+	if near and (remaining <= maxStep or stalled) then
+		follower.Next += 1
+		follower.Stalled = 0
+		return moved.Position, moved.Floor, if waypoints[follower.Next] then nil else "Arrived" :: FollowEvent
+	end
+	follower.Stalled = if stalled then follower.Stalled + 1 else 0
+	return moved.Position,
+		moved.Floor,
+		if follower.Stalled >= follower.StallSteps then "Blocked" :: FollowEvent else nil
 end
 
 --[=[

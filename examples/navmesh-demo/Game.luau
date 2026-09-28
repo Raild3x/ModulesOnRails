@@ -17,11 +17,9 @@ export type Npc = {
 	Filter: { [string]: any }, -- a NavMesh.QueryFilter
 	Position: vector, -- feet, on the surface
 	Floor: string,
-	Path: any?, -- a NavMesh.PathResult
-	Next: number, -- index of the waypoint being walked to
+	Follower: any?, -- a NavMesh.Follower
 	Goal: vector?,
 	Jump: { From: vector, To: vector, T: number }?, -- mid-link
-	StuckTime: number,
 	RepathIn: number, -- chaser: seconds until the next goal check
 	PatrolIndex: number,
 	Stats: { [string]: number },
@@ -49,7 +47,7 @@ local GATE_PERIOD = 15 -- seconds between balcony gate (jump link) toggles
 local JUMP_TIME = 0.5
 local CHASE_REPATH = 0.25 -- seconds between chaser goal checks
 local CHASE_MOVED = 2 -- repath when the target moved this far from the path's goal
-local STUCK_SECONDS = 0.75
+local STALL_STEPS = 23 -- steps without progress before a repath (0.75 s at 30 Hz)
 local WANDER_RANGE = 30
 local RESCUE_RADIUS = 4 -- studs: how far to look for the mesh when a door closed on an NPC
 local MUD_COST = 4
@@ -119,7 +117,7 @@ local function repath(world: World, npc: Npc, goal: vector, why: string): boolea
 		if rescue then
 			npc.Position, npc.Floor = rescue.Position :: any, rescue.Floor
 		end
-		npc.Path = nil
+		npc.Follower = nil
 		return false
 	elseif path.Status ~= "Success" then
 		log(
@@ -129,9 +127,7 @@ local function repath(world: World, npc: Npc, goal: vector, why: string): boolea
 			)}`
 		)
 	end
-	npc.Path = path
-	npc.Next = 2 -- waypoint 1 is the snapped start
-	npc.StuckTime = 0
+	npc.Follower = NavMesh.NewFollower(path, STALL_STEPS)
 	return #path.Waypoints >= 2
 end
 
@@ -170,9 +166,7 @@ local function newGoal(world: World, npc: Npc, why: string)
 		repath(world, npc, PATROL[npc.PatrolIndex], why)
 	end
 end
-
--- HAND-ROLLED: the whole path follower. Walks toward the next waypoint with MoveAlongSurface,
--- takes links labelled "Jump" as a timed hop, and notices when it is not getting anywhere.
+-- Walks the path with NavMesh.Advance, and takes links labelled "Jump" as a timed hop.
 local function follow(world: World, npc: Npc, dt: number)
 	local NavMesh = world.NavMesh
 	local jump = npc.Jump
@@ -192,64 +186,26 @@ local function follow(world: World, npc: Npc, dt: number)
 		return
 	end
 
-	local path = npc.Path
-	if path == nil then
+	local follower = npc.Follower
+	if follower == nil then
 		return
 	end
-	local waypoints = path.Waypoints
-	local target = waypoints[npc.Next]
-	if target == nil then
-		npc.Path = nil
-		return
-	end
-	local here = waypoints[npc.Next - 1]
-	if here and here.Label == world.Level.JUMP_LABEL and flatDistance(npc.Position, here.Position :: any) < 0.5 then
-		-- The segment here -> target is the link: hop it instead of walking.
-		log(world, `{npc.Name}: jumps {fmt(here.Position :: any)} -> {fmt(target.Position :: any)}`)
-		npc.Jump = { From = npc.Position, To = target.Position :: any, T = 0 }
-		npc.Next += 1
-		return
-	end
-
-	local step = npc.Speed * dt
-	local goal: vector = target.Position :: any
-	local remaining = flatDistance(npc.Position, goal)
-	local to = if remaining <= step then goal else npc.Position + (goal - npc.Position) * (step / remaining)
-	local moved = timed(world, "MoveAlongSurface", NavMesh.MoveAlongSurface, world.Mesh, npc.Position, to, npc.Filter)
-	if moved.Status == "NoStart" then
-		-- The NPC is off the mesh (the door closed on it).
-		count(world, npc, "move:off-mesh")
-		repath(world, npc, npc.Goal or npc.Position, "off-mesh")
-		return
-	end
-	local progress = flatDistance(npc.Position, moved.Position)
-	npc.Position, npc.Floor = moved.Position :: any, moved.Floor
-	if remaining <= step then
-		npc.Next += 1 -- arrived (MoveAlongSurface may have kept us off a wall: close enough)
-		npc.StuckTime = 0
-		return
-	end
-	-- HAND-ROLLED: a corner waypoint can sit closer to a wall than the radius (the funnel offsets
-	-- it along the portal, SR4), and MoveAlongSurface keeps us AgentRadius off it, so "arrived"
-	-- needs a tolerance. The path's end is already pushed off the walls (ticket 24).
-	if progress < 0.1 * step and remaining <= npc.Radius * math.sqrt(2) + 0.05 then -- sqrt 2: a corner
-		count(world, npc, "arrived-short-of-waypoint")
-		npc.Next += 1
-		npc.StuckTime = 0
-		return
-	end
-	if progress < 0.1 * step then
-		npc.StuckTime += dt
-		if npc.StuckTime > STUCK_SECONDS then
-			count(world, npc, "stuck")
-			log(world, `{npc.Name}: stuck at {fmt(npc.Position)} walking to {fmt(goal)}, repathing`)
-			if npc.Goal and repath(world, npc, npc.Goal, "stuck") then
-				return
-			end
-			npc.Path = nil
+	local position, floor, event =
+		timed(world, "Advance", NavMesh.Advance, world.Mesh, follower, npc.Position, npc.Speed * dt, npc.Filter)
+	npc.Position, npc.Floor = position :: any, floor or npc.Floor
+	if event == "Arrived" then
+		npc.Follower = nil
+	elseif event == "Link" then
+		-- The follower stops at the link's start: hop it.
+		log(world, `{npc.Name}: jumps {fmt(follower.Link.From)} -> {fmt(follower.Link.To)}`)
+		npc.Jump = { From = npc.Position, To = follower.Link.To, T = 0 }
+	elseif event == "Blocked" then
+		-- Stalled against something, or off the mesh (a door closed on it).
+		count(world, npc, if floor then "stuck" else "move:off-mesh")
+		log(world, `{npc.Name}: blocked at {fmt(npc.Position)}, repathing`)
+		if not (npc.Goal and repath(world, npc, npc.Goal, "stuck")) then
+			npc.Follower = nil
 		end
-	else
-		npc.StuckTime = 0
 	end
 end
 
@@ -264,7 +220,7 @@ local function chase(world: World, npc: Npc, target: Npc, dt: number)
 	local blocked = timed(world, "Raycast", NavMesh.Raycast, world.Mesh, npc.Position, target.Position, npc.Filter)
 	if not blocked and npc.Floor == target.Floor then
 		count(world, npc, "chase:direct")
-		npc.Path = {
+		npc.Follower = NavMesh.NewFollower({
 			Status = "Success",
 			Waypoints = {
 				{ Position = npc.Position, Floor = npc.Floor },
@@ -272,11 +228,13 @@ local function chase(world: World, npc: Npc, target: Npc, dt: number)
 			},
 			Cost = 0,
 			TileStamps = {},
-		}
-		npc.Next, npc.Goal = 2, target.Position
+		}, STALL_STEPS)
+		npc.Goal = target.Position
 		return
 	end
-	local stale = npc.Path == nil or npc.Goal == nil or flatDistance(npc.Goal :: vector, target.Position) > CHASE_MOVED
+	local stale = npc.Follower == nil
+		or npc.Goal == nil
+		or flatDistance(npc.Goal :: vector, target.Position) > CHASE_MOVED
 	if stale then
 		repath(world, npc, target.Position, "target-moved")
 	end
@@ -298,8 +256,8 @@ end
 -- HAND-ROLLED: nothing tells the game which paths a change broke, so poll every NPC's path.
 local function revalidate(world: World, why: string)
 	for _, npc in world.Npcs do
-		if npc.Path and npc.Goal and not npc.Jump then
-			local valid = timed(world, "IsPathValid", world.NavMesh.IsPathValid, world.Mesh, npc.Path)
+		if npc.Follower and npc.Goal and not npc.Jump then
+			local valid = timed(world, "IsPathValid", world.NavMesh.IsPathValid, world.Mesh, npc.Follower.Path)
 			if not valid then
 				repath(world, npc, npc.Goal, why)
 			end
@@ -328,7 +286,7 @@ local function step(world: World, dt: number)
 	for _, npc in world.Npcs do
 		if npc.Kind == "Chase" then
 			chase(world, npc, target, dt)
-		elseif npc.Path == nil and not npc.Jump then
+		elseif npc.Follower == nil and not npc.Jump then
 			newGoal(world, npc, "arrived")
 		end
 		follow(world, npc, dt)
@@ -348,11 +306,9 @@ local function spawn(world: World, name: string, kind: Kind, radius: number, spe
 		Filter = filter,
 		Position = snapped.Position :: any,
 		Floor = snapped.Floor,
-		Path = nil,
-		Next = 2,
+		Follower = nil,
 		Goal = nil,
 		Jump = nil,
-		StuckTime = 0,
 		RepathIn = 0,
 		PatrolIndex = 1,
 		Stats = {},

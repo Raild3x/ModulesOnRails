@@ -125,23 +125,21 @@ end
 local function pathList(world: any): { any }
 	local list = {}
 	for _, npc in world.Npcs do
-		local path = npc.Path
-		if path == nil then
+		local follower = npc.Follower
+		if follower == nil then
 			continue
 		end
 		local color = "#" .. hex(NPC_COLORS[npc.Name] or Color3.new(1, 1, 1))
 		local prev = npc.Position
-		for i = npc.Next, #path.Waypoints do
+		local path = follower.Path
+		for i = follower.Next, #path.Waypoints do
 			local w = path.Waypoints[i].Position
-			table.insert(
-				list,
-				{
-					Kind = "Line",
-					Points = { prev.X, prev.Y + 0.15, prev.Z, w.X, w.Y + 0.15, w.Z },
-					Color = color,
-					Layer = "Paths",
-				}
-			)
+			table.insert(list, {
+				Kind = "Line",
+				Points = { prev.X, prev.Y + 0.15, prev.Z, w.X, w.Y + 0.15, w.Z },
+				Color = color,
+				Layer = "Paths",
+			})
 			prev = w
 		end
 		if npc.Goal then

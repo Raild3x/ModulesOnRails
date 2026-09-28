@@ -221,4 +221,43 @@ export type PathStatus = "Success" | "Partial" | "Budget" | "NoStart" | "NoGoal"
 ]=]
 export type PathResult = { Status: PathStatus, Waypoints: { Waypoint }, Cost: number, TileStamps: { number } }
 
+--[=[
+	@within NavMesh
+	@type FollowEvent "Arrived" | "Link" | "Blocked"
+	- `Arrived`: the last waypoint is reached (at once for a path with none).
+	- `Link`: the agent is at a link's start; `Follower.Link` says where it goes. The follower
+	  never walks the link: move the agent to `Link.To` (hop, climb, teleport) and keep calling.
+	- `Blocked`: `StallSteps` steps in a row made no progress, or the agent is off the mesh
+	  (then `Advance` returns no floor). Repath.
+]=]
+export type FollowEvent = "Arrived" | "Link" | "Blocked"
+
+--[=[
+	@within NavMesh
+	@interface FollowerLink
+	.Label string -- the link's label
+	.From Vector3 -- its start (the waypoint the agent stands at)
+	.To Vector3 -- its landing
+]=]
+export type FollowerLink = { Label: string, From: Vector3, To: Vector3 }
+
+--[=[
+	@within NavMesh
+	@interface Follower
+	.Path PathResult
+	.Next number -- the waypoint being walked to
+	.Stalled number -- steps in a row without progress
+	.StallSteps number -- how many make Blocked
+	.Link FollowerLink? -- set on the step that returned "Link", nil otherwise
+
+	Plain data `Advance` updates in place; make one per path with `NewFollower`.
+]=]
+export type Follower = {
+	Path: PathResult,
+	Next: number,
+	Stalled: number,
+	StallSteps: number,
+	Link: FollowerLink?,
+}
+
 return {}
