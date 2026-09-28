@@ -575,6 +575,14 @@ end
 
 --[=[
 	@within NavMeshStorage
+	Sets a tile's stamp (to carry it into a rebuilt or loaded state).
+]=]
+function Storage.SetTileStamp(s: State, tile: number, stamp: number)
+	s.TileStamp[tile] = stamp
+end
+
+--[=[
+	@within NavMeshStorage
 	Records tile `tile`'s triangulation input (see the class docs). `coords` are flat grid
 	points; `edges` flat 1-based point pairs, with one group and one seam id (0 = none) each.
 ]=]

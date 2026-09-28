@@ -358,7 +358,7 @@ local function apply(s: State): State
 		assert(Storage.InsertTile(n, floor, x0, z0, x1, z1) == tile, "tile ids must survive a rebuild")
 		local tc, te, tg, ts = Storage.GetTileSources(s, tile)
 		Storage.SetTileSources(n, tile, tc, te, tg, ts)
-		n.TileStamp[tile] = Storage.GetTileStamp(s, tile)
+		Storage.SetTileStamp(n, tile, Storage.GetTileStamp(s, tile))
 		meshVertex[floor] = meshVertex[floor] or {}
 		openEdges[floor] = openEdges[floor] or {}
 		local context = `floor '{Storage.GetFloorName(s, floor)}'`

@@ -18,6 +18,7 @@ local Fixtures = require("./Fixtures")
 local Funnel = require("./Funnel")
 local Queries = require("./Queries")
 local Search = require("./Search")
+local Serialize = require("./Serialize")
 local Snap = require("./Snap")
 local Storage = require("./Storage")
 local Tiles = require("./Tiles")
@@ -308,6 +309,24 @@ end
 ]=]
 function NavMesh.Update(mesh: NavMeshData)
 	Tiles.Update(mesh)
+end
+
+--[=[
+	@within NavMesh
+	Bakes the mesh into a versioned buffer (P3), to ship precomputed or store. Its format is
+	independent of the in-memory layout (SR9). It includes each tile's source data (R7), so a
+	loaded mesh still supports `AddObstacle` and `Update`.
+]=]
+function NavMesh.Serialize(mesh: NavMeshData): buffer
+	return Serialize.Serialize(mesh)
+end
+
+--[=[
+	@within NavMesh
+	Loads a mesh from `Serialize`'s buffer. Errors on another format version or a damaged buffer.
+]=]
+function NavMesh.Deserialize(data: buffer): NavMeshData
+	return Serialize.Deserialize(data)
 end
 
 --[=[

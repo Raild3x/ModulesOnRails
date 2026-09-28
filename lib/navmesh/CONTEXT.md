@@ -15,7 +15,7 @@ A layered 2.5D navigation mesh for pathfinding queries, built on ConstrainedDela
 - **Seam**: a walk-through segment shared by two floors, such as the top of a staircase.
 - **Link**: a point-to-point action hop between surface points, such as a ladder, jump or
   teleporter. A link can be switched off.
-- **Tile**: a square cell of a floor. It is the unit the mesh rebuilds when obstacles change.
+- **Tile**: a square cell of a floor, aligned to the world origin. It is the unit the mesh rebuilds when obstacles change.
 - **Clearance**: the widest agent that can pass through a place. It lets one mesh serve any
   agent radius.
 - **Snap**: placing a query point onto the nearest floor surface.
@@ -26,3 +26,25 @@ A layered 2.5D navigation mesh for pathfinding queries, built on ConstrainedDela
   query points.
 - **Waypoint**: one point of a returned path. It carries a link's label when a link starts
   there.
+- **Corner width**: the widest agent that can pass through a triangle between two of its edges.
+  Only walls bound it.
+- **Portal width**: the widest agent that can cross one edge.
+- **Reach**: how far from a triangle a wall can still change one of its widths (half the width).
+  It bounds how much clearance an `Update` recomputes.
+- **Wall**: a mesh edge with no neighbour that is not open: the edge of walkable surface or of
+  an obstacle. Tile, area and seam edges are never walls.
+- **Open edge**: a seam edge. It has no neighbour on its own floor, yet it is walkable.
+- **Seam portal**: the overlap of two floors' seam edges, stored as a crossing between their
+  triangles. The floors' seam vertices may differ by up to one grid pixel.
+- **Extra link**: a transition beyond a triangle's three edges, either a seam portal or a link.
+- **Corridor**: the chain of triangles a path search returns, with how each was entered.
+- **Funnel**: pulling a corridor tight into the shortest path through it.
+- **Dynamic obstacle**: an obstacle added or removed at runtime. The change is pending until
+  `Update`.
+- **Dirty tile**: a tile an `Update` must rebuild: its rectangle, grown by one grid pixel,
+  overlaps a changed obstacle.
+- **Baseline**: the exact triangulation input Build gave a tile. Rebuilding from it, not from
+  the tile's current state, is what makes removing an obstacle exact.
+- **Stamp**: a per-tile counter that changes when anything a path through that tile relies on
+  changes. `IsPathValid` compares a path's stamps against the current ones.
+- **Bake**: a mesh serialized to a versioned buffer, to ship precomputed.
