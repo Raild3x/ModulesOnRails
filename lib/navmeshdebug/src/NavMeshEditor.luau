@@ -34,6 +34,10 @@
 	| [ / ] or the slider | agent radius down / up |
 	| T | show or hide the tile grid |
 	| P | print the description as Luau source |
+	| B | build the description and save a bake next to the editor (`SaveBake`) |
+
+	From code (for example a Studio command bar or a screenshot script), `SetMarkers` and
+	`SetAgentRadius` place the path markers and set the radius, and `SaveBake` saves a bake.
 ]=]
 
 local Players = game:GetService("Players")
@@ -55,11 +59,15 @@ export type Editor = {
 	Changed: Signal.Signal<(EditorDescription) -> (), EditorDescription>,
 	GetDescription: (self: Editor) -> EditorDescription,
 	ExportSource: (self: Editor) -> string,
+	SetMarkers: (self: Editor, start: vector, goal: vector) -> (),
+	SetAgentRadius: (self: Editor, radius: number) -> (),
+	SaveBake: (self: Editor, parent: Instance) -> Folder,
 	Destroy: (self: Editor) -> (),
 }
 
 type EditorInternal = Editor & {
 	_janitor: Janitor.Janitor,
+	_parent: Instance,
 	_state: EditorState.State,
 	_renderer: any, -- a DrawListRenderer
 	_built: any?, -- the last mesh or triangulation that built
@@ -280,9 +288,19 @@ local KEYS: { [Enum.KeyCode]: (self: EditorInternal, p: vector) -> EditorState.E
 		print(self:ExportSource())
 		return nil
 	end,
+	[Enum.KeyCode.B] = function(self)
+		local ok, result = pcall(self.SaveBake, self, self._parent)
+		self._error = if ok then nil else tostring(result)
+		refresh(self, false)
+		if ok then
+			print(`[NavMeshEditor] saved {result:GetFullName()}: move it into the place (see NavMesh.Deserialize)`)
+		end
+		return nil
+	end,
 }
 
 NavMeshEditor._Keys = KEYS -- for the key-binding spec
+NavMeshEditor._ChunkSize = 199_999 -- SaveBake's StringValue length (a StringValue holds under 200,000)
 
 -- The status bar and the radius slider (click or drag along the bar).
 local function makeGui(self: EditorInternal, janitor: Janitor.Janitor, parent: Instance)
@@ -387,6 +405,7 @@ function NavMeshEditor.new(parent: Instance, mode: EditorMode, initial: EditorDe
 	local self: EditorInternal = setmetatable({
 		Changed = Signal.new(janitor),
 		_janitor = janitor,
+		_parent = parent,
 		_state = EditorState.new(mode, initial),
 		_renderer = janitor:Add(DrawListRenderer.new(folder), "Destroy"),
 		_showTiles = true,
@@ -423,6 +442,59 @@ end
 ]=]
 function NavMeshEditor.ImportSource(source: string): EditorDescription
 	return LuauLiteral.Parse(source)
+end
+
+--[=[
+	@within NavMeshEditor
+	Puts the path start and goal markers at `start` and `goal`, and redraws the path.
+]=]
+function NavMeshEditor.SetMarkers(self: EditorInternal, start: vector, goal: vector)
+	self:_apply { Type = "SetMarker", Which = "Start", Position = start }
+	self:_apply { Type = "SetMarker", Which = "Goal", Position = goal }
+end
+
+--[=[
+	@within NavMeshEditor
+	Sets the agent radius the path uses (below 0 counts as 0), and redraws the path.
+]=]
+function NavMeshEditor.SetAgentRadius(self: EditorInternal, radius: number)
+	self:_apply { Type = "SetAgentRadius", Radius = radius }
+end
+
+--[=[
+	@within NavMeshEditor
+	Builds the description, serializes the mesh, and saves it under `parent` as a Folder named
+	`NavMeshBake` (replacing an earlier one): the buffer compressed with zstd, base64-encoded,
+	and split across StringValues `1`, `2`, ... (a StringValue holds under 200,000
+	characters). `NavMesh.Deserialize` shows the loader. Errors when the description does not
+	build, and in CDT mode.
+
+	In Play mode the bake lands in the client's copy of the game: copy it in the Explorer
+	before stopping, then paste it into the place (for example into ServerStorage).
+]=]
+function NavMeshEditor.SaveBake(self: EditorInternal, parent: Instance): Folder
+	if self._state.Mode ~= "NavMesh" then
+		error("NavMeshEditor: SaveBake is only for NavMesh mode", 2)
+	end
+	local EncodingService = game:GetService("EncodingService")
+	local data = NavMesh.Serialize(NavMesh.Build(self._state.Description))
+	local packed = EncodingService:CompressBuffer(data, Enum.CompressionAlgorithm.Zstd, 19)
+	local text = buffer.tostring(EncodingService:Base64Encode(packed))
+	local folder = Instance.new("Folder")
+	folder.Name = "NavMeshBake"
+	local size = NavMeshEditor._ChunkSize
+	for i = 1, math.max(1, math.ceil(#text / size)) do
+		local chunk = Instance.new("StringValue")
+		chunk.Name = tostring(i)
+		chunk.Value = string.sub(text, (i - 1) * size + 1, i * size)
+		chunk.Parent = folder
+	end
+	local old = parent:FindFirstChild("NavMeshBake")
+	if old then
+		old:Destroy()
+	end
+	folder.Parent = parent
+	return folder
 end
 
 --[=[
