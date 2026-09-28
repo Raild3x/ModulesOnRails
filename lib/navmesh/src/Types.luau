@@ -77,7 +77,7 @@ export type LinkDesc = {
 	.Seams { SeamDesc }?
 	.Links { LinkDesc }? -- link id = its 1-based index
 	.TileSize number? -- studs, from 1/256 to 32768; tiles are aligned to the world origin (default: per floor, about 36 edges per tile, a power of two from 4 to 256)
-	.MaxAgentRadius number? -- optional cap on AgentRadius (studs); bounds how far Update recomputes clearance (default: no cap)
+	.MaxAgentRadius number? -- optional cap on AgentRadius (studs); bounds how far Build and Update compute clearance, so set it when you can: uncapped, Update costs 30-50% more (default: no cap)
 
 	The authored description a mesh is built from. Part→polygon conversion belongs in a separate
 	adapter package (Q1).
@@ -112,7 +112,7 @@ export type NavMeshDrawOptions = {
 --[=[
 	@within NavMesh
 	@interface QueryFilter
-	.AgentRadius number? -- studs (default 0); paths keep this far from walls, and no wider than the mesh's MaxAgentRadius
+	.AgentRadius number? -- studs (default 0); paths route only where this fits and turn this far off wall corners (a turn's straight chord can pass slightly closer); no wider than the mesh's MaxAgentRadius. The path's end point is not offset.
 	.AreaCosts { [number]: number }? -- cost multiplier per area id (default 1, >= 0); math.huge excludes the area
 	.MaxExpansions number? -- stop with "Budget" after expanding this many triangles (default unlimited)
 	.SnapExtents Vector3? -- half-size of the snap box around a feet position (default (0.5, 4, 0.5))
@@ -138,7 +138,7 @@ export type NavPoint = { Position: Vector3, Floor: string }
 	@interface Waypoint
 	.Position Vector3
 	.Floor string
-	.Label string? -- set where a link starts (ticket 16)
+	.Label string? -- the link's label, on the waypoint where a link starts; the next waypoint is where it lands (not walkable between them)
 ]=]
 export type Waypoint = { Position: Vector3, Floor: string, Label: string? }
 

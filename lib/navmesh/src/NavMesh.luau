@@ -9,7 +9,21 @@
 	ConstrainedDelaunay. Mesh state is plain data (no metatable, safe to send over the
 	network): operate on it through this module.
 
-	See `docs/plans/navmesh/spec.md` for the full API; it lands ticket by ticket.
+	```lua
+	local mesh = NavMesh.Build({
+		Floors = {
+			Ground = {
+				Walkable = { { Vector3.new(0, 0, 0), Vector3.new(40, 0, 0), Vector3.new(40, 0, 30), Vector3.new(0, 0, 30) } },
+				Obstacles = { { Vector3.new(10, 0, 10), Vector3.new(14, 0, 10), Vector3.new(14, 0, 14), Vector3.new(10, 0, 14) } },
+			},
+		},
+		MaxAgentRadius = 2, -- optional, but Build and Update run faster with a cap
+	})
+	local path = NavMesh.FindPath(mesh, Vector3.new(2, 0, 2), Vector3.new(30, 0, 25), { AgentRadius = 1 })
+	```
+
+	`examples/navmesh-demo` is a small game on this API, and `docs/plans/navmesh/spec.md` has the
+	design rationale (search nodes, radius offsets, invalidation).
 ]=]
 
 local Build = require("./Build")
@@ -215,7 +229,8 @@ end
 	A random point on the mesh, uniform in plan (X, Z) over the areas the filter allows, and
 	within `radius` of `center` (in plan) when given. `rng` returns numbers in [0, 1) (default
 	`math.random`), so a seeded generator gives reproducible points. Returns nil when no allowed
-	surface lies in range.
+	surface lies in range. `AgentRadius` is ignored: a point may lie closer to a wall than the
+	radius (reject those with `FindDistanceToWall` if an agent must stand there).
 ]=]
 function NavMesh.FindRandomPoint(
 	mesh: NavMeshData,
@@ -235,8 +250,8 @@ end
 
 --[=[
 	@within NavMesh
-	Whether a path from `FindPath` still holds: false once a link toggle (or, later, an
-	`Update`) touched a tile it passes through (SR5). Deliberately conservative: a change
+	Whether a path from `FindPath` still holds: false once a link toggle or an `Update`
+	touched a tile it passes through (SR5). Deliberately conservative: a change
 	anywhere in such a tile invalidates it.
 ]=]
 function NavMesh.IsPathValid(mesh: NavMeshData, path: PathResult): boolean
