@@ -49,6 +49,43 @@ local function across(s: Storage.State, t: number, e: number, hit: vector, costs
 	return n
 end
 
+-- A walk that starts exactly on a vertex of t (a radius-0 funnel corner) must leave through
+-- the triangle of that vertex's fan whose corner holds the direction; the snap may have picked
+-- any of them. Turns around the vertex one way, then the other (a fan on a wall is open on one
+-- side only), until a triangle holds the direction. Returns it, or t when none does (the
+-- direction heads into a wall).
+local function fanStart(s: Storage.State, t: number, p: vector, dx: number, dz: number, costs: { [number]: number })
+	for side = 1, 2 do
+		local at = t
+		for _ = 1, 64 do
+			local verts = { Storage.GetTriangle(s, at) }
+			local i = 0
+			for k = 1, 3 do
+				local q = Storage.GetVertex(s, verts[k])
+				if q.X == p.X and q.Z == p.Z then
+					i = k
+				end
+			end
+			if i == 0 then
+				return t
+			end
+			-- Edge e runs from vertex e % 3 + 1 to (e + 1) % 3 + 1: out of p along edge i - 1 (3
+			-- for i = 1), into p along edge i % 3 + 1. The interior is left of both (CCW).
+			local u = Storage.GetVertex(s, verts[i % 3 + 1])
+			local w = Storage.GetVertex(s, verts[(i + 1) % 3 + 1])
+			if cross2(u.X - p.X, u.Z - p.Z, dx, dz) >= 0 and cross2(p.X - w.X, p.Z - w.Z, dx, dz) >= 0 then
+				return at
+			end
+			local n = across(s, at, if side == 1 then (if i == 1 then 3 else i - 1) else i % 3 + 1, p, costs)
+			if n == 0 then
+				break
+			end
+			at = n
+		end
+	end
+	return t
+end
+
 --[=[
 	@within NavMeshQueries
 	Walks straight from `p` (on triangle `t`) towards `to` in (X, Z). Returns whether a wall or
@@ -63,6 +100,7 @@ function Queries.Walk(
 	costs: { [number]: number }
 ): (boolean, vector, number, vector?)
 	local dx, dz = to.X - p.X, to.Z - p.Z
+	t = fanStart(s, t, p, dx, dz, costs)
 	local from = -1 -- the edge of t we entered through (never an exit)
 	for _ = 1, WALK_LIMIT do
 		local verts = { Storage.GetTriangle(s, t) }
@@ -124,11 +162,11 @@ function Queries.DistanceToWall(
 	local seen = { [t] = true }
 	local queue = { t }
 	local head = 1
-	local function segmentPoint(u: vector, w: vector): (vector, number)
+	local function segmentPoint(u: vector, w: vector): (vector, number, number)
 		local ex, ez = w.X - u.X, w.Z - u.Z
 		local k = math.clamp(((p.X - u.X) * ex + (p.Z - u.Z) * ez) / (ex * ex + ez * ez), 0, 1)
 		local q = u + (w - u) * k
-		return q, math.sqrt((q.X - p.X) ^ 2 + (q.Z - p.Z) ^ 2)
+		return q, math.sqrt((q.X - p.X) ^ 2 + (q.Z - p.Z) ^ 2), k
 	end
 	while head <= #queue do
 		local tri = queue[head]
@@ -136,18 +174,19 @@ function Queries.DistanceToWall(
 		local verts = { Storage.GetTriangle(s, tri) }
 		for e = 1, 3 do
 			local u, w = Storage.GetVertex(s, verts[e % 3 + 1]), Storage.GetVertex(s, verts[(e + 1) % 3 + 1])
-			local q, d = segmentPoint(u, w)
+			local q, d, k = segmentPoint(u, w)
 			if d >= best then
 				continue -- nothing past this edge can be nearer
 			end
 			local n = if Storage.IsWallEdge(s, tri, e) then 0 else across(s, tri, e, q, costs)
 			if n == 0 then
 				-- A wall (or an excluded area's border): the nearest so far.
-				local normal = vector.create(p.X - q.X, 0, p.Z - q.Z)
-				if d < 1e-9 then
-					-- On the wall: its inward normal (CCW triangle: the interior is on the left).
-					normal = vector.create(-(w.Z - u.Z), 0, w.X - u.X)
-				end
+				-- Its inward normal (CCW triangle: the interior is on the left) when the nearest
+				-- point is inside the edge: exact, where p - q is f32 rounding for a point on or a
+				-- hair off the wall. At an end vertex, away from it (or the edge's, from on it).
+				local normal = if (k > 0 and k < 1) or d < 1e-9
+					then vector.create(u.Z - w.Z, 0, w.X - u.X)
+					else vector.create(p.X - q.X, 0, p.Z - q.Z)
 				best, bestHit, bestNormal = d, q, normal / vector.magnitude(normal)
 			elseif not seen[n] then
 				seen[n] = true

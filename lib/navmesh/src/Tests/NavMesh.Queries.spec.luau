@@ -205,6 +205,35 @@ return function(t: tiniest)
 			end
 		end)
 
+		test("from a wall corner, moves every way that isn't into the obstacle (a radius-0 funnel corner)", function()
+			-- Each corner with the signs (X, Z) of the quarter the obstacle fills: the crate's at
+			-- (11, 5) and (11, 9), and the hole's four. Along a wall is open; only that quarter is
+			-- blocked. The snap's triangle needs the fan turned one way at some, the other at others.
+			local corners = {
+				{ v(11, 0, 5), -1, 1 },
+				{ v(11, 0, 9), -1, -1 },
+				{ v(12, 0, 12), 1, 1 },
+				{ v(16, 0, 12), -1, 1 },
+				{ v(16, 0, 16), -1, -1 },
+				{ v(12, 0, 16), 1, -1 },
+			}
+			for _, corner in corners do
+				local at, sx, sz = corner[1], corner[2], corner[3]
+				for k = 0, 15 do
+					local a = k * math.pi / 8
+					local dx, dz = math.cos(a), math.sin(a)
+					local blocked = dx * sx > 1e-9 and dz * sz > 1e-9
+					local moved = NavMesh.MoveAlongSurface(court, at, at + v(dx, 0, dz) * 0.5).Position
+					local progress = vector.magnitude(vector.create(moved.X - at.X, 0, moved.Z - at.Z))
+					local hit = NavMesh.Raycast(court, at, at + v(dx, 0, dz) * 0.5)
+					expect(progress > 0.4 or blocked)
+						.with_context(`from {fmt(at)} angle {k}/16: moved {progress}`)
+						.is_true()
+					expect(hit == blocked).with_context(`raycast from {fmt(at)} angle {k}/16`).is_true()
+				end
+			end
+		end)
+
 		test("reports NoStart when it starts off the mesh (ticket 24: it no longer throws)", function()
 			local moved = NavMesh.MoveAlongSurface(court, v(50, 0, 50), v(1, 0, 1))
 			expect(moved.Status).is("NoStart")
@@ -247,6 +276,27 @@ return function(t: tiniest)
 				local along = if case[2] == v(8, 0, 6) then faceDir else v(1, 0, 0)
 				expect(math.abs(n.X * along.X + n.Z * along.Z) < 1e-6).with_context(fmt(n)).is_true()
 			end
+		end)
+
+		test("a point a rounding error off a wall still gets the wall's normal (f32 vectors)", function()
+			-- At z 3.956849337 the foot on the x = 12 wall rounds 2.4e-7 along it: the normal
+			-- from that offset would point along the wall, and FindPath's end push slid 2r along it.
+			local mesh = NavMesh.Build(Fixtures.OneWayLink.Desc)
+			for _, dx in { 0, 1e-7, 1e-6 } do
+				local _, _, normal = NavMesh.FindDistanceToWall(mesh, v(12 + dx, 0, 3.956849337), 1)
+				expect(fmt(normal :: any)).with_context(`{dx} off`).is("1.0000,0.0000,0.0000")
+			end
+			local path = NavMesh.FindPath(mesh, v(14.001820564, 0, 1.878223658), v(1.460927486, 4, 3.956849337), {
+				AgentRadius = 0.25,
+			})
+			expect(path.Status).is("Partial")
+			expect(fmt(path.Waypoints[#path.Waypoints].Position)).is("12.2500,0.0000,3.9568")
+			-- Off a corner (the Courtyard hole's at (16, 12)) the normal points away from it.
+			local court = NavMesh.Build(Fixtures.Courtyard.Desc)
+			local d, hit, normal = NavMesh.FindDistanceToWall(court, v(17, 0, 11), 3)
+			expect(math.abs(d - math.sqrt(2)) < 1e-6).is_true()
+			expect(fmt(hit :: any)).is("16.0000,0.0000,12.0000")
+			expect(fmt(normal :: any)).is("0.7071,0.0000,-0.7071")
 		end)
 
 		test("agrees with a brute-force scan of every wall", function()
