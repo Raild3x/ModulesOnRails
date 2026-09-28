@@ -39,10 +39,15 @@ local function collectSpecs(dir: string, out: { string })
 	end
 end
 
+-- Probe hits while collecting, for mutation test selection (Mutation.Collect):
+-- inside each spec's describe bodies, and everywhere else (module init, spec top level).
+export type Collect = { outside: { number }, bySpec: { [string]: { number } } }
+
 --[=[
-	Runs the instrumented suite in `buildDir`. Returns coverage + tally.
+	Runs the instrumented suite in `buildDir`. Returns coverage + tally, and the
+	collect-time hits.
 ]=]
-function LuneRunner.run(spec: PackageSpec, buildDir: string, options: { timeout: number? }?): RunOutput
+function LuneRunner.run(spec: PackageSpec, buildDir: string, options: { timeout: number? }?): (RunOutput, Collect)
 	local dynRequire: any = require
 
 	-- The emitted runtime module (same cached instance the instrumented
@@ -70,6 +75,37 @@ function LuneRunner.run(spec: PackageSpec, buildDir: string, options: { timeout:
 	local specFiles: { string } = {}
 	collectSpecs(buildDir .. "/" .. spec.sourceRoot, specFiles)
 
+	-- Collect-time attribution: specs get a tiniest whose `describe` drains the
+	-- counters on entering and leaving each top-level describe body, so setup done
+	-- there is filed under that spec and everything else under `outside`. Its own
+	-- baseline leaves the plugin's per-test deltas untouched.
+	local collectBaseline = runtime.new_baseline()
+	local outside: { number } = {}
+	local bySpec: { [string]: { number } } = {}
+	local currentSpec = ""
+	local depth = 0
+	local function drain(into: { number })
+		for _, id in runtime.delta(collectBaseline) do
+			table.insert(into, id)
+		end
+	end
+	local specApi = setmetatable({
+		describe = function(label: string, inner: (...any) -> ())
+			tiniest.describe(label, function(...)
+				if depth == 0 then
+					drain(outside)
+				end
+				depth += 1
+				inner(...)
+				depth -= 1
+				if depth == 0 then
+					bySpec[currentSpec] = bySpec[currentSpec] or {}
+					drain(bySpec[currentSpec])
+				end
+			end)
+		end,
+	}, { __index = tiniest })
+
 	local buildPrefix = buildDir .. "/"
 	local tests = tiniest.collect_tests(function()
 		local describe = tiniest.describe
@@ -79,10 +115,12 @@ function LuneRunner.run(spec: PackageSpec, buildDir: string, options: { timeout:
 			-- ".coverage/<pkg>/build/" prefix and ".luau" suffix).
 			local label = (file:gsub("^" .. buildPrefix:gsub("([%-%.%+])", "%%%1"), ""):gsub("%.luau$", ""))
 			describe(label, function()
-				dynRequire(requirePath)(tiniest)
+				currentSpec = label
+				dynRequire(requirePath)(specApi)
 			end)
 		end
 	end)
+	drain(outside)
 
 	local runOptions: any = { safe_mode = true }
 	if options and options.timeout then
@@ -97,7 +135,7 @@ function LuneRunner.run(spec: PackageSpec, buildDir: string, options: { timeout:
 		coverage = result.coverage,
 		tally = result.status_tally,
 		duration = duration,
-	}
+	}, { outside = outside, bySpec = bySpec }
 end
 
 return LuneRunner
