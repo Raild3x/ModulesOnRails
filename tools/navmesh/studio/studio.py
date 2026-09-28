@@ -8,6 +8,7 @@ lib/<pkg> with the link modules setup writes).
     python tools/navmesh/studio/studio.py shot bench
     python tools/navmesh/studio/studio.py shot editor                 # F7 of NavMeshEditor (EditorShot.luau)
     python tools/navmesh/studio/studio.py play                        # Play-mode editor session (ticket 21)
+    python tools/navmesh/studio/studio.py ship                        # ways to ship a bake (BakeShip.luau)
 
 `bench` prints each cell's median over runs and exits 1 when a run does not finish or a Draw
 yields. `shot` briefly maximizes Studio (PrintWindow capture: no focus, nothing on top leaks in), and saves the PNG in .bench/navmesh/studio/
@@ -68,6 +69,11 @@ editor.Changed:Connect(function()
 end)
 """
 
+SHIP = PRELUDE + """require(Studio.BakeShip)({{
+	NavMesh = NavMesh, Level = require(Studio.Level), Scenes = Scenes, Reps = {reps},
+}})
+"""
+
 SHOT = PRELUDE + """require(Studio.Shot)({{
 \tNavMesh = NavMesh, Renderer = Renderer, Scenes = Scenes, Scene = "{scene}", HoldSeconds = {hold},
 }})
@@ -79,7 +85,9 @@ def build_place(script: str, extra: dict | None = None, name: str = "studio") ->
     lib = (Path.cwd() / "lib").as_posix()
     studio = {"$className": "Folder"}
     for module, path in (("RendererBench", HERE / "RendererBench.luau"), ("Shot", HERE / "Shot.luau"),
-                       ("EditorShot", HERE / "EditorShot.luau"), ("Scenes", HERE.parent / "bench" / "Scenes.luau")):
+                       ("EditorShot", HERE / "EditorShot.luau"), ("Scenes", HERE.parent / "bench" / "Scenes.luau"),
+                       ("BakeShip", HERE / "BakeShip.luau"),
+                       ("Level", HERE.parents[2] / "examples" / "navmesh-demo" / "Level.luau")):
         studio[module] = {"$path": path.as_posix()}
     src = {"$className": "Folder"}
     for pkg in ("constraineddelaunay", "constraineddelaunaydebug", "navmesh", "navmeshdebug"):
@@ -161,6 +169,15 @@ def shot(args) -> int:
     return 0 if "[MARK] done" in text and "SAVED" in captured else 1
 
 
+def ship(args) -> int:
+    place = build_place(SHIP.format(reps=args.reps))
+    text = studio(place, 600)
+    (OUT / "ship.txt").write_text(text, encoding="utf-8")
+    print("\n".join(line for line in text.splitlines() if line.lstrip()[:3] in ("[B]", "[C]", "[R]", "[L]", "[W]")
+                    or "rror" in line))
+    return 0 if "[MARK] done" in text else 1
+
+
 def play(args) -> int:
     (OUT / "session").mkdir(parents=True, exist_ok=True)
     session = OUT / "session" / "NavMeshEditorSession.client.luau"
@@ -196,8 +213,10 @@ def main() -> int:
     pl.add_argument("--fixture", default="ThreeFloorStairs", help="a NavMesh fixture (a CDT fixture with --mode CDT)")
     pl.add_argument("--mode", choices=["NavMesh", "CDT"], default="NavMesh")
     pl.add_argument("--no-open", action="store_true", help="only build the place")
+    sh = sub.add_parser("ship")
+    sh.add_argument("--reps", type=int, default=7)
     args = ap.parse_args()
-    return {"bench": bench, "shot": shot, "play": play}[args.command](args)
+    return {"bench": bench, "shot": shot, "play": play, "ship": ship}[args.command](args)
 
 
 if __name__ == "__main__":
