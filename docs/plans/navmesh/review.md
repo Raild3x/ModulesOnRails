@@ -52,6 +52,15 @@ the const question are deliberately open, gated on benchmarks.
 - **`Update` re-snap:** local to the dirty tiles, from each tile's static baseline (spec SR13,
   bench.md 3). User: "2- yes".
 
+### Rulings during the build (2026-09-28)
+- **Parallel mutation tooling:** merged as built. `--mutate-jobs` defaults to half the CPU
+  cores, and `--mutate-files` filters the mutants. User: "Merge as built (Recommended)".
+- **Committing tickets 15-19:** one mutation gate on the final state, then five commits in
+  order, with the specs run at each. User: "One gate, 5 commits".
+- **Editor deviations (ticket 21):** accept all three and amend the spec: the public
+  `ImportSource`, the `constraineddelaunay` sibling, and an `Apply` that updates in place.
+  User: "Accept all, amend spec (Recommended)".
+
 ### Rulings during the build (2026-09-27)
 - **U-a (clearance reach), ruled after the P4 probe (ticket 15 notes):** no cap by default,
   with an optional cap. Any `AgentRadius` works, and each width's reach r* is stored.

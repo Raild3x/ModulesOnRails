@@ -213,7 +213,8 @@ Four in-repo packages:
     driven by input events;
   - uses `howmanysmall/better-signal@2.1.0` and `howmanysmall/janitor` (house rule
     `prefer-existing-packages`);
-  - siblings: navmesh and constraineddelaunaydebug.
+  - siblings: navmesh, constraineddelaunaydebug and constraineddelaunay (the editor's CDT mode
+    triangulates directly; amended in ticket 21, user: "Accept all, amend spec").
 - **Sibling dependencies (D2, F10):**
   - navmesh and constraineddelaunaydebug declare `[custom] siblings = "constraineddelaunay"`.
   - Re-run `npm run setup <dependent>` when a sibling's *registry dependencies* change.
@@ -503,6 +504,8 @@ export type Editor = {
     Changed: Signal.Signal<(EditorDescription) -> (), EditorDescription>, -- better-signal (house form: lib/dragdrop/src/Reactive.luau)
     GetDescription: (self: Editor) -> EditorDescription,
     ExportSource: (self: Editor) -> string, -- generic plain-data -> Luau-literal printer
+    -- Added in ticket 21: NavMeshEditor.ImportSource(source: string): EditorDescription parses
+    -- exactly that printer's grammar (no loadstring), for the "export and import" interaction.
     Destroy: (self: Editor) -> (),          -- Janitor-backed
 }
 NavMeshEditor.new(parent: Instance, mode: EditorMode, initial: EditorDescription?): Editor -- LocalScript, Play mode
@@ -513,7 +516,10 @@ renderer:Draw(NavMesh.ToDrawList(mesh, { Triangles = true, Seams = true, Links =
 local editor = NavMeshEditor.new(workspace, "NavMesh", NavMeshFixtures.ThreeFloorStairs.Desc)
 editor.Changed:Connect(function(desc) print(editor:ExportSource()) end)
 ```
-- **Editor structure:** `EditorState.luau` holds the description and the selection, plus a
+- **Editor structure** *(amended in ticket 21: `Apply` updates the state in place and returns
+  whether the description changed. "Pure" means no Instances and no yields, which keeps drags
+  from allocating a copy per mouse move)*: `EditorState.luau` holds the description and the
+  selection, plus a
   pure `Apply(state, event)` for events such as `PointerDown`, `Drag`, `CreateRing`,
   `CreateSeam`, `CreateLink` and `Delete`. `NavMeshEditor` maps `UserInputService` events onto
   it.

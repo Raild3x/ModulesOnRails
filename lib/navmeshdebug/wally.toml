@@ -15,9 +15,10 @@ publishable = "false"
 # The properly capitalized and spaced name of the library
 formattedName = "NavMeshDebug"
 # Unpublished in-repo dependencies, vendored by setup (see scripts/setup_package_for_testing.py)
-siblings = "navmesh,constraineddelaunaydebug"
+siblings = "navmesh,constraineddelaunaydebug,constraineddelaunay"
 # The intro page for the documentation
 docsLink = "NavMeshDebug"
 
 [dependencies]
+Janitor = "howmanysmall/janitor@^1.16.0"
 Signal = "howmanysmall/better-signal@2.1.0"

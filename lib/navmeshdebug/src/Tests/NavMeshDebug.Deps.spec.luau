@@ -21,7 +21,7 @@ return function(t: tiniest)
 		end)
 
 		test("constraineddelaunaydebug sibling", function()
-			local svg = ConstrainedDelaunayDebug.SvgBackend.Render({})
+			local svg = ConstrainedDelaunayDebug.SvgBackend.Render {}
 			expect(svg:find("<svg", 1, true) ~= nil).is_true()
 		end)
 
