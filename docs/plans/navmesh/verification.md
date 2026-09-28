@@ -90,13 +90,15 @@ Later tickets cite these as their test seams. Commands run from the repo root.
   1. A scratchpad `place.project.json` mounts the worktree's `lib/` at `ReplicatedStorage.src`,
      then `rojo build … -o phase0.rbxl`.
   2. Start `capture.ps1` in the background. It waits for a Studio window titled
-     `*run-in-roblox*`, then maximizes and captures it with `CopyFromScreen`.
+     `*run-in-roblox*`, then maximizes it and captures its own content with `PrintWindow`.
   3. Run `run-in-roblox --place phase0.rbxl --script draw.luau`. The script draws with
      `DrawListRenderer`, sets a top-down Scriptable camera, and holds for 12s under a deadline.
 - **Proved:** the PNG shows the drawn outlines, obstacles, circle and label in the viewport.
 - **Gotchas:**
   - run-in-roblox opens a *copy* named `run-in-roblox-place.rbxl`, so match on that title.
-  - The capture briefly maximizes and focuses Studio on the user's desktop.
+  - The capture maximizes Studio on the user's desktop, but doesn't focus it.
+  - It used `CopyFromScreen` until 2026-09-28, which saved whatever window was on top of Studio
+    (the dogfood agent caught another app's window that way). `PrintWindow` can't do that.
   - It captures the whole window, not just the viewport.
   - `rojo build` embeds sources, so rebuild the `.rbxl` after every source edit.
 

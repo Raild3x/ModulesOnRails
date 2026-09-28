@@ -10,7 +10,7 @@ lib/<pkg> with the link modules setup writes).
     python tools/navmesh/studio/studio.py play                        # Play-mode editor session (ticket 21)
 
 `bench` prints each cell's median over runs and exits 1 when a run does not finish or a Draw
-yields. `shot` briefly maximizes and focuses Studio, and saves the PNG in .bench/navmesh/studio/
+yields. `shot` briefly maximizes Studio (PrintWindow capture: no focus, nothing on top leaks in), and saves the PNG in .bench/navmesh/studio/
 (gitignored) for review with the Read tool. `shot editor[:<Fixture>]` opens NavMeshEditor on a
 NavMesh fixture (default ThreeFloorStairs). `play [--fixture F] [--mode NavMesh|CDT]` builds
 .bench/navmesh/studio/editor.rbxl, with a baseplate and a LocalScript that opens the editor,
