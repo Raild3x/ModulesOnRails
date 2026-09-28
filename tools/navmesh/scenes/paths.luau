@@ -50,4 +50,24 @@ add("Shallow", NavMesh.Fixtures.ShallowObstacles.Desc, v(1, 1), v(39, 19))
 for _, radius in { 0.5, 1.5, 2.5 } do
 	add(`Courtyard_Radius{radius}`, courtyard, v(1, 1), v(2, 29), { AgentRadius = radius }, { Clearance = true })
 end
+-- Ticket 26: several paths in one list, each in its own colour, over a custom palette, with the
+-- LinkJump link disabled (drawn faded).
+do
+	local mesh = NavMesh.Build(courtyard)
+	local paths = {
+		NavMesh.FindPath(mesh, v(1, 1), v(29, 19)),
+		NavMesh.FindPath(mesh, v(29, 1), v(2, 29)),
+		NavMesh.FindPath(mesh, v(6, 18), v(6, 29.5)),
+	}
+	local palette = {
+		Areas = true,
+		AreaColors = { "#fff59d", "#80deea" },
+		WallColor = "#ff6f00",
+		PathColors = { "#d81b60", "#3949ab", "#2e7d32" },
+	}
+	table.insert(scenes, { Name = "Courtyard_MultiPath", List = NavMesh.ToDrawList(mesh, palette, paths) })
+	local jump = NavMesh.Build(NavMesh.Fixtures.LinkJump.Desc)
+	NavMesh.SetLinkEnabled(jump, 1, false)
+	table.insert(scenes, { Name = "LinkJump_Disabled", List = NavMesh.ToDrawList(jump, { Links = true }) })
+end
 return scenes

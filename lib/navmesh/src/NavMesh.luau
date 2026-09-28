@@ -356,11 +356,20 @@ end
 	@function ToDrawList
 	@param mesh NavMeshData
 	@param options NavMeshDrawOptions?
-	@param path PathResult?
+	@param paths (PathResult | { PathResult })?
 	@return DrawList
 
 	The mesh as debug drawing primitives: triangles on `Floor:<name>` layers, walls, and
-	optionally tile bounds. A `path` is drawn on the `Path` layer.
+	optionally tile bounds, seams and links (a disabled link is drawn faded). `paths`, one path
+	or a list of them, go on the `Path` layer, each in its `PathColors` entry. `FloorColors`,
+	`AreaColors` and `WallColor` replace the default palette, for a grey or dark baseplate.
+
+	```lua
+	local list = NavMesh.ToDrawList(mesh, {
+		WallColor = "#ffffff",
+		PathColors = { "#d81b60", "#3949ab" },
+	}, { pathA, pathB })
+	```
 ]=]
 NavMesh.ToDrawList = DrawList.ToDrawList
 
