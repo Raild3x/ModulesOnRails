@@ -199,6 +199,11 @@ return function(t: tiniest)
 			local p = NavMesh.FindNearestPoint(decked, v(10, 0, 10), nil, 3) :: NavMesh.NavPoint
 			expect(p.Floor).is("Ground")
 			expect(math.abs(vector.magnitude(p.Position - v(10, 0, 10)) - 2) < 1e-9).is_true()
+			-- 4 studs up the deck is 2 away in 3D, the hole's edge sqrt(20).
+			local tight = { SnapExtents = v(0.5, 1, 0.5) }
+			local up = NavMesh.FindNearestPoint(decked, v(10, 4, 10), tight, 3) :: NavMesh.NavPoint
+			expect(up.Floor).is("Deck")
+			expect(fmt(up.Position)).is("10.0000,6.0000,10.0000")
 		end)
 
 		test("skips excluded areas", function()

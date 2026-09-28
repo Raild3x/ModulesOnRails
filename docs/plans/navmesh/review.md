@@ -71,6 +71,21 @@ the const question are deliberately open, gated on benchmarks.
 - **Changed regions (ticket 22):** 2026-09-28: `Update` returns the changed regions, a list of
   `{ Floor, Min, Max }` boxes (`ChangedRegion`). `IsPathValid` stays as it is. User: "changed
   regions only", not an exact `IsPathValid`.
+- **Off-mesh policy and closest-reachable queries (ticket 24):** 2026-09-28, all five required:
+  1. `FindPath` pushes the last waypoint `AgentRadius` off the walls (the `MoveAlongSurface`
+     push), for Success, Partial and Budget; unchanged at radius 0; documented that the end
+     can differ from the goal by up to the radius.
+  2. `MoveAlongSurface` returns a status instead of throwing off the mesh. One off-mesh policy
+     for every query, in the `NavMesh` class doc. As built: `MoveResult { Status, Position,
+     Floor? }` with `"Success" | "NoStart"`, the same status name and "no result on NoStart"
+     rule as `FindPath`'s `PathResult`.
+  3. `FindRandomPoint(mesh, { Filter, Center, Radius, Rng })`, honouring `Filter.AgentRadius`
+     (samples only where the agent fits, pushes off the walls); sampling bias documented.
+  4. `FindNearestPoint(mesh, position, filter, searchRadius?)`: the closest point within that
+     plan distance, however far outside `SnapExtents`; cost bounded by the radius.
+  5. `QueryFilter.GoalFallback`: an off-mesh goal gives `Partial` to the closest reachable point
+     instead of `NoGoal`. "Closest reachable" is 3D over the whole reachable region, bounded by
+     `MaxExpansions` (documented on `QueryFilter`).
 
 ### Rulings during the build (2026-09-27)
 - **U-a (clearance reach), ruled after the P4 probe (ticket 15 notes):** no cap by default,
