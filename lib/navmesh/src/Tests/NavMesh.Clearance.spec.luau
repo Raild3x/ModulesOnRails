@@ -417,4 +417,185 @@ return function(t: tiniest)
 			end).fails_with("AgentRadius must be")
 		end)
 	end)
+
+	describe("Barriers inside a triangle (ticket 27)", function()
+		local Clearance = require("../Clearance")
+		local Search = require("../Search")
+		local Snap = require("../Snap")
+		local extents = vector.create(0.5, 4, 0.5)
+		-- The ticket's room: 20 x 10 in one tile, a slab up to z = 9 (a 1-stud gap over it), and
+		-- the sliver (0, 10) (10, 9) (20, 10) spanning the gap. `south` and `slabFrom` open a way
+		-- round under the slab.
+		local function room(south: number, slabFrom: number): any
+			return NavMesh.Build {
+				TileSize = 64,
+				Floors = {
+					Ground = {
+						Walkable = { flat(0, { 0, south, 20, south, 20, 10, 0, 10 }) },
+						Obstacles = { flat(0, { 10, slabFrom, 11, slabFrom, 11, 9, 10, 9 }) },
+					},
+				},
+			}
+		end
+		local function status(mesh: any, a: any, b: any, r: number): (string, number)
+			local path = NavMesh.FindPath(mesh, a, b, { AgentRadius = r })
+			return path.Status, #path.Waypoints
+		end
+
+		test("an end touching a wall is judged where it stands pushed out to r", function()
+			local mesh = room(0, -1)
+			-- 0.2 from the north wall, past the gap: pushed out it stands on the gap's far side.
+			expect(status(mesh, v(14, 9.8), v(15, 5), 0.51)).is("Success")
+			-- 0.5 from the north wall, before the gap: pushed out it is still before it.
+			expect(status(mesh, v(9.6, 9.5), v(15, 5), 0.51)).is("Partial")
+		end)
+
+		test("an end still covered once pushed out has no side, and is not cut off", function()
+			local mesh = room(0, -1)
+			-- 0.05 over the slab's corner: pushed 0.51 from it, it is 0.49 from the north wall.
+			local a = v(10, 9.05)
+			expect(status(mesh, a, v(15, 5), 0.51)).is("Success")
+			local s, count = status(mesh, a, v(12, 9.45), 0.51)
+			expect(s).is("Success")
+			expect(count).is(2)
+		end)
+
+		test("ends with no clear line between them but nothing parting them keep one triangle", function()
+			-- r 0.45 passes the 1-stud gap, though the straight line grazes the slab's corner.
+			local mesh = room(0, -1)
+			local a, b = v(9.6, 9.3), v(11.5, 9.3)
+			expect(Snap.Snap(mesh, a, extents, {})).is(Snap.Snap(mesh, b, extents, {}))
+			local s, count = status(mesh, a, b, 0.45)
+			expect(s).is("Success")
+			expect(count).is(2)
+		end)
+
+		test("a detour leaves the shared triangle and comes back into it", function()
+			local mesh = room(-6, -3)
+			local a, b = v(9.6, 9.5), v(12, 9.45)
+			local t = Snap.Snap(mesh, a, extents, {})
+			local result, corridor = Search.Run(mesh, t, a, t, b, {}, math.huge, 0.51)
+			expect(result).is("Success")
+			expect(corridor[1]).is(t)
+			expect(corridor[#corridor]).is(t)
+			expect(#corridor > 4).with_context(table.concat(corridor, " ")).is_true()
+			for i = 2, #corridor - 1 do
+				expect(corridor[i] >= 1 and corridor[i] <= Storage.TriangleCount(mesh)).is_true()
+			end
+		end)
+
+		test("a goal cut off from the edge it is reached by is passed through, then reached round", function()
+			-- The reversed repro with a way under the slab: entering the sliver from the east, the
+			-- goal is past the gap; the search passes through and goes round to its west edge.
+			local mesh = room(-6, -3)
+			local a, b = v(15, 5), v(9.6, 9.5)
+			local startT = Snap.Snap(mesh, a, extents, {})
+			local goalT = Snap.Snap(mesh, b, extents, {})
+			local result, corridor = Search.Run(mesh, startT, a, goalT, b, {}, math.huge, 0.51)
+			expect(result).is("Success")
+			expect(corridor[1]).is(startT)
+			expect(corridor[#corridor]).is(goalT)
+			for i = 1, #corridor do
+				expect(corridor[i] >= 1 and corridor[i] <= Storage.TriangleCount(mesh)).is_true()
+				expect(corridor[i] ~= goalT or i == #corridor).with_context(table.concat(corridor, " ")).is_true()
+			end
+			local path = NavMesh.FindPath(mesh, a, b, { AgentRadius = 0.51 })
+			expect(path.Status).is("Success")
+			local lowest = math.huge
+			for _, w in path.Waypoints do
+				lowest = math.min(lowest, (w.Position :: any).Z)
+			end
+			expect(lowest < -3).is_true()
+		end)
+
+		test("a Partial from a lone triangle ends at its point nearest the goal", function()
+			local mesh = NavMesh.Build {
+				Floors = { Ground = { Walkable = { flat(0, { 0, 0, 4, 0, 0, 4 }), flat(0, { 10, 0, 14, 0, 14, 4 }) } } },
+			}
+			local path = NavMesh.FindPath(mesh, v(1, 1), v(13, 1), { AgentRadius = 0.1 })
+			expect(path.Status).is("Partial")
+			local last = path.Waypoints[#path.Waypoints].Position :: any
+			expect(math.abs(last.X - 4) < 1e-6 and math.abs(last.Z) < 1e-6).with_context(`{last.X}, {last.Z}`).is_true()
+		end)
+
+		test("remembered walls belong to their own triangle", function()
+			local mesh = room(0, -1)
+			local sliver = Snap.Snap(mesh, v(9.6, 9.5), extents, {})
+			local other = Snap.Snap(mesh, v(15, 5), extents, {})
+			expect(sliver ~= other).is_true()
+			-- The sliver's edge towards (20, 10) from (10, 9): the one the start can't reach.
+			local exit = 0
+			local verts = { Storage.GetTriangle(mesh, sliver) }
+			for e = 1, 3 do
+				local p, q = Storage.GetVertex(mesh, verts[e % 3 + 1]), Storage.GetVertex(mesh, verts[(e + 1) % 3 + 1])
+				if math.max(p.X, q.X) == 20 and math.min(p.X, q.X) == 10 then
+					exit = e
+				end
+			end
+			expect(exit ~= 0).is_true()
+			-- Both orders: each call must see its own triangle's walls, not the last one's.
+			for _ = 1, 2 do
+				expect(Clearance.CutOff(mesh, other, 1, 0.51, 15, 5)).is(false)
+				expect(Clearance.CutOff(mesh, sliver, exit, 0.51, 9.6, 9.5)).is(true)
+				expect(Clearance.CutOff(mesh, other, 1, 0.51, 15, 5)).is(false)
+			end
+		end)
+
+		test("what the barriers catch over fixed queries is pinned (soundness: the flood spec)", function()
+			-- A characterization: every cut-off verdict over fixed random queries, as a count and a
+			-- hash. The FindPath flood spec proves the verdicts sound; this pins how many blocks
+			-- they catch, so a change that loses (or adds) one is seen. Re-pin only after the
+			-- flood spec and tools/navmesh/bench/radius_oracle.luau still pass.
+			math.randomseed(2727)
+			local function rnd(lo: number, hi: number): number
+				return lo + math.random() * (hi - lo)
+			end
+			local obstacles = {}
+			local x = 2
+			while x < 60 do
+				local w, gap = rnd(0.5, 2), rnd(0.5, 2)
+				table.insert(obstacles, flat(0, { x, -1, x + w, -1, x + w, 10 - gap, x, 10 - gap }))
+				x += w + rnd(2, 6)
+			end
+			for _ = 1, 40 do
+				local cx, cz, w, d = rnd(1, 63), rnd(12, 30), rnd(0.3, 2), rnd(0.3, 2)
+				table.insert(
+					obstacles,
+					flat(0, { cx, cz, cx + w, cz + 0.2, cx + w - 0.1, cz + d, cx - 0.2, cz + d - 0.1 })
+				)
+			end
+			local mesh = NavMesh.Build {
+				TileSize = 64,
+				Floors = { Ground = { Walkable = { flat(0, { 0, 0, 64, 0, 64, 32, 0, 32 }) }, Obstacles = obstacles } },
+			}
+			local bits, cuts, parted = {}, 0, 0
+			for i = 1, 600 do
+				local r = rnd(0.2, 1.2)
+				-- Half in the strip along the north of the slabs, where the gap slivers are.
+				local p = v(rnd(0, 64), if i % 2 == 0 then rnd(8, 10) else rnd(0, 32))
+				local tri = Snap.Snap(mesh, p, vector.create(1e-4, 4, 1e-4), {})
+				if tri == 0 then
+					continue
+				end
+				for e = 1, 3 do
+					local cut = Clearance.CutOff(mesh, tri, e, r, p.X, p.Z)
+					table.insert(bits, if cut then "1" else "0")
+					cuts += if cut then 1 else 0
+				end
+				local q = v(p.X + rnd(-4, 4), p.Z + rnd(-0.4, 0.4))
+				if Snap.Snap(mesh, q, vector.create(1e-4, 4, 1e-4), {}) == tri then
+					local apart = Clearance.Separated(mesh, tri, r, p.X, p.Z, q.X, q.Z)
+					table.insert(bits, if apart then "S" else "s")
+					parted += if apart then 1 else 0
+				end
+			end
+			local hash = 0
+			for i, b in bits do
+				hash = (hash * 31 + string.byte(b) * i) % 1000000007
+			end
+			expect(`{#bits} verdicts, {cuts} cut off, {parted} parted, hash {hash}`).is(
+				"1844 verdicts, 221 cut off, 3 parted, hash 553896827"
+			)
+		end)
+	end)
 end
