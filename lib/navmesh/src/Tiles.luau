@@ -17,15 +17,13 @@
 	pixel, overlaps its snapped bounding box (SR13). New hot pixels then never land on a clean
 	tile's border, so clean tiles never change.
 
-	**Rebuild:**
-	- A dirty tile with no active obstacle is rebuilt from its baseline, the exact triangulation
-	  input Build gave it, with no re-snap work. So add-then-remove reproduces a fresh Build
-	  (SR14); re-snapping an obstacle-free baseline also leaves it unchanged, since snap
-	  rounding is idempotent on snapped input.
-	- The other dirty tiles of a floor are snap-rounded together from their baselines plus the
-	  active obstacles over them (local re-snap, ruled 2026-09-26). Each tile gets its own
-	  fragments, the obstacle chains clipped to it, and every snapped vertex on its border.
-	- Every dirty tile is triangulated by Build's own `TriangulateTile`.
+	**Rebuild (v3, 2026-09-28):** the dirty tiles of a floor go through Build's own snap rounding
+	and clipping (`Build.Internal.TileInputs`), fed the floor's authored rings and seams near them
+	plus the active obstacles near them, placed after the static obstacles as if baked. That is
+	exactly the input a fresh Build with those obstacles gives them (SR14), so add-then-remove
+	reproduces a fresh Build. (Before v3, Update re-snapped each tile's already-snapped input,
+	which could round a crossing to the next pixel.) Every dirty tile is triangulated by Build's
+	own `TriangulateTile`.
 
 	**Commit (atomic, SR13/SR14; ticket 22 made it local):**
 	- Everything that can fail runs first, reading the mesh only: the rebuilt tiles are
@@ -55,7 +53,6 @@
 
 local Build = require("./Build")
 local Clearance = require("./Clearance")
-local Quantize = require("./Quantize")
 local Snap = require("./Snap")
 local Storage = require("./Storage")
 local Types = require("./Types")
@@ -64,6 +61,7 @@ local Internal = Build.Internal
 local GRID = Internal.GRID
 local PointKey = Internal.PointKey
 local EDGE_KEY = Internal.EDGE_KEY
+local GROUP_OBSTACLE = Internal.GROUP_OBSTACLE
 local Orient2D = require("../ConstrainedDelaunay").Orient2D
 
 type State = Storage.State
@@ -130,142 +128,91 @@ local function tileRect(s: State, tile: number): (number, number, number, number
 	return math.round(x0 * GRID), math.round(z0 * GRID), math.round(x1 * GRID), math.round(z1 * GRID)
 end
 
--- Whether a tile's rectangle grown by one pixel overlaps the box.
-local function touches(s: State, tile: number, bx0: number, bz0: number, bx1: number, bz1: number): boolean
-	local x0, z0, x1, z1 = tileRect(s, tile)
-	return x0 - 1 <= bx1 and bx0 <= x1 + 1 and z0 - 1 <= bz1 and bz0 <= z1 + 1
+-- Per mesh (weak), per floor: the walkable rings' height surfaces (Build.Internal.MakeSurface),
+-- by ring index. Rings never change after Build, so they are made once, on the first Update;
+-- runtime state, never serialized.
+local surfaceCache: { [State]: { [number]: { [number]: any } } } = setmetatable({}, { __mode = "k" }) :: any
+
+local function surfacesOf(s: State, floor: number): { [number]: any }
+	local floors = surfaceCache[s] or {}
+	surfaceCache[s] = floors
+	local surfaces = floors[floor]
+	if surfaces == nil then
+		surfaces = {}
+		local _, _, _, rings, groups = Storage.GetFloorSources(s, floor)
+		for i, ring in rings do
+			if groups[i] == Internal.GROUP_WALKABLE then
+				surfaces[i] = Internal.MakeSurface(ring)
+			end
+		end
+		floors[floor] = surfaces
+	end
+	return surfaces
 end
 
 type Obstacle = { Id: number, Floor: number, X: { number }, Z: { number }, Box: { number } }
 
--- The triangulation input for each dirty tile of one floor that has active obstacles over it:
--- its baseline and those obstacles snap-rounded together (one re-snap per floor).
+-- The triangulation input for each of a floor's dirty tiles: Build's own snap rounding and
+-- clipping, fed the floor's authored rings and seams within a pixel of those tiles and the active
+-- obstacles there, after the static ones as if baked (SR14). `Build.Internal.TileInputs` says
+-- why that is exactly Build's input.
+-- ponytail: whole rings near the tiles are re-snapped (a planar 8,192-point ring near a change
+-- costs about 19 ms); a per-ring edge index if huge authored rings show up.
 local function reSnap(
 	s: State,
+	floor: number,
 	tiles: { number },
 	obstacles: { Obstacle },
-	tileSize: number
-): { [number]: { Coords: { number }, Edges: { number }, Groups: { number }, Seams: { number } } }
-	local coords, edges = {}, {}
-	local edgeTile, edgeGroup, edgeSeam = {}, {}, {}
-	local obstacleEdges: { [number]: { number } } = {} -- obstacle index -> its input edge ids, in order
+	surfaces: { [number]: any }
+): { [number]: any }
+	local tileSize, _, _, rings, groups = Storage.GetFloorSources(s, floor)
+	local only: { number } = {}
+	local tileAt: { [number]: number } = {}
+	local x0, z0, x1, z1 = math.huge, math.huge, -math.huge, -math.huge
 	for _, tile in tiles do
-		local tc, te, tg, ts = Storage.GetTileSources(s, tile)
-		local offset = #coords // 2
-		table.move(tc, 1, #tc, #coords + 1, coords)
-		for k = 1, #tg do
-			table.insert(edges, offset + te[2 * k - 1])
-			table.insert(edges, offset + te[2 * k])
-			local id = #edges // 2
-			edgeTile[id], edgeGroup[id], edgeSeam[id] = tile, tg[k], ts[k]
+		local tx0, tz0, tx1, tz1 = tileRect(s, tile)
+		table.insert(only, tx0)
+		table.insert(only, tz0)
+		tileAt[PointKey(tx0, tz0)] = tile
+		x0, z0 = math.min(x0, tx0 - 1), math.min(z0, tz0 - 1)
+		x1, z1 = math.max(x1, tx1 + 1), math.max(z1, tz1 + 1)
+	end
+	local sources = {}
+	local function add(ring: any, group: number, surface: any)
+		local bx0, bz0, bx1, bz1 = bounds(ring.X, ring.Z)
+		if bx0 <= x1 and x0 <= bx1 and bz0 <= z1 and z0 <= bz1 then
+			table.insert(sources, { Ring = ring, Group = group, Surface = surface })
 		end
 	end
-	for index, obstacle in obstacles do
-		local offset = #coords // 2
-		local n = #obstacle.X
-		local ids = {}
-		for i = 1, n do
-			table.insert(coords, obstacle.X[i])
-			table.insert(coords, obstacle.Z[i])
+	for r, ring in rings do
+		if groups[r] <= GROUP_OBSTACLE then
+			add(ring, groups[r], surfaces[r])
 		end
-		for i = 1, n do
-			table.insert(edges, offset + i)
-			table.insert(edges, offset + i % n + 1)
-			table.insert(ids, #edges // 2)
+	end
+	for _, obstacle in obstacles do
+		add(obstacle, GROUP_OBSTACLE, nil)
+	end
+	for r, ring in rings do
+		if groups[r] > GROUP_OBSTACLE then
+			add(ring, groups[r], nil)
 		end
-		obstacleEdges[index] = ids
 	end
-	-- The floor's tile lines over everything above, as in Build: an obstacle can also cross a
-	-- line beside a clean tile, and clipping needs every crossing at a snapped vertex.
-	local minX, minZ, maxX, maxZ = math.huge, math.huge, -math.huge, -math.huge
-	for i = 1, #coords, 2 do
-		minX, maxX = math.min(minX, coords[i]), math.max(maxX, coords[i])
-		minZ, maxZ = math.min(minZ, coords[i + 1]), math.max(maxZ, coords[i + 1])
+	local seams = {}
+	for id = 1, Storage.SeamCount(s) do
+		local a, b, ax, az, bx, bz = Storage.GetSeam(s, id)
+		if
+			(a == floor or b == floor)
+			and math.min(ax, bx) <= x1
+			and x0 <= math.max(ax, bx)
+			and math.min(az, bz) <= z1
+			and z0 <= math.max(az, bz)
+		then
+			table.insert(seams, { Id = id, AX = ax, AZ = az, BX = bx, BZ = bz })
+		end
 	end
-	local ix0, ix1 = math.floor(minX / tileSize), math.ceil(maxX / tileSize)
-	local iz0, iz1 = math.floor(minZ / tileSize), math.ceil(maxZ / tileSize)
-	local function addLine(ax: number, az: number, bx: number, bz: number)
-		table.move({ ax, az, bx, bz }, 1, 4, #coords + 1, coords)
-		table.insert(edges, #coords // 2 - 1)
-		table.insert(edges, #coords // 2)
-	end
-	for i = ix0, ix1 do
-		addLine(i * tileSize, iz0 * tileSize, i * tileSize, iz1 * tileSize)
-	end
-	for j = iz0, iz1 do
-		addLine(ix0 * tileSize, j * tileSize, ix1 * tileSize, j * tileSize)
-	end
-
-	local snapped, fragments, source = Quantize.SnapRound(coords, edges)
 	local inputs = {}
-	for _, tile in tiles do
-		inputs[tile] = { Coords = {}, Edges = {}, Groups = {}, Seams = {} }
-	end
-	local function addEdge(input: any, ax: number, az: number, bx: number, bz: number, group: number, seam: number)
-		local c = input.Coords
-		table.move({ ax, az, bx, bz }, 1, 4, #c + 1, c)
-		table.insert(input.Edges, #c // 2 - 1)
-		table.insert(input.Edges, #c // 2)
-		table.insert(input.Groups, group)
-		table.insert(input.Seams, seam)
-	end
-	-- Each baseline edge's fragments go back to its own tile, with its group and seam.
-	local fragFirst, fragLast = {}, {}
-	for f, k in source do
-		if fragFirst[k] == nil then
-			fragFirst[k] = f
-		end
-		fragLast[k] = f
-		local tile = edgeTile[k]
-		if tile then
-			local a, b = fragments[2 * f - 1], fragments[2 * f]
-			addEdge(
-				inputs[tile],
-				snapped[2 * a - 1],
-				snapped[2 * a],
-				snapped[2 * b - 1],
-				snapped[2 * b],
-				edgeGroup[k],
-				edgeSeam[k]
-			)
-		end
-	end
-	-- Each obstacle as its snapped closed chain, clipped to every dirty tile.
-	for index, obstacle in obstacles do
-		local xs, zs = {}, {}
-		for _, k in obstacleEdges[index] do
-			if fragFirst[k] == nil then
-				continue -- a zero-length edge
-			end
-			for f = fragFirst[k], fragLast[k] do
-				local v = fragments[2 * f - 1]
-				table.insert(xs, snapped[2 * v - 1])
-				table.insert(zs, snapped[2 * v])
-			end
-		end
-		for _, tile in tiles do
-			local x0, z0, x1, z1 = tileRect(s, tile)
-			local cx, cz = Internal.ClipToRect(xs, zs, x0, z0, x1, z1)
-			if cx then
-				local n = #cx
-				for i = 1, n do
-					local j = i % n + 1
-					addEdge(inputs[tile], cx[i], cz[i], cx[j], cz[j], Internal.GROUP_OBSTACLE, 0)
-				end
-			end
-		end
-	end
-	-- Every snapped vertex on a tile's border, so neighbours split shared borders alike.
-	for _, tile in tiles do
-		local x0, z0, x1, z1 = tileRect(s, tile)
-		local c = inputs[tile].Coords
-		for v = 1, #snapped // 2 do
-			local x, z = snapped[2 * v - 1], snapped[2 * v]
-			if x >= x0 and x <= x1 and z >= z0 and z <= z1 and (x == x0 or x == x1 or z == z0 or z == z1) then
-				table.insert(c, x)
-				table.insert(c, z)
-			end
-		end
+	for _, input in (Internal.TileInputs(sources, seams, tileSize, only)) do
+		inputs[tileAt[PointKey(input.X0, input.Z0)]] = input
 	end
 	return inputs
 end
@@ -391,11 +338,8 @@ local function prepare(s: State): Plan
 	local rebuilt: { [number]: { any } } = {}
 	local rebuiltInput: { [number]: any } = {}
 	for floor, tiles in dirtyByFloor do
-		local tileSize, defaultArea, areaIds, rings = Storage.GetFloorSources(s, floor)
-		local surfaces = {}
-		for i, ring in rings do
-			surfaces[i] = Internal.MakeSurface(ring)
-		end
+		local _, defaultArea, areaIds = Storage.GetFloorSources(s, floor)
+		local surfaces = surfacesOf(s, floor)
 		local floorData = {
 			Context = `floor '{Storage.GetFloorName(s, floor)}'`,
 			Surfaces = surfaces,
@@ -404,34 +348,12 @@ local function prepare(s: State): Plan
 			Heights = floorHeights[floor],
 			HeightFrom = {},
 		}
-		-- Tiles with an active obstacle over them are re-snapped together; the rest use their
-		-- baseline verbatim.
-		local floorActive: { Obstacle } = active[floor] or {}
-		local covered, overs = {}, {}
+		-- Every dirty tile is re-snapped from the floor's rings, with the active obstacles.
+		local inputs = reSnap(s, floor, tiles, active[floor] or {}, surfaces)
 		for _, tile in tiles do
-			local x0, z0, x1, z1 = tileRect(s, tile)
-			for _, obstacle in floorActive do
-				local b = obstacle.Box
-				if x0 - 1 <= b[3] and b[1] <= x1 + 1 and z0 - 1 <= b[4] and b[2] <= z1 + 1 then
-					table.insert(covered, tile)
-					break
-				end
-			end
-		end
-		for _, obstacle in floorActive do
-			for _, tile in covered do
-				if touches(s, tile, obstacle.Box[1], obstacle.Box[2], obstacle.Box[3], obstacle.Box[4]) then
-					table.insert(overs, obstacle)
-					break
-				end
-			end
-		end
-		local snappedInputs = if #covered > 0 then reSnap(s, covered, overs, tileSize) else {}
-		for _, tile in tiles do
-			local input = snappedInputs[tile]
+			local input = inputs[tile]
 			if input == nil then
-				local tc, te, tg, ts = Storage.GetTileSources(s, tile)
-				input = { Coords = tc, Edges = te, Groups = tg, Seams = ts }
+				error("NavMesh.Update: internal error: a stored tile has no walkable input", 0)
 			end
 			rebuiltInput[tile] = input
 			rebuilt[tile] = Internal.TriangulateTile(input.Coords, input.Edges, input.Groups, floorData)

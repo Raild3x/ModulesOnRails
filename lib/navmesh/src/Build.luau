@@ -569,6 +569,307 @@ local function seamFragments(tc: { number }, te: { number }, ts: { number }): { 
 	return out
 end
 
+-- A ring fed to snap rounding: its winding group, and a walkable ring's surface (whose creases
+-- go in too).
+type SourceRing = { Ring: Ring, Group: number, Surface: Surface? }
+-- One tile's triangulation input: its min corner (grid units), then flat grid points, point
+-- pairs, and a group and seam id (0 = none) per pair.
+type TileInput = {
+	X0: number,
+	Z0: number,
+	Coords: { number },
+	Edges: { number },
+	Groups: { number },
+	Seams: { number },
+}
+
+-- Steps 3-4 (SR2, SR3): snap-rounds the rings, the creases of their surfaces, the seams and the
+-- origin-aligned tile lines together, then clips it all to each tile. Returns the input of every
+-- tile a walkable ring reaches, row by row, and the tile size (`tileSize` nil = adaptive).
+-- `only` (flat tile min corners, grid units) limits which tiles get an input, and the tile
+-- lines to the ones bounding them: no other line meets a pixel centred in those tiles.
+--
+-- Update calls this with only the rings and seams whose boxes come within a pixel of its dirty
+-- tiles (SR14), and gets Build's input for them:
+-- - Snap rounding routes a fragment only through hot pixels centred in its own box, and its ends
+--   are such centres, so every fragment stays in its segment's box: a segment further than a
+--   pixel from a tile never reaches it, however far rounding drifts.
+-- - A hot pixel centred in a tile's closed rectangle is an endpoint or a crossing (marked in
+--   one of at most two pixels) of segments within a pixel of the tile, so they are all given.
+-- - The lines bounding a wanted tile are given, and span every given ring.
+-- Creases are picked the same way, one segment at a time, so a non-planar ring's whole crease
+-- fan isn't re-snapped for a change at one end of it.
+local function tileInputs(
+	sources: { SourceRing },
+	seams: { FloorSeam },
+	tileSize: number?,
+	only: { number }?
+): ({ TileInput }, number)
+	-- Snap rounding, once (SR3): rings, creases and the tile grid lines together. Afterwards
+	-- every ring crosses a tile line only at a snapped vertex on that line, so tiles can be cut
+	-- apart without any new rounding.
+	local coords, edges = {}, {}
+	local ringFirstEdge, ringEdgeCount = {}, {}
+	local ringOffset = {}
+	-- Bounds of every ring, not just the walkable ones: the tile lines must span any place a
+	-- ring can cross them, and obstacles or areas may reach past the walkable surface.
+	local minX, minZ, maxX, maxZ = math.huge, math.huge, -math.huge, -math.huge
+	for r, source in sources do
+		local ring = source.Ring
+		ringOffset[r] = #coords // 2
+		for i = 1, #ring.X do
+			table.insert(coords, ring.X[i])
+			table.insert(coords, ring.Z[i])
+			minX, maxX = math.min(minX, ring.X[i]), math.max(maxX, ring.X[i])
+			minZ, maxZ = math.min(minZ, ring.Z[i]), math.max(maxZ, ring.Z[i])
+		end
+		table.insert(ringFirstEdge, #edges // 2 + 1)
+		table.insert(ringEdgeCount, #ring.X)
+		ringEdges(#ring.X, ringOffset[r], edges)
+	end
+	for _, seam in seams do
+		minX, maxX = math.min(minX, seam.AX, seam.BX), math.max(maxX, seam.AX, seam.BX)
+		minZ, maxZ = math.min(minZ, seam.AZ, seam.BZ), math.max(maxZ, seam.AZ, seam.BZ)
+	end
+	local size: number = tileSize or adaptiveTileSize((maxX - minX) * (maxZ - minZ) / (GRID * GRID), #edges // 2)
+	-- With `only`: whether a box comes within a pixel of a wanted tile.
+	local function wantedNear(bx0: number, bz0: number, bx1: number, bz1: number): boolean
+		for k = 1, #(only :: { number }), 2 do
+			local x0, z0 = (only :: { number })[k], (only :: { number })[k + 1]
+			if bx0 <= x0 + size + 1 and x0 - 1 <= bx1 and bz0 <= z0 + size + 1 and z0 - 1 <= bz1 then
+				return true
+			end
+		end
+		return false
+	end
+	local creaseFirst = #edges // 2 + 1
+	for r, source in sources do
+		local surface = source.Surface
+		if surface == nil or surface.Planar then
+			continue
+		end
+		-- Creases: every interior diagonal of a non-planar ring's surface.
+		local tri = surface.Tri
+		for t = 1, CDT.TriangleCount(tri) do
+			if CDT.GetWinding(tri, t, GROUP_WALKABLE) <= 0 then
+				continue
+			end
+			local verts = { CDT.GetTriangle(tri, t) }
+			for e = 1, 3 do
+				local nb = CDT.GetNeighbor(tri, t, e)
+				if nb > t and CDT.GetCoveringEdgeCount(tri, t, e) == 0 then
+					local a = ringOffset[r] + (CDT.InputVertexOf(tri, verts[e % 3 + 1]) :: number)
+					local b = ringOffset[r] + (CDT.InputVertexOf(tri, verts[(e + 1) % 3 + 1]) :: number)
+					local ax, az, bx, bz = coords[2 * a - 1], coords[2 * a], coords[2 * b - 1], coords[2 * b]
+					if
+						only == nil
+						or wantedNear(math.min(ax, bx), math.min(az, bz), math.max(ax, bx), math.max(az, bz))
+					then
+						table.insert(edges, a)
+						table.insert(edges, b)
+					end
+				end
+			end
+		end
+	end
+	-- Seams: open constraints like creases, so each seam lines up with triangle edges (ticket 16).
+	local seamOfEdge: { [number]: number } = {}
+	for _, seam in seams do
+		table.insert(coords, seam.AX)
+		table.insert(coords, seam.AZ)
+		table.insert(coords, seam.BX)
+		table.insert(coords, seam.BZ)
+		table.insert(edges, #coords // 2 - 1)
+		table.insert(edges, #coords // 2)
+		seamOfEdge[#edges // 2] = seam.Id
+	end
+	local creaseLast = #edges // 2
+	-- The tile grid, aligned to the world origin, as full-length lines over the rings.
+	local ix0, ix1 = math.floor(minX / size), math.ceil(maxX / size)
+	local iz0, iz1 = math.floor(minZ / size), math.ceil(maxZ / size)
+	-- The tiles to fill (by index), their index bounds, and the lines bounding them.
+	local wanted: { [number]: boolean } = {}
+	local lineX: { [number]: boolean } = {}
+	local lineZ: { [number]: boolean } = {}
+	local ti0, tj0, ti1, tj1 = ix0, iz0, ix1 - 1, iz1 - 1
+	if only then
+		ti0, tj0, ti1, tj1 = math.huge, math.huge, -math.huge, -math.huge
+		for k = 1, #only, 2 do
+			local i, j = only[k] // size, only[k + 1] // size
+			wanted[pointKey(i, j)] = true
+			lineX[i], lineX[i + 1], lineZ[j], lineZ[j + 1] = true, true, true, true
+			ti0, tj0, ti1, tj1 = math.min(ti0, i), math.min(tj0, j), math.max(ti1, i), math.max(tj1, j)
+		end
+	end
+	local function addLine(ax: number, az: number, bx: number, bz: number)
+		table.insert(coords, ax)
+		table.insert(coords, az)
+		table.insert(coords, bx)
+		table.insert(coords, bz)
+		table.insert(edges, #coords // 2 - 1)
+		table.insert(edges, #coords // 2)
+	end
+	for i = ix0, ix1 do
+		if only == nil or lineX[i] then
+			addLine(i * size, iz0 * size, i * size, iz1 * size)
+		end
+	end
+	for j = iz0, iz1 do
+		if only == nil or lineZ[j] then
+			addLine(ix0 * size, j * size, ix1 * size, j * size)
+		end
+	end
+
+	local snapped, fragments, source = Quantize.SnapRound(coords, edges)
+	-- The fragments of one source edge are contiguous and in order along it.
+	local fragFirst, fragLast = {}, {}
+	for f, k in source do
+		if fragFirst[k] == nil then
+			fragFirst[k] = f
+		end
+		fragLast[k] = f
+	end
+	-- Each ring as its snapped closed chain (grid coordinates).
+	local chainX, chainZ = {}, {}
+	for r = 1, #sources do
+		local xs, zs = {}, {}
+		for k = ringFirstEdge[r], ringFirstEdge[r] + ringEdgeCount[r] - 1 do
+			for f = fragFirst[k], fragLast[k] do
+				local v = fragments[2 * f - 1]
+				table.insert(xs, snapped[2 * v - 1])
+				table.insert(zs, snapped[2 * v])
+			end
+		end
+		chainX[r], chainZ[r] = xs, zs
+	end
+	-- Bucket each ring, crease fragment and on-line vertex into every tile its bounding box
+	-- touches (closed rectangles), so each tile only looks at its own content.
+	local columns = ix1 - ix0
+	local tileRings: { [number]: { number } } = {}
+	local tileCreases: { [number]: { number } } = {}
+	local tileBorder: { [number]: { number } } = {}
+	local function bucket(
+		lists: { [number]: { number } },
+		item: number,
+		bx0: number,
+		bz0: number,
+		bx1: number,
+		bz1: number
+	)
+		-- A bound on a tile line belongs to the tiles on both sides of it.
+		local i0 = math.max(ti0, math.ceil(bx0 / size) - 1)
+		local i1 = math.min(ti1, math.floor(bx1 / size))
+		local j0 = math.max(tj0, math.ceil(bz0 / size) - 1)
+		local j1 = math.min(tj1, math.floor(bz1 / size))
+		for j = j0, j1 do
+			for i = i0, i1 do
+				local index = (j - iz0) * columns + (i - ix0) + 1
+				local list = lists[index]
+				if list == nil then
+					list = {}
+					lists[index] = list
+				end
+				table.insert(list, item)
+			end
+		end
+	end
+	for r = 1, #sources do
+		local xs, zs = chainX[r], chainZ[r]
+		local bx0, bz0, bx1, bz1 = math.huge, math.huge, -math.huge, -math.huge
+		for i = 1, #xs do
+			bx0, bx1 = math.min(bx0, xs[i]), math.max(bx1, xs[i])
+			bz0, bz1 = math.min(bz0, zs[i]), math.max(bz1, zs[i])
+		end
+		bucket(tileRings, r, bx0, bz0, bx1, bz1)
+	end
+	for f = 1, #source do
+		local k = source[f]
+		if k >= creaseFirst and k <= creaseLast then
+			local a, b = fragments[2 * f - 1], fragments[2 * f]
+			local ax, az, bx, bz = snapped[2 * a - 1], snapped[2 * a], snapped[2 * b - 1], snapped[2 * b]
+			bucket(tileCreases, f, math.min(ax, bx), math.min(az, bz), math.max(ax, bx), math.max(az, bz))
+		end
+	end
+	-- Snapped vertices on any tile line: each tile adds those on its border, so both tiles on
+	-- a shared border split it at the same points (no T-junctions).
+	for v = 1, #snapped // 2 do
+		local x, z = snapped[2 * v - 1], snapped[2 * v]
+		if x % size == 0 or z % size == 0 then
+			bucket(tileBorder, v, x, z, x, z)
+		end
+	end
+
+	-- 4. Per tile: the clipped rings, creases, tile rectangle and border vertices.
+	local inputs: { TileInput } = {}
+	for tj = tj0, tj1 do
+		for ti = ti0, ti1 do
+			if only and not wanted[pointKey(ti, tj)] then
+				continue
+			end
+			local x0, z0 = ti * size, tj * size
+			local x1, z1 = x0 + size, z0 + size
+			local tc, te, tg, ts = {}, {}, {}, {}
+			local hasWalkable = false
+			local function addPoints(xs: { number }, zs: { number }, group: number?)
+				local offset = #tc // 2
+				for i = 1, #xs do
+					table.insert(tc, xs[i])
+					table.insert(tc, zs[i])
+				end
+				if group ~= nil then
+					ringEdges(#xs, offset, te)
+					for _ = 1, #xs do
+						table.insert(tg, group)
+						table.insert(ts, 0)
+					end
+				end
+			end
+			local index = (tj - iz0) * columns + (ti - ix0) + 1
+			for _, r in tileRings[index] or {} do
+				local xs, zs = clipToRect(chainX[r], chainZ[r], x0, z0, x1, z1)
+				if xs then
+					hasWalkable = hasWalkable or sources[r].Group == GROUP_WALKABLE
+					addPoints(xs, zs, sources[r].Group)
+				end
+			end
+			if not hasWalkable then
+				continue
+			end
+			for _, f in tileCreases[index] or {} do
+				local a, b = fragments[2 * f - 1], fragments[2 * f]
+				local mx, mz = (snapped[2 * a - 1] + snapped[2 * b - 1]) / 2, (snapped[2 * a] + snapped[2 * b]) / 2
+				if x0 <= mx and mx <= x1 and z0 <= mz and mz <= z1 then
+					addPoints({ snapped[2 * a - 1], snapped[2 * b - 1] }, { snapped[2 * a], snapped[2 * b] })
+					table.insert(te, #tc // 2 - 1)
+					table.insert(te, #tc // 2)
+					table.insert(tg, GROUP_OPEN)
+					table.insert(ts, seamOfEdge[source[f]] or 0)
+				end
+			end
+			addPoints({ x0, x1, x1, x0 }, { z0, z0, z1, z1 }, GROUP_TILE)
+			-- Sorted by position: snapped vertex ids depend on which rings went in, and the
+			-- triangulator's order (so its choice among cocircular points) on its input's order.
+			local border = {}
+			for _, v in tileBorder[index] or {} do
+				local x, z = snapped[2 * v - 1], snapped[2 * v]
+				if x == x0 or x == x1 or z == z0 or z == z1 then
+					table.insert(border, { x, z })
+				end
+			end
+			table.sort(border, function(p: { number }, q: { number }): boolean
+				return p[1] < q[1] or (p[1] == q[1] and p[2] < q[2])
+			end)
+			local borderX, borderZ = {}, {}
+			for i, p in border do
+				borderX[i], borderZ[i] = p[1], p[2]
+			end
+			addPoints(borderX, borderZ)
+			table.insert(inputs, { X0 = x0, Z0 = z0, Coords = tc, Edges = te, Groups = tg, Seams = ts })
+		end
+	end
+	return inputs, size
+end
+
 local function buildFloor(
 	s: Storage.State,
 	name: string,
@@ -600,182 +901,29 @@ local function buildFloor(
 	end
 
 	-- 2. Height surfaces.
+	local sources: { SourceRing } = {}
 	local surfaces: { Surface } = {}
 	for i, ring in walkable do
 		surfaces[i] = makeSurface(ring)
-	end
-
-	-- 3. Snap rounding, once per floor (SR3): rings, creases and the tile grid lines together.
-	-- Afterwards every ring crosses a tile line only at a snapped vertex on that line, so tiles
-	-- can be cut apart without any new rounding.
-	local coords, edges = {}, {}
-	local ringFirstEdge, ringEdgeCount, ringGroup = {}, {}, {}
-	-- Bounds of every ring, not just the walkable ones: the tile lines must span any place a
-	-- ring can cross them, and obstacles or areas may reach past the walkable surface.
-	local minX, minZ, maxX, maxZ = math.huge, math.huge, -math.huge, -math.huge
-	local function addRing(ring: Ring, group: number): number
-		local offset = #coords // 2
-		for i = 1, #ring.X do
-			table.insert(coords, ring.X[i])
-			table.insert(coords, ring.Z[i])
-			minX, maxX = math.min(minX, ring.X[i]), math.max(maxX, ring.X[i])
-			minZ, maxZ = math.min(minZ, ring.Z[i]), math.max(maxZ, ring.Z[i])
-		end
-		table.insert(ringFirstEdge, #edges // 2 + 1)
-		table.insert(ringEdgeCount, #ring.X)
-		table.insert(ringGroup, group)
-		ringEdges(#ring.X, offset, edges)
-		return offset
-	end
-	local walkableOffsets = {}
-	for i, ring in walkable do
-		walkableOffsets[i] = addRing(ring, GROUP_WALKABLE)
+		table.insert(sources, { Ring = ring, Group = GROUP_WALKABLE, Surface = surfaces[i] })
 	end
 	for _, ring in obstacles do
-		addRing(ring, GROUP_OBSTACLE)
+		table.insert(sources, { Ring = ring, Group = GROUP_OBSTACLE })
 	end
 	for i, ring in areas do
-		addRing(ring, GROUP_FIRST_AREA + i - 1)
-	end
-	for _, seam in seams do
-		minX, maxX = math.min(minX, seam.AX, seam.BX), math.max(maxX, seam.AX, seam.BX)
-		minZ, maxZ = math.min(minZ, seam.AZ, seam.BZ), math.max(maxZ, seam.AZ, seam.BZ)
-	end
-	local tileSize: number = explicitTileSize
-		or adaptiveTileSize((maxX - minX) * (maxZ - minZ) / (GRID * GRID), #edges // 2)
-	local creaseFirst = #edges // 2 + 1
-	for i, surface in surfaces do
-		if surface.Planar then
-			continue
-		end
-		-- Creases: every interior diagonal of a non-planar ring's surface.
-		local tri = surface.Tri
-		for t = 1, CDT.TriangleCount(tri) do
-			if CDT.GetWinding(tri, t, GROUP_WALKABLE) <= 0 then
-				continue
-			end
-			local verts = { CDT.GetTriangle(tri, t) }
-			for e = 1, 3 do
-				local nb = CDT.GetNeighbor(tri, t, e)
-				if nb > t and CDT.GetCoveringEdgeCount(tri, t, e) == 0 then
-					table.insert(edges, walkableOffsets[i] + (CDT.InputVertexOf(tri, verts[e % 3 + 1]) :: number))
-					table.insert(edges, walkableOffsets[i] + (CDT.InputVertexOf(tri, verts[(e + 1) % 3 + 1]) :: number))
-				end
-			end
-		end
-	end
-	-- Seams: open constraints like creases, so each seam lines up with triangle edges (ticket 16).
-	local seamOfEdge: { [number]: number } = {}
-	for _, seam in seams do
-		table.insert(coords, seam.AX)
-		table.insert(coords, seam.AZ)
-		table.insert(coords, seam.BX)
-		table.insert(coords, seam.BZ)
-		table.insert(edges, #coords // 2 - 1)
-		table.insert(edges, #coords // 2)
-		seamOfEdge[#edges // 2] = seam.Id
-	end
-	local creaseLast = #edges // 2
-	-- The tile grid, aligned to the world origin, as full-length lines over the floor.
-	local ix0, ix1 = math.floor(minX / tileSize), math.ceil(maxX / tileSize)
-	local iz0, iz1 = math.floor(minZ / tileSize), math.ceil(maxZ / tileSize)
-	local function addLine(ax: number, az: number, bx: number, bz: number)
-		table.insert(coords, ax)
-		table.insert(coords, az)
-		table.insert(coords, bx)
-		table.insert(coords, bz)
-		table.insert(edges, #coords // 2 - 1)
-		table.insert(edges, #coords // 2)
-	end
-	for i = ix0, ix1 do
-		addLine(i * tileSize, iz0 * tileSize, i * tileSize, iz1 * tileSize)
-	end
-	for j = iz0, iz1 do
-		addLine(ix0 * tileSize, j * tileSize, ix1 * tileSize, j * tileSize)
+		table.insert(sources, { Ring = ring, Group = GROUP_FIRST_AREA + i - 1 })
 	end
 
-	local snapped, fragments, source = Quantize.SnapRound(coords, edges)
-	-- The fragments of one source edge are contiguous and in order along it.
-	local fragFirst, fragLast = {}, {}
-	for f, k in source do
-		if fragFirst[k] == nil then
-			fragFirst[k] = f
-		end
-		fragLast[k] = f
-	end
-	-- Each ring as its snapped closed chain (grid coordinates).
-	local chainX, chainZ = {}, {}
-	for r = 1, #ringGroup do
-		local xs, zs = {}, {}
-		for k = ringFirstEdge[r], ringFirstEdge[r] + ringEdgeCount[r] - 1 do
-			for f = fragFirst[k], fragLast[k] do
-				local v = fragments[2 * f - 1]
-				table.insert(xs, snapped[2 * v - 1])
-				table.insert(zs, snapped[2 * v])
-			end
-		end
-		chainX[r], chainZ[r] = xs, zs
-	end
-	-- Bucket each ring, crease fragment and on-line vertex into every tile its bounding box
-	-- touches (closed rectangles), so each tile only looks at its own content.
-	local columns = ix1 - ix0
-	local tileRings: { [number]: { number } } = {}
-	local tileCreases: { [number]: { number } } = {}
-	local tileBorder: { [number]: { number } } = {}
-	local function bucket(
-		lists: { [number]: { number } },
-		item: number,
-		bx0: number,
-		bz0: number,
-		bx1: number,
-		bz1: number
-	)
-		-- A bound on a tile line belongs to the tiles on both sides of it.
-		local i0 = math.max(ix0, math.ceil(bx0 / tileSize) - 1)
-		local i1 = math.min(ix1 - 1, math.floor(bx1 / tileSize))
-		local j0 = math.max(iz0, math.ceil(bz0 / tileSize) - 1)
-		local j1 = math.min(iz1 - 1, math.floor(bz1 / tileSize))
-		for j = j0, j1 do
-			for i = i0, i1 do
-				local index = (j - iz0) * columns + (i - ix0) + 1
-				local list = lists[index]
-				if list == nil then
-					list = {}
-					lists[index] = list
-				end
-				table.insert(list, item)
-			end
-		end
-	end
-	for r = 1, #ringGroup do
-		local xs, zs = chainX[r], chainZ[r]
-		local bx0, bz0, bx1, bz1 = math.huge, math.huge, -math.huge, -math.huge
-		for i = 1, #xs do
-			bx0, bx1 = math.min(bx0, xs[i]), math.max(bx1, xs[i])
-			bz0, bz1 = math.min(bz0, zs[i]), math.max(bz1, zs[i])
-		end
-		bucket(tileRings, r, bx0, bz0, bx1, bz1)
-	end
-	for f = 1, #source do
-		local k = source[f]
-		if k >= creaseFirst and k <= creaseLast then
-			local a, b = fragments[2 * f - 1], fragments[2 * f]
-			local ax, az, bx, bz = snapped[2 * a - 1], snapped[2 * a], snapped[2 * b - 1], snapped[2 * b]
-			bucket(tileCreases, f, math.min(ax, bx), math.min(az, bz), math.max(ax, bx), math.max(az, bz))
-		end
-	end
-	-- Snapped vertices on any tile line: each tile adds those on its border, so both tiles on
-	-- a shared border split it at the same points (no T-junctions).
-	for v = 1, #snapped // 2 do
-		local x, z = snapped[2 * v - 1], snapped[2 * v]
-		if x % tileSize == 0 or z % tileSize == 0 then
-			bucket(tileBorder, v, x, z, x, z)
-		end
-	end
+	-- 3-4. Snap rounding and the tile inputs.
+	local inputs, tileSize = tileInputs(sources, seams, explicitTileSize, nil)
 
-	-- 4-5. Per tile: triangulate, keep, heights, copy out.
+	-- 5-6. Per tile: triangulate, keep, heights, copy out.
 	local floorId = Storage.InsertFloor(s, name)
-	Storage.SetFloorSources(s, floorId, tileSize, defaultArea, areaIds, walkable)
+	local rings, groups = {}, {}
+	for i, source in sources do
+		rings[i], groups[i] = source.Ring, source.Group
+	end
+	Storage.SetFloorSources(s, floorId, tileSize, defaultArea, areaIds, rings, groups)
 	local floorData: FloorData = {
 		Context = floorContext,
 		Surfaces = surfaces,
@@ -786,76 +934,16 @@ local function buildFloor(
 	}
 	local meshVertex: { [number]: number } = {} -- grid point key -> mesh vertex (interned per floor)
 	local openEdges: { [number]: number } = {} -- directed edge key -> triangle * 4 + edge
-	for tj = iz0, iz1 - 1 do
-		for ti = ix0, ix1 - 1 do
-			local x0, z0 = ti * tileSize, tj * tileSize
-			local x1, z1 = x0 + tileSize, z0 + tileSize
-			local tc, te, tg, ts = {}, {}, {}, {}
-			local hasWalkable = false
-			local function addPoints(xs: { number }, zs: { number }, group: number?)
-				local offset = #tc // 2
-				for i = 1, #xs do
-					table.insert(tc, xs[i])
-					table.insert(tc, zs[i])
-				end
-				if group ~= nil then
-					ringEdges(#xs, offset, te)
-					for _ = 1, #xs do
-						table.insert(tg, group)
-						table.insert(ts, 0)
-					end
-				end
-			end
-			local index = (tj - iz0) * columns + (ti - ix0) + 1
-			for _, r in tileRings[index] or {} do
-				local xs, zs = clipToRect(chainX[r], chainZ[r], x0, z0, x1, z1)
-				if xs then
-					hasWalkable = hasWalkable or ringGroup[r] == GROUP_WALKABLE
-					addPoints(xs, zs, ringGroup[r])
-				end
-			end
-			if not hasWalkable then
-				continue
-			end
-			for _, f in tileCreases[index] or {} do
-				local a, b = fragments[2 * f - 1], fragments[2 * f]
-				local mx, mz = (snapped[2 * a - 1] + snapped[2 * b - 1]) / 2, (snapped[2 * a] + snapped[2 * b]) / 2
-				if x0 <= mx and mx <= x1 and z0 <= mz and mz <= z1 then
-					addPoints({ snapped[2 * a - 1], snapped[2 * b - 1] }, { snapped[2 * a], snapped[2 * b] })
-					table.insert(te, #tc // 2 - 1)
-					table.insert(te, #tc // 2)
-					table.insert(tg, GROUP_OPEN)
-					table.insert(ts, seamOfEdge[source[f]] or 0)
-				end
-			end
-			addPoints({ x0, x1, x1, x0 }, { z0, z0, z1, z1 }, GROUP_TILE)
-			local borderX, borderZ = {}, {}
-			for _, v in tileBorder[index] or {} do
-				local x, z = snapped[2 * v - 1], snapped[2 * v]
-				if x == x0 or x == x1 or z == z0 or z == z1 then
-					table.insert(borderX, x)
-					table.insert(borderZ, z)
-				end
-			end
-			addPoints(borderX, borderZ)
-
-			local triangles = triangulateTile(tc, te, tg, floorData)
-			if #triangles == 0 then
-				continue
-			end
-			local tile = Storage.InsertTile(s, floorId, x0 / GRID, z0 / GRID, x1 / GRID, z1 / GRID)
-			Storage.SetTileSources(s, tile, tc, te, tg, ts)
-			copyOut(
-				s,
-				floorContext,
-				tile,
-				triangles,
-				floorData.Heights,
-				meshVertex,
-				openEdges,
-				seamFragments(tc, te, ts)
-			)
+	for _, input in inputs do
+		local tc, te, tg, ts = input.Coords, input.Edges, input.Groups, input.Seams
+		local triangles = triangulateTile(tc, te, tg, floorData)
+		if #triangles == 0 then
+			continue
 		end
+		local x0, z0 = input.X0, input.Z0
+		local tile =
+			Storage.InsertTile(s, floorId, x0 / GRID, z0 / GRID, (x0 + tileSize) / GRID, (z0 + tileSize) / GRID)
+		copyOut(s, floorContext, tile, triangles, floorData.Heights, meshVertex, openEdges, seamFragments(tc, te, ts))
 	end
 
 	linkOpenEdges(s, openEdges)
@@ -1114,12 +1202,14 @@ end
 -- The pieces `Update` (Tiles.luau) reuses, so a rebuilt tile goes through exactly Build's steps.
 Build.Internal = {
 	GRID = GRID,
+	GROUP_WALKABLE = GROUP_WALKABLE,
 	GROUP_OBSTACLE = GROUP_OBSTACLE,
 	EDGE_KEY = EDGE_KEY,
 	Fail = fail,
 	Fmt = fmt,
 	QuantizeRing = quantizeRing,
 	MakeSurface = makeSurface,
+	TileInputs = tileInputs,
 	TriangulateTile = triangulateTile,
 	CopyOut = copyOut,
 	LinkOpenEdges = linkOpenEdges,

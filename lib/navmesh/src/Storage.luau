@@ -33,10 +33,9 @@
 	*open*: no neighbour, yet not a wall. Each tile has a stamp that `IsPathValid` compares.
 
 	**Rebuild sources (ticket 18):** what `Update` needs to rebuild a tile exactly as Build did.
-	- Per tile: the exact triangulation input Build fed it (grid coordinates, constraint edges,
-	  their winding groups and seam ids).
-	- Per floor: its tile size, default area, area ids by group, and walkable rings (grid X/Z
-	  with heights) for the height surfaces.
+	- Per floor: its tile size, default area, area ids by group, and every authored ring
+	  (walkable, obstacle and area; grid X/Z with heights and a winding group), quantized but not
+	  snap-rounded. Update re-snaps them near its dirty tiles, exactly as Build did (SR14).
 	- Seam pieces: the (triangle, edge) pairs lying on each seam.
 	- Dynamic obstacles: the live records in id order (slot 1..`ObstacleCount`), each with its
 	  id, floor, quantized ring and state (pending or committed), plus the next id to hand out.
@@ -87,15 +86,7 @@ export type State = {
 	TileFirst: { number }, -- first triangle of the tile's range
 	TileTriangles: { number }, -- triangle count of the tile's range
 	TileStamp: { number },
-	-- Rebuild sources (ticket 18): per tile, ranges into the flat source arrays.
-	TileSrcCoordFirst: { number },
-	TileSrcCoordCount: { number }, -- points (two numbers each)
-	TileSrcEdgeFirst: { number },
-	TileSrcEdgeCount: { number }, -- edges (two ids each, a group and a seam id)
-	SrcCoords: { number },
-	SrcEdges: { number },
-	SrcGroups: { number },
-	SrcSeams: { number },
+	-- Rebuild sources (ticket 18).
 	-- Per floor.
 	FloorTileSize: { number }, -- grid units
 	FloorDefaultArea: { number },
@@ -109,6 +100,7 @@ export type State = {
 	RingX: { number },
 	RingZ: { number },
 	RingY: { number },
+	RingGroup: { number }, -- per ring: its winding group (Build's GROUP_*)
 	-- Seam pieces.
 	PieceSeam: { number },
 	PieceTri: { number },
@@ -208,14 +200,6 @@ function Storage.New(): State
 		TileFirst = {},
 		TileTriangles = {},
 		TileStamp = {},
-		TileSrcCoordFirst = {},
-		TileSrcCoordCount = {},
-		TileSrcEdgeFirst = {},
-		TileSrcEdgeCount = {},
-		SrcCoords = {},
-		SrcEdges = {},
-		SrcGroups = {},
-		SrcSeams = {},
 		FloorTileSize = {},
 		FloorDefaultArea = {},
 		FloorAreaFirst = {},
@@ -228,6 +212,7 @@ function Storage.New(): State
 		RingX = {},
 		RingZ = {},
 		RingY = {},
+		RingGroup = {},
 		PieceSeam = {},
 		PieceTri = {},
 		PieceEdge = {},
@@ -589,44 +574,10 @@ end
 
 --[=[
 	@within NavMeshStorage
-	Records tile `tile`'s triangulation input (see the class docs). `coords` are flat grid
-	points; `edges` flat 1-based point pairs, with one group and one seam id (0 = none) each.
-]=]
-function Storage.SetTileSources(
-	s: State,
-	tile: number,
-	coords: { number },
-	edges: { number },
-	groups: { number },
-	seams: { number }
-)
-	s.TileSrcCoordFirst[tile] = #s.SrcCoords + 1
-	s.TileSrcCoordCount[tile] = #coords // 2
-	table.move(coords, 1, #coords, #s.SrcCoords + 1, s.SrcCoords)
-	s.TileSrcEdgeFirst[tile] = #s.SrcGroups + 1
-	s.TileSrcEdgeCount[tile] = #groups
-	table.move(edges, 1, #edges, #s.SrcEdges + 1, s.SrcEdges)
-	table.move(groups, 1, #groups, #s.SrcGroups + 1, s.SrcGroups)
-	table.move(seams, 1, #seams, #s.SrcSeams + 1, s.SrcSeams)
-end
-
---[=[
-	@within NavMeshStorage
-	Tile `tile`'s triangulation input, as fresh arrays: (coords, edges, groups, seams).
-]=]
-function Storage.GetTileSources(s: State, tile: number): ({ number }, { number }, { number }, { number })
-	local c0, cn = s.TileSrcCoordFirst[tile], s.TileSrcCoordCount[tile]
-	local e0, en = s.TileSrcEdgeFirst[tile], s.TileSrcEdgeCount[tile]
-	return table.move(s.SrcCoords, c0, c0 + 2 * cn - 1, 1, table.create(2 * cn)),
-		table.move(s.SrcEdges, 2 * e0 - 1, 2 * (e0 + en - 1), 1, table.create(2 * en)),
-		table.move(s.SrcGroups, e0, e0 + en - 1, 1, table.create(en)),
-		table.move(s.SrcSeams, e0, e0 + en - 1, 1, table.create(en))
-end
-
---[=[
-	@within NavMeshStorage
 	Records floor `floor`'s rebuild data: tile size (grid units), default area, area ids by group
-	(the i-th area group's id), and walkable rings (each { X, Z } grid, { Y } heights).
+	(the i-th area group's id), and its authored rings (each { X, Z } grid, { Y } heights),
+	quantized but not snap-rounded, with a winding group each: walkable, then obstacles, then
+	areas.
 ]=]
 function Storage.SetFloorSources(
 	s: State,
@@ -634,7 +585,8 @@ function Storage.SetFloorSources(
 	tileSize: number,
 	defaultArea: number,
 	areaIds: { number },
-	rings: { { X: { number }, Z: { number }, Y: { number } } }
+	rings: { { X: { number }, Z: { number }, Y: { number } } },
+	groups: { number }
 )
 	s.FloorTileSize[floor] = tileSize
 	s.FloorDefaultArea[floor] = defaultArea
@@ -650,16 +602,23 @@ function Storage.SetFloorSources(
 		table.move(ring.Z, 1, #ring.Z, #s.RingZ + 1, s.RingZ)
 		table.move(ring.Y, 1, #ring.Y, #s.RingY + 1, s.RingY)
 	end
+	table.move(groups, 1, #groups, #s.RingGroup + 1, s.RingGroup)
 end
 
 --[=[
 	@within NavMeshStorage
-	Floor `floor`'s rebuild data: (tileSize, defaultArea, areaIds, rings), as fresh tables.
+	Floor `floor`'s rebuild data: (tileSize, defaultArea, areaIds, rings, groups), as fresh tables.
 ]=]
 function Storage.GetFloorSources(
 	s: State,
 	floor: number
-): (number, number, { number }, { { X: { number }, Z: { number }, Y: { number } } })
+): (
+	number,
+	number,
+	{ number },
+	{ { X: { number }, Z: { number }, Y: { number } } },
+	{ number }
+)
 	local a0, an = s.FloorAreaFirst[floor], s.FloorAreaCount[floor]
 	local rings = {}
 	for r = s.FloorRingFirst[floor], s.FloorRingFirst[floor] + s.FloorRingCount[floor] - 1 do
@@ -670,10 +629,12 @@ function Storage.GetFloorSources(
 			Y = table.move(s.RingY, p0, p0 + pn - 1, 1, table.create(pn)),
 		})
 	end
+	local r0, rn = s.FloorRingFirst[floor], s.FloorRingCount[floor]
 	return s.FloorTileSize[floor],
 		s.FloorDefaultArea[floor],
 		table.move(s.AreaIds, a0, a0 + an - 1, 1, table.create(an)),
-		rings
+		rings,
+		table.move(s.RingGroup, r0, r0 + rn - 1, 1, table.create(rn))
 end
 
 function Storage.SeamCount(s: State): number
@@ -961,14 +922,6 @@ function Storage.ShellFrom(s: State): State
 			"FloorNames",
 			"TileFloor",
 			"TileBounds",
-			"TileSrcCoordFirst",
-			"TileSrcCoordCount",
-			"TileSrcEdgeFirst",
-			"TileSrcEdgeCount",
-			"SrcCoords",
-			"SrcEdges",
-			"SrcGroups",
-			"SrcSeams",
 			"FloorTileSize",
 			"FloorDefaultArea",
 			"FloorAreaFirst",
@@ -981,6 +934,7 @@ function Storage.ShellFrom(s: State): State
 			"RingX",
 			"RingZ",
 			"RingY",
+			"RingGroup",
 			"SeamFloorA",
 			"SeamFloorB",
 			"SeamEnds",

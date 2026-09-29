@@ -56,8 +56,14 @@ A layered 2.5D navigation mesh for pathfinding queries, built on ConstrainedDela
   `Update`.
 - **Dirty tile**: a tile an `Update` must rebuild: its rectangle, grown by one grid pixel,
   overlaps a changed obstacle.
-- **Baseline**: the exact triangulation input Build gave a tile. Rebuilding from it, not from
-  the tile's current state, is what makes removing an obstacle exact.
+- **Authored rings**: a floor's walkable, obstacle and area rings, quantized to the grid but
+  not snap-rounded, each with its winding group. `Update` re-snaps the ones near its dirty
+  tiles with the active obstacles, through Build's own code, so a rebuilt tile is exactly what
+  a fresh Build would make (format v3). Before v3 it re-snapped each tile's stored *baseline*
+  (the snapped input Build gave it), which could land a crossing one grid pixel off.
+- **Barrier** (ticket 27): a chain of an agent's radius-r wall discs inside one triangle,
+  closed at vertices or on wall edges. It can cut a path's start or goal off from an edge of
+  its own triangle, which the search checks at query time.
 - **Stamp**: a per-tile counter that changes when anything a path through that tile relies on
   changes. `IsPathValid` compares a path's stamps against the current ones.
 - **Bake**: a mesh serialized to a versioned buffer, to ship precomputed.

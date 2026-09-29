@@ -641,6 +641,44 @@ return function(t: tiniest)
 			expect(differsFromFresh(mesh, NavMesh.Build(desc))).with_context("removed").is("")
 		end)
 
+		test("an update equals a fresh Build where the obstacle crosses static slivers (fixed seeds)", function()
+			-- Update re-snaps the floor's authored rings near its dirty tiles, not the snapped ones:
+			-- re-snapping a snapped sliver can round its crossing with the crate to the next pixel
+			-- (a random search hit that in 79 of 300 cases before the fix).
+			math.randomseed(18)
+			local function rnd(lo: number, hi: number): number
+				return lo + math.random() * (hi - lo)
+			end
+			local crate = flat(0, { 10, 10, 13, 10, 13, 13, 10, 13 })
+			local failures, built = {}, 0
+			for trial = 1, 60 do
+				local ax, az, bx, bz = rnd(0.3, 1.5), rnd(6, 16), rnd(11, 12.5), rnd(10.5, 12.5)
+				local w = rnd(0.2, 0.6)
+				local desc: any = {
+					TileSize = 4,
+					Floors = {
+						Ground = {
+							Walkable = { flat(0, { 0, 0, 16, 0, 16, 20, 0, 20 }) },
+							Obstacles = { flat(0, { ax, az, bx, bz, bx, bz + w, ax, az + w }) },
+						},
+					},
+				}
+				local ok, mesh = pcall(NavMesh.Build, desc)
+				if not ok then
+					continue
+				end
+				built += 1
+				NavMesh.AddObstacle(mesh, "Ground", crate)
+				NavMesh.Update(mesh)
+				local d = differsFromFresh(mesh, NavMesh.Build(baked(desc, "Ground", { crate })))
+				if d ~= "" then
+					table.insert(failures, `trial {trial}: {d}`)
+				end
+			end
+			expect(table.concat(failures, "; ")).is("")
+			expect(built >= 50).with_context(`{built} built`).is_true()
+		end)
+
 		test("a wall vertex a clean tile shares with a rebuilt one keeps its flag (ticket 22)", function()
 			-- A static wedge touches the tile line x = 16 at one vertex, (16, 12), from the west: its
 			-- walls are all in the clean west tile. The crate dirties only the east tile, whose
@@ -775,7 +813,7 @@ return function(t: tiniest)
 				NavMesh.Update(mesh)
 				expect(Storage.TriangleCount(mesh)).is(triangles)
 				expect(Storage.VertexCount(mesh)).is(vertices)
-				local now = `{#mesh.SrcCoords},{#mesh.ExtraNext},{#mesh.PieceSeam},{mesh.TriangleCapacity}`
+				local now = `{#mesh.RingX},{#mesh.ExtraNext},{#mesh.PieceSeam},{mesh.TriangleCapacity}`
 				if cycle == 1 then
 					sizes = now
 				end

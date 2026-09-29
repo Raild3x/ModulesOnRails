@@ -1,7 +1,7 @@
 --!strict
 -- NavMesh.Update cost (ticket 22): one 4 x 4 crate added, then removed, on the bench scenes.
--- Base is the Update as of c22136d (a whole fresh state, clearance reach from the obstacle box;
--- tools/navmesh/bench/update_base); Local is the shipped one. Interpreted Lune, os.clock.
+-- Local is the shipped Update. (Base, the Update as of c22136d, was removed with format v3,
+-- whose storage it can't read; its numbers are in bench.md.) Interpreted Lune, os.clock.
 --   lune run tools/navmesh/bench/update_lune.luau [maps|sweep] [runs]
 -- Method (bench.md): each variant updates its own mesh; runs are interleaved with the variant
 -- order rotated each run; one warm-up run; medians with [min-max] over the runs. The crate is the
@@ -10,7 +10,6 @@
 local process = require("@lune/process")
 local NavMesh = require("../../../lib/navmesh/src/NavMesh")
 local Storage = require("../../../lib/navmesh/src/Storage")
-local BaseTiles = require("./update_base/Tiles")
 local Scenes = require("./Scenes")
 
 local mode = process.args[1] or "maps"
@@ -18,7 +17,6 @@ local runs = tonumber(process.args[2]) or 15
 
 type Variant = { Name: string, Update: (mesh: any) -> () }
 local variants: { Variant } = {
-	{ Name = "Base", Update = BaseTiles.Update },
 	{ Name = "Local", Update = NavMesh.Update },
 }
 
@@ -87,7 +85,7 @@ local function measure(
 				table.insert(times[variant.Name].remove, removed)
 			end
 		end
-		assert(counts[1] == counts[2], `{name}: the variants disagree on the triangle count`)
+		assert(counts[1] == (counts[2] or counts[1]), `{name}: the variants disagree on the triangle count`)
 	end
 	local mesh = meshes[variants[1].Name]
 	return times, Storage.TriangleCount(mesh), Storage.TileCount(mesh)
@@ -111,21 +109,19 @@ else
 end
 
 print(`Update ms, add / remove, median [min-max] of {runs} interleaved runs`)
-print("| scene | cap | TileSize | triangles | tiles | Base add | Base remove | Local add | Local remove |")
-print("|---|---|---|---|---|---|---|---|---|")
+print("| scene | cap | TileSize | triangles | tiles | Local add | Local remove |")
+print("|---|---|---|---|---|---|---|")
 for _, row in rows do
 	local name, cap, size = row[1] :: string, row[2] :: number, row[3] :: number
 	local times, triangles, tiles = measure(name, if cap > 0 then cap else nil, if size > 0 then size else nil)
 	print(
 		string.format(
-			"| %s | %s | %s | %d | %d | %s | %s | %s | %s |",
+			"| %s | %s | %s | %d | %d | %s | %s |",
 			name,
 			if cap > 0 then tostring(cap) else "none",
 			if size > 0 then tostring(size) else "default",
 			triangles,
 			tiles,
-			cell(times.Base.add),
-			cell(times.Base.remove),
 			cell(times.Local.add),
 			cell(times.Local.remove)
 		)
