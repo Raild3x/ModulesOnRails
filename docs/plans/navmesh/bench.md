@@ -645,6 +645,64 @@ Compressing (bake time only, zstd level 19): demo 1.7-1.8 ms, bench 95-104 ms.
   and loads no slower.
 - Not measured: replicating a large StringValue or attribute to a client, which needs a live
   server and client session.
+## Bake format v3 and Update from authored rings (Track B, 2026-09-28)
+- **Bench:** `tools/navmesh/bench/zz_v3_cost.luau` (scratch, not committed). One 4 x 4 crate is
+  added then removed, `MaxAgentRadius` 2, medians of 15 interleaved runs, in ms. Old =
+  feat/navmesh before B1. A = authored rings plus per-tile snapped sources (verbatim remove).
+  B = rings only (shipped).
+
+| scene | TileSize | tris | tiles | bake KB (A) | tile sources KB | added rings KB | Old add | A add | B add | Old remove | A remove | B remove |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| props | default | 3152 | 64 | 412 | 102 | 40.0 | 13.7 | 12.2 | 12.3 | 12.7 | 13.3 | 14.6 |
+| bench | default | 4605 | 64 | 623 | 171 | 56.2 | 10.8 | 8.0 | 7.4 | 5.4 | 6.0 | 6.8 |
+| bench | 8 | 7823 | 1024 | 1307 | 543 | 56.2 | 2.5 | 2.3 | 2.5 | 1.5 | 1.6 | 2.2 |
+| terrain | default | 1297 | 16 | 198 | 64 | 20.5 | 16.3 | 10.6 | 10.9 | 8.4 | 7.9 | 10.1 |
+| terrain | 8 | 28912 | 13685 | 6717 | 3717 | 20.5 | 7.9 | 7.7 | 8.0 | 7.0 | 7.2 | 7.0 |
+| walls | default | 692 | 16 | 156 | 81 | 12.5 | 34.2 | 15.2 | 15.1 | 10.1 | 10.0 | 13.6 |
+| walls | 8 | 3572 | 1024 | 806 | 447 | 12.5 | 2.7 | 2.3 | 2.3 | 1.5 | 1.6 | 1.6 |
+
+- **Bake size:** B's bake is A's minus the tile sources, 25-55% smaller than A's. The "Shipping a bake" sizes above were measured on v2 bakes; v3 bakes of the same levels are smaller. The v3 section
+  headers add 6 bytes each.
+- **Update:**
+  - Adding an obstacle was never slower than Old; walls at the default tile size dropped from
+    34 to 15 ms. Only the tile lines bounding the dirty tiles are laid. Laying them all cost
+    51 ms at terrain/8, because the walkable outline spans the floor.
+  - Removing one costs up to +3.6 ms (walls at the default tile size).
+- **Huge rings** (a walkable outline of n points, a crate near it, TileSize 8 / 32):
+  - Old, A and B are within noise of each other at every n: 64 points, 18 / 12 ms;
+    2,048 points, 1.6 s / 5.0 s to add.
+  - Clearance dominates. A reviewer's profile at 512 points put 270 ms of a 275 ms remove in
+    `Clearance.Refresh` and 1-2 ms in snapping.
+- **Non-planar huge rings:**
+  - Creases are now picked per segment: at 8,192 points, `TileInputs` fell from 663 to 21 ms
+    (32,768 points: 4,325 to 100 ms).
+  - Ring surfaces are cached per mesh in memory; they cost 158 ms per Update at 8,192 points
+    before.
+
+## Ticket 27: radius inside the end triangles (2026-09-28)
+- **Bench:** `tools/navmesh/bench/findpath_radius_cost.luau`. 400 random queries per
+  scene, radius 0.3-2, 7 interleaved passes, median ms per 400.
+
+| scene | TileSize | Old | New | ratio |
+|---|---|---|---|---|
+| props | default | 39.5 | 51.9 | 1.31 |
+| props | 64 | 190.5 | 210.9 | 1.11 |
+| bench | default | 88.2 | 97.3 | 1.10 |
+| bench | 64 | 95.7 | 103.3 | 1.08 |
+| terrain | default | 21.0 | 27.2 | 1.30 |
+| terrain | 64 | 23.4 | 27.1 | 1.16 |
+| walls | default | 20.5 | 28.5 | 1.39 |
+| walls | 64 | 19.3 | 28.5 | 1.48 |
+
+- **Why:** the check runs for the start and goal triangles only. The 15-40 us per `FindPath`
+  goes on gathering the walls within r (13-33 us per call); a clear straight line from the end
+  to the edge usually exits early.
+- **Optimizations kept:**
+  - a box pre-test in `nearWalls`, which is exact, so Build's widths are unchanged;
+  - `segSeg >= 2r` rejects a link before its exact cost;
+  - components are grown only from walls that touch the boundary;
+  - a per-mesh memo of the last triangle's walls, dropped by `Refresh`.
+- **Without them:** 163 us per call on props.
 
 ## Not measured (flagged)
 - Remote transfer time and payload size per layout (needs a live server/client session).

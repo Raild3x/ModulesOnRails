@@ -148,3 +148,13 @@ Prototype both on the bench maps before presenting them.
     - the link re-snap.
   - Uncapped clearance costs about 0.3 ms per recomputed triangle.
   - The wall index stays in memory for the mesh's lifetime.
+
+## Follow-up (2026-09-28, Track B)
+- **The one-pixel mismatch is fixed.** Update used to re-snap each tile's snapped baseline, and
+  could differ from a fresh Build by a grid pixel where a dynamic obstacle crossed a static
+  edge. Its dirty tiles now go through `Build.Internal.TileInputs`, fed the floor's authored
+  rings, creases and seams within a pixel of them.
+  - Results: 0 of 300 on the random sliver search (was 79), and 48/48 on the bench oracle.
+  - Spec: "an update equals a fresh Build where the obstacle crosses static slivers".
+- **Baselines are gone** (bake format v3, review.md). Every dirty tile is re-snapped, and Update
+  timings are within noise of before (bench.md, "Bake format v3").

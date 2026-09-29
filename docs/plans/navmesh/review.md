@@ -118,6 +118,37 @@ the const question are deliberately open, gated on benchmarks.
   A, the stateless `Advance(mesh, path, cursor, ...)`: both prototypes behaved identically
   in the sim, but `follow` was 39 lines against A's 55, because A left the stall timer and
   the link arithmetic to the game. User: "B: follower table (Recommended)".
+- **Update equals Build, and bake format v3 (Track B, B1):** 2026-09-28.
+  - The fix: `Update` re-snaps the floor's authored rings near its dirty tiles through Build's
+    own snap and clip step (`Build.Internal.TileInputs`).
+  - The fork, rings only vs rings plus per-tile snapped sources, was debated with a reviewer
+    agent at the user's request ("Debate with a subagent ... find a common solution"). Both
+    sides ended on rings only.
+    - The sources' remove fast path saves 0.1-3.6 ms, while clearance dominates `Update` (about
+      270 ms of a 275 ms remove on a 512-point outline).
+    - Rings only makes bakes 25-55% smaller, removes a ~4x in-memory copy, and leaves one
+      `Update` path.
+  - The review added three things: creases are picked per segment (a non-planar 8,192-point
+    ring went from 663 to 21 ms), ring surfaces are cached per mesh in memory, and tile border
+    vertices are sorted. It also corrected the locality proof (fragments stay in their
+    segment's box).
+  - Format v3 is tagged sections, with bit 15 marking a required tag.
+    - Links are sparse with a next id (ticket 30).
+    - Headroom (ticket 29) and the simplification tolerance (Track D) are reserved.
+    - This follows the research-branch request (rulings D2/D3) to leave room.
+  - User: "Go ahead (Recommended)".
+- **Ticket 27, radius inside the end triangles (Track B, B2):** 2026-09-28, designed within
+  the handoff's bounds. Neither stored option from the ticket was built: one wall point per
+  corner can't represent a multi-link chain, and a stored chain depends on the radius.
+  - Barriers are found at query time (`Clearance.CutOff` / `Separated`), with no stored data
+    and no format change.
+  - It costs +8-48% on cheap random radius queries, about 15-40 us per `FindPath` (bench.md).
+  - Found by the oracle while building it, and fixed:
+    - A barrier ending inside a crossable edge doesn't close, because the agent steps round
+      it through the neighbour.
+    - The start and goal triangles can be entered again as separate search nodes.
+    - Ends touching a wall are judged pushed out to r.
+  - Oracle: 153/153 Success -> Partial flips confirmed over 80,000 random queries, 0 refuted.
 
 ### Rulings during the build (2026-09-27)
 - **U-a (clearance reach), ruled after the P4 probe (ticket 15 notes):** no cap by default,
