@@ -83,3 +83,32 @@ first)
   same-triangle detour and no-detour cases, the U-turn case, and a flood oracle over the notch
   room. All four fail on the old code.
 - **Cost:** FindPath with a radius is +8-48% on cheap random queries (bench.md, "Ticket 27").
+
+## Mutation (2026-09-28, rebased on tickets 23/24)
+- **Covered-line scores:** Clearance 80.1 (80.9 before), Search 84.0 (85.5 before), Storage
+  95.6, Tiles 80.4, Serialize 87.5, Build 83.5.
+- **Survivors in the new code, triaged:**
+  - *Equivalent:*
+    - `x == nil or z == nil` turned to `and`: `standing` returns both or neither.
+    - Loops started at 0: the index-0 entries are nil and skipped.
+    - Repeated component roots, pairs of a contact with itself, and all pairs in `CutOff`: each
+      gives the same or a still-sound verdict.
+    - The memo's index literals (a miss is only slower) and `buildIndex`'s flag (walls are
+      already flagged).
+    - The sample points on `e`: any point of `e` proves a clear line.
+    - Search: `width > 0` turned to `>= 0` (CutOff at r = 0 is false); the start's own push
+      priority; the stamp direction; a point outside the triangle, which is never inside its
+      barrier.
+  - *Measure-zero boundaries:* `<` / `<=` ties in `inside`, `clear`, `standing` and the
+    contact test.
+  - *Unreachable on meshes we can build:* the ids of the start-again and goal-again nodes.
+    Through a sliver, the gap's own corner width blocks passing from one crossable edge to the
+    other, so the pass-through node is a dead end whatever it maps to (checked by hand for four
+    mutants).
+- **Specs added for the real ones:**
+  - pushed-out and uncovered ends;
+  - a same-triangle pair with no clear line;
+  - detour and pass-through corridors checked via `Search.Run`;
+  - the per-mesh memo, queried in both orders;
+  - a lone-triangle Partial;
+  - a pinned count and hash of cut-off and parted verdicts over fixed queries.
