@@ -52,6 +52,11 @@ A layered 2.5D navigation mesh for pathfinding queries, built on ConstrainedDela
 - **Extra link**: a transition beyond a triangle's three edges, either a seam portal or a link.
 - **Corridor**: the chain of triangles a path search returns, with how each was entered.
 - **Funnel**: pulling a corridor tight into the shortest path through it.
+- **Heron node** (ticket 25): with uniform costs, a search node sits where a ray from its
+  parent's node to the goal would bounce off the edge, not at the edge's midpoint. Weighted
+  queries keep midpoints.
+- **Pin** (ticket 25, weighted): with `AreaCosts`, the funnel fixes the path on each portal where
+  the multiplier changes, at the point Snell's law gives: the cost-aware funnel.
 - **Drape** (ticket 25): the waypoints the funnel adds where a straight stretch crosses a crease
   (a slope change inside a floor) or a seam, so a height lerped between waypoints stays on the
   surface.
