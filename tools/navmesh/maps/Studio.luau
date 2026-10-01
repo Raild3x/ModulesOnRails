@@ -20,6 +20,15 @@ return function(o: {
 	local rbx = { Instance = Instance, Vector3 = Vector3, CFrame = CFrame, Color3 = Color3, Enum = Enum }
 	local report = o.Harness.Run(o.Map, o.NavMesh, o.Adapter, rbx, folder)
 	print(o.Harness.Format(report))
+	local seeThrough = {}
+	for _, name in o.Map.SeeThrough or {} do
+		seeThrough[name] = true
+	end
+	for _, p in folder:GetDescendants() do
+		if p:IsA("BasePart") and seeThrough[p.Name] then
+			p.Transparency = 0.75
+		end
+	end
 
 	local meshRenderer = o.Renderer.new(folder, { AlwaysOnTop = false })
 	local pathRenderer = o.Renderer.new(folder, { AlwaysOnTop = true })
@@ -31,12 +40,12 @@ return function(o: {
 	pathRenderer:Draw(o.NavMesh.ToDrawList(report.Mesh, { Triangles = false, PathColors = PATH_COLORS }, paths))
 
 	local camera = workspace.CurrentCamera
-	camera.CameraType = Enum.CameraType.Scriptable
 	camera.FieldOfView = 50
+	local eye, target
 	local view = o.Map.View
 	if view then
 		local f, t = view.From, view.To
-		camera.CFrame = CFrame.lookAt(Vector3.new(f[1], f[2], f[3]), Vector3.new(t[1], t[2], t[3]))
+		eye, target = Vector3.new(f[1], f[2], f[3]), Vector3.new(t[1], t[2], t[3])
 	else -- straight down over the walkable Parts, framed to fit
 		local lo, hi = Vector3.one * math.huge, Vector3.one * -math.huge
 		for _, p in report.Built.Walkable do
@@ -45,9 +54,15 @@ return function(o: {
 		end
 		local mid, size = (lo + hi) / 2, hi - lo
 		local h = math.max(size.X / 1.4, size.Z) / 2 / math.tan(math.rad(25)) * 1.15
-		camera.CFrame = CFrame.lookAt(mid + Vector3.new(0, h, 0.01), mid)
+		eye, target = mid + Vector3.new(0, h, 0.01), mid
 	end
-
+	-- Placed, not locked (user: "do not lock it so I cant look around"). Studio's edit camera
+	-- re-aims at Focus, so set both, and again a frame later.
+	for _ = 1, 2 do
+		camera.CFrame = CFrame.lookAt(eye, target)
+		camera.Focus = CFrame.new(target)
+		task.wait()
+	end
 	print("[MARK] drawn")
 	task.wait(o.Hold)
 	meshRenderer:Destroy()

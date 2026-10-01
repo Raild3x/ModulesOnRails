@@ -3,7 +3,7 @@ table as run.luau), draws the mesh and every scenario's path, and captures the S
 Run from the repo root, with lib/navmesh, lib/navmeshadapter and lib/constraineddelaunaydebug
 set up (their link modules and _Index: `npm run setup <pkg>`, or copy them from a set-up checkout).
 
-    python tools/navmesh/maps/studio.py FlatLot [--hold 20] [--settle 12]
+    python tools/navmesh/maps/studio.py FlatLot [--hold 30] [--settle 20]
 
 Studio.luau draws for --hold seconds, then clears the drawing and holds again. The first capture
 (at --settle seconds after the window opens) shows the drawing; the second (--hold seconds later)
@@ -43,8 +43,9 @@ def build_place(script: str) -> Path:
     OUT.mkdir(parents=True, exist_ok=True)
     lib = (Path.cwd() / "lib").as_posix()
     maps = {"$className": "Folder", "Maps": {"$path": (HERE / "Maps").as_posix()}}
-    for module in ("Studio", "Harness", "Parts"):
-        maps[module] = {"$path": (HERE / f"{module}.luau").as_posix()}
+    for module in HERE.glob("*.luau"):  # Studio, Harness, Parts and shared map builders
+        if module.stem != "run":
+            maps[module.stem] = {"$path": module.as_posix()}
     src = {"$className": "Folder"}
     for pkg in ("constraineddelaunay", "constraineddelaunaydebug", "navmesh", "navmeshadapter"):
         src[pkg] = {"$path": f"{lib}/{pkg}"}
@@ -72,8 +73,8 @@ def differ(a: Path, b: Path) -> float:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("map", help="a module name in tools/navmesh/maps/Maps")
-    ap.add_argument("--hold", type=int, default=20, help="seconds the drawing stays, then the cleared view")
-    ap.add_argument("--settle", type=int, default=12, help="seconds after the window opens before the first capture")
+    ap.add_argument("--hold", type=int, default=30, help="seconds the drawing stays, then the cleared view")
+    ap.add_argument("--settle", type=int, default=20, help="seconds after the window opens before the first capture")
     args = ap.parse_args()
 
     place = build_place(RUN.format(map=args.map, hold=args.hold))

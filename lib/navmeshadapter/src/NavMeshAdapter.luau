@@ -12,6 +12,9 @@
 	  plane form one floor, named after the first Part that lands on it.
 	- Where an edge of one floor's face lies on another floor's surface (the foot and top of a
 	  ramp), a seam joins them.
+	- With `MaxStepHeight`, an edge that lies up to that far above another floor's face (a stair
+	  step's riser, a curb) gets a strip floor, 0.25 studs wide and as steep as the rise, seamed to
+	  both. Paths climb stairs and curbs; their heights rise over each strip.
 
 	Blocks, wedges and cylinders are supported. The result is plain data: add `Links` and
 	`MaxAgentRadius` to it, then pass it to `NavMesh.Build`.
@@ -24,12 +27,14 @@
 	.MaxSlope number? -- steepest walkable face, in degrees (default 45)
 	.CylinderSides number? -- sides of the polygon a cylinder becomes (default 16)
 	.WeldTolerance number? -- cracks up to this wide between faces of one floor are closed (default 0.05 studs; 0 turns welding off)
+	.MaxStepHeight number? -- floors whose faces meet across a rise up to this many studs are joined by a steep strip floor over the riser (stairs, curbs; default 0: off)
 ]=]
 export type AdapterOptions = {
 	AgentHeight: number?,
 	MaxSlope: number?,
 	CylinderSides: number?,
 	WeldTolerance: number?,
+	MaxStepHeight: number?,
 }
 
 local NavMesh = require("../NavMesh")
@@ -325,6 +330,148 @@ local function nameAreas(walkable: { BasePart }): { [string]: number }
 	return areas
 end
 
+type Face = { Ring: { vector }, Floor: Floor }
+type Seam = { FloorA: string, FloorB: string, From: vector, To: vector }
+
+-- How far a riser strip reaches out over the lower floor, in studs.
+local STRIP_WIDTH = 0.25
+
+-- Removes [t0, t1] from the sorted intervals (segment parameters).
+local function subtract(intervals: { { number } }, t0: number, t1: number): { { number } }
+	local out = {}
+	for _, iv in intervals do
+		if iv[1] < t0 then
+			table.insert(out, { iv[1], math.min(iv[2], t0) })
+		end
+		if iv[2] > t1 then
+			table.insert(out, { math.max(iv[1], t1), iv[2] })
+		end
+	end
+	return out
+end
+
+-- The t range (along p + d t) of the part of convex `ring` within the band s0 <= s <= s1, where
+-- s is the distance along `normal` from the line through p; nil if none of it is.
+local function bandInterval(
+	p: vector,
+	d: vector,
+	normal: vector,
+	ring: { vector },
+	s0: number,
+	s1: number
+): (number?, number?)
+	local dd = d.x * d.x + d.z * d.z
+	local pts = {}
+	for _, v in ring do
+		local w = v - p
+		table.insert(pts, { (w.x * d.x + w.z * d.z) / dd, w.x * normal.x + w.z * normal.z })
+	end
+	for _, bound in { { s0, 1 }, { s1, -1 } } do -- keep (s - s0) >= 0, then (s1 - s) >= 0
+		local kept = {}
+		for i, a in pts do
+			local b = pts[i % #pts + 1]
+			local fa, fb = (a[2] - bound[1]) * bound[2], (b[2] - bound[1]) * bound[2]
+			if fa >= 0 then
+				table.insert(kept, a)
+			end
+			if fa * fb < 0 then
+				local t = fa / (fa - fb)
+				table.insert(kept, { a[1] + (b[1] - a[1]) * t, bound[1] })
+			end
+		end
+		pts = kept
+	end
+	if #pts == 0 then
+		return nil, nil
+	end
+	local lo, hi = math.huge, -math.huge
+	for _, q in pts do
+		lo, hi = math.min(lo, q[1]), math.max(hi, q[1])
+	end
+	return lo, hi
+end
+
+-- The step-height rule (ticket 34, ruled "ramp strips for now"): where an edge of a face lies
+-- over another floor's face, above it by no more than `maxStep` (a stair riser, a curb), a strip
+-- floor bridges the rise. The strip runs from the edge out STRIP_WIDTH over the lower face, is
+-- cut out of the lower floor, and joins both floors with ordinary same-height seams (the core
+-- refuses a seam whose sides differ in height; ticket 40 would let it).
+-- - The lower face must reach past the strip, and the parts of the edge where a cut stands in
+--   the strip's band (or just inside the edge, on the upper floor) are left out: Build rejects a seam with no walkable floor beside it.
+-- - Strips are cut out of the lower floor as they are made, so where two meet at a corner the
+--   later one stops at the earlier.
+local function riserStrips(
+	faces: { Face },
+	floorDescs: { [string]: any },
+	maxStep: number,
+	names: { [string]: true },
+	seams: { Seam }
+)
+	for _, upper in faces do
+		local ring = upper.Ring
+		for i, p in ring do
+			local q = ring[i % #ring + 1]
+			local d = q - p
+			local length = math.sqrt(d.x * d.x + d.z * d.z)
+			if length <= 1e-6 then
+				continue
+			end
+			local normal = vector.create(d.z, 0, -d.x) / length -- the ring is CCW: right is out
+			local out, beyond = normal * STRIP_WIDTH, normal * (STRIP_WIDTH + 0.01)
+			for _, lower in faces do
+				local L = lower.Floor
+				if L == upper.Floor then
+					continue
+				end
+				local t0, t1 = clipSegment(p + beyond, q + beyond, lower.Ring)
+				if t0 == nil then
+					continue
+				end
+				local fine = true
+				for _, t in { t0 :: number, t1 :: number } do
+					local u = p + d * t
+					local rise = u.y - height(L, u.x, u.z)
+					fine = fine and rise > HEIGHT_TOLERANCE and rise <= maxStep + HEIGHT_TOLERANCE
+				end
+				if not fine then
+					continue
+				end
+				local intervals = { { t0 :: number, t1 :: number } }
+				-- Cuts over the strip's band on the lower floor, or just inside the edge on the upper.
+				for _, side in { { L.Name, 0.001, STRIP_WIDTH + 0.01 }, { upper.Floor.Name, -0.01, -0.001 } } do
+					for _, cutRing in floorDescs[side[1]].Obstacles or {} do
+						local c0, c1 = bandInterval(p, d, normal, cutRing, side[2], side[3])
+						if c0 then
+							intervals = subtract(intervals, c0, c1 :: number)
+						end
+					end
+				end
+				local function low(v: vector): vector
+					return vector.create(v.x, height(L, v.x, v.z), v.z)
+				end
+				for _, iv in intervals do
+					if (iv[2] - iv[1]) * length <= 1e-3 then
+						continue
+					end
+					local from, to = p + d * iv[1], p + d * iv[2]
+					local name, k = "Riser", 1
+					while names[name] do
+						k += 1
+						name = `Riser {k}`
+					end
+					names[name] = true
+					local lf, lt = low(from + out), low(to + out)
+					floorDescs[name] = { Walkable = { { lt, to, from, lf } } } -- CCW: out is right of from->to
+					floorDescs[L.Name].Obstacles = floorDescs[L.Name].Obstacles or {}
+					table.insert(floorDescs[L.Name].Obstacles, { lt, low(to), low(from), lf })
+					table.insert(seams, { FloorA = name, FloorB = upper.Floor.Name, From = from, To = to })
+					table.insert(seams, { FloorA = L.Name, FloorB = name, From = lf, To = lt })
+				end
+			end
+		end
+	end
+end
+
 --[=[
 	@within NavMeshAdapter
 	@param walkable { BasePart } -- Parts whose upward faces are walkable
@@ -358,12 +505,13 @@ local function fromParts(
 	local minUp = math.cos(math.rad(o.MaxSlope or 45))
 	local sides = o.CylinderSides or 16
 	local weldTolerance = o.WeldTolerance or 0.05
+	local maxStep = o.MaxStepHeight or 0
 
 	-- Walkable faces, grouped into floors by plane.
 	local floors: { Floor } = {}
 	local names: { [string]: true } = {}
 	local solids: { Solid } = {}
-	local faces: { { Ring: { vector }, Floor: Floor } } = {}
+	local faces: { Face } = {}
 	for _, part in walkable do
 		local solid = toWorld(part, sides)
 		table.insert(solids, solid)
@@ -425,7 +573,7 @@ local function fromParts(
 	end
 
 	-- Each floor: its welded faces, minus every solid standing within the agent's height.
-	local seams: { { FloorA: string, FloorB: string, From: vector, To: vector } } = {}
+	local seams: { Seam } = {}
 	local desc = { Floors = {}, Seams = seams }
 	for _, f in floors do
 		if weldTolerance > 0 then
@@ -496,6 +644,9 @@ local function fromParts(
 				end
 			end
 		end
+	end
+	if maxStep > 0 then
+		riserStrips(faces, desc.Floors, maxStep, names, seams)
 	end
 	return desc :: any, areaIds -- `vector` points; the public types still say Vector3 (ticket 26)
 end

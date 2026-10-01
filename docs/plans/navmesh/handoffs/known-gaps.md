@@ -22,6 +22,16 @@ ends" section. Two kinds of end still pass unjudged; both are below.
   1: 160 to 235 us). Success queries don't pay it. The cost is one push plus one barrier test
   per candidate end.
 
+**Found by Track M1 (2026-10-01):**
+- **A path and its reverse can differ in length by about 7%.** On the building maps
+  (`lune run tools/navmesh/maps/run.luau Building BuildingRamp`), Lobby to Upstairs is 55.0
+  studs up the wedge ramps and 51.3 back down; with step strips it is 57.6 and 61.7 (radius
+  0.5). The corridor search is not optimal (entry-edge midpoint nodes, and a triangle closes on
+  first entry; see the Track G item above), so each direction can settle on a different
+  corridor. No fix is planned here; it is a measurement for whoever revisits the node model.
+- **A seam can't join floors at different heights.** Build refuses it, so a stair riser needs
+  the adapter's strip floor. Ticket 40 owns it.
+
 **Found by Track M2 (2026-10-01), in the Part adapter, not the core:**
 - **Tilted Parts lose their seams, or get zero-length ones that `NavMesh.Build` rejects.**
   - **Repro:** `lune run tools/navmesh/bench/adapter_f32_seams.luau`. Seven hinged slabs give
