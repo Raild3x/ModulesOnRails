@@ -13,6 +13,14 @@
 	surface is added, as few as keep a height lerped between consecutive points within 0.01
 	studs of the surface. A flat floor gets none.
 
+	**Area costs (ticket 25, weighted):** with `AreaCosts`, the path is pinned on each portal
+	where the multiplier changes, and each pin slides along its portal to where the path through
+	it costs least, which bends it at the border by Snell's law. The funnel pulls each run
+	between pins straight, which is exact inside one multiplier. Without that, the funnel ignored
+	costs: it could cut back across the mud the search went round. Against a weighted reference
+	(4,350 routes) the mean excess cost went from 4.3% to 2.2% and the worst from 3.09x to
+	1.99x; the rest comes from the corridor the search picks.
+
 	**Agent radius (SR4):** each portal end that is a wall vertex is moved along the portal,
 	towards its other end, by min(r, half the portal's length). Free-space vertices (tile, area,
 	seam) are not offset, but a seam portal's end that is a wall vertex on either of its floors
@@ -148,13 +156,18 @@ local function drape(
 				local l, r = lefts[i], rights[i]
 				local ex, ez = r.X - l.X, r.Z - l.Z
 				local denom = ex * dz - ez * dx
-				if denom == 0 then
+				if l == r and length > 0 then
+					-- A pinned portal (see `refract`) the segment runs straight through.
+					c, owner = l, owners[i]
+					u = math.clamp(((l.X - p.X) * dx + (l.Z - p.Z) * dz) / (length * length), 0, 1)
+				elseif denom == 0 then
 					continue -- the segment runs along this portal: its ends are on it
+				else
+					local wx, wz = p.X - l.X, p.Z - l.Z
+					local s = math.clamp((wx * dz - wz * dx) / denom, 0, 1)
+					u = math.clamp((wx * ez - wz * ex) / denom, 0, 1)
+					c, owner = vector.create(p.X + dx * u, l.Y + (r.Y - l.Y) * s, p.Z + dz * u), owners[i]
 				end
-				local wx, wz = p.X - l.X, p.Z - l.Z
-				local s = math.clamp((wx * dz - wz * dx) / denom, 0, 1)
-				u = math.clamp((wx * ez - wz * ex) / denom, 0, 1)
-				c, owner = vector.create(p.X + dx * u, l.Y + (r.Y - l.Y) * s, p.Z + dz * u), owners[i]
 			end
 			local d = (u - anchorU) * length
 			if d > 0 then
@@ -176,6 +189,100 @@ local function drape(
 		table.insert(outFrom, from[k + 1])
 	end
 	return out, outFrom
+end
+
+-- The point of segment a-b, as a fraction, minimising m1 |p - x| + m2 |x - q| (convex): golden
+-- section to 1e-9 of the segment.
+local PHI = (math.sqrt(5) - 1) / 2
+local function snell(a: vector, b: vector, p: vector, q: vector, m1: number, m2: number): number
+	local function f(u: number): number
+		local x, z = a.X + (b.X - a.X) * u, a.Z + (b.Z - a.Z) * u
+		return m1 * math.sqrt((x - p.X) ^ 2 + (z - p.Z) ^ 2) + m2 * math.sqrt((q.X - x) ^ 2 + (q.Z - z) ^ 2)
+	end
+	local lo, hi = 0, 1
+	local x1, x2 = hi - PHI, PHI
+	local f1, f2 = f(x1), f(x2)
+	while hi - lo > 1e-9 do
+		if f1 <= f2 then
+			hi, x2, f2 = x2, x1, f1
+			x1 = hi - PHI * (hi - lo)
+			f1 = f(x1)
+		else
+			lo, x1, f1 = x1, x2, f2
+			x2 = lo + PHI * (hi - lo)
+			f2 = f(x2)
+		end
+	end
+	return (lo + hi) / 2
+end
+
+-- The cost-aware funnel (ticket 25, weighted): pins the path on each portal between two
+-- triangles of different `mult`, and moves each pin along its portal to where its two
+-- neighbouring path points cost least through it (Snell's law at the boundary), sweeping until
+-- the pins settle. The funnel pulls each run between pins straight, which is exact inside a run
+-- (one multiplier). Pins are left in `lefts`/`rights` (both ends at the pin) for the final pull.
+local function refract(lefts: { vector }, rights: { vector }, owners: { number }, mult: (number) -> number)
+	local pins, a, b, u = {}, {}, {}, {}
+	for j = 2, #lefts - 1 do
+		if mult(owners[j]) ~= mult(owners[j + 1]) and lefts[j] ~= rights[j] then
+			table.insert(pins, j)
+			table.insert(a, lefts[j])
+			table.insert(b, rights[j])
+			table.insert(u, 0.5)
+		end
+	end
+	if #pins == 0 then
+		return
+	end
+	local function at(k: number): vector
+		return a[k] + (b[k] - a[k]) * u[k]
+	end
+	-- ponytail: a full pull per sweep; pull only the runs next to moved pins if long corridors
+	-- with many area changes get slow.
+	-- Each sweep pulls the path through the pins, then settles the pins against the path points
+	-- either side of them, or against each other where no corner lies between two (cheap 1-D
+	-- steps, repeated: neighbouring pins move each other).
+	local prev, next = {}, {}
+	for _ = 1, 32 do
+		for k, j in pins do
+			lefts[j], rights[j] = at(k), at(k)
+		end
+		local points, _, on = pull(lefts, rights, owners)
+		local first = 1 -- the first path point not before the current pin's portal
+		for k, j in pins do
+			while on[first] < j do
+				first += 1
+			end
+			local before, after = first - 1, first
+			while on[after] == j do
+				after += 1
+			end
+			prev[k] = if k > 1 and on[before] <= pins[k - 1] then false else points[before]
+			next[k] = if k < #pins and on[after] >= pins[k + 1] then false else points[after]
+		end
+		local settled = true
+		for pass = 1, 200 do
+			local moved = 0
+			for k, j in pins do
+				local old = at(k)
+				u[k] =
+					snell(a[k], b[k], prev[k] or at(k - 1), next[k] or at(k + 1), mult(owners[j]), mult(owners[j + 1]))
+				moved = math.max(moved, vector.magnitude(at(k) - old))
+			end
+			if pass == 1 and moved >= 1e-6 then
+				settled = false
+			end
+			if moved < 1e-7 then
+				break
+			end
+		end
+		if settled then
+			break
+		end
+	end
+	for k, j in pins do
+		lefts[j], rights[j] = at(k), at(k)
+	end
 end
 
 -- Whether `p` is a wall vertex of triangle `t`, matched in (X, Z) only (a seam point has one
@@ -207,7 +314,8 @@ function Funnel.StringPull(
 	vias: { number },
 	startP: vector,
 	endP: vector,
-	radius: number
+	radius: number,
+	costs: { [number]: number }?
 ): ({ vector }, { number }, { [number]: string })
 	local points, from, labels = {}, {}, {}
 	local lefts, rights, owners = { startP }, { startP }, { corridor[1] }
@@ -215,6 +323,11 @@ function Funnel.StringPull(
 		table.insert(lefts, stop)
 		table.insert(rights, stop)
 		table.insert(owners, owner)
+		if costs then
+			refract(lefts, rights, owners, function(t: number): number
+				return costs[Storage.GetTriangleArea(s, t)] or 1
+			end)
+		end
 		local segment, segmentFrom = drape(lefts, rights, owners, pull(lefts, rights, owners))
 		for k, point in segment do
 			table.insert(points, point)

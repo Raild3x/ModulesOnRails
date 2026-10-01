@@ -121,7 +121,7 @@ export type NavMeshDrawOptions = {
 	@within NavMesh
 	@interface QueryFilter
 	.AgentRadius number? -- studs (default 0), up to the mesh's MaxAgentRadius; paths only go where the agent fits, but the line can pass closer than this to a wall, mostly at turns (see the Funnel notes; ticket 32). The path's end point is pushed this far off the walls, so it can differ from the goal by up to the radius.
-	.AreaCosts { [number]: number }? -- cost multiplier per area id (default 1, >= 0); math.huge excludes the area
+	.AreaCosts { [number]: number }? -- cost multiplier per area id (default 1, >= 0); math.huge excludes the area. Paths bend at area borders to save cost (Snell's law), and run straight where every multiplier is the same
 	.MaxExpansions number? -- stop with "Budget" after expanding this many triangles (default unlimited)
 	.SnapExtents Vector3? -- half-size of the snap box around a feet position (default (0.5, 4, 0.5))
 	.GoalFallback boolean? -- FindPath only: a goal that doesn't snap gives "Partial" to the closest reachable point instead of "NoGoal" (default false)

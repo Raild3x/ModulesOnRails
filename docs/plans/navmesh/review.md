@@ -219,6 +219,16 @@ the const question are deliberately open, gated on benchmarks.
   (Recommended)". The user then asked to look into weighted navmeshes too ("We should also
   look into solutions for weighted navmeshes"); that research is under way on
   `proto/g-areabend`.
+- **Weighted paths (ticket 25 follow-up):** a cost-aware funnel plus exact edge costs
+  (Detour's rule).
+  - The research (`proto/g-areabend`, `research/weighted-paths.md`) found today's weighted
+    paths 4.3% dearer on average than a validated reference, 1 in 20 by 21%, the worst 3.1x.
+    About half came from the funnel ignoring costs.
+  - It surveyed what Detour, Unity, Unreal and Godot do: their funnels ignore costs too, and
+    Unity calls costs "hints".
+  - Rejected: Steiner points (near-exact, 25-38x slower, no radius) and weighted heron (fails
+    the cheap-link specs).
+  - User: "Cost-aware funnel + exact edge costs (Recommended)".
 - **`PathResult.Length`:** added with no question, since there was no real trade-off. It is the
   3D polyline length, a link's hop counted as a straight line.
 - **Added footprints (ticket 28):** `Update` returns `(regions, added)`, where `added` holds one

@@ -177,7 +177,8 @@ function NavMesh.FindPath(mesh: NavMeshData, from: Vector3, to: Vector3, filter:
 	end
 	local status, corridor, vias, endP, cost =
 		Search.Run(mesh, startT, startP, goalT, goalP :: vector, costs, maxExpansions, radius)
-	local points, owners, labels = Funnel.StringPull(mesh, corridor, vias, startP, endP, radius)
+	local points, owners, labels =
+		Funnel.StringPull(mesh, corridor, vias, startP, endP, radius, if next(costs) then costs else nil)
 	local n = #points
 	points[n], owners[n] = Queries.Push(mesh, owners[n], points[n], radius, costs)
 	local waypoints = table.create(#points)

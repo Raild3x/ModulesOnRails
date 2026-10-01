@@ -219,6 +219,179 @@ return function(t: tiniest)
 		end)
 	end)
 
+	describe("Weighted paths (cost-aware funnel)", function()
+		local Search = require("../Search")
+		local Snap = require("../Snap")
+		local Funnel = require("../Funnel")
+
+		-- The exact weighted cost of a polyline over a room whose only area is the rectangle
+		-- x0..x1, z0..z1 (multiplier m, 1 elsewhere): each segment clipped against it. A segment
+		-- along the border costs the cheaper side's multiplier (a path a hair inside it).
+		local function cost(points: { any }, x0: number, z0: number, x1: number, z1: number, m: number): number
+			local total = 0
+			for i = 2, #points do
+				local p, q = points[i - 1], points[i]
+				local t0, t1, rate = 0, 1, m
+				for _, axis in { { p.X, q.X - p.X, x0, x1 }, { p.Z, q.Z - p.Z, z0, z1 } } do
+					local s, d, lo, hi = axis[1], axis[2], axis[3], axis[4]
+					if d == 0 then
+						if s < lo or s > hi then
+							t0, t1 = 1, 0
+						elseif s == lo or s == hi then
+							rate = math.min(m, 1)
+						end
+					else
+						local a, b = (lo - s) / d, (hi - s) / d
+						t0, t1 = math.max(t0, math.min(a, b)), math.min(t1, math.max(a, b))
+					end
+				end
+				local length = math.sqrt((q.X - p.X) ^ 2 + (q.Z - p.Z) ^ 2)
+				local inside = if t1 > t0 then (t1 - t0) * length else 0
+				total += (length - inside) + inside * rate
+			end
+			return total
+		end
+
+		test("a path bends at an area border by Snell's law", function()
+			-- Mud (x 3) over the east half: the cheapest line from (2, 2) to (18, 18) runs longer
+			-- on dry ground, and m1 sin a1 = m2 sin a2 where it crosses x = 10.
+			local mesh = NavMesh.Build {
+				Floors = {
+					Ground = {
+						Walkable = { rect(0, 0, 0, 20, 20) },
+						Areas = { { Polygon = rect(0, 10, 0, 20, 20), Area = 2 } },
+					},
+				},
+			}
+			local path = NavMesh.FindPath(mesh, v(2, 0, 2), v(18, 0, 18), { AreaCosts = { [2] = 3 } })
+			local w = path.Waypoints
+			expect(#w).is(3)
+			local p, c, q = w[1].Position, w[2].Position, w[3].Position
+			expect(math.abs(c.X - 10) < 1e-6).with_context(fmt(c)).is_true()
+			local sin1 = (c.Z - p.Z) / vector.magnitude(c - p)
+			local sin2 = (q.Z - c.Z) / vector.magnitude(q - c)
+			expect(math.abs(1 * sin1 - 3 * sin2) < 1e-4).with_context(`{sin1} vs {sin2}`).is_true()
+			expect(cost({ p, c, q }, 10, 0, 20, 20, 3) < cost({ p, q }, 10, 0, 20, 20, 3) - 1).is_true()
+		end)
+
+		test("a path crossing a mud strip obeys Snell's law at both borders", function()
+			-- Each pin depends on the other: the sweeps must settle them together.
+			local mesh = NavMesh.Build {
+				Floors = {
+					Ground = {
+						Walkable = { rect(0, 0, 0, 20, 20) },
+						Areas = { { Polygon = rect(0, 8, 0, 12, 20), Area = 2 } },
+					},
+				},
+			}
+			local w = NavMesh.FindPath(mesh, v(2, 0, 3), v(18, 0, 17), { AreaCosts = { [2] = 4 } }).Waypoints
+			expect(#w).is(4)
+			local function sine(p: any, q: any): number
+				return (q.Z - p.Z) / vector.magnitude(q - p)
+			end
+			local p, c1, c2, q = w[1].Position, w[2].Position, w[3].Position, w[4].Position
+			expect(math.abs(sine(p, c1) - 4 * sine(c1, c2)) < 1e-4).with_context(`{fmt(c1)} {fmt(c2)}`).is_true()
+			expect(math.abs(4 * sine(c1, c2) - sine(c2, q)) < 1e-4).with_context(`{fmt(c1)} {fmt(c2)}`).is_true()
+		end)
+
+		test("a corner the bent path meets moves the pin again", function()
+			-- The straight line passes under the crate; bent at the mud's border it would cross the
+			-- crate, so it wraps its corner, and the bend must obey Snell's law towards the corner.
+			local mesh = NavMesh.Build {
+				Floors = {
+					Ground = {
+						Walkable = { rect(0, 0, 0, 20, 20) },
+						Obstacles = { rect(0, 12, 16.1, 14, 16.6) },
+						Areas = { { Polygon = rect(0, 10, 0, 20, 20), Area = 2 } },
+					},
+				},
+			}
+			local w = NavMesh.FindPath(mesh, v(2, 0, 2), v(18, 0, 18), { AreaCosts = { [2] = 3 } }).Waypoints
+			expect(#w).is(4)
+			local p, c, corner = w[1].Position, w[2].Position, w[3].Position
+			expect(fmt(corner)).is("14.000,0.000,16.102")
+			local sin1 = (c.Z - p.Z) / vector.magnitude(c - p)
+			local sin2 = (corner.Z - c.Z) / vector.magnitude(corner - c)
+			expect(math.abs(sin1 - 3 * sin2) < 1e-4).with_context(`{fmt(c)}: {sin1} vs {3 * sin2}`).is_true()
+		end)
+
+		test("pins with a corner between them each bend towards the corner", function()
+			-- In through the mud strip's west border, round the crate inside it, out through its
+			-- east border: each pin obeys Snell's law between its dry side and the crate corner.
+			local mesh = NavMesh.Build {
+				Floors = {
+					Ground = {
+						Walkable = { rect(0, 0, 0, 30, 20) },
+						Obstacles = { rect(0, 14, 6, 16, 12) },
+						Areas = { { Polygon = rect(0, 10, 0, 20, 20), Area = 2 } },
+					},
+				},
+			}
+			local w = NavMesh.FindPath(mesh, v(2, 0, 2), v(28, 0, 16), { AreaCosts = { [2] = 3 } }).Waypoints
+			expect(#w).is(5)
+			local function sine(p: any, q: any): number
+				return (q.Z - p.Z) / vector.magnitude(q - p)
+			end
+			local start, pin1, corner, pin2, goal =
+				w[1].Position, w[2].Position, w[3].Position, w[4].Position, w[5].Position
+			expect(fmt(corner)).is("14.000,0.000,12.000")
+			expect(math.abs(sine(start, pin1) - 3 * sine(pin1, corner)) < 1e-4).with_context(fmt(pin1)).is_true()
+			expect(math.abs(3 * sine(corner, pin2) - sine(pin2, goal)) < 1e-4).with_context(fmt(pin2)).is_true()
+		end)
+
+		test("a pin crossed head-on still gets its crease waypoint", function()
+			-- The roof's far slope is mud: the path crosses the ridge at right angles, so the pin
+			-- there doesn't bend it, yet the ridge is a crease.
+			local mud = NavMesh.Build {
+				Floors = {
+					Roof = {
+						Walkable = { { v(0, 0, 0), v(10, 4, 0), v(20, 0, 0), v(20, 0, 20), v(10, 4, 20), v(0, 0, 20) } },
+						Areas = { { Polygon = rect(0, 10, 0, 20, 20), Area = 2 } },
+					},
+				},
+			}
+			local path = NavMesh.FindPath(mud, v(2, 0, 10), v(18, 0, 10), { AreaCosts = { [2] = 3 } })
+			expect(#path.Waypoints).is(3)
+			expect(fmt(path.Waypoints[2].Position)).is("10.000,4.000,10.000")
+		end)
+
+		test("on the same corridor, the path is never dearer than the plain funnel's", function()
+			-- Repro 4's room with its patch dear or cheap: every pair, through the corridor the
+			-- search picked, costs no more than the cost-blind string-pull, and many cost less.
+			local mesh = NavMesh.Build {
+				Floors = {
+					Ground = {
+						Walkable = { rect(0, 0, 0, 40, 40) },
+						Areas = { { Polygon = rect(0, 0, 18, 30, 26), Area = 2 } },
+					},
+				},
+			}
+			math.randomseed(25)
+			local cheaper, worse = 0, {}
+			for _, m in { 5, 0.5 } do
+				local costs = { [2] = m }
+				for _ = 1, 60 do
+					local a = v(0.5 + math.random() * 39, 0, 0.5 + math.random() * 39)
+					local b = v(0.5 + math.random() * 39, 0, 0.5 + math.random() * 39)
+					local extents = v(0.5, 4, 0.5)
+					local st, sp = Snap.Snap(mesh, a, extents, costs)
+					local gt, gp = Snap.Snap(mesh, b, extents, costs)
+					local _, corridor, vias, endP = Search.Run(mesh, st, sp :: any, gt, gp :: any, costs, math.huge, 0)
+					local plain = Funnel.StringPull(mesh, corridor, vias, sp :: any, endP, 0)
+					local aware = Funnel.StringPull(mesh, corridor, vias, sp :: any, endP, 0, costs)
+					local c0, c1 = cost(plain, 0, 18, 30, 26, m), cost(aware, 0, 18, 30, 26, m)
+					if c1 > c0 + 1e-6 then
+						table.insert(worse, `x{m} {fmt(a)} -> {fmt(b)}: {c1} > {c0}`)
+					elseif c1 < c0 - 1e-3 then
+						cheaper += 1
+					end
+				end
+			end
+			expect(table.concat(worse, "; ")).is("")
+			expect(cheaper >= 10).with_context(`{cheaper} cheaper`).is_true()
+		end)
+	end)
+
 	describe("PathResult.Length", function()
 		test("is the 3D length of the polyline, link hops included", function()
 			local function polyline(path: any): number

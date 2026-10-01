@@ -344,6 +344,19 @@ return function(t: tiniest)
 				heron = heron and (multiplier == 1 or multiplier == math.huge)
 			end
 			local total, p = 0, startP
+			-- A step inside t costs t's multiplier; the last one, into the goal's triangle, is split
+			-- where it crosses the edge a-b (Detour's rule).
+			local function step(q: vector, a: vector, b: vector, t: number, m: number, last: boolean): number
+				if not last then
+					return vector.magnitude(q - p) * mult(t)
+				end
+				-- Where the segment p-q meets the edge's line: solve p + (q - p) s on the line a-b.
+				local n = vector.create(b.Z - a.Z, 0, a.X - b.X)
+				local dp, dq = vector.dot(p - a, n), vector.dot(q - a, n)
+				local s = if dp ~= dq then math.clamp(dp / (dp - dq), 0, 1) else 0
+				local c = p + (q - p) * s
+				return vector.magnitude(c - p) * mult(t) + vector.magnitude(q - c) * mult(m)
+			end
 			for i = 2, #corridor do
 				local t, m = corridor[i - 1], corridor[i]
 				local last = m == goalT
@@ -356,7 +369,7 @@ return function(t: tiniest)
 						then goalP
 						elseif heron then Search.HeronPoint(a, b, p, goalP)
 						else (a + b) * 0.5
-					total += vector.magnitude(node - p) * (mult(t) + mult(m)) * 0.5
+					total += step(node, a, b, t, m, last)
 					p = node
 				else
 					local _, _, kind, ref, a, b = Storage.GetExtra(mesh, vias[i])
@@ -370,7 +383,7 @@ return function(t: tiniest)
 						end
 					else
 						local node = if last then goalP else (a + b) * 0.5
-						total += vector.magnitude(node - p) * (mult(t) + mult(m)) * 0.5
+						total += step(node, a, b, t, m, last)
 						p = node
 					end
 				end
@@ -421,7 +434,7 @@ return function(t: tiniest)
 							Search.Run(mesh, st, sp :: any, gt, gp :: any, case.Costs, math.huge, 0)
 						local expected = corridorCost(mesh, corridor, vias, sp :: any, gt, gp :: any, case.Costs)
 						checked += 1
-						expect(math.abs(cost - expected) < 1e-6)
+						expect(math.abs(cost - expected) < 1e-6 * math.max(1, expected))
 							.with_context(`{case.Fixtures.Name} {fmt(a)} -> {fmt(b)} ({status}): {cost} vs {expected}`)
 							.is_true()
 					end

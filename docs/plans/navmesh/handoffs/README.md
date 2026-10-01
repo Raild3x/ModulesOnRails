@@ -8,7 +8,7 @@ for your track. Everything named here lives on branch `feat/navmesh` unless it s
   - That covers the local Update with changed regions, the path follower, the off-mesh and
     reachable queries, the Part adapter (`lib/navmeshadapter`), debug drawing, the bake
     format v3 (tagged sections), and the start/goal radius barriers.
-  - 291 specs pass (after Track G, 2026-10-01).
+  - 297 specs pass (after Track G and its weighted-path follow-up, 2026-10-01).
   - It is **local only. Do not push.** The only remote configured, `github-desktop-Mophyr`, is
     not the project's repo.
 - **Docs:** everything is under `docs/plans/navmesh/`:
@@ -28,7 +28,7 @@ for your track. Everything named here lives on branch `feat/navmesh` unless it s
 
 | Order | Track | Handoff | Touches |
 |---|---|---|---|
-| 1 | G, path output: **merged 2026-10-01** | [G-path-output.md](G-path-output.md): tickets 28 and 25 (minus link items), the Partial-end radius gap. Also built: heron nodes, added footprints; ticket 32 filed. Weighted-path research is on `proto/g-areabend` | Funnel, NavMesh, Types, Search (only if the area-bend fix needs it), the demo |
+| 1 | G, path output: **merged 2026-10-01** | [G-path-output.md](G-path-output.md): tickets 28 and 25 (minus link items), the Partial-end radius gap. Also built: heron nodes, added footprints; ticket 32 filed. Weighted paths built too (cost-aware funnel, exact edge costs) | Funnel, NavMesh, Types, Search (only if the area-bend fix needs it), the demo |
 | 1 | H, measure and dogfood (**done 2026-10-01**: bench.md "Large worlds, 1-4 km", `examples/navmesh-demo2/REPORT.md`, new gaps in known-gaps.md; D6 ruled: fix O(map) costs first) | [H-measure-and-dogfood.md](H-measure-and-dogfood.md): ticket 31 (1-4 km maps), a second dogfood game on the new APIs | `tools/navmesh/bench`, `examples` only; no library code |
 | 2 | E, links | [E-links.md](E-links.md): ticket 30, the link gaps, ticket 25's link names and ids | Search, Tiles (links pass), Storage (links), Serialize (links section), NavMesh, Types |
 | 3 | F, geometry input | [F-geometry-input.md](F-geometry-input.md): the simplification passes, plus Update on huge rings | Build, Quantize, Tiles (re-snap), Clearance, Serialize (tolerance field), Types, the adapter |
@@ -65,7 +65,7 @@ for your track. Everything named here lives on branch `feat/navmesh` unless it s
     navmesh worktree.
 - **Tests:**
   - Quick run: `lune run tools/navmesh/specs.luau` (about 10 s, prints `PASS n FAIL m`).
-  - Gate: `lune run coverage.luau package=navmesh`. It must pass; 291 specs on `feat/navmesh` (after Track G, 2026-10-01).
+  - Gate: `lune run coverage.luau package=navmesh`. It must pass; 297 specs on `feat/navmesh` (after Track G, 2026-10-01).
   - Mutation:
     `lune run coverage.luau package=navmesh --mutate --mutate-jobs=8 --mutate-files=src/X.luau,src/Y.luau`
     - `--status package=navmesh` shows progress; `--resume` continues a killed run.
