@@ -22,6 +22,30 @@ ends" section. Two kinds of end still pass unjudged; both are below.
   1: 160 to 235 us). Success queries don't pay it. The cost is one push plus one barrier test
   per candidate end.
 
+**Found by Track M1 (2026-10-01):**
+- **A path and its reverse can differ in length by about 7%.** On the building maps
+  (`lune run tools/navmesh/maps/run.luau Building BuildingRamp`), Lobby to Upstairs is 55.0
+  studs up the wedge ramps and 51.3 back down; with step strips it is 57.6 and 61.7 (radius
+  0.5). The corridor search is not optimal (entry-edge midpoint nodes, and a triangle closes on
+  first entry; see the Track G item above), so each direction can settle on a different
+  corridor. No fix is planned here; it is a measurement for whoever revisits the node model.
+- **`PathResult.Cost` changes meaning with the filter.** With uniform costs (or only
+  exclusions, `math.huge`), it is the heron-node cost, about the path's length. Any finite
+  multiplier other than 1, even on an area the path never touches, switches the search to
+  edge-midpoint costs, and the same waypoints cost more.
+  - **Repro:** `lune run tools/navmesh/bench/path_cost_modes.luau`. A straight 36-stud path costs 36.000 at `AreaCosts[5] = 1` or
+    `math.huge`, and 36.374 at 1.0001, 2 or 5, with area 5 off the path.
+  - On the building's stairs: 69.6 at uniform costs, 88.0 at `AreaCosts[5] = 1.0001` (+26%).
+  - **Why it matters:** costs from two filters can't be compared, and a reroute rule compares
+    exactly that ("fresh path with the elevator" against "stay off it"). Ticket 35's study
+    keeps both queries in the same mode. Owner: whoever next touches Search (the heron-node
+    gate is Track G's).
+- **Riser strips have no area.** The adapter's step strips (ticket 34) take the default area,
+  not the step Parts' `NavArea`, so a stairs multiplier misses about 1/6 of each tread. Small;
+  fix when ticket 40 replaces the strips, or give a strip its upper face's area.
+- **A seam can't join floors at different heights.** Build refuses it, so a stair riser needs
+  the adapter's strip floor. Ticket 40 owns it.
+
 **Found by Track M2 (2026-10-01), in the Part adapter, not the core:**
 - **Tilted Parts lose their seams, or get zero-length ones that `NavMesh.Build` rejects.**
   - **Repro:** `lune run tools/navmesh/bench/adapter_f32_seams.luau`. Seven hinged slabs give
@@ -149,6 +173,30 @@ than it looks. Read them before touching `Search`, `Clearance`, `Tiles` or `Seri
   `git archive <base> lib/navmesh/src`. Keep it out of the tree during coverage runs.
 - **Scratch archive:** the old `navmesh-phase0` worktree's untracked `zz_*` probes are in the
   main checkout's gitignored `.bench/navmesh/archive/navmesh-phase0/`.
+
+## Found by Track M3 on the Street map (2026-10-01)
+Neither is fixed: Track M3 may not change the core, and its adapter change is limited to the
+area-name table.
+- **The adapter ignores a Part exactly `AgentHeight` tall standing on a floor.**
+  - In `cut`, its top corners sit at exactly `agentHeight`, which the `< agentHeight` test
+    leaves out, and no edge strictly crosses that level. So `top` stays 0 and the cut is dropped.
+  - Repro: a 10 x 10 ground slab at y 0 and a 2 x h x 2 box on it, default options. h 4.99 and
+    5.01 give one obstacle ring, h 5 gives none.
+  - Found when the Street's 5-stud cars didn't cut the road: paths and radius 3.5 went straight
+    through them. The map uses 4.5-stud cars.
+  - **Fix:** count a point at exactly `agentHeight` toward `top` (and the hull), or test
+    `<= agentHeight` for the top. Owner: whichever track next changes the adapter.
+- **A finite area cost turns heron nodes off for the whole query, even for paths that never
+  touch that area.** `Search` keeps heron nodes only when every multiplier is 1 or excluded.
+  - On the Street (`lune run tools/navmesh/maps/street_measure.luau`), at road cost 5 or 10
+    every path stays off the road, yet it is on average 0.5% and at worst 11.7% longer than the
+    best crosswalk-only path (road excluded, heron on). The worst, S52->N44, takes the east
+    crosswalk (73.8) instead of the west one (66.1). That is midpoint A* picking the wrong
+    crosswalk.
+  - At road cost 1.5 to 3 the worst is 7.3-10.7%.
+  - This is the trade-off Search's header documents (goal-ward nodes overprice routes round
+    dear areas), seen on a realistic layout. A fix would need the heron gate to be finer than
+    "any cost but 1". It is not ruled.
 
 ## Found by Track H on 1-4 km maps (2026-10-01)
 These are numbers on large maps, not wrong answers. Each has a script under

@@ -7,6 +7,33 @@ U1–U3, N1–N4, V1–V4), plus the Phase 0 requirement: "Prototype and Test yo
 framework as part of phase 0 so we can ensure it will work for our goals at every step." R4 and
 the const question are deliberately open, gated on benchmarks.
 
+### Rulings during Track M1 (2026-10-01)
+- **Ticket 34, how stair steps join (the adapter's step-height rule).** Riser seams were the
+  obvious shape, but Build refuses a seam whose two sides differ in height. Measured on the
+  building map (ticket 34's as-built notes): ramp strips, riser seams (core check loosened
+  locally), a merged sloped floor (wedge ramp as stand-in), and links per riser. User: "We will
+  go with ramp strips for now, but make a ticket for riser seams to replace it".
+  - Built: `AdapterOptions.MaxStepHeight` (default off). Each riser up to that height gets a
+    0.25-stud strip floor seamed to both steps.
+  - Ticket 40 (riser seams in the core) is filed to replace the strips.
+  - Rejected: links per riser (Partial at radius 1 and up; 12 link events per climb) and a
+    merged sloped floor (needs stair-run detection, can't do a single curb).
+- **Ticket 35, reroute when the elevator frees up mid-stairs?** Measured over 20 seeded crowds
+  of 40 (ticket 35's as-built notes): only 2-4% of NPCs would switch, gaining 1-2 s each;
+  library-only handling strands 6% when the elevator goes out of service. User: "Hysteresis +
+  library aids".
+  - The game, which owns the elevator, re-checks walking NPCs on its own reopen event. An NPC
+    switches if a fresh path costs at least 15% less than staying off the elevator. The game
+    also broadcasts out-of-service. Built in `tools/navmesh/maps/ElevatorSim.luau` as the
+    reference policy for ticket 38.
+  - The library aids are ticket 41, for a library track: link toggles that invalidate only the
+    paths using the link, and a remaining-cost query on a follower.
+  - Rejected: re-planning at waypoints (10x the FindPath calls, no gain), library-only (strands
+    NPCs), and never rerouting (the commit point measured the same as never).
+- **Studio camera (map harness):** "You may move the camera where needed at the start, but do
+  not lock it so I cant look around". `Studio.luau` places the camera once and leaves the
+  camera type alone.
+
 ### Rulings during Track M2 (2026-10-01)
 - **Adapter seams between tilted Parts (ticket 37's pre-work):** fix the three f32 tolerances
   in `clipSegment` and the seam loop now, with specs, and merge into `feat/navmesh` before the
@@ -267,6 +294,15 @@ the const question are deliberately open, gated on benchmarks.
   repaths (regions) to 43 for 19 door toggles, and Track H measured 10.8 replans per Update
   against 0.57. Removed-obstacle boxes were offered too, and not chosen. User: "Add footprint
   boxes (Recommended)".
+
+### Rulings during the build (2026-10-01, Track M3)
+- **The adapter's area-name table (D5, ticket 26's open item, built for ticket 36):** a Part
+  names its area with a text `NavArea` attribute. `FromParts` returns `(desc, areas)`; each name
+  gets an id from 2 up, in name order, skipping ids used by numeric `NavArea`s. Numeric
+  `NavArea` still works. Rejected: areas by `Material` (every existing map would gain areas, and
+  repainting a Part would change paths) and a caller-supplied table (stable ids, but names
+  written twice). Adding a name can renumber the later ones, so a saved bake's costs may need
+  the table rebuilt. User: "Text NavArea (Recommended)".
 
 ### Rulings during the build (2026-09-27)
 - **U-a (clearance reach), ruled after the P4 probe (ticket 15 notes):** no cap by default,

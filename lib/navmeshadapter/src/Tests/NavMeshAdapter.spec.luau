@@ -166,6 +166,35 @@ return function(t: tiniest)
 			expect(near(lo, vector.create(2, 0, 2)) and near(hi, vector.create(6, 0, 6))).is_true()
 		end)
 
+		test("a text NavArea names an area: ids from 2 by name, skipping numeric ones", function()
+			local road = slab("Road", 0, 0, 10, 4, 0)
+			road:SetAttribute("NavArea", "Road")
+			local walk = slab("Walk", 0, 4, 10, 8, 0)
+			walk:SetAttribute("NavArea", "Sidewalk")
+			local cross = slab("Cross", 4, 0, 6, 4, 0)
+			cross:SetAttribute("NavArea", "Crosswalk")
+			local mud = slab("Mud", 0, 8, 10, 10, 0)
+			mud:SetAttribute("NavArea", 2)
+			local road2 = slab("Road2", 10, 0, 20, 4, 0)
+			road2:SetAttribute("NavArea", "Road")
+			local desc: any, areas = NavMeshAdapter.FromParts({ road, walk, cross, mud, road2 }, {})
+			expect(areas.Crosswalk).is(3)
+			expect(areas.Road).is(4)
+			expect(areas.Sidewalk).is(5)
+			local count = 0
+			for _ in areas do
+				count += 1
+			end
+			expect(count).is(3)
+			local ids = {}
+			for _, a in desc.Floors.Road.Areas do
+				table.insert(ids, a.Area)
+			end
+			expect(table.concat(ids, ",")).is("4,5,3,2,4")
+			local _, none = NavMeshAdapter.FromParts({ slab("Ground", 0, 0, 1, 1, 0) }, {})
+			expect(next(none)).is(nil)
+		end)
+
 		test("floor rings run counter-clockwise: upside-down Parts, tiny faces", function()
 			local flipped = part("Part", "Deck", { 4, 1, 4 }, CFrame.new(0, 0, 0) * CFrame.Angles(math.pi, 0, 0))
 			local tiny = part("Part", "Tiny", { 0.5, 1, 0.5 }, CFrame.new(10, 3, 0)) -- upright, under 1 square stud
@@ -676,6 +705,199 @@ return function(t: tiniest)
 			local desc: any = NavMeshAdapter.FromParts({ a, b }, {})
 			local lo = bounds(desc.Floors.Ground.Walkable[2])
 			expect(near(lo, vector.create(9.99, 0, 2))).is_true()
+		end)
+	end)
+
+	describe("step-height rule (ticket 34)", function()
+		-- Ground over x 0..20 with a step block on its east half (x 10..20), h tall: the step's
+		-- west edge is a riser over the ground; its other edges are at the ground's border.
+		local function stepped(h: number, options: any?, obstacles: { any }?): any
+			return NavMeshAdapter.FromParts(
+				{ slab("Ground", 0, 0, 20, 10, 0), box("Step", 10, 0, 20, 10, 0, h) },
+				obstacles or {},
+				options
+			)
+		end
+		local function climb(desc: any): NavMesh.PathResult
+			return NavMesh.FindPath(NavMesh.Build(desc), vector.create(2, 0, 5) :: any, vector.create(15, 1, 5) :: any)
+		end
+		local function risers(desc: any): { any }
+			local out = {}
+			for name, floor in desc.Floors do
+				if string.find(name, "^Riser") then
+					table.insert(out, floor)
+				end
+			end
+			return out
+		end
+
+		test("a riser up to MaxStepHeight gets a strip floor, seamed to both floors", function()
+			local desc = stepped(1, { MaxStepHeight = 1 })
+			expect(sortedNames(desc)).is("Ground,Riser,Step")
+			local ring = desc.Floors.Riser.Walkable[1]
+			expect(area(ring) > 0).is_true()
+			local lo, hi = bounds(ring)
+			expect(near(lo, vector.create(9.75, 0, 0)) and near(hi, vector.create(10, 1, 10))).is_true()
+			expect(#desc.Seams).is(2)
+			local byPair = {}
+			for _, seam in desc.Seams do
+				byPair[seam.FloorA .. "/" .. seam.FloorB] = seam
+			end
+			local top, foot = byPair["Riser/Step"], byPair["Ground/Riser"]
+			expect(top.From.x == 10 and top.To.x == 10 and top.From.y == 1).is_true()
+			expect(foot.From.x == 9.75 and foot.To.x == 9.75 and foot.From.y == 0).is_true()
+			-- The strip is cut out of the ground, beside the step's own cut.
+			expect(#desc.Floors.Ground.Obstacles).is(2)
+			local cutLo, cutHi = bounds(desc.Floors.Ground.Obstacles[#desc.Floors.Ground.Obstacles])
+			expect(near(cutLo, vector.create(9.75, 0, 0)) and near(cutHi, vector.create(10, 0, 10))).is_true()
+			local path = climb(desc)
+			expect(path.Status).is("Success")
+			local floors = {}
+			for _, w in path.Waypoints do
+				if floors[#floors] ~= w.Floor then
+					table.insert(floors, w.Floor)
+				end
+			end
+			expect(table.concat(floors, ",")).is("Ground,Riser,Step")
+		end)
+
+		test("off by default: the riser stays a wall", function()
+			local desc = stepped(1)
+			expect(sortedNames(desc)).is("Ground,Step")
+			expect(climb(desc).Status).is("Partial")
+		end)
+
+		test("a rise above MaxStepHeight gets no strip", function()
+			expect(#risers(stepped(1.5, { MaxStepHeight = 1 }))).is(0)
+			expect(#risers(stepped(1.5, { MaxStepHeight = 1.5 }))).is(1)
+		end)
+
+		test("a ramp's foot and top meet at the same height: plain seams, no strip", function()
+			local desc: any = NavMeshAdapter.FromParts({
+				slab("Ground", 0, 0, 40, 30, 0),
+				ramp("Ramp", 6, 12, 1, 12, 18),
+				slab("Deck", 18, 12, 30, 18, 1), -- its 1-stud sides are above MaxStepHeight
+			}, {}, { MaxStepHeight = 0.5 })
+			expect(#risers(desc)).is(0)
+			expect(#desc.Seams).is(2)
+		end)
+
+		test("only the open part of a riser gets a strip", function()
+			-- A crate on the ground against the riser's south half.
+			local desc = stepped(1, { MaxStepHeight = 1 }, { box("Crate", 6, 0, 10, 4, 0, 3) })
+			local strips = risers(desc)
+			expect(#strips).is(1)
+			local lo, hi = bounds(strips[1].Walkable[1])
+			expect(near(lo, vector.create(9.75, 0, 4)) and near(hi, vector.create(10, 1, 10))).is_true()
+			expect(climb(desc).Status).is("Success")
+		end)
+
+		test("a riser blocked along its whole length gets no strip, and Build still succeeds", function()
+			-- Build rejects a seam with no floor beside it: the strip must not be made.
+			-- The last leaves a 0.0005-stud sliver of riser open: too short for a strip.
+			for _, crate in
+				{
+					box("Crate", 6, 0, 10, 10, 0, 3),
+					box("Crate", 9.8, 0, 9.9, 10, 0, 3),
+					box("Crate", 6, 0.0005, 10, 10, 0, 3),
+				}
+			do
+				local desc = stepped(1, { MaxStepHeight = 1 }, { crate })
+				expect(#risers(desc)).is(0)
+				expect(climb(desc).Status).is("Partial")
+			end
+		end)
+
+		test("a cut poking into the strip's band trims the strip to the band, at any angle", function()
+			-- A crate turned 45 degrees whose corner reaches x 9.85: inside the band (x 9.74..10)
+			-- only for |z - 5| <= 0.11. Straight and with the whole scene turned 30 degrees.
+			local edge = 4 * math.sqrt(2) / 2
+			for _, degrees in { 0, 30 } do
+				local diamond = part(
+					"Part",
+					"Crate",
+					{ edge, 3, edge },
+					CFrame.new(7.85, 1.5, 5) * CFrame.Angles(0, math.pi / 4, 0)
+				)
+				local desc: any = NavMeshAdapter.FromParts(
+					turn({ slab("Ground", 0, 0, 20, 10, 0), box("Step", 10, 0, 20, 10, 0, 1) }, degrees),
+					turn({ diamond }, degrees),
+					{ MaxStepHeight = 1 }
+				)
+				local lengths = {}
+				for _, strip in risers(desc) do
+					local ring = strip.Walkable[1]
+					table.insert(lengths, vector.magnitude(ring[2] - ring[3]))
+				end
+				table.sort(lengths)
+				expect(#lengths).is(2)
+				expect(math.abs(lengths[1] - 4.89) < 1e-3 and math.abs(lengths[2] - 4.89) < 1e-3).is_true()
+				expect(NavMesh.Build(desc)).exists()
+			end
+		end)
+
+		test("a cut on the upper step against the riser leaves that part without a strip", function()
+			local half = stepped(1, { MaxStepHeight = 1 }, { box("Crate", 10, 0, 11, 4, 1, 3) })
+			local strips = risers(half)
+			expect(#strips).is(1)
+			local lo, hi = bounds(strips[1].Walkable[1])
+			expect(near(lo, vector.create(9.75, 0, 4)) and near(hi, vector.create(10, 1, 10))).is_true()
+			local whole = stepped(1, { MaxStepHeight = 1 }, { box("Crate", 10, 0, 11, 10, 1, 3) })
+			expect(#risers(whole)).is(0)
+			expect(NavMesh.Build(whole)).exists()
+		end)
+
+		test("off the origin: heights are measured from the lower floor", function()
+			local desc: any = NavMeshAdapter.FromParts(
+				{ slab("Ground", 0, 0, 20, 10, 3.3), box("Step", 10, 0, 20, 10, 3.3, 1) },
+				{},
+				{ MaxStepHeight = 1 }
+			)
+			local strips = risers(desc)
+			expect(#strips).is(1)
+			local lo, hi = bounds(strips[1].Walkable[1])
+			expect(math.abs(lo.y - 3.3) < 1e-4 and math.abs(hi.y - 4.3) < 1e-4).is_true()
+		end)
+
+		test("a tread just wider than the strip gets one", function()
+			local desc: any = NavMeshAdapter.FromParts(
+				{ slab("Ground", 9.5, 0, 20, 10, 0), box("Step", 10, 0, 20, 10, 0, 1) },
+				{},
+				{ MaxStepHeight = 1 }
+			)
+			expect(#risers(desc)).is(1)
+		end)
+
+		test("a tread narrower than the strip gets none", function()
+			local desc: any = NavMeshAdapter.FromParts(
+				{ slab("Ground", 9.8, 0, 20, 10, 0), box("Step", 10, 0, 20, 10, 0, 1) },
+				{},
+				{ MaxStepHeight = 1 }
+			)
+			expect(#risers(desc)).is(0)
+		end)
+
+		test("a block on open ground gets a strip on every side, and stays buildable", function()
+			local desc: any = NavMeshAdapter.FromParts(
+				{ slab("Ground", 0, 0, 20, 20, 0), box("Block", 8, 8, 12, 12, 0, 1) },
+				{},
+				{ MaxStepHeight = 1 }
+			)
+			expect(#risers(desc)).is(4)
+			local mesh = NavMesh.Build(desc)
+			for _, from in { vector.create(2, 0, 2), vector.create(18, 0, 10), vector.create(10, 0, 18) } do
+				expect(NavMesh.FindPath(mesh, from :: any, vector.create(10, 1, 10) :: any).Status).is("Success")
+			end
+		end)
+
+		test("strip names skip names a Part already took", function()
+			local desc: any = NavMeshAdapter.FromParts({
+				slab("Ground", 0, 0, 20, 10, 0),
+				box("Step", 10, 0, 20, 10, 0, 1),
+				slab("Riser", 40, 0, 44, 4, 5),
+			}, {}, { MaxStepHeight = 1 })
+			expect(sortedNames(desc)).is("Ground,Riser,Riser 2,Step")
+			expect(#desc.Floors["Riser 2"].Walkable[1]).is(4)
 		end)
 	end)
 end
