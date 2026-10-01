@@ -112,3 +112,42 @@ first)
   - the per-mesh memo, queried in both orders;
   - a lone-triangle Partial;
   - a pinned count and hash of cut-off and parted verdicts over fixed queries.
+
+## Partial and Budget ends (2026-10-01, Track G, G3)
+- **The gap:** a Partial or Budget end was its triangle's point nearest the goal, then pushed
+  off the walls. It could lie past a barrier inside that triangle. Repro: ticket 27's room, from
+  (5, 5) to an east-room goal at r 0.51, ended at x 14.5-18.2, past the 1-stud gap.
+- **The fix, in `Search.Run`'s end selection, with this ticket's code only:**
+  - Each best candidate is judged as FindPath will return it: pushed off the walls with
+    `Queries.Push`.
+  - The push can carry it out of a sliver too thin to stand in, into a neighbour. So it is
+    checked in the triangle it lands in, against every node the search closed for that
+    triangle (a start-again or goal-again node too):
+    - `CutOff` from the node's entry edge;
+    - `Separated` from the start point, or from a link's landing;
+    - for a seam, `CutOff` from the seam edge.
+  - A stranded candidate is skipped and the next best is taken; the start point always
+    stands. The extra cost is a rescan per stranded candidate (`ponytail:` noted).
+  - The tested point is moved 1/1024 stud towards its triangle's centroid, in f64. A point on
+    the triangle's boundary (where the nearest point usually is) is undecided by the barrier
+    polygons' even-odd test, and a point on a wall can't be pushed out.
+- **Specs** (FindPath spec, ticket 27 section):
+  - the room's three goals end west of the gap, a narrow agent still succeeds, and an islands
+    end against a wall still stands r off it;
+  - over 24 one-slab rooms with random slab place, width and gap (every barrier inside one
+    triangle), every Partial and Budget end the agent can stand at is reachable from the start
+    by the grid flood (67 ends judged).
+- **Negative controls:** each fails a spec: no check (2 fail), no nudge (2), no push (2), no
+  barrier test (2), and nodes not required to be closed (3).
+- **What it still misses** (known-gaps.md):
+  - an end the push leaves in the pinch itself (still under r from the walls), which `CutOff`
+    can't place;
+  - a barrier closed in a neighbouring triangle (this ticket's completeness gap).
+  - A stricter rule was prototyped and dropped: refuse any end that can't stand clear after
+    the push. It took the many-slab room to 17/405 unreachable ends, but it also refused ends
+    in acute corners, which the two-pass push can't clear. Those fell back to the start: ticket
+    27's lone-triangle spec failed. A many-pass push to tell corners from pinches was worse on
+    every count (12% unreachable, 83 us, still failing that spec).
+- **Numbers** (`tools/navmesh/bench/partial_end.luau`, many-slab rooms, 5 seeds, 405
+  Partial/Budget ends): ends a flood proves unreachable went from 216 (53%) to 89 (22%). Partial
+  FindPath went from 30 to 56 us mean (p95 54 to 113). Success paths don't run this code.

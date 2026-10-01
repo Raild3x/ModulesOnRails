@@ -6,7 +6,10 @@ track that now owns it, where one does. Items without an owner are deferred unti
 **Owned by a round-2 track:**
 - **Links skip ticket 27's end check, and Storage link ids are dense:** Track E.
 - **Update time grows badly with one huge authored ring:** Track F.
-- **A Partial path's end ignores the radius inside its last triangle:** Track G.
+
+**Narrowed by Track G (2026-10-01):** a Partial or Budget end is now judged with ticket 27's
+barriers, as FindPath returns it (pushed off the walls). See ticket 27's "Partial and Budget
+ends" section. Two kinds of end still pass unjudged; both are below.
 
 ## Deferred, only if the user asks
 - **Precise `IsPathValid`.** Ticket 22 notes what `Clearance.Refresh` already knows.
@@ -46,10 +49,19 @@ than it looks. Read them before touching `Search`, `Clearance`, `Tiles` or `Seri
   Each miss falls back to the old optimistic answer. The search's start-again and goal-again
   node ids have no spec that reaches them; no mesh built so far needs them (ticket 27's
   mutation notes).
-- **A Partial path's end ignores the radius inside its last triangle.**
-  - The end is that triangle's point nearest the goal, then pushed off the walls (ticket 24).
-    It can still lie past a gap narrower than 2r inside that triangle.
-  - Only the start triangle is guarded, once a barrier cut the start off.
+- **A Partial or Budget end can still lie past a gap narrower than 2r** (narrowed by Track G).
+  - Since Track G, each candidate end is pushed off the walls, then checked with
+    `Clearance.CutOff` / `Separated` in the triangle the push lands in. A stranded one is
+    skipped for the next best.
+  - Two kinds of end still pass:
+    - **An end the push leaves inside the pinch itself**, still under r from the walls.
+      `CutOff` can't place a point that can't stand, so it answers "not cut off". A stricter
+      rule was tried: refuse an end that can't stand clear. It also refused ends in acute
+      corners, which the two-pass push can't clear, and dragged them back to the start.
+    - **A barrier closed in a neighbouring triangle**: the wall that closes it is more than r
+      from the end's triangle. This is ticket 27's "barrier completeness" gap.
+  - On the many-slab room (`tools/navmesh/bench/partial_end.luau`), ends a grid flood proves
+    unreachable went from 216 of 405 to 89. Partial FindPath there went from 30 to 56 us mean.
 - **A loaded mesh pays an O(triangles) spike once.** After `Deserialize`, the first `Update`
   or the first `FindPath` with an `AgentRadius` builds the wall index. Bake it, or build it
   lazily per tile, if load-time hitches matter.

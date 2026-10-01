@@ -704,6 +704,24 @@ Compressing (bake time only, zstd level 19): demo 1.7-1.8 ms, bench 95-104 ms.
   - a per-mesh memo of the last triangle's walls, dropped by `Refresh`.
 - **Without them:** 163 us per call on props.
 
+## Track G: path output (2026-10-01)
+The full tables are in the tickets; this is the index.
+- **Door repaths with `FirstAffectedSegment`** (ticket 28): 121 / 72 / 59 / 44 repaths for 19
+  door toggles at the demo's default TileSize / 16 / 8 / 4. `IsPathValid` polling gives 118 /
+  77 / 75 / 64. At the default each floor is one tile, so every region is the whole floor. A
+  tighter region (changed triangles only) gave 100 at the default and no change at 16, 8 or 4.
+  The check costs 1.5-2.6 us per NPC.
+- **The drape** (ticket 25, `tools/navmesh/bench/path_shape.luau`): FindPath time within
+  ±5% noise on flat maps (+13% on a hilly ring). Lerp drift drops from 3.2-3.7 studs to at most
+  0.0099. A `SamplePath` helper costs 2-10x a FindPath at 1-stud spacing and still drifts 0.12-0.16.
+- **Path length against the exact shortest path** (ticket 25, branch `proto/g-areabend`):
+  p95 1.074 and max 2.33 today. Heron nodes give 1.0036 and 1.23, and FindPath 0.48x at r 0.
+- **Bisector funnel** (ticket 25, branch `proto/g-bisector`): see ticket 25's "Measured"
+  section.
+- **Partial ends** (ticket 27's G3 section, `tools/navmesh/bench/partial_end.luau`): ends a
+  flood proves unreachable drop from 216/405 to 89/405 on the many-slab rooms. Partial FindPath
+  there goes from 30 to 56 us mean.
+
 ## Not measured (flagged)
 - Remote transfer time and payload size per layout (needs a live server/client session).
 - Locality on a real CDT's vertex and triangle ordering. The grid mesh has near-ideal locality,

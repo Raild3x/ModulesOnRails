@@ -52,6 +52,9 @@ A layered 2.5D navigation mesh for pathfinding queries, built on ConstrainedDela
 - **Extra link**: a transition beyond a triangle's three edges, either a seam portal or a link.
 - **Corridor**: the chain of triangles a path search returns, with how each was entered.
 - **Funnel**: pulling a corridor tight into the shortest path through it.
+- **Drape** (ticket 25): the waypoints the funnel adds where a straight stretch crosses a crease
+  (a slope change inside a floor) or a seam, so a height lerped between waypoints stays on the
+  surface.
 - **Dynamic obstacle**: an obstacle added or removed at runtime. The change is pending until
   `Update`.
 - **Dirty tile**: a tile an `Update` must rebuild: its rectangle, grown by one grid pixel,

@@ -265,7 +265,8 @@ Effort is a rough guess, not a benchmark:
     sharpness of the turn", where the old one "simply offset by the agent width" (IMP #232
     [staff]).
   - Our funnel's clearance at corners is a chord (1.13-1.21 studs at r = 1.5, REPORT.md 9),
-    and straight stretches can pass within 0.06r of a wall on dense maps (Track D2).
+    and paths can pass within 0.06r of a wall on dense maps, mostly at turns (Track D2;
+    corrected by Track G's measurements, ticket 25; ticket 32 holds the fix).
   - Adopting it means one or two arc waypoints when the turn angle exceeds a threshold. That
     turns the chord guarantee into the true radius at corners.
   - **Maps to ticket 25 / D2** ("arc-midpoint waypoint", "bisector-offset funnel").

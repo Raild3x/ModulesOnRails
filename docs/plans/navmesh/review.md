@@ -180,6 +180,25 @@ the const question are deliberately open, gated on benchmarks.
   - **D6, large worlds:** measure first. Benchmark bake size and build time on a 1-4 km
     authored map before ruling on region bakes. User: "Measure first".
 
+### Rulings during the build (2026-10-01, Track G)
+- **Seam and crease waypoints (ticket 25):** the drape only. FindPath adds the fewest surface
+  points that keep a lerped height within 0.01 studs of the surface. A `SamplePath(path,
+  spacing)` helper was measured and not built: it costs 2-10x a FindPath at 1-stud spacing and
+  still drifts 0.12-0.16 studs. The user asked for the trade-offs in plain terms first. User:
+  "Drape only (Recommended)".
+- **Bisector-offset funnel (ticket 25):** keep today's funnel; a radius-aware funnel becomes
+  ticket 32. The docs are corrected: the low clearance is at turns, not on straight stretches.
+  The prototype crossed walls without a post-check, and with one it left dense maps' worst case
+  where it was, at 1.6-2.3x FindPath time. User: "Create a new ticket for this, in the
+  meantime keep it as is today".
+- **Path length against the shortest (ticket 25's area-edge bend):** not ruled yet. The excess
+  is general: it comes from A* nodes at edge midpoints, not from area edges. Gated "heron"
+  nodes were the recommendation (p95 1.074 to 1.0036, FindPath 0.48x at r 0). The user asked
+  first: "Have a subagent research alternatives. What is the standard fixes used by other
+  navmesh systems?"
+- **`PathResult.Length`:** added with no question, since there was no real trade-off. It is the
+  3D polyline length, a link's hop counted as a straight line.
+
 ### Rulings during the build (2026-09-27)
 - **U-a (clearance reach), ruled after the P4 probe (ticket 15 notes):** no cap by default,
   with an optional cap. Any `AgentRadius` works, and each width's reach r* is stored.

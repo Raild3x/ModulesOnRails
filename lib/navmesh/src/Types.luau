@@ -120,7 +120,7 @@ export type NavMeshDrawOptions = {
 --[=[
 	@within NavMesh
 	@interface QueryFilter
-	.AgentRadius number? -- studs (default 0), up to the mesh's MaxAgentRadius; paths only go where the agent fits, and turn this far from wall corners (straight stretches are not offset from walls). The path's end point is pushed this far off the walls, so it can differ from the goal by up to the radius.
+	.AgentRadius number? -- studs (default 0), up to the mesh's MaxAgentRadius; paths only go where the agent fits, but the line can pass closer than this to a wall, mostly at turns (see the Funnel notes; ticket 32). The path's end point is pushed this far off the walls, so it can differ from the goal by up to the radius.
 	.AreaCosts { [number]: number }? -- cost multiplier per area id (default 1, >= 0); math.huge excludes the area
 	.MaxExpansions number? -- stop with "Budget" after expanding this many triangles (default unlimited)
 	.SnapExtents Vector3? -- half-size of the snap box around a feet position (default (0.5, 4, 0.5))

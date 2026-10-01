@@ -5,9 +5,12 @@ that are addressable by name.
 
 **Blocked by:** none
 
-**Status:** needs-triage (dogfood report, pain points 8, 9 and 15; repros 4 and 7)
+**Status:** partly built on `navmesh-path-output` (2026-10-01, Track G): the seam and crease
+waypoints, and `PathResult.Length`. The area-edge bend and the bisector funnel are measured and
+wait for rulings (see "Measured" below). The link items belong to Track E (ticket 30). From the
+dogfood report, pain points 8, 9 and 15, and repros 4 and 7.
 
-- [ ] **Waypoints where a path crosses a seam or a crease (slope change).**
+- [x] **Waypoints where a path crosses a seam or a crease (slope change).**
   - Today a ramp-to-balcony path has no point at the ramp's top. Interpolating Y between
     waypoints passes 3 studs under the surface, and `FindNearestPoint` then lands on the floor
     below (repro 7).
@@ -18,8 +21,77 @@ that are addressable by name.
 - [ ] **Link id on the link's waypoint.**
 - [ ] **An optional `Name` on `LinkDesc`,** with `SetLinkEnabled` accepting it, since today
       it only takes an index into `Links`.
-- [ ] Decide whether `PathResult` gains a `Length` (the 3D polyline length). `Cost` is the
+- [x] Decide whether `PathResult` gains a `Length` (the 3D polyline length). `Cost` is the
       search cost and differs from it.
 
 The corner-chord clearance is documented in `QueryFilter.AgentRadius` as of 3ce0e7c. Emitting
 an arc-midpoint waypoint on sharp turns stays optional.
+
+## As built (2026-10-01, Track G)
+- **Seam and crease waypoints: the drape, in `Funnel.luau`.**
+  - After each funnel run, every straight stretch is walked across the portals it crosses.
+    Each crossing's height comes from the portal edge, so it is exact. Between crossings, both
+    the surface and a lerp are linear, so checking at the crossings is enough.
+  - A sleeve of allowed slopes from the last kept point keeps the fewest crossings for which a
+    height lerped between consecutive waypoints stays within 0.01 studs of the surface. It is
+    one pass, like the funnel in plan. A flat floor gets no extra waypoint.
+  - An added waypoint takes its floor from the triangle before the portal, as funnel corners
+    do.
+  - `pull` now also returns which portal each point lies on.
+- **The follower:** each added waypoint costs `Advance` at most one short step, because a
+  step that reaches a waypoint stops there.
+  - Ramp paths took 155 steps instead of 154.
+  - 200 random demo-level paths took 21,170 steps instead of 21,163, for 17 added waypoints.
+  - No added stall or `Blocked`.
+- **`SamplePath` was measured as the alternative, and not built.** It walks each segment over
+  the surface and emits a point every `spacing` studs. Numbers are from
+  `tools/navmesh/bench/path_shape.luau`, 100 paths per scene, r 0.5:
+
+  | scene | lerp drift, no drape | drift, drape | FindPath, no drape / drape | SamplePath 1 stud: cost, points, drift | SamplePath 0.25: cost, points, drift |
+  |---|---|---|---|---|---|
+  | overhang (repro 7) | 3.21 | 0.0000 | 16.5 / 15.8 us | 54 us, 19, 0.123 | 200 us, 72, 0.030 |
+  | hills (one uneven ring) | 3.70 | 0.0099 | 22.2 / 25.0 us | 39 us, 14, 0.160 | 152 us, 51, 0.034 |
+  | props (flat) | 0 | 0 | 209 / 218 us | 327 us, 42, 0 | 1,128 us, 146, 0 |
+  | walls (flat) | 0 | 0 | 92 / 96 us | 934 us, 196, 0 | 3,633 us, 766, 0 |
+
+  - The drape costs about what run-to-run noise does (±5%), and it is exact.
+  - `SamplePath` costs 2-10x a FindPath at 1-stud spacing and still drifts 0.12-0.16 studs.
+  - It also walks from each waypoint, so where two floors overlap at a seam it can start on the
+    wrong one. The ThreeFloorStairs fixture's Ground runs on under its stairs, and the spec
+    oracle hit exactly that.
+- **`PathResult.Length`:** the 3D length of the waypoint polyline, with a link's hop counted
+  as a straight line. It is 0 with no waypoints. There was no real trade-off, so it wasn't
+  asked.
+- **Specs:** `NavMesh.PathShape.spec.luau`.
+  - The drape is checked by a surface walk: lerped heights stay within 0.0101 of it on the
+    overhang (r 0 and 0.5), a gabled roof and a hilly ring.
+  - Repro 7's exact waypoints, the roof's ridge point, no non-turning waypoint over 60 Courtyard
+    paths, and `Length`.
+- **Negative controls:** each fails a spec: no drape (3 fail), tolerance 1 stud (1), the sleeve
+  never or always cutting (3 each), heights lerped instead of taken from the portal (3), and
+  either sleeve bound frozen (3 and 2).
+
+## Measured, waiting for a ruling (2026-10-01, Track G)
+- **The area-edge bend is not an area effect.** It comes from A* nodes at entry-edge midpoints.
+  - The reference is an exact shortest path: a visibility graph over reflex wall vertices, with
+    exact sightline tests. It was validated on a convex room (ratio exactly 1) and on a
+    hand-solved room, with three negative controls.
+  - Over 31,989 pairs (r 0, equal costs, 15 small flat scenes), FindPath / shortest has mean
+    1.0123, p95 1.0736, p99 1.182 and max 2.33. 19.5% of paths are more than 1% too long.
+  - Removing areas moves the mean by under a point, except repro 4's convex room.
+  - "Heron" nodes put the node at the point of the entry edge minimising |parent - x| + |x -
+    goal|, gated to queries whose area multipliers are all 1. They give p95 1.0036 and max 1.23,
+    with 2.7% over 1%. FindPath takes 0.48x the time at r 0 and 0.80x at r 1.
+  - A shortcut post-pass gives p95 1.060 at 3.5x the time. Theta*-like any-angle search is worse
+    and slower.
+  - Branch `proto/g-areabend`, `docs/plans/navmesh/research/path-length.md` there, with the
+    oracle `tools/navmesh/bench/PathOracle.luau`.
+- **The bisector-offset funnel.**
+  - Off-portal offsets bend the corridor: without a post-check, 0.7-8% of paths on the dense
+    `bench` map cross a wall.
+  - With the post-check (`checked-t`), sparse maps keep exactly 1.00 r. Dense maps keep their
+    worst case (0.01-0.08 r), because 10-47% of paths fall back. FindPath is 1.6-2.3x slower.
+  - **Correction:** the low clearance is at turns, not on straight stretches. In 79-100% of
+    today's paths the worst point is within 1.5 r of a turn waypoint.
+  - Branch `proto/g-bisector`, `docs/plans/navmesh/research/bisector-funnel.md` there, with
+    `tools/navmesh/bench/funnel_clearance.luau`.

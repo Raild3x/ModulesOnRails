@@ -26,9 +26,11 @@
 	- between crossings the straight segment is not offset at all, and can cut past a corner.
 	No fixed fraction of r holds on every mesh. The measured worst clearance over random paths
 	(ends at least 2r from walls) was 0.23-0.71 r on the Courtyard fixture and 0.06-0.11 r on
-	the bench `walls` scene. Whether an agent fits is decided by the search's clearance widths
-	(SR4); the offset only keeps turns off the corners. Offsetting along the corner's bisector
-	instead is a ticket 25 option.
+	the bench `walls` scene. In 79-100% of paths that worst point is within 1.5 r of a turn,
+	where the portal runs nearly parallel to a wall (ticket 25). Whether an agent fits is
+	decided by the search's clearance widths (SR4); the offset only keeps turns off the corners.
+	Moving portal ends off their edge (a bisector offset) was measured and rejected, because it
+	bends the corridor through walls. A radius-aware funnel is ticket 32.
 ]=]
 
 local CDT = require("../ConstrainedDelaunay")
