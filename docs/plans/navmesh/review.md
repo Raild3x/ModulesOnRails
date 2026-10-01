@@ -7,6 +7,19 @@ U1–U3, N1–N4, V1–V4), plus the Phase 0 requirement: "Prototype and Test yo
 framework as part of phase 0 so we can ensure it will work for our goals at every step." R4 and
 the const question are deliberately open, gated on benchmarks.
 
+### Rulings during Track E (2026-10-01)
+- **The generator's default `Area` stays 1,** as for `LinkDesc`. A game that wants
+  `AreaCosts` to switch generated links off passes its own `Area`. User: "Keep 1 (Recommended)".
+- **Link density: one link per `Spacing`,** as built. Kept links are at least `Spacing` apart
+  along a ledge (about 10 on a 40-stud ledge at the default 4), not one per straight ledge as
+  ticket 30's wording had it. After Part 1, 1,000 links add about 10-17 us per `FindPath`.
+  User: "One per Spacing (Recommended)".
+- **The default reach numbers stay** (`MaxDrop` 10, `MaxJumpDistance` 6, `MaxJumpUp` 3,
+  `Clearance` 1). User: "Keep the guesses (Recommended)".
+- **Other floors' obstacles: open.** The user asked instead whether obstacles should be 3D, with
+  a height, so an obstacle's top acts as a floor. Answer pending (see Track E's report). Until
+  then, the probe stops only at the ledge floor's own obstacles.
+
 ### Rulings during Track M2 (2026-10-01)
 - **Adapter seams between tilted Parts (ticket 37's pre-work):** fix the three f32 tolerances
   in `clipSegment` and the seam loop now, with specs, and merge into `feat/navmesh` before the

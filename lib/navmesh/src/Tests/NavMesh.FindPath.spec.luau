@@ -1013,6 +1013,7 @@ return function(t: tiniest)
 					{ MaxExpansions = -1 },
 					{ SnapExtents = v(-1, 1, 1) },
 					{ AgentRadius = 2, Capped = true },
+					{ GoalFallback = 1 },
 				}
 			do
 				local target = if filter.Capped then cappedMesh else mesh

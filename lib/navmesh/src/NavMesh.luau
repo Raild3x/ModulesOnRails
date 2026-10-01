@@ -624,19 +624,16 @@ function NavMesh.SetLinkEnabled(mesh: NavMeshData, link: number | string, enable
 		if slot == 0 then
 			error(`NavMesh.SetLinkEnabled: no link {link}`, 2)
 		end
-		slots[1] = slot
+		slots = { slot }
 	end
 	-- An end covered by an obstacle, or of a link waiting for Update, has no triangle (0):
-	-- nothing to bump there.
-	local bumped = {}
+	-- nothing to bump there. A tile bumped twice is just as invalid.
 	for _, slot in slots do
 		local fromTri, _, toTri = Storage.GetLink(mesh, slot)
 		Storage.SetLinkFlag(mesh, slot, enabled)
 		for _, t in { fromTri, toTri } do
-			local tile = if t ~= 0 then Storage.GetTriangleTile(mesh, t) else 0
-			if tile ~= 0 and not bumped[tile] then
-				bumped[tile] = true
-				Storage.BumpTileStamp(mesh, tile)
+			if t ~= 0 then
+				Storage.BumpTileStamp(mesh, Storage.GetTriangleTile(mesh, t))
 			end
 		end
 	end

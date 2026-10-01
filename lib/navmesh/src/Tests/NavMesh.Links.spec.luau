@@ -179,6 +179,71 @@ return function(t: tiniest)
 			expect(#NavMesh.Update(mesh)).is(0)
 		end)
 
+		test("link errors point at the caller's line", function()
+			local mesh = pads { JUMP }
+			NavMesh.RemoveLink(mesh, 1)
+			local calls = {
+				function()
+					NavMesh.AddLink(mesh, { From = 1 } :: any)
+				end,
+				function()
+					NavMesh.RemoveLink(mesh, 9)
+				end,
+				function()
+					NavMesh.RemoveLink(mesh, 1)
+				end,
+				function()
+					NavMesh.SetLinkEnabled(mesh, "nope", true)
+				end,
+				function()
+					NavMesh.SetLinkEnabled(mesh, 9, true)
+				end,
+			}
+			for i, call in calls do
+				local ok, err = pcall(call)
+				expect(ok).is(false)
+				expect(tostring(err):find("Links.spec", 1, true) ~= nil).with_context(`call {i}: {err}`).is_true()
+			end
+		end)
+
+		test("an explicit Cost is kept at Update, even 0", function()
+			local mesh = pads()
+			for _, cost in { 0, 0.5, 2 } do
+				local id = NavMesh.AddLink(mesh, { From = v(9, 0, 5), To = v(15, 0, 5), Cost = cost })
+				NavMesh.Update(mesh)
+				local slot = Storage.FindLink(mesh :: any, id)
+				expect(select(5, Storage.GetLink(mesh :: any, slot))).with_context(tostring(cost)).is(cost)
+			end
+		end)
+
+		test("links and obstacles in one Update: every rebuilt tile and link end is a region", function()
+			-- A long floor and a radius cap, so the obstacle's clearance stays far from the links.
+			local mesh = NavMesh.Build {
+				Floors = {
+					Ground = {
+						Walkable = {
+							flat(0, { 0, 0, 40, 0, 40, 10, 0, 10 }),
+							flat(0, { 44, 0, 54, 0, 54, 10, 44, 10 }),
+						},
+					},
+				},
+				TileSize = 4,
+				MaxAgentRadius = 1,
+			}
+			NavMesh.AddObstacle(mesh, "Ground", { v(1, 0, 1), v(2, 0, 1), v(2, 0, 2), v(1, 0, 2) })
+			NavMesh.AddLink(mesh, { From = v(39, 0, 9), To = v(45, 0, 9) })
+			NavMesh.AddLink(mesh, { From = v(39, 0, 1), To = v(53, 0, 1) })
+			local regions = NavMesh.Update(mesh)
+			expect(#regions).is(5) -- the obstacle's tile and four link-end tiles, none touching
+			for _, p in { v(1.5, 0, 1.5), v(39, 0, 9), v(45, 0, 9), v(39, 0, 1), v(53, 0, 1) } do
+				local hit = false
+				for _, r in regions do
+					hit = hit or (p.X >= r.Min.X and p.X <= r.Max.X and p.Z >= r.Min.Z and p.Z <= r.Max.Z)
+				end
+				expect(hit).with_context(`{p}`).is_true()
+			end
+		end)
+
 		test("a link-only Update leaves the triangles as they were", function()
 			local mesh = pads()
 			local before = Storage.TriangleCount(mesh :: any)
@@ -287,6 +352,9 @@ return function(t: tiniest)
 			expect(Search.HeuristicScale(mesh :: any, {})).is(1)
 			local free = pads { { From = v(5, 0, 5), To = v(5, 0, 5), Cost = 0 } }
 			expect(Search.HeuristicScale(free :: any, {})).is(0)
+			-- A short link is priced by its length like any other.
+			local short = pads { { From = v(5, 0, 5), To = v(5.5, 0, 5), Cost = 0.25 } }
+			expect(Search.HeuristicScale(short :: any, {})).is(0.5)
 		end)
 	end)
 
