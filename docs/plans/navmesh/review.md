@@ -14,6 +14,29 @@ the const question are deliberately open, gated on benchmarks.
   - Rejected: leaving it for M1's step-height rule (it would block ticket 37 until 34), and
     fixing it only on M2's branch (the other map tracks keep hitting it).
   - Repro: `tools/navmesh/bench/adapter_f32_seams.luau`; details in known-gaps.md.
+- **Two more adapter changes for wedge-triangle terrain:** join a floor's faces that share an
+  edge into one ring (dropping corners left on a straight line), and merge cut-hull corners
+  closer than 0.01 studs. User: "Both, merge early (Recommended)".
+  - Measured first on ForestRiver, 10 seeds x 4 tilts: 16 of 40 layouts built and passed on the
+    adapter of the first fix, 31 of 40 with both; the other 9 were the core bug below.
+  - Rejected: the hull fix alone (most terrain still fails), and slabs-only ground (skips the
+    most common Part-terrain form).
+- **The core bug, an obstacle covering a whole seam, is fixed by Track M2 now,** an exception to
+  the handoff's "core is off limits". User: "M2 fixes it now (Recommended)".
+  - The fix: such a seam is closed (no portals) instead of a Build or `Update` error; a seam that
+    never lay on a floor stays an error.
+  - Rejected: leaving it to a core track (the regression map couldn't cover it, and dropping a
+    crate on a ramp's foot would keep failing).
+- **A third adapter change: faces join a floor within 0.001 studs of its plane** (seams keep
+  0.01). User: "Yes, 0.001, merge early (Recommended)".
+  - Measured first: 37 of 40 layouts passed with the changes above; the 3 failures (all at 1
+    degree) were a ramp's foot walled to agents with a radius, because a level pad had joined a
+    floor 0.004 off its plane. 40 of 40 with 0.001 (and with 0.0001). At 1 degree, 290 floors
+    instead of 246, with the same triangles, bake and Build time.
+  - Rejected: 0.0001 (too close to f32 noise for faces meant to be coplanar), and keeping 0.01
+    (closes crossings silently on slightly tilted terrain).
+  - So ticket 37's "merge near-coplanar faces" idea is answered: merging saves floors, not
+    triangles, and it moves cuts.
 
 ### Rulings after Track H (2026-10-01)
 - **D6, large worlds, ruled on ticket 31's numbers** (bench.md, "Large worlds, 1-4 km"): fix

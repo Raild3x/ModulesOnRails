@@ -43,6 +43,46 @@ ends" section. Two kinds of end still pass unjudged; both are below.
     degrees.
   - Axis-aligned levels never hit this, which is why the adapter's specs and both demos passed;
     the demo's `adapter_check` output is unchanged.
+- **Wedge-triangle terrain still failed on most layouts (16 of 40 seed x tilt layouts of
+  ForestRiver) after that fix. Fixed (2026-10-01, ruled) by three more adapter changes and one
+  core change; 40 of 40 now build and pass:**
+  - **Face join (adapter):** a floor's faces that share an edge become one ring, without the
+    corners that leaves on a straight line. Two wedges made one triangle with a corner (the
+    altitude's foot) mid-diagonal, which each side snapped differently.
+  - **Hull corners (adapter):** cut corners closer than 0.01 studs become one; two 0.003 apart
+    swapped on the core's grid and folded the ring.
+  - **Coplanar tolerance (adapter):** faces join a floor within 0.001 studs of its plane, not
+    0.01. A level pad that joined a floor 0.004 off its own plane moved the floor's cut from a
+    ramp 0.016 past the ramp's foot, and the sliver of ground left there walled the crossing
+    to any agent with a radius.
+  - **Core 1, an obstacle covering a whole seam:** see below.
+- **Core: three inputs that Part terrain makes and `NavMesh.Build` rejected.** One script shows
+  all three: `lune run tools/navmesh/bench/core_seam_repros.luau`.
+- **Core 1, fixed (2026-10-01, ruled, by Track M2): an obstacle covering a whole seam on one
+  floor failed the Build, and an `Update`.**
+  - **Repro (case 1):** floors A and B meet at a 4-stud seam; a crate on A covers it. Build
+    threw "seam 1: does not lie on floor 'A'", and `AddObstacle` of the crate then `Update`
+    failed the same way (SR13 kept the old mesh, so the crate never landed).
+  - **Now:** `joinSeam` (Build.luau) closes such a seam (no portals). A seam whose middle isn't
+    in or on the floor's authored walkable rings is still "does not lie on floor"; floors whose
+    pieces overlap along the seam but never across it (one side) are still "don't meet across
+    it", cut or not.
+- **Core 2, open: a seam end near a diagonal edge can snap a grid step off it.**
+  - **Repro (case 2):** two triangles share the diagonal (0,0)-(10,10), and a seam runs from
+    (0,0) to (5.001953125, 5.0019459), 7e-6 studs off the diagonal. On the 1/256 grid, x rounds
+    up and z rounds down, so the end lands a step off the snapped edge.
+  - Before Core 1's fix this threw "does not lie on floor 'B'"; **now the seam is closed
+    silently**, which is worse to debug. The case prints "ok" in the repro either way, so check
+    the seam joins, not only that Build runs.
+  - The core tolerates about 1e-3 studs off an edge in general; this is the half-grid rounding
+    case. The face join keeps Part terrain out of it (seam ends are triangle corners); a
+    hand-written description can still hit it. A fix would snap seam ends onto the floor's
+    snapped edge.
+- **Core 3, open: an obstacle whose corners are under a grid step apart can fold on the grid.**
+  - **Repro (case 3):** a convex obstacle with corners (30.00198, 99.99806) and (30.00002,
+    100.00004), 0.003 studs apart. Snapped, they swap order: "the ring folds back on itself".
+  - The adapter's hull fix keeps Part input out of it; `AddObstacle` with a ring like this
+    still fails. A fix would drop corners that snap within a grid step of the last.
 
 ## Deferred, only if the user asks
 - **Precise `IsPathValid`.** Ticket 22 notes what `Clearance.Refresh` already knows.
