@@ -37,6 +37,21 @@ return function(t: tiniest)
 		return (folder:FindFirstChild("Status", true) :: TextLabel).Text
 	end
 
+	-- The loader for a saved bake (keep in sync with NavMeshEditor.SaveBake's
+	-- doc comment): join the chunks, base64-decode, unzstd when compressed.
+	local function loadBake(folder: Instance): buffer
+		local EncodingService = game:GetService("EncodingService")
+		local chunks = {}
+		for i = 1, #folder:GetChildren() do
+			chunks[i] = (folder:FindFirstChild(tostring(i)) :: StringValue).Value
+		end
+		local data = EncodingService:Base64Decode(buffer.fromstring(table.concat(chunks)))
+		if buffer.readu32(data, 0) == 0xFD2FB528 then -- the zstd frame magic
+			data = EncodingService:DecompressBuffer(data, Enum.CompressionAlgorithm.Zstd)
+		end
+		return data
+	end
+
 	describe("NavMeshEditor", function()
 		test("opens on a fixture and draws its mesh", function()
 			local editor, folder = open("NavMesh", NavMesh.Fixtures.ThreeFloorStairs.Desc)
@@ -77,6 +92,74 @@ return function(t: tiniest)
 			expect(string.find(status(folder), "radius 0.5", 1, true) ~= nil).is_true()
 			expect(string.find(status(folder), "path Success", 1, true) ~= nil).is_true()
 			editor:Destroy()
+			folder:Destroy()
+		end)
+
+		test("SetMarkers and SetAgentRadius drive the path from code", function()
+			local editor, folder = open("NavMesh", NavMesh.Fixtures.ThreeFloorStairs.Desc)
+			editor:SetMarkers(vector.create(2, 0, 2), vector.create(36, 5, 18))
+			editor:SetAgentRadius(0.5)
+			expect(editor._state.Start).is(vector.create(2, 0, 2))
+			expect(editor._state.Goal).is(vector.create(36, 5, 18))
+			expect(string.find(status(folder), "radius 0.5", 1, true) ~= nil).is_true()
+			expect(string.find(status(folder), "path Success", 1, true) ~= nil).is_true()
+			editor:Destroy()
+			folder:Destroy()
+		end)
+
+		test("SaveBake builds the description and saves a bake that loads back", function()
+			local desc = NavMesh.Fixtures.ThreeFloorStairs.Desc
+			local editor, folder = open("NavMesh", desc)
+			local bake = editor:SaveBake(folder)
+			expect(bake.Name).is("NavMeshBake")
+			expect(bake.Parent).is(folder)
+			expect(#bake:GetChildren()).is(1)
+			local expected = buffer.tostring(NavMesh.Serialize(NavMesh.Build(desc)))
+			expect(buffer.tostring(loadBake(bake))).is(expected)
+			local again = editor:SaveBake(folder)
+			expect(bake.Parent).never_exists()
+			expect(#folder:GetChildren()).is(2) -- the editor's own folder and the new bake
+			expect(again.Parent).is(folder)
+			editor:Destroy()
+			folder:Destroy()
+		end)
+
+		test("SaveBake splits a bake across StringValues of at most _ChunkSize characters", function()
+			expect(NavMeshEditor._ChunkSize < 200000).is_true() -- a StringValue's limit
+			local desc = NavMesh.Fixtures.Courtyard.Desc
+			local editor, folder = open("NavMesh", desc)
+			local limit = NavMeshEditor._ChunkSize
+			NavMeshEditor._ChunkSize = 100
+			local ok, bake = pcall(editor.SaveBake, editor, folder)
+			NavMeshEditor._ChunkSize = limit
+			assert(ok, bake)
+			expect(#bake:GetChildren() > 2).is_true()
+			for _, chunk in bake:GetChildren() do
+				expect(chunk.ClassName).is("StringValue")
+				expect(#(chunk :: StringValue).Value <= 100).is_true()
+			end
+			local expected = buffer.tostring(NavMesh.Serialize(NavMesh.Build(desc)))
+			expect(buffer.tostring(loadBake(bake))).is(expected)
+			editor:Destroy()
+			folder:Destroy()
+		end)
+
+		test("SaveBake errors on a description that does not build, and in CDT mode", function()
+			local editor, folder = open("NavMesh", NavMesh.Fixtures.ThreeFloorStairs.Desc)
+			editor:_apply { Type = "SetDescription", Description = BOWTIE }
+			expect(function()
+				editor:SaveBake(folder)
+			end).fails_with("NavMesh.Build")
+			expect(folder:FindFirstChild("NavMeshBake")).never_exists()
+			NavMeshEditor._Keys[Enum.KeyCode.B](editor, vector.zero) -- the key shows it instead
+			expect(string.find(status(folder), "ERROR: NavMesh.Build", 1, true) ~= nil).is_true()
+			expect(folder:FindFirstChild("NavMeshBake")).never_exists()
+			editor:Destroy()
+			local cdt = open("CDT")
+			expect(function()
+				cdt:SaveBake(folder)
+			end).fails_with("SaveBake is only for NavMesh mode")
+			cdt:Destroy()
 			folder:Destroy()
 		end)
 
@@ -156,6 +239,8 @@ return function(t: tiniest)
 			expect(key(Enum.KeyCode.T)).never_exists()
 			expect(editor._showTiles).never_is_true()
 			expect(key(Enum.KeyCode.P)).never_exists()
+			expect(key(Enum.KeyCode.B)).never_exists()
+			expect(folder:FindFirstChild("NavMeshBake")).exists()
 			editor:Destroy()
 			folder:Destroy()
 

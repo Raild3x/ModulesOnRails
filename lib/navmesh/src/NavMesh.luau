@@ -358,6 +358,30 @@ end
 	Bakes the mesh into a versioned buffer (P3), to ship precomputed or store. Its format is
 	independent of the in-memory layout (SR9). It includes each tile's source data (R7), so a
 	loaded mesh still supports `AddObstacle` and `Update`.
+
+	**Shipping a bake in a place.** A place cannot hold a buffer (attributes reject buffers,
+	and scripts cannot set `BinaryStringValue.Value`), and a script can only set a
+	`StringValue` or a ModuleScript's source under 200,000 characters. So ship the bake as
+	base64 text split across StringValues named `1`, `2`, ... in a Folder, compressed with
+	zstd first when it is made in Studio:
+	- **In Studio:** `NavMeshEditor:SaveBake(parent)` (key B in the editor) builds the
+	  description and writes that Folder. Save the place (in Play mode, copy the Folder
+	  before you stop). By hand, from the command bar:
+	  `EncodingService:Base64Encode(EncodingService:CompressBuffer(NavMesh.Serialize(mesh), Enum.CompressionAlgorithm.Zstd, 19))`,
+	  then cut the text into StringValues of at most 199,999 characters.
+	- **From files (Rojo):** write the base64 of the buffer to `NavMeshBake/1.txt`,
+	  `NavMeshBake/2.txt`, ... (Rojo turns each `.txt` into a StringValue). Leave it
+	  uncompressed: Lune's zstd frames do not decode with `EncodingService` (they lack the
+	  content size), and Lune has no base64, so a Lune script needs a small encoder.
+
+	`NavMeshEditor.SaveBake` (package NavMeshDebug) documents the loader: join the chunks,
+	`EncodingService:Base64Decode`, then `DecompressBuffer` when the bytes start with the zstd
+	frame magic (`0xFD2FB528` as a u32), so one loader reads both kinds.
+
+	Measured in Studio (`docs/plans/navmesh/bench.md`): the 256-stud bench map's 580 KB bake
+	is 227 KB of text in 2 StringValues and loads in 1.4-1.7 ms, before `Deserialize`'s 7-8 ms.
+	A `\xNN` string literal in a ModuleScript is 4.1x the bake, which is over the source limit
+	for that map.
 ]=]
 function NavMesh.Serialize(mesh: NavMeshData): buffer
 	return Serialize.Serialize(mesh)
@@ -366,6 +390,7 @@ end
 --[=[
 	@within NavMesh
 	Loads a mesh from `Serialize`'s buffer. Errors on another format version or a damaged buffer.
+	`Serialize` shows how to ship a bake in a place and load it back.
 ]=]
 function NavMesh.Deserialize(data: buffer): NavMeshData
 	return Serialize.Deserialize(data)

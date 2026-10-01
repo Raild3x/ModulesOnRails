@@ -43,14 +43,11 @@ EDITOR = PRELUDE + """print("[MARK] start")
 local NavMeshEditor = require(src.navmeshdebug.src.NavMeshEditor)
 local Level = require(Demo.Level)
 local editor = NavMeshEditor.new(workspace, "NavMesh", Level.Desc)
--- There is no public way to place the markers or set the radius from code: use the private
--- _apply, as tools/navmesh/studio/EditorShot.luau does.
-editor:_apply {{ Type = "SetMarker", Which = "Start", Position = Vector3.new(5, 0, 5) }}
-editor:_apply {{ Type = "SetMarker", Which = "Goal", Position = Vector3.new(45, 6, 37) }}
-editor:_apply {{ Type = "SetAgentRadius", Radius = 1.5 }}
-print("[MARK] path " .. tostring(editor._pathStatus) .. " error " .. tostring(editor._error))
+editor:SetMarkers(Vector3.new(5, 0, 5), Vector3.new(45, 6, 37))
+editor:SetAgentRadius(1.5)
 local gui = workspace:FindFirstChild("NavMeshEditor", true)
 local screen = gui and gui:FindFirstChildOfClass("ScreenGui")
+print("[MARK] status " .. (if screen then screen.Status.Text else "no status bar"))
 if screen then screen.Parent = game:GetService("StarterGui") end
 local camera = workspace.CurrentCamera
 camera.CameraType = Enum.CameraType.Scriptable

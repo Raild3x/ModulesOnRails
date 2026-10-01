@@ -592,6 +592,60 @@ Studio, ms per 12 queries, medians of 3 runs x 5 rounds:
 - **Per-phase profiles and the rejected variants** (Opt1 in-place, Opt2 alone) are on branches
   `proto/local-update` and `proto/local-update-77`. Ruling: review.md, 2026-09-28.
 
+## Shipping a bake in a place (ticket 26, 2026-09-28)
+How to hold `NavMesh.Serialize`'s buffer in a place. Measured in Studio (edit mode, plugin
+context) by `python tools/navmesh/studio/studio.py ship` (`BakeShip.luau`). Three runs, median
+of 7 reps each; the load column gives the range over the runs.
+- **Text** is the string's length. **Saved** is the bytes in the binary place format
+  (`SerializationService:SerializeInstancesAsync`, the `.rbxm` format a `.rbxl` uses; it
+  compresses property data itself).
+- **Load** is string to buffer, read from the saved and reloaded copy, before `Deserialize`.
+  For a ModuleScript it is `require` of a fresh module (compile and run, with a unique source
+  per rep so Studio cannot reuse bytecode).
+- Every row round-trips byte for byte through save and load.
+- `Deserialize` itself: demo 0.10-0.15 ms, bench 6.9-7.7 ms.
+
+| Option | Demo text (x bake) | Demo saved | Demo load ms | Bench text (x bake) | Bench saved | Bench load ms |
+|---|---|---|---|---|---|---|
+| Bake bytes | 6,920 | | | 580,187 | | |
+| ModuleScript `\xNN` literal (the demo today) | 28,430 (4.11) | 5,862 | 0.19-0.26 | 2,381,213 (4.10) | over the limit | - |
+| ModuleScript, printable bytes raw, others `\ddd` | 13,799 (1.99) | 3,999 | 0.07 | 1,284,338 (2.21) | over the limit | - |
+| StringValues, base64 (EncodingService) | 9,228 (1.33), 1 value | 4,389 | 0.01 | 773,584 (1.33), 4 values | 403,183 | 1.39-1.89 |
+| StringValues, base64 (plain Luau decoder) | same | same | 0.25-0.28 | same | same | 26.8-27.9 |
+| **StringValues, zstd then base64 (the recipe)** | **1,468 (0.21), 1 value** | **2,346** | **0.01** | **227,232 (0.39), 2 values** | **229,020** | **1.36-1.67** |
+| String attribute, raw bytes | 6,920 (1.00) | 3,395 | 0.00 | 580,187 (1.00) | 263,008 | 0.15-0.19 |
+| String attribute, zstd bytes | 1,101 (0.16) | 1,649 | 0.01 | 170,424 (0.29) | 171,636 | 0.80-0.88 |
+
+Compressing (bake time only, zstd level 19): demo 1.7-1.8 ms, bench 95-104 ms.
+
+**Limits found (probes in the same script):**
+- A script cannot set `StringValue.Value` or `ModuleScript.Source` to 200,000 characters or
+  more ("Provided string length (200000) is greater than or equal to max length (200000)");
+  199,999 works and survives a save. So the bench map's ModuleScript literal cannot even be
+  written from Studio. A Rojo-built place is not limited: a 773,584-character `.txt`
+  StringValue loaded whole.
+- Attributes reject a buffer ("buffer is not a supported attribute type"). A string attribute
+  holds any bytes, and they survive save and load.
+- `BinaryStringValue.Value` is not scriptable.
+- `EncodingService` has `Base64Encode`/`Base64Decode` and zstd `CompressBuffer`/
+  `DecompressBuffer`. Lune 0.10.4 has neither base64 nor a Roblox-compatible zstd: its zstd
+  frames omit the content size, and `DecompressBuffer` fails on them ("decompression failed").
+  Lune's `@lune/roblox` also refuses a non-UTF-8 string attribute, so a file pipeline can only
+  write text: plain base64.
+
+**Why the recipe is zstd plus base64 in StringValues, not the fastest row:**
+- The raw-bytes attribute loads fastest (0.2 ms against 1.4-1.7 ms at the bench size), but
+  only Studio can write it (not Rojo or Lune), and attributes have replication caps under
+  next-generation replication (a 1,024-byte attribute payload per instance, and 50-character
+  strings, per DevForum reports; not measured here). The load time is small either way next to
+  `Deserialize`'s 7 ms.
+- StringValues can be written both from Studio (`NavMeshEditor:SaveBake`) and from files
+  (`.txt` under Rojo). One loader reads both, because it checks for the zstd frame magic.
+- zstd cuts the bench text from 4 values to 2 and the saved place data from 403 KB to 229 KB,
+  and loads no slower.
+- Not measured: replicating a large StringValue or attribute to a client, which needs a live
+  server and client session.
+
 ## Not measured (flagged)
 - Remote transfer time and payload size per layout (needs a live server/client session).
 - Locality on a real CDT's vertex and triangle ordering. The grid mesh has near-ideal locality,
