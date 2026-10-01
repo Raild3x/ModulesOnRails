@@ -182,8 +182,8 @@ gap G3.
 
 ### Design questions for a ruling
 **Ruled 2026-10-01 (review.md, "Rulings during Track E"):** 1 keep `Area` 1; 2 one link per
-`Spacing`, as built; 4 keep the defaults. Question 3 is open: the user asked whether obstacles
-should get a height (their top acting as a floor). Note: since Part 1, links no longer cost a
+`Spacing`, as built; 4 keep the defaults. Question 3: keep the ledge floor's obstacles only;
+obstacle heights (a top acting as a floor) come with ticket 29. Note: since Part 1, links no longer cost a
 per-query loop in `Search`, so question 2's cost argument is gone.
 
 1. **The default `Area`.** It is 1, the same as `LinkDesc`, so generated links share area 1

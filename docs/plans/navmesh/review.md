@@ -16,9 +16,11 @@ the const question are deliberately open, gated on benchmarks.
   User: "One per Spacing (Recommended)".
 - **The default reach numbers stay** (`MaxDrop` 10, `MaxJumpDistance` 6, `MaxJumpUp` 3,
   `Clearance` 1). User: "Keep the guesses (Recommended)".
-- **Other floors' obstacles: open.** The user asked instead whether obstacles should be 3D, with
-  a height, so an obstacle's top acts as a floor. Answer pending (see Track E's report). Until
-  then, the probe stops only at the ledge floor's own obstacles.
+- **Other floors' obstacles: probes stop only at the ledge floor's own obstacles, for now.**
+  The user asked whether obstacles should be 3D, with a height, so an obstacle's top acts as a
+  floor. Ruled: do it with ticket 29, which already plans a height per obstacle (for ceilings).
+  There, the generator jumps over low obstacles and lands on their tops. User: "With ticket 29
+  (Recommended)".
 
 ### Rulings during Track M2 (2026-10-01)
 - **Adapter seams between tilted Parts (ticket 37's pre-work):** fix the three f32 tolerances
