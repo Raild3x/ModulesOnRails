@@ -31,7 +31,7 @@ return function(t: tiniest)
 		for _, row in rows do
 			table.insert(waypoints, { Position = v(row[1], row[2], row[3]), Floor = row[4], Label = row[5] })
 		end
-		return { Status = "Success", Waypoints = waypoints, Cost = 0, TileStamps = {} }
+		return { Status = "Success", Waypoints = waypoints, Cost = 0, Length = 0, TileStamps = {} }
 	end
 
 	local function box(floor: string, x0: number, z0: number, x1: number, z1: number): any

@@ -186,7 +186,7 @@ do
 	)
 end
 
-print("\n== 7. Waypoints skip slope changes: lerping Y between them lands on the floor below")
+print("\n== 7. Waypoints at slope changes (ticket 25): lerping Y between them stays on the ramp")
 do
 	local mesh = NavMesh.Build({
 		Floors = {
@@ -206,8 +206,13 @@ do
 		table.insert(points, `{f(w.Position)} {w.Floor}`)
 	end
 	print(`  {path.Status}: {table.concat(points, " -> ")}`)
-	local a, b = path.Waypoints[1].Position, path.Waypoints[#path.Waypoints].Position
-	local mid = a + (b - a) * ((19.8 - a.X) / (b.X - a.X)) -- where the path is about to top the ramp
+	-- The waypoints either side of x 19.8, where the path is about to top the ramp.
+	local k = 1
+	while path.Waypoints[k + 1].Position.X < 19.8 do
+		k += 1
+	end
+	local a, b = path.Waypoints[k].Position, path.Waypoints[k + 1].Position
+	local mid = a + (b - a) * ((19.8 - a.X) / (b.X - a.X))
 	local snapped = NavMesh.FindNearestPoint(mesh, mid)
 	print(
 		`  straight 3D segment at x 19.8 = {f(mid)}; the ramp surface there is y 4.9; FindNearestPoint puts it at {f(

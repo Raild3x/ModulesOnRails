@@ -227,6 +227,7 @@ local function chase(world: World, npc: Npc, target: Npc, dt: number)
 				{ Position = target.Position, Floor = target.Floor },
 			},
 			Cost = 0,
+			Length = vector.magnitude(target.Position - npc.Position),
 			TileStamps = {},
 		}, STALL_STEPS)
 		npc.Goal = target.Position

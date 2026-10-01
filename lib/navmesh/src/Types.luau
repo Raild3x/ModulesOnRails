@@ -223,11 +223,18 @@ export type PathStatus = "Success" | "Partial" | "Budget" | "NoStart" | "NoGoal"
 	@within NavMesh
 	@interface PathResult
 	.Status PathStatus
-	.Waypoints { Waypoint } -- from the snapped start; the last is pushed AgentRadius off the walls
+	.Waypoints { Waypoint } -- from the snapped start; the last is pushed AgentRadius off the walls. Besides the corners there is one wherever the slope changes (a crease or a seam), so a height lerped between consecutive waypoints stays within 0.01 studs of the surface
 	.Cost number -- the search cost: 3D length times area multipliers, measured through the midpoints of the edges crossed
+	.Length number -- the 3D length of the waypoint polyline, a link's hop counted as a straight line (0 with no waypoints)
 	.TileStamps { number } -- opaque: for IsPathValid
 ]=]
-export type PathResult = { Status: PathStatus, Waypoints: { Waypoint }, Cost: number, TileStamps: { number } }
+export type PathResult = {
+	Status: PathStatus,
+	Waypoints: { Waypoint },
+	Cost: number,
+	Length: number,
+	TileStamps: { number },
+}
 
 --[=[
 	@within NavMesh

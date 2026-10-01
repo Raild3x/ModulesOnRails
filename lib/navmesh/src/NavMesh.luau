@@ -164,13 +164,13 @@ function NavMesh.FindPath(mesh: NavMeshData, from: Vector3, to: Vector3, filter:
 	local costs, maxExpansions, extents, radius, fallback = readFilter(mesh, filter)
 	local startT, startP = Snap.Snap(mesh, vector.create(from.X, from.Y, from.Z), extents, costs)
 	if startP == nil then
-		return { Status = "NoStart" :: PathStatus, Waypoints = {}, Cost = 0, TileStamps = {} }
+		return { Status = "NoStart" :: PathStatus, Waypoints = {}, Cost = 0, Length = 0, TileStamps = {} }
 	end
 	local goal = vector.create(to.X, to.Y, to.Z)
 	local goalT, goalP = Snap.Snap(mesh, goal, extents, costs)
 	if goalP == nil then
 		if not fallback then
-			return { Status = "NoGoal" :: PathStatus, Waypoints = {}, Cost = 0, TileStamps = {} }
+			return { Status = "NoGoal" :: PathStatus, Waypoints = {}, Cost = 0, Length = 0, TileStamps = {} }
 		end
 		-- No goal triangle: the search ends Partial (or Budget) at the reached point nearest it.
 		goalT, goalP = 0, goal
@@ -181,7 +181,11 @@ function NavMesh.FindPath(mesh: NavMeshData, from: Vector3, to: Vector3, filter:
 	local n = #points
 	points[n], owners[n] = Queries.Push(mesh, owners[n], points[n], radius, costs)
 	local waypoints = table.create(#points)
+	local length = 0
 	for i, p in points do
+		if i > 1 then
+			length += vector.magnitude(p - points[i - 1])
+		end
 		waypoints[i] = {
 			Position = p :: any, -- a vector is a Vector3 on Roblox
 			Floor = Storage.GetFloorName(mesh, Storage.GetTriangleFloor(mesh, owners[i])),
@@ -200,7 +204,13 @@ function NavMesh.FindPath(mesh: NavMeshData, from: Vector3, to: Vector3, filter:
 			table.insert(stamps, Storage.GetTileStamp(mesh, tile))
 		end
 	end
-	return { Status = status :: PathStatus, Waypoints = waypoints, Cost = cost, TileStamps = stamps }
+	return {
+		Status = status :: PathStatus,
+		Waypoints = waypoints,
+		Cost = cost,
+		Length = length,
+		TileStamps = stamps,
+	}
 end
 
 local function toVector(p: Vector3): vector

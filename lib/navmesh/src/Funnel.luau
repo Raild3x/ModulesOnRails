@@ -9,6 +9,10 @@
 	String-pulls a triangle corridor into the shortest path through it in (X, Z): the "simple
 	stupid funnel" (Mononen). Corners are mesh vertices, so they keep their heights.
 
+	**Drape (ticket 25):** where a straight stretch crosses a crease or a seam, a point on the
+	surface is added, as few as keep a height lerped between consecutive points within 0.01
+	studs of the surface. A flat floor gets none.
+
 	**Agent radius (SR4):** each portal end that is a wall vertex is moved along the portal,
 	towards its other end, by min(r, half the portal's length). Free-space vertices (tile, area,
 	seam) are not offset, but a seam portal's end that is a wall vertex on either of its floors
@@ -39,10 +43,10 @@ end
 
 -- The simple stupid funnel over one run of portals (lefts[1] = rights[1] = the start, the last
 -- pair = the end), then without exactly zero-turn corners. Returns the points and, for each,
--- the triangle it was taken from.
-local function pull(lefts: { vector }, rights: { vector }, owners: { number }): ({ vector }, { number })
+-- the triangle it was taken from and the portal it lies on.
+local function pull(lefts: { vector }, rights: { vector }, owners: { number }): ({ vector }, { number }, { number })
 	local startP, endP = lefts[1], lefts[#lefts]
-	local points, from = { startP }, { owners[1] }
+	local points, from, at = { startP }, { owners[1] }, { 1 }
 	local apex, left, right = startP, startP, startP
 	local apexI, leftI, rightI = 1, 1, 1
 	local i = 2
@@ -60,6 +64,7 @@ local function pull(lefts: { vector }, rights: { vector }, owners: { number }): 
 			else
 				table.insert(points, left)
 				table.insert(from, owners[leftI])
+				table.insert(at, leftI)
 				apex, apexI = left, leftI
 				right, rightI = apex, apexI
 				i = apexI + 1
@@ -75,6 +80,7 @@ local function pull(lefts: { vector }, rights: { vector }, owners: { number }): 
 			else
 				table.insert(points, right)
 				table.insert(from, owners[rightI])
+				table.insert(at, rightI)
 				apex, apexI = right, rightI
 				left, leftI = apex, apexI
 				i = apexI + 1
@@ -86,21 +92,88 @@ local function pull(lefts: { vector }, rights: { vector }, owners: { number }): 
 	if points[#points] ~= endP then
 		table.insert(points, endP)
 		table.insert(from, owners[#owners])
+		table.insert(at, #lefts)
 	end
 	-- A line that grazes a vertex exactly leaves a zero-turn corner there: drop it (exact test).
-	local kept, keptFrom = { points[1] }, { from[1] }
+	local kept, keptFrom, keptAt = { points[1] }, { from[1] }, { at[1] }
 	for k = 2, #points - 1 do
 		local a, q, c = kept[#kept], points[k], points[k + 1]
 		if CDT.Orient2D(a.X, a.Z, q.X, q.Z, c.X, c.Z) ~= 0 then
 			table.insert(kept, q)
 			table.insert(keptFrom, from[k])
+			table.insert(keptAt, at[k])
 		end
 	end
 	if #points > 1 then
 		table.insert(kept, points[#points])
 		table.insert(keptFrom, from[#points])
+		table.insert(keptAt, at[#points])
 	end
-	return kept, keptFrom
+	return kept, keptFrom, keptAt
+end
+
+-- How far (studs) a height lerped between two waypoints may stray from the surface.
+local DRAPE = 0.01
+
+-- Adds the surface points `drape` needs between the funnel's points: where a straight segment
+-- crosses a portal between differently sloped triangles (a crease) or floors (a seam), so a
+-- height lerped between consecutive waypoints stays within DRAPE of the surface. Portal ends
+-- lie on the shared edge, so a crossing's height is exact; between crossings the surface and
+-- the lerp are both linear, so checking at crossings is enough. A sleeve of allowed slopes from
+-- the last kept point (as the funnel does in plan) keeps the fewest points, in one pass.
+local function drape(
+	lefts: { vector },
+	rights: { vector },
+	owners: { number },
+	points: { vector },
+	from: { number },
+	at: { number }
+): ({ vector }, { number })
+	local out, outFrom = { points[1] }, { from[1] }
+	for k = 1, #points - 1 do
+		local p, q = points[k], points[k + 1]
+		local dx, dz = q.X - p.X, q.Z - p.Z
+		local length = math.sqrt(dx * dx + dz * dz)
+		-- The sleeve from the anchor: its point, its distance along p-q, and the slope bounds.
+		local anchor, anchorU = p, 0
+		local lo, hi = -math.huge, math.huge
+		local last, lastOwner, lastU = p, from[k], 0
+		for i = at[k] + 1, at[k + 1] do
+			local c, owner, u
+			if i == at[k + 1] then
+				c, owner, u = q, from[k + 1], 1
+			else
+				local l, r = lefts[i], rights[i]
+				local ex, ez = r.X - l.X, r.Z - l.Z
+				local denom = ex * dz - ez * dx
+				if denom == 0 then
+					continue -- the segment runs along this portal: its ends are on it
+				end
+				local wx, wz = p.X - l.X, p.Z - l.Z
+				local s = math.clamp((wx * dz - wz * dx) / denom, 0, 1)
+				u = math.clamp((wx * ez - wz * ex) / denom, 0, 1)
+				c, owner = vector.create(p.X + dx * u, l.Y + (r.Y - l.Y) * s, p.Z + dz * u), owners[i]
+			end
+			local d = (u - anchorU) * length
+			if d > 0 then
+				local slope = (c.Y - anchor.Y) / d
+				if slope < lo or slope > hi then
+					-- c can't be reached in a straight lerp: the last crossing becomes a waypoint.
+					table.insert(out, last)
+					table.insert(outFrom, lastOwner)
+					anchor, anchorU = last, lastU
+					lo, hi = -math.huge, math.huge
+					d = (u - anchorU) * length
+				end
+				lo = math.max(lo, (c.Y - DRAPE - anchor.Y) / d)
+				hi = math.min(hi, (c.Y + DRAPE - anchor.Y) / d)
+				last, lastOwner, lastU = c, owner, u
+			end
+		end
+		table.insert(out, q)
+		table.insert(outFrom, from[k + 1])
+	end
+	return out, outFrom
 end
 
 -- Whether `p` is a wall vertex of triangle `t`, matched in (X, Z) only (a seam point has one
@@ -140,7 +213,7 @@ function Funnel.StringPull(
 		table.insert(lefts, stop)
 		table.insert(rights, stop)
 		table.insert(owners, owner)
-		local segment, segmentFrom = pull(lefts, rights, owners)
+		local segment, segmentFrom = drape(lefts, rights, owners, pull(lefts, rights, owners))
 		for k, point in segment do
 			table.insert(points, point)
 			table.insert(from, segmentFrom[k])
