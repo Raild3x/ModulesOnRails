@@ -57,8 +57,10 @@ return function(t: tiniest)
 			-- The box is closed: touching the segment counts, from either side.
 			expect(NavMesh.FirstAffectedSegment(ell, { box("Ground", 3, 0, 4, 1) }, 0)).is(1)
 			expect(NavMesh.FirstAffectedSegment(ell, { box("Ground", 9, 4, 10, 6) }, 0)).is(2)
-			-- A box over a segment's far end only.
+			-- A box over a segment's far end only, either way along the axis.
 			expect(NavMesh.FirstAffectedSegment(ell, { box("Ground", 9.5, -1, 12, 1) }, 0)).is(1)
+			local back = path { { 10, 0, 0, "Ground" }, { 0, 0, 0, "Ground" } }
+			expect(NavMesh.FirstAffectedSegment(back, { box("Ground", -1, -1, 1, 1) }, 0)).is(1)
 			-- A box at the last waypoint, from past the last segment.
 			expect(NavMesh.FirstAffectedSegment(ell, { box("Ground", 9.5, 9.5, 10.5, 10.5) }, 0, 3)).is(nil)
 			-- A segment exactly one stud long in X.
