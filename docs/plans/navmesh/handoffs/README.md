@@ -23,7 +23,7 @@ for your track. Everything named here lives on branch `feat/navmesh` unless it s
 | Track | Handoff | Can start | Touches | Conflicts with |
 |---|---|---|---|---|
 | A | [A-ticket24-then-23.md](A-ticket24-then-23.md): finish ticket 24, then 23 | now; WIP exists | NavMesh, Queries, Snap, Search, Types, Funnel, the demo | B on `Search.luau`; C on `Types.luau` |
-| B | [B-core-correctness-v3.md](B-core-correctness-v3.md): ticket 27 and the 1-pixel Update mismatch, one v3 bake format | now | Storage, Clearance, Tiles, Build, Search, Serialize | A on `Search.luau` |
+| B | [B-core-correctness-v3.md](B-core-correctness-v3.md): ticket 27 and the 1-pixel Update mismatch, one v3 bake format | **done, merged 2026-10-01** | Storage, Clearance, Tiles, Build, Search, Serialize | A on `Search.luau` |
 | C | [C-ticket26-adapter-debug.md](C-ticket26-adapter-debug.md): Part adapter and debug drawing (ticket 26) | now | a new adapter module, DrawList, navmeshdebug, the demo's Studio side | A only in its last step (the `vector` typing) |
 | D | [D-later.md](D-later.md): ticket 25, the simplification passes, deferred items | after A (25) and C (simplification) | Funnel, Build, Quantize | everything; run it alone |
 

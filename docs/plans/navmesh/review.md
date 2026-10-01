@@ -149,6 +149,11 @@ the const question are deliberately open, gated on benchmarks.
     - The start and goal triangles can be entered again as separate search nodes.
     - Ends touching a wall are judged pushed out to r.
   - Oracle: 153/153 Success -> Partial flips confirmed over 80,000 random queries, 0 refuted.
+- **Track B merge gate:** 2026-10-01. Mutation came in below two files' figures: Clearance
+  80.1 (was 80.9) and Search 84.0 (was 85.5). Storage 95.6, Tiles 80.4, Serialize 87.5 and
+  Build 83.5 were fine. The survivors were triaged in ticket 27's notes: equivalent mutants,
+  measure-zero ties, and re-entry node ids no buildable mesh reaches. User: "Merge, accept
+  triage". The new figures are the baseline.
 
 ### Rulings during the build (2026-09-27)
 - **U-a (clearance reach), ruled after the P4 probe (ticket 15 notes):** no cap by default,
