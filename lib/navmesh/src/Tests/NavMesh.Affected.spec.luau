@@ -152,6 +152,79 @@ return function(t: tiniest)
 			end
 		end)
 
+		test("Update also returns the footprint of each obstacle it added", function()
+			local mesh = NavMesh.Build(Fixtures.ThreeFloorStairs.Desc)
+			local crate = NavMesh.AddObstacle(mesh, "Upper", flat(5, { 30.2, 4.1, 32.7, 4.3, 32.5, 6.6, 30.1, 6.4 }))
+			local regions, added = NavMesh.Update(mesh)
+			expect(#regions > 0).is_true()
+			expect(#added).is(1)
+			local box = added[1]
+			expect(box.Floor).is("Upper")
+			-- The ring's bounds on the 1/256 grid, grown by one pixel.
+			expect(box.Min.X).is(math.round(30.1 * 256) / 256 - 1 / 256)
+			expect(box.Max.Z).is(math.round(6.6 * 256) / 256 + 1 / 256)
+			expect(box.Min.Y <= 5 and box.Max.Y >= 5).with_context(`{box.Min.Y}, {box.Max.Y}`).is_true()
+			-- A removal adds nothing, and nor does an add taken back before the Update.
+			NavMesh.RemoveObstacle(mesh, crate)
+			NavMesh.RemoveObstacle(mesh, NavMesh.AddObstacle(mesh, "Ground", flat(0, { 2, 2, 3, 2, 3, 3, 2, 3 })))
+			local _, none = NavMesh.Update(mesh)
+			expect(#none).is(0)
+			expect(#select(2, NavMesh.Update(mesh))).is(0)
+		end)
+
+		test("a path clear of every added footprint is still walked to the end", function()
+			-- Random paths on a floor of props, then random crates added, one Update at a time.
+			-- The follower walks each path the footprints leave alone on the updated mesh.
+			math.randomseed(29)
+			local function rnd(lo: number, hi: number): number
+				return lo + math.random() * (hi - lo)
+			end
+			local mesh = NavMesh.Build {
+				TileSize = 8,
+				MaxAgentRadius = 1,
+				Floors = { Ground = { Walkable = { flat(0, { 0, 0, 40, 0, 40, 24, 0, 24 }) } } },
+			}
+			local walked, flagged = 0, 0
+			for step = 1, 5 do
+				local paths = {}
+				for _ = 1, 24 do
+					local radius = if #paths % 2 == 0 then 0.3 else 0.8
+					local found = NavMesh.FindPath(
+						mesh,
+						v(rnd(1, 39), 0, rnd(1, 23)),
+						v(rnd(1, 39), 0, rnd(1, 23)),
+						{ AgentRadius = radius }
+					)
+					if found.Status == "Success" and #found.Waypoints >= 2 then
+						table.insert(paths, { Path = found, Radius = radius })
+					end
+				end
+				local cx, cz = rnd(4, 36), rnd(4, 20)
+				local w, d = rnd(2, 6), rnd(2, 6)
+				NavMesh.AddObstacle(mesh, "Ground", flat(0, { cx, cz, cx + w, cz, cx + w, cz + d, cx, cz + d }))
+				local _, added = NavMesh.Update(mesh)
+				for _, q in paths do
+					if NavMesh.FirstAffectedSegment(q.Path, added, q.Radius) then
+						flagged += 1
+						continue
+					end
+					walked += 1
+					local filter = { AgentRadius = q.Radius }
+					local follower = NavMesh.NewFollower(q.Path)
+					local at, event = q.Path.Waypoints[1].Position, nil
+					for _ = 1, 2000 do
+						at, _, event = NavMesh.Advance(mesh, follower, at, 0.5, filter)
+						if event then
+							break
+						end
+					end
+					expect(event).with_context(`step {step}`).is("Arrived")
+				end
+			end
+			expect(walked > 40).with_context(`{walked} walked`).is_true()
+			expect(flagged > 10).with_context(`{flagged} flagged`).is_true()
+		end)
+
 		test("a path it calls unaffected is what FindPath returns again after adds (ticket 22)", function()
 			-- Random paths over two floors joined by a ramp, then random crates added on either
 			-- floor, one Update at a time. Adds only: a removal can open a better route through a

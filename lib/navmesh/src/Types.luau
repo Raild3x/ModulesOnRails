@@ -153,6 +153,9 @@ export type QueryFilter = {
 	segments between them fattened by its `AgentRadius`, stay outside every box on their floors
 	is unaffected: `FindPath` would return it again, unless a removal opened a better route
 	through a box. `NavMesh.FirstAffectedSegment` runs that test.
+
+	`Update`'s second list uses the same shape for each added obstacle's footprint (its ring's
+	bounds, Y the floor's span in the changed regions): a path clear of those is still walkable.
 ]=]
 export type ChangedRegion = { Floor: string, Min: Vector3, Max: Vector3 }
 

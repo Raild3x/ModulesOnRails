@@ -72,6 +72,9 @@ A layered 2.5D navigation mesh for pathfinding queries, built on ConstrainedDela
 - **Changed region**: a per-floor box `Update` returns around what it changed: whole rebuilt
   tiles, plus the triangles whose widths it recomputed. `FirstAffectedSegment` names the first
   segment of a path that one reaches, fattened by the agent's radius (ticket 28).
+- **Added footprint**: the box of an obstacle an `Update` added, its second result. A path
+  clear of every added footprint is still walkable; one clear of every changed region is also
+  the path `FindPath` would return again.
 - **Bake**: a mesh serialized to a versioned buffer, to ship precomputed.
 - **Pending change**: a dynamic obstacle added or removed but not yet applied by `Update`
   (`HasPendingChanges`).

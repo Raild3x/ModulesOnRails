@@ -198,6 +198,11 @@ the const question are deliberately open, gated on benchmarks.
   navmesh systems?"
 - **`PathResult.Length`:** added with no question, since there was no real trade-off. It is the
   3D polyline length, a link's hop counted as a straight line.
+- **Added footprints (ticket 28):** `Update` returns `(regions, added)`, where `added` holds one
+  box per obstacle it added. A path clear of those is still walkable. Demo 1 went from 117
+  repaths (regions) to 43 for 19 door toggles, and Track H measured 10.8 replans per Update
+  against 0.57. Removed-obstacle boxes were offered too, and not chosen. User: "Add footprint
+  boxes (Recommended)".
 
 ### Rulings during the build (2026-09-27)
 - **U-a (clearance reach), ruled after the P4 probe (ticket 15 notes):** no cap by default,

@@ -660,21 +660,59 @@ end
 	cheaper updates), plus a copy of the rest of the mesh at about 0.1-0.2 ms per 1,000 triangles
 	under Lune; a `MaxAgentRadius` cap makes the clearance part much cheaper.
 
-	Returns the changed regions (`ChangedRegion`), empty when nothing was pending: a path that
-	stays outside every box, fattened by its `AgentRadius`, is unaffected, which is finer than
-	`IsPathValid`'s per-tile stamps. `FirstAffectedSegment` does that test. A region holds whole
-	rebuilt tiles, so smaller tiles give tighter regions. Atomic (SR13): on an error the mesh is unchanged, the pending obstacle changes
-	are rolled back, and the error is raised again. Triangle and vertex ids are only stable until
-	the next `Update` (SR14).
+	Returns two lists of boxes (`ChangedRegion`), both empty when nothing was pending. Test a path
+	against either with `FirstAffectedSegment`, which is finer than `IsPathValid`'s per-tile stamps:
+	- **The changed regions** hold everything the Update changed: whole rebuilt tiles, so smaller
+	  tiles give tighter regions. A path clear of them, fattened by its `AgentRadius`, is what
+	  `FindPath` would return again (unless a removal opened a better way).
+	- **The added footprints:** one box per obstacle the Update added, its ring's bounds. A path
+	  clear of them is still walkable, though `FindPath` may now return another. Usually that is
+	  what a game needs: it replans far fewer agents. A removal adds no box, since it blocks
+	  nothing; it may open a way for a `Partial` path, so retry those after removing.
+
+	Atomic (SR13): on an error the mesh is unchanged, the pending obstacle changes are rolled back,
+	and the error is raised again. Triangle and vertex ids are only stable until the next `Update`
+	(SR14).
 
 	```lua
 	local door = NavMesh.AddObstacle(mesh, "Ground", doorFootprint)
-	local regions = NavMesh.Update(mesh) -- { { Floor, Min, Max } }
-	if NavMesh.FirstAffectedSegment(path, regions, radius) then path = NavMesh.FindPath(mesh, npcFeet, goal, filter) end
+	local regions, added = NavMesh.Update(mesh) -- each { { Floor, Min, Max } }
+	if NavMesh.FirstAffectedSegment(path, added, radius) then path = NavMesh.FindPath(mesh, npcFeet, goal, filter) end
 	```
 ]=]
-function NavMesh.Update(mesh: NavMeshData): { ChangedRegion }
-	return Tiles.Update(mesh)
+function NavMesh.Update(mesh: NavMeshData): ({ ChangedRegion }, { ChangedRegion })
+	-- The footprints this Update adds, read before it commits them: on the 1/256 grid, grown
+	-- by one pixel for the snap rounding.
+	local added = {}
+	for slot = 1, Storage.ObstacleCount(mesh) do
+		local _, floor, state, xs, zs = Storage.GetObstacleRecord(mesh, slot)
+		if state == Storage.OBSTACLE_PENDING_ADD then
+			local x0, z0, x1, z1 = math.huge, math.huge, -math.huge, -math.huge
+			for i, x in xs do
+				x0, x1, z0, z1 = math.min(x0, x), math.max(x1, x), math.min(z0, zs[i]), math.max(z1, zs[i])
+			end
+			table.insert(added, {
+				Floor = floor,
+				Min = vector.create((x0 - 1) / 256, 0, (z0 - 1) / 256),
+				Max = vector.create((x1 + 1) / 256, 0, (z1 + 1) / 256),
+			})
+		end
+	end
+	local regions = Tiles.Update(mesh)
+	-- Heights: the span of the floor's changed regions, which hold every footprint.
+	for _, box in added do
+		local floor = Storage.GetFloorName(mesh, box.Floor)
+		local y0, y1 = math.huge, -math.huge
+		for _, r in regions do
+			if r.Floor == floor then
+				y0, y1 = math.min(y0, r.Min.Y), math.max(y1, r.Max.Y)
+			end
+		end
+		box.Floor = floor
+		box.Min = vector.create(box.Min.X, y0, box.Min.Z) :: any
+		box.Max = vector.create(box.Max.X, y1, box.Max.Z) :: any
+	end
+	return regions, added :: any
 end
 
 --[=[

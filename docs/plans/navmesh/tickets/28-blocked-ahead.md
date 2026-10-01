@@ -82,3 +82,36 @@ gap G2, and the dogfood report's pain point 4.
     unchanged at 16, 8 and 4: the level's triangles are room-sized. It would change `Tiles`,
     which this track doesn't own. Smaller tiles are the lever, so the `Update` doc now says so.
   - The check costs 1.5-2.6 us per NPC per toggle, against 0.4-0.9 us for `IsPathValid`.
+
+## Added footprints (2026-10-01, Track G, ruled)
+- **Why:** Track H's second dogfood game hit the same wall independently (its REPORT.md, pain
+  point 1). A game needs to know whether its path is still walkable, not whether `FindPath`
+  would return the same path. For an add, the obstacle's own footprint, grown by the radius,
+  decides that.
+- **As built:** `NavMesh.Update` returns `(regions, added)`.
+  - `added` holds one `ChangedRegion` per obstacle the Update added: its ring's grid bounds,
+    grown by one pixel for the snap rounding.
+  - Y is the span of that floor's changed regions.
+  - It is read from the pending records before `Tiles.Update` commits them, so `Tiles` is
+    unchanged.
+  - A removal adds no box; the `Update` doc says to retry `Partial` paths after one.
+  - Existing callers that take one result are unaffected.
+- **Demo:** the door toggle tests `added`. When nothing was added (the door opened), it
+  repaths the NPCs on a non-`Success` path.
+
+  | 120 s sim, seed 7, 19 toggles | default TileSize | TileSize 8 |
+  |---|---|---|
+  | `IsPathValid` polling | 119 | 72 |
+  | changed regions | 117 | 51 |
+  | added footprints, plus Partial retries on open | 43 | 34 |
+
+  - There are no stuck agents in any of them, and the arrivals are similar.
+  - Track H measured 10.8 replans per `Update` with regions against 0.57 with footprints, by
+    hand on their warehouse.
+- **Specs** (`NavMesh.Affected.spec.luau`):
+  - one box per add, on its floor, with the exact bounds; none for a removal or an add taken
+    back before the Update;
+  - a walk property: over 5 random crate adds, every path clear of the added footprints is
+    walked to `Arrived` by the follower on the updated mesh.
+- **Negative controls:** each fails a spec: no boxes (2 fail), no one-pixel grow (1), boxes
+  shrunk to half (2), and flat Y (1).

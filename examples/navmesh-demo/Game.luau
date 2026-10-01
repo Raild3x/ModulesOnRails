@@ -241,7 +241,7 @@ local function chase(world: World, npc: Npc, target: Npc, dt: number)
 	end
 end
 
--- Returns the regions the Update changed.
+-- Returns the footprints the Update added (the door's, when it closes).
 local function toggleDoor(world: World): { any }
 	local NavMesh = world.NavMesh
 	if world.DoorId then
@@ -250,14 +250,15 @@ local function toggleDoor(world: World): { any }
 	else
 		world.DoorId = NavMesh.AddObstacle(world.Mesh, "Ground", world.Level.DOOR)
 	end
-	local regions = timed(world, "Update", NavMesh.Update, world.Mesh)
+	local _, added = timed(world, "Update", NavMesh.Update, world.Mesh)
 	count(world, nil, if world.DoorId then "door:closed" else "door:opened")
 	log(world, if world.DoorId then "door closes" else "door opens")
-	return regions
+	return added
 end
 
--- After an Update: repath the NPCs whose way ahead meets a changed region.
-local function repathAffected(world: World, regions: { any })
+-- After an Update: repath the NPCs whose way ahead meets an added footprint (it is no longer
+-- walkable), and, when nothing was added (the door opened), the ones on a Partial path.
+local function repathAffected(world: World, added: { any })
 	for _, npc in world.Npcs do
 		local follower = npc.Follower
 		if follower and npc.Goal and not npc.Jump then
@@ -266,11 +267,11 @@ local function repathAffected(world: World, regions: { any })
 				"FirstAffectedSegment",
 				world.NavMesh.FirstAffectedSegment,
 				follower.Path,
-				regions,
+				added,
 				npc.Radius,
 				follower.Next - 1
 			)
-			if segment then
+			if segment or (#added == 0 and follower.Path.Status ~= "Success") then
 				repath(world, npc, npc.Goal, "door")
 			end
 		end
