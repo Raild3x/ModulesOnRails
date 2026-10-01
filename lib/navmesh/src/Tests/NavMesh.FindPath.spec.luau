@@ -593,6 +593,8 @@ return function(t: tiniest)
 			for _, w in partial.Waypoints do
 				expect((w.Position :: any).X <= 10).with_context(fmt(w.Position)).is_true()
 			end
+			-- At the reachable point nearest the goal: by the slab's west face, not back at the start.
+			expect(fmt(partial.Waypoints[#partial.Waypoints].Position)).is("9.4900,0.0000,5.0000")
 		end)
 
 		test("ends parted inside one triangle go round when they can, else stop", function()

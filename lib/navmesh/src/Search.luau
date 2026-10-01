@@ -336,15 +336,13 @@ function Search.Run(
 	-- Whether point p of node u's triangle is cut off, inside it, from where u was entered: its
 	-- edge, or the start point, or a link's landing (ticket 27's barriers). A point on the
 	-- triangle's boundary is undecided by the barrier polygons' inside test (and one on a wall
-	-- can't be pushed out), so it is moved 1/1024 stud towards the centroid first, in f64.
+	-- can't be pushed out), so it is moved a millionth of the way to the centroid first, in f64.
 	local function stranded(u: number, p: vector): boolean
 		local t = triangleOf(u)
 		local ia, ib, ic = GetTriangle(s, t)
 		local a, b, c = GetVertex(s, ia), GetVertex(s, ib), GetVertex(s, ic)
-		local dx, dz = (a.X + b.X + c.X) / 3 - p.X, (a.Z + b.Z + c.Z) / 3 - p.Z
-		local d = math.sqrt(dx * dx + dz * dz)
-		local k = if d > 0 then math.min(1 / 1024, d / 2) / d else 0
-		local x, z = p.X + dx * k, p.Z + dz * k
+		local x = p.X + ((a.X + b.X + c.X) / 3 - p.X) * 1e-6
+		local z = p.Z + ((a.Z + b.Z + c.Z) / 3 - p.Z) * 1e-6
 		if u == startT then
 			return Clearance.Separated(s, t, radius, startP.X, startP.Z, x, z)
 		elseif via[u] == 0 then

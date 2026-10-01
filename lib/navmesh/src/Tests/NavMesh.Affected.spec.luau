@@ -54,8 +54,16 @@ return function(t: tiniest)
 			expect(NavMesh.FirstAffectedSegment(ell, both, 0, 2)).is(2)
 			-- Past the last segment there is nothing left to block.
 			expect(NavMesh.FirstAffectedSegment(ell, both, 0, 3)).is(nil)
-			-- The box is closed: touching the segment counts.
+			-- The box is closed: touching the segment counts, from either side.
 			expect(NavMesh.FirstAffectedSegment(ell, { box("Ground", 3, 0, 4, 1) }, 0)).is(1)
+			expect(NavMesh.FirstAffectedSegment(ell, { box("Ground", 9, 4, 10, 6) }, 0)).is(2)
+			-- A box over a segment's far end only.
+			expect(NavMesh.FirstAffectedSegment(ell, { box("Ground", 9.5, -1, 12, 1) }, 0)).is(1)
+			-- A box at the last waypoint, from past the last segment.
+			expect(NavMesh.FirstAffectedSegment(ell, { box("Ground", 9.5, 9.5, 10.5, 10.5) }, 0, 3)).is(nil)
+			-- A segment exactly one stud long in X.
+			local short = path { { 0, 0, 0, "Ground" }, { 1, 0, 0, "Ground" } }
+			expect(NavMesh.FirstAffectedSegment(short, { box("Ground", 0.9, -0.1, 1.1, 0.1) }, 0)).is(1)
 		end)
 
 		test("fattens the segments by the radius", function()
@@ -70,6 +78,8 @@ return function(t: tiniest)
 			local regions = { box("Ground", 10.3, 10.3, 12, 12) }
 			expect(NavMesh.FirstAffectedSegment(ell, regions, 0.2)).is(nil)
 			expect(NavMesh.FirstAffectedSegment(ell, regions, 0.6)).is(2)
+			-- Touching the grown bounds counts.
+			expect(NavMesh.FirstAffectedSegment(ell, { box("Ground", 10.5, 4, 11, 6) }, 0.5)).is(2)
 			-- From segment 2 on, a box beside segment 1 is behind the agent.
 			local behind = { box("Ground", -2, -2, -0.5, -0.5) }
 			expect(NavMesh.FirstAffectedSegment(ell, behind, 1)).is(1)
@@ -123,13 +133,20 @@ return function(t: tiniest)
 					{ "regions must be a list", ell, nil, 0 },
 					{ "radius must be a number of studs >= 0", ell, {}, -1 },
 					{ "radius must be a number of studs >= 0", ell, {}, 0 / 0 },
+					{ "radius must be a number of studs >= 0", ell, {}, math.huge },
 					{ "fromSegment must be a whole number >= 1", ell, {}, 0, 0 },
 					{ "fromSegment must be a whole number >= 1", ell, {}, 0, 1.5 },
 				}
 			do
-				local ok, err = pcall(NavMesh.FirstAffectedSegment, case[2], case[3], case[4], case[5])
+				local ok, err = pcall(function()
+					NavMesh.FirstAffectedSegment(case[2], case[3], case[4], case[5])
+				end)
 				expect(ok).is(false)
 				expect(string.find(tostring(err), case[1], 1, true) ~= nil).with_context(tostring(err)).is_true()
+				-- Blamed on the caller's line.
+				expect(string.find(tostring(err), "Affected.spec", 1, true) ~= nil)
+					.with_context(tostring(err))
+					.is_true()
 			end
 		end)
 
