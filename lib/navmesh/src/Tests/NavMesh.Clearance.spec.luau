@@ -450,6 +450,60 @@ return function(t: tiniest)
 			expect(status(mesh, v(9.6, 9.5), v(15, 5), 0.51)).is("Partial")
 		end)
 
+		test(
+			"a point pushed out of the triangle is parted from one only if that is cut off from the edge it crossed",
+			function()
+				-- (15, 9.9) is 0.1 under the north wall: pushed to r 0.51 it stands at z 9.49, under the
+				-- sliver's east edge (z 9.5 there), outside the sliver (E3: a link's start there).
+				local mesh = room(0, -1)
+				local sliver = Snap.Snap(mesh, v(15, 9.9), extents, {})
+				expect(Snap.Snap(mesh, v(9.6, 9.5), extents, {})).is(sliver)
+				-- From east of the gap it is a step away; from west of it, past the gap.
+				expect(Clearance.Separated(mesh, sliver, 0.51, 12, 9.45, 15, 9.9)).is(false)
+				expect(Clearance.Separated(mesh, sliver, 0.51, 15, 9.9, 12, 9.45)).is(false)
+				expect(Clearance.Separated(mesh, sliver, 0.51, 9.6, 9.5, 15, 9.9)).is(true)
+				expect(Clearance.Separated(mesh, sliver, 0.51, 15, 9.9, 9.6, 9.5)).is(true)
+			end
+		)
+
+		test("remembered verdicts don't depend on the order asked, across radii (E3)", function()
+			-- Verdicts are kept per triangle and radius (a few radii each). Ask the same questions
+			-- of two copies of the room, in opposite orders: every answer must match.
+			local questions = {}
+			for _, r in { 0.45, 0.51, 0.6, 0.7, 0.8 } do
+				for _, p in { v(9.6, 9.5), v(12, 9.45), v(15, 9.9), v(5, 5), v(10, 9.05) } do
+					table.insert(questions, { r, p })
+				end
+			end
+			local function ask(mesh: any, order: { number }): { string }
+				local out = {}
+				for _, k in order do
+					local r, p = questions[k][1], questions[k][2]
+					local tri = Snap.Snap(mesh, p, extents, {})
+					local bits = {}
+					for e = 1, 3 do
+						table.insert(bits, if Clearance.CutOff(mesh, tri, e, r, p.X, p.Z) then "1" else "0")
+					end
+					local sep = Clearance.Separated(mesh, tri, r, p.X, p.Z, 9.6, 9.5)
+					table.insert(bits, if sep then "S" else "s")
+					out[k] = table.concat(bits)
+				end
+				return out
+			end
+			local forward, backward = {}, {}
+			for k = 1, #questions do
+				table.insert(forward, k)
+				table.insert(backward, 1, k)
+			end
+			local first = room(0, -1)
+			local a, b = ask(first, forward), ask(room(0, -1), backward)
+			expect(table.concat(b, " ")).is(table.concat(a, " "))
+			-- And a second pass on the first copy, now all remembered.
+			expect(table.concat(ask(first, backward), " ")).is(table.concat(a, " "))
+			-- The questions are not all one answer.
+			expect(string.find(table.concat(a), "1") ~= nil and string.find(table.concat(a), "S") ~= nil).is_true()
+		end)
+
 		test("an end still covered once pushed out has no side, and is not cut off", function()
 			local mesh = room(0, -1)
 			-- 0.05 over the slab's corner: pushed 0.51 from it, it is 0.49 from the north wall.
@@ -593,8 +647,10 @@ return function(t: tiniest)
 			for i, b in bits do
 				hash = (hash * 31 + string.byte(b) * i) % 1000000007
 			end
+			-- Re-pinned in E3 (was 3 parted): all three had a point pushed out of its thin
+			-- triangle, and the flood connects the two pushed points in each.
 			expect(`{#bits} verdicts, {cuts} cut off, {parted} parted, hash {hash}`).is(
-				"1844 verdicts, 221 cut off, 3 parted, hash 553896827"
+				"1844 verdicts, 221 cut off, 0 parted, hash 557876296"
 			)
 		end)
 	end)
