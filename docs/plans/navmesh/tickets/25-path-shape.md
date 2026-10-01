@@ -134,3 +134,16 @@ an arc-midpoint waypoint on sharp turns stays optional.
     today's paths the worst point is within 1.5 r of a turn waypoint.
   - Branch `proto/g-bisector`, `docs/plans/navmesh/research/bisector-funnel.md` there, with
     `tools/navmesh/bench/funnel_clearance.luau`.
+
+## Track G merge gate (2026-10-01)
+- `lune run coverage.luau package=navmesh --mutate --mutate-files=src/Funnel.luau,src/NavMesh.luau,src/Search.luau`:
+  291 specs pass, 98.8% of statements.
+- Mutation, against `mutation-baseline.md`: Funnel 85.9% (83.3), NavMesh 94.9% (94.7), Search
+  89.7% (84.0).
+- New survivors were triaged and the real ones killed with specs (tickets 27 and 28 list
+  them). Those left are equivalent:
+  - `FirstAffectedSegment`'s prefilter (a speed reject only), `axis = 0`, `first + 0`, and
+    `inf % 1`;
+  - the end check's nudge direction in Z;
+  - `startCut = true`, whose end-selection role the end check now shares, and whose re-entry
+    role ticket 27 found unreachable on buildable meshes.
