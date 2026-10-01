@@ -1,10 +1,10 @@
 -- Ticket 36's measurements on the Street map: for every start on the south sidewalk and goal
--- on the north one (13 x 13 pairs), at several road costs:
+-- on the forecourt (13 x 13 pairs), at several road costs:
 --   jaywalk  the share of paths that enter the road (the harness's Avoids check);
 --   stretch  path length / the straight line (mean, max): the detour overhead;
 --   excess   path length / the best crosswalk-only path (road excluded) for paths that stay off
 --            the road: how far the search's crosswalk choice is from the best one.
--- Run from the repo root: lune run tools/navmesh/maps/street_measure.luau [MapName]
+-- Run from the repo root: lune run tools/navmesh/maps/street_measure.luau [Street | StreetFlush]
 local process = require("@lune/process")
 local roblox = require("@lune/roblox") :: any
 local NavMesh = require("../../../lib/navmesh/src/NavMesh")
@@ -14,7 +14,7 @@ local Harness = require("./Harness")
 local dynRequire: any = require
 local street = dynRequire("./Maps/" .. (process.args[1] or "Street"))
 local COSTS = { 1, 1.5, 2, 3, 5, 10, math.huge }
-local XS = { 4, 12, 20, 28, 36, 44, 52, 60, 68, 76, 84, 92, 96 }
+local XS = { -16, -8, 0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 76 }
 
 local scenarios = {}
 for _, cost in COSTS do
@@ -38,8 +38,8 @@ map.Scenarios = scenarios
 map.Build = function(rbx, parent)
 	local built = street.Build(rbx, parent)
 	for _, x in XS do
-		built.Points[`S{x}`] = rbx.Vector3.new(x, 0, 7)
-		built.Points[`N{x}`] = rbx.Vector3.new(x, 0, 37)
+		built.Points[`S{x}`] = rbx.Vector3.new(x, 0, -43)
+		built.Points[`N{x}`] = rbx.Vector3.new(x, 0, -13)
 	end
 	return built
 end

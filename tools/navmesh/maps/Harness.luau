@@ -99,20 +99,29 @@ local function edgeDistance(x: number, z: number, ring: { any }): number
 	return best
 end
 
--- Does the segment a-b (on `floor`) enter one of the floor's areas with this id? Walking an
--- area's edge doesn't count. ponytail: samples every 0.25 studs; exact clipping if a sliver
--- area ever slips between samples.
-local function entersArea(desc: any, floor: string, a: vector, b: vector, id: number): boolean
-	local areas = desc.Floors[floor] and desc.Floors[floor].Areas
-	if areas == nil then
-		return false
-	end
+-- Does the segment a-b enter an area with this id, on any floor at its height? Not only the
+-- end waypoints' floors: a segment between two curb strips lies on the road. Walking an area's
+-- edge doesn't count; the height test is the area's Y range (exact for flat areas).
+-- ponytail: samples every 0.25 studs; exact clipping if a sliver area ever slips between samples.
+local function entersArea(desc: any, a: vector, b: vector, id: number): boolean
 	local steps = math.max(1, math.ceil(vector.magnitude(b - a) / 0.25))
-	for _, area in areas do
-		if area.Area == id then
+	for _, floor in desc.Floors do
+		for _, area in floor.Areas or {} do
+			if area.Area ~= id then
+				continue
+			end
+			local lo, hi = math.huge, -math.huge
+			for _, q in area.Polygon do
+				lo, hi = math.min(lo, q.Y), math.max(hi, q.Y)
+			end
 			for k = 0, steps do
 				local p = a + (b - a) * (k / steps)
-				if insidePolygon(p.x, p.z, area.Polygon) and edgeDistance(p.x, p.z, area.Polygon) > 0.05 then
+				if
+					p.y >= lo - 0.05
+					and p.y <= hi + 0.05
+					and insidePolygon(p.x, p.z, area.Polygon)
+					and edgeDistance(p.x, p.z, area.Polygon) > 0.05
+				then
 					return true
 				end
 			end
@@ -179,7 +188,7 @@ local function check(e: Expect, path: any, desc: any, areas: { [string]: number 
 		for i = 2, #w do
 			if w[i - 1].Label == nil then -- a link's hop is not walked
 				local a, b = v(w[i - 1].Position), v(w[i].Position)
-				if entersArea(desc, w[i - 1].Floor, a, b, id) or entersArea(desc, w[i].Floor, a, b, id) then
+				if entersArea(desc, a, b, id) then
 					table.insert(failed, `Avoids: segment {i - 1}-{i} enters area {id}`)
 					break
 				end
