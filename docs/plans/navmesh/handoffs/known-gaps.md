@@ -98,9 +98,8 @@ than it looks. Read them before touching `Search`, `Clearance`, `Tiles` or `Seri
 - **A loaded mesh pays an O(triangles) spike once.** After `Deserialize`, the first `Update`
   or the first `FindPath` with an `AgentRadius` builds the wall index. Bake it, or build it
   lazily per tile, if load-time hitches matter.
-- **Link ids are dense in Storage.** v3 bakes carry link ids and a next id, but the reader
-  still requires ids 1..n. Ticket 30's sparse ids need Storage link ids first, then this
-  reader check relaxed. The format itself needs no change.
+- ~~**Link ids are dense in Storage.**~~ Closed by Track E (ticket 30 part 1, 3b4d0d5): Storage
+  link records are sparse, and the v3 reader takes increasing ids below the next id.
 - **FindPath with a radius costs 15-40 us more,** mostly gathering the walls around the start
   and goal triangles (bench.md, "Ticket 27"). The last answer is memoized per mesh. Cache per
   triangle if radius queries get hot.

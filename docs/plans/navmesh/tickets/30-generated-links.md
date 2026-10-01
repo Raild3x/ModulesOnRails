@@ -60,3 +60,37 @@ gap G3.
       gets none; a 3-stud gap gets a jump link and a 20-stud gap doesn't; `AreaCosts` on the
       link area turns them off; the generator is deterministic for a given mesh. All with
       negative controls.
+
+## Part 1 as built (Track E, 2026-10-01, commit 3b4d0d5)
+- **API:** `NavMesh.AddLink(mesh, desc) -> id` and `NavMesh.RemoveLink(mesh, id)`, pending
+  until `Update` (SR13), as specified. `AddLink` runs Build's own link checks at the call
+  (`Build.Internal.CheckLink`); `Update` snaps the ends with Build's snap
+  (`Build.Internal.SnapLinkEnd`). An end that doesn't snap fails that `Update` with
+  `NavMesh.Update: link <id>: To (...) is not on the mesh` and rolls back every pending change,
+  obstacles too. `HasPendingChanges` covers links. A link-only `Update` keeps every triangle; it
+  still pays the O(T) range copy.
+- **Storage:** link records are sparse like obstacles (id, state, name, next id). Extra links
+  name a link by its slot, and `RemoveLinkRecord` moves the later slots' extras down. A pending
+  add has no triangles, and cost -1 when it takes the default (made from the snapped ends at
+  `Update`, as Build does).
+- **Stamps and regions:** `Update` bumps every link end's tile (as before). It also returns the
+  end tiles of each link it added or removed as changed regions, so `FirstAffectedSegment` sees
+  them (ticket 28).
+- **Format:** still v3, with no new version. The links section writes real ids and the next id;
+  flags 4 and 8 mark a pending add or removal. Names go in a new optional section, 0x0001,
+  written only when a link has a name. A bake with no names and no pending links is byte-for-byte
+  what it was, so the demos needed no rebake (the frozen-bake spec passes).
+- **Heuristic scale:** measured first (bench.md, "Ticket 30"). At 1,000 links the loop was 44-60
+  us of a 114-170 us `FindPath`. It now reads `Storage.LinkPrices`, the cheapest Cost / length per
+  link area, rebuilt after any link change: 0.08 us, and 55-95 us per `FindPath` at 1,000 links.
+  There was no fork to rule: the `AreaCosts`-keyed cache breaks when a caller edits its table in
+  place.
+- **Ticket 25's link items:** `LinkDesc.Name`, `SetLinkEnabled` by name (every link with that
+  name), `Waypoint.LinkId` and `FollowerLink.Id`. The follower and `FirstAffectedSegment` now
+  key on `LinkId`. Before, a link with no `Label` gave its start waypoint nothing to mark it, so
+  the follower tried to walk the gap.
+- **Specs:** `NavMesh.Links.spec.luau` (16) plus a Storage contract case. There were 20 hand
+  negative controls (one break each: no snap at Update, no rollback, no record freeing, stale
+  prices, no regions, no names section, the reader's id check, follower on Label, ...). Each
+  failed at least one spec. The reader's id check first passed, because Storage's own assert
+  also rejected the bake. The spec now checks for the damaged-bake message itself.
