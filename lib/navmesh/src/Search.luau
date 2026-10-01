@@ -26,8 +26,10 @@
 	midpoints too. Heron nodes depend on the route to them, so A* is no longer exactly Dijkstra
 	over a fixed graph (it is with midpoints).
 
-	**Costs:** crossing from t into m costs the 3D distance from t's node to m's node times the
-	mean of the two areas' `AreaCosts` multipliers (default 1; `math.huge` excludes the area).
+	**Costs:** a step from t's node to the node on the edge it leaves t by lies inside t, so it
+	costs the 3D distance times t's `AreaCosts` multiplier (default 1; `math.huge` excludes the
+	area). The last step, into the goal's triangle, is split where it crosses the edge
+	(Detour's rule; ticket 25, weighted). It was the mean of the two multipliers.
 
 	**Heuristic (SR7):** the 3D distance to the goal point, scaled by
 	`min(1, smallest AreaCosts multiplier)`, so it never overestimates. A zero multiplier makes
@@ -96,6 +98,20 @@ local function heronPoint(a: vector, b: vector, p: vector, g: vector): vector
 	return a + (b - a) * math.clamp(u, 0, 1)
 end
 Search.HeronPoint = heronPoint -- for the specs' node-chain oracle
+
+-- The cost of the step from p (in triangle t, multiplier tm) to q over t's edge a-b (Detour's
+-- rule): inside t when q is on the edge; split where it crosses the edge when q is past it, in
+-- the next triangle (multiplier mm).
+local function stepCost(p: vector, q: vector, a: vector, b: vector, tm: number, mm: number, past: boolean): number
+	if not past or tm == mm then
+		return vector.magnitude(q - p) * (if past then mm else tm)
+	end
+	local ex, ez = b.X - a.X, b.Z - a.Z
+	local sp = ex * (p.Z - a.Z) - ez * (p.X - a.X)
+	local sq = ex * (q.Z - a.Z) - ez * (q.X - a.X)
+	local c = p + (q - p) * (if sp ~= sq then math.clamp(sp / (sp - sq), 0, 1) else 0)
+	return vector.magnitude(c - p) * tm + vector.magnitude(q - c) * mm
+end
 
 -- The edge of m on the seam portal it shares with t (the slot its own seam extra back to t
 -- names).
@@ -307,13 +323,13 @@ function Search.Run(
 				continue
 			end
 			-- Edge e runs between the two vertices other than vertex e.
+			local a = GetVertex(s, if e == 1 then ib elseif e == 2 then ic else ia)
+			local b = GetVertex(s, if e == 1 then ic elseif e == 2 then ia else ib)
 			local mp = goalP
 			if node ~= goalNode then
-				local a = GetVertex(s, if e == 1 then ib elseif e == 2 then ic else ia)
-				local b = GetVertex(s, if e == 1 then ic elseif e == 2 then ia else ib)
 				mp = if heron then heronPoint(a, b, tp, goalP) else (a + b) * 0.5
 			end
-			local ng = gt + vector.magnitude(mp - tp) * (tm + mm) * 0.5
+			local ng = gt + stepCost(tp, mp, a, b, tm, mm, node == goalNode)
 			if seen[node] ~= stamp or ng < g[node] then
 				g[node], pos[node], seen[node], parent[node], via[node], entry[node] = ng, mp, stamp, u, 0, back
 				push(open, node, ng + vector.magnitude(goalP - mp) * scale)
@@ -362,7 +378,7 @@ function Search.Run(
 				end
 				node = target(m, goalCut)
 				mp = if node == goalNode then goalP else (a + b) * 0.5
-				ng = gt + vector.magnitude(mp - tp) * (tm + mm) * 0.5
+				ng = gt + stepCost(tp, mp, a, b, tm, mm, node == goalNode)
 			end
 			if closed[node] ~= stamp and (seen[node] ~= stamp or ng < g[node]) then
 				g[node], pos[node], seen[node], parent[node], via[node], entry[node] = ng, mp, stamp, u, extra, 0

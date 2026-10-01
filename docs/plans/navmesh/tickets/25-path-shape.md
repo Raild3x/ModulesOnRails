@@ -110,6 +110,52 @@ an arc-midpoint waypoint on sharp turns stays optional.
   checked are connected by the grid flood. The search closes a triangle by its first entry, and
   a dead-end entry can lock out a better one. This predates heron.
 
+## Weighted paths (2026-10-01, Track G, ruled)
+- **Ruling:** "Cost-aware funnel + exact edge costs (Recommended)", after the research on
+  `proto/g-areabend` (`docs/plans/navmesh/research/weighted-paths.md`, with a validated
+  weighted reference, `WeightedOracle.luau`).
+- **Exact edge costs, in `Search.luau`:** a step from a node to the next edge's node lies in one
+  triangle and costs its multiplier. The last step into the goal's triangle is split where it
+  crosses the edge. It was the mean of the two multipliers. This is Detour's rule, and the
+  search's cost is now that of a real line.
+- **The cost-aware funnel, in `Funnel.luau` (`refract`):**
+  - With `AreaCosts`, each run of a piece between links is pinned on every portal where the
+    multiplier changes. Each pin starts where the plain path crosses.
+  - Each sweep pulls the path through the pins. The pins then settle against the path points
+    either side of them, or against each other where no corner lies between: a golden-section
+    step on m1 |p - x| + m2 |x - q| along the portal, repeated up to 200 times without a pull.
+  - Sweeps repeat (up to 32) until a pull no longer moves a pin, so a corner the bent path
+    meets moves the pins again.
+  - The drape treats a pinned portal the path crosses head-on as a crossing point.
+  - The prototype re-ran the funnel about 100 times per pin per sweep (3x FindPath). This
+    version needs one pull per sweep.
+- **Numbers:**
+  - Against the reference (4,350 routes, radius 0), as built: mean 1.0219, p95 1.128, worst
+    1.994, 24.3% over 1%. Before: 1.043, 1.212, 3.09 and 35%. This matches the prototype.
+  - Weighted FindPath, us per call, old vs new:
+
+    | scene | r 0, mud x5 | r 1, mud x5 | r 0, mud x0.5 |
+    |---|---|---|---|
+    | props | 149-161 vs 150-167 | 176-189 vs 178-187 | 291-297 vs 291-307 |
+    | bench | 231-235 vs 236-249 | 259-267 vs 266-288 | 431-453 vs 530-531 |
+
+  - Queries with no `AreaCosts` skip all of this.
+- **Specs** (PathShape):
+  - Snell's law at a border, and at both borders of a mud strip (residual under 1e-4);
+  - a corner the bent path meets moves the pin again;
+  - a pin crossed head-on still gets its crease waypoint;
+  - on repro 4's room (patch x5 and x0.5), the path is never dearer than the plain funnel's on
+    the same corridor, by an exact rectangle-clip cost in the spec, and cheaper on at least 10
+    of 120.
+  - The node-chain oracle now prices steps by Detour's rule, with its own crossing math.
+- **Negative controls:** each fails a spec: refract off (2 fail), the drape's pinned-portal
+  case (1), multipliers swapped (2), one settling pass (1), one sweep (1), and pins settled
+  against the portal ends (2). Mean edge costs instead of Detour's rule fail the node-chain
+  spec (2).
+- **Left as it is:** the corridor choice. The rest of the excess is the same "wrong side of an
+  obstacle" error as before. Weighted heron and Steiner points were measured and rejected
+  (research doc).
+
 ## Measured, not built (2026-10-01, Track G)
 - **The area-edge bend is not an area effect** (now fixed by heron nodes for uniform costs). It comes from A* nodes at entry-edge midpoints.
   - The reference is an exact shortest path: a visibility graph over reflex wall vertices, with
