@@ -74,16 +74,17 @@ for your track. Everything named here lives on branch `feat/navmesh` unless it s
   - Never push.
 
 ## Not on `feat/navmesh`
-- `navmesh-ticket24` (worktree `.claude/worktrees/ticket24`) has the ticket 24 WIP (15d0c4c),
-  not gated, based on e88ad15 (before ticket 22). Track A owns it.
+- Tracks A, B and C are merged (2026-10-01). Their worktrees and branches are removed.
 - Reference-only prototypes, not for merge:
   - `proto/simplify` (worktree `simplify-proto`; also untracked probe scripts at its root);
   - `proto/local-update` and `proto/local-update-77` (ticket 22 variants).
-- Untracked scratch:
-  - `tools/navmesh/bench/zz_*.luau` in the `navmesh-phase0` and `update-proto` worktrees. Track B
-    needs `update-proto`'s `zz_search2.luau` (the random sliver search) and
-    `zz_oracle_proto.luau` (the bench-map Update oracle).
-  - Gitignored `.bench/` and `.coverage/` folders: benchmark and triage outputs.
+- `research/roblox-pathfinding` (worktree `rbx-pathfinding-research`): tickets 28-30 and
+  rulings D2/D3, not merged yet.
+- Scratch:
+  - the old `navmesh-phase0` probes (`zz_*.luau`) are archived in the main checkout's
+    gitignored `.bench/navmesh/archive/navmesh-phase0/`;
+  - gitignored `.bench/` and `.coverage/` folders hold benchmark and triage outputs.
+- **Known gaps** nobody has ticketed yet: [D-later.md, D4](D-later.md).
 - **Not NavMesh work:** the other `feat/*`, `fix/*`, `package/*` and `pr/*` branches, and the
   untracked `lib/component/*`, `lib/profiletrademanager/` and `lib/remotecomponent/CONTEXT.md` in
   the main checkout, belong to other sessions. Leave them alone.
