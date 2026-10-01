@@ -199,3 +199,10 @@ an arc-midpoint waypoint on sharp turns stays optional.
 - **After the weighted follow-up (same command):** 297 specs pass, 98.9% of statements;
   Funnel 85.4%, NavMesh 94.9%, Search 88.9%. The refraction loop's surviving mutants are its
   stopping thresholds and loop caps, which change only when it stops, plus golden-section ties.
+
+**Where the research lives (2026-10-01):** the four write-ups (`path-length.md`,
+`path-length-standard-fixes.md`, `weighted-paths.md`, `bisector-funnel.md`) are copied into
+`docs/plans/navmesh/research/` on `feat/navmesh`. Their bench tools (the exact and weighted
+references `PathOracle.luau` and `WeightedOracle.luau`, the prototypes, `funnel_clearance.luau`)
+stay only on `proto/g-areabend` and `proto/g-bisector`. Keep those branches if the numbers
+need re-running.
