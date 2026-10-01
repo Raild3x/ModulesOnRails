@@ -62,6 +62,18 @@ and rebake `examples/navmesh-demo/Baked.luau` with its `bake.luau`.
   queries: 0 false positives. Mutation on Clearance, Search and Storage stays at or above its
   current score: Clearance 80.9%, Search 85.5%, Storage 95.3%.
 
+## B3. Leave room in v3 for two later fields (added 2026-09-28)
+Rulings D2 and D3 (review.md) add bake data that v3 should expect, even if these tickets land
+later:
+- **Ticket 29, agent height:** per-triangle headroom (one f32 per triangle), or the
+  `FloorDesc.Headroom` rings recomputed on load.
+- **Ticket 30, runtime links:** sparse link records plus a next link id, the obstacle v2
+  pattern.
+
+You don't need to build either. Make the v3 header a versioned field list (already asked for
+above), so both can be added without a v4 that breaks bakes. If that isn't practical, say so
+before v3 is frozen.
+
 ## When done
 - **Docs:** record rulings in `review.md`, amend SR9 and SR4 in `spec.md`, add as-built notes
   to tickets 27 and 22, and bench numbers in `bench.md` if cost changed.

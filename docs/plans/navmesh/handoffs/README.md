@@ -27,6 +27,16 @@ for your track. Everything named here lives on branch `feat/navmesh` unless it s
 | C | [C-ticket26-adapter-debug.md](C-ticket26-adapter-debug.md): Part adapter and debug drawing (ticket 26) | now | a new adapter module, DrawList, navmeshdebug, the demo's Studio side | A only in its last step (the `vector` typing) |
 | D | [D-later.md](D-later.md): ticket 25, the simplification passes, deferred items | after A (25) and C (simplification) | Funnel, Build, Quantize | everything; run it alone |
 
+**New tickets from the Roblox comparison (2026-09-28, rulings D1-D6 in review.md; research in
+`research/roblox-pathfinding-comparison.md`), not yet assigned to a track:**
+
+| Ticket | Can start | Touches | Conflicts with |
+|---|---|---|---|
+| [28](../tickets/28-blocked-ahead.md): `FirstAffectedSegment`, which part of a path an `Update` blocked | now (22 and 23 are merged) | NavMesh, Types, the demo | A on `NavMesh.luau`/`Types.luau` if A is still open |
+| [29](../tickets/29-agent-height.md): agent height (headroom) | after B's v3 | Build, Storage, Search, Queries, Serialize, Types | B (format); the adapter emits its rings (C) |
+| [30](../tickets/30-generated-links.md): generated jump and drop links, runtime `AddLink`/`RemoveLink` | after B's v3 | Search, Tiles, Storage, Serialize, NavMesh | B, and D's ticket 25 (`LinkDesc.Name`) |
+| [31](../tickets/31-large-world-measure.md): measure 1-4 km maps (bench only) | now | `tools/navmesh/bench` only | none |
+
 - **A, B and C can run at the same time**, each in its own worktree off `feat/navmesh`.
 - **Merge order:** merge A before B's Search changes land, or rebase B on A. Leave C's
   `vector` typing step until A is merged.
