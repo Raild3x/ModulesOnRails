@@ -30,6 +30,20 @@ has merged, because both tracks touch Tiles and Serialize.
   ring pass must run identically on both paths, so "Update equals a fresh Build" still holds.
 - **The adapter:** now that the Part adapter exists, measure its real output; that's the
   content these passes target.
+- **Added by the user, 2026-10-01** (from the demo 2 pillars; not in the plan):
+  - **Cylinders are inscribed.** `NavMeshAdapter` puts a cylinder's vertices on the circle,
+    so the obstacle is smaller than the Part: by 0.02 studs at 16 sides for a 2-stud pillar,
+    and by 0.29 studs if it had 4 sides. R1 can only grow the ring it is handed, so this is
+    upstream of its guarantee. Circumscribe them: vertices at r / cos(pi / n).
+  - **Pick the side count from the size.** With tolerance eps, a circumscribed cylinder needs
+    `ceil(pi / acos(r / (r + eps)))` sides. At eps 1/10 that is 8 for a 2-stud pillar and 4
+    for a half-stud prop. A fixed eps in studs already simplifies small things most, which is
+    what the user asked for. Keep eps absolute: a tolerance relative to size would move big
+    rings by whole studs and break the clearance bound.
+  - **Measure `Update`, not only Build and `FindPath`.** On demo 2 (pillar at (176, 96), a
+    crate 10 studs east, default TileSize), the crate's `Update` takes 5.0 ms at 16 sides,
+    3.1 at 8 and 2.5 at 4. The triangles touching the pillar drop from 21 to 13 and 9. The
+    probe was a scratch script; rebuild it as a bench when doing this.
 
 ## F2. Update on huge rings ([known-gaps.md](known-gaps.md))
 - A crate near a 2,048-point walkable outline takes 1.6 s to add at TileSize 8, and 5.0 s at
