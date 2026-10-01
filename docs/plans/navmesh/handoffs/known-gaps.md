@@ -22,6 +22,27 @@ ends" section. Two kinds of end still pass unjudged; both are below.
   1: 160 to 235 us). Success queries don't pay it. The cost is one push plus one barrier test
   per candidate end.
 
+**Found by Track M2 (2026-10-01), in the Part adapter, not the core:**
+- **Tilted Parts lose their seams, or get zero-length ones that `NavMesh.Build` rejects.**
+  - **Repro:** `lune run tools/navmesh/bench/adapter_f32_seams.luau`. Seven hinged slabs give
+    5 of 6 seams and a Partial path. A 2 x 2 heightfield of WedgePart triangles makes
+    `NavMesh.Build` throw "seam has zero length".
+  - **Cause:** Part data is f32, so the hinge between two rotated Parts is collinear only to
+    about 1e-5 studs. `clipSegment` (NavMeshAdapter) has three tolerances that assume exact
+    input:
+    1. it treats two edges as parallel only when their cross product is under 1e-12
+       (unnormalised), so a hinge reads as a crossing and the clip comes back empty;
+    2. a parallel edge more than 1e-6 x its length outside the ring rejects the clip, where
+       f32 noise is about 1e-5;
+    3. a clip that only touches a face at a corner passes as a seam of about 1e-5 studs, which
+       the core rejects on its 1/256 grid.
+  - **Prototype fix** (scratch copy, not applied): a relative parallel test (sine under 1e-4),
+    the outside test in studs (`HEIGHT_TOLERANCE`, 0.01), and skipping clips shorter than
+    0.01 studs. All three are needed. With them, the repro gives 6 seams and Success, and a
+    6 x 6 heightfield (72 triangles) builds and paths at 1-10 degrees.
+  - Axis-aligned levels never hit this, which is why the adapter's specs and both demos pass.
+    Awaiting a ruling (adapter changes need one).
+
 ## Deferred, only if the user asks
 - **Precise `IsPathValid`.** Ticket 22 notes what `Clearance.Refresh` already knows.
 - **Opt1's in-place commit for `Update`.** It only matters if the remaining O(T) copy shows up;
