@@ -62,6 +62,10 @@ Everything lives in `tools/navmesh/maps/`. No library code changed.
 - **Shared builders:** a map used by several map files lives at the top of
   `tools/navmesh/maps/` (ticket 34's `Building.luau` and `BuildingPoints.luau`). studio.py
   mounts every top-level `.luau` there except `run.luau`.
+- **Later additions (tickets 34-35):** `Built.Extra` (anything the map's Studio code needs),
+  a map's `Animate(report, NavMesh, rbx, parent)`, which returns a per-frame step function
+  Studio runs during the hold (moving NPCs), and a scenario's `DisabledLinks = { label }`
+  (links off for that scenario, an elevator out of service).
 - **A scenario** is `{ Name, From, To, Filter?, Expect?, MustFail? }`. `From` and `To` are point
   names; `Filter` is the `QueryFilter`. Every `Expect` field is optional:
   - `Status`: the `PathStatus`;

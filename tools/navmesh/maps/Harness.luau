@@ -15,6 +15,7 @@ export type Built = {
 	Obstacles: { BasePart },
 	Points: { [string]: Vector3 }, -- named spots: spawns, goals
 	Links: { any }?, -- NavMesh LinkDesc list
+	Extra: any?, -- anything else the map's Animate needs (an elevator cab Part)
 }
 
 -- Every field is optional; a scenario with none only checks that FindPath runs.
@@ -35,6 +36,7 @@ export type Scenario = {
 	To: string,
 	Filter: any?, -- the QueryFilter
 	Expect: Expect?,
+	DisabledLinks: { string }?, -- labels of links switched off for this scenario (an elevator out of service)
 	-- A negative control: the scenario passes only if exactly this expectation fails.
 	MustFail: string?,
 }
@@ -46,6 +48,9 @@ export type Map = {
 	Build: (rbx: Rbx, parent: Instance?) -> Built,
 	Scenarios: { Scenario },
 	View: { From: { number }, To: { number } }?, -- Studio camera; default: straight down over the map
+	-- Studio only: called once after drawing; returns a step function run every frame for the
+	-- hold (NPCs walking). See Maps/BuildingElevator.luau.
+	Animate: ((report: any, NavMesh: any, rbx: Rbx, parent: Instance) -> (dt: number) -> ())?,
 	SeeThrough: { string }?, -- names of Parts Studio draws see-through (an upper floor over a stair)
 }
 
@@ -235,11 +240,21 @@ function Harness.Run(map: Map, NavMesh: any, Adapter: any, rbx: Rbx, parent: Ins
 	for _, s in map.Scenarios do
 		local from, to = built.Points[s.From], built.Points[s.To]
 		assert(from and to, `{map.Name}/{s.Name}: unknown point {if from then s.To else s.From}`)
+		local off = {}
+		for id, link in desc.Links or {} do
+			if table.find(s.DisabledLinks or {}, link.Label) then
+				table.insert(off, id)
+				NavMesh.SetLinkEnabled(mesh, id, false)
+			end
+		end
 		local path, best = nil, math.huge
 		for _ = 1, 3 do
 			t0 = os.clock()
 			path = NavMesh.FindPath(mesh, from, to, s.Filter)
 			best = math.min(best, os.clock() - t0)
+		end
+		for _, id in off do
+			NavMesh.SetLinkEnabled(mesh, id, true)
 		end
 		local failed = check(s.Expect or {}, path, desc, v(from), v(to))
 		local pass = #failed == 0

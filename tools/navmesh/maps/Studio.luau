@@ -64,7 +64,15 @@ return function(o: {
 		task.wait()
 	end
 	print("[MARK] drawn")
-	task.wait(o.Hold)
+	if o.Map.Animate then
+		local step = o.Map.Animate(report, o.NavMesh, rbx, folder)
+		local deadline = os.clock() + o.Hold
+		while os.clock() < deadline do
+			step(task.wait())
+		end
+	else
+		task.wait(o.Hold)
+	end
 	meshRenderer:Destroy()
 	pathRenderer:Destroy()
 	print("[MARK] cleared")

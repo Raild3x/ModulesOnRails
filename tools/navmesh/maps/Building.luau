@@ -9,7 +9,14 @@
 --   flight 2 climbs back west along z 22..28 to the upper floor at x 36.
 -- - The narrow stair is 3 wide, straight, along the south wall (z 1..4), climbing east from x 4
 --   to the upper floor at x 20.5.
--- `ramps = true` swaps the main stair's flights for wedge ramps with the same rise and run.
+-- Options:
+-- - `Ramps`: swap the main stair's flights for wedge ramps with the same rise and run.
+-- - `Elevator` (ticket 35): a shaft at x 2..8, z 10..16 with its doors facing north, and a
+--   two-way link labelled "Elevator" between the landing points (5, 0, 18) and (5, 12, 18). Its
+--   Cost (56 studs: 3.5 s at 16 studs/s, the ride and doors with the cab already waiting) is a
+--   floor; a game scales it per query with `AreaCosts[ELEVATOR_AREA]` for the current wait.
+--   Every step Part gets `NavArea` STAIRS_AREA, so NPCs can price the stairs.
+-- Returns the walkable Parts, the obstacles, the links and the cab Part (or nil).
 
 type Rbx = { Instance: any, Vector3: any, CFrame: any, Color3: any, Enum: any }
 
@@ -19,7 +26,11 @@ local TREAD, RISE = 1.5, 1
 local GROUND, SLAB, WALL = { 70, 72, 78 }, { 196, 170, 120 }, { 120, 120, 135 }
 local STAIR, LANDING = { 150, 120, 90 }, { 170, 140, 100 }
 
-return function(rbx: Rbx, parent: Instance?, ramps: boolean)
+local STAIRS_AREA, ELEVATOR_AREA = 5, 6
+
+local function build(rbx: Rbx, parent: Instance?, options: { Ramps: boolean?, Elevator: boolean? }?)
+	local o = options or {}
+	local ramps = o.Ramps == true
 	local P = Parts(rbx, parent)
 	local V3, CF = rbx.Vector3, rbx.CFrame
 	local walkable, obstacles = {}, {}
@@ -77,5 +88,28 @@ return function(rbx: Rbx, parent: Instance?, ramps: boolean)
 		walk(P.box("Narrow", x, 1, x + TREAD, 4, 0, RISE * i, STAIR))
 	end
 
-	return walkable, obstacles
+	local links, cab = {}, nil
+	if o.Elevator then
+		for _, p in walkable do
+			if p.Name == "Step" or p.Name == "Narrow" then
+				p:SetAttribute("NavArea", STAIRS_AREA)
+			end
+		end
+		block(P.box("Shaft", 2, 10, 8, 16, 0, 24, WALL))
+		cab = P.box("Cab", 2.5, 10.5, 7.5, 15.5, 0.05, 8, { 220, 200, 60 }) -- shown in Studio, not navigated
+		table.insert(links, {
+			From = V3.new(5, 0, 18),
+			To = V3.new(5, 12, 18),
+			Cost = 56,
+			Area = ELEVATOR_AREA,
+			Label = "Elevator",
+		})
+	end
+	return walkable, obstacles, links, cab
 end
+
+return {
+	Build = build,
+	STAIRS_AREA = STAIRS_AREA,
+	ELEVATOR_AREA = ELEVATOR_AREA,
+}

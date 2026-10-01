@@ -49,6 +49,11 @@ for your track. Everything named here lives on branch `feat/navmesh` unless it s
   - **Ticket 34 merged 2026-10-01:** the building map (`Building`, `BuildingRamp`) and the
     adapter's step-height rule, `AdapterOptions.MaxStepHeight` (ramp strips, ruled; riser
     seams are ticket 40). M3's curbs can use it now.
+  - **Ticket 35 merged 2026-10-01:** the elevator map (`BuildingElevator`), the crowd sim
+    `tools/navmesh/maps/ElevatorSim.luau`, and the reroute study
+    (`tools/navmesh/bench/elevator_reroute.luau`). Ruled policy, which ticket 38 reuses:
+    hysteresis (15%) on the game's own reopen event, plus a broadcast when the elevator goes
+    out of service. Library aids are ticket 41.
   - The chain is 33 first; then 34, 36 and 37 in parallel; 35 after 34; 38 joins them all. 39 (voxel Terrain) comes later.
   - They are mostly maps, scenarios and measurements, so they can run beside a library track.
     The exceptions are the adapter changes the maps may force: the step-height rule (34) and

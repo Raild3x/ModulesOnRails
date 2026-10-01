@@ -68,7 +68,7 @@ return {
 	Name = "Building",
 	AdapterOptions = { MaxStepHeight = 1 },
 	Build = function(rbx: any, parent: Instance?)
-		local walkable, obstacles = Building(rbx, parent, false)
+		local walkable, obstacles = Building.Build(rbx, parent, { Ramps = false })
 		return { Walkable = walkable, Obstacles = obstacles, Points = Points(rbx) }
 	end,
 	Scenarios = scenarios,

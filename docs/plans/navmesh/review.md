@@ -18,6 +18,18 @@ the const question are deliberately open, gated on benchmarks.
   - Ticket 40 (riser seams in the core) is filed to replace the strips.
   - Rejected: links per riser (Partial at radius 1 and up; 12 link events per climb) and a
     merged sloped floor (needs stair-run detection, can't do a single curb).
+- **Ticket 35, reroute when the elevator frees up mid-stairs?** Measured over 20 seeded crowds
+  of 40 (ticket 35's as-built notes): only 2-4% of NPCs would switch, gaining 1-2 s each;
+  library-only handling strands 6% when the elevator goes out of service. User: "Hysteresis +
+  library aids".
+  - The game, which owns the elevator, re-checks walking NPCs on its own reopen event. An NPC
+    switches if a fresh path costs at least 15% less than staying off the elevator. The game
+    also broadcasts out-of-service. Built in `tools/navmesh/maps/ElevatorSim.luau` as the
+    reference policy for ticket 38.
+  - The library aids are ticket 41, for a library track: link toggles that invalidate only the
+    paths using the link, and a remaining-cost query on a follower.
+  - Rejected: re-planning at waypoints (10x the FindPath calls, no gain), library-only (strands
+    NPCs), and never rerouting (the commit point measured the same as never).
 - **Studio camera (map harness):** "You may move the camera where needed at the start, but do
   not lock it so I cant look around". `Studio.luau` places the camera once and leaves the
   camera type alone.
