@@ -722,6 +722,227 @@ The full tables are in the tickets; this is the index.
   flood proves unreachable drop from 216/405 to 89/405 on the many-slab rooms. Partial FindPath
   there goes from 30 to 56 us mean.
 
+## Large worlds, 1-4 km (ticket 31, 2026-10-01)
+**Question:** how do Build, the bake and queries scale on 1-4 km maps? The answer feeds the D6
+ruling ("Measure first") on region bakes.
+
+**Bench:**
+- `lune run tools/navmesh/bench/large_world.luau sides=1024,2048,4096 runs=3 [maps=...] [tiles=...] bakes`
+  measures in interpreted Lune with `os.clock`.
+- The maps are in `LargeMaps.luau`; everything after Build is measured from the bake by
+  `LargeWorld.luau`.
+- Studio: `python tools/navmesh/bench/large_world.py --runs 3` loads the 4 km bakes as base64
+  StringValues.
+
+**Maps** (seeded, the same density at every size):
+- **city:** a street grid with a 96-stud pitch and 16-stud streets, and four building lots per
+  block. Each building footprint is an obstacle.
+  - One lot in 16 holds a two-storey building: a ramp floor and a roof floor at y = 12, with
+    two seams.
+  - At 4 km that makes 862 seams and 863 floors.
+- **open:** one floor with props of 1-4 studs, randomly rotated, one per 400 square studs.
+  That is 42k obstacles at 4 km.
+- **terrain:** what a terrain adapter would emit.
+  - A heightfield lattice of 32-stud cells, rotated 3 degrees, split into two planar triangle
+    rings per cell, with cliffs (cells steeper than 1 in 2) left out.
+  - Rocks are obstacles, one per 2,000 square studs.
+  - That is 7.7k walkable rings at 2 km and 31k at 4 km.
+
+**Method:**
+- Every desc sets `MaxAgentRadius` 2, and every query uses `AgentRadius` 1.
+- Each cell (map, side, TileSize) is measured once per run, with the cell order rotated each
+  run. Cells are the median [min-max] over 3 runs.
+- 4 km terrain ran once, at the default TileSize only. Its Build is quadratic (below).
+- The machine was shared with Track G's specs and oracles, and with the H2 dogfood agent. An
+  earlier, more loaded sweep measured Builds up to 2x slower (open 2 km: 5.9 s against 3.0 s),
+  so read ratios within a row.
+- **TileSize:** the default resolves to 128 studs on city and 64 on the others, at every side.
+  Each map also gets two other sizes.
+- **Heap:** neither runtime lets a script force a collection.
+  - `LargeWorld`'s settled heap churns short-lived garbage until the count stops falling.
+  - Check: a 10 MB buffer reads 10.2-10.3 MB, and the same 1 km mesh reads 3.8-4.8 MB over
+    six loads, so read it as about ±15%.
+- **FindPath:** 30 seeded pairs, at least side / 2 apart in plan, each run with no budget and
+  then with `MaxExpansions` 5,000. Hits counts the `Budget` results.
+- **Cold** is the first radius `FindPath` (or the first `Update`, one 4 x 4 crate) on a fresh
+  `Deserialize`. **Warm** is the same `FindPath` after the 60 others, and the median of 10
+  later crate adds and removes.
+
+**Size and load** (Lune; Build in seconds, bake and zstd in MB, zstd at level 19):
+
+| map | side | TileSize | triangles | tiles | Build s | bake MB | zstd MB | Deserialize ms | heap MB |
+|---|---|---|---|---|---|---|---|---|---|
+| city | 1024 | default (128) | 3,179 | 155 | 0.12 [0.11-0.12] | 0.31 | 0.05 | 2.7 [2.6-2.8] | 0.7 |
+| city | 1024 | 32 | 5,561 | 1,127 | 0.27 [0.25-0.31] | 0.55 | 0.08 | 4.4 [4.3-4.8] | 1.4 |
+| city | 1024 | 64 | 3,773 | 333 | 0.15 [0.15-0.15] | 0.37 | 0.06 | 3.0 [2.9-3.3] | 0.7 |
+| city | 2048 | default (128) | 13,840 | 635 | 0.53 [0.50-0.60] | 1.34 | 0.20 | 11.0 [10.9-11.3] | 2.8 |
+| city | 2048 | 32 | 23,662 | 4,546 | 1.11 [1.09-1.13] | 2.32 | 0.31 | 18.4 [17.9-18.8] | 5.4 |
+| city | 2048 | 64 | 16,376 | 1,340 | 0.66 [0.66-0.66] | 1.58 | 0.24 | 12.8 [12.4-13.4] | 2.9 |
+| city | 4096 | default (128) | 55,409 | 2,464 | 2.25 [2.19-2.27] | 5.35 | 0.81 | 46.9 [45.7-48.8] | 10.9 |
+| city | 4096 | 32 | 94,545 | 18,149 | 4.82 [4.70-4.83] | 9.26 | 1.23 | 78.4 [76.4-81.5] | 22.5 |
+| city | 4096 | 64 | 65,345 | 5,300 | 2.80 [2.79-2.95] | 6.30 | 0.93 | 52.8 [51.5-53.3] | 11.5 |
+| open | 1024 | default (64) | 16,543 | 256 | 0.75 [0.73-0.75] | 1.57 | 0.31 | 12.4 [12.0-13.1] | 4.2 |
+| open | 1024 | 32 | 18,576 | 1,024 | 0.74 [0.73-0.75] | 1.76 | 0.34 | 13.3 [13.3-14.4] | 4.1 |
+| open | 1024 | 128 | 15,918 | 64 | 0.74 [0.74-0.74] | 1.51 | 0.30 | 12.3 [11.2-12.4] | 2.6 |
+| open | 2048 | default (64) | 66,407 | 1,024 | 3.00 [2.97-3.01] | 6.28 | 1.21 | 52.4 [52.0-57.9] | 16.2 |
+| open | 2048 | 32 | 74,456 | 4,096 | 3.09 [3.06-3.14] | 7.06 | 1.33 | 61.0 [58.6-63.5] | 16.5 |
+| open | 2048 | 128 | 63,811 | 256 | 3.06 [3.03-3.11] | 6.04 | 1.19 | 49.3 [46.6-50.4] | 10.4 |
+| open | 4096 | default (64) | 265,434 | 4,096 | 13.0 [12.8-13.6] | 25.1 | 4.88 | 694 [658-698] | 66.2 |
+| open | 4096 | 32 | 297,861 | 16,384 | 13.2 [13.0-13.3] | 28.3 | 5.36 | 690 [685-711] | 68.8 |
+| open | 4096 | 128 | 255,454 | 1,024 | 13.1 [12.9-13.8] | 24.2 | 4.73 | 657 [639-699] | 41.8 |
+| terrain | 1024 | default (64) | 10,998 | 256 | 3.28 [3.23-3.50] | 1.08 | 0.22 | 9.2 [8.3-9.3] | 2.3 |
+| terrain | 1024 | 32 | 16,573 | 1,024 | 5.17 [5.03-5.29] | 1.56 | 0.29 | 13.0 [11.7-13.9] | 4.1 |
+| terrain | 1024 | 128 | 8,564 | 64 | 2.62 [2.60-2.69] | 0.88 | 0.18 | 8.4 [7.0-8.8] | 2.2 |
+| terrain | 2048 | default (64) | 45,868 | 1,024 | 62.8 [62.8-77.6] | 4.49 | 0.91 | 40.8 [36.3-41.4] | 9.4 |
+| terrain | 2048 | 32 | 68,672 | 4,096 | 99.8 [96.4-104.8] | 6.44 | 1.23 | 56.5 [54.1-56.7] | 16.4 |
+| terrain | 2048 | 128 | 35,888 | 256 | 51.6 [48.7-59.3] | 3.66 | 0.76 | 31.5 [31.5-41.5] | 9.1 |
+| terrain | 4096 | default (64) | 187,167 | 4,096 | 2,082 (one run) | 18.3 | 3.65 | 495 | 37.8 |
+
+**Queries** (Lune, ms):
+
+| map | side | TileSize | FindPath p50 | p95 | Budget p50 | p95 | Budget hits | cold FindPath | warm | cold Update | Update p50 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| city | 1024 | default | 0.28 | 0.56 | 0.28 | 0.48 | 0/30 | 2.5 [2.5-3.6] | 0.4 | 5.8 [5.6-6.1] | 2.6 |
+| city | 1024 | 32 | 0.45 | 0.97 | 0.46 | 0.97 | 0/30 | 4.1 [4.0-4.1] | 1.0 | 6.2 [6.2-6.8] | 1.9 [1.5-2.7] |
+| city | 1024 | 64 | 0.30 | 0.69 | 0.29 | 0.79 | 0/30 | 2.7 [2.7-3.1] | 0.4 | 5.5 [5.5-5.7] | 2.2 [2.1-2.3] |
+| city | 2048 | default | 1.04 | 2.16 | 0.98 | 2.36 | 2/30 | 10.7 [10.6-12.4] | 0.8 | 17.9 [15.0-19.1] | 5.5 [5.4-5.6] |
+| city | 2048 | 32 | 1.72 | 4.08 | 1.47 | 2.72 | 11/30 | 17.4 [17.4-17.5] | 4.0 | 23.3 [22.2-25.0] | 6.7 [6.3-7.4] |
+| city | 2048 | 64 | 1.35 | 3.37 | 1.31 | 2.78 | 9/30 | 11.9 [11.3-12.7] | 1.5 | 17.1 [15.3-18.2] | 4.8 [4.3-5.0] |
+| city | 4096 | default | 5.20 | 9.99 | 2.64 | 3.05 | 28/30 | 54.5 [50.5-55.3] | 6.0 | 69.7 [68.5-77.8] | 18.1 [15.1-19.4] |
+| city | 4096 | 32 | 8.45 | 19.46 | 2.91 | 3.33 | 28/30 | 71.4 [70.2-77.1] | 14.0 | 100.5 [94.7-102.8] | 25.6 [23.6-30.4] |
+| city | 4096 | 64 | 4.96 | 11.83 | 2.83 | 3.32 | 27/30 | 61.9 [52.1-63.8] | 6.6 | 81.4 [70.0-90.5] | 19.9 [19.2-20.4] |
+| open | 1024 | default | 1.27 | 2.01 | 1.17 | 2.35 | 3/30 | 9.1 [9.1-10.8] | 1.3 | 17.1 [16.7-17.3] | 6.5 [5.9-7.3] |
+| open | 1024 | 32 | 1.04 | 2.09 | 1.03 | 2.38 | 2/30 | 10.3 [9.9-12.4] | 1.5 | 15.9 [14.9-19.4] | 4.4 [4.0-4.9] |
+| open | 1024 | 128 | 1.03 | 2.22 | 0.99 | 2.42 | 2/30 | 8.4 [7.9-8.9] | 1.2 | 23.5 [22.8-23.6] | 13.7 [13.7-14.7] |
+| open | 2048 | default | 4.54 | 7.37 | 2.49 | 2.98 | 30/30 | 40.1 [37.1-45.2] | 6.2 | 58.1 [56.2-59.6] | 16.6 [16.4-18.6] |
+| open | 2048 | 32 | 5.13 | 8.21 | 2.56 | 3.42 | 29/30 | 37.6 [35.9-43.3] | 2.8 | 64.8 [63.9-70.4] | 19.7 [18.2-20.6] |
+| open | 2048 | 128 | 3.81 | 9.75 | 2.50 | 3.12 | 29/30 | 37.5 [37.1-38.6] | 7.9 | 57.9 [55.4-60.5] | 21.1 [19.5-21.6] |
+| open | 4096 | default | 18.16 | 37.23 | 2.82 | 3.62 | 30/30 | 129.8 [126.2-146.1] | 21.9 | 249.9 [240.7-284.0] | 72.9 [65.4-73.5] |
+| open | 4096 | 32 | 19.04 | 34.70 | 2.86 | 3.76 | 30/30 | 192.2 [167.9-211.0] | 24.8 | 268.6 [264.8-292.2] | 68.9 [67.0-72.9] |
+| open | 4096 | 128 | 18.88 | 36.71 | 2.87 | 3.88 | 30/30 | 128.2 [127.7-157.0] | 19.5 | 242.0 [240.9-251.3] | 72.9 [68.7-77.5] |
+| terrain | 1024 | default | 0.66 | 1.83 | 0.64 | 1.70 | 0/30 | 4.4 [4.2-5.1] | 0.3 | 57.4 [56.6-59.6] | 15.6 [15.3-16.2] |
+| terrain | 1024 | 32 | 0.85 | 2.34 | 0.81 | 2.66 | 2/30 | 6.8 [6.6-7.0] | 0.6 | 55.2 [55.1-61.2] | 12.9 [12.3-13.6] |
+| terrain | 1024 | 128 | 0.48 | 1.44 | 0.44 | 0.98 | 0/30 | 4.2 [3.7-5.1] | 0.3 | 87.5 [83.9-90.7] | 46.8 [45.8-48.2] |
+| terrain | 2048 | default | 3.31 | 8.86 | 2.63 | 3.48 | 24/30 | 23.7 [19.7-27.3] | 1.8 | 263.8 [263.5-285.1] | 80.4 [79.4-90.6] |
+| terrain | 2048 | 32 | 3.14 | 8.30 | 2.75 | 3.78 | 24/30 | 27.0 [26.6-28.4] | 3.0 | 227.5 [220.1-230.7] | 37.7 [36.4-47.5] |
+| terrain | 2048 | 128 | 1.65 | 8.54 | 1.68 | 2.89 | 11/30 | 19.2 [18.2-21.4] | 2.5 | 383.2 [365.5-398.9] | 211.0 [194.0-226.4] |
+| terrain | 4096 | default | 11.53 | 29.02 | 2.87 | 3.52 | 30/30 | 96.9 | 12.7 | 1,292 | 583 |
+
+The FindPath and Budget columns are medians over runs. Each run's values are in the `[R]` lines
+the bench prints.
+
+**Studio** (the 4 km bakes, `large_world.py --runs 3`, edit mode, median [min-max]):
+
+| map | bake MB | Deserialize ms | heap MB | FindPath p50 | p95 | Budget p50 | cold FindPath | warm | cold Update | Update p50 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| city | 5.35 | 89.8 [54.5-130.7] | 10.9 [10.7-10.9] | 5.34 | 9.44 | 2.54 | 47.6 [44.4-53.9] | 6.0 | 64.5 [61.2-68.2] | 19.9 [19.5-20.4] |
+| open | 25.1 | 704 [696-768] | 66.4 [65.1-68.0] | 18.97 | 37.62 | 2.68 | 148.3 [129.3-161.2] | 21.7 | 220.6 [207.4-245.4] | 75.2 [72.6-77.5] |
+| terrain | 18.3 | 543 [502-555] | 37.3 [36.8-44.8] | 12.70 | 30.55 | 2.78 | 72.1 [63.6-77.3] | 12.5 | 1,237 [1,212-1,248] | 501 [497-522] |
+
+- Studio runs at about Lune's speed here, within 15% on every column except city's noisy
+  `Deserialize`.
+- An earlier three-run Studio pass, on city and open only, agreed: open `Deserialize` took
+  724 [712-793] ms and held 65.1 MB.
+- That earlier pass read city's heap as 16.7 [10.4-17.3] MB. Studio's heap gauge includes the
+  rest of its Luau VM, so small meshes read noisily. Loading a 4 km open bake holds about
+  65 MB in both runtimes.
+
+**Where the time goes** (each line has its script):
+- **Build is O(triangles x walkable rings) on a floor** (`rings_repro.luau`,
+  `profile_build.luau 1024 default terrain`).
+  - Build asks every walkable ring's surface for each kept triangle's heights, with one
+    `CDT.Locate` per ring. At 1 km terrain that is 21M Locates, 80% of Build.
+  - On an n x n grid of 8-stud squares, Build takes 13, 68, 593 and 7,655 ms at 64, 256,
+    1,024 and 4,096 rings.
+  - `Update` shares the cost: one crate's `Update` takes 6.9, 16, 56 and 330 ms on those
+    meshes.
+  - This is the whole terrain story: Build takes 3 s at 1 km, 63-100 s at 2 km and
+    35 minutes at 4 km (2,082 s, one run). Open and city stay linear: about 50 us per triangle on open, 40
+    on city.
+- **Deserialize runs at 0.8-0.9 us per triangle**, except on the 4 km open map, where it takes
+  2.8 us (`deserialize_profile.luau`).
+  - That bake spends 520 of its 731 ms in `Storage.SetFloorSources`, which appends 42k rings
+    with `table.move`.
+  - Appending with `table.move` past the array part is quadratic in Luau
+    (`tablemove_repro.luau`: 80k four-point rings take 680-740 ms, against 5 ms by index).
+  - The memcpy floor for the same bake is 6 ms, and `Connect` takes 1 ms.
+- **A warm Update grows with the map, not the change** (`update_profile.luau`; one crate on
+  the open map):
+
+| side | triangles | rings | Update ms | ring scan | clean-tile copy | TileInputs + triangulate + Refresh | rest |
+|---|---|---|---|---|---|---|---|
+| 1024 | 16,543 | 2,622 | 5.6 | 1.5 | 1.6 | 1.3 | 1.2 |
+| 2048 | 66,407 | 10,486 | 18.8 | 8.4 | 5.3 | 2.5 | 2.6 |
+| 4096 | 265,434 | 41,944 | 66.9 | 44.2 | 18.6 | 1.9 | 2.2 |
+
+  - The **ring scan** is `Tiles.reSnap`, which takes the bounds of every authored ring on the
+    floor to find those near the dirty tiles.
+  - The **clean-tile copy** is the O(T) copy that ticket 22 deferred (Opt1).
+  - On the 4 km city, `Build.Internal.Connect` adds 7.2 ms per `Update`, because it re-joins
+    all 862 seams.
+  - On terrain the ring term dominates instead. `TriangulateTile` takes 38 ms of a 43 ms
+    `Update` at 1 km, 60 of 74 at 2 km and 436 of 477 at 4 km
+    (`update_profile.luau terrain 3`; its crate falls elsewhere than LargeWorld's).
+- **The load spike** (known-gaps.md):
+  - The first radius `FindPath` after `Deserialize` costs 6-9x a warm one: 130 against 22 ms
+    on the 4 km open map.
+  - The first `Update` costs about 3.4x: 250 against 73 ms.
+- **Heap:**
+  - A loaded mesh holds 2-2.6x its bake.
+  - The triangle buffers keep their doubling capacity, so up to half of them is slack
+    (`heap_fields.luau open-4096`: 182 bytes per triangle allocated, where the data needs 92).
+  - Hence the 4 km open map's 66 MB at the default TileSize (265k triangles, capacity 524k)
+    against 42 MB at TileSize 128 (255k triangles, capacity 262k).
+  - The f64 widths are 52% of what the buffers allocate.
+- **The bake** (`bake_sections.luau 4096`):
+  - Triangles are 76-78% of it, at 77 bytes each: 12 vertex, 12 neighbour, 4 area, 1 open and
+    48 width bytes.
+  - Authored rings are 12%, and vertices 9%.
+  - zstd already shrinks the bake 5-7x. Narrower widths save little on top of it.
+
+| bake | triangle section | f64 widths (today) | f32 widths | u16 widths (1/256 stud, rounded down) |
+|---|---|---|---|---|
+| open 4 km | raw MB | 19.5 | 13.4 | 10.4 |
+| open 4 km | zstd MB | 2.91 | 2.57 | 2.38 |
+| city 4 km | raw MB | 4.08 | 2.81 | 2.18 |
+| city 4 km | zstd MB | 0.52 | 0.46 | 0.45 |
+
+- **MaxExpansions 5,000** keeps a cross-map `FindPath` to about 3-5 ms (p95) at any size.
+  - But it truncates: 27-30 of 30 cross-map queries end `Budget` on the 2 km open map and on
+    every 4 km map.
+  - 5,000 expansions cover about 1-2 km of open ground.
+- **TileSize:**
+  - 32 costs 12-75% more triangles and bake than the default, and up to 2.3x the Build on
+    city.
+  - 128 on open keeps the bake but costs 2.1x per warm `Update` at 1 km (13.7 against 6.5
+    ms). Its tile rebuild is the bigger part there.
+  - At 4 km the O(map) terms swamp the TileSize differences.
+
+**Reading for D6:**
+- **Up to 2 km, the bake and the load are fine on every map tried.**
+  - City: 1.3 MB (0.2 MB zstd), 11 ms to load and 3 MB of heap.
+  - Open: 6.3 MB (1.2 MB zstd), 52 ms to load and 16 MB of heap.
+  - Terrain: 4.5 MB (0.9 MB zstd), 41 ms to load and 9 MB of heap.
+  - But terrain's Build (63 s) and warm `Update` (80 ms) at 2 km are already not fine. That
+    is the ring term, not size.
+- **At 4 km the open map is the problem:**
+  - a 25 MB bake (4.9 MB zstd);
+  - a 0.7 s `Deserialize` in Studio, on the client's main thread;
+  - 66 MB of heap;
+  - a 67-73 ms warm `Update`.
+  - 4 km terrain is worse on time but not on size: a 35-minute Build and a 583 ms warm
+    `Update`, with an 18 MB bake (3.7 MB zstd), a 0.5 s load and 38 MB of heap.
+- **Most of that is not size itself:**
+  - The `table.move` appends cost 520 ms of the load.
+  - Buffer slack is a third of the heap.
+  - The ring scan and the O(T) copy are 63 of 67 ms of an `Update`.
+- **Measured from the parts** (not built), the cheap fixes would give about:
+  - `Deserialize` 0.24 s;
+  - heap about 43 MB, or about 37 MB with f32 widths in memory;
+  - a warm `Update` under 25 ms with the ring index alone, and about 5 ms with Opt1 too.
+- **Terrain-like input needs the surface index before anything else.** No region scheme helps
+  a Build that is quadratic within a floor.
+
 ## Not measured (flagged)
 - Remote transfer time and payload size per layout (needs a live server/client session).
 - Locality on a real CDT's vertex and triangle ordering. The grid mesh has near-ideal locality,

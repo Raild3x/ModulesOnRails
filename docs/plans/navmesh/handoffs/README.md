@@ -29,7 +29,7 @@ for your track. Everything named here lives on branch `feat/navmesh` unless it s
 | Order | Track | Handoff | Touches |
 |---|---|---|---|
 | 1 | G, path output | [G-path-output.md](G-path-output.md): tickets 28 and 25 (minus link items), the Partial-end radius gap | Funnel, NavMesh, Types, Search (only if the area-bend fix needs it), the demo |
-| 1 | H, measure and dogfood | [H-measure-and-dogfood.md](H-measure-and-dogfood.md): ticket 31 (1-4 km maps), a second dogfood game on the new APIs | `tools/navmesh/bench`, `examples` only; no library code |
+| 1 | H, measure and dogfood (**done 2026-10-01**: bench.md "Large worlds, 1-4 km", `examples/navmesh-demo2/REPORT.md`, new gaps in known-gaps.md; D6 awaits a ruling) | [H-measure-and-dogfood.md](H-measure-and-dogfood.md): ticket 31 (1-4 km maps), a second dogfood game on the new APIs | `tools/navmesh/bench`, `examples` only; no library code |
 | 2 | E, links | [E-links.md](E-links.md): ticket 30, the link gaps, ticket 25's link names and ids | Search, Tiles (links pass), Storage (links), Serialize (links section), NavMesh, Types |
 | 3 | F, geometry input | [F-geometry-input.md](F-geometry-input.md): the simplification passes, plus Update on huge rings | Build, Quantize, Tiles (re-snap), Clearance, Serialize (tolerance field), Types, the adapter |
 | wave 2 | W, headroom | [W-headroom.md](W-headroom.md): ticket 29 | almost everything; alone, after E and F |

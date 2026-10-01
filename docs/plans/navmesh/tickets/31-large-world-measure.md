@@ -6,18 +6,18 @@ needed.
 
 **Blocked by:** none. It is bench-only and touches no `src`, so it can run beside any track.
 
-**Status:** needs-triage. Ruled 2026-09-28 (review.md, D6: "Measure first"). From
+**Status:** measured 2026-10-01 (Track H); the D6 options await a ruling. Ruled 2026-09-28 (review.md, D6: "Measure first"). From
 [research/roblox-pathfinding-comparison.md](../research/roblox-pathfinding-comparison.md)
 gap G7. Today's reference point: the 256-stud bench map bakes to 581 KB and builds in
 213-595 ms (examples/navmesh-demo/REPORT.md, measured timings).
 
-- [ ] **Maps:** generated and seeded, in `tools/navmesh/bench/`, at 1, 2 and 4 km square
+- [x] **Maps:** generated and seeded, in `tools/navmesh/bench/`, at 1, 2 and 4 km square
       (well inside the ±32,768-stud range):
   - **city:** a street grid with building footprints as obstacles, and some multi-floor
     buildings with seams;
   - **open:** a large floor with scattered props;
   - **terrain-like:** dense, slightly rotated rings, the input a terrain adapter would produce.
-- [ ] **Measure,** for each map and the default and two other `TileSize`s:
+- [x] **Measure,** for each map and the default and two other `TileSize`s:
   - Build ms;
   - bake bytes;
   - Deserialize ms;
@@ -26,10 +26,27 @@ gap G7. Today's reference point: the 256-stud bench map bakes to 581 KB and buil
     `MaxExpansions`);
   - one `Update`.
   - Use the audited method in bench.md.
-- [ ] **Measure on both runtimes:** Lune, and one Studio run on the largest map (heap and
+- [x] **Measure on both runtimes:** Lune, and one Studio run on the largest map (heap and
       Deserialize), since the bake ships to clients.
-- [ ] **Report** to bench.md, then present the D6 options with these numbers:
+- [x] **Report** to bench.md, then present the D6 options with these numbers:
   - out of scope;
   - region bakes (tile-subset `Serialize` plus a merging `Deserialize`);
   - anything the numbers suggest, for example a smaller bake format before any region
     loading.
+
+## As built (2026-10-01, Track H)
+- **Maps:** `tools/navmesh/bench/LargeMaps.luau` (city, open, terrain).
+- **Bench:** `large_world.luau` (Lune), on the shared core `LargeWorld.luau`.
+  - The ticket asks for Build ms, bake bytes, `Deserialize` ms, heap, `FindPath` and `Update`.
+    The bench adds two columns: the zstd size, and the cold-versus-warm load spike.
+  - 4 km terrain ran once, at the default TileSize only, because its Build is quadratic.
+- **Studio:** `large_world.py` runs on the 4 km bakes.
+- **Profiles behind the reading:**
+  - `update_profile.luau`, `deserialize_profile.luau`, `heap_fields.luau` and
+    `bake_sections.luau`;
+  - `profile_build.luau`, which gained a `largeMap` argument.
+- **Repros:** `rings_repro.luau` and `tablemove_repro.luau`.
+- **Results:** bench.md, "Large worlds, 1-4 km".
+- **New gaps:** known-gaps.md, "Found by Track H". Two of them are library performance bugs:
+  - Build and `Update` cost O(triangles x walkable rings);
+  - appending with `table.move` is quadratic in `Storage`.
