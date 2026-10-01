@@ -297,27 +297,60 @@ local function weld(f: Floor, tolerance: number)
 	end
 end
 
+-- The area-name table (research D5): each text `NavArea` gets an id from 2 up, in name order,
+-- skipping ids a numeric `NavArea` already uses. Name order keeps ids independent of Part order.
+local function nameAreas(walkable: { BasePart }): { [string]: number }
+	local names, taken, seen = {}, {}, {}
+	for _, part in walkable do
+		local area = part:GetAttribute("NavArea")
+		if type(area) == "number" then
+			taken[area] = true
+		elseif type(area) == "string" and not seen[area] then
+			seen[area] = true
+			table.insert(names, area)
+		end
+	end
+	table.sort(names)
+	local areas, id = {}, 2
+	for _, name in names do
+		while taken[id] do
+			id += 1
+		end
+		areas[name] = id
+		id += 1
+	end
+	return areas
+end
+
 --[=[
 	@within NavMeshAdapter
 	@param walkable { BasePart } -- Parts whose upward faces are walkable
 	@param obstacles { BasePart } -- the other solid Parts: crates, walls, props
 	@param options AdapterOptions?
 	@return NavMesh.NavMeshDesc -- Floors and Seams; add Links and MaxAgentRadius yourself
+	@return { [string]: number } -- area id per `NavArea` name
 
-	A walkable Part with a number attribute `NavArea` marks its walkable faces as that area id
-	(later Parts win where areas overlap).
+	A walkable Part with a `NavArea` attribute marks its walkable faces as an area (later Parts
+	win where areas overlap). A number is the area id; text is a name, and the second result
+	maps each name to its id (2 up, in name order, skipping ids used as numbers).
 
 	```lua
-	local desc = NavMeshAdapter.FromParts(
+	local desc, areas = NavMeshAdapter.FromParts(
 		CollectionService:GetTagged("Walkable"),
 		Level.Props:GetChildren()
 	)
 	desc.MaxAgentRadius = 2
 	local mesh = NavMesh.Build(desc)
+	local filter = { AreaCosts = { [areas.Road] = 10 } }
 	```
 ]=]
-local function fromParts(walkable: { BasePart }, obstacles: { BasePart }, options: AdapterOptions?): NavMesh.NavMeshDesc
+local function fromParts(
+	walkable: { BasePart },
+	obstacles: { BasePart },
+	options: AdapterOptions?
+): (NavMesh.NavMeshDesc, { [string]: number })
 	local o: AdapterOptions = options or {}
+	local areaIds = nameAreas(walkable)
 	local agentHeight = o.AgentHeight or 5
 	local minUp = math.cos(math.rad(o.MaxSlope or 45))
 	local sides = o.CylinderSides or 16
@@ -376,6 +409,9 @@ local function fromParts(walkable: { BasePart }, obstacles: { BasePart }, option
 			table.insert(f.Rings, ring)
 			table.insert(faces, { Ring = ring, Floor = f })
 			local area = part:GetAttribute("NavArea")
+			if type(area) == "string" then
+				area = areaIds[area]
+			end
 			if type(area) == "number" then
 				table.insert(f.Areas, { Polygon = ring, Area = area })
 			end
@@ -458,7 +494,7 @@ local function fromParts(walkable: { BasePart }, obstacles: { BasePart }, option
 			end
 		end
 	end
-	return desc :: any -- `vector` points; the public types still say Vector3 (ticket 26)
+	return desc :: any, areaIds -- `vector` points; the public types still say Vector3 (ticket 26)
 end
 
 return {

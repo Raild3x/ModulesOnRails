@@ -237,6 +237,15 @@ the const question are deliberately open, gated on benchmarks.
   against 0.57. Removed-obstacle boxes were offered too, and not chosen. User: "Add footprint
   boxes (Recommended)".
 
+### Rulings during the build (2026-10-01, Track M3)
+- **The adapter's area-name table (D5, ticket 26's open item, built for ticket 36):** a Part
+  names its area with a text `NavArea` attribute. `FromParts` returns `(desc, areas)`; each name
+  gets an id from 2 up, in name order, skipping ids used by numeric `NavArea`s. Numeric
+  `NavArea` still works. Rejected: areas by `Material` (every existing map would gain areas, and
+  repainting a Part would change paths) and a caller-supplied table (stable ids, but names
+  written twice). Adding a name can renumber the later ones, so a saved bake's costs may need
+  the table rebuilt. User: "Text NavArea (Recommended)".
+
 ### Rulings during the build (2026-09-27)
 - **U-a (clearance reach), ruled after the P4 probe (ticket 15 notes):** no cap by default,
   with an optional cap. Any `AgentRadius` works, and each width's reach r* is stored.
