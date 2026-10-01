@@ -338,6 +338,11 @@ return function(t: tiniest)
 			if #corridor == 1 then
 				return if corridor[1] == goalT then vector.magnitude(goalP - startP) * mult(goalT) else 0
 			end
+			-- Heron nodes when every multiplier is 1 (or excluded) and no link is cheap; else midpoints.
+			local heron = Search.HeuristicScale(mesh, costs) >= 1
+			for _, multiplier in costs do
+				heron = heron and (multiplier == 1 or multiplier == math.huge)
+			end
 			local total, p = 0, startP
 			for i = 2, #corridor do
 				local t, m = corridor[i - 1], corridor[i]
@@ -345,9 +350,12 @@ return function(t: tiniest)
 				if vias[i] == 0 then
 					local verts = { Storage.GetTriangle(mesh, t) }
 					local e = sharedEdge(mesh, t, m)
-					local a, b =
-						Storage.GetVertex(mesh, verts[e % 3 + 1]), Storage.GetVertex(mesh, verts[(e + 1) % 3 + 1])
-					local node = if last then goalP else (a + b) * 0.5
+					local va, vb = verts[e % 3 + 1], verts[(e + 1) % 3 + 1]
+					local a, b = Storage.GetVertex(mesh, va), Storage.GetVertex(mesh, vb)
+					local node = if last
+						then goalP
+						elseif heron then Search.HeronPoint(a, b, p, goalP)
+						else (a + b) * 0.5
 					total += vector.magnitude(node - p) * (mult(t) + mult(m)) * 0.5
 					p = node
 				else
@@ -541,15 +549,20 @@ return function(t: tiniest)
 		end)
 
 		test("A* finds Dijkstra's costs between many pairs (the scaled heuristic is admissible)", function()
+			-- With midpoint nodes, which any multiplier other than 1 selects (here on an unused
+			-- area): their places don't depend on the route, so A* and Dijkstra search one graph.
+			-- Heron nodes depend on the route to them, so there is no fixed graph to agree on.
 			local count = 0
 			for index, case in cases do
 				local mesh = NavMesh.Build(case.Fixtures.Desc)
-				local dijkstra = table.clone(case.Costs)
+				local astar = table.clone(case.Costs)
+				astar[98] = 2
+				local dijkstra = table.clone(astar)
 				dijkstra[99] = 0 -- a zero multiplier on an unused area scales the heuristic to 0
 				local spots = spotsFor(index, case, 7, 200)
 				for _, a in spots do
 					for _, b in spots do
-						local x = NavMesh.FindPath(mesh, a, b, { AreaCosts = case.Costs })
+						local x = NavMesh.FindPath(mesh, a, b, { AreaCosts = astar })
 						if x.Status ~= "Success" then
 							continue
 						end

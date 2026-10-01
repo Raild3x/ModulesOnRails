@@ -5,9 +5,10 @@ that are addressable by name.
 
 **Blocked by:** none
 
-**Status:** partly built on `navmesh-path-output` (2026-10-01, Track G): the seam and crease
-waypoints, and `PathResult.Length`. The area-edge bend and the bisector funnel are measured and
-wait for rulings (see "Measured" below). The link items belong to Track E (ticket 30). From the
+**Status:** built on `navmesh-path-output` (2026-10-01, Track G): the seam and crease
+waypoints (the drape), `PathResult.Length`, and heron nodes for the path-length item. The
+bisector funnel was measured and moved to ticket 32 (ruled). Weighted queries (area costs) keep
+midpoint nodes; research on them continues on `proto/g-areabend`. The link items belong to Track E (ticket 30). From the
 dogfood report, pain points 8, 9 and 15, and repros 4 and 7.
 
 - [x] **Waypoints where a path crosses a seam or a crease (slope change).**
@@ -15,7 +16,7 @@ dogfood report, pain points 8, 9 and 15, and repros 4 and 7.
     waypoints passes 3 studs under the surface, and `FindNearestPoint` then lands on the floor
     below (repro 7).
   - The alternative is a `SamplePath(path, spacing)` helper.
-- [ ] **Equal-cost area boundaries don't bend paths.**
+- [x] **Equal-cost area boundaries don't bend paths.** (Heron nodes; the bend was general.)
   - Repro 4: a patch with cost 1 makes a path 8% longer.
   - Candidate fix: a final shortcut pass over segments whose area costs are equal.
 - [ ] **Link id on the link's waypoint.**
@@ -71,8 +72,46 @@ an arc-midpoint waypoint on sharp turns stays optional.
   never or always cutting (3 each), heights lerped instead of taken from the portal (3), and
   either sleeve bound frozen (3 and 2).
 
-## Measured, waiting for a ruling (2026-10-01, Track G)
-- **The area-edge bend is not an area effect.** It comes from A* nodes at entry-edge midpoints.
+## Heron nodes (2026-10-01, Track G, ruled)
+- **Ruling:** "Heron, gated (Recommended)", after a second research round on what other
+  engines do (`proto/g-areabend`, `docs/plans/navmesh/research/path-length-standard-fixes.md`).
+  No mainstream engine guarantees shortest paths. Detour, Unity, Unreal and Godot all use one
+  node per polygon plus a funnel.
+- **As built in `Search.luau`:** an edge node sits at the edge point minimising |parent - x| +
+  |x - goal|, the goal reflected across the edge when it is on the parent's side. It is used
+  only when every multiplier is 1 (or excluded) and the heuristic scale is 1 (no link cheaper
+  than walking). Otherwise, and at seam portals, nodes stay at midpoints.
+  - The prototype kept nodes r off wall-vertex ends. That was dropped: no spec could see it,
+    and lengths and success counts moved within noise either way.
+- **Numbers:**
+  - Prototype, 32k pairs against the exact oracle: p95 1.074 to 1.0036, max 2.33 to 1.23,
+    paths over 1% too long 19.5% to 2.7%.
+  - As built, FindPath us per call on bench scenes against the same code with midpoints:
+
+    | scene | r 0 | r 1 |
+    |---|---|---|
+    | props | 150 to 72 | 181 to 187 |
+    | bench | 207 to 100 | 242 to 155 |
+    | walls | 65 to 67 | 85 to 84 |
+
+  - Repro 4's room with two area patches (uniform costs): 88 of 300 paths bent (worst 1.18x)
+    with midpoints, against 7 (worst 1.014x) with heron.
+- **Specs:**
+  - The node-chain oracle now recomputes heron nodes for uniform-cost cases and midpoints for
+    the others, so it checks the gate both ways. `Search.HeronPoint` is exported for it.
+  - A* = Dijkstra is checked with midpoint nodes, selected by a multiplier of 2 on an unused
+    area. Heron nodes depend on the route to them, so there is no fixed graph to agree on.
+  - The convex-room spec (PathShape): no path over 1.02x the straight line, and at most 15 of
+    300 bend.
+- **Negative controls:** each fails a spec: heron off (2 fail), the multiplier gate ignored (2),
+  and the link gate ignored (1).
+- **Found while measuring (known-gaps.md):** with an agent radius, which node model runs
+  decides Success or Partial for about 7 of 260 `props` queries, both ways. Both flipped pairs
+  checked are connected by the grid flood. The search closes a triangle by its first entry, and
+  a dead-end entry can lock out a better one. This predates heron.
+
+## Measured, not built (2026-10-01, Track G)
+- **The area-edge bend is not an area effect** (now fixed by heron nodes for uniform costs). It comes from A* nodes at entry-edge midpoints.
   - The reference is an exact shortest path: a visibility graph over reflex wall vertices, with
     exact sightline tests. It was validated on a convex room (ratio exactly 1) and on a
     hand-solved room, with three negative controls.

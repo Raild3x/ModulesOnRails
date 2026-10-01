@@ -191,11 +191,17 @@ the const question are deliberately open, gated on benchmarks.
   The prototype crossed walls without a post-check, and with one it left dense maps' worst case
   where it was, at 1.6-2.3x FindPath time. User: "Create a new ticket for this, in the
   meantime keep it as is today".
-- **Path length against the shortest (ticket 25's area-edge bend):** not ruled yet. The excess
+- **Path length against the shortest (ticket 25's area-edge bend):** heron nodes, gated to
+  uniform costs. The first ask got this reply: The excess
   is general: it comes from A* nodes at edge midpoints, not from area edges. Gated "heron"
   nodes were the recommendation (p95 1.074 to 1.0036, FindPath 0.48x at r 0). The user asked
   first: "Have a subagent research alternatives. What is the standard fixes used by other
-  navmesh systems?"
+  navmesh systems?" The second round surveyed Detour, Unity, Unreal, Godot, Polyanya, TA*,
+  Kallmann and Steiner points, and measured Polyanya (exact, radius 0 only, 1.1-2.1x),
+  Steiner (15-28x) and a Detour-style follower repair (little gain). User: "Heron, gated
+  (Recommended)". The user then asked to look into weighted navmeshes too ("We should also
+  look into solutions for weighted navmeshes"); that research is under way on
+  `proto/g-areabend`.
 - **`PathResult.Length`:** added with no question, since there was no real trade-off. It is the
   3D polyline length, a link's hop counted as a straight line.
 - **Added footprints (ticket 28):** `Update` returns `(regions, added)`, where `added` holds one

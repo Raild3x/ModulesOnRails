@@ -11,6 +11,17 @@ track that now owns it, where one does. Items without an owner are deferred unti
 barriers, as FindPath returns it (pushed off the walls). See ticket 27's "Partial and Budget
 ends" section. Two kinds of end still pass unjudged; both are below.
 
+**Found by Track G (2026-10-01):**
+- **The search can return Partial for a reachable pair with an agent radius.** It closes a
+  triangle the first time it is entered. If that entry is a dead end for the radius (the corner
+  width onward is too narrow), a better entry can't reopen it. Changing the node model flips
+  about 7 of 260 `props` radius queries between Success and Partial, both ways. The two checked
+  are connected by the grid flood. One node per (triangle, entry edge) would close it; it ran
+  3x slower in ticket 14's probe.
+- **G3's end check costs about 70-80 us per Partial radius query on dense maps** (`props`, r
+  1: 160 to 235 us). Success queries don't pay it. The cost is one push plus one barrier test
+  per candidate end.
+
 ## Deferred, only if the user asks
 - **Precise `IsPathValid`.** Ticket 22 notes what `Clearance.Refresh` already knows.
 - **Opt1's in-place commit for `Update`.** It only matters if the remaining O(T) copy shows up;

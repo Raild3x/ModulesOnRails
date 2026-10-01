@@ -15,6 +15,17 @@
 	towards small triangles, 56% longer in the worst case on the Courtyard. One node per
 	(triangle, entry edge) had fixed positions but ran 3x slower for a smaller gain.
 
+	**Heron nodes (ticket 25):** when every walkable stud costs the same (no `AreaCosts`
+	multiplier but 1 or excluded, and no link cheaper than walking), an edge node sits instead
+	where a ray from the parent's node to the goal would bounce off the edge: the edge point
+	minimising |parent - x| + |x - goal|. Midpoints sit beside the true line, so A* misjudged
+	which side of an obstacle was shorter: against an exact shortest path (32k pairs), p95 went
+	from 1.074 to 1.0036 and the worst from 2.33x to 1.23x, and FindPath got about 2x faster at
+	r 0. With other costs, goal-ward nodes overprice a route heading away from the goal (round a
+	dear area, back to a cheap link), so those queries keep midpoints. Seam portals keep
+	midpoints too. Heron nodes depend on the route to them, so A* is no longer exactly Dijkstra
+	over a fixed graph (it is with midpoints).
+
 	**Costs:** crossing from t into m costs the 3D distance from t's node to m's node times the
 	mean of the two areas' `AreaCosts` multipliers (default 1; `math.huge` excludes the area).
 
@@ -68,6 +79,29 @@ type Scratch = {
 local pool: { [Storage.State]: Scratch } = setmetatable({}, { __mode = "k" }) :: any
 
 local Search = {}
+
+-- The heron node on edge a-b for a search at p heading for g: the point of the edge minimising
+-- |p - x| + |x - g| in plan (g reflected across the edge's line when it is on p's side, as
+-- light bounces). Its height is the edge's there.
+local function heronPoint(a: vector, b: vector, p: vector, g: vector): vector
+	local ex, ez = b.X - a.X, b.Z - a.Z
+	local len2 = ex * ex + ez * ez
+	local sp = ex * (p.Z - a.Z) - ez * (p.X - a.X)
+	local sg = ex * (g.Z - a.Z) - ez * (g.X - a.X)
+	local gx, gz = g.X, g.Z
+	if sp * sg > 0 then
+		local k = 2 * sg / len2
+		gx, gz = gx + k * ez, gz - k * ex
+		sg = -sg
+	end
+	local u = 0.5
+	if sp ~= sg then
+		local f = sp / (sp - sg)
+		u = ((p.X + f * (gx - p.X) - a.X) * ex + (p.Z + f * (gz - p.Z) - a.Z) * ez) / len2
+	end
+	return a + (b - a) * math.clamp(u, 0, 1)
+end
+Search.HeronPoint = heronPoint -- for the specs' node-chain oracle
 
 -- The edge of m on the seam portal it shares with t (the slot its own seam extra back to t
 -- names).
@@ -200,6 +234,15 @@ function Search.Run(
 	local GetExtraHead, GetExtra, GetLink = Storage.GetExtraHead, Storage.GetExtra, Storage.GetLink
 	local EXTRA_LINK = Storage.EXTRA_LINK
 	local scale = Search.HeuristicScale(s, costs)
+	-- Heron nodes only where every walkable stud costs the same: no multiplier but 1 (or
+	-- excluded) and no link cheaper than walking. Goal-ward nodes overprice a route that heads
+	-- away from the goal round a dear area, or back to a cheap link.
+	local heron = scale >= 1
+	for _, multiplier in costs do
+		if multiplier ~= 1 and multiplier ~= math.huge then
+			heron = false
+		end
+	end
 
 	-- The node that entering triangle m leads to, given whether the goal is cut off from that
 	-- entry.
@@ -270,11 +313,12 @@ function Search.Run(
 				continue
 			end
 			-- Edge e runs between the two vertices other than vertex e.
-			local mp = if node == goalNode
-				then goalP
-				elseif e == 1 then (GetVertex(s, ib) + GetVertex(s, ic)) * 0.5
-				elseif e == 2 then (GetVertex(s, ic) + GetVertex(s, ia)) * 0.5
-				else (GetVertex(s, ia) + GetVertex(s, ib)) * 0.5
+			local mp = goalP
+			if node ~= goalNode then
+				local a = GetVertex(s, if e == 1 then ib elseif e == 2 then ic else ia)
+				local b = GetVertex(s, if e == 1 then ic elseif e == 2 then ia else ib)
+				mp = if heron then heronPoint(a, b, tp, goalP) else (a + b) * 0.5
+			end
 			local ng = gt + vector.magnitude(mp - tp) * (tm + mm) * 0.5
 			if seen[node] ~= stamp or ng < g[node] then
 				g[node], pos[node], seen[node], parent[node], via[node], entry[node] = ng, mp, stamp, u, 0, back

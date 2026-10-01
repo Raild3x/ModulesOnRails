@@ -163,6 +163,47 @@ return function(t: tiniest)
 		end)
 	end)
 
+	describe("Path length (heron nodes)", function()
+		test("in a convex room, area patches and all, uniform-cost paths keep to the straight line", function()
+			-- Repro 4's room, where the straight line is the shortest path (a convex room's straight
+			-- line between points r clear of the walls stays r clear). With nodes at edge midpoints
+			-- 88 of these 300 paths bend, up to 1.18x; with heron nodes, used when every multiplier
+			-- is 1, 7 bend, by at most 1.014x. Heron nodes are not exact.
+			local mesh = NavMesh.Build {
+				Floors = {
+					Ground = {
+						Walkable = { rect(0, 0, 0, 40, 40) },
+						Areas = {
+							{ Polygon = rect(0, 0, 18, 30, 26), Area = 2 },
+							{ Polygon = rect(0, 22, 4, 27, 33), Area = 3 },
+						},
+					},
+				},
+			}
+			math.randomseed(4)
+			local bent, long = 0, {}
+			for _, r in { 0, 0.5 } do
+				for _ = 1, 150 do
+					local a = v(r + 0.1 + math.random() * (39.8 - 2 * r), 0, r + 0.1 + math.random() * (39.8 - 2 * r))
+					local b = v(r + 0.1 + math.random() * (39.8 - 2 * r), 0, r + 0.1 + math.random() * (39.8 - 2 * r))
+					local path = NavMesh.FindPath(mesh, a, b, { AgentRadius = r, AreaCosts = { [2] = 1 } })
+					if #path.Waypoints ~= 2 then
+						bent += 1
+					end
+					if path.Length > 1.02 * vector.magnitude(b - a) then
+						table.insert(long, `r {r}: {fmt(a)} -> {fmt(b)}: {path.Length}`)
+					end
+				end
+			end
+			expect(table.concat(long, "; ")).is("")
+			expect(bent <= 15).with_context(`{bent} of 300 bend`).is_true()
+			-- A dearer patch switches back to midpoint nodes, which may bend; the path then goes
+			-- round the patch where that is cheaper.
+			local round = NavMesh.FindPath(mesh, v(15, 0, 10), v(15, 0, 35), { AreaCosts = { [2] = 5 } })
+			expect(#round.Waypoints > 2).is_true()
+		end)
+	end)
+
 	describe("PathResult.Length", function()
 		test("is the 3D length of the polyline, link hops included", function()
 			local function polyline(path: any): number

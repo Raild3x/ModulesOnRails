@@ -717,7 +717,9 @@ The full tables are in the tickets; this is the index.
   ±5% noise on flat maps (+13% on a hilly ring). Lerp drift drops from 3.2-3.7 studs to at most
   0.0099. A `SamplePath` helper costs 2-10x a FindPath at 1-stud spacing and still drifts 0.12-0.16.
 - **Path length against the exact shortest path** (ticket 25, branch `proto/g-areabend`):
-  p95 1.074 and max 2.33 today. Heron nodes give 1.0036 and 1.23, and FindPath 0.48x at r 0.
+  p95 1.074 and max 2.33 with midpoint nodes, against 1.0036 and 1.23 with heron nodes (built,
+  for uniform costs). FindPath with heron: props 150 to 72 us at r 0, bench 207 to 100, walls
+  65 to 67; at r 1, 181 to 187, 242 to 155 and 85 to 84 (ticket 25's heron section).
 - **Bisector funnel** (ticket 25, branch `proto/g-bisector`): see ticket 25's "Measured"
   section.
 - **Partial ends** (ticket 27's G3 section, `tools/navmesh/bench/partial_end.luau`): ends a
