@@ -3,7 +3,7 @@
 lib/constraineddelaunaydebug set up (their link modules and _Index; see README.md).
 
     python examples/navmesh-demo2/studio.py shot [--view top|oblique|door] [--seconds 30] [--no-draw]
-    python examples/navmesh-demo2/studio.py play [--view top|oblique|door]   # opens Studio; press Run (F8)
+    python examples/navmesh-demo2/studio.py play [--view free|top|oblique|door]   # opens Studio; press Run (F8)
 
 Runs the demo in edit mode with run-in-roblox and captures the Studio window twice
 (tools/navmesh/studio/capture.ps1: PrintWindow, maximized) at --settle and --settle + 6 seconds.
@@ -81,7 +81,7 @@ def main() -> int:
     s.add_argument("--settle", type=int, default=16, help="seconds after the window opens before the first capture")
     s.add_argument("--no-draw", action="store_true", help="no debug drawing (negative control)")
     p = sub.add_parser("play")
-    p.add_argument("--view", choices=["top", "oblique", "door"], default="oblique")
+    p.add_argument("--view", choices=["free", "top", "oblique", "door"], default="free")
     args = ap.parse_args()
 
     if args.command == "play":
