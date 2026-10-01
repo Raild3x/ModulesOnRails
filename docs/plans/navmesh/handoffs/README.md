@@ -41,6 +41,14 @@ for your track. Everything named here lives on branch `feat/navmesh` unless it s
   4. Ticket 29 (W) starts after E and F have both merged.
 - **Merge order:** G, then E, then F. Each later track merges `feat/navmesh` into its branch
   before its own merge.
+- **Complex-map tickets 33-38 (added 2026-10-01), not yet assigned to a track:**
+  - The chain is 33, then 34, then 35 and 36, while 37 can start right after 33; 38 joins them
+    all. 39 (voxel Terrain) comes later.
+  - They are mostly maps, scenarios and measurements, so they can run beside a library track.
+    The exceptions are the adapter changes the maps may force: the step-height rule (34) and
+    the area-name table (36). Those touch `lib/navmeshadapter`.
+- **Ticket 29 is rewritten and parked:** ceilings come from obstacles, with per-NPC postures.
+  Revisit it with the user before wave 2 starts.
 - **Human tasks:**
   - **The editor's manual Play-mode check:** `npm run setup navmeshdebug`, then
     `python tools/navmesh/studio/studio.py play`, then press F5. The key list is in ticket 21.
