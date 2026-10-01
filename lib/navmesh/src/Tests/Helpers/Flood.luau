@@ -9,6 +9,12 @@
 -- split 5 x 5, down to MIN_H. Cells are 8-connected. So every free path runs through free cells,
 -- and two ends it cannot connect are truly parted at radius r. It floods from both ends in turn
 -- and stops when either side runs out, which keeps a small pocket cheap.
+--
+-- Links (E3) are teleports between their two snapped ends, one way unless bidirectional;
+-- disabled ones are skipped. A link is taken from the cell of its start, or of the start pushed
+-- straight out of its nearest wall to r (where an agent touching the wall would stand, as the
+-- search judges link points), and lands in the cells of its end and of its end pushed out the
+-- same way, free or not. From b the flood runs links backwards.
 
 local Snap = require("../../Snap")
 local Storage = require("../../Storage")
@@ -20,17 +26,23 @@ local ON_MESH = vector.create(1e-4, 50, 1e-4)
 
 local Flood = {}
 
-local function pointSeg(px: number, pz: number, w: { number }): number
+-- Distance from (px, pz) to segment w, and the nearest point.
+local function pointSeg(px: number, pz: number, w: { number }): (number, number, number)
 	local dx, dz = w[3] - w[1], w[4] - w[2]
 	local len2 = dx * dx + dz * dz
 	local u = if len2 > 0 then math.clamp(((px - w[1]) * dx + (pz - w[2]) * dz) / len2, 0, 1) else 0
-	return math.sqrt((w[1] + u * dx - px) ^ 2 + (w[2] + u * dz - pz) ^ 2)
+	local qx, qz = w[1] + u * dx, w[2] + u * dz
+	return math.sqrt((qx - px) ^ 2 + (qz - pz) ^ 2), qx, qz
 end
 
 export type Oracle = {
 	Mesh: any,
 	-- Distance from (x, z) to the nearest wall edge, or `cap` when none is nearer.
 	Clearance: (x: number, z: number, cap: number) -> number,
+	-- The nearest wall point within `cap` of (x, z), and its distance (nil when none).
+	Nearest: (x: number, z: number, cap: number) -> (number, number?, number?),
+	-- Enabled links: { from, to, bidirectional }.
+	Links: { { any } },
 }
 
 --[=[
@@ -57,21 +69,36 @@ function Flood.New(mesh: any): Oracle
 			end
 		end
 	end
-	return {
-		Mesh = mesh,
-		Clearance = function(x: number, z: number, cap: number): number
-			local best = cap
-			local reach = math.ceil(cap / HASH)
-			local ci, cj = math.floor(x / HASH), math.floor(z / HASH)
-			for i = ci - reach, ci + reach do
-				for j = cj - reach, cj + reach do
-					for _, w in hash[key(i, j)] or {} do
-						best = math.min(best, pointSeg(x, z, w))
+	local function nearest(x: number, z: number, cap: number): (number, number?, number?)
+		local best, bx, bz = cap, nil, nil
+		local reach = math.ceil(cap / HASH)
+		local ci, cj = math.floor(x / HASH), math.floor(z / HASH)
+		for i = ci - reach, ci + reach do
+			for j = cj - reach, cj + reach do
+				for _, w in hash[key(i, j)] or {} do
+					local d, qx, qz = pointSeg(x, z, w)
+					if d < best then
+						best, bx, bz = d, qx, qz
 					end
 				end
 			end
-			return best
+		end
+		return best, bx, bz
+	end
+	local links = {}
+	for id = 1, Storage.LinkCount(mesh) do
+		local _, from, _, to, _, _, _, both, enabled = Storage.GetLink(mesh, id)
+		if enabled then
+			table.insert(links, { from, to, both })
+		end
+	end
+	return {
+		Mesh = mesh,
+		Clearance = function(x: number, z: number, cap: number): number
+			return (nearest(x, z, cap))
 		end,
+		Nearest = nearest,
+		Links = links,
 	}
 end
 
@@ -113,14 +140,69 @@ function Flood.Connected(oracle: Oracle, r: number, a: vector, b: vector): boole
 	end
 	local queues = { {}, {} }
 	local heads = { 1, 1 }
-	for side, p in { a, b } do
-		local i, j = math.floor(p.X / H), math.floor(p.Z / H)
+	-- The cells of p and of p pushed out of its nearest wall to r (when that stands clear).
+	local function cells(p: vector): { number }
+		local out = { math.floor(p.X / H), math.floor(p.Z / H) }
+		local d, qx, qz = oracle.Nearest(p.X, p.Z, r)
+		if qx ~= nil and qz ~= nil and d > 0 then
+			local x, z = qx + (p.X - qx) * r / d, qz + (p.Z - qz) * r / d
+			if clearance(x, z, r) >= r * (1 - 1e-9) then
+				table.insert(out, math.floor(x / H))
+				table.insert(out, math.floor(z / H))
+			end
+		end
+		return out
+	end
+	-- Per side, cell -> the link ends a flood reaching it jumps to.
+	local jumps: { { [number]: { vector } } } = { {}, {} }
+	local function jump(side: number, from: vector, to: vector)
+		local at = cells(from)
+		for c = 1, #at, 2 do
+			local k = key(at[c], at[c + 1])
+			jumps[side][k] = jumps[side][k] or {}
+			table.insert(jumps[side][k], to)
+		end
+	end
+	for _, l in oracle.Links do
+		jump(1, l[1], l[2])
+		jump(2, l[2], l[1])
+		if l[3] then
+			jump(1, l[2], l[1])
+			jump(2, l[1], l[2])
+		end
+	end
+	-- Claims cell (i, j) for `side`, free or not, and takes the links from it: true when that
+	-- meets the other side.
+	local function enter(side: number, i: number, j: number): boolean
 		local k = key(i, j)
-		if state[k] ~= nil and state[k] ~= side then
+		local st = state[k]
+		if st == side then
+			return false
+		elseif st ~= nil and st > 0 then
 			return true
 		end
 		state[k] = side
 		table.insert(queues[side], { i, j })
+		for _, to in jumps[side][k] or {} do
+			local at = cells(to)
+			for c = 1, #at, 2 do
+				if enter(side, at[c], at[c + 1]) then
+					return true
+				end
+			end
+		end
+		return false
+	end
+	-- Each end floods from its own cell and from where it stands pushed off its nearest wall,
+	-- as the search judges an end touching a wall (E3; ticket 27 started from its own cell only,
+	-- which can't leave an end in a wall's disc and so "proved" any such end parted).
+	for side, p in { a, b } do
+		local at = cells(p)
+		for c = 1, #at, 2 do
+			if enter(side, at[c], at[c + 1]) then
+				return true
+			end
+		end
 	end
 	while true do
 		for side = 1, 2 do
@@ -138,8 +220,9 @@ function Flood.Connected(oracle: Oracle, r: number, a: vector, b: vector): boole
 						local st = state[k]
 						if st == nil then
 							if mayHoldFree(i * H, j * H, H) then
-								state[k] = side
-								table.insert(q, { i, j })
+								if enter(side, i, j) then
+									return true
+								end
 							else
 								state[k] = -1
 							end
