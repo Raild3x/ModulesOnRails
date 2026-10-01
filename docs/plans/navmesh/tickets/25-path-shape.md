@@ -196,3 +196,6 @@ an arc-midpoint waypoint on sharp turns stays optional.
   - the end check's nudge direction in Z;
   - `startCut = true`, whose end-selection role the end check now shares, and whose re-entry
     role ticket 27 found unreachable on buildable meshes.
+- **After the weighted follow-up (same command):** 297 specs pass, 98.9% of statements;
+  Funnel 85.4%, NavMesh 94.9%, Search 88.9%. The refraction loop's surviving mutants are its
+  stopping thresholds and loop caps, which change only when it stops, plus golden-section ties.
