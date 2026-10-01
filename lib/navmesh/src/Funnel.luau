@@ -234,21 +234,6 @@ local function refract(lefts: { vector }, rights: { vector }, owners: { number }
 	if #pins == 0 then
 		return
 	end
-	-- Start each pin where the plain funnel's path crosses its portal.
-	local points, _, on = pull(lefts, rights, owners)
-	local first = 1
-	for k, j in pins do
-		while on[first] < j do
-			first += 1
-		end
-		local p, q = points[first - 1], points[first]
-		local ex, ez = b[k].X - a[k].X, b[k].Z - a[k].Z
-		local dx, dz = q.X - p.X, q.Z - p.Z
-		local denom = ex * dz - ez * dx
-		if denom ~= 0 then
-			u[k] = math.clamp(((p.X - a[k].X) * dz - (p.Z - a[k].Z) * dx) / denom, 0, 1)
-		end
-	end
 	local function at(k: number): vector
 		return a[k] + (b[k] - a[k]) * u[k]
 	end
@@ -262,8 +247,8 @@ local function refract(lefts: { vector }, rights: { vector }, owners: { number }
 		for k, j in pins do
 			lefts[j], rights[j] = at(k), at(k)
 		end
-		points, _, on = pull(lefts, rights, owners)
-		first = 1 -- the first path point not before the current pin's portal
+		local points, _, on = pull(lefts, rights, owners)
+		local first = 1 -- the first path point not before the current pin's portal
 		for k, j in pins do
 			while on[first] < j do
 				first += 1

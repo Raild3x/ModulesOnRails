@@ -315,6 +315,30 @@ return function(t: tiniest)
 			expect(math.abs(sin1 - 3 * sin2) < 1e-4).with_context(`{fmt(c)}: {sin1} vs {3 * sin2}`).is_true()
 		end)
 
+		test("pins with a corner between them each bend towards the corner", function()
+			-- In through the mud strip's west border, round the crate inside it, out through its
+			-- east border: each pin obeys Snell's law between its dry side and the crate corner.
+			local mesh = NavMesh.Build {
+				Floors = {
+					Ground = {
+						Walkable = { rect(0, 0, 0, 30, 20) },
+						Obstacles = { rect(0, 14, 6, 16, 12) },
+						Areas = { { Polygon = rect(0, 10, 0, 20, 20), Area = 2 } },
+					},
+				},
+			}
+			local w = NavMesh.FindPath(mesh, v(2, 0, 2), v(28, 0, 16), { AreaCosts = { [2] = 3 } }).Waypoints
+			expect(#w).is(5)
+			local function sine(p: any, q: any): number
+				return (q.Z - p.Z) / vector.magnitude(q - p)
+			end
+			local start, pin1, corner, pin2, goal =
+				w[1].Position, w[2].Position, w[3].Position, w[4].Position, w[5].Position
+			expect(fmt(corner)).is("14.000,0.000,12.000")
+			expect(math.abs(sine(start, pin1) - 3 * sine(pin1, corner)) < 1e-4).with_context(fmt(pin1)).is_true()
+			expect(math.abs(3 * sine(corner, pin2) - sine(pin2, goal)) < 1e-4).with_context(fmt(pin2)).is_true()
+		end)
+
 		test("a pin crossed head-on still gets its crease waypoint", function()
 			-- The roof's far slope is mud: the path crosses the ridge at right angles, so the pin
 			-- there doesn't bend it, yet the ridge is a crease.

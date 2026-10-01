@@ -120,7 +120,8 @@ an arc-midpoint waypoint on sharp turns stays optional.
   search's cost is now that of a real line.
 - **The cost-aware funnel, in `Funnel.luau` (`refract`):**
   - With `AreaCosts`, each run of a piece between links is pinned on every portal where the
-    multiplier changes. Each pin starts where the plain path crosses.
+    multiplier changes. Pins start at portal midpoints; starting them where the plain path
+    crosses was measured and changed neither time nor result, so it was dropped.
   - Each sweep pulls the path through the pins. The pins then settle against the path points
     either side of them, or against each other where no corner lies between: a golden-section
     step on m1 |p - x| + m2 |x - q| along the portal, repeated up to 200 times without a pull.
@@ -143,14 +144,16 @@ an arc-midpoint waypoint on sharp turns stays optional.
 - **Specs** (PathShape):
   - Snell's law at a border, and at both borders of a mud strip (residual under 1e-4);
   - a corner the bent path meets moves the pin again;
+  - two pins with a crate corner between them each bend towards the corner;
   - a pin crossed head-on still gets its crease waypoint;
   - on repro 4's room (patch x5 and x0.5), the path is never dearer than the plain funnel's on
     the same corridor, by an exact rectangle-clip cost in the spec, and cheaper on at least 10
     of 120.
   - The node-chain oracle now prices steps by Detour's rule, with its own crossing math.
 - **Negative controls:** each fails a spec: refract off (2 fail), the drape's pinned-portal
-  case (1), multipliers swapped (2), one settling pass (1), one sweep (1), and pins settled
-  against the portal ends (2). Mean edge costs instead of Detour's rule fail the node-chain
+  case (1), multipliers swapped (2), one settling pass (1), one sweep (1), pins settled
+  against the portal ends (2), and a neighbouring pin taken for the point beside a pin, either
+  side (1 each). Mean edge costs instead of Detour's rule fail the node-chain
   spec (2).
 - **Left as it is:** the corridor choice. The rest of the excess is the same "wrong side of an
   obstacle" error as before. Weighted heron and Steiner points were measured and rejected
