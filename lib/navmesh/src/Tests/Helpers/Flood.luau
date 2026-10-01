@@ -87,8 +87,8 @@ function Flood.New(mesh: any): Oracle
 	end
 	local links = {}
 	for id = 1, Storage.LinkCount(mesh) do
-		local _, from, _, to, _, _, _, both, enabled = Storage.GetLink(mesh, id)
-		if enabled then
+		local fromTri, from, toTri, to, _, _, _, both, enabled = Storage.GetLink(mesh, id)
+		if enabled and fromTri ~= 0 and toTri ~= 0 then -- a free slot (sparse ids) has no ends
 			table.insert(links, { from, to, both })
 		end
 	end

@@ -165,7 +165,10 @@ for _, scene in scenes do
 		local wallCorners = #corners
 		for _ = 1, if Storage.LinkCount(mesh) > 0 then wallCorners // (2 * Storage.LinkCount(mesh)) + 1 else 0 do
 			for id = 1, Storage.LinkCount(mesh) do
-				local _, from, _, to = Storage.GetLink(mesh, id)
+				local fromTri, from, _, to = Storage.GetLink(mesh, id)
+				if fromTri == 0 then
+					continue -- a free slot
+				end
 				table.insert(corners, from)
 				table.insert(corners, to)
 			end
