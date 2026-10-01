@@ -363,6 +363,105 @@ return function(t: tiniest)
 			expect(math.min(seam.From.z, seam.To.z)).is(3)
 			expect(math.max(seam.From.z, seam.To.z)).is(6)
 		end)
+
+		-- Part data is f32: a hinge between two turned Parts is only true to about 1e-5 studs.
+		test("slabs tilted edge to edge join at every hinge", function()
+			local ys = { 0, 0.9, 0.5, 1.6, 1.2, 0.4, 0.4, 1.1 } -- tops along X, 10 studs a piece
+			local parts = {}
+			for i = 1, #ys - 1 do
+				local x0, y0, x1, y1 = (i - 1) * 10, ys[i], i * 10, ys[i + 1]
+				local len = math.sqrt(100 + (y1 - y0) ^ 2)
+				local nx, ny = -(y1 - y0) / len, 10 / len -- the top's normal; the slab hangs below it
+				local cf = CFrame.new((x0 + x1) / 2 - nx / 2, (y0 + y1) / 2 - ny / 2, 4)
+					* CFrame.Angles(0, 0, math.atan2(y1 - y0, 10))
+				table.insert(parts, part("Part", `S{i}`, { len, 1, 8 }, cf))
+			end
+			local desc: any = NavMeshAdapter.FromParts(parts, {})
+			expect(#desc.Seams).is(6)
+			desc.MaxAgentRadius = 1
+			local path =
+				NavMesh.FindPath(NavMesh.Build(desc), vector.create(1, 0, 4) :: any, vector.create(69, 1.1, 4) :: any)
+			expect(path.Status).is("Success")
+		end)
+
+		test("triangles of wedge pairs: a seam along every shared edge, none where faces touch at a corner", function()
+			-- The usual Roblox triangle: two WedgeParts, their right-angle faces up, meeting at
+			-- the foot of the altitude onto the longest edge.
+			local function triangle(name: string, a: any, b: any, c: any, out: { any })
+				local ab, ac, bc = b - a, c - a, c - b
+				if ab:Dot(ab) > ac:Dot(ac) and ab:Dot(ab) > bc:Dot(bc) then
+					c, a = a, c
+				elseif ac:Dot(ac) > bc:Dot(bc) then
+					a, b = b, a
+				end
+				ab, ac, bc = b - a, c - a, c - b
+				local right = ac:Cross(ab).Unit
+				local up, back = bc:Cross(right).Unit, bc.Unit
+				local down = if right.Y > 0 then -right else right
+				local h = math.abs(ab:Dot(up))
+				local ra, rb = math.abs(ab:Dot(back)), math.abs(ac:Dot(back))
+				table.insert(
+					out,
+					part(
+						"WedgePart",
+						name,
+						{ 0.2, h, ra },
+						CFrame.fromMatrix((a + b) / 2 + down * 0.1, right, up, back)
+					)
+				)
+				table.insert(
+					out,
+					part(
+						"WedgePart",
+						name,
+						{ 0.2, h, rb },
+						CFrame.fromMatrix((a + c) / 2 + down * 0.1, -right, up, -back)
+					)
+				)
+			end
+			-- 2 x 2 cells of 10 studs, slopes up to about 10 degrees; no two triangles coplanar.
+			local heights = { { 0.62, -0.47, 0.58 }, { 0.23, -0.69, 0.56 }, { -0.37, 0.22, 0.70 } }
+			local function at(i: number, j: number): any
+				return Vector3.new(i * 10, heights[i + 1][j + 1], j * 10)
+			end
+			-- Each triangle is a floor; shared: { floor, floor, the shared edge's length in plan }.
+			local parts, shared = {}, {}
+			for i = 0, 1 do
+				for j = 0, 1 do
+					local a, b = `A{i}{j}`, `B{i}{j}`
+					triangle(a, at(i, j), at(i + 1, j), at(i + 1, j + 1), parts)
+					triangle(b, at(i, j), at(i + 1, j + 1), at(i, j + 1), parts)
+					table.insert(shared, { a, b, math.sqrt(200) })
+					if i == 0 then
+						table.insert(shared, { a, `B1{j}`, 10 })
+					end
+					if j == 1 then
+						table.insert(shared, { a, `B{i}0`, 10 })
+					end
+				end
+			end
+			local desc: any = NavMeshAdapter.FromParts(parts, {})
+			for _, seam in desc.Seams do
+				expect(vector.magnitude(seam.To - seam.From) > 0.01).is_true()
+			end
+			for _, edge in shared do
+				local covered = 0
+				for _, seam in desc.Seams do
+					local pair = seam.FloorA .. seam.FloorB
+					if pair == edge[1] .. edge[2] or pair == edge[2] .. edge[1] then
+						covered += vector.magnitude((seam.To - seam.From) * vector.create(1, 0, 1))
+					end
+				end
+				expect(math.abs(covered - edge[3]) < 0.01).is_true()
+			end
+			desc.MaxAgentRadius = 1
+			local path = NavMesh.FindPath(
+				NavMesh.Build(desc),
+				vector.create(1, 0.6, 1) :: any,
+				vector.create(19, 0.7, 19) :: any
+			)
+			expect(path.Status).is("Success")
+		end)
 	end)
 
 	describe("welding (D3)", function()

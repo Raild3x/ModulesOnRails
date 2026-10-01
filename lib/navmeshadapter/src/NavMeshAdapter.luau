@@ -34,7 +34,9 @@ export type AdapterOptions = {
 
 local NavMesh = require("../NavMesh")
 
--- Heights within this many studs count as the same surface (coplanar faces, seam edges).
+-- Heights within this many studs count as the same surface (coplanar faces, seam edges). Part
+-- data is f32, so a hinge between two turned Parts is only true to about 1e-5 studs: seam edges
+-- also use it as their distance tolerance across a face's edge and their shortest length.
 local HEIGHT_TOLERANCE = 0.01
 
 -- A convex solid in world space: its vertices and faces (vertex index lists).
@@ -210,7 +212,8 @@ local function cut(solid: Solid, floor: Floor, agentHeight: number): { vector }?
 	return ring
 end
 
--- The parameter interval [t0, t1] of segment a->b inside the convex CCW ring (XZ), or nil.
+-- The parameter interval [t0, t1] of segment a->b inside the convex CCW ring (XZ), or nil. A
+-- segment along one of the ring's edges (a hinge) is inside it unless HEIGHT_TOLERANCE outside.
 local function clipSegment(a: vector, b: vector, ring: { vector }): (number?, number?)
 	local t0, t1 = 0, 1
 	local d = b - a
@@ -221,8 +224,8 @@ local function clipSegment(a: vector, b: vector, ring: { vector }): (number?, nu
 		local num = ex * (a.z - p.z) - ez * (a.x - p.x)
 		local den = ex * d.z - ez * d.x
 		local len = math.sqrt(ex * ex + ez * ez)
-		if math.abs(den) < 1e-12 then
-			if num < -1e-6 * len then
+		if math.abs(den) < 1e-4 * len * vector.magnitude(d) then -- parallel, to f32 precision
+			if num < -HEIGHT_TOLERANCE * len then
 				return nil, nil
 			end
 		else
@@ -484,8 +487,8 @@ local function fromParts(
 					continue
 				end
 				local t0, t1 = clipSegment(p, q, fa.Ring)
-				if t0 == nil then
-					continue
+				if t0 == nil or ((t1 :: number) - t0) * vector.magnitude(q - p) < HEIGHT_TOLERANCE then
+					continue -- a face touching the edge at a corner only
 				end
 				local from, to = p + (q - p) * t0, p + (q - p) * (t1 :: number)
 				if not known(A.Name, fb.Floor.Name, from, to) then
