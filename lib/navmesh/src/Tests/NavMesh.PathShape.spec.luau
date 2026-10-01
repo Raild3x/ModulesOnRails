@@ -164,6 +164,21 @@ return function(t: tiniest)
 	end)
 
 	describe("Path length (heron nodes)", function()
+		test("a heron node is where a ray from the parent to the goal meets or bounces off the edge", function()
+			local Search = require("../Search")
+			local a, b = v(0, 0, 0), v(10, 2, 0) -- heights interpolate along the edge
+			-- A slanted edge (the case below, turned by a 3-4-5 rotation and scaled by 5):
+			local c = v(40, 2, 30)
+			-- across the edge, where the straight line crosses it;
+			expect(fmt(Search.HeronPoint(a, c, v(10, 0, -5), v(16, 0, 37)))).is("12.000,0.600,9.000")
+			-- on the same side, the goal mirrored, as light bounces.
+			expect(fmt(Search.HeronPoint(a, c, v(10, 0, -5), v(54, 0, 3)))).is("12.000,0.600,9.000")
+			-- Both on the edge's line: the midpoint.
+			expect(fmt(Search.HeronPoint(a, b, v(-2, 0, 0), v(12, 0, 0)))).is("5.000,1.000,0.000")
+			-- Past an end: clamped to it.
+			expect(fmt(Search.HeronPoint(a, b, v(12, 0, -1), v(14, 0, 3)))).is("10.000,2.000,0.000")
+		end)
+
 		test("in a convex room, area patches and all, uniform-cost paths keep to the straight line", function()
 			-- Repro 4's room, where the straight line is the shortest path (a convex room's straight
 			-- line between points r clear of the walls stays r clear). With nodes at edge midpoints

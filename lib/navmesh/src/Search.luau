@@ -81,24 +81,18 @@ local pool: { [Storage.State]: Scratch } = setmetatable({}, { __mode = "k" }) ::
 local Search = {}
 
 -- The heron node on edge a-b for a search at p heading for g: the point of the edge minimising
--- |p - x| + |x - g| in plan (g reflected across the edge's line when it is on p's side, as
--- light bounces). Its height is the edge's there.
+-- |p - x| + |x - g| in plan, where a ray from p to g (mirrored across the edge when on p's
+-- side, as light bounces) meets it. Mirroring leaves g's place along the edge as it is, so the
+-- node splits p's and g's places along the edge in the ratio of their distances from it. Its
+-- height is the edge's there.
 local function heronPoint(a: vector, b: vector, p: vector, g: vector): vector
 	local ex, ez = b.X - a.X, b.Z - a.Z
 	local len2 = ex * ex + ez * ez
-	local sp = ex * (p.Z - a.Z) - ez * (p.X - a.X)
-	local sg = ex * (g.Z - a.Z) - ez * (g.X - a.X)
-	local gx, gz = g.X, g.Z
-	if sp * sg > 0 then
-		local k = 2 * sg / len2
-		gx, gz = gx + k * ez, gz - k * ex
-		sg = -sg
-	end
-	local u = 0.5
-	if sp ~= sg then
-		local f = sp / (sp - sg)
-		u = ((p.X + f * (gx - p.X) - a.X) * ex + (p.Z + f * (gz - p.Z) - a.Z) * ez) / len2
-	end
+	local dp = math.abs(ex * (p.Z - a.Z) - ez * (p.X - a.X))
+	local dg = math.abs(ex * (g.Z - a.Z) - ez * (g.X - a.X))
+	local up = ((p.X - a.X) * ex + (p.Z - a.Z) * ez) / len2
+	local ug = ((g.X - a.X) * ex + (g.Z - a.Z) * ez) / len2
+	local u = if dp + dg > 0 then (up * dg + ug * dp) / (dp + dg) else 0.5
 	return a + (b - a) * math.clamp(u, 0, 1)
 end
 Search.HeronPoint = heronPoint -- for the specs' node-chain oracle
