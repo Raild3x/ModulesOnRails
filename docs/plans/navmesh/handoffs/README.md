@@ -1,11 +1,14 @@
-# NavMesh handoffs (2026-09-28)
+# NavMesh handoffs (round 2, 2026-10-01)
 
 Start here if you are a new session picking up NavMesh work. Read this file, then the handoff
 for your track. Everything named here lives on branch `feat/navmesh` unless it says otherwise.
 
 ## Where things stand
-- **`feat/navmesh`** has NavMesh tickets 01-22, the hardening and dogfood fixes, the Serialize
-  v2 format, and the faster coverage tool.
+- **`feat/navmesh`** has NavMesh tickets 01-24, 26 and 27.
+  - That covers the local Update with changed regions, the path follower, the off-mesh and
+    reachable queries, the Part adapter (`lib/navmeshadapter`), debug drawing, the bake
+    format v3 (tagged sections), and the start/goal radius barriers.
+  - 271 specs pass.
   - It is **local only. Do not push.** The only remote configured, `github-desktop-Mophyr`, is
     not the project's repo.
 - **Docs:** everything is under `docs/plans/navmesh/`:
@@ -14,36 +17,34 @@ for your track. Everything named here lives on branch `feat/navmesh` unless it s
   - `bench.md` holds the measurements.
   - `tickets/NN-*.md` hold the tickets. Their Status and As-built sections are current.
   - `simplification-plan.md` is the geometry-simplification plan.
+  - `research/roblox-pathfinding-comparison.md` compares us with Roblox's PathfindingService;
+    its rulings D1-D6 are in review.md.
+  - [known-gaps.md](known-gaps.md) lists the weak spots and deferred items. Read it before
+    touching Search, Clearance, Tiles or Serialize.
   - The glossary is `lib/navmesh/CONTEXT.md`.
-- **Dogfood game:** `examples/navmesh-demo/`. Its `REPORT.md` is the usability report that
-  tickets 22-27 came from, and `repros.luau` reproduces each issue.
+- **Dogfood game:** `examples/navmesh-demo/`. Its `REPORT.md` is the first usability report.
 
-## Tracks, and what can run in parallel
+## Tracks and order (ruled 2026-10-01: two at a time)
 
-| Track | Handoff | Can start | Touches | Conflicts with |
-|---|---|---|---|---|
-| A | [A-ticket24-then-23.md](A-ticket24-then-23.md): finish ticket 24, then 23 | now; WIP exists | NavMesh, Queries, Snap, Search, Types, Funnel, the demo | B on `Search.luau`; C on `Types.luau` |
-| B | [B-core-correctness-v3.md](B-core-correctness-v3.md): ticket 27 and the 1-pixel Update mismatch, one v3 bake format | **done, merged 2026-10-01** | Storage, Clearance, Tiles, Build, Search, Serialize | A on `Search.luau` |
-| C | [C-ticket26-adapter-debug.md](C-ticket26-adapter-debug.md): Part adapter and debug drawing (ticket 26) | now | a new adapter module, DrawList, navmeshdebug, the demo's Studio side | A only in its last step (the `vector` typing) |
-| D | [D-later.md](D-later.md): ticket 25, the simplification passes, deferred items | after A (25) and C (simplification) | Funnel, Build, Quantize | everything; run it alone |
-
-**New tickets from the Roblox comparison (2026-09-28, rulings D1-D6 in review.md; research in
-`research/roblox-pathfinding-comparison.md`), not yet assigned to a track:**
-
-| Ticket | Can start | Touches | Conflicts with |
+| Order | Track | Handoff | Touches |
 |---|---|---|---|
-| [28](../tickets/28-blocked-ahead.md): `FirstAffectedSegment`, which part of a path an `Update` blocked | now (22 and 23 are merged) | NavMesh, Types, the demo | A on `NavMesh.luau`/`Types.luau` if A is still open |
-| [29](../tickets/29-agent-height.md): agent height (headroom) | after B's v3 | Build, Storage, Search, Queries, Serialize, Types | B (format); the adapter emits its rings (C) |
-| [30](../tickets/30-generated-links.md): generated jump and drop links, runtime `AddLink`/`RemoveLink` | after B's v3 | Search, Tiles, Storage, Serialize, NavMesh | B, and D's ticket 25 (`LinkDesc.Name`) |
-| [31](../tickets/31-large-world-measure.md): measure 1-4 km maps (bench only) | now | `tools/navmesh/bench` only | none |
+| 1 | G, path output | [G-path-output.md](G-path-output.md): tickets 28 and 25 (minus link items), the Partial-end radius gap | Funnel, NavMesh, Types, Search (only if the area-bend fix needs it), the demo |
+| 1 | H, measure and dogfood | [H-measure-and-dogfood.md](H-measure-and-dogfood.md): ticket 31 (1-4 km maps), a second dogfood game on the new APIs | `tools/navmesh/bench`, `examples` only; no library code |
+| 2 | E, links | [E-links.md](E-links.md): ticket 30, the link gaps, ticket 25's link names and ids | Search, Tiles (links pass), Storage (links), Serialize (links section), NavMesh, Types |
+| 3 | F, geometry input | [F-geometry-input.md](F-geometry-input.md): the simplification passes, plus Update on huge rings | Build, Quantize, Tiles (re-snap), Clearance, Serialize (tolerance field), Types, the adapter |
+| wave 2 | W, headroom | [W-headroom.md](W-headroom.md): ticket 29 | almost everything; alone, after E and F |
 
-- **A, B and C can run at the same time**, each in its own worktree off `feat/navmesh`.
-- **Merge order:** merge A before B's Search changes land, or rebase B on A. Leave C's
-  `vector` typing step until A is merged.
-- **One human task:** the editor's manual Play-mode check.
-  1. `npm run setup navmeshdebug`
-  2. `python tools/navmesh/studio/studio.py play`
-  3. Press F5. The key list is in ticket 21.
+- **Two sessions at a time:**
+  1. G and H together. They share no files.
+  2. When G merges, start E beside H, or after it.
+  3. When E merges, start F.
+  4. Ticket 29 (W) starts after E and F have both merged.
+- **Merge order:** G, then E, then F. Each later track merges `feat/navmesh` into its branch
+  before its own merge.
+- **Human tasks:**
+  - **The editor's manual Play-mode check:** `npm run setup navmeshdebug`, then
+    `python tools/navmesh/studio/studio.py play`, then press F5. The key list is in ticket 21.
+  - **Where `feat/navmesh` goes:** a remote, or a PR to main. Nothing has been pushed.
 
 ## House rules (every track)
 - **Worktree:** never work in the main checkout. Create one:
@@ -53,13 +54,13 @@ for your track. Everything named here lives on branch `feat/navmesh` unless it s
     navmesh worktree.
 - **Tests:**
   - Quick run: `lune run tools/navmesh/specs.luau` (about 10 s, prints `PASS n FAIL m`).
-  - Gate: `lune run coverage.luau package=navmesh`. It must pass; 210 specs on `feat/navmesh`.
+  - Gate: `lune run coverage.luau package=navmesh`. It must pass; 271 specs on `feat/navmesh` (2026-10-01).
   - Mutation:
     `lune run coverage.luau package=navmesh --mutate --mutate-jobs=8 --mutate-files=src/X.luau,src/Y.luau`
     - `--status package=navmesh` shows progress; `--resume` continues a killed run.
     - Scores are the covered-line score.
-    - Don't let a file drop below its figure in the ticket notes. Triage survivors, and write
-      specs for the real ones.
+    - Don't let a file drop below its baseline in `docs/plans/navmesh/mutation-baseline.md`
+      (whole-package run, 2026-10-01). Triage survivors, and write specs for the real ones.
 - **Spec-first, with negative controls:** every new behaviour gets a spec that fails without the
   change. Show that it fails (revert the fix, run, restore).
 - **Benchmark before options:** any performance or architecture fork gets prototyped and measured
@@ -84,17 +85,14 @@ for your track. Everything named here lives on branch `feat/navmesh` unless it s
   - Never push.
 
 ## Not on `feat/navmesh`
-- Tracks A, B and C are merged (2026-10-01). Their worktrees and branches are removed.
 - Reference-only prototypes, not for merge:
-  - `proto/simplify` (worktree `simplify-proto`; also untracked probe scripts at its root);
+  - `proto/simplify` (worktree `simplify-proto`; also untracked probe scripts at its root),
+    which Track F builds from;
   - `proto/local-update` and `proto/local-update-77` (ticket 22 variants).
-- `research/roblox-pathfinding` (worktree `rbx-pathfinding-research`): tickets 28-30 and
-  rulings D2/D3, not merged yet.
-- Scratch:
-  - the old `navmesh-phase0` probes (`zz_*.luau`) are archived in the main checkout's
-    gitignored `.bench/navmesh/archive/navmesh-phase0/`;
-  - gitignored `.bench/` and `.coverage/` folders hold benchmark and triage outputs.
-- **Known gaps** nobody has ticketed yet: [D-later.md, D4](D-later.md).
+- `research/roblox-pathfinding` is merged (b232d00); its worktree `rbx-pathfinding-research`
+  can be removed.
+- **Scratch:** the old `zz_*` probes are archived in the main checkout's gitignored
+  `.bench/navmesh/archive/`.
 - **Not NavMesh work:** the other `feat/*`, `fix/*`, `package/*` and `pr/*` branches, and the
   untracked `lib/component/*`, `lib/profiletrademanager/` and `lib/remotecomponent/CONTEXT.md` in
   the main checkout, belong to other sessions. Leave them alone.
