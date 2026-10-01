@@ -34,6 +34,17 @@ survived), the covered-line score.
 - **Funnel and NavMesh are lower than their hardening figures.** Tickets 23 and 24 added code
   there without re-gating the whole file. Track G owns Funnel and NavMesh next. It should
   triage those survivors and win the lost points back if the mutants turn out to be real.
+- **Build dropped to 82.3% in Track M2 (2026-10-01; 762 / 923 decided, 161 survived).** The
+  drop is all in `onWalkable`, the new check that a seam cut away by obstacles did lie on its
+  floor (ticket 37's core fix): 19 of its mutants survive, against 18 more survivors in the
+  file.
+  - **Triaged as not real:** they change the size or direction of the one-pixel probe offset
+    (`len`, `nx`, `nz`, `* side` against `/ side` for side = ±1, `+` against `-` when both
+    sides are probed), or the even-odd test's ties at a vertex. Any offset under a ring's width
+    gives the same answer, so killing them would need floors narrower than the offset.
+  - Every behaviour of the change has a spec that fails without it: the edge probe, a seam off
+    a floor that has obstacles, floors on one side of a seam with one partly cut, and floors
+    crossing at the seam (the overlap rule).
 - **`src/Tests/Helpers/Flood.luau` is a test helper**, and it gets mutated too (48.7%, 77
   survivors). It's not library code, so leave it out of the baseline. Excluding `Tests/` from
   `--mutate` is a small tooling fix for whoever touches the coverage tool next.
