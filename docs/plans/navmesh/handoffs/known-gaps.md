@@ -22,6 +22,16 @@ ends" section. Two kinds of end still pass unjudged; both are below.
   1: 160 to 235 us). Success queries don't pay it. The cost is one push plus one barrier test
   per candidate end.
 
+**Found by Track E (2026-10-01), not fixed (no owner; Funnel was Track G's):**
+- **The funnel folds back at a seam line.** In `ThreeFloorStairs`, `FindPath` from the ramp
+  (10.5, 0.25, 3) to the Ground just past the ramp's side (10.5, 0, 5.05) returns Success with
+  a corner at the seam's end, (10, 0, 0): `Length` 8.1 at r 0 and 6.2 at r 1, against a walk of
+  about 2.3. `Cost` is 4.2, so the search's corridor is fine and the string pull is wrong.
+  - **Likely cause:** the path crosses the seam at x = 10, then x = 10 again on the Ground under
+    the ramp. Two collinear portals crossed in opposite directions.
+  - **Repro:** `lune run tools/navmesh/bench/funnel_seam_repro.luau`.
+  - The link generator works round it: its walk test takes `min(Length, Cost)`.
+
 **Found by Track M2 (2026-10-01), in the Part adapter, not the core:**
 - **Tilted Parts lose their seams, or get zero-length ones that `NavMesh.Build` rejects.**
   - **Repro:** `lune run tools/navmesh/bench/adapter_f32_seams.luau`. Seven hinged slabs give
