@@ -46,6 +46,7 @@ local Build = require("./Build")
 local DrawList = require("./DrawList")
 local Fixtures = require("./Fixtures")
 local Funnel = require("./Funnel")
+local Generate = require("./Generate")
 local Queries = require("./Queries")
 local Search = require("./Search")
 local Serialize = require("./Serialize")
@@ -73,6 +74,7 @@ export type RandomPointOptions = Types.RandomPointOptions
 export type ChangedRegion = Types.ChangedRegion
 export type SeamDesc = Types.SeamDesc
 export type LinkDesc = Types.LinkDesc
+export type GenerateLinksOptions = Types.GenerateLinksOptions
 export type NavMeshData = Storage.State
 
 local DEFAULT_SNAP_EXTENTS = vector.create(0.5, 4, 0.5)
@@ -619,6 +621,49 @@ function NavMesh.SetLinkEnabled(mesh: NavMeshData, linkId: number, enabled: bool
 			Storage.BumpTileStamp(mesh, tile)
 		end
 	end
+end
+
+--[=[
+	@within NavMesh
+	Drop and jump links read off a built mesh (ticket 30): pure, it returns descriptions and
+	changes nothing. Rebuild with them in `NavMeshDesc.Links`.
+
+	- **Where:** every wall edge is sampled every `Spacing / 4` studs and probed straight out.
+	  The first spot out there with a surface between `MaxDrop` below and `MaxJumpUp` above,
+	  within `MaxJumpDistance`, is the landing.
+	- **Drops:** a landing lower than the ledge, within `Clearance` of it, gives a one-way link
+	  labelled `"Drop"`. Anything else is a `"Jump"`, two-way when the way back is within both
+	  `MaxJumpUp` and `MaxDrop`.
+	- **No links through walls:** the probe stops at an obstacle of the ledge's own floor, so an
+	  interior wall or a railing gives none. Both ends are pushed `Clearance` off the walls and
+	  must then admit it.
+	- **No duplicates:** a link is dropped when walking between its ends (`FindPath`'s `Length`
+	  at `AgentRadius = Clearance`) is shorter than `DetourFactor` times the link's, and
+	  when both its ends lie within `Spacing` of a link already kept between the same floors.
+	- **Deterministic:** the same mesh gives the same list, in the same order.
+	- **Turning them off:** every link gets area `Area`, so `AreaCosts = { [Area] = math.huge }`
+	  is an agent that can't jump. Give it an id no surface uses.
+
+	Obstacles have no height, so the probe can't tell a low railing from a wall: it stops at
+	both. A gap between two floors with no obstacle in it reads as jumpable even when, in the
+	game, a wall stands there.
+
+	```lua
+	local desc = buildDescription()
+	desc.Links = NavMesh.GenerateLinks(NavMesh.Build(desc), { Clearance = 1, Area = 9 })
+	local mesh = NavMesh.Build(desc)
+	local walker = NavMesh.FindPath(mesh, from, to, { AgentRadius = 1, AreaCosts = { [9] = math.huge } })
+	```
+]=]
+local WALK_SNAP = vector.create(0.1, 0.1, 0.1) -- GenerateLinks' ends are on the surface already
+
+function NavMesh.GenerateLinks(mesh: NavMeshData, options: GenerateLinksOptions?): { LinkDesc }
+	return Generate.Links(mesh, options, function(from, to, radius)
+		local path =
+			NavMesh.FindPath(mesh, from :: any, to :: any, { AgentRadius = radius, SnapExtents = WALK_SNAP :: any })
+		-- Both are lengths of real walks; the funnel's can fold back badly across a seam line.
+		return if path.Status == "Success" then math.min(path.Length, path.Cost) else math.huge
+	end)
 end
 
 --[=[
