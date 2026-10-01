@@ -29,6 +29,20 @@ ends" section. Two kinds of end still pass unjudged; both are below.
   0.5). The corridor search is not optimal (entry-edge midpoint nodes, and a triangle closes on
   first entry; see the Track G item above), so each direction can settle on a different
   corridor. No fix is planned here; it is a measurement for whoever revisits the node model.
+- **`PathResult.Cost` changes meaning with the filter.** With uniform costs (or only
+  exclusions, `math.huge`), it is the heron-node cost, about the path's length. Any finite
+  multiplier other than 1, even on an area the path never touches, switches the search to
+  edge-midpoint costs, and the same waypoints cost more.
+  - **Repro:** `lune run tools/navmesh/bench/path_cost_modes.luau`. A straight 36-stud path costs 36.000 at `AreaCosts[5] = 1` or
+    `math.huge`, and 36.374 at 1.0001, 2 or 5, with area 5 off the path.
+  - On the building's stairs: 69.6 at uniform costs, 88.0 at `AreaCosts[5] = 1.0001` (+26%).
+  - **Why it matters:** costs from two filters can't be compared, and a reroute rule compares
+    exactly that ("fresh path with the elevator" against "stay off it"). Ticket 35's study
+    keeps both queries in the same mode. Owner: whoever next touches Search (the heron-node
+    gate is Track G's).
+- **Riser strips have no area.** The adapter's step strips (ticket 34) take the default area,
+  not the step Parts' `NavArea`, so a stairs multiplier misses about 1/6 of each tread. Small;
+  fix when ticket 40 replaces the strips, or give a strip its upper face's area.
 - **A seam can't join floors at different heights.** Build refuses it, so a stair riser needs
   the adapter's strip floor. Ticket 40 owns it.
 
