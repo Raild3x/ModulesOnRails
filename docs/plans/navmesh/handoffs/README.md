@@ -41,7 +41,7 @@ for your track. Everything named here lives on branch `feat/navmesh` unless it s
   4. Ticket 29 (W) starts after E and F have both merged.
 - **Merge order:** G, then E, then F. Each later track merges `feat/navmesh` into its branch
   before its own merge.
-- **Complex-map tickets 33-38 (added 2026-10-01), not yet assigned to a track:**
+- **Complex-map tickets 33-38 (added 2026-10-01): Tracks [M1](M1-maps-indoor-urban.md) (33-36) and [M2](M2-maps-outdoor-combined.md) (37, 38; starts once 33 merges):**
   - The chain is 33, then 34, then 35 and 36, while 37 can start right after 33; 38 joins them
     all. 39 (voxel Terrain) comes later.
   - They are mostly maps, scenarios and measurements, so they can run beside a library track.
