@@ -1,8 +1,8 @@
 # Track M2: map scenarios, outdoor and combined (tickets 37 and 38)
 
 Read [README.md](README.md) first for the house rules. This track builds the outdoor terrain map
-and then the combined city map. Track M1 builds the harness (ticket 33) and the urban maps
-(34-36).
+and then the combined city map. Track M1 builds the harness (ticket 33) and the building
+(34, 35), and Track M3 builds the street (36).
 
 **Setup:** a worktree off `feat/navmesh`, branch `navmesh-maps-outdoor`.
 
@@ -29,7 +29,7 @@ and then the combined city map. Track M1 builds the harness (ticket 33) and the 
        it, with plain-English options, pros, cons and numbers.
    - **Record the numbers so Track F's simplification passes can be re-measured** against
      them later.
-2. **Ticket 38, the combined city map,** once M1's tickets 35 and 36 have merged.
+2. **Ticket 38, the combined city map,** once M1's ticket 35 and M3's ticket 36 have merged.
    - Join the building, elevator, street and terrain into one map, and run daily routes for a
      seeded crowd using the follower.
    - Add live events (the elevator out of service, a door closing, a crate dropped on a
@@ -43,7 +43,7 @@ and then the combined city map. Track M1 builds the harness (ticket 33) and the 
   - If a scenario exposes a core bug, write a minimal repro, add it to
     [known-gaps.md](known-gaps.md), and tell the user. Don't fix it here.
 - **Adapter changes** (`lib/navmeshadapter`) only after the user rules on them. M1 is also
-  adding a step-height rule there. Merge `feat/navmesh` into your branch before each merge,
+  adding a step-height rule there, and M3 an area-name table. Merge `feat/navmesh` into your branch before each merge,
   and keep your changes in self-contained functions.
 
 ## Gates (each ticket)

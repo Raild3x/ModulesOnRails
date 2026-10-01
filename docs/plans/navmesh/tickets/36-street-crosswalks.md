@@ -4,7 +4,9 @@
 sidewalks and send them across at crosswalks: the test bed for area costs on a realistic
 layout.
 
-**Blocked by:** 34 (the building, and its step-height rule for the curbs)
+**Blocked by:** 33 (map scenario harness). Stepped curbs need 34's step-height rule, so start
+with flush curb cuts and add the steps once that rule has merged. The building's entrance can
+be a stand-in until 34's building lands.
 
 **Status:** ready-for-agent
 
