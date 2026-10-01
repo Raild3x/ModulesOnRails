@@ -60,7 +60,7 @@ strips now, riser seams later (ticket 40).
   - Strips are cut as they are made, so where two meet at a block's corner the later one stops
     at the earlier.
   - Side edges count too: a 1-stud step can be climbed from its side, as in Roblox.
-- **Specs:** 13 in `NavMeshAdapter.spec.luau` ("step-height rule (ticket 34)"). Negative
+- **Specs:** 14 in `NavMeshAdapter.spec.luau` ("step-height rule (ticket 34)"). Negative
   controls:
   - with the rule off, the riser stays a wall (`Partial`);
   - with the cut subtraction disabled, "only the open part of a riser gets a strip" and
@@ -115,7 +115,11 @@ waypoints and lies on the ramp surface.
   43 floors, 60 seams; bake 49,532 bytes; FindPath 0.08-0.22 ms.
 - **BuildingRamp:** FromParts 2.4 ms, Build 14.5-16 ms; 177 triangles, 31 floors, 36 seams;
   bake 27,242 bytes; FindPath 0.06-0.09 ms.
-- **Gates:** adapter specs 38/38; adapter coverage 99.1% lines.
+- **Gates:** adapter specs 40/40, coverage 99.1% lines. Mutation (NavMeshAdapter.luau, after
+  merging M2's tilted-seam fix): 85.8% of the whole file; **82.1% on the new code** (86 of 105
+  killed). The survivors are boundary and epsilon equivalents (`<` against `<=`, the 0.01-stud
+  margins) and `*`/`/` by a +-1 band sign. One real survivor (`or {}` to `and {}`, which wiped
+  the lower floor's cuts) was killed by asserting the ground keeps both cuts.
 
 ### Screenshot
 `python tools/navmesh/maps/studio.py Building` (an oblique view, the upper slab and walls

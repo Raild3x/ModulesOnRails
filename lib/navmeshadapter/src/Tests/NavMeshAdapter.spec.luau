@@ -514,7 +514,8 @@ return function(t: tiniest)
 			local top, foot = byPair["Riser/Step"], byPair["Ground/Riser"]
 			expect(top.From.x == 10 and top.To.x == 10 and top.From.y == 1).is_true()
 			expect(foot.From.x == 9.75 and foot.To.x == 9.75 and foot.From.y == 0).is_true()
-			-- The strip is cut out of the ground.
+			-- The strip is cut out of the ground, beside the step's own cut.
+			expect(#desc.Floors.Ground.Obstacles).is(2)
 			local cutLo, cutHi = bounds(desc.Floors.Ground.Obstacles[#desc.Floors.Ground.Obstacles])
 			expect(near(cutLo, vector.create(9.75, 0, 0)) and near(cutHi, vector.create(10, 0, 10))).is_true()
 			local path = climb(desc)
