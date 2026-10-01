@@ -61,7 +61,7 @@ than it looks. Read them before touching `Search`, `Clearance`, `Tiles` or `Seri
     - **A barrier closed in a neighbouring triangle**: the wall that closes it is more than r
       from the end's triangle. This is ticket 27's "barrier completeness" gap.
   - On the many-slab room (`tools/navmesh/bench/partial_end.luau`), ends a grid flood proves
-    unreachable went from 216 of 405 to 89. Partial FindPath there went from 30 to 56 us mean.
+    unreachable went from 216 of 405 to 90. Partial FindPath there went from 30 to 56-61 us mean.
 - **A loaded mesh pays an O(triangles) spike once.** After `Deserialize`, the first `Update`
   or the first `FindPath` with an `AgentRadius` builds the wall index. Bake it, or build it
   lazily per tile, if load-time hitches matter.

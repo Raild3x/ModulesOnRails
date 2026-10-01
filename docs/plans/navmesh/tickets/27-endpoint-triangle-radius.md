@@ -127,18 +127,27 @@ first)
     - `Separated` from the start point, or from a link's landing;
     - for a seam, `CutOff` from the seam edge.
   - A stranded candidate is skipped and the next best is taken; the start point always
-    stands. The extra cost is a rescan per stranded candidate (`ponytail:` noted).
+    stands.
+  - **The start triangle's own point is judged inside it** (`Separated` from the start), and
+    not pushed first. Track H's demo2 invariants caught the pushed version. An agent rescued
+    onto a wall, boxed into a small triangle by the widths, got a one-waypoint Partial: its
+    point, pushed into a neighbour the search never entered, was refused. The agent then stood
+    in the wall, 450 agent-ticks under its radius against 0 before. On the props scene 7,216 of
+    14,304 wall starts did this. The push off the wall is the way out, as before G3. The extra cost is a rescan per stranded candidate (`ponytail:` noted).
   - The tested point is moved 1/1024 stud towards its triangle's centroid, in f64. A point on
     the triangle's boundary (where the nearest point usually is) is undecided by the barrier
     polygons' even-odd test, and a point on a wall can't be pushed out.
 - **Specs** (FindPath spec, ticket 27 section):
   - the room's three goals end west of the gap, a narrow agent still succeeds, and an islands
     end against a wall still stands r off it;
+  - starts at every wall edge's midpoint of a dense random-props floor (r 1, `GoalFallback`)
+    all get at least two waypoints;
   - over 24 one-slab rooms with random slab place, width and gap (every barrier inside one
     triangle), every Partial and Budget end the agent can stand at is reachable from the start
     by the grid flood (67 ends judged).
-- **Negative controls:** each fails a spec: no check (2 fail), no nudge (2), no push (2), no
-  barrier test (2), and nodes not required to be closed (3).
+- **Negative controls:** each fails a spec: no check (2 fail), no nudge (3), no push (2), no
+  barrier test (2), nodes not required to be closed (3), and the start triangle's point pushed
+  like the others (1).
 - **What it still misses** (known-gaps.md):
   - an end the push leaves in the pinch itself (still under r from the walls), which `CutOff`
     can't place;
@@ -149,5 +158,5 @@ first)
     27's lone-triangle spec failed. A many-pass push to tell corners from pinches was worse on
     every count (12% unreachable, 83 us, still failing that spec).
 - **Numbers** (`tools/navmesh/bench/partial_end.luau`, many-slab rooms, 5 seeds, 405
-  Partial/Budget ends): ends a flood proves unreachable went from 216 (53%) to 89 (22%). Partial
-  FindPath went from 30 to 56 us mean (p95 54 to 113). Success paths don't run this code.
+  Partial/Budget ends): ends a flood proves unreachable went from 216 (53%) to 90 (22%). Partial
+  FindPath went from 30 to 56-61 us mean (p95 54 to 111-125). Success paths don't run this code.

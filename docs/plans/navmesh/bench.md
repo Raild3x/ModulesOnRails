@@ -706,11 +706,13 @@ Compressing (bake time only, zstd level 19): demo 1.7-1.8 ms, bench 95-104 ms.
 
 ## Track G: path output (2026-10-01)
 The full tables are in the tickets; this is the index.
-- **Door repaths with `FirstAffectedSegment`** (ticket 28): 121 / 72 / 59 / 44 repaths for 19
-  door toggles at the demo's default TileSize / 16 / 8 / 4. `IsPathValid` polling gives 118 /
-  77 / 75 / 64. At the default each floor is one tile, so every region is the whole floor. A
-  tighter region (changed triangles only) gave 100 at the default and no change at 16, 8 or 4.
-  The check costs 1.5-2.6 us per NPC.
+- **Door repaths with `FirstAffectedSegment`** (ticket 28), for 19 door toggles:
+  - with the added footprints (ruled): 43 at the default TileSize and 34 at 8;
+  - with changed regions: 121 / 72 / 59 / 44 at the default TileSize / 16 / 8 / 4;
+  - with `IsPathValid` polling: 118 / 77 / 75 / 64.
+  - At the default each floor is one tile, so every region is the whole floor. A tighter region
+    (changed triangles only) gave 100 at the default and no change at 16, 8 or 4.
+  - The check costs 1.5-2.6 us per NPC.
 - **The drape** (ticket 25, `tools/navmesh/bench/path_shape.luau`): FindPath time within
   ±5% noise on flat maps (+13% on a hilly ring). Lerp drift drops from 3.2-3.7 studs to at most
   0.0099. A `SamplePath` helper costs 2-10x a FindPath at 1-stud spacing and still drifts 0.12-0.16.
@@ -719,8 +721,8 @@ The full tables are in the tickets; this is the index.
 - **Bisector funnel** (ticket 25, branch `proto/g-bisector`): see ticket 25's "Measured"
   section.
 - **Partial ends** (ticket 27's G3 section, `tools/navmesh/bench/partial_end.luau`): ends a
-  flood proves unreachable drop from 216/405 to 89/405 on the many-slab rooms. Partial FindPath
-  there goes from 30 to 56 us mean.
+  flood proves unreachable drop from 216/405 to 90/405 on the many-slab rooms. Partial FindPath
+  there goes from 30 to 56-61 us mean.
 
 ## Large worlds, 1-4 km (ticket 31, 2026-10-01)
 **Question:** how do Build, the bake and queries scale on 1-4 km maps? The answer feeds the D6
