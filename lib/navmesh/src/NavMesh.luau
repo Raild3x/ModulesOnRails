@@ -655,12 +655,9 @@ end
 	local walker = NavMesh.FindPath(mesh, from, to, { AgentRadius = 1, AreaCosts = { [9] = math.huge } })
 	```
 ]=]
-local WALK_SNAP = vector.create(0.1, 0.1, 0.1) -- GenerateLinks' ends are on the surface already
-
 function NavMesh.GenerateLinks(mesh: NavMeshData, options: GenerateLinksOptions?): { LinkDesc }
 	return Generate.Links(mesh, options, function(from, to, radius)
-		local path =
-			NavMesh.FindPath(mesh, from :: any, to :: any, { AgentRadius = radius, SnapExtents = WALK_SNAP :: any })
+		local path = NavMesh.FindPath(mesh, from :: any, to :: any, { AgentRadius = radius })
 		-- Both are lengths of real walks; the funnel's can fold back badly across a seam line.
 		return if path.Status == "Success" then math.min(path.Length, path.Cost) else math.huge
 	end)

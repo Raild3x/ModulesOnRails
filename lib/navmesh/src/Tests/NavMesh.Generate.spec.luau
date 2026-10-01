@@ -81,14 +81,15 @@ return function(t: tiniest)
 	end
 
 	-- Two pads on one floor with a gap of `gap` studs along X; the far one `rise` studs higher.
-	local function gap(width: number, rise: number?): any
-		local x = 10 + width
+	-- Both at height `base` (default 0) plus that.
+	local function gap(width: number, rise: number?, base: number?): any
+		local x, y = 10 + width, base or 0
 		return {
 			Floors = {
 				Ground = {
 					Walkable = {
-						flat(0, { 0, 0, 10, 0, 10, 10, 0, 10 }),
-						flat(rise or 0, { x, 0, x + 10, 0, x + 10, 10, x, 10 }),
+						flat(y, { 0, 0, 10, 0, 10, 10, 0, 10 }),
+						flat(y + (rise or 0), { x, 0, x + 10, 0, x + 10, 10, x, 10 }),
 					},
 				},
 			},
@@ -311,6 +312,10 @@ return function(t: tiniest)
 			local cappedMesh = NavMesh.Build(capped)
 			for _, case in
 				{
+					{
+						{ Clearance = 0.75 },
+						"NavMesh.GenerateLinks: Clearance 0.75 is above the mesh's MaxAgentRadius 0.5",
+					},
 					{ { Bogus = 1 }, "unknown option 'Bogus'" },
 					{ { Spacing = 0 }, "Spacing must be a number > 0" },
 					{ { Spacing = -1 }, "Spacing must be a number >= 0" },
@@ -327,25 +332,109 @@ return function(t: tiniest)
 					{ "fast", "options must be a table" },
 				}
 			do
-				local ok, err = pcall(NavMesh.GenerateLinks, mesh, case[1] :: any)
+				-- Each names the caller's line.
+				local target = if case[1] == "fast" or case[1].Clearance ~= 0.75 then mesh else cappedMesh
+				local ok, err = pcall(function()
+					NavMesh.GenerateLinks(target, case[1] :: any)
+				end)
 				expect(ok).is(false)
-				expect(string.find(tostring(err), case[2], 1, true) ~= nil).with_context(tostring(err)).is_true()
+				local message = tostring(err)
+				expect(string.find(message, case[2], 1, true) ~= nil).with_context(message).is_true()
+				expect(string.find(message, "Generate.spec", 1, true) ~= nil).with_context(message).is_true()
 			end
-			expect(function()
-				NavMesh.GenerateLinks(cappedMesh, { Clearance = 1 })
-			end).fails_with("above the mesh's MaxAgentRadius 0.5")
 			expect(#NavMesh.GenerateLinks(cappedMesh, { Clearance = 0.5 }) >= 1).is_true()
-			-- Errors point at the caller's line.
-			local ok, err = pcall(function()
-				NavMesh.GenerateLinks(mesh, { Spacing = 0 })
-			end)
-			expect(ok).is(false)
-			expect(tostring(err):find("Generate.spec", 1, true) ~= nil).with_context(tostring(err)).is_true()
-			local ok2, err2 = pcall(function()
-				NavMesh.GenerateLinks(mesh, { MaxDrop = -1 })
-			end)
-			expect(ok2).is(false)
-			expect(tostring(err2):find("Generate.spec", 1, true) ~= nil).with_context(tostring(err2)).is_true()
+			expect(#NavMesh.GenerateLinks(mesh, { Clearance = 3 }) >= 1).is_true()
+		end)
+
+		test("reach limits are inclusive: MaxJumpDistance, MaxDrop and MaxJumpUp", function()
+			-- The 3-stud gap is crossed at MaxJumpDistance 3, not 2.5.
+			expect(#NavMesh.GenerateLinks(NavMesh.Build(gap(3)), { MaxJumpDistance = 3 }) >= 1).is_true()
+			expect(#NavMesh.GenerateLinks(NavMesh.Build(gap(3)), { MaxJumpDistance = 2.5 })).is(0)
+			-- Down exactly MaxDrop (5): one-way; up exactly MaxJumpUp (5): two-way.
+			local down = NavMesh.GenerateLinks(NavMesh.Build(gap(3, 5)), { MaxDrop = 5, MaxJumpUp = 0 })
+			expect(#down >= 1).is_true()
+			expect(down[1].Bidirectional).is(false)
+			expect(#NavMesh.GenerateLinks(NavMesh.Build(gap(3, 5)), { MaxDrop = 4.9, MaxJumpUp = 0 })).is(0)
+			local up = NavMesh.GenerateLinks(NavMesh.Build(gap(3, 5)), { MaxDrop = 5, MaxJumpUp = 5 })
+			expect(#up >= 1).is_true()
+			expect(up[1].Bidirectional).is(true)
+			-- A climb is measured from the ledge: pads at 10 and 12 are 2 apart, within 3 both ways.
+			local high = NavMesh.GenerateLinks(NavMesh.Build(gap(3, 2, 10)))
+			expect(#high >= 1).is_true()
+			for _, l in high do
+				expect(l.Bidirectional).with_context(text { l }).is(true)
+			end
+		end)
+
+		test("a drop lands Clearance out from the ledge; a cliff foot within Clearance is still a Drop", function()
+			local links = NavMesh.GenerateLinks(NavMesh.Build(BALCONY), { Clearance = 0.5 })
+			expect(#links >= 1).is_true()
+			for _, l in links do
+				-- Off the balcony's plan by 0.5 plus the 0.05 probe.
+				local x, z = l.To.X, l.To.Z
+				local off = math.max(10 - x, x - 30, 10 - z, z - 20)
+				expect(off > 0.5 and off < 0.6).with_context(text { l }).is_true()
+			end
+			-- A ledge (y = 4) whose ground starts 1 stud out: a drop at Clearance 1, a jump at 0.5.
+			local cliff = {
+				Floors = {
+					Ledge = { Walkable = { flat(4, { 0, 0, 10, 0, 10, 10, 0, 10 }) } },
+					Ground = { Walkable = { flat(0, { 11, 0, 21, 0, 21, 10, 11, 10 }) } },
+				},
+			}
+			local mesh = NavMesh.Build(cliff)
+			expect(NavMesh.GenerateLinks(mesh)[1].Label).is("Drop")
+			expect(NavMesh.GenerateLinks(mesh, { Clearance = 0.5 })[1].Label).is("Jump")
+		end)
+
+		test("a level hop within Clearance is a two-way Jump, not a Drop", function()
+			local links = NavMesh.GenerateLinks(NavMesh.Build(gap(0.5)))
+			expect(#links >= 1).is_true()
+			for _, l in links do
+				expect(l.Label).is("Jump")
+				expect(l.Bidirectional).is(true)
+			end
+		end)
+
+		test("samples each wall edge evenly: one sample, mid-edge, when Spacing is long", function()
+			-- The pads' facing edges (z = 0..10) are single edges: one sample each, at z = 5.
+			local links = NavMesh.GenerateLinks(NavMesh.Build(gap(3)), { Spacing = 100 })
+			expect(#links).is(1)
+			expect(links[1].From.Z).is(5)
+			expect(links[1].To.Z).is(5)
+		end)
+
+		test("a wall added at runtime (AddObstacle) is a wall too", function()
+			local mesh = NavMesh.Build(BALCONY)
+			NavMesh.AddObstacle(mesh, "Balcony", flat(5, { 19.75, 10, 20.25, 10, 20.25, 20, 19.75, 20 }))
+			NavMesh.Update(mesh)
+			local links = NavMesh.GenerateLinks(mesh)
+			expect(#links >= 8).is_true()
+			for _, l in links do
+				local x, z = l.To.X, l.To.Z
+				expect(x <= 9 + 1e-3 or x >= 31 - 1e-3 or z <= 9 + 1e-3 or z >= 21 - 1e-3)
+					.with_context(text { l })
+					.is_true()
+			end
+		end)
+
+		test("an interior wall on a slanted balcony gets none", function()
+			-- A diamond balcony (y = 5) centred on (20, 20) over Ground, with a wall strip across it.
+			local desc = {
+				Floors = {
+					Ground = { Walkable = { flat(0, { 0, 0, 40, 0, 40, 40, 0, 40 }) } },
+					Balcony = {
+						Walkable = { flat(5, { 20, 8, 32, 20, 20, 32, 8, 20 }) },
+						Obstacles = { flat(5, { 19.75, 12, 20.25, 12, 20.25, 28, 19.75, 28 }) },
+					},
+				},
+			}
+			local links = NavMesh.GenerateLinks(NavMesh.Build(desc))
+			expect(#links >= 8).is_true()
+			for _, l in links do
+				-- Every landing is off the diamond (|x - 20| + |z - 20| > 12).
+				expect(math.abs(l.To.X - 20) + math.abs(l.To.Z - 20) > 12).with_context(text { l }).is_true()
+			end
 		end)
 
 		test("is pure: the mesh is unchanged", function()

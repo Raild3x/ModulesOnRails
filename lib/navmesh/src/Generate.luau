@@ -39,7 +39,6 @@ type GenerateLinksOptions = Types.GenerateLinksOptions
 
 local PROBE = 0.05 -- the first column, just past the wall: past snap rounding's pixel, inside any real wall
 local STEP = 0.5 -- the march step, so a gap is measured to within this
-local MARGIN = 0.01 -- a column this near a ring's edge is not inside it (snap rounding moves edges a pixel)
 local FIT = 1e-3 -- slack on "both ends admit Clearance", for the push's rounding
 local WALKABLE_GROUP = 1 -- Build's GROUP_WALKABLE: a floor's walkable rings in its sources
 local NO_COSTS = {}
@@ -74,25 +73,22 @@ type Ring = { X: { number }, Z: { number } }
 
 local Generate = {}
 
--- Whether (x, z) is inside one of `rings` (studs) by more than MARGIN.
+-- Whether (x, z) is inside one of `rings` (studs), by the crossing rule.
+-- ponytail: a column exactly on a ring's edge, where snap rounding moved the triangles a pixel
+-- away, can read as inside and stop a march early (a missed link, never a wrong one).
 local function inside(rings: { Ring }, x: number, z: number): boolean
 	for _, ring in rings do
 		local xs, zs = ring.X, ring.Z
-		local odd, near = false, false
+		local odd = false
 		local j = #xs
 		for i = 1, #xs do
 			local ax, az, bx, bz = xs[j], zs[j], xs[i], zs[i]
 			if (az > z) ~= (bz > z) and x < ax + (z - az) / (bz - az) * (bx - ax) then
 				odd = not odd
 			end
-			local dx, dz = bx - ax, bz - az
-			local u = math.clamp(((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz), 0, 1)
-			if (ax + u * dx - x) ^ 2 + (az + u * dz - z) ^ 2 <= MARGIN * MARGIN then
-				near = true
-			end
 			j = i
 		end
-		if odd and not near then
+		if odd then
 			return true
 		end
 	end
@@ -207,11 +203,11 @@ function Generate.Links(
 
 	local candidates: { Candidate } = {}
 	-- The link off sample `s` (on wall edge of triangle `t`, floor `floor`) along outward `n`.
-	local function march(t: number, floor: number, s: vector, n: vector)
+	local function march(t: number, floor: number, s: vector, nx: number, nz: number)
 		local lo, hi = s.Y - maxDrop, s.Y + maxUp
 		local d = PROBE
 		while d <= math.max(maxJump, PROBE) do
-			local x, z = s.X + n.X * d, s.Z + n.Z * d
+			local x, z = s.X + nx * d, s.Z + nz * d
 			local landT, landP, landFloor = 0, nil :: vector?, 0
 			for f = 1, floors do
 				local ft, fp = surfaceAt(mesh, f, x, z)
@@ -225,15 +221,12 @@ function Generate.Links(
 			end
 			if landP then
 				-- Land a radius further out when that floor is there: a drop's straight down.
-				local farT, farP = surfaceAt(mesh, landFloor, x + n.X * clearance, z + n.Z * clearance)
+				local farT, farP = surfaceAt(mesh, landFloor, x + nx * clearance, z + nz * clearance)
 				local fromP, fromT = Queries.Push(mesh, t, s, clearance, NO_COSTS)
 				local toP, toT = Queries.Push(mesh, if farP then farT else landT, farP or landP, clearance, NO_COSTS)
 				if
-					clearance > 0
-					and (
-						Queries.DistanceToWall(mesh, fromT, fromP, clearance, NO_COSTS) < clearance - FIT
-						or Queries.DistanceToWall(mesh, toT, toP, clearance, NO_COSTS) < clearance - FIT
-					)
+					Queries.DistanceToWall(mesh, fromT, fromP, clearance, NO_COSTS) < clearance - FIT
+					or Queries.DistanceToWall(mesh, toT, toP, clearance, NO_COSTS) < clearance - FIT
 				then
 					return -- an end too narrow for the agent
 				end
@@ -265,10 +258,10 @@ function Generate.Links(
 			local u, w = Storage.GetVertex(mesh, verts[e % 3 + 1]), Storage.GetVertex(mesh, verts[(e + 1) % 3 + 1])
 			local length = math.sqrt((w.X - u.X) ^ 2 + (w.Z - u.Z) ^ 2)
 			-- Out of a CCW triangle: the interior is on the left of u -> w.
-			local n = vector.create((w.Z - u.Z) / length, 0, (u.X - w.X) / length)
+			local nx, nz = (w.Z - u.Z) / length, (u.X - w.X) / length
 			local count = math.ceil(length / step)
 			for i = 1, count do
-				march(t, Storage.GetTriangleFloor(mesh, t), u + (w - u) * ((i - 0.5) / count), n)
+				march(t, Storage.GetTriangleFloor(mesh, t), u + (w - u) * ((i - 0.5) / count), nx, nz)
 			end
 		end
 	end
