@@ -714,6 +714,39 @@ return function(t: tiniest)
 			expect(fmt(apart.Waypoints[#apart.Waypoints].Position)).is("9.5000,0.0000,7.0000")
 		end)
 
+		test("a start against a wall, boxed in by the widths, still gets a way out of the wall", function()
+			-- Small props close together: a start on a wall edge often sits in a triangle no edge
+			-- of which admits the agent. Its own nearest point is judged inside its triangle; the
+			-- push off the wall (into a triangle the search never entered) is the way out.
+			math.randomseed(17)
+			local props = {}
+			for _ = 1, 40 do
+				local x, z, w, d = math.random() * 15, math.random() * 15, 0.3 + math.random(), 0.3 + math.random()
+				table.insert(props, flat(0, { x, z, x + w, z, x + w, z + d, x, z + d }))
+			end
+			local mesh = NavMesh.Build {
+				Floors = { Ground = { Walkable = { flat(0, { 0, 0, 16, 0, 16, 16, 0, 16 }) }, Obstacles = props } },
+			}
+			local starts, stuck = 0, {}
+			for t = 1, Storage.TriangleCount(mesh) do
+				local ids = { Storage.GetTriangle(mesh, t) }
+				for e = 1, 3 do
+					if Storage.IsWallEdge(mesh, t, e) then
+						local a, b =
+							Storage.GetVertex(mesh, ids[e % 3 + 1]), Storage.GetVertex(mesh, ids[(e + 1) % 3 + 1])
+						local p = (a + b) * 0.5
+						local path = NavMesh.FindPath(mesh, p, v(500, 0, 500), { AgentRadius = 1, GoalFallback = true })
+						starts += 1
+						if #path.Waypoints < 2 then
+							table.insert(stuck, fmt(p))
+						end
+					end
+				end
+			end
+			expect(table.concat(stuck, " ")).is("")
+			expect(starts > 100).is_true()
+		end)
+
 		test("every Partial and Budget end is reachable from the start (a grid flood agrees)", function()
 			-- Rooms like the one above, each with one slab of random place, width and gap, so
 			-- every barrier lies inside one triangle (ticket 27's reach; one that spans two

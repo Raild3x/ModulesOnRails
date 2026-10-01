@@ -357,9 +357,14 @@ function Search.Run(
 
 	-- Whether the end FindPath makes of point p of node u's triangle, pushed off the walls
 	-- (which can carry it into a neighbour, out of a sliver too thin to stand in), stands where
-	-- a node the search closed reaches it. Like ticket 27's checks this is sound, not complete:
-	-- an end the push leaves in a pinch narrower than 2r can't be placed, and passes.
+	-- a node the search closed reaches it. The start triangle's own point is judged where it
+	-- is, as before: a start against a wall may be boxed into its triangle by the widths, and
+	-- its push is the way out. Like ticket 27's checks this is sound, not complete: an end the
+	-- push leaves in a pinch narrower than 2r can't be placed, and passes.
 	local function reachable(u: number, p: vector): boolean
+		if u == startT then
+			return not stranded(u, p)
+		end
 		local q, t = Queries.Push(s, triangleOf(u), p, radius, costs)
 		local nodes = if t == startT then { startT, startAgain } elseif t == goalT then { goalAgain } else { t }
 		for _, w in nodes do
