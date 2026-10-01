@@ -28,34 +28,6 @@ local function countKind(list: { any }, layer: string?): number
 	return n
 end
 
--- Whether a path's segments, grown by `radius`, meet a region Update returned (in plan; a
--- square-grown box, so never a miss where the round one meets).
-local function meetsRegions(path: any, regions: { any }, radius: number): boolean
-	local points = path.Waypoints
-	for i = 1, math.max(#points - 1, 1) do
-		local a, b = points[i], points[math.min(i + 1, #points)]
-		for _, r in regions do
-			if r.Floor == a.Floor or r.Floor == b.Floor then
-				local t0, t1, hit = 0, 1, true
-				for _, axis in { "X", "Z" } do
-					local p, d = a.Position[axis], b.Position[axis] - a.Position[axis]
-					local lo, hi = r.Min[axis] - radius, r.Max[axis] + radius
-					if d == 0 then
-						hit = hit and p >= lo and p <= hi
-					else
-						local u0, u1 = (lo - p) / d, (hi - p) / d
-						t0, t1 = math.max(t0, math.min(u0, u1)), math.min(t1, math.max(u0, u1))
-					end
-				end
-				if hit and t0 <= t1 then
-					return true
-				end
-			end
-		end
-	end
-	return false
-end
-
 local seed = 1
 local function rng(): number
 	seed = (seed * 1103515245 + 12345) % 2147483648
@@ -111,7 +83,7 @@ for _, size in { 0, 32, 16, 8, 4 } do
 		if not NavMesh.IsPathValid(mesh, path) then
 			broken += 1
 		end
-		if meetsRegions(path, regions, 0.5) then
+		if NavMesh.FirstAffectedSegment(path, regions, 0.5) then
 			touched += 1
 		end
 	end

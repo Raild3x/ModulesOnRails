@@ -240,7 +240,8 @@ local function chase(world: World, npc: Npc, target: Npc, dt: number)
 	end
 end
 
-local function toggleDoor(world: World)
+-- Returns the regions the Update changed.
+local function toggleDoor(world: World): { any }
 	local NavMesh = world.NavMesh
 	if world.DoorId then
 		NavMesh.RemoveObstacle(world.Mesh, world.DoorId)
@@ -248,12 +249,34 @@ local function toggleDoor(world: World)
 	else
 		world.DoorId = NavMesh.AddObstacle(world.Mesh, "Ground", world.Level.DOOR)
 	end
-	timed(world, "Update", NavMesh.Update, world.Mesh)
+	local regions = timed(world, "Update", NavMesh.Update, world.Mesh)
 	count(world, nil, if world.DoorId then "door:closed" else "door:opened")
 	log(world, if world.DoorId then "door closes" else "door opens")
+	return regions
 end
 
--- HAND-ROLLED: nothing tells the game which paths a change broke, so poll every NPC's path.
+-- After an Update: repath the NPCs whose way ahead meets a changed region.
+local function repathAffected(world: World, regions: { any })
+	for _, npc in world.Npcs do
+		local follower = npc.Follower
+		if follower and npc.Goal and not npc.Jump then
+			local segment = timed(
+				world,
+				"FirstAffectedSegment",
+				world.NavMesh.FirstAffectedSegment,
+				follower.Path,
+				regions,
+				npc.Radius,
+				follower.Next - 1
+			)
+			if segment then
+				repath(world, npc, npc.Goal, "door")
+			end
+		end
+	end
+end
+
+-- HAND-ROLLED: a link toggle returns no regions, so poll every NPC's path's tile stamps.
 local function revalidate(world: World, why: string)
 	for _, npc in world.Npcs do
 		if npc.Follower and npc.Goal and not npc.Jump then
@@ -270,8 +293,7 @@ local function step(world: World, dt: number)
 	world.DoorTimer -= dt
 	if world.DoorTimer <= 0 then
 		world.DoorTimer += DOOR_PERIOD
-		toggleDoor(world)
-		revalidate(world, "door")
+		repathAffected(world, toggleDoor(world))
 	end
 	world.GateTimer -= dt
 	if world.GateTimer <= 0 then
