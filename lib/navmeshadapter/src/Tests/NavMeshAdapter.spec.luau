@@ -335,6 +335,47 @@ return function(t: tiniest)
 			expect(math.max(seam.From.z, seam.To.z)).is(6)
 		end)
 
+		test("a ramp's foot on ground beside a slab 0.004 studs off level stays open to a radius", function()
+			-- The tilted slab comes first. Were the level slab put on its floor (within 0.01), that
+			-- plane would sit 0.004 above the foot, and the ramp's cut would start 0.016 past it:
+			-- a sliver of ground walled right beside the crossing.
+			local tilt = math.atan2(0.004, 10)
+			local desc: any = NavMeshAdapter.FromParts({
+				part("Part", "Tilted", { 10.000001, 1, 10 }, CFrame.new(5, -0.502, 5) * CFrame.Angles(0, 0, tilt)),
+				slab("Level", 10, 0, 30, 10, 0),
+				part("WedgePart", "Ramp", { 6, 2.5, 10 }, CFrame.new(25, 1.25, 3) * CFrame.Angles(0, math.pi / 2, 0)),
+			}, {})
+			desc.MaxAgentRadius = 1
+			local path = NavMesh.FindPath(
+				NavMesh.Build(desc),
+				vector.create(15, 0, 3) :: any,
+				vector.create(25, 1.25, 3) :: any,
+				{
+					AgentRadius = 1,
+				}
+			)
+			expect(path.Status).is("Success")
+			expect(path.Length < 11).is_true()
+		end)
+
+		test("ground touching a ramp's foot at a corner adds no seam there (turned: f32 data)", function()
+			local desc: any = NavMeshAdapter.FromParts(
+				turn({
+					slab("Ground", 0, -10, 12, 0, 0), -- meets the foot along x 10..12, and its corner
+					slab("Ground", 10, 0, 20, 10, 0), -- under the foot; touches the first only along it
+					-- Rises towards -Z from its foot at z = 0, x 10..20.
+					part("WedgePart", "Ramp", { 10, 6, 12 }, CFrame.new(15, 3, -6) * CFrame.Angles(0, math.pi, 0)),
+				}, 30),
+				{}
+			)
+			expect(#desc.Seams > 0).is_true()
+			for _, seam in desc.Seams do
+				expect(vector.magnitude(seam.To - seam.From) > 0.01).is_true()
+			end
+			desc.MaxAgentRadius = 1
+			NavMesh.Build(desc)
+		end)
+
 		-- Part data is f32: a hinge between two turned Parts is only true to about 1e-5 studs.
 		test("slabs tilted edge to edge join at every hinge", function()
 			local ys = { 0, 0.9, 0.5, 1.6, 1.2, 0.4, 0.4, 1.1 } -- tops along X, 10 studs a piece
@@ -432,6 +473,168 @@ return function(t: tiniest)
 				vector.create(19, 0.7, 19) :: any
 			)
 			expect(path.Status).is("Success")
+		end)
+	end)
+
+	-- Ticket 37's meadow (ForestRiver, seed 37, 1 degree): one triangle as two WedgeParts, and the
+	-- next triangle's first wedge, exactly as the map makes them (f32 Part data).
+	describe("Part terrain", function()
+		local function wedge(name: string, size: { number }, c: { number }): any
+			return part("WedgePart", name, size, CFrame.new(table.unpack(c)))
+		end
+		local function triangle(): { any }
+			return {
+				wedge("T", { 0.19999695, 7.071808, 7.0710754 }, {
+					24.998977661132812,
+					-0.118133544921875,
+					110.00102233886719,
+					-0.0102386474609375,
+					-0.70703125,
+					-0.7071075439453125,
+					-0.9998931884765625,
+					0.014434814453125,
+					0.0000457763671875,
+					0.0101776123046875,
+					0.70703125,
+					-0.7071075439453125,
+				}),
+				wedge("T", { 0.19999695, 7.071808, 7.07106 }, {
+					19.998977661132812,
+					-0.117828369140625,
+					105.00102233886719,
+					0.0102386474609375,
+					-0.70703125,
+					0.7071075439453125,
+					0.9998931884765625,
+					0.014434814453125,
+					-0.0000457763671875,
+					-0.0101776123046875,
+					0.70703125,
+					0.7071075439453125,
+				}),
+			}
+		end
+
+		test("a triangle built from two wedges is one ring of three corners", function()
+			local desc: any = NavMeshAdapter.FromParts(triangle(), {})
+			expect(#desc.Floors.T.Walkable).is(1)
+			expect(#desc.Floors.T.Walkable[1]).is(3)
+		end)
+
+		test("near-coplanar triangles touching at one corner get no seam there", function()
+			-- ForestRiver, seed 100, 1 degree: triangles (0,20)-(10,30)-(0,30) and
+			-- (10,20)-(20,30)-(10,30). The second's edge x = 10 lies on the first's plane and meets
+			-- its face only at (10, 30), which f32 noise makes a sliver, not a point.
+			local parts = {}
+			for _, w in
+				{
+					{
+						"A",
+						{ 0.199996948, 7.07116699, 7.07099915 },
+						{
+							4.9998016357421875,
+							-0.04644775390625,
+							30.000534057617188,
+							-0.0020294189453125,
+							-0.7071075439453125,
+							-0.7071075439453125,
+							-0.9999847412109375,
+							0.00518798828125,
+							-0.0023193359375,
+							0.00531005859375,
+							0.70709228515625,
+							-0.7071075439453125,
+						},
+					},
+					{
+						"A",
+						{ 0.199996948, 7.07116699, 7.07116699 },
+						{
+							-0.0001983642578125,
+							-0.0628662109375,
+							25.000534057617188,
+							0.0020294189453125,
+							-0.7071075439453125,
+							0.7071075439453125,
+							0.9999847412109375,
+							0.00518798828125,
+							0.0023193359375,
+							-0.00531005859375,
+							0.70709228515625,
+							0.7071075439453125,
+						},
+					},
+					{
+						"B",
+						{ 0.199996948, 7.0710907, 7.07107544 },
+						{
+							14.99981689453125,
+							-0.0659942626953125,
+							30.000106811523438,
+							-0.0018768310546875,
+							-0.7071075439453125,
+							-0.7071075439453125,
+							-1,
+							0.0021209716796875,
+							0.0005340576171875,
+							0.001129150390625,
+							0.7071075439453125,
+							-0.7071075439453125,
+						},
+					},
+					{
+						"B",
+						{ 0.199996948, 7.0710907, 7.07106018 },
+						{
+							9.99981689453125,
+							-0.062225341796875,
+							25.000106811523438,
+							0.0018768310546875,
+							-0.7071075439453125,
+							0.7071075439453125,
+							1,
+							0.0021209716796875,
+							-0.0005340576171875,
+							-0.001129150390625,
+							0.7071075439453125,
+							0.7071075439453125,
+						},
+					},
+				}
+			do
+				table.insert(parts, wedge(w[1], w[2], w[3]))
+			end
+			local desc: any = NavMeshAdapter.FromParts(parts, {})
+			expect(#desc.Seams).is(0)
+			desc.MaxAgentRadius = 1
+			NavMesh.Build(desc)
+		end)
+
+		test("a neighbour's cut has no corners closer than 0.01 studs (they fold on the grid)", function()
+			local neighbour = wedge("N", { 0.19999695, 7.071747, 7.07106 }, {
+				25.0009765625,
+				-0.1197509765625,
+				99.9990234375,
+				0.009796142578125,
+				0.7070465087890625,
+				0.7071075439453125,
+				-0.999908447265625,
+				0.013885498046875,
+				-0.0000457763671875,
+				-0.009857177734375,
+				-0.70703125,
+				0.7071075439453125,
+			})
+			local desc: any = NavMeshAdapter.FromParts(triangle(), { neighbour })
+			expect(desc.Floors.T.Obstacles).exists()
+			for _, ring in desc.Floors.T.Obstacles do
+				for i, p in ring do
+					local q = ring[i % #ring + 1]
+					expect(math.abs(p.x - q.x) + math.abs(p.z - q.z) > 0.01).is_true()
+				end
+			end
+			desc.MaxAgentRadius = 1
+			NavMesh.Build(desc)
 		end)
 	end)
 

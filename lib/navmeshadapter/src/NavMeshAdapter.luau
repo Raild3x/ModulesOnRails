@@ -9,7 +9,8 @@
 	- Every Part is solid: where it stands inside the agent's height above a floor, its
 	  footprint is cut out of that floor (a crate on the ground, the ground under a ramp).
 	- A walkable Part's upward faces (no steeper than `MaxSlope`) are walkable. Faces on one
-	  plane form one floor, named after the first Part that lands on it.
+	  plane form one floor, named after the first Part that lands on it; faces of a floor that
+	  share an edge become one ring.
 	- Where an edge of one floor's face lies on another floor's surface (the foot and top of a
 	  ramp), a seam joins them.
 
@@ -34,10 +35,14 @@ export type AdapterOptions = {
 
 local NavMesh = require("../NavMesh")
 
--- Heights within this many studs count as the same surface (coplanar faces, seam edges). Part
--- data is f32, so a hinge between two turned Parts is only true to about 1e-5 studs: seam edges
--- also use it as their distance tolerance across a face's edge and their shortest length.
+-- Heights within this many studs count as the same surface (seam edges). Part data is f32, so a
+-- hinge between two turned Parts is only true to about 1e-5 studs: seam edges also use it as
+-- their distance tolerance across a face's edge and their shortest length.
 local HEIGHT_TOLERANCE = 0.01
+-- Faces within this many studs of a floor's plane join that floor. Much tighter than
+-- HEIGHT_TOLERANCE: a face joining a floor 0.004 off its own plane moves the floor's cuts, and
+-- under a ramp's foot that walls the crossing (ticket 37).
+local COPLANAR_TOLERANCE = 0.001
 
 -- A convex solid in world space: its vertices and faces (vertex index lists).
 type Solid = { Points: { vector }, Faces: { { number } } }
@@ -168,6 +173,11 @@ local function area2D(ring: { vector }): number
 	return sum / 2
 end
 
+-- Within HEIGHT_TOLERANCE of each other in plan.
+local function close(p: vector, q: vector): boolean
+	return math.abs(p.x - q.x) + math.abs(p.z - q.z) <= HEIGHT_TOLERANCE
+end
+
 -- Where the solid stands within [0, agentHeight) above the floor: the footprint of that slice,
 -- or nil when the solid only touches the floor (a Part of the floor itself, or one below it).
 -- An agent fits under a ceiling exactly agentHeight up.
@@ -202,7 +212,17 @@ local function cut(solid: Solid, floor: Floor, agentHeight: number): { vector }?
 	if top <= HEIGHT_TOLERANCE then
 		return nil
 	end
-	local ring = hull2D(pts)
+	-- Hull corners closer than HEIGHT_TOLERANCE are one corner: f32 noise puts them there, and
+	-- on the core's grid they can swap and fold the ring.
+	local ring = {}
+	for _, p in hull2D(pts) do
+		if ring[1] == nil or not close(p, ring[#ring]) then
+			table.insert(ring, p)
+		end
+	end
+	if close(ring[1], ring[#ring]) then
+		table.remove(ring)
+	end
 	if area2D(ring) <= 1e-6 then -- a plate with no thickness
 		return nil
 	end
@@ -300,6 +320,69 @@ local function weld(f: Floor, tolerance: number)
 	end
 end
 
+-- Drops corners on a straight line between their neighbours (within HEIGHT_TOLERANCE).
+local function straighten(ring: { vector }): { vector }
+	local i = 1
+	while #ring > 3 and i <= #ring do
+		local a, b, c = ring[(i - 2) % #ring + 1], ring[i], ring[i % #ring + 1]
+		local cross = (b.x - a.x) * (c.z - a.z) - (b.z - a.z) * (c.x - a.x)
+		local len = math.sqrt((c.x - a.x) ^ 2 + (c.z - a.z) ^ 2)
+		if math.abs(cross) / len <= HEIGHT_TOLERANCE then -- 0 / 0 (a spike) keeps it
+			table.remove(ring, i)
+		else
+			i += 1
+		end
+	end
+	return ring
+end
+
+-- The edge r1[a] -> r1[a + 1] that r2 runs the other way, from r2[b] to r2[b + 1]; nil if none.
+local function sharedEdge(r1: { vector }, r2: { vector }): (number?, number?)
+	for a = 1, #r1 do
+		local u, v = r1[a], r1[a % #r1 + 1]
+		for b = 1, #r2 do
+			if close(r2[b], v) and close(r2[b % #r2 + 1], u) then
+				return a, b
+			end
+		end
+	end
+	return nil, nil
+end
+
+-- Joins a floor's faces that share an edge into one ring, without the corners that leaves on a
+-- straight line: a triangle built from two WedgeParts is one triangle again, so its neighbours
+-- see whole edges (a corner mid-edge snaps off it in the core).
+-- ponytail: every pair of the floor's rings, O(rings^2 x corners^2); index edges if a floor of
+-- thousands of Parts shows up slow.
+local function join(f: Floor)
+	local rings = f.Rings
+	local i = 1
+	while i <= #rings do
+		local joined = false
+		for j = i + 1, #rings do
+			local a, b = sharedEdge(rings[i], rings[j])
+			if a then
+				-- rings[i] from the shared edge's far end round to its near end, then rings[j]
+				-- between them.
+				local r1, r2, out = rings[i], rings[j], {}
+				for k = 0, #r1 - 1 do
+					table.insert(out, r1[(a + k) % #r1 + 1])
+				end
+				for k = 2, #r2 - 1 do
+					table.insert(out, r2[((b :: number) + k - 1) % #r2 + 1])
+				end
+				rings[i] = straighten(out)
+				table.remove(rings, j)
+				joined = true
+				break
+			end
+		end
+		if not joined then
+			i += 1
+		end
+	end
+end
+
 --[=[
 	@within NavMeshAdapter
 	@param walkable { BasePart } -- Parts whose upward faces are walkable
@@ -355,7 +438,7 @@ local function fromParts(walkable: { BasePart }, obstacles: { BasePart }, option
 			for _, f in floors do
 				local on = true -- every corner on f's plane: the face lies in it
 				for _, p in ring do
-					on = on and math.abs(height(f, p.x, p.z) - p.y) <= HEIGHT_TOLERANCE
+					on = on and math.abs(height(f, p.x, p.z) - p.y) <= COPLANAR_TOLERANCE
 				end
 				if on then
 					floor = f
@@ -377,7 +460,6 @@ local function fromParts(walkable: { BasePart }, obstacles: { BasePart }, option
 				ring[i] = vector.create(p.x, height(f, p.x, p.z), p.z) -- exactly on the floor's plane
 			end
 			table.insert(f.Rings, ring)
-			table.insert(faces, { Ring = ring, Floor = f })
 			local area = part:GetAttribute("NavArea")
 			if type(area) == "number" then
 				table.insert(f.Areas, { Polygon = ring, Area = area })
@@ -394,6 +476,10 @@ local function fromParts(walkable: { BasePart }, obstacles: { BasePart }, option
 	for _, f in floors do
 		if weldTolerance > 0 then
 			weld(f, weldTolerance)
+		end
+		join(f)
+		for _, ring in f.Rings do
+			table.insert(faces, { Ring = ring, Floor = f })
 		end
 		local lo, hi = vector.one * math.huge, vector.one * -math.huge
 		for _, ring in f.Rings do
