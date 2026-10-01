@@ -24,7 +24,7 @@ export type Expect = {
 	Floors: { string }?, -- the floors visited, in order (repeats collapsed)
 	Visits: { string }?, -- floors the path must visit in this order, among others (a stair's landing)
 	Links: { string }?, -- the labels of the links used, in order
-	Avoids: { number }?, -- area ids no path segment may enter
+	Avoids: { number | string }?, -- areas no path segment may enter: ids, or names from the adapter's table
 	MaxStretch: number?, -- Length <= this x the straight line from From to To
 	MinLength: number?, -- studs: "goes the long way"
 	MaxLength: number?, -- studs: a reference path's length, plus slack
@@ -34,7 +34,7 @@ export type Scenario = {
 	Name: string,
 	From: string, -- a point name
 	To: string,
-	Filter: any?, -- the QueryFilter
+	Filter: any?, -- the QueryFilter, or a function of the adapter's area-name table returning it
 	Expect: Expect?,
 	DisabledLinks: { string }?, -- labels of links switched off for this scenario (an elevator out of service)
 	-- A negative control: the scenario passes only if exactly this expectation fails.
@@ -66,6 +66,7 @@ export type Report = {
 	Map: Map,
 	Built: Built,
 	Desc: any,
+	Areas: { [string]: number }, -- the adapter's area-name table
 	Mesh: any,
 	Rows: { Row },
 	FromPartsMs: number,
@@ -103,20 +104,29 @@ local function edgeDistance(x: number, z: number, ring: { any }): number
 	return best
 end
 
--- Does the segment a-b (on `floor`) enter one of the floor's areas with this id? Walking an
--- area's edge doesn't count. ponytail: samples every 0.25 studs; exact clipping if a sliver
--- area ever slips between samples.
-local function entersArea(desc: any, floor: string, a: vector, b: vector, id: number): boolean
-	local areas = desc.Floors[floor] and desc.Floors[floor].Areas
-	if areas == nil then
-		return false
-	end
+-- Does the segment a-b enter an area with this id, on any floor at its height? Not only the
+-- end waypoints' floors: a segment between two curb strips lies on the road. Walking an area's
+-- edge doesn't count; the height test is the area's Y range (exact for flat areas).
+-- ponytail: samples every 0.25 studs; exact clipping if a sliver area ever slips between samples.
+local function entersArea(desc: any, a: vector, b: vector, id: number): boolean
 	local steps = math.max(1, math.ceil(vector.magnitude(b - a) / 0.25))
-	for _, area in areas do
-		if area.Area == id then
+	for _, floor in desc.Floors do
+		for _, area in floor.Areas or {} do
+			if area.Area ~= id then
+				continue
+			end
+			local lo, hi = math.huge, -math.huge
+			for _, q in area.Polygon do
+				lo, hi = math.min(lo, q.Y), math.max(hi, q.Y)
+			end
 			for k = 0, steps do
 				local p = a + (b - a) * (k / steps)
-				if insidePolygon(p.x, p.z, area.Polygon) and edgeDistance(p.x, p.z, area.Polygon) > 0.05 then
+				if
+					p.y >= lo - 0.05
+					and p.y <= hi + 0.05
+					and insidePolygon(p.x, p.z, area.Polygon)
+					and edgeDistance(p.x, p.z, area.Polygon) > 0.05
+				then
 					return true
 				end
 			end
@@ -146,7 +156,7 @@ local function same(a: { any }, b: { any }): boolean
 end
 
 -- The expectations a path fails, each as "Name: why".
-local function check(e: Expect, path: any, desc: any, from: vector, to: vector): { string }
+local function check(e: Expect, path: any, desc: any, areas: { [string]: number }, from: vector, to: vector): { string }
 	local failed = {}
 	if e.Status and path.Status ~= e.Status then
 		table.insert(failed, `Status: got {path.Status}, want {e.Status}`)
@@ -177,12 +187,13 @@ local function check(e: Expect, path: any, desc: any, from: vector, to: vector):
 	if e.Links and not same(links, e.Links) then
 		table.insert(failed, `Links: got {list(links)}, want {list(e.Links)}`)
 	end
-	for _, id in e.Avoids or {} do
+	for _, avoid in e.Avoids or {} do
+		local id = if type(avoid) == "string" then assert(areas[avoid], `no area named {avoid}`) else avoid
 		local w = path.Waypoints
 		for i = 2, #w do
 			if w[i - 1].Label == nil then -- a link's hop is not walked
 				local a, b = v(w[i - 1].Position), v(w[i].Position)
-				if entersArea(desc, w[i - 1].Floor, a, b, id) or entersArea(desc, w[i].Floor, a, b, id) then
+				if entersArea(desc, a, b, id) then
 					table.insert(failed, `Avoids: segment {i - 1}-{i} enters area {id}`)
 					break
 				end
@@ -211,7 +222,7 @@ local Harness = {}
 function Harness.Run(map: Map, NavMesh: any, Adapter: any, rbx: Rbx, parent: Instance?): Report
 	local built = map.Build(rbx, parent)
 	local t0 = os.clock()
-	local desc = Adapter.FromParts(built.Walkable, built.Obstacles, map.AdapterOptions)
+	local desc, areas = Adapter.FromParts(built.Walkable, built.Obstacles, map.AdapterOptions)
 	local fromPartsMs = (os.clock() - t0) * 1000
 	desc.MaxAgentRadius = map.MaxAgentRadius or 2
 	desc.Links = built.Links
@@ -227,6 +238,7 @@ function Harness.Run(map: Map, NavMesh: any, Adapter: any, rbx: Rbx, parent: Ins
 		Map = map,
 		Built = built,
 		Desc = desc,
+		Areas = areas,
 		Mesh = mesh,
 		Rows = {},
 		FromPartsMs = fromPartsMs,
@@ -247,16 +259,17 @@ function Harness.Run(map: Map, NavMesh: any, Adapter: any, rbx: Rbx, parent: Ins
 				NavMesh.SetLinkEnabled(mesh, id, false)
 			end
 		end
+		local filter = if type(s.Filter) == "function" then s.Filter(areas) else s.Filter
 		local path, best = nil, math.huge
 		for _ = 1, 3 do
 			t0 = os.clock()
-			path = NavMesh.FindPath(mesh, from, to, s.Filter)
+			path = NavMesh.FindPath(mesh, from, to, filter)
 			best = math.min(best, os.clock() - t0)
 		end
 		for _, id in off do
 			NavMesh.SetLinkEnabled(mesh, id, true)
 		end
-		local failed = check(s.Expect or {}, path, desc, v(from), v(to))
+		local failed = check(s.Expect or {}, path, desc, areas, v(from), v(to))
 		local pass = #failed == 0
 		if s.MustFail then
 			pass = #failed == 1 and string.find(failed[1], s.MustFail .. ":", 1, true) == 1

@@ -134,6 +134,30 @@ than it looks. Read them before touching `Search`, `Clearance`, `Tiles` or `Seri
 - **Scratch archive:** the old `navmesh-phase0` worktree's untracked `zz_*` probes are in the
   main checkout's gitignored `.bench/navmesh/archive/navmesh-phase0/`.
 
+## Found by Track M3 on the Street map (2026-10-01)
+Neither is fixed: Track M3 may not change the core, and its adapter change is limited to the
+area-name table.
+- **The adapter ignores a Part exactly `AgentHeight` tall standing on a floor.**
+  - In `cut`, its top corners sit at exactly `agentHeight`, which the `< agentHeight` test
+    leaves out, and no edge strictly crosses that level. So `top` stays 0 and the cut is dropped.
+  - Repro: a 10 x 10 ground slab at y 0 and a 2 x h x 2 box on it, default options. h 4.99 and
+    5.01 give one obstacle ring, h 5 gives none.
+  - Found when the Street's 5-stud cars didn't cut the road: paths and radius 3.5 went straight
+    through them. The map uses 4.5-stud cars.
+  - **Fix:** count a point at exactly `agentHeight` toward `top` (and the hull), or test
+    `<= agentHeight` for the top. Owner: whichever track next changes the adapter.
+- **A finite area cost turns heron nodes off for the whole query, even for paths that never
+  touch that area.** `Search` keeps heron nodes only when every multiplier is 1 or excluded.
+  - On the Street (`lune run tools/navmesh/maps/street_measure.luau`), at road cost 5 or 10
+    every path stays off the road, yet it is on average 0.5% and at worst 11.7% longer than the
+    best crosswalk-only path (road excluded, heron on). The worst, S52->N44, takes the east
+    crosswalk (73.8) instead of the west one (66.1). That is midpoint A* picking the wrong
+    crosswalk.
+  - At road cost 1.5 to 3 the worst is 7.3-10.7%.
+  - This is the trade-off Search's header documents (goal-ward nodes overprice routes round
+    dear areas), seen on a realistic layout. A fix would need the heron gate to be finer than
+    "any cost but 1". It is not ruled.
+
 ## Found by Track H on 1-4 km maps (2026-10-01)
 These are numbers on large maps, not wrong answers. Each has a script under
 `tools/navmesh/bench/`. Details are in bench.md, "Large worlds, 1-4 km". None is fixed. Track H

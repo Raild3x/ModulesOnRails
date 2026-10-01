@@ -67,14 +67,18 @@ Everything lives in `tools/navmesh/maps/`. No library code changed.
   Studio runs during the hold (moving NPCs), and a scenario's `DisabledLinks = { label }`
   (links off for that scenario, an elevator out of service).
 - **A scenario** is `{ Name, From, To, Filter?, Expect?, MustFail? }`. `From` and `To` are point
-  names; `Filter` is the `QueryFilter`. Every `Expect` field is optional:
+  names; `Filter` is the `QueryFilter`, or (added in ticket 36) a function of the adapter's
+  area-name table returning it, so a scenario writes `AreaCosts = { [areas.Road] = 10 }`.
+  Every `Expect` field is optional:
   - `Status`: the `PathStatus`;
   - `Floors`: the floors visited, in order, with repeats collapsed;
   - `Visits`: floors that must appear in this order, among others. Added in ticket 34: with
     riser strips, a stair's floor list holds every riser;
   - `Links`: the labels of the links used, in order;
-  - `Avoids`: area ids no walked segment may enter. A segment along an area's edge doesn't
-    count; a link's hop isn't checked. The check samples every 0.25 studs;
+  - `Avoids`: areas no walked segment may enter, as ids or (ticket 36) names. A segment along
+    an area's edge doesn't count; a link's hop isn't checked. The check samples every 0.25
+    studs, against every floor's areas at the sample's height (ticket 36: a crossing between
+    two curb strips lies on the road floor, which neither end waypoint is on);
   - `MaxStretch`: `Length` at most this many times the straight line From-To;
   - `MinLength` / `MaxLength`, in studs. For a reference path, run it once and use its length
     plus slack.

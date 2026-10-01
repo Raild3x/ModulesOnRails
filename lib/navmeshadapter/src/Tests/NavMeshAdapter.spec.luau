@@ -166,6 +166,35 @@ return function(t: tiniest)
 			expect(near(lo, vector.create(2, 0, 2)) and near(hi, vector.create(6, 0, 6))).is_true()
 		end)
 
+		test("a text NavArea names an area: ids from 2 by name, skipping numeric ones", function()
+			local road = slab("Road", 0, 0, 10, 4, 0)
+			road:SetAttribute("NavArea", "Road")
+			local walk = slab("Walk", 0, 4, 10, 8, 0)
+			walk:SetAttribute("NavArea", "Sidewalk")
+			local cross = slab("Cross", 4, 0, 6, 4, 0)
+			cross:SetAttribute("NavArea", "Crosswalk")
+			local mud = slab("Mud", 0, 8, 10, 10, 0)
+			mud:SetAttribute("NavArea", 2)
+			local road2 = slab("Road2", 10, 0, 20, 4, 0)
+			road2:SetAttribute("NavArea", "Road")
+			local desc: any, areas = NavMeshAdapter.FromParts({ road, walk, cross, mud, road2 }, {})
+			expect(areas.Crosswalk).is(3)
+			expect(areas.Road).is(4)
+			expect(areas.Sidewalk).is(5)
+			local count = 0
+			for _ in areas do
+				count += 1
+			end
+			expect(count).is(3)
+			local ids = {}
+			for _, a in desc.Floors.Road.Areas do
+				table.insert(ids, a.Area)
+			end
+			expect(table.concat(ids, ",")).is("4,5,3,2,4")
+			local _, none = NavMeshAdapter.FromParts({ slab("Ground", 0, 0, 1, 1, 0) }, {})
+			expect(next(none)).is(nil)
+		end)
+
 		test("floor rings run counter-clockwise: upside-down Parts, tiny faces", function()
 			local flipped = part("Part", "Deck", { 4, 1, 4 }, CFrame.new(0, 0, 0) * CFrame.Angles(math.pi, 0, 0))
 			local tiny = part("Part", "Tiny", { 0.5, 1, 0.5 }, CFrame.new(10, 3, 0)) -- upright, under 1 square stud
