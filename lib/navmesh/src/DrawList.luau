@@ -23,6 +23,7 @@ local TILE_COLOR = "#ff7043"
 local PATH_COLOR = "#d81b60"
 local SEAM_COLOR = "#00acc1"
 local LINK_COLOR = "#6a1b9a"
+local DISABLED_LINK_COLOR = "#ce93d8"
 
 local DrawList = {}
 
@@ -45,8 +46,16 @@ local function clearanceColor(s: Storage.State, t: number): string
 	return string.format("#%02x%02x40", red, green)
 end
 
-function DrawList.ToDrawList(s: Storage.State, options: Types.NavMeshDrawOptions?, path: Types.PathResult?): DrawList
+function DrawList.ToDrawList(
+	s: Storage.State,
+	options: Types.NavMeshDrawOptions?,
+	paths: (Types.PathResult | { Types.PathResult })?
+): DrawList
 	local opts: Types.NavMeshDrawOptions = options or {}
+	local floorColors = opts.FloorColors or FLOOR_COLORS
+	local areaColors = opts.AreaColors or AREA_COLORS
+	local wallColor = opts.WallColor or WALL_COLOR
+	local pathColors = opts.PathColors or { PATH_COLOR }
 	local list: DrawList = {}
 
 	if opts.Triangles ~= false then
@@ -59,8 +68,8 @@ function DrawList.ToDrawList(s: Storage.State, options: Types.NavMeshDrawOptions
 				Points = { pa.X, pa.Y, pa.Z, pb.X, pb.Y, pb.Z, pc.X, pc.Y, pc.Z },
 				Color = if opts.Clearance
 					then clearanceColor(s, t)
-					elseif opts.Areas then paletteColor(AREA_COLORS, Storage.GetTriangleArea(s, t))
-					else paletteColor(FLOOR_COLORS, floor),
+					elseif opts.Areas then paletteColor(areaColors, Storage.GetTriangleArea(s, t))
+					else paletteColor(floorColors, floor),
 				Layer = `Floor:{Storage.GetFloorName(s, floor)}`,
 			})
 		end
@@ -74,7 +83,7 @@ function DrawList.ToDrawList(s: Storage.State, options: Types.NavMeshDrawOptions
 					table.insert(list, {
 						Kind = "Line",
 						Points = { p.X, p.Y, p.Z, q.X, q.Y, q.Z },
-						Color = WALL_COLOR,
+						Color = wallColor,
 						Layer = "Walls",
 					})
 				end
@@ -85,12 +94,19 @@ function DrawList.ToDrawList(s: Storage.State, options: Types.NavMeshDrawOptions
 	if opts.Tiles then
 		for tile = 1, Storage.TileCount(s) do
 			local x0, z0, x1, z1 = Storage.GetTileBounds(s, tile)
+			-- At the lowest height of the tile's triangles (0 for an empty tile).
+			local first, count = Storage.GetTileRange(s, tile)
+			local y = if count > 0 then math.huge else 0
+			for t = first, first + count - 1 do
+				local a, b, c = Storage.GetTriangle(s, t)
+				y = math.min(y, Storage.GetVertex(s, a).Y, Storage.GetVertex(s, b).Y, Storage.GetVertex(s, c).Y)
+			end
 			local corners = { x0, z0, x1, z0, x1, z1, x0, z1 }
 			for k = 0, 3 do
 				local i, j = 2 * k + 1, (2 * k + 2) % 8 + 1
 				table.insert(list, {
 					Kind = "Line",
-					Points = { corners[i], 0, corners[i + 1], corners[j], 0, corners[j + 1] },
+					Points = { corners[i], y, corners[i + 1], corners[j], y, corners[j + 1] },
 					Color = TILE_COLOR,
 					Layer = "Tiles",
 				})
@@ -119,25 +135,32 @@ function DrawList.ToDrawList(s: Storage.State, options: Types.NavMeshDrawOptions
 
 	if opts.Links then
 		for id = 1, Storage.LinkCount(s) do
-			local _, from, _, to, _, _, _, both = Storage.GetLink(s, id)
+			local _, from, _, to, _, _, _, both, enabled = Storage.GetLink(s, id)
+			local color = if enabled then LINK_COLOR else DISABLED_LINK_COLOR
 			table.insert(list, {
 				Kind = "Arrow",
 				Points = { from.X, from.Y, from.Z, to.X, to.Y, to.Z },
-				Color = LINK_COLOR,
+				Color = color,
 				Layer = "Links",
 			})
 			if both then
 				table.insert(list, {
 					Kind = "Arrow",
 					Points = { to.X, to.Y, to.Z, from.X, from.Y, from.Z },
-					Color = LINK_COLOR,
+					Color = color,
 					Layer = "Links",
 				})
 			end
 		end
 	end
 
-	if path then
+	-- One path, or a list of them (a PathResult always has Waypoints).
+	local pathList: { Types.PathResult } = if paths == nil
+		then {}
+		elseif (paths :: any).Waypoints then { paths :: Types.PathResult }
+		else paths :: { Types.PathResult }
+	for n, path in pathList do
+		local color = paletteColor(pathColors, n)
 		local waypoints = path.Waypoints
 		for i, w in waypoints do
 			local p = w.Position
@@ -145,10 +168,10 @@ function DrawList.ToDrawList(s: Storage.State, options: Types.NavMeshDrawOptions
 				local q = waypoints[i - 1].Position
 				table.insert(
 					list,
-					{ Kind = "Line", Points = { q.X, q.Y, q.Z, p.X, p.Y, p.Z }, Color = PATH_COLOR, Layer = "Path" }
+					{ Kind = "Line", Points = { q.X, q.Y, q.Z, p.X, p.Y, p.Z }, Color = color, Layer = "Path" }
 				)
 			end
-			table.insert(list, { Kind = "Point", Points = { p.X, p.Y, p.Z }, Color = PATH_COLOR, Layer = "Path" })
+			table.insert(list, { Kind = "Point", Points = { p.X, p.Y, p.Z }, Color = color, Layer = "Path" })
 		end
 	end
 	return list

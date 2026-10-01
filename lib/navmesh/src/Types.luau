@@ -98,7 +98,11 @@ export type NavMeshDesc = {
 	.Clearance boolean? -- colour triangles by their widest crossing, red (under 1 stud) to green (8 and over)
 	.Seams boolean? -- seam portals, on the Seams layer
 	.Links boolean? -- links as arrows (both ways when bidirectional), on the Links layer
-	.Tiles boolean? -- tile bounds
+	.Tiles boolean? -- tile bounds, at the lowest height of each tile's triangles
+	.FloorColors { string }? -- "#rrggbb" per floor, in floor-name order, cycled (default six built-in colours)
+	.AreaColors { string }? -- per area id, cycled, with Areas (default: area 1 grey #9e9e9e, ...)
+	.WallColor string? -- default #212121
+	.PathColors { string }? -- per path when drawing several, cycled (default #d81b60 for every path)
 ]=]
 export type NavMeshDrawOptions = {
 	Triangles: boolean?,
@@ -107,6 +111,10 @@ export type NavMeshDrawOptions = {
 	Tiles: boolean?,
 	Seams: boolean?,
 	Links: boolean?,
+	FloorColors: { string }?,
+	AreaColors: { string }?,
+	WallColor: string?,
+	PathColors: { string }?,
 }
 
 --[=[
