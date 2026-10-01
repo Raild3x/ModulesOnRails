@@ -84,8 +84,9 @@ return function(o: Options)
 		balls[npc] = ball(folder, npc)
 	end
 
-	local meshRenderer = o.Renderer.new(folder)
-	local pathRenderer = o.Renderer.new(folder)
+	-- Not AlwaysOnTop: walls, shelves and the mezzanine deck hide what is behind them.
+	local meshRenderer = o.Renderer.new(folder, { AlwaysOnTop = false })
+	local pathRenderer = o.Renderer.new(folder, { AlwaysOnTop = false })
 	local drawTimes, pathTimes = {}, {}
 	local function drawMesh()
 		local d0 = os.clock()

@@ -14,13 +14,17 @@
 	benchmark chose this over two `WedgePart`s per triangle: on a 4,605-triangle mesh it
 	draws in about 11 ms with one fill part, where wedges take about 250 ms and 9,210 parts.
 
+	Everything is drawn `Lift` studs above its points (default 0.1), so fills and lines on a
+	floor's top face don't z-fight with the floor's Part. Lines draw over the world by default;
+	pass `AlwaysOnTop = false` to let walls and decks hide what is behind them.
+
 	`Draw` never yields. Creating a `MeshPart` from an `EditableMesh` yields for a frame,
 	so the fills appear a frame after `Draw`, and a newer `Draw` discards fills still on
 	their way. Like the adornment lines, the fills do not replicate: draw where you look
 	(Studio, or a client).
 
 	```lua
-	local renderer = DrawListRenderer.new(workspace)
+	local renderer = DrawListRenderer.new(workspace, { AlwaysOnTop = false })
 	renderer:Draw(list)
 	renderer:SetLayerVisible("Triangles", false)
 	renderer:Destroy()
@@ -38,6 +42,7 @@ local POINT_CROSS_SIZE = 0.25
 local TEXT_SIZE = 16
 local FILL_TRANSPARENCY = 0.6
 local MESH_CHUNK = 20000 -- an EditableMesh holds at most 20,000 triangles and 60,000 vertices
+local DEFAULT_LIFT = 0.1 -- studs: clears depth-buffer fighting with a coplanar Part, invisible at play scale
 
 export type DrawListRenderer = {
 	Draw: (self: DrawListRenderer, list: DrawList) -> (),
@@ -52,6 +57,8 @@ type DrawListRendererInternal = DrawListRenderer & {
 	_meshes: { EditableMesh }, -- backing the current fills; destroyed on the next Draw
 	_generation: number, -- bumped by Draw and Destroy, so late fills know they are stale
 	_pending: number, -- fills still being created
+	_alwaysOnTop: boolean,
+	_lift: Vector3, -- added to every drawn point
 }
 
 -- Triangle corners for one (layer, colour), three per triangle.
@@ -62,9 +69,18 @@ DrawListRenderer.__index = DrawListRenderer
 
 --[=[
 	@within DrawListRenderer
+	@interface RendererOptions
+	.AlwaysOnTop boolean? -- lines draw over the world (default true); false lets Parts in front hide them
+	.Lift number? -- studs everything is raised above its points (default 0.1), so a drawing on a Part's face doesn't z-fight with it
+]=]
+export type RendererOptions = { AlwaysOnTop: boolean?, Lift: number? }
+
+--[=[
+	@within DrawListRenderer
 	Creates a renderer whose adornments and fills live in a Folder under `parent`.
 ]=]
-function DrawListRenderer.new(parent: Instance): DrawListRenderer
+function DrawListRenderer.new(parent: Instance, options: RendererOptions?): DrawListRenderer
+	local o: RendererOptions = options or {}
 	local folder = Instance.new("Folder")
 	folder.Name = "DrawListRenderer"
 	folder.Parent = parent
@@ -76,6 +92,8 @@ function DrawListRenderer.new(parent: Instance): DrawListRenderer
 		_meshes = {},
 		_generation = 0,
 		_pending = 0,
+		_alwaysOnTop = if o.AlwaysOnTop == nil then true else o.AlwaysOnTop,
+		_lift = Vector3.new(0, o.Lift or DEFAULT_LIFT, 0),
 	}, DrawListRenderer)
 	return (self :: any) :: DrawListRenderer
 end
@@ -88,7 +106,7 @@ local function getAdornment(self: DrawListRendererInternal, layer: string, color
 		created.Name = key
 		created.Adornee = workspace.Terrain
 		created.Color3 = Color3.fromHex(color)
-		created.AlwaysOnTop = true
+		created.AlwaysOnTop = self._alwaysOnTop
 		created.Visible = not self._hiddenLayers[layer]
 		created:SetAttribute("Layer", layer)
 		created.Parent = self._folder
@@ -96,10 +114,6 @@ local function getAdornment(self: DrawListRendererInternal, layer: string, color
 		adornment = created
 	end
 	return adornment :: WireframeHandleAdornment
-end
-
-local function v3(p: { number }, i: number): Vector3
-	return Vector3.new(p[i], p[i + 1], p[i + 2])
 end
 
 -- Removes the fills and their meshes, and marks fills still being created as stale.
@@ -117,7 +131,14 @@ local function clearFills(self: DrawListRendererInternal)
 end
 
 -- Creates the MeshPart for one mesh chunk. Runs on its own thread: CreateMeshPartAsync yields.
-local function createFillPart(self: DrawListRendererInternal, mesh: EditableMesh, name: string, layer: string, color: string, center: Vector3)
+local function createFillPart(
+	self: DrawListRendererInternal,
+	mesh: EditableMesh,
+	name: string,
+	layer: string,
+	color: string,
+	center: Vector3
+)
 	local generation = self._generation
 	local ok, part = pcall(AssetService.CreateMeshPartAsync, AssetService, Content.fromObject(mesh))
 	self._pending -= 1
@@ -188,6 +209,10 @@ function DrawListRenderer.Draw(self: DrawListRendererInternal, list: DrawList)
 	end
 	clearFills(self)
 	local fills: { [string]: Fill } = {}
+	local lift = self._lift
+	local function v3(p: { number }, i: number): Vector3
+		return Vector3.new(p[i], p[i + 1], p[i + 2]) + lift
+	end
 	for _, primitive in list do
 		local adornment = getAdornment(self, primitive.Layer, primitive.Color)
 		local p = primitive.Points
