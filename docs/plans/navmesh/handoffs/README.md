@@ -42,6 +42,10 @@ for your track. Everything named here lives on branch `feat/navmesh` unless it s
 - **Merge order:** G, then E, then F. Each later track merges `feat/navmesh` into its branch
   before its own merge.
 - **Complex-map tickets 33-38 (added 2026-10-01): Tracks [M1](M1-maps-indoor-urban.md) (33, 34, 35), [M3](M3-maps-street.md) (36) and [M2](M2-maps-outdoor-combined.md) (37, 38). M2 and M3 start once 33 merges:**
+  - **Ticket 33 merged 2026-10-01:** the harness is in `tools/navmesh/maps/`. Run
+    `lune run tools/navmesh/maps/run.luau`; screenshots come from
+    `python tools/navmesh/maps/studio.py <Map>`. The conventions are in ticket 33's as-built
+    notes.
   - The chain is 33 first; then 34, 36 and 37 in parallel; 35 after 34; 38 joins them all. 39 (voxel Terrain) comes later.
   - They are mostly maps, scenarios and measurements, so they can run beside a library track.
     The exceptions are the adapter changes the maps may force: the step-height rule (34) and
