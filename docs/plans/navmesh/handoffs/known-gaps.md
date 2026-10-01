@@ -64,3 +64,49 @@ than it looks. Read them before touching `Search`, `Clearance`, `Tiles` or `Seri
   `git archive <base> lib/navmesh/src`. Keep it out of the tree during coverage runs.
 - **Scratch archive:** the old `navmesh-phase0` worktree's untracked `zz_*` probes are in the
   main checkout's gitignored `.bench/navmesh/archive/navmesh-phase0/`.
+
+## Found by Track H on 1-4 km maps (2026-10-01)
+These are numbers on large maps, not wrong answers. Each has a script under
+`tools/navmesh/bench/`. Details are in bench.md, "Large worlds, 1-4 km". None is fixed. Track H
+changes no library code.
+- **Build and Update cost O(triangles x walkable rings) on a floor.**
+  - Build's heights loop (`triangulateTile`, "Heights. Each kept triangle...") asks every
+    walkable ring's surface for every kept triangle, with one `CDT.Locate` each. `Update` hands
+    the same per-floor surface list to `TriangulateTile`.
+  - `rings_repro.luau`: on an n x n grid of 8-stud walkable squares, Locates per triangle
+    equal the ring count. At 4,096 rings, Build takes 7.4 s and one crate's `Update` 330 ms.
+  - A terrain adapter's output hits this. At the default TileSize, the terrain map takes:
+    - 3.3 s to Build at 1 km, 63 s at 2 km and 35 minutes at 4 km;
+    - 16, 80 and 583 ms per warm `Update`.
+
+    `profile_build.luau 1024 default terrain` puts 80% of the time in `Locate`.
+  - **Fix:** give each tile only the surfaces whose box meets it (a tile hash of ring boxes).
+  - **Owner:** Track F, which owns Build and the re-snap.
+- **Appending with `table.move` is quadratic in Luau.**
+  - The append sites: `Storage.SetFloorSources` (every authored ring), `InsertSeam`,
+    `InsertObstacleRecord`, and the seam pieces in `Tiles.prepare`.
+  - `Deserialize` of the 4 km open map (42k rings) spends 520 of its 731 ms in
+    `SetFloorSources`, against 4 ms at 2 km (`deserialize_profile.luau`).
+  - `tablemove_repro.luau` shows it in plain Luau: 80k four-point appends take 680-740 ms by
+    `table.move`, and 4-5 ms by index.
+  - **Fix:** append by index, or `table.create` the destination.
+  - Without it, `Deserialize` would run at about 0.9 us per triangle, about 240 ms at 4 km.
+- **A warm Update scans every authored ring on its floor.** `Tiles.reSnap` takes the bounds of
+  every ring to find those near the dirty tiles.
+  - `update_profile.luau`: on the open map, the scan takes 1.5 ms at 1 km, 8.4 ms at 2 km and
+    44 ms at 4 km, out of a 67 ms `Update`. The rebuild itself is about 2 ms.
+  - **Fix:** a per-floor index of ring boxes, like Snap's tile hash.
+  - **Owner:** Track F (the re-snap).
+- **Update re-joins every seam (`Build.Internal.Connect`).** It takes 7.2 ms per `Update` on
+  the 4 km city's 862 seams and 863 floors (`update_profile.luau city`).
+- **The O(T) clean-tile copy now shows** (the Opt1 deferred item above): 5.3 ms at 66k
+  triangles and 18.6 ms at 265k.
+- **Buffers keep their growth capacity after `Deserialize`.**
+  - The triangle buffers are sized to the next power of two, so up to half is slack
+    (`heap_fields.luau`: 182 bytes per triangle allocated, where the data needs 92).
+  - The 4 km open map holds 66 MB at the default TileSize (265k triangles, capacity 524k) and
+    42 MB at TileSize 128 (255k triangles, capacity 262k).
+  - **Fix:** size the buffers exactly on load.
+- **The load spike, measured** (the item above). On the 4 km open map:
+  - the first radius `FindPath` takes 130 ms, against 22 ms warm;
+  - the first `Update` takes 250 ms, against 73 ms.
