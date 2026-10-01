@@ -152,7 +152,7 @@ export type QueryFilter = {
 	triangle whose clearance widths were recomputed. A path whose waypoints, and the straight
 	segments between them fattened by its `AgentRadius`, stay outside every box on their floors
 	is unaffected: `FindPath` would return it again, unless a removal opened a better route
-	through a box.
+	through a box. `NavMesh.FirstAffectedSegment` runs that test.
 ]=]
 export type ChangedRegion = { Floor: string, Min: Vector3, Max: Vector3 }
 

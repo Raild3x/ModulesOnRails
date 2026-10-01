@@ -175,36 +175,8 @@ return function(t: tiniest)
 		return ""
 	end
 
-	-- Whether a path's waypoints, or the segments between them grown by `radius`, meet a region
-	-- on their floor (in plan; a square grown box, so never a miss where the round one meets).
 	local function pathMeets(path: any, regions: { any }, radius: number): boolean
-		local points = path.Waypoints
-		for i = 1, math.max(#points - 1, 1) do
-			local a, b = points[i], points[math.min(i + 1, #points)]
-			for _, r in regions do
-				if r.Floor == a.Floor or r.Floor == b.Floor then
-					-- Slab test of segment a-b against the box grown by the radius.
-					local t0, t1 = 0, 1
-					local hit = true
-					for _, axis in { "X", "Z" } do
-						local p, d = a.Position[axis], b.Position[axis] - a.Position[axis]
-						local lo, hi = r.Min[axis] - radius, r.Max[axis] + radius
-						if d == 0 then
-							if p < lo or p > hi then
-								hit = false
-							end
-						else
-							local u0, u1 = (lo - p) / d, (hi - p) / d
-							t0, t1 = math.max(t0, math.min(u0, u1)), math.min(t1, math.max(u0, u1))
-						end
-					end
-					if hit and t0 <= t1 then
-						return true
-					end
-				end
-			end
-		end
-		return false
+		return NavMesh.FirstAffectedSegment(path, regions, radius) ~= nil
 	end
 
 	-- A 40 x 4 corridor in 8-stud tiles, and a door across it at x = 15..17.

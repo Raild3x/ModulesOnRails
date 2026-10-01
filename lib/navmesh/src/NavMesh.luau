@@ -475,6 +475,116 @@ function NavMesh.IsPathValid(mesh: NavMeshData, path: PathResult): boolean
 	return true
 end
 
+-- Whether segment a-b, grown by `radius` into a square-cornered band, meets box `r` in plan
+-- (the slab test on the box grown by the radius).
+local function segmentMeets(a: vector, b: vector, r: ChangedRegion, radius: number): boolean
+	local t0, t1 = 0, 1
+	for axis = 1, 2 do
+		local p = if axis == 1 then a.X else a.Z
+		local d = (if axis == 1 then b.X else b.Z) - p
+		local lo = (if axis == 1 then r.Min.X else r.Min.Z) - radius
+		local hi = (if axis == 1 then r.Max.X else r.Max.Z) + radius
+		if d == 0 then
+			if p < lo or p > hi then
+				return false
+			end
+		else
+			local u0, u1 = (lo - p) / d, (hi - p) / d
+			t0, t1 = math.max(t0, math.min(u0, u1)), math.min(t1, math.max(u0, u1))
+		end
+	end
+	return t0 <= t1
+end
+
+--[=[
+	@within NavMesh
+	Which part of `path` the `regions` an `Update` returned reach (ticket 28): the index `i` of the
+	first segment `Waypoints[i] -> Waypoints[i + 1]`, at or after `fromSegment` (default 1), that
+	meets a region box on the floor of either of its ends, with the segment grown by `radius`
+	(the path's `AgentRadius`). Returns nil when none does: then `FindPath` would return the same
+	path again, unless a removal opened a better route through a box (see `ChangedRegion`).
+
+	A link's segment (from a waypoint with a `Label`) has no surface between its ends, so only its
+	two ends are tested. The radius grows boxes square, so it can report a segment the round agent
+	would miss by up to 0.41 radius at a box corner, never the reverse. Plain data in and out: one
+	check per agent costs O(regions) when the path's bounds miss every box.
+
+	With a follower, test only the way ahead: the agent is on segment `follower.Next - 1`.
+
+	```lua
+	local regions = NavMesh.Update(mesh)
+	for _, npc in npcs do
+		if NavMesh.FirstAffectedSegment(npc.Follower.Path, regions, npc.Radius, npc.Follower.Next - 1) then
+			repath(npc)
+		end
+	end
+	```
+]=]
+function NavMesh.FirstAffectedSegment(
+	path: PathResult,
+	regions: { ChangedRegion },
+	radius: number,
+	fromSegment: number?
+): number?
+	if type(path) ~= "table" or type(path.Waypoints) ~= "table" then
+		error("NavMesh.FirstAffectedSegment: path must be a PathResult", 2)
+	end
+	if type(regions) ~= "table" then
+		error("NavMesh.FirstAffectedSegment: regions must be a list of ChangedRegion", 2)
+	end
+	if type(radius) ~= "number" or not (radius >= 0 and radius < math.huge) then
+		error("NavMesh.FirstAffectedSegment: radius must be a number of studs >= 0", 2)
+	end
+	local first = if fromSegment == nil then 1 else fromSegment
+	if type(first) ~= "number" or not (first >= 1 and first < math.huge and first % 1 == 0) then
+		error("NavMesh.FirstAffectedSegment: fromSegment must be a whole number >= 1", 2)
+	end
+	local waypoints = path.Waypoints
+	local n = #waypoints
+	-- One waypoint is a path standing still: its point is segment 1.
+	local last = math.max(n - 1, 1)
+	if first > last or n == 0 then
+		return nil
+	end
+	-- Cheap reject: the bounds of the rest of the path, grown by the radius, against every box.
+	local lo, hi = toVector(waypoints[first].Position), toVector(waypoints[first].Position)
+	for i = first + 1, n do
+		local p = toVector(waypoints[i].Position)
+		lo, hi = vector.min(lo, p), vector.max(hi, p)
+	end
+	local near = false
+	for _, r in regions do
+		if
+			r.Min.X <= hi.X + radius
+			and r.Max.X >= lo.X - radius
+			and r.Min.Z <= hi.Z + radius
+			and r.Max.Z >= lo.Z - radius
+		then
+			near = true
+			break
+		end
+	end
+	if not near then
+		return nil
+	end
+	for i = first, last do
+		local a, b = waypoints[i], waypoints[math.min(i + 1, n)]
+		local pa, pb = toVector(a.Position), toVector(b.Position)
+		for _, r in regions do
+			if r.Floor ~= a.Floor and r.Floor ~= b.Floor then
+				continue
+			end
+			local hit = if a.Label
+				then segmentMeets(pa, pa, r, radius) or segmentMeets(pb, pb, r, radius)
+				else segmentMeets(pa, pb, r, radius)
+			if hit then
+				return i
+			end
+		end
+	end
+	return nil
+end
+
 --[=[
 	@within NavMesh
 	Enables or disables link `linkId` (its 1-based index in `Links`). Paths through either end's
@@ -542,14 +652,15 @@ end
 
 	Returns the changed regions (`ChangedRegion`), empty when nothing was pending: a path that
 	stays outside every box, fattened by its `AgentRadius`, is unaffected, which is finer than
-	`IsPathValid`'s per-tile stamps. Atomic (SR13): on an error the mesh is unchanged, the pending obstacle changes
+	`IsPathValid`'s per-tile stamps. `FirstAffectedSegment` does that test. A region holds whole
+	rebuilt tiles, so smaller tiles give tighter regions. Atomic (SR13): on an error the mesh is unchanged, the pending obstacle changes
 	are rolled back, and the error is raised again. Triangle and vertex ids are only stable until
 	the next `Update` (SR14).
 
 	```lua
 	local door = NavMesh.AddObstacle(mesh, "Ground", doorFootprint)
 	local regions = NavMesh.Update(mesh) -- { { Floor, Min, Max } }
-	if not NavMesh.IsPathValid(mesh, path) then path = NavMesh.FindPath(mesh, npcFeet, goal) end
+	if NavMesh.FirstAffectedSegment(path, regions, radius) then path = NavMesh.FindPath(mesh, npcFeet, goal, filter) end
 	```
 ]=]
 function NavMesh.Update(mesh: NavMeshData): { ChangedRegion }

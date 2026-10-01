@@ -66,6 +66,9 @@ A layered 2.5D navigation mesh for pathfinding queries, built on ConstrainedDela
   its own triangle, which the search checks at query time.
 - **Stamp**: a per-tile counter that changes when anything a path through that tile relies on
   changes. `IsPathValid` compares a path's stamps against the current ones.
+- **Changed region**: a per-floor box `Update` returns around what it changed: whole rebuilt
+  tiles, plus the triangles whose widths it recomputed. `FirstAffectedSegment` names the first
+  segment of a path that one reaches, fattened by the agent's radius (ticket 28).
 - **Bake**: a mesh serialized to a versioned buffer, to ship precomputed.
 - **Pending change**: a dynamic obstacle added or removed but not yet applied by `Update`
   (`HasPendingChanges`).
