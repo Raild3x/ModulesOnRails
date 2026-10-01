@@ -46,6 +46,9 @@ for your track. Everything named here lives on branch `feat/navmesh` unless it s
     `lune run tools/navmesh/maps/run.luau`; screenshots come from
     `python tools/navmesh/maps/studio.py <Map>`. The conventions are in ticket 33's as-built
     notes.
+  - **Ticket 34 merged 2026-10-01:** the building map (`Building`, `BuildingRamp`) and the
+    adapter's step-height rule, `AdapterOptions.MaxStepHeight` (ramp strips, ruled; riser
+    seams are ticket 40). M3's curbs can use it now.
   - The chain is 33 first; then 34, 36 and 37 in parallel; 35 after 34; 38 joins them all. 39 (voxel Terrain) comes later.
   - They are mostly maps, scenarios and measurements, so they can run beside a library track.
     The exceptions are the adapter changes the maps may force: the step-height rule (34) and

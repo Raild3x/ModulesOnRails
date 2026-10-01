@@ -7,6 +7,21 @@ U1–U3, N1–N4, V1–V4), plus the Phase 0 requirement: "Prototype and Test yo
 framework as part of phase 0 so we can ensure it will work for our goals at every step." R4 and
 the const question are deliberately open, gated on benchmarks.
 
+### Rulings during Track M1 (2026-10-01)
+- **Ticket 34, how stair steps join (the adapter's step-height rule).** Riser seams were the
+  obvious shape, but Build refuses a seam whose two sides differ in height. Measured on the
+  building map (ticket 34's as-built notes): ramp strips, riser seams (core check loosened
+  locally), a merged sloped floor (wedge ramp as stand-in), and links per riser. User: "We will
+  go with ramp strips for now, but make a ticket for riser seams to replace it".
+  - Built: `AdapterOptions.MaxStepHeight` (default off). Each riser up to that height gets a
+    0.25-stud strip floor seamed to both steps.
+  - Ticket 40 (riser seams in the core) is filed to replace the strips.
+  - Rejected: links per riser (Partial at radius 1 and up; 12 link events per climb) and a
+    merged sloped floor (needs stair-run detection, can't do a single curb).
+- **Studio camera (map harness):** "You may move the camera where needed at the start, but do
+  not lock it so I cant look around". `Studio.luau` places the camera once and leaves the
+  camera type alone.
+
 ### Rulings after Track H (2026-10-01)
 - **D6, large worlds, ruled on ticket 31's numbers** (bench.md, "Large worlds, 1-4 km"): fix
   the O(map) costs first, then re-measure. Region bakes are decided after that re-measure.

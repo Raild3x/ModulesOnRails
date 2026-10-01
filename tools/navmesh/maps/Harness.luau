@@ -21,6 +21,7 @@ export type Built = {
 export type Expect = {
 	Status: string?, -- the PathStatus
 	Floors: { string }?, -- the floors visited, in order (repeats collapsed)
+	Visits: { string }?, -- floors the path must visit in this order, among others (a stair's landing)
 	Links: { string }?, -- the labels of the links used, in order
 	Avoids: { number }?, -- area ids no path segment may enter
 	MaxStretch: number?, -- Length <= this x the straight line from From to To
@@ -45,6 +46,7 @@ export type Map = {
 	Build: (rbx: Rbx, parent: Instance?) -> Built,
 	Scenarios: { Scenario },
 	View: { From: { number }, To: { number } }?, -- Studio camera; default: straight down over the map
+	SeeThrough: { string }?, -- names of Parts Studio draws see-through (an upper floor over a stair)
 }
 
 export type Row = {
@@ -155,6 +157,17 @@ local function check(e: Expect, path: any, desc: any, from: vector, to: vector):
 	end
 	if e.Floors and not same(floors, e.Floors) then
 		table.insert(failed, `Floors: got {list(floors)}, want {list(e.Floors)}`)
+	end
+	if e.Visits then
+		local k = 1
+		for _, f in floors do
+			if f == e.Visits[k] then
+				k += 1
+			end
+		end
+		if k <= #e.Visits then
+			table.insert(failed, `Visits: {e.Visits[k]} missing (in order) from {list(floors)}`)
+		end
 	end
 	if e.Links and not same(links, e.Links) then
 		table.insert(failed, `Links: got {list(links)}, want {list(e.Links)}`)
