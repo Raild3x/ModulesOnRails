@@ -22,7 +22,7 @@ export type Expect = {
 	Status: string?, -- the PathStatus
 	Floors: { string }?, -- the floors visited, in order (repeats collapsed)
 	Links: { string }?, -- the labels of the links used, in order
-	Avoids: { number }?, -- area ids no path segment may enter
+	Avoids: { number | string }?, -- areas no path segment may enter: ids, or names from the adapter's table
 	MaxStretch: number?, -- Length <= this x the straight line from From to To
 	MinLength: number?, -- studs: "goes the long way"
 	MaxLength: number?, -- studs: a reference path's length, plus slack
@@ -32,7 +32,7 @@ export type Scenario = {
 	Name: string,
 	From: string, -- a point name
 	To: string,
-	Filter: any?, -- the QueryFilter
+	Filter: any?, -- the QueryFilter, or a function of the adapter's area-name table returning it
 	Expect: Expect?,
 	-- A negative control: the scenario passes only if exactly this expectation fails.
 	MustFail: string?,
@@ -59,6 +59,7 @@ export type Report = {
 	Map: Map,
 	Built: Built,
 	Desc: any,
+	Areas: { [string]: number }, -- the adapter's area-name table
 	Mesh: any,
 	Rows: { Row },
 	FromPartsMs: number,
@@ -139,7 +140,7 @@ local function same(a: { any }, b: { any }): boolean
 end
 
 -- The expectations a path fails, each as "Name: why".
-local function check(e: Expect, path: any, desc: any, from: vector, to: vector): { string }
+local function check(e: Expect, path: any, desc: any, areas: { [string]: number }, from: vector, to: vector): { string }
 	local failed = {}
 	if e.Status and path.Status ~= e.Status then
 		table.insert(failed, `Status: got {path.Status}, want {e.Status}`)
@@ -159,7 +160,8 @@ local function check(e: Expect, path: any, desc: any, from: vector, to: vector):
 	if e.Links and not same(links, e.Links) then
 		table.insert(failed, `Links: got {list(links)}, want {list(e.Links)}`)
 	end
-	for _, id in e.Avoids or {} do
+	for _, avoid in e.Avoids or {} do
+		local id = if type(avoid) == "string" then assert(areas[avoid], `no area named {avoid}`) else avoid
 		local w = path.Waypoints
 		for i = 2, #w do
 			if w[i - 1].Label == nil then -- a link's hop is not walked
@@ -193,7 +195,7 @@ local Harness = {}
 function Harness.Run(map: Map, NavMesh: any, Adapter: any, rbx: Rbx, parent: Instance?): Report
 	local built = map.Build(rbx, parent)
 	local t0 = os.clock()
-	local desc = Adapter.FromParts(built.Walkable, built.Obstacles, map.AdapterOptions)
+	local desc, areas = Adapter.FromParts(built.Walkable, built.Obstacles, map.AdapterOptions)
 	local fromPartsMs = (os.clock() - t0) * 1000
 	desc.MaxAgentRadius = map.MaxAgentRadius or 2
 	desc.Links = built.Links
@@ -209,6 +211,7 @@ function Harness.Run(map: Map, NavMesh: any, Adapter: any, rbx: Rbx, parent: Ins
 		Map = map,
 		Built = built,
 		Desc = desc,
+		Areas = areas,
 		Mesh = mesh,
 		Rows = {},
 		FromPartsMs = fromPartsMs,
@@ -222,13 +225,14 @@ function Harness.Run(map: Map, NavMesh: any, Adapter: any, rbx: Rbx, parent: Ins
 	for _, s in map.Scenarios do
 		local from, to = built.Points[s.From], built.Points[s.To]
 		assert(from and to, `{map.Name}/{s.Name}: unknown point {if from then s.To else s.From}`)
+		local filter = if type(s.Filter) == "function" then s.Filter(areas) else s.Filter
 		local path, best = nil, math.huge
 		for _ = 1, 3 do
 			t0 = os.clock()
-			path = NavMesh.FindPath(mesh, from, to, s.Filter)
+			path = NavMesh.FindPath(mesh, from, to, filter)
 			best = math.min(best, os.clock() - t0)
 		end
-		local failed = check(s.Expect or {}, path, desc, v(from), v(to))
+		local failed = check(s.Expect or {}, path, desc, areas, v(from), v(to))
 		local pass = #failed == 0
 		if s.MustFail then
 			pass = #failed == 1 and string.find(failed[1], s.MustFail .. ":", 1, true) == 1
