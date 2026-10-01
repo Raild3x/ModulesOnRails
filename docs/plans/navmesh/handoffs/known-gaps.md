@@ -36,12 +36,13 @@ ends" section. Two kinds of end still pass unjudged; both are below.
        f32 noise is about 1e-5;
     3. a clip that only touches a face at a corner passes as a seam of about 1e-5 studs, which
        the core rejects on its 1/256 grid.
-  - **Prototype fix** (scratch copy, not applied): a relative parallel test (sine under 1e-4),
-    the outside test in studs (`HEIGHT_TOLERANCE`, 0.01), and skipping clips shorter than
-    0.01 studs. All three are needed. With them, the repro gives 6 seams and Success, and a
-    6 x 6 heightfield (72 triangles) builds and paths at 1-10 degrees.
-  - Axis-aligned levels never hit this, which is why the adapter's specs and both demos pass.
-    Awaiting a ruling (adapter changes need one).
+  - **Fixed (2026-10-01, ruled; review.md "Rulings during Track M2"):** a relative parallel
+    test (sine under 1e-4), the outside test in studs (`HEIGHT_TOLERANCE`, 0.01), and skipping
+    clips shorter than 0.01 studs. Each has an adapter spec that fails without it. The repro now
+    gives 6 seams and Success, and a 6 x 6 heightfield (72 triangles) builds and paths at 1-10
+    degrees.
+  - Axis-aligned levels never hit this, which is why the adapter's specs and both demos passed;
+    the demo's `adapter_check` output is unchanged.
 
 ## Deferred, only if the user asks
 - **Precise `IsPathValid`.** Ticket 22 notes what `Clearance.Refresh` already knows.

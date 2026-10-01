@@ -3,7 +3,8 @@
 -- zero-length ones that NavMesh.Build rejects. Part data is f32, so a hinge between two rotated
 -- Parts is collinear only to about 1e-5 studs; `clipSegment` in NavMeshAdapter wants 1e-12.
 --   lune run tools/navmesh/bench/adapter_f32_seams.luau
--- Expected: hinged strip 6 seams and Success; wedge field builds and Success.
+-- Fixed 2026-10-01 (known-gaps.md). Expected: hinged strip 6 seams and Success; the wedge field
+-- builds and paths Success.
 local roblox = require("@lune/roblox") :: any
 local NavMesh = require("../../../lib/navmesh/src/NavMesh")
 local Adapter = require("../../../lib/navmeshadapter/src/NavMeshAdapter")

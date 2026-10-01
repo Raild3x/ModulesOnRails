@@ -7,6 +7,14 @@ U1–U3, N1–N4, V1–V4), plus the Phase 0 requirement: "Prototype and Test yo
 framework as part of phase 0 so we can ensure it will work for our goals at every step." R4 and
 the const question are deliberately open, gated on benchmarks.
 
+### Rulings during Track M2 (2026-10-01)
+- **Adapter seams between tilted Parts (ticket 37's pre-work):** fix the three f32 tolerances
+  in `clipSegment` and the seam loop now, with specs, and merge into `feat/navmesh` before the
+  terrain maps, so Tracks M1 and M3 get it too. User: "Fix now, merge early (Recommended)".
+  - Rejected: leaving it for M1's step-height rule (it would block ticket 37 until 34), and
+    fixing it only on M2's branch (the other map tracks keep hitting it).
+  - Repro: `tools/navmesh/bench/adapter_f32_seams.luau`; details in known-gaps.md.
+
 ### Rulings after Track H (2026-10-01)
 - **D6, large worlds, ruled on ticket 31's numbers** (bench.md, "Large worlds, 1-4 km"): fix
   the O(map) costs first, then re-measure. Region bakes are decided after that re-measure.
