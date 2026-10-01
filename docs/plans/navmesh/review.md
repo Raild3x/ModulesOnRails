@@ -7,6 +7,23 @@ U1–U3, N1–N4, V1–V4), plus the Phase 0 requirement: "Prototype and Test yo
 framework as part of phase 0 so we can ensure it will work for our goals at every step." R4 and
 the const question are deliberately open, gated on benchmarks.
 
+### Rulings after Track H (2026-10-01)
+- **D6, large worlds, ruled on ticket 31's numbers** (bench.md, "Large worlds, 1-4 km"): fix
+  the O(map) costs first, then re-measure. Region bakes are decided after that re-measure.
+  User: "Fix O(map) costs first (Recommended)".
+  - **In order:**
+    1. index each tile's surfaces in Build and `Update` (this makes terrain's Build linear);
+    2. append by index in Storage (no `table.move` appends);
+    3. a ring-box index for `Tiles.reSnap`;
+    4. exact-size buffers on load.
+  - Opt1 (the in-place commit) and a lazy wall index stay deferred until the re-measure.
+  - The items and their scripts are in known-gaps.md, "Found by Track H". Track F owns the
+    Build and re-snap items.
+  - **Rejected for now:**
+    - out of scope above 2 km (it leaves the terrain bug in place);
+    - region bakes (they don't touch the per-floor terms);
+    - a smaller bake format (12-18% after zstd).
+
 ### Debate rulings (2026-09-25)
 - **D1 (P1): accepted.** DrawList builders move into the cores, and a single DrawListRenderer
   replaces U2's two renderer names. User: "Accept P1 (Recommended)".

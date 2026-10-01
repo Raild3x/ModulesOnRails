@@ -85,8 +85,9 @@ return function(t: tiniest)
 			local green = container(folder):FindFirstChild("Fill Triangles|#43a047") :: MeshPart
 			local blue = container(folder):FindFirstChild("Fill Triangles|#1e88e5") :: MeshPart
 			expect(#childrenOf(folder, "MeshPart")).is(2)
-			expect(green.Position).is(Vector3.new(5, 0, 5))
-			expect(blue.Position).is(Vector3.new(25, 2, 5))
+			-- Raised by the default 0.1-stud lift.
+			expect(green.Position).is(Vector3.new(5, 0.1, 5))
+			expect(blue.Position).is(Vector3.new(25, 2.1, 5))
 			expect(green.Color).is(Color3.fromHex("#43a047"))
 			expect(green.Anchored).is_true()
 			expect(green.CanQuery).never_is_true()
@@ -121,7 +122,12 @@ return function(t: tiniest)
 			for i = 1, 20001 do
 				local x = i % 200
 				local z = i // 200
-				list[i] = { Kind = "Tri", Points = { x, 0, z, x, 0, z + 1, x + 1, 0, z }, Color = "#43a047", Layer = "Triangles" }
+				list[i] = {
+					Kind = "Tri",
+					Points = { x, 0, z, x, 0, z + 1, x + 1, 0, z },
+					Color = "#43a047",
+					Layer = "Triangles",
+				}
 			end
 			renderer:Draw(list :: any)
 			local meshes = (renderer :: any)._meshes
@@ -149,6 +155,25 @@ return function(t: tiniest)
 			folder:Destroy()
 		end)
 
+		test("keeps the previous fills on screen until the new ones arrive (no blink on redraw)", function()
+			local folder = Instance.new("Folder")
+			local renderer = DrawListRenderer.new(folder)
+			renderer:Draw(LIST :: any)
+			settle(renderer)
+			local before = childrenOf(folder, "MeshPart")
+			expect(#before).is(2)
+			renderer:Draw(LIST :: any)
+			-- The new fills are a frame away; the old ones still show.
+			expect(#childrenOf(folder, "MeshPart")).is(2)
+			expect(before[1].Parent ~= nil).is_true()
+			settle(renderer)
+			local after = childrenOf(folder, "MeshPart")
+			expect(#after).is(2)
+			expect(before[1].Parent == nil).is_true()
+			renderer:Destroy()
+			folder:Destroy()
+		end)
+
 		test("hides a layer", function()
 			local folder = Instance.new("Folder")
 			local renderer = DrawListRenderer.new(folder)
@@ -164,6 +189,25 @@ return function(t: tiniest)
 			renderer:SetLayerVisible("Triangles", true)
 			expect(adornment.Visible).is_true()
 			expect(fill.Transparency < 1).is_true()
+			renderer:Destroy()
+			folder:Destroy()
+		end)
+
+		test("lines draw over the world by default; AlwaysOnTop = false and Lift are honoured", function()
+			local folder = Instance.new("Folder")
+			local renderer = DrawListRenderer.new(folder)
+			renderer:Draw({ LIST[4] } :: any)
+			local line = container(folder):FindFirstChild("Constraints|#c62828") :: WireframeHandleAdornment
+			expect(line.AlwaysOnTop).is_true()
+			renderer:Destroy()
+
+			renderer = DrawListRenderer.new(folder, { AlwaysOnTop = false, Lift = 0 })
+			renderer:Draw(LIST :: any)
+			settle(renderer)
+			line = container(folder):FindFirstChild("Constraints|#c62828") :: WireframeHandleAdornment
+			local green = container(folder):FindFirstChild("Fill Triangles|#43a047") :: MeshPart
+			expect(line.AlwaysOnTop).never_is_true()
+			expect(green.Position).is(Vector3.new(5, 0, 5))
 			renderer:Destroy()
 			folder:Destroy()
 		end)

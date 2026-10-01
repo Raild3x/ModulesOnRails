@@ -3,6 +3,7 @@
 lib/constraineddelaunaydebug set up (their link modules and _Index; see README.md).
 
     python examples/navmesh-demo2/studio.py shot [--view top|oblique|door] [--seconds 30] [--no-draw]
+    python examples/navmesh-demo2/studio.py play [--view free|top|oblique|door]   # opens Studio; press Run (F8)
 
 Runs the demo in edit mode with run-in-roblox and captures the Studio window twice
 (tools/navmesh/studio/capture.ps1: PrintWindow, maximized) at --settle and --settle + 6 seconds.
@@ -11,6 +12,7 @@ demo's log and timings; output lands in .bench/navmesh-demo2/ (gitignored).
 """
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -36,7 +38,7 @@ print("[MARK] done")
 """
 
 
-def build_place(script: str) -> Path:
+def build_place(script: str, play: bool = False) -> Path:
     OUT.mkdir(parents=True, exist_ok=True)
     lib = (Path.cwd() / "lib").as_posix()
     demo = {"$className": "Folder", "NavMeshBake": {"$path": (HERE / "NavMeshBake").as_posix()}}
@@ -46,9 +48,13 @@ def build_place(script: str) -> Path:
     for pkg in ("constraineddelaunay", "constraineddelaunaydebug", "navmesh", "navmeshadapter"):
         src[pkg] = {"$path": f"{lib}/{pkg}"}
     tree = {"$className": "DataModel", "ReplicatedStorage": {"$className": "ReplicatedStorage", "src": src, "Demo": demo}}
-    (OUT / "demo.project.json").write_text(json.dumps({"name": "navmesh-demo2", "tree": tree}, indent=2), encoding="utf-8")
     (OUT / "run.luau").write_text(script, encoding="utf-8")
-    place = OUT / "demo.rbxl"
+    if play:  # the same script as a server Script, so Run (F8) starts the demo
+        (OUT / "play.server.luau").write_text(script, encoding="utf-8")
+        tree["ServerScriptService"] = {"$className": "ServerScriptService",
+                                       "NavMeshDemo2": {"$path": (OUT / "play.server.luau").resolve().as_posix()}}
+    (OUT / "demo.project.json").write_text(json.dumps({"name": "navmesh-demo2", "tree": tree}, indent=2), encoding="utf-8")
+    place = OUT / ("play.rbxl" if play else "demo.rbxl")
     subprocess.run(["rojo", "build", str(OUT / "demo.project.json"), "-o", str(place)], check=True)
     return place
 
@@ -74,7 +80,15 @@ def main() -> int:
     s.add_argument("--seconds", type=int, default=30)
     s.add_argument("--settle", type=int, default=16, help="seconds after the window opens before the first capture")
     s.add_argument("--no-draw", action="store_true", help="no debug drawing (negative control)")
+    p = sub.add_parser("play")
+    p.add_argument("--view", choices=["free", "top", "oblique", "door"], default="free")
     args = ap.parse_args()
+
+    if args.command == "play":
+        place = build_place(RUN.format(seconds="math.huge", view=args.view, draw="true"), play=True)
+        os.startfile(place.resolve())  # noqa: S606 (Windows)
+        print(f"opened {place}: press Run (F8) in Studio; Stop (Shift+F5) ends it")
+        return 0
 
     name = f"shot-{args.view}" + ("-nodraw" if args.no_draw else "")
     place = build_place(RUN.format(seconds=args.seconds, view=args.view, draw="false" if args.no_draw else "true"))

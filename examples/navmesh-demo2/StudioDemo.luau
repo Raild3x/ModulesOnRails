@@ -12,7 +12,7 @@ type Options = {
 	BakeText: any,
 	BakeFolder: Instance,
 	Seconds: number,
-	Camera: string, -- "top" | "oblique" | "door"
+	Camera: string, -- "top" | "oblique" | "door" | "free"
 	Draw: boolean, -- false: no debug drawing (the negative control for the screenshot)
 }
 
@@ -84,8 +84,9 @@ return function(o: Options)
 		balls[npc] = ball(folder, npc)
 	end
 
-	local meshRenderer = o.Renderer.new(folder)
-	local pathRenderer = o.Renderer.new(folder)
+	-- Not AlwaysOnTop: walls, shelves and the mezzanine deck hide what is behind them.
+	local meshRenderer = o.Renderer.new(folder, { AlwaysOnTop = false })
+	local pathRenderer = o.Renderer.new(folder, { AlwaysOnTop = false })
 	local drawTimes, pathTimes = {}, {}
 	local function drawMesh()
 		local d0 = os.clock()
@@ -112,14 +113,16 @@ return function(o: Options)
 		drawMesh()
 	end
 
-	local camera = workspace.CurrentCamera
-	camera.CameraType = Enum.CameraType.Scriptable
-	camera.FieldOfView = 50
-	camera.CFrame = ({
-		top = CFrame.lookAt(Vector3.new(200, 330, 120.01), Vector3.new(200, 0, 120)),
-		oblique = CFrame.lookAt(Vector3.new(210, 70, -20), Vector3.new(210, 4, 110)),
-		door = CFrame.lookAt(Vector3.new(246, 26, 100), Vector3.new(272, 2, 120)), -- the east wall's middle door
-	})[o.Camera]
+	if o.Camera ~= "free" then -- "free" leaves the camera to the user (studio.py play)
+		local camera = workspace.CurrentCamera
+		camera.CameraType = Enum.CameraType.Scriptable
+		camera.FieldOfView = 50
+		camera.CFrame = ({
+			top = CFrame.lookAt(Vector3.new(200, 330, 120.01), Vector3.new(200, 0, 120)),
+			oblique = CFrame.lookAt(Vector3.new(210, 70, -20), Vector3.new(210, 4, 110)),
+			door = CFrame.lookAt(Vector3.new(246, 26, 100), Vector3.new(272, 2, 120)), -- the east wall's middle door
+		})[o.Camera]
+	end
 
 	local updates = 0
 	local accumulator, frame = 0, 0

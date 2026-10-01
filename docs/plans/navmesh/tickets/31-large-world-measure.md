@@ -6,7 +6,7 @@ needed.
 
 **Blocked by:** none. It is bench-only and touches no `src`, so it can run beside any track.
 
-**Status:** measured 2026-10-01 (Track H); the D6 options await a ruling. Ruled 2026-09-28 (review.md, D6: "Measure first"). From
+**Status:** measured 2026-10-01 (Track H); D6 ruled 2026-10-01: fix the O(map) costs first, then re-measure (review.md). Ruled 2026-09-28 (review.md, D6: "Measure first"). From
 [research/roblox-pathfinding-comparison.md](../research/roblox-pathfinding-comparison.md)
 gap G7. Today's reference point: the 256-stud bench map bakes to 581 KB and builds in
 213-595 ms (examples/navmesh-demo/REPORT.md, measured timings).
