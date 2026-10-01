@@ -947,6 +947,37 @@ the bench prints.
 - **Terrain-like input needs the surface index before anything else.** No region scheme helps
   a Build that is quadratic within a floor.
 
+## Ticket 30: FindPath with many links (Track E, 2026-10-01)
+`lune run tools/navmesh/bench/link_scale.luau`. Random links between on-mesh points on each
+scene, dearer than walking (Cost 1-2x the distance, areas 1-4); 400 random pairs at r 0, median
+of 7 passes. "HeuristicScale" is 1,000 calls with `AreaCosts = { [2] = 1.5, [3] = 0.8 }`.
+
+**Before** (the scale looped over every link on every query):
+
+| scene | links | FindPath us | HeuristicScale us |
+|---|---|---|---|
+| props | 0 / 100 / 1,000 | 76 / 85 / 125 | 0.04 / 4.1 / 44 |
+| bench | 0 / 100 / 1,000 | 81 / 123 / 169 | 0.05 / 6.6 / 55 |
+| terrain | 0 / 100 / 1,000 | 44 / 68 / 114 | 0.03 / 5.5 / 60 |
+| walls | 0 / 100 / 1,000 | 108 / 111 / 170 | 0.05 / 5.4 / 57 |
+
+At 1,000 links the scale was 35-50% of a query. The candidate, the cheapest Cost / length kept
+per link area (rebuilt once after any link change), took 0.07-0.11 us and gave the same scale
+in all 12 cases. The other candidate in ticket 30, a cache keyed by the `AreaCosts` table, was
+not built: it breaks when a caller edits its table in place, and per-area is already O(areas).
+
+**After** (`Storage.LinkPrices`, read by `Search.HeuristicScale`):
+
+| scene | links | FindPath us | HeuristicScale us |
+|---|---|---|---|
+| props | 0 / 100 / 1,000 | 73 / 80 / 88 | 0.02 / 0.07 / 0.07 |
+| bench | 0 / 100 / 1,000 | 87 / 80 / 95 | 0.02 / 0.08 / 0.08 |
+| terrain | 0 / 100 / 1,000 | 38 / 41 / 55 | 0.02 / 0.07 / 0.09 |
+| walls | 0 / 100 / 1,000 | 78 / 77 / 74 | 0.02 / 0.08 / 0.08 |
+
+What 1,000 links still add (up to 17 us on terrain) is the search expanding the links
+themselves. Runs vary by about 10%: other sessions shared the machine.
+
 ## Not measured (flagged)
 - Remote transfer time and payload size per layout (needs a live server/client session).
 - Locality on a real CDT's vertex and triangle ordering. The grid mesh has near-ideal locality,

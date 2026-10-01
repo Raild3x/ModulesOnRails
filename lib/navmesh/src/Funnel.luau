@@ -300,12 +300,12 @@ end
 --[=[
 	@within NavMeshFunnel
 	The path from `startP` to `endP` through `corridor` (entered as `vias` says, see Search),
-	as points, the triangle each point was taken from (for its floor), and the label of each
+	as points, the triangle each point was taken from (for its floor), and the link slot of each
 	point where a link starts (by point index).
 
 	Seam portals are portals like shared edges, and their wall-corner ends are offset the same
 	way. A link
-	breaks the string: the path runs to the link's start, which carries its label, then on from
+	breaks the string: the path runs to the link's start, which carries the link, then on from
 	where it lands.
 ]=]
 function Funnel.StringPull(
@@ -316,8 +316,8 @@ function Funnel.StringPull(
 	endP: vector,
 	radius: number,
 	costs: { [number]: number }?
-): ({ vector }, { number }, { [number]: string })
-	local points, from, labels = {}, {}, {}
+): ({ vector }, { number }, { [number]: number })
+	local points, from, links = {}, {}, {}
 	local lefts, rights, owners = { startP }, { startP }, { corridor[1] }
 	local function finish(stop: vector, owner: number)
 		table.insert(lefts, stop)
@@ -351,10 +351,7 @@ function Funnel.StringPull(
 			local _, _, kind, ref, a, b = Storage.GetExtra(s, via)
 			if kind == Storage.EXTRA_LINK then
 				finish(a, t)
-				local label = select(7, Storage.GetLink(s, ref))
-				if label ~= "" then
-					labels[#points] = label
-				end
+				links[#points] = ref
 				lefts, rights, owners = { b }, { b }, { nextT }
 			else
 				-- A seam portal's end is a wall corner when it is a wall vertex on either floor.
@@ -385,7 +382,7 @@ function Funnel.StringPull(
 		end
 	end
 	finish(endP, corridor[#corridor])
-	return points, from, labels
+	return points, from, links
 end
 
 return Funnel

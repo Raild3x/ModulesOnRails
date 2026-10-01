@@ -112,6 +112,59 @@ function Tiles.RemoveObstacle(s: State, id: number)
 	end
 end
 
+--[=[
+	@within NavMeshTiles
+	Validates and records a link (pending until `Update`, which snaps its ends). Returns its id,
+	which is never reused.
+]=]
+function Tiles.AddLink(s: State, desc: Types.LinkDesc): number
+	local ok, fromP, toP, cost, area, label, both, name = pcall(Internal.CheckLink, desc, "link")
+	if not ok then
+		error((tostring(fromP):gsub("^NavMesh.Build:", "NavMesh.AddLink:")), 3)
+	end
+	-- A pending add has no triangles; cost -1 stands for the default, made from the snapped ends.
+	local slot = Storage.InsertLink(s, 0, fromP, 0, toP, cost or -1, area, label, both, name)
+	Storage.SetLinkState(s, slot, Storage.OBSTACLE_PENDING_ADD)
+	return Storage.GetLinkId(s, slot)
+end
+
+--[=[
+	@within NavMeshTiles
+	Records the removal of link `id` (pending until `Update`).
+]=]
+function Tiles.RemoveLink(s: State, id: number)
+	if type(id) ~= "number" or id % 1 ~= 0 or id < 1 or id >= Storage.GetLinkNextId(s) then
+		error(`NavMesh.RemoveLink: no link {id}`, 3)
+	end
+	local slot = Storage.FindLink(s, id)
+	local state = if slot ~= 0 then Storage.GetLinkState(s, slot) else 0
+	if state == Storage.OBSTACLE_PENDING_ADD then
+		Storage.RemoveLinkRecord(s, slot) -- never applied: nothing for Update to undo
+	elseif state == Storage.OBSTACLE_ACTIVE then
+		Storage.SetLinkState(s, slot, Storage.OBSTACLE_PENDING_REMOVE)
+	else
+		error(`NavMesh.RemoveLink: link {id} is already removed`, 3)
+	end
+end
+
+--[=[
+	@within NavMeshTiles
+	Whether a link or obstacle change waits for `Update`.
+]=]
+function Tiles.HasPending(s: State): boolean
+	for slot = 1, Storage.ObstacleCount(s) do
+		if Storage.GetObstacleState(s, slot) ~= Storage.OBSTACLE_ACTIVE then
+			return true
+		end
+	end
+	for slot = 1, Storage.LinkCount(s) do
+		if Storage.GetLinkState(s, slot) ~= Storage.OBSTACLE_ACTIVE then
+			return true
+		end
+	end
+	return false
+end
+
 -- Grid bounds of a ring.
 local function bounds(xs: { number }, zs: { number }): (number, number, number, number)
 	local x0, z0, x1, z1 = math.huge, math.huge, -math.huge, -math.huge
@@ -525,7 +578,13 @@ end
 -- triangles, neighbours, wall flags, seam pieces and link ends only change in the rebuilt tiles,
 -- and widths only in recomputed triangles (a portal width a recomputed triangle writes for its
 -- neighbour lies on their shared edge).
-local function changedRegions(s: State, n: State, plan: Plan, recompute: { [number]: boolean }): { Types.ChangedRegion }
+local function changedRegions(
+	s: State,
+	n: State,
+	plan: Plan,
+	recompute: { [number]: boolean },
+	linkTiles: { number }
+): { Types.ChangedRegion }
 	local boxes: { { number } } = {} -- floor, min x, y, z, max x, y, z
 	local function fit(box: { number }, state: State, t: number)
 		for _, v in { Storage.GetTriangle(state, t) } do
@@ -534,7 +593,9 @@ local function changedRegions(s: State, n: State, plan: Plan, recompute: { [numb
 			box[5], box[6], box[7] = math.max(box[5], p.X), math.max(box[6], p.Y), math.max(box[7], p.Z)
 		end
 	end
-	for _, tile in plan.DirtyList do
+	-- The rebuilt tiles, and the end tiles of the links the Update added or removed (whole tiles:
+	-- ticket 30).
+	for _, tile in table.move(linkTiles, 1, #linkTiles, #plan.DirtyList + 1, table.clone(plan.DirtyList)) do
 		local box =
 			{ Storage.GetTileFloor(n, tile), math.huge, math.huge, math.huge, -math.huge, -math.huge, -math.huge }
 		for _, state in { s, n } do
@@ -692,32 +753,61 @@ local function apply(s: State): (State, { Types.ChangedRegion })
 		end
 	end
 	-- Links, re-snapped onto the new triangles (an end under an obstacle drops out for now).
+	-- Pending removals go; pending adds are snapped from the caller's points, and an end that
+	-- doesn't snap fails the Update (ticket 30). Their end tiles are changed regions.
 	local linkTiles: { [number]: boolean } = {}
-	for id = 1, Storage.LinkCount(s) do
-		local oldFrom, from, oldTo, to, cost, area, label, both, enabled = Storage.GetLink(s, id)
+	local changedLinkTiles: { [number]: boolean } = {}
+	for slot = 1, Storage.LinkCount(s) do
+		local oldFrom, from, oldTo, to, cost, area, label, both, enabled = Storage.GetLink(s, slot)
+		local id, state = Storage.GetLinkId(s, slot), Storage.GetLinkState(s, slot)
 		for _, t in { oldFrom, oldTo } do
 			if t ~= 0 then
 				linkTiles[Storage.GetTriangleTile(s, t)] = true
+				if state == Storage.OBSTACLE_PENDING_REMOVE then
+					changedLinkTiles[Storage.GetTriangleTile(s, t)] = true
+				end
 			end
 		end
-		local fromTri, fromAt = Snap.Snap(n, from, LINK_EXTENTS, {})
-		local toTri, toAt = Snap.Snap(n, to, LINK_EXTENTS, {})
-		-- An end the snap moved in plan is under an obstacle (near its edge): it drops out too,
-		-- rather than keep a point off its triangle. (The tolerance only absorbs rounding.)
-		if fromAt == nil or (fromAt.X - from.X) ^ 2 + (fromAt.Z - from.Z) ^ 2 > 1e-12 then
-			fromTri = 0
+		if state == Storage.OBSTACLE_PENDING_REMOVE then
+			continue
 		end
-		if toAt == nil or (toAt.X - to.X) ^ 2 + (toAt.Z - to.Z) ^ 2 > 1e-12 then
-			toTri = 0
+		local fromTri, toTri
+		if state == Storage.OBSTACLE_PENDING_ADD then
+			local context = `link {id}`
+			local ok, t, p = pcall(Internal.SnapLinkEnd, n, from, "From", context)
+			local ok2, t2, p2 = pcall(Internal.SnapLinkEnd, n, to, "To", context)
+			if not (ok and ok2) then
+				error((tostring(if ok then t2 else t):gsub("^NavMesh.Build:", "NavMesh.Update:")), 0)
+			end
+			fromTri, from, toTri, to = t, p, t2, p2
+			if cost < 0 then
+				cost = vector.magnitude(to - from)
+			end
+			changedLinkTiles[Storage.GetTriangleTile(n, fromTri)] = true
+			changedLinkTiles[Storage.GetTriangleTile(n, toTri)] = true
+		else
+			local fromAt, toAt
+			fromTri, fromAt = Snap.Snap(n, from, LINK_EXTENTS, {})
+			toTri, toAt = Snap.Snap(n, to, LINK_EXTENTS, {})
+			-- An end the snap moved in plan is under an obstacle (near its edge): it drops out too,
+			-- rather than keep a point off its triangle. (The tolerance only absorbs rounding.)
+			if fromAt == nil or (fromAt.X - from.X) ^ 2 + (fromAt.Z - from.Z) ^ 2 > 1e-12 then
+				fromTri = 0
+			end
+			if toAt == nil or (toAt.X - to.X) ^ 2 + (toAt.Z - to.Z) ^ 2 > 1e-12 then
+				toTri = 0
+			end
 		end
-		Storage.InsertLink(n, fromTri, from, toTri, to, cost, area, label, both)
-		Storage.SetLinkFlag(n, id, enabled)
+		local at =
+			Storage.InsertLink(n, fromTri, from, toTri, to, cost, area, label, both, Storage.GetLinkName(s, slot), id)
+		Storage.SetLinkFlag(n, at, enabled)
 		for _, t in { fromTri, toTri } do
 			if t ~= 0 then
 				linkTiles[Storage.GetTriangleTile(n, t)] = true
 			end
 		end
 	end
+	Storage.SetLinkNextId(n, Storage.GetLinkNextId(s))
 	Internal.Connect(n)
 	-- Obstacles: the pending changes committed. A removed obstacle's record is dropped (its id
 	-- stays used: the next id carries over).
@@ -777,7 +867,14 @@ local function apply(s: State): (State, { Types.ChangedRegion })
 			Storage.BumpTileStamp(n, tile)
 		end
 	end
-	return n, changedRegions(s, n, plan, recompute)
+	local changedLinkList = {}
+	for tile in changedLinkTiles do
+		if not dirty[tile] then
+			table.insert(changedLinkList, tile)
+		end
+	end
+	table.sort(changedLinkList)
+	return n, changedRegions(s, n, plan, recompute, changedLinkList)
 end
 
 --[=[
@@ -786,14 +883,7 @@ end
 	unchanged, the pending records are rolled back, and the error is raised again.
 ]=]
 function Tiles.Update(s: State): { Types.ChangedRegion }
-	local pending = false
-	for slot = 1, Storage.ObstacleCount(s) do
-		if Storage.GetObstacleState(s, slot) ~= Storage.OBSTACLE_ACTIVE then
-			pending = true
-			break
-		end
-	end
-	if not pending then
+	if not Tiles.HasPending(s) then
 		return {}
 	end
 	local ok, result, regions = pcall(apply, s)
@@ -805,6 +895,14 @@ function Tiles.Update(s: State): { Types.ChangedRegion }
 				Storage.RemoveObstacleRecord(s, slot)
 			elseif state == Storage.OBSTACLE_PENDING_REMOVE then
 				Storage.SetObstacleState(s, slot, Storage.OBSTACLE_ACTIVE)
+			end
+		end
+		for slot = Storage.LinkCount(s), 1, -1 do
+			local state = Storage.GetLinkState(s, slot)
+			if state == Storage.OBSTACLE_PENDING_ADD then
+				Storage.RemoveLinkRecord(s, slot)
+			elseif state == Storage.OBSTACLE_PENDING_REMOVE then
+				Storage.SetLinkState(s, slot, Storage.OBSTACLE_ACTIVE)
 			end
 		end
 		error(result, 0)

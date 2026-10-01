@@ -58,8 +58,10 @@ export type SeamDesc = { FloorA: string, FloorB: string, From: Vector3, To: Vect
 	.Cost number? -- default the 3D distance From -> To; scaled by the area's cost multiplier
 	.Area number? -- area id for AreaCosts (default 1)
 	.Label string? -- copied onto the waypoint where the link starts
+	.Name string? -- for `SetLinkEnabled` by name; several links may share one (both halves of a door, say)
 
-	A jump, ladder or teleport between two points. Link id = its 1-based index in `Links`.
+	A jump, ladder or teleport between two points. A link in `NavMeshDesc.Links` has id = its
+	1-based index there; `AddLink` hands out the next ids. Ids are never reused.
 ]=]
 export type LinkDesc = {
 	From: Vector3,
@@ -68,6 +70,7 @@ export type LinkDesc = {
 	Cost: number?,
 	Area: number?,
 	Label: string?,
+	Name: string?,
 }
 
 --[=[
@@ -204,9 +207,10 @@ export type RandomPointOptions = {
 	@interface Waypoint
 	.Position Vector3
 	.Floor string
-	.Label string? -- the link's label, on the waypoint where a link starts; the next waypoint is where it lands (not walkable between them)
+	.Label string? -- the link's label, on the waypoint where a link starts
+	.LinkId number? -- the link's id, on the waypoint where a link starts; the next waypoint is where it lands (not walkable between them)
 ]=]
-export type Waypoint = { Position: Vector3, Floor: string, Label: string? }
+export type Waypoint = { Position: Vector3, Floor: string, Label: string?, LinkId: number? }
 
 --[=[
 	@within NavMesh
@@ -253,11 +257,12 @@ export type FollowEvent = "Arrived" | "Link" | "Blocked"
 --[=[
 	@within NavMesh
 	@interface FollowerLink
-	.Label string -- the link's label
+	.Label string -- the link's label ("" when it has none)
+	.Id number -- the link's id
 	.From Vector3 -- its start (the waypoint the agent stands at)
 	.To Vector3 -- its landing
 ]=]
-export type FollowerLink = { Label: string, From: Vector3, To: Vector3 }
+export type FollowerLink = { Label: string, Id: number, From: Vector3, To: Vector3 }
 
 --[=[
 	@within NavMesh

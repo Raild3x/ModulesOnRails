@@ -1036,9 +1036,10 @@ end
 
 local LINK_EXTENTS = vector.create(0.5, 4, 0.5)
 
--- Snaps and records link `id`, with its extra links (both ways unless one-way).
-local function addLink(s: Storage.State, id: number, link: any)
-	local context = `link {id}`
+-- Checks link description `link` (`context` names it in errors). Returns its two points, its
+-- cost (nil = the default, the 3D distance between its snapped ends), area, label ("" = none),
+-- whether it runs both ways, and its name ("" = none).
+local function checkLink(link: any, context: string): (vector, vector, number?, number, string, boolean, string)
 	if type(link) ~= "table" then
 		fail(context, "must be a table")
 	end
@@ -1048,16 +1049,10 @@ local function addLink(s: Storage.State, id: number, link: any)
 		if typeof(p) ~= "Vector3" and type(p) ~= "vector" then
 			fail(context, `{field} must be a Vector3`)
 		end
-		local t, snapped = Snap.Snap(s, vector.create(p.X, p.Y, p.Z), LINK_EXTENTS, {})
-		if snapped == nil then
-			fail(context, `{field} ({fmt(p.X)}, {fmt(p.Y)}, {fmt(p.Z)}) is not on the mesh`)
-		end
-		ends[k] = { Tri = t, Point = snapped :: vector }
+		ends[k] = vector.create(p.X, p.Y, p.Z)
 	end
 	local cost = link.Cost
-	if cost == nil then
-		cost = vector.magnitude(ends[2].Point - ends[1].Point)
-	elseif type(cost) ~= "number" or not (cost >= 0 and cost < math.huge) then
+	if cost ~= nil and (type(cost) ~= "number" or not (cost >= 0 and cost < math.huge)) then
 		fail(context, "Cost must be a finite number >= 0")
 	end
 	local area = if link.Area == nil then 1 else checkArea(link.Area, context)
@@ -1069,8 +1064,30 @@ local function addLink(s: Storage.State, id: number, link: any)
 	if both ~= nil and type(both) ~= "boolean" then
 		fail(context, "Bidirectional must be a boolean")
 	end
-	local from, to = ends[1], ends[2]
-	Storage.InsertLink(s, from.Tri, from.Point, to.Tri, to.Point, cost, area, label or "", both ~= false)
+	local name = link.Name
+	if name ~= nil and type(name) ~= "string" then
+		fail(context, "Name must be a string")
+	end
+	return ends[1], ends[2], cost, area, label or "", both ~= false, name or ""
+end
+
+-- Snaps link point `p` (field `field` of the link `context` names) onto the mesh: its triangle
+-- and snapped point. Errors when it is not on the mesh.
+local function snapLinkEnd(s: Storage.State, p: vector, field: string, context: string): (number, vector)
+	local t, snapped = Snap.Snap(s, p, LINK_EXTENTS, {})
+	if snapped == nil then
+		fail(context, `{field} ({fmt(p.X)}, {fmt(p.Y)}, {fmt(p.Z)}) is not on the mesh`)
+	end
+	return t, snapped :: vector
+end
+
+-- Snaps and records link `id` of the description.
+local function addLink(s: Storage.State, id: number, link: any)
+	local context = `link {id}`
+	local fromP, toP, cost, area, label, both, name = checkLink(link, context)
+	local fromTri, from = snapLinkEnd(s, fromP, "From", context)
+	local toTri, to = snapLinkEnd(s, toP, "To", context)
+	Storage.InsertLink(s, fromTri, from, toTri, to, cost or vector.magnitude(to - from), area, label, both, name)
 end
 
 -- (Re)builds every extra link: seam portals from the stored seam pieces, then links from their
@@ -1217,6 +1234,8 @@ Build.Internal = {
 	ClipToRect = clipToRect,
 	PointKey = pointKey,
 	Connect = connect,
+	CheckLink = checkLink,
+	SnapLinkEnd = snapLinkEnd,
 }
 
 return Build

@@ -40,6 +40,9 @@
 	- Dynamic obstacles: the live records in id order (slot 1..`ObstacleCount`), each with its
 	  id, floor, quantized ring and state (pending or committed), plus the next id to hand out.
 	  Removed records are dropped, so ids are sparse; they are never reused.
+	- Links (ticket 30): records the same way, by slot (1..`LinkCount`) in id order, with a state
+	  and the next id. Extra links name a link by its slot. A pending add has no triangles yet
+	  (its ends are the caller's points, snapped at `Update`).
 
 	The state is plain data and passes `PlainData.Check`.
 ]=]
@@ -69,9 +72,14 @@ export type State = {
 	ExtraNext: { number },
 	ExtraTarget: { number },
 	ExtraKind: { number }, -- Storage.EXTRA_SEAM or Storage.EXTRA_LINK
-	ExtraRef: { number }, -- links: the link id; seams: the slot of the seam edge in the source triangle
+	ExtraRef: { number }, -- links: the link's slot; seams: the slot of the seam edge in the source triangle
 	ExtraA: { vector },
 	ExtraB: { vector },
+	-- Links: records by slot, ids increasing (never reused), like obstacles (ticket 30).
+	LinkNextId: number,
+	LinkId: { number },
+	LinkState: { number }, -- Storage.OBSTACLE_* (links share the obstacle states)
+	LinkName: { string }, -- "" = none
 	LinkFromTri: { number },
 	LinkToTri: { number },
 	LinkFrom: { vector },
@@ -81,6 +89,9 @@ export type State = {
 	LinkLabel: { string }, -- "" = none
 	LinkBidirectional: { boolean },
 	LinkEnabled: { boolean },
+	-- Derived, never stored: per link area, the cheapest Cost / length of an enabled link with
+	-- both ends on the mesh (Search's heuristic scale). nil = stale; any link change clears it.
+	LinkPrices: { [number]: number }?,
 	TileFloor: { number },
 	TileBounds: { number }, -- minX, minZ, maxX, maxZ per tile (studs)
 	TileFirst: { number }, -- first triangle of the tile's range
@@ -186,6 +197,10 @@ function Storage.New(): State
 		ExtraRef = {},
 		ExtraA = {},
 		ExtraB = {},
+		LinkNextId = 1,
+		LinkId = {},
+		LinkState = {},
+		LinkName = {},
 		LinkFromTri = {},
 		LinkToTri = {},
 		LinkFrom = {},
@@ -498,13 +513,19 @@ function Storage.GetExtra(s: State, id: number): (number, number, number, number
 	return s.ExtraNext[id], s.ExtraTarget[id], s.ExtraKind[id], s.ExtraRef[id], s.ExtraA[id], s.ExtraB[id]
 end
 
+--[=[
+	@within NavMeshStorage
+	The number of link records (slots), pending ones included.
+]=]
 function Storage.LinkCount(s: State): number
 	return #s.LinkFromTri
 end
 
 --[=[
 	@within NavMeshStorage
-	Records a link (enabled) and returns its id. `label` "" means none.
+	Records a link (enabled, committed) after the last slot and returns its slot. `label` and
+	`name` "" mean none. The id is `id`, default the next id; ids only grow, so it must be at
+	least the next id, which moves past it.
 ]=]
 function Storage.InsertLink(
 	s: State,
@@ -515,8 +536,17 @@ function Storage.InsertLink(
 	cost: number,
 	area: number,
 	label: string,
-	bidirectional: boolean
+	bidirectional: boolean,
+	name: string?,
+	id: number?
 ): number
+	local given = id or s.LinkNextId
+	assert(given >= s.LinkNextId, "link ids are never reused")
+	s.LinkNextId = given + 1
+	s.LinkPrices = nil
+	table.insert(s.LinkId, given)
+	table.insert(s.LinkState, Storage.OBSTACLE_ACTIVE)
+	table.insert(s.LinkName, name or "")
 	table.insert(s.LinkFromTri, fromTri)
 	table.insert(s.LinkToTri, toTri)
 	table.insert(s.LinkFrom, from)
@@ -531,7 +561,7 @@ end
 
 --[=[
 	@within NavMeshStorage
-	Link `id`: (fromTri, from, toTri, to, cost, area, label, bidirectional, enabled).
+	The link in slot `id`: (fromTri, from, toTri, to, cost, area, label, bidirectional, enabled).
 ]=]
 function Storage.GetLink(
 	s: State,
@@ -550,6 +580,94 @@ end
 
 function Storage.SetLinkFlag(s: State, id: number, enabled: boolean)
 	s.LinkEnabled[id] = enabled
+	s.LinkPrices = nil
+end
+
+function Storage.GetLinkId(s: State, slot: number): number
+	return s.LinkId[slot]
+end
+
+function Storage.GetLinkName(s: State, slot: number): string
+	return s.LinkName[slot]
+end
+
+function Storage.SetLinkName(s: State, slot: number, name: string)
+	s.LinkName[slot] = name
+end
+
+function Storage.GetLinkState(s: State, slot: number): number
+	return s.LinkState[slot]
+end
+
+function Storage.SetLinkState(s: State, slot: number, state: number)
+	s.LinkState[slot] = state
+end
+
+--[=[
+	@within NavMeshStorage
+	The id the next new link gets. It only grows, so ids are never reused.
+]=]
+function Storage.GetLinkNextId(s: State): number
+	return s.LinkNextId
+end
+
+function Storage.SetLinkNextId(s: State, id: number)
+	assert(id >= s.LinkNextId, "link ids are never reused")
+	s.LinkNextId = id
+end
+
+--[=[
+	@within NavMeshStorage
+	The slot holding link `id`, or 0 when it has no record (removed, or never made).
+]=]
+function Storage.FindLink(s: State, id: number): number
+	local ids = s.LinkId
+	local lo, hi = 1, #ids
+	while lo <= hi do
+		local mid = (lo + hi) // 2
+		local at = ids[mid]
+		if at == id then
+			return mid
+		elseif at < id then
+			lo = mid + 1
+		else
+			hi = mid - 1
+		end
+	end
+	return 0
+end
+
+--[=[
+	@within NavMeshStorage
+	Drops the link record in `slot`; later records move down a slot, and the extra links naming
+	them follow. The record's own extra links must be gone already (a pending add has none). The
+	next id is unchanged.
+]=]
+function Storage.RemoveLinkRecord(s: State, slot: number)
+	for _, column in
+		{
+			s.LinkId,
+			s.LinkState,
+			s.LinkName,
+			s.LinkFromTri,
+			s.LinkToTri,
+			s.LinkFrom,
+			s.LinkTo,
+			s.LinkCost,
+			s.LinkArea,
+			s.LinkLabel,
+			s.LinkBidirectional,
+			s.LinkEnabled,
+		} :: { { any } }
+	do
+		table.remove(column, slot)
+	end
+	for e, kind in s.ExtraKind do
+		if kind == Storage.EXTRA_LINK and s.ExtraRef[e] > slot then
+			s.ExtraRef[e] -= 1
+		end
+	end
+	s.LinkPrices = nil
 end
 
 --[=[
@@ -685,6 +803,7 @@ end
 function Storage.SetLinkEnds(s: State, id: number, fromTri: number, from: vector, toTri: number, to: vector)
 	s.LinkFromTri[id], s.LinkFrom[id] = fromTri, from
 	s.LinkToTri[id], s.LinkTo[id] = toTri, to
+	s.LinkPrices = nil
 end
 
 function Storage.PieceCount(s: State): number

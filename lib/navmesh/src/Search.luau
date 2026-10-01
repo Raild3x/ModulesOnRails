@@ -152,23 +152,36 @@ end
 	@within NavMeshSearch
 	The SR7 heuristic scale: `min(1, smallest AreaCosts multiplier, smallest enabled link
 	(Cost x its area multiplier) / its 3D length)`, so the heuristic never overestimates.
+
+	Links are read through `Storage.LinkPrices`, the cheapest Cost / length per link area, made
+	once per link change: a query reads one entry per area. Looping over every link instead
+	took 44-60 us of a 110-170 us `FindPath` at 1,000 links (bench.md, "Ticket 30").
 ]=]
 function Search.HeuristicScale(s: Storage.State, costs: { [number]: number }): number
+	local prices = s.LinkPrices
+	if prices == nil then
+		local made: { [number]: number } = {}
+		for slot = 1, Storage.LinkCount(s) do
+			local fromTri, from, toTri, to, cost, area, _, _, enabled = Storage.GetLink(s, slot)
+			if enabled and fromTri ~= 0 and toTri ~= 0 then
+				local length = vector.magnitude(to - from)
+				local ratio = if length > 0 then cost / length elseif cost == 0 then 0 else nil
+				if ratio then -- a dear zero-length link bounds nothing
+					made[area] = math.min(made[area] or math.huge, ratio)
+				end
+			end
+		end
+		s.LinkPrices = made
+		prices = made
+	end
 	local scale = 1
 	for _, multiplier in costs do
 		scale = math.min(scale, multiplier)
 	end
-	for id = 1, Storage.LinkCount(s) do
-		local _, from, _, to, cost, area, _, _, enabled = Storage.GetLink(s, id)
+	for area, ratio in prices :: { [number]: number } do
 		local multiplier = costs[area] or 1
-		if enabled and multiplier ~= math.huge then
-			local length = vector.magnitude(to - from)
-			local price = cost * multiplier
-			if length > 0 then
-				scale = math.min(scale, price / length)
-			elseif price == 0 then
-				scale = 0
-			end
+		if multiplier ~= math.huge then
+			scale = math.min(scale, ratio * multiplier)
 		end
 	end
 	return scale

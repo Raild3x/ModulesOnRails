@@ -361,13 +361,17 @@ return function(t: tiniest)
 			expect(function()
 				NavMesh.SetLinkEnabled(mesh, 1, "yes" :: any)
 			end).fails_with("must be a boolean")
-			for _, id in { 0, 1.5, "1" } do
+			for _, id in { 0, 1.5, true } do
 				expect(function()
 						NavMesh.SetLinkEnabled(mesh, id :: any, true)
 					end)
 					.with_context(tostring(id))
 					.fails_with(`no link {id}`)
 			end
+			-- A string is a name (ticket 25); no link has one here.
+			expect(function()
+				NavMesh.SetLinkEnabled(mesh, "1", true)
+			end).fails_with("no link named '1'")
 			for i, call in
 				{
 					function()
