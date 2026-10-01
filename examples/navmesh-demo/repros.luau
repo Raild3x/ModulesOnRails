@@ -97,7 +97,7 @@ do
 	print(`  MoveAlongSurface r=1.5 from (4,0,10) to (16,0,10): ends at {f(moved.Position)}`)
 end
 
-print("\n== 3. FindRandomPoint ignores QueryFilter.AgentRadius")
+print("\n== 3. FindRandomPoint honours QueryFilter.AgentRadius (ticket 24)")
 do
 	local mesh = NavMesh.Build({ Floors = { Ground = { Walkable = { rect(0, 0, 0, 10, 10) } } } } :: any)
 	local close = 0
@@ -107,13 +107,13 @@ do
 		return seed / 2147483648
 	end
 	for _ = 1, 1000 do
-		local p = assert(NavMesh.FindRandomPoint(mesh, { AgentRadius = 2 }, nil, nil, lcg))
+		local p = assert(NavMesh.FindRandomPoint(mesh, { Filter = { AgentRadius = 2 }, Rng = lcg }))
 		if NavMesh.FindDistanceToWall(mesh, p.Position, 5) < 2 then
 			close += 1
 		end
 	end
 	print(
-		`  {close} / 1000 points are closer than the radius (2) to a wall (expected 0; 64% of a 10x10 square is within 2 of its edge)`
+		`  {close} / 1000 points are closer than the radius (2) to a wall (64% of a 10x10 square is within 2 of its edge)`
 	)
 	local p = NavMesh.FindPath(mesh, v(5, 0, 5), v(0.2, 0, 0.2), { AgentRadius = 2 })
 	print(`  FindPath r=2 to such a point: {p.Status}, ends at {f(p.Waypoints[#p.Waypoints].Position)}`)
@@ -140,7 +140,7 @@ do
 	)
 end
 
-print("\n== 5. A door that closes on an agent: every query treats it differently")
+print("\n== 5. A door that closes on an agent: one off-mesh policy (ticket 24)")
 do
 	local mesh = NavMesh.Build({ Floors = { Ground = { Walkable = { rect(0, 0, 0, 20, 20) } } } } :: any)
 	NavMesh.AddObstacle(mesh, "Ground", rect(0, 9, 0, 11, 20))
@@ -153,10 +153,16 @@ do
 	local blocked, stop = NavMesh.Raycast(mesh, inDoor, v(2, 0, 2))
 	print(`  Raycast: blocked={blocked}, stop={f(stop)}`)
 	print(`  FindDistanceToWall: {NavMesh.FindDistanceToWall(mesh, inDoor, 5)}`)
-	local ok, err = pcall(NavMesh.MoveAlongSurface, mesh, inDoor, v(2, 0, 2))
-	print(`  MoveAlongSurface: {if ok then "ok" else err}`)
-	local rescue = NavMesh.FindNearestPoint(mesh, inDoor, { SnapExtents = v(2, 4, 2) })
-	print(`  FindNearestPoint with SnapExtents (2, 4, 2): {f(rescue and rescue.Position)}`)
+	local ok, moved = pcall(NavMesh.MoveAlongSurface, mesh, inDoor, v(2, 0, 2))
+	print(`  MoveAlongSurface: {if ok then `Status {moved.Status}, Position {f(moved.Position)}` else moved}`)
+	local rescue = NavMesh.FindNearestPoint(mesh, inDoor, nil, 2)
+	print(`  FindNearestPoint with searchRadius 2: {f(rescue and rescue.Position)}`)
+	local fallback = NavMesh.FindPath(mesh, v(2, 0, 10), v(10.5, 0, 10), { GoalFallback = true })
+	print(
+		`  FindPath to a goal inside the door, GoalFallback: {fallback.Status}, ends at {f(
+			fallback.Waypoints[#fallback.Waypoints].Position
+		)}`
+	)
 end
 
 print("\n== 6. On a small level every Update invalidates every path (one tile per floor)")

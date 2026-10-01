@@ -120,17 +120,25 @@ export type NavMeshDrawOptions = {
 --[=[
 	@within NavMesh
 	@interface QueryFilter
-	.AgentRadius number? -- studs (default 0), up to the mesh's MaxAgentRadius; paths only go where the agent fits, and turn this far from wall corners (straight stretches are not offset from walls). The path's end point is not offset.
+	.AgentRadius number? -- studs (default 0), up to the mesh's MaxAgentRadius; paths only go where the agent fits, and turn this far from wall corners (straight stretches are not offset from walls). The path's end point is pushed this far off the walls, so it can differ from the goal by up to the radius.
 	.AreaCosts { [number]: number }? -- cost multiplier per area id (default 1, >= 0); math.huge excludes the area
 	.MaxExpansions number? -- stop with "Budget" after expanding this many triangles (default unlimited)
 	.SnapExtents Vector3? -- half-size of the snap box around a feet position (default (0.5, 4, 0.5))
+	.GoalFallback boolean? -- FindPath only: a goal that doesn't snap gives "Partial" to the closest reachable point instead of "NoGoal" (default false)
 
+	**Closest reachable point (`GoalFallback`):** the search runs from the start with no goal
+	triangle, over every triangle it can reach for this `AgentRadius` and `AreaCosts` (up to
+	`MaxExpansions`, then `Budget`). Each reached triangle offers its point nearest the goal in
+	plan (X, Z), at its surface height, and the one nearest the goal in 3D wins; the end is then
+	pushed off the walls like any end. There is no distance bound: the whole reachable region is
+	searched, as for any unreachable goal, so bound it with `MaxExpansions` on a big mesh.
 ]=]
 export type QueryFilter = {
 	AgentRadius: number?,
 	AreaCosts: { [number]: number }?,
 	MaxExpansions: number?,
 	SnapExtents: Vector3?,
+	GoalFallback: boolean?,
 }
 
 --[=[
@@ -158,6 +166,38 @@ export type NavPoint = { Position: Vector3, Floor: string }
 
 --[=[
 	@within NavMesh
+	@type MoveStatus "Success" | "NoStart"
+	- `Success`: moved (it may have slid along or stopped at a wall).
+	- `NoStart`: `from` did not snap onto the mesh; nothing moved.
+]=]
+export type MoveStatus = "Success" | "NoStart"
+
+--[=[
+	@within NavMesh
+	@interface MoveResult
+	.Status MoveStatus
+	.Position Vector3 -- where the move ended; `from` itself on NoStart
+	.Floor string? -- the floor it ended on; nil on NoStart
+]=]
+export type MoveResult = { Status: MoveStatus, Position: Vector3, Floor: string? }
+
+--[=[
+	@within NavMesh
+	@interface RandomPointOptions
+	.Filter QueryFilter? -- AreaCosts exclusions and AgentRadius apply
+	.Center Vector3? -- pick within Radius of this point, in plan
+	.Radius number? -- studs, >= 0; required with Center
+	.Rng (() -> number)? -- returns [0, 1) (default math.random)
+]=]
+export type RandomPointOptions = {
+	Filter: QueryFilter?,
+	Center: Vector3?,
+	Radius: number?,
+	Rng: (() -> number)?,
+}
+
+--[=[
+	@within NavMesh
 	@interface Waypoint
 	.Position Vector3
 	.Floor string
@@ -169,10 +209,13 @@ export type Waypoint = { Position: Vector3, Floor: string, Label: string? }
 	@within NavMesh
 	@type PathStatus "Success" | "Partial" | "Budget" | "NoStart" | "NoGoal"
 	- `Success`: reached the goal.
-	- `Partial`: the goal is unreachable; the waypoints end at the reachable point nearest it.
+	- `Partial`: the goal is unreachable (or, with `GoalFallback`, off the mesh); the waypoints
+	  end at the reachable point nearest it.
 	- `Budget`: `MaxExpansions` was hit; the waypoints end at the point nearest the goal found so
 	  far.
 	- `NoStart` / `NoGoal`: that end could not be snapped onto the mesh (no waypoints).
+	Every end is pushed `AgentRadius` off the walls, so it can differ from the goal by up to that
+	even on `Success`.
 ]=]
 export type PathStatus = "Success" | "Partial" | "Budget" | "NoStart" | "NoGoal"
 
@@ -180,10 +223,49 @@ export type PathStatus = "Success" | "Partial" | "Budget" | "NoStart" | "NoGoal"
 	@within NavMesh
 	@interface PathResult
 	.Status PathStatus
-	.Waypoints { Waypoint } -- from the snapped start
+	.Waypoints { Waypoint } -- from the snapped start; the last is pushed AgentRadius off the walls
 	.Cost number -- the search cost: 3D length times area multipliers, measured through the midpoints of the edges crossed
 	.TileStamps { number } -- opaque: for IsPathValid
 ]=]
 export type PathResult = { Status: PathStatus, Waypoints: { Waypoint }, Cost: number, TileStamps: { number } }
+
+--[=[
+	@within NavMesh
+	@type FollowEvent "Arrived" | "Link" | "Blocked"
+	- `Arrived`: the last waypoint is reached (at once for a path with none).
+	- `Link`: the agent is at a link's start; `Follower.Link` says where it goes. The follower
+	  never walks the link: move the agent to `Link.To` (hop, climb, teleport) and keep calling.
+	- `Blocked`: `StallSteps` steps in a row made no progress, or the agent is off the mesh
+	  (then `Advance` returns no floor). Repath.
+]=]
+export type FollowEvent = "Arrived" | "Link" | "Blocked"
+
+--[=[
+	@within NavMesh
+	@interface FollowerLink
+	.Label string -- the link's label
+	.From Vector3 -- its start (the waypoint the agent stands at)
+	.To Vector3 -- its landing
+]=]
+export type FollowerLink = { Label: string, From: Vector3, To: Vector3 }
+
+--[=[
+	@within NavMesh
+	@interface Follower
+	.Path PathResult
+	.Next number -- the waypoint being walked to
+	.Stalled number -- steps in a row without progress
+	.StallSteps number -- how many make Blocked
+	.Link FollowerLink? -- set on the step that returned "Link", nil otherwise
+
+	Plain data `Advance` updates in place; make one per path with `NewFollower`.
+]=]
+export type Follower = {
+	Path: PathResult,
+	Next: number,
+	Stalled: number,
+	StallSteps: number,
+	Link: FollowerLink?,
+}
 
 return {}

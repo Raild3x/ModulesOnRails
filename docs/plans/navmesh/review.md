@@ -83,6 +83,29 @@ the const question are deliberately open, gated on benchmarks.
   about 0.01% of a `FindPath`). User: "Error (Recommended)".
 - **`HasPendingChanges(mesh)` (ticket 26):** 2026-09-28: added (the recommendation was to skip
   it). User: "Add it".
+- **Off-mesh policy and closest-reachable queries (ticket 24):** 2026-09-28, all five required:
+  1. `FindPath` pushes the last waypoint `AgentRadius` off the walls (the `MoveAlongSurface`
+     push), for Success, Partial and Budget; unchanged at radius 0; documented that the end
+     can differ from the goal by up to the radius.
+  2. `MoveAlongSurface` returns a status instead of throwing off the mesh. One off-mesh policy
+     for every query, in the `NavMesh` class doc. As built: `MoveResult { Status, Position,
+     Floor? }` with `"Success" | "NoStart"`, the same status name and "no result on NoStart"
+     rule as `FindPath`'s `PathResult`.
+  3. `FindRandomPoint(mesh, { Filter, Center, Radius, Rng })`, honouring `Filter.AgentRadius`
+     (samples only where the agent fits, pushes off the walls); sampling bias documented.
+  4. `FindNearestPoint(mesh, position, filter, searchRadius?)`: the closest point within that
+     plan distance, however far outside `SnapExtents`; cost bounded by the radius.
+  5. `QueryFilter.GoalFallback`: an off-mesh goal gives `Partial` to the closest reachable point
+     instead of `NoGoal`. "Closest reachable" is 3D over the whole reachable region, bounded by
+     `MaxExpansions` (documented on `QueryFilter`).
+- **Path follower API (ticket 23):** 2026-09-28: shape B, a follower table.
+  `NavMesh.NewFollower(path, stallSteps?)` returns plain data `{ Path, Next, Stalled,
+  StallSteps, Link }`, and `NavMesh.Advance(mesh, follower, position, maxStep, filter) ->
+  (position, floor, event)` updates it in place. `Blocked` is debounced inside (after
+  `stallSteps` steps) and immediate off the mesh; `Link` fills `follower.Link`. Chosen over
+  A, the stateless `Advance(mesh, path, cursor, ...)`: both prototypes behaved identically
+  in the sim, but `follow` was 39 lines against A's 55, because A left the stall timer and
+  the link arithmetic to the game. User: "B: follower table (Recommended)".
 
 ### Rulings during the build (2026-09-27)
 - **U-a (clearance reach), ruled after the P4 probe (ticket 15 notes):** no cap by default,

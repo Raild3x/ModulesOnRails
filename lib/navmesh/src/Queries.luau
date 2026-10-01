@@ -49,6 +49,43 @@ local function across(s: Storage.State, t: number, e: number, hit: vector, costs
 	return n
 end
 
+-- A walk that starts exactly on a vertex of t (a radius-0 funnel corner) must leave through
+-- the triangle of that vertex's fan whose corner holds the direction; the snap may have picked
+-- any of them. Turns around the vertex one way, then the other (a fan on a wall is open on one
+-- side only), until a triangle holds the direction. Returns it, or t when none does (the
+-- direction heads into a wall).
+local function fanStart(s: Storage.State, t: number, p: vector, dx: number, dz: number, costs: { [number]: number })
+	for side = 1, 2 do
+		local at = t
+		for _ = 1, 64 do
+			local verts = { Storage.GetTriangle(s, at) }
+			local i = 0
+			for k = 1, 3 do
+				local q = Storage.GetVertex(s, verts[k])
+				if q.X == p.X and q.Z == p.Z then
+					i = k
+				end
+			end
+			if i == 0 then
+				return t
+			end
+			-- Edge e runs from vertex e % 3 + 1 to (e + 1) % 3 + 1: out of p along edge i - 1 (3
+			-- for i = 1), into p along edge i % 3 + 1. The interior is left of both (CCW).
+			local u = Storage.GetVertex(s, verts[i % 3 + 1])
+			local w = Storage.GetVertex(s, verts[(i + 1) % 3 + 1])
+			if cross2(u.X - p.X, u.Z - p.Z, dx, dz) >= 0 and cross2(p.X - w.X, p.Z - w.Z, dx, dz) >= 0 then
+				return at
+			end
+			local n = across(s, at, if side == 1 then (if i == 1 then 3 else i - 1) else i % 3 + 1, p, costs)
+			if n == 0 then
+				break
+			end
+			at = n
+		end
+	end
+	return t
+end
+
 --[=[
 	@within NavMeshQueries
 	Walks straight from `p` (on triangle `t`) towards `to` in (X, Z). Returns whether a wall or
@@ -63,6 +100,7 @@ function Queries.Walk(
 	costs: { [number]: number }
 ): (boolean, vector, number, vector?)
 	local dx, dz = to.X - p.X, to.Z - p.Z
+	t = fanStart(s, t, p, dx, dz, costs)
 	local from = -1 -- the edge of t we entered through (never an exit)
 	for _ = 1, WALK_LIMIT do
 		local verts = { Storage.GetTriangle(s, t) }
@@ -124,11 +162,11 @@ function Queries.DistanceToWall(
 	local seen = { [t] = true }
 	local queue = { t }
 	local head = 1
-	local function segmentPoint(u: vector, w: vector): (vector, number)
+	local function segmentPoint(u: vector, w: vector): (vector, number, number)
 		local ex, ez = w.X - u.X, w.Z - u.Z
 		local k = math.clamp(((p.X - u.X) * ex + (p.Z - u.Z) * ez) / (ex * ex + ez * ez), 0, 1)
 		local q = u + (w - u) * k
-		return q, math.sqrt((q.X - p.X) ^ 2 + (q.Z - p.Z) ^ 2)
+		return q, math.sqrt((q.X - p.X) ^ 2 + (q.Z - p.Z) ^ 2), k
 	end
 	while head <= #queue do
 		local tri = queue[head]
@@ -136,18 +174,19 @@ function Queries.DistanceToWall(
 		local verts = { Storage.GetTriangle(s, tri) }
 		for e = 1, 3 do
 			local u, w = Storage.GetVertex(s, verts[e % 3 + 1]), Storage.GetVertex(s, verts[(e + 1) % 3 + 1])
-			local q, d = segmentPoint(u, w)
+			local q, d, k = segmentPoint(u, w)
 			if d >= best then
 				continue -- nothing past this edge can be nearer
 			end
 			local n = if Storage.IsWallEdge(s, tri, e) then 0 else across(s, tri, e, q, costs)
 			if n == 0 then
 				-- A wall (or an excluded area's border): the nearest so far.
-				local normal = vector.create(p.X - q.X, 0, p.Z - q.Z)
-				if d < 1e-9 then
-					-- On the wall: its inward normal (CCW triangle: the interior is on the left).
-					normal = vector.create(-(w.Z - u.Z), 0, w.X - u.X)
-				end
+				-- Its inward normal (CCW triangle: the interior is on the left) when the nearest
+				-- point is inside the edge: exact, where p - q is f32 rounding for a point on or a
+				-- hair off the wall. At an end vertex, away from it (or the edge's, from on it).
+				local normal = if (k > 0 and k < 1) or d < 1e-9
+					then vector.create(u.Z - w.Z, 0, w.X - u.X)
+					else vector.create(p.X - q.X, 0, p.Z - q.Z)
 				best, bestHit, bestNormal = d, q, normal / vector.magnitude(normal)
 			elseif not seen[n] then
 				seen[n] = true
@@ -191,11 +230,29 @@ function Queries.Move(
 		end
 		target = vector.create(p.X + w.X * along, target.Y, p.Z + w.Z * along)
 	end
+	return Queries.Push(s, t, p, radius, costs)
+end
+
+--[=[
+	@within NavMeshQueries
+	Pushes `p` (on triangle `t`) to `radius` from the nearest wall, walking over the surface so
+	it never passes through another wall: twice, so a corner's two walls are both cleared. Where
+	the mesh is narrower than `2 radius` it gets as far as the walls allow. Returns the point
+	and its triangle (unchanged at radius 0). `MoveAlongSurface`, `FindPath`'s end and
+	`RandomPoint` all use it.
+]=]
+function Queries.Push(
+	s: Storage.State,
+	t: number,
+	p: vector,
+	radius: number,
+	costs: { [number]: number }
+): (vector, number)
 	if radius > 0 then
-		-- Keep the agent's radius from the nearest wall, without walking through another.
 		for _ = 1, 2 do
+			-- A wall found is nearer than the radius (DistanceToWall reports none at radius).
 			local d, _, normal = Queries.DistanceToWall(s, t, p, radius, costs)
-			if normal == nil or d >= radius then
+			if normal == nil then
 				break
 			end
 			local push = vector.create(p.X + normal.X * (radius - d), p.Y, p.Z + normal.Z * (radius - d))
@@ -206,23 +263,47 @@ function Queries.Move(
 	return p, t
 end
 
+local TRIES = 32
+local FIT = 1e-6 -- slack on "at least agentRadius from every wall", for the push's rounding
+
 --[=[
 	@within NavMeshQueries
-	A random point on the mesh, uniform in plan (X, Z) over triangles not excluded by `costs`
-	and, when `center` is given, within `radius` of it in plan. `rng` returns [0, 1). Returns the
-	point and its triangle, or nil when nothing qualifies.
+	A random point where an agent of radius `agentRadius` can stand, uniform in plan (X, Z):
+	- over triangles not excluded by `costs` and, when `center` is given, within `radius` of it
+	  in plan;
+	- at `agentRadius > 0`, only triangles the agent can enter (an edge whose portal width is at
+	  least `2 agentRadius`; a wall's is 0), and only points at least `agentRadius` from every
+	  wall.
+	It draws up to 32 points and keeps the first that qualifies, which is exactly uniform over
+	that region. When every draw misses (a region barely wider than the agent), the last one
+	that fell in the circle is pushed off the walls (`Push`) and kept if it then qualifies: that
+	one lands on the region's edge. `rng` returns [0, 1). Returns the point and its triangle, or
+	nil when nothing qualifies.
 ]=]
 function Queries.RandomPoint(
 	s: Storage.State,
 	costs: { [number]: number },
 	center: vector?,
 	radius: number,
+	agentRadius: number,
 	rng: () -> number
 ): (vector?, number)
+	local width = 2 * agentRadius
 	local candidates, cumulative = {}, {}
 	local total = 0
 	for t = 1, Storage.TriangleCount(s) do
 		if (costs[Storage.GetTriangleArea(s, t)] or 1) == math.huge then
+			continue
+		end
+		if
+			width > 0
+			and math.max(
+					Storage.GetPortalWidth(s, t, 1),
+					Storage.GetPortalWidth(s, t, 2),
+					Storage.GetPortalWidth(s, t, 3)
+				)
+				< width
+		then
 			continue
 		end
 		local a, b, c = Storage.GetTriangle(s, t)
@@ -240,8 +321,14 @@ function Queries.RandomPoint(
 	if #candidates == 0 then
 		return nil, 0
 	end
-	-- ponytail: rejection sampling for the circle, 32 tries; a clipped-triangle sampler if that misses.
-	for _ = 1, 32 do
+	local function inCircle(p: vector): boolean
+		return center == nil or (p.X - center.X) ^ 2 + (p.Z - center.Z) ^ 2 <= radius * radius
+	end
+	local function fits(t: number, p: vector): boolean
+		return agentRadius == 0 or Queries.DistanceToWall(s, t, p, agentRadius, costs) >= agentRadius - FIT
+	end
+	local missT, missP = 0, nil :: vector?
+	for _ = 1, TRIES do
 		local pick = rng() * total
 		local lo, hi = 1, #candidates
 		while lo < hi do
@@ -257,7 +344,16 @@ function Queries.RandomPoint(
 		local pa, pb, pc = Storage.GetVertex(s, a), Storage.GetVertex(s, b), Storage.GetVertex(s, c)
 		local r1, r2 = math.sqrt(rng()), rng()
 		local p = pa * (1 - r1) + pb * (r1 * (1 - r2)) + pc * (r1 * r2)
-		if center == nil or (p.X - center.X) ^ 2 + (p.Z - center.Z) ^ 2 <= radius * radius then
+		if inCircle(p) then
+			if fits(t, p) then
+				return p, t
+			end
+			missT, missP = t, p
+		end
+	end
+	if missP then
+		local p, t = Queries.Push(s, missT, missP, agentRadius, costs)
+		if inCircle(p) and fits(t, p) then
 			return p, t
 		end
 	end

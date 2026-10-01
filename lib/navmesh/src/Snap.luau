@@ -82,6 +82,57 @@ local function closest(a: vector, b: vector, c: vector, px: number, pz: number):
 	return x, z, (wa * a.Y + wb * b.Y + wc * c.Y) / (wa + wb + wc)
 end
 
+-- Calls fn(t, a, b, c) for each triangle not excluded by `costs` whose (X, Z) bounding box
+-- meets the box [lx, hx] x [lz, hz], with its three vertices. Per floor, the tiles come from the
+-- hash, or from the tile list when the box covers more cells than the mesh has tiles (a wide
+-- search radius), so the cost is bounded by both the box and the mesh.
+local function eachTriangle(
+	s: Storage.State,
+	lx: number,
+	hx: number,
+	lz: number,
+	hz: number,
+	costs: { [number]: number },
+	fn: (number, vector, vector, vector) -> ()
+)
+	local function scan(tile: number)
+		local first, count = Storage.GetTileRange(s, tile)
+		for t = first, first + count - 1 do
+			if (costs[Storage.GetTriangleArea(s, t)] or 1) == math.huge then
+				continue
+			end
+			local ia, ib, ic = Storage.GetTriangle(s, t)
+			local a, b, c = Storage.GetVertex(s, ia), Storage.GetVertex(s, ib), Storage.GetVertex(s, ic)
+			if
+				math.max(a.X, b.X, c.X) < lx
+				or math.min(a.X, b.X, c.X) > hx
+				or math.max(a.Z, b.Z, c.Z) < lz
+				or math.min(a.Z, b.Z, c.Z) > hz
+			then
+				continue
+			end
+			fn(t, a, b, c)
+		end
+	end
+	local index = indexOf(s)
+	for floor in index.Cells do
+		local size = index.Size[floor]
+		local cells = (math.floor(hx / size) - math.ceil(lx / size) + 2)
+			* (math.floor(hz / size) - math.ceil(lz / size) + 2)
+		if cells > index.Count then
+			for tile = 1, index.Count do
+				if Storage.GetTileFloor(s, tile) == floor then
+					scan(tile)
+				end
+			end
+			continue
+		end
+		for _, tile in Snap.TilesIn(s, floor, lx, lz, hx, hz) do
+			scan(tile)
+		end
+	end
+end
+
 --[=[
 	@within NavMeshSnap
 	The tiles of `floor` whose closed rectangle meets the closed box (studs), through the tile
@@ -118,22 +169,7 @@ function Snap.Snap(s: Storage.State, p: vector, extents: vector, costs: { [numbe
 	local floorOff: { [number]: number } = {}
 	local floorDy: { [number]: number } = {}
 	local floorPoint: { [number]: vector } = {}
-	local lx, hx, lz, hz = px - ex, px + ex, pz - ez, pz + ez
-	local function consider(t: number)
-		if (costs[Storage.GetTriangleArea(s, t)] or 1) == math.huge then
-			return
-		end
-		local ia, ib, ic = Storage.GetTriangle(s, t)
-		local a, b, c = Storage.GetVertex(s, ia), Storage.GetVertex(s, ib), Storage.GetVertex(s, ic)
-		-- Reject by bounding box before the exact closest-point test.
-		if
-			math.max(a.X, b.X, c.X) < lx
-			or math.min(a.X, b.X, c.X) > hx
-			or math.max(a.Z, b.Z, c.Z) < lz
-			or math.min(a.Z, b.Z, c.Z) > hz
-		then
-			return
-		end
+	eachTriangle(s, px - ex, px + ex, pz - ez, pz + ez, costs, function(t, a, b, c)
 		local x, z, h = closest(a, b, c, px, pz)
 		local dy = h - py
 		if math.abs(x - px) > ex or math.abs(z - pz) > ez or math.abs(dy) > ey then
@@ -146,15 +182,7 @@ function Snap.Snap(s: Storage.State, p: vector, extents: vector, costs: { [numbe
 			floorTri[floor], floorOff[floor], floorDy[floor] = t, off, dy
 			floorPoint[floor] = vector.create(x, h, z)
 		end
-	end
-	for floor in indexOf(s).Cells do
-		for _, tile in Snap.TilesIn(s, floor, lx, lz, hx, hz) do
-			local first, count = Storage.GetTileRange(s, tile)
-			for t = first, first + count - 1 do
-				consider(t)
-			end
-		end
-	end
+	end)
 	-- Nearest vertically; on a tie, a floor under the point's column (offset 0) beats one only
 	-- reached across the snap box, then below beats above, then the lower floor id.
 	local bestFloor, bestDy, bestUnder = 0, math.huge, false
@@ -178,6 +206,27 @@ function Snap.Snap(s: Storage.State, p: vector, extents: vector, costs: { [numbe
 		return 0, nil
 	end
 	return floorTri[bestFloor], floorPoint[bestFloor]
+end
+
+--[=[
+	@within NavMeshSnap
+	The nearest surface point to `p` within `radius` of it in plan, with no vertical limit: each
+	triangle offers its point nearest `p` in (X, Z), at its surface height (as `Snap` takes it),
+	and the one nearest `p` in 3D wins. Returns the triangle and the point, or `0, nil`. The
+	cost is bounded by the radius (and by the mesh).
+]=]
+function Snap.Nearest(s: Storage.State, p: vector, radius: number, costs: { [number]: number }): (number, vector?)
+	local px, py, pz = p.X, p.Y, p.Z
+	local bestT, bestP, best = 0, nil :: vector?, math.huge
+	eachTriangle(s, px - radius, px + radius, pz - radius, pz + radius, costs, function(t, a, b, c)
+		local x, z, h = closest(a, b, c, px, pz)
+		local plan = (x - px) ^ 2 + (z - pz) ^ 2
+		local d = plan + (h - py) ^ 2
+		if plan <= radius * radius and d < best then
+			bestT, bestP, best = t, vector.create(x, h, z), d
+		end
+	end)
+	return bestT, bestP
 end
 
 --[=[

@@ -24,6 +24,22 @@
 
 	`examples/navmesh-demo` is a small game on this API, and `docs/plans/navmesh/spec.md` has the
 	design rationale (search nodes, radius offsets, invalidation).
+
+	**Off the mesh.** A query position is on the mesh when it snaps within
+	`QueryFilter.SnapExtents`. No query throws for a position that doesn't; each answers "nothing
+	here" in its own result:
+
+	| Query | Off-mesh answer |
+	|---|---|
+	| `FindPath` | `Status` `"NoStart"`, or `"NoGoal"` (with `GoalFallback`: `"Partial"` to the closest reachable point) |
+	| `MoveAlongSurface` | `Status` `"NoStart"`, `Position` = `from`, no `Floor` |
+	| `Advance` | `"Blocked"` at once, the position unchanged, no floor |
+	| `Raycast` | blocked at `from`: `(true, from)` |
+	| `FindDistanceToWall` | `(0, nil, nil)`: in a wall (a point on a wall gets a hit point and normal) |
+	| `FindNearestPoint` | `nil` |
+
+	To rescue an agent that a closed door left off the mesh, snap it back with
+	`FindNearestPoint(mesh, position, filter, searchRadius)`.
 ]=]
 
 local Build = require("./Build")
@@ -48,22 +64,35 @@ export type Waypoint = Types.Waypoint
 export type PathStatus = Types.PathStatus
 export type PathResult = Types.PathResult
 export type NavPoint = Types.NavPoint
+export type MoveStatus = Types.MoveStatus
+export type MoveResult = Types.MoveResult
+export type FollowEvent = Types.FollowEvent
+export type FollowerLink = Types.FollowerLink
+export type Follower = Types.Follower
+export type RandomPointOptions = Types.RandomPointOptions
 export type ChangedRegion = Types.ChangedRegion
 export type SeamDesc = Types.SeamDesc
 export type LinkDesc = Types.LinkDesc
 export type NavMeshData = Storage.State
 
 local DEFAULT_SNAP_EXTENTS = vector.create(0.5, 4, 0.5)
-local FILTER_KEYS = { AgentRadius = true, AreaCosts = true, MaxExpansions = true, SnapExtents = true }
+local FILTER_KEYS =
+	{ AgentRadius = true, AreaCosts = true, MaxExpansions = true, SnapExtents = true, GoalFallback = true }
 
 local NavMesh = {}
 
 -- Validates a filter at the API boundary and returns its parts with defaults applied.
-local function readFilter(mesh: NavMeshData, filter: QueryFilter?): ({ [number]: number }, number, vector, number)
+local function readFilter(
+	mesh: NavMeshData,
+	filter: QueryFilter?
+): ({ [number]: number }, number, vector, number, boolean)
 	local f: QueryFilter = filter or {}
 	for key in f :: any do
 		if not FILTER_KEYS[key] then
-			error(`unknown QueryFilter key '{key}' (known: AgentRadius, AreaCosts, MaxExpansions, SnapExtents)`, 3)
+			error(
+				`unknown QueryFilter key '{key}' (known: AgentRadius, AreaCosts, MaxExpansions, SnapExtents, GoalFallback)`,
+				3
+			)
 		end
 	end
 	local radius = f.AgentRadius or 0
@@ -89,7 +118,11 @@ local function readFilter(mesh: NavMeshData, filter: QueryFilter?): ({ [number]:
 	if not (extents.X >= 0 and extents.Y >= 0 and extents.Z >= 0) then
 		error("QueryFilter.SnapExtents must not be negative", 3)
 	end
-	return costs, maxExpansions, extents, radius
+	local fallback = f.GoalFallback
+	if fallback ~= nil and type(fallback) ~= "boolean" then
+		error("QueryFilter.GoalFallback must be a boolean", 3)
+	end
+	return costs, maxExpansions, extents, radius, fallback == true
 end
 
 --[=[
@@ -112,6 +145,14 @@ NavMesh.Build = Build.Build
 	`SnapExtents`: the nearest surface vertically; ties go to a surface under the point, then below.
 	The path is the shortest one through the cheapest triangle corridor.
 
+	**The end point** is pushed `AgentRadius` off the walls (as `MoveAlongSurface` does), so an
+	agent can stand there: for `Success`, `Partial` and `Budget` alike. So the last waypoint can
+	differ from the requested goal by up to `AgentRadius` (about 1.41 times it in a corner) even
+	on `Success`. At radius 0 it is the snapped goal.
+
+	**`GoalFallback`:** a goal that doesn't snap then gives `Partial` to the closest reachable
+	point instead of `NoGoal` (see `QueryFilter`).
+
 	```lua
 	local path = NavMesh.FindPath(mesh, npcFeet, goal, { AreaCosts = { [2] = 1.5 } })
 	if path.Status == "Success" then
@@ -120,18 +161,25 @@ NavMesh.Build = Build.Build
 	```
 ]=]
 function NavMesh.FindPath(mesh: NavMeshData, from: Vector3, to: Vector3, filter: QueryFilter?): PathResult
-	local costs, maxExpansions, extents, radius = readFilter(mesh, filter)
+	local costs, maxExpansions, extents, radius, fallback = readFilter(mesh, filter)
 	local startT, startP = Snap.Snap(mesh, vector.create(from.X, from.Y, from.Z), extents, costs)
 	if startP == nil then
 		return { Status = "NoStart" :: PathStatus, Waypoints = {}, Cost = 0, TileStamps = {} }
 	end
-	local goalT, goalP = Snap.Snap(mesh, vector.create(to.X, to.Y, to.Z), extents, costs)
+	local goal = vector.create(to.X, to.Y, to.Z)
+	local goalT, goalP = Snap.Snap(mesh, goal, extents, costs)
 	if goalP == nil then
-		return { Status = "NoGoal" :: PathStatus, Waypoints = {}, Cost = 0, TileStamps = {} }
+		if not fallback then
+			return { Status = "NoGoal" :: PathStatus, Waypoints = {}, Cost = 0, TileStamps = {} }
+		end
+		-- No goal triangle: the search ends Partial (or Budget) at the reached point nearest it.
+		goalT, goalP = 0, goal
 	end
 	local status, corridor, vias, endP, cost =
-		Search.Run(mesh, startT, startP, goalT, goalP, costs, maxExpansions, radius)
+		Search.Run(mesh, startT, startP, goalT, goalP :: vector, costs, maxExpansions, radius)
 	local points, owners, labels = Funnel.StringPull(mesh, corridor, vias, startP, endP, radius)
+	local n = #points
+	points[n], owners[n] = Queries.Push(mesh, owners[n], points[n], radius, costs)
 	local waypoints = table.create(#points)
 	for i, p in points do
 		waypoints[i] = {
@@ -140,7 +188,9 @@ function NavMesh.FindPath(mesh: NavMeshData, from: Vector3, to: Vector3, filter:
 			Label = labels[i],
 		}
 	end
-	-- Every tile the corridor passes through, with its stamp now (tile, stamp, tile, stamp, ...).
+	-- Every tile the corridor passes through, and the pushed end's, with its stamp now (tile,
+	-- stamp, tile, stamp, ...).
+	table.insert(corridor, owners[n])
 	local stamps, seen = {}, {}
 	for _, t in corridor do
 		local tile = Storage.GetTriangleTile(mesh, t)
@@ -165,10 +215,35 @@ end
 	@within NavMesh
 	Snaps a **feet** position onto the mesh (U-b): within `SnapExtents`, the nearest surface
 	vertically; ties go to a surface under the point, then below. Returns nil when nothing is in range.
+
+	With `searchRadius`, a position that doesn't snap takes the nearest surface point within
+	`searchRadius` of it in plan (X, Z), however far outside `SnapExtents` and with no vertical
+	limit: each triangle offers its point nearest the position in plan, at its surface height,
+	and the one nearest in 3D wins. The cost is bounded by the radius. Use it to rescue an agent
+	a closed door left off the mesh, or to find the floor under a point high in the air.
+
+	```lua
+	local back = NavMesh.FindNearestPoint(mesh, npcFeet, filter, 4)
+	```
 ]=]
-function NavMesh.FindNearestPoint(mesh: NavMeshData, position: Vector3, filter: QueryFilter?): NavPoint?
+function NavMesh.FindNearestPoint(
+	mesh: NavMeshData,
+	position: Vector3,
+	filter: QueryFilter?,
+	searchRadius: number?
+): NavPoint?
 	local costs, _, extents = readFilter(mesh, filter)
-	local t, p = Snap.Snap(mesh, toVector(position), extents, costs)
+	if
+		searchRadius ~= nil
+		and (type(searchRadius) ~= "number" or not (searchRadius >= 0 and searchRadius < math.huge))
+	then
+		error("NavMesh.FindNearestPoint: searchRadius must be a number of studs >= 0", 2)
+	end
+	local at = toVector(position)
+	local t, p = Snap.Snap(mesh, at, extents, costs)
+	if p == nil and searchRadius then
+		t, p = Snap.Nearest(mesh, at, searchRadius, costs)
+	end
 	return if p then navPoint(mesh, p, t) else nil
 end
 
@@ -194,16 +269,121 @@ end
 	@within NavMesh
 	Moves from `from` towards `to` over the surface, sliding along walls it meets, and keeps the
 	end `AgentRadius` from the nearest wall where there is room (V3, SR4). For per-frame
-	movement. Errors when `from` doesn't snap onto the mesh (snap it with `FindNearestPoint`).
+	movement. When `from` doesn't snap onto the mesh (a door closed on the agent) it returns
+	`Status` `"NoStart"` with `Position` = `from` and no `Floor`, like `FindPath`: rescue the
+	agent with `FindNearestPoint`'s `searchRadius`.
+
+	```lua
+	local moved = NavMesh.MoveAlongSurface(mesh, feet, feet + step, filter)
+	if moved.Status == "NoStart" then
+		local back = NavMesh.FindNearestPoint(mesh, feet, filter, 4)
+	end
+	```
 ]=]
-function NavMesh.MoveAlongSurface(mesh: NavMeshData, from: Vector3, to: Vector3, filter: QueryFilter?): NavPoint
+function NavMesh.MoveAlongSurface(mesh: NavMeshData, from: Vector3, to: Vector3, filter: QueryFilter?): MoveResult
 	local costs, _, extents, radius = readFilter(mesh, filter)
 	local t, p = Snap.Snap(mesh, toVector(from), extents, costs)
 	if p == nil then
-		error("NavMesh.MoveAlongSurface: from is not on the mesh (snap it with FindNearestPoint first)", 2)
+		return { Status = "NoStart" :: MoveStatus, Position = from }
 	end
 	local stop, at = Queries.Move(mesh, t, p, toVector(to), radius, costs)
-	return navPoint(mesh, stop, at)
+	return {
+		Status = "Success" :: MoveStatus,
+		Position = stop :: any,
+		Floor = Storage.GetFloorName(mesh, Storage.GetTriangleFloor(mesh, at)),
+	}
+end
+
+--[=[
+	@within NavMesh
+	A `Follower` for `path`, walking from its first waypoint (the snapped start) to its second.
+	`Advance` reports `Blocked` after `stallSteps` steps in a row without progress (default 10).
+]=]
+function NavMesh.NewFollower(path: PathResult, stallSteps: number?): Follower
+	if type(path) ~= "table" or type(path.Waypoints) ~= "table" then
+		error("NavMesh.NewFollower: path must be a PathResult", 2)
+	end
+	local steps = if stallSteps == nil then 10 else stallSteps
+	if type(steps) ~= "number" or not (steps >= 1 and steps < math.huge and steps % 1 == 0) then
+		error("NavMesh.NewFollower: stallSteps must be a whole number >= 1", 2)
+	end
+	return { Path = path, Next = 2, Stalled = 0, StallSteps = steps, Link = nil }
+end
+
+local STALL = 0.1 -- a step that moves less than this fraction of maxStep made no progress
+
+--[=[
+	@within NavMesh
+	Moves an agent at feet `position` up to `maxStep` studs along `follower`'s path with
+	`MoveAlongSurface` (use the same `filter` as the `FindPath` call), and updates `follower`.
+	Returns (position, floor, event); `event` is nil while walking (see `FollowEvent`), and
+	`floor` is nil only when the agent is off the mesh or the path has no waypoints.
+
+	- **Arrival:** a waypoint counts as reached when the step gets to it, or when the agent
+	  stalls within `AgentRadius` of it: the funnel puts corner waypoints on the
+	  portal, which can be nearer a wall than the radius (SR4), and the push keeps the agent
+	  off it. The path's end is already offset.
+	- **Links:** at a waypoint with a `Label`, it returns `"Link"` without moving; move the agent
+	  to `follower.Link.To` yourself, then call again from there.
+	- It never throws for an agent off the mesh (a door closed on it): that is `"Blocked"` at
+	  once, with no floor.
+
+	```lua
+	local follower = NavMesh.NewFollower(NavMesh.FindPath(mesh, feet, goal, filter))
+	-- each frame:
+	local position, floor, event = NavMesh.Advance(mesh, follower, feet, speed * dt, filter)
+	if event == "Link" then
+		hop(follower.Link.To)
+	elseif event == "Blocked" then
+		repath()
+	end
+	```
+]=]
+function NavMesh.Advance(
+	mesh: NavMeshData,
+	follower: Follower,
+	position: Vector3,
+	maxStep: number,
+	filter: QueryFilter?
+): (Vector3, string?, FollowEvent?)
+	if type(maxStep) ~= "number" or not (maxStep >= 0 and maxStep < math.huge) then
+		error("NavMesh.Advance: maxStep must be a number of studs >= 0", 2)
+	end
+	follower.Link = nil
+	local waypoints = follower.Path.Waypoints
+	local target = waypoints[follower.Next]
+	if target == nil then
+		local last = waypoints[#waypoints]
+		return position, last and last.Floor, "Arrived" :: FollowEvent
+	end
+	local here = waypoints[follower.Next - 1]
+	if here.Label then
+		-- The next waypoint is the link's landing: never walk that segment.
+		follower.Next += 1
+		follower.Link = { Label = here.Label, From = here.Position, To = target.Position }
+		return position, here.Floor, "Link" :: FollowEvent
+	end
+	local p, goal = toVector(position), toVector(target.Position)
+	local remaining = math.sqrt((goal.X - p.X) ^ 2 + (goal.Z - p.Z) ^ 2)
+	local to = if remaining <= maxStep then goal else p + (goal - p) * (maxStep / remaining)
+	local moved = NavMesh.MoveAlongSurface(mesh, position, to :: any, filter)
+	if moved.Status == "NoStart" then
+		return position, nil, "Blocked" :: FollowEvent
+	end
+	local stop = toVector(moved.Position)
+	local stalled = math.sqrt((stop.X - p.X) ^ 2 + (stop.Z - p.Z) ^ 2) < STALL * maxStep
+	local radius = if filter then filter.AgentRadius or 0 else 0
+	-- The allowance is f32 rounding: an ulp is 0.004 at 32768 studs.
+	local near = math.sqrt((goal.X - stop.X) ^ 2 + (goal.Z - stop.Z) ^ 2) <= radius + 0.01
+	if near and (remaining <= maxStep or stalled) then
+		follower.Next += 1
+		follower.Stalled = 0
+		return moved.Position, moved.Floor, if waypoints[follower.Next] then nil else "Arrived" :: FollowEvent
+	end
+	follower.Stalled = if stalled then follower.Stalled + 1 else 0
+	return moved.Position,
+		moved.Floor,
+		if follower.Stalled >= follower.StallSteps then "Blocked" :: FollowEvent else nil
 end
 
 --[=[
@@ -211,7 +391,7 @@ end
 	The distance from a feet position to the nearest wall reachable over the mesh, up to
 	`maxRadius`. Returns (distance, hitPoint, wallNormal), with the normal pointing away from the
 	wall in (X, Z); (maxRadius, nil, nil) when no wall is that close; (0, nil, nil) when the
-	position is off the mesh.
+	position is off the mesh (in a wall; a point on a wall gets its hit point and normal).
 ]=]
 function NavMesh.FindDistanceToWall(
 	mesh: NavMeshData,
@@ -231,27 +411,50 @@ function NavMesh.FindDistanceToWall(
 	return d, hit :: any, normal :: any
 end
 
+local RANDOM_OPTIONS = { Filter = true, Center = true, Radius = true, Rng = true }
+
 --[=[
 	@within NavMesh
-	A random point on the mesh, uniform in plan (X, Z) over the areas the filter allows, and
-	within `radius` of `center` (in plan) when given. `rng` returns numbers in [0, 1) (default
-	`math.random`), so a seeded generator gives reproducible points. Returns nil when no allowed
-	surface lies in range. `AgentRadius` is ignored: a point may lie closer to a wall than the
-	radius (reject those with `FindDistanceToWall` if an agent must stand there).
+	A random point where an agent can stand, uniform in plan (X, Z) over the areas
+	`options.Filter` allows, within `Radius` of `Center` (in plan) when given. `Rng` returns
+	numbers in [0, 1) (default `math.random`), so a seeded generator gives reproducible points.
+	Returns nil when no such point is in range.
+
+	With `Filter.AgentRadius` r > 0 it only picks points at least r from every wall, in triangles
+	such an agent can enter (one of its edges admits a width of 2r). It draws up to 32 points and
+	keeps the first that qualifies, which is exactly uniform over that region. The biases:
+	- a triangle no edge of which admits 2r is skipped even if part of it is r clear, and so is
+	  a floor that is a single triangle (no edge to cross);
+	- when all 32 draws miss (a region barely wider than the agent), the last is pushed off the
+	  walls and so lands on the region's edge; if that fails too, it returns nil.
+
+	```lua
+	local goal = NavMesh.FindRandomPoint(mesh, { Filter = filter, Center = feet, Radius = 30, Rng = rng })
+	```
 ]=]
-function NavMesh.FindRandomPoint(
-	mesh: NavMeshData,
-	filter: QueryFilter?,
-	center: Vector3?,
-	radius: number?,
-	rng: (() -> number)?
-): NavPoint?
-	local costs = readFilter(mesh, filter)
-	if center ~= nil and (type(radius) ~= "number" or not (radius >= 0)) then
-		error("NavMesh.FindRandomPoint: a center needs a radius >= 0", 2)
+function NavMesh.FindRandomPoint(mesh: NavMeshData, options: RandomPointOptions?): NavPoint?
+	local o: RandomPointOptions = options or {}
+	for key in o :: any do
+		if not RANDOM_OPTIONS[key] then
+			error(
+				`NavMesh.FindRandomPoint: unknown option {key} (options are Filter, Center, Radius, Rng; AgentRadius and the rest go in Filter)`,
+				2
+			)
+		end
 	end
-	local p, t =
-		Queries.RandomPoint(mesh, costs, if center then toVector(center) else nil, radius or 0, rng or math.random)
+	local costs, _, _, agentRadius = readFilter(mesh, o.Filter)
+	local center, radius = o.Center, o.Radius
+	if center ~= nil and (type(radius) ~= "number" or not (radius >= 0)) then
+		error("NavMesh.FindRandomPoint: a Center needs a Radius >= 0", 2)
+	end
+	local p, t = Queries.RandomPoint(
+		mesh,
+		costs,
+		if center then toVector(center) else nil,
+		radius or 0,
+		agentRadius,
+		o.Rng or math.random
+	)
 	return if p then navPoint(mesh, p, t) else nil
 end
 

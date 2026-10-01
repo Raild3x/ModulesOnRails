@@ -19,11 +19,24 @@ A layered 2.5D navigation mesh for pathfinding queries, built on ConstrainedDela
 - **Clearance**: the widest agent that can pass through a place. It lets one mesh serve any
   agent radius.
 - **Snap**: placing a query point onto the nearest floor surface.
+- **Off the mesh**: a query point that doesn't snap within `SnapExtents`, such as an agent a
+  closed door left inside an obstacle. No query throws for it; each answers with a status or
+  an empty result (the policy table is in the `NavMesh` class doc).
+- **Search radius**: `FindNearestPoint`'s optional bound for rescuing an off-mesh point: the
+  nearest surface point within that plan distance, however far outside `SnapExtents`.
+- **End offset**: `FindPath` pushes a path's last waypoint `AgentRadius` off the walls, so an
+  agent can stand there. The end can differ from the goal by up to the radius.
+- **Closest reachable point**: where `GoalFallback` ends a path whose goal doesn't snap: of
+  every triangle the start can reach, the point nearest the goal in 3D (each triangle offering
+  its point nearest the goal in plan), then end-offset. Bounded only by `MaxExpansions`.
 - **Grid**: the fixed 1/256-stud lattice that every authored coordinate is rounded to before a
   build.
 - **Snap rounding**: bending every authored edge through grid points so that no two edges cross.
   It happens at build time, to authored edges. Not to be confused with **Snap**, which works on
   query points.
+- **Follower**: plain data (`NewFollower`) that `Advance` walks a path with, a step at a time.
+  It reports arriving, reaching a link (which it never walks) and being blocked (stalled, or
+  off the mesh).
 - **Waypoint**: one point of a returned path. It carries a link's label when a link starts
   there.
 - **Corner width**: the widest agent that can pass through a triangle between two of its edges.

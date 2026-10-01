@@ -88,8 +88,8 @@ for _, size in { 0, 32, 16, 8, 4 } do
 	-- the ones that meet a region Update returned (ticket 22).
 	local paths, findTimes = {}, {}
 	for _ = 1, 200 do
-		local a = NavMesh.FindRandomPoint(mesh, nil, nil, nil, rng)
-		local b = NavMesh.FindRandomPoint(mesh, nil, nil, nil, rng)
+		local a = NavMesh.FindRandomPoint(mesh, { Rng = rng })
+		local b = NavMesh.FindRandomPoint(mesh, { Rng = rng })
 		if a and b then
 			local path
 			table.insert(
