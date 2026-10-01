@@ -2,7 +2,8 @@
 -- the time go? Wraps the module functions Build reaches through tables, in the vendored CDT
 -- copy Build actually uses (run `npm run setup navmesh` first). The wraps are installed before
 -- Build is required, so the Triangulator's cached predicate locals see them too.
---   lune run tools/navmesh/bench/profile_build.luau [mapSize] [tileSize]
+--   lune run tools/navmesh/bench/profile_build.luau [mapSize] [tileSize|default] [largeMap]
+-- largeMap: city, open or terrain from LargeMaps.luau (ticket 31), with MaxAgentRadius 2.
 local process = require("@lune/process")
 
 local CDT_SRC = "../../../lib/navmesh/_Index/raild3x_constraineddelaunay@local/constraineddelaunay/src/"
@@ -45,8 +46,14 @@ local NavMesh = require("../../../lib/navmesh/src/NavMesh")
 local TileSize = require("./TileSize")
 
 local mapSize = tonumber(process.args[1]) or 256
-local tileSize = tonumber(process.args[2]) or 32
+local tileSize = if process.args[2] == "default" then nil else tonumber(process.args[2]) or 32
 local desc = TileSize.Map(mapSize, 7)
+for _, map in require("./LargeMaps") do
+	if map.Name == process.args[3] then
+		desc = map.Make(mapSize)
+		desc.MaxAgentRadius = 2
+	end
+end
 desc.TileSize = tileSize
 
 local t0 = os.clock()
@@ -55,9 +62,9 @@ local total = os.clock() - t0
 
 print(
 	string.format(
-		"map %d studs, TileSize %d: %d triangles, %d tiles",
+		"map %d studs, TileSize %s: %d triangles, %d tiles",
 		mapSize,
-		tileSize,
+		tostring(tileSize or "default"),
 		mesh.TriangleCount,
 		#mesh.TileFloor
 	)
