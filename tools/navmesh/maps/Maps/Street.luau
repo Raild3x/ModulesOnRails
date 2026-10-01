@@ -68,6 +68,8 @@ return {
 				East = V3.new(94, 0, 7),
 				Mid = V3.new(60, 0, 10),
 				NorthWalk = V3.new(40, 0, 36),
+				BendStart = V3.new(60, 0, 7),
+				BendGoal = V3.new(12, 0, 37),
 			},
 		}
 	end,
@@ -109,6 +111,15 @@ return {
 				return { AgentRadius = 2.5, AreaCosts = { [areas.Road] = math.huge } }
 			end,
 			Expect = { Status = "Success", Avoids = { "Road" } },
+		},
+		{
+			-- Equal costs everywhere, yet the path bends on the road's edge at (32, 30), 2 studs past
+			-- the car's corner: 57.43 studs, against 57.11 round the corner (tickets 25 and 32).
+			Name = "equal-cost bend on the road's edge",
+			From = "BendStart",
+			To = "BendGoal",
+			Filter = costs(1),
+			Expect = { Status = "Success", MaxLength = 57.5 },
 		},
 		-- Negative controls.
 		{
