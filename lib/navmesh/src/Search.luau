@@ -46,6 +46,7 @@
 
 local Clearance = require("./Clearance")
 local OpenList = require("./OpenList")
+local Queries = require("./Queries")
 local Snap = require("./Snap")
 local Storage = require("./Storage")
 
@@ -332,24 +333,70 @@ function Search.Run(
 		end
 	end
 
+	-- Whether point p of node u's triangle is cut off, inside it, from where u was entered: its
+	-- edge, or the start point, or a link's landing (ticket 27's barriers). A point on the
+	-- triangle's boundary is undecided by the barrier polygons' inside test (and one on a wall
+	-- can't be pushed out), so it is moved 1/1024 stud towards the centroid first, in f64.
+	local function stranded(u: number, p: vector): boolean
+		local t = triangleOf(u)
+		local ia, ib, ic = GetTriangle(s, t)
+		local a, b, c = GetVertex(s, ia), GetVertex(s, ib), GetVertex(s, ic)
+		local dx, dz = (a.X + b.X + c.X) / 3 - p.X, (a.Z + b.Z + c.Z) / 3 - p.Z
+		local d = math.sqrt(dx * dx + dz * dz)
+		local k = if d > 0 then math.min(1 / 1024, d / 2) / d else 0
+		local x, z = p.X + dx * k, p.Z + dz * k
+		if u == startT then
+			return Clearance.Separated(s, t, radius, startP.X, startP.Z, x, z)
+		elseif via[u] == 0 then
+			return cutOff(s, t, entry[u], radius, x, z)
+		end
+		local _, _, kind, _, _, landing = GetExtra(s, via[u])
+		if kind == EXTRA_LINK then
+			return Clearance.Separated(s, t, radius, landing.X, landing.Z, x, z)
+		end
+		return cutOff(s, t, seamEdge(s, t, triangleOf(parent[u])), radius, x, z)
+	end
+
+	-- Whether the end FindPath makes of point p of node u's triangle, pushed off the walls
+	-- (which can carry it into a neighbour, out of a sliver too thin to stand in), stands where
+	-- a node the search closed reaches it. Like ticket 27's checks this is sound, not complete:
+	-- an end the push leaves in a pinch narrower than 2r can't be placed, and passes.
+	local function reachable(u: number, p: vector): boolean
+		local q, t = Queries.Push(s, triangleOf(u), p, radius, costs)
+		local nodes = if t == startT then { startT, startAgain } elseif t == goalT then { goalAgain } else { t }
+		for _, w in nodes do
+			if closed[w] == stamp and not stranded(w, q) then
+				return true
+			end
+		end
+		return false
+	end
+
 	local last, endP = goalNode, goalP
 	if status ~= "Success" then
 		-- The reached triangle holding the point nearest the goal (not the nearest node). The
 		-- start is always in the list: it is popped first and is not the goal. The goal's own
 		-- triangle is left out (reached, it was cut off from the goal), and so is the rest of
-		-- the start's once a chain cut the start off in it: the start then stays put.
-		local best = vector.magnitude(goalP - startP)
-		last, endP = startT, startP
-		for _, u in closedList do
-			local t = triangleOf(u)
-			if t ~= goalT and not (u == startT and startCut) then
-				local p = Snap.ClosestOnTriangle(s, t, goalP)
-				local d = vector.magnitude(goalP - p)
-				if d < best then
-					best, last, endP = d, u, p
+		-- the start's once a chain cut the start off in it: the start then stays put. A point
+		-- whose pushed end a barrier strands is left out too, and the next best is taken.
+		-- ponytail: a rescan per stranded point; keep a sorted list if many strand at once.
+		local stranding: { [number]: boolean } = {}
+		repeat
+			local best = vector.magnitude(goalP - startP)
+			last, endP = startT, startP
+			for _, u in closedList do
+				local t = triangleOf(u)
+				if t ~= goalT and not (u == startT and startCut) and not stranding[u] then
+					local p = Snap.ClosestOnTriangle(s, t, goalP)
+					local d = vector.magnitude(goalP - p)
+					if d < best then
+						best, last, endP = d, u, p
+					end
 				end
 			end
-		end
+			local done = width == 0 or endP == startP or reachable(last, endP)
+			stranding[last] = true
+		until done
 	end
 	local corridor, vias = {}, {}
 	local u = last

@@ -693,6 +693,78 @@ return function(t: tiniest)
 			expect(table.concat(refuted, "; ")).is("")
 			expect(checked >= 10).with_context(`{checked} blocked queries`).is_true()
 		end)
+
+		test("a Partial end never lies past a barrier in its last triangle", function()
+			-- The sliver is entered from the west, but its point nearest a goal in the east room
+			-- is past the gap (Track G, G3).
+			local mesh = room(0, -1)
+			for _, goal in { v(15, 0, 5), v(15, 0, 9.5), v(19, 0, 2) } do
+				local path = NavMesh.FindPath(mesh, v(5, 0, 5), goal, { AgentRadius = 0.51 })
+				expect(path.Status).is("Partial")
+				local last = path.Waypoints[#path.Waypoints].Position :: any
+				expect(last.X <= 10).with_context(`{fmt(goal)}: ends at {fmt(last)}`).is_true()
+			end
+			-- A narrow agent goes through.
+			expect(NavMesh.FindPath(mesh, v(5, 0, 5), v(15, 0, 5), { AgentRadius = 0.49 }).Status).is("Success")
+			-- An end against a wall with nothing in the way still stands just off it.
+			local apart = NavMesh.FindPath(NavMesh.Build(islands), v(2, 0, 3), v(25, 0, 7), { AgentRadius = 0.5 })
+			expect(apart.Status).is("Partial")
+			expect(fmt(apart.Waypoints[#apart.Waypoints].Position)).is("9.5000,0.0000,7.0000")
+		end)
+
+		test("every Partial and Budget end is reachable from the start (a grid flood agrees)", function()
+			-- Rooms like the one above, each with one slab of random place, width and gap, so
+			-- every barrier lies inside one triangle (ticket 27's reach; one that spans two
+			-- triangles is a known gap). Only ends the agent can stand at are judged: an end the
+			-- push leaves in a pinch narrower than 2r is another known gap.
+			math.randomseed(33)
+			local function rnd(lo: number, hi: number): number
+				return lo + math.random() * (hi - lo)
+			end
+			local checked, moved, refuted = 0, 0, {}
+			for _ = 1, 24 do
+				local x0, width, top = rnd(3, 15), rnd(0.5, 2), 10 - rnd(0.6, 1.6)
+				local mesh = NavMesh.Build {
+					TileSize = 64,
+					Floors = {
+						Ground = {
+							Walkable = { flat(0, { 0, 0, 20, 0, 20, 10, 0, 10 }) },
+							Obstacles = { flat(0, { x0, -1, x0 + width, -1, x0 + width, top, x0, top }) },
+						},
+					},
+				}
+				local oracle = Flood.New(mesh)
+				for i = 1, 20 do
+					local r = rnd(0.25, 0.9)
+					local a, b = v(rnd(0, 20), 0, rnd(0, 10)), v(rnd(0, 20), 0, rnd(0, 10))
+					-- A start the agent can stand at (the flood can't leave one in a wall's disc).
+					if not Flood.OnMesh(oracle, a.X, a.Z) or not Flood.OnMesh(oracle, b.X, b.Z) then
+						continue
+					elseif oracle.Clearance(a.X, a.Z, r + 0.01) < r then
+						continue
+					end
+					local filter = { AgentRadius = r, MaxExpansions = if i % 3 == 0 then 2 else nil }
+					local path = NavMesh.FindPath(mesh, a, b, filter)
+					local last = path.Waypoints[#path.Waypoints]
+					last = last and last.Position :: any
+					if
+						(path.Status == "Partial" or path.Status == "Budget")
+						and NavMesh.FindDistanceToWall(mesh, last, r) >= r * (1 - 1e-6)
+					then
+						checked += 1
+						if (last.X - x0) * (b.X - x0) < 0 then
+							moved += 1 -- it ended on the far side of the slab from the goal
+						end
+						if not Flood.Connected(oracle, r, path.Waypoints[1].Position :: any, last) then
+							table.insert(refuted, `r {r}, slab {x0}: {fmt(a)} -> {fmt(b)} ends at {fmt(last)}`)
+						end
+					end
+				end
+			end
+			expect(table.concat(refuted, "; ")).is("")
+			expect(checked >= 50).with_context(`{checked} Partial or Budget`).is_true()
+			expect(moved >= 20).with_context(`{moved} ended short of the slab`).is_true()
+		end)
 	end)
 
 	describe("FindPath statuses", function()
