@@ -83,6 +83,18 @@ the const question are deliberately open, gated on benchmarks.
   about 0.01% of a `FindPath`). User: "Error (Recommended)".
 - **`HasPendingChanges(mesh)` (ticket 26):** 2026-09-28: added (the recommendation was to skip
   it). User: "Add it".
+- **Point types (ticket 26, `vector` typing):** 2026-10-01: keep `Vector3` in the public types;
+  the item is closed as won't-fix.
+  - Measured with `luau-lsp analyze`, Roblox definitions loaded, on two strict callers of the
+    whole API.
+  - Errors as (Roblox-style caller / Lune-style caller):
+    - `Vector3` (kept): 0 / 23.
+    - `vector`: 23 / 0.
+    - `Vector3 | vector` throughout: 7 / 7.
+    - Inputs as the union, outputs `Vector3`: 0 / 9 (the recommendation).
+  - The package's own errors were about 810-840 in every variant, all the known `.X`-on-`vector`
+    noise.
+  - User: "A: keep Vector3".
 - **Off-mesh policy and closest-reachable queries (ticket 24):** 2026-09-28, all five required:
   1. `FindPath` pushes the last waypoint `AgentRadius` off the walls (the `MoveAlongSurface`
      push), for Success, Partial and Budget; unchanged at radius 0; documented that the end

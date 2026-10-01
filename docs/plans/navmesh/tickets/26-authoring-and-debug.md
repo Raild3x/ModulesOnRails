@@ -5,15 +5,16 @@ scene.
 
 **Blocked by:** none
 
-**Status:** built on `navmesh-adapter` (2026-10-01), except the `vector` typing, which is open
-and needs a ruling. The rulings are in review.md (2026-09-28).
+**Status:** done (2026-10-01). The `vector` typing item was ruled won't-fix: the public types
+stay `Vector3`. The rulings are in review.md (2026-09-28 and 2026-10-01).
 
 - [x] **A Part to `NavMeshDesc` adapter** for anchored blocks, wedges and cylinders.
   - It produces walkable floors, seams at ramp feet and tops, and the obstacle cut under a
     solid ramp.
   - Today the demo authors its level twice, and a ramp needs three hand-written pieces.
-- [ ] **Types say `vector`,** or a `Vector3 | vector` alias. The runtime already uses `vector`
-      throughout, and strict-mode users under both Lune and Roblox currently hit type errors.
+- [x] ~~**Types say `vector`,** or a `Vector3 | vector` alias.~~ Won't fix (ruled 2026-10-01):
+      strict Roblox callers, the main audience, get no errors with `Vector3`. Strict Lune
+      callers get 23 in the measured sample; the numbers for every option are in review.md.
 - [x] **Silent mistakes get errors:**
   - `Walkable = ring` (a ring instead of a list of rings);
   - unknown `QueryFilter` keys (for example `AgentRaduis`);
