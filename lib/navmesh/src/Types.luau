@@ -75,6 +75,31 @@ export type LinkDesc = {
 
 --[=[
 	@within NavMesh
+	@interface GenerateLinksOptions
+	.Spacing number? -- studs between links along a ledge (default 4)
+	.MaxDrop number? -- the deepest drop or jump down, studs (default 10)
+	.MaxJumpDistance number? -- the widest gap a jump crosses, in plan, studs (default 6)
+	.MaxJumpUp number? -- the highest a jump climbs, studs (default 3)
+	.Clearance number? -- the agent radius both ends must admit, studs (default 1; at most the mesh's MaxAgentRadius)
+	.Area number? -- area id of every link, so `AreaCosts[Area] = math.huge` turns them off (default 1)
+	.Labels { Drop: string?, Jump: string? }? -- the labels to use (default "Drop" and "Jump")
+	.DetourFactor number? -- keep a link only when walking between its ends costs at least this many times the link (default 2)
+
+	Options for `NavMesh.GenerateLinks`.
+]=]
+export type GenerateLinksOptions = {
+	Spacing: number?,
+	MaxDrop: number?,
+	MaxJumpDistance: number?,
+	MaxJumpUp: number?,
+	Clearance: number?,
+	Area: number?,
+	Labels: { Drop: string?, Jump: string? }?,
+	DetourFactor: number?,
+}
+
+--[=[
+	@within NavMesh
 	@interface NavMeshDesc
 	.Floors { [string]: FloorDesc }
 	.Seams { SeamDesc }?
