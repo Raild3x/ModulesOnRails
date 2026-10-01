@@ -181,6 +181,62 @@ return function(t: tiniest)
 			expect(Flood.Connected(Flood.New(mesh), 0.51, island, v(17, 0, 7))).is(false)
 		end)
 
+		test("a goal entered across a seam must be reached from the seam's edge", function()
+			-- The sliver on B with its east edge a seam to A, as above: from A the goal west of
+			-- the pinch is out of reach (the seam is crossed east of it).
+			local mesh = NavMesh.Build {
+				TileSize = 64,
+				Floors = {
+					A = { Walkable = { flat(0, { 10, 9, 20, 0, 20, 10 }) } },
+					B = { Walkable = { flat(0, { 0, 0, 10, 0, 10, 9, 20, 10, 0, 10 }) } },
+				},
+				Seams = { { FloorA = "A", FloorB = "B", From = v(10, 0, 9), To = v(20, 0, 10) } },
+			}
+			expect(status(mesh, v(17, 0, 7), west, 0.51)).is("Partial")
+			expect(status(mesh, v(17, 0, 7), west, 0.49)).is("Success")
+			expect(Flood.Connected(Flood.New(mesh), 0.51, v(17, 0, 7), west)).is(false)
+		end)
+
+		test("the same checks hold for an agent narrower than 1 stud", function()
+			-- The room with its gap 0.5 wide (the slab up to z 9.5): a 0.3 agent is turned away
+			-- at each entry kind, a 0.2 one passes.
+			local function narrow(links: { any }): any
+				return NavMesh.Build {
+					TileSize = 64,
+					Floors = {
+						Ground = {
+							Walkable = {
+								flat(0, { 0, 0, 20, 0, 20, 10, 0, 10 }),
+								flat(0, { 30, 0, 40, 0, 40, 10, 30, 10 }),
+							},
+							Obstacles = { flat(0, { 10, -1, 11, -1, 11, 9.5, 10, 9.5 }) },
+						},
+					},
+					Links = links,
+				}
+			end
+			local w, e = v(9.6, 0, 9.75), v(12, 0, 9.75)
+			local cases = {
+				{ narrow { link(v(3, 0, 3), w) }, v(5, 0, 5), e }, -- a landing in the goal triangle
+				{ narrow { link(e, island) }, w, island }, -- a link from the start triangle
+				{ narrow { link(island, w) }, island, v(15, 0, 5) }, -- leaving a landing's triangle
+			}
+			for i, case in cases do
+				expect(status(case[1], case[2], case[3], 0.3)).with_context(`case {i}`).is("Partial")
+				expect(status(case[1], case[2], case[3], 0.2)).with_context(`case {i}`).is("Success")
+			end
+			local seam = NavMesh.Build {
+				TileSize = 64,
+				Floors = {
+					A = { Walkable = { flat(0, { 0, 0, 10, 0, 10, 9.5, 0, 10 }) } },
+					B = { Walkable = { flat(0, { 0, 10, 10, 9.5, 20, 0, 20, 10 }) } },
+				},
+				Seams = { { FloorA = "A", FloorB = "B", From = v(0, 0, 10), To = v(10, 0, 9.5) } },
+			}
+			expect(status(seam, v(5, 0, 5), v(17, 0, 7), 0.3)).is("Partial")
+			expect(status(seam, v(5, 0, 5), v(17, 0, 7), 0.2)).is("Success")
+		end)
+
 		test("a Partial end in a triangle reached only by a link is judged from the landing", function()
 			-- A one-triangle pad between the island and an unreachable goal, reached by a link: its
 			-- point nearest the goal is the best end, and the landing reaches it.

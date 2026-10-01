@@ -718,33 +718,23 @@ local function beyond(edges: Region, x: number, z: number): number
 	return found
 end
 
--- Triangle t's edges (edge e opposite vertex e, CCW), which of them are walls, and the walls
--- within r of it. Answers are kept per mesh and triangle, for the last RADII radii asked there
--- (a search asks about one triangle once per exit edge and link, and E3's landing checks repeat
--- for every query at the same radius: a game has a few agent sizes), until the walls change
--- (Refresh drops them).
--- ponytail: dropped wholesale at AROUND_CAP triangles; an LRU if huge maps thrash it.
-local AROUND_CAP = 8192
-local RADII = 4
+-- Triangle t's edges (edge e opposite vertex e, CCW), which of them are walls, the walls within
+-- r of it, and the record holding them: [4] the CutOff / Separated verdicts asked there, [5]
+-- their count. Records are kept per mesh, triangle and radius (a search asks about a triangle
+-- once per exit edge and link, and E3's landing checks repeat on every query at one radius: a
+-- game has a few agent sizes), until the walls change (Refresh drops them).
+-- ponytail: dropped wholesale at AROUND_CAP records; an LRU if huge maps thrash it.
+local AROUND_CAP = 32768
 local function around(s: Storage.State, t: number, r: number): (Region, { boolean }, { Seg }, { any })
 	local memo = lastAround[s]
-	local list = memo and memo[t]
-	if list then
-		for _, rec in list do
-			if rec[1] == r then
-				return rec[2], rec[3], rec[4], rec
-			end
-		end
-	end
 	if memo == nil or memo.n >= AROUND_CAP then
 		memo = { n = 0 }
 		lastAround[s] = memo
-		list = nil
 	end
-	if list == nil then
-		list = {}
-		memo[t] = list
-		memo.n += 1
+	local key = string.format("%d %.17g", t, r)
+	local rec = memo[key]
+	if rec then
+		return rec[1], rec[2], rec[3], rec
 	end
 	local index = indexes[s] or buildIndex(s, false)
 	indexes[s] = index
@@ -759,9 +749,9 @@ local function around(s: Storage.State, t: number, r: number): (Region, { boolea
 	end
 	local walls = { Storage.IsWallEdge(s, t, 1), Storage.IsWallEdge(s, t, 2), Storage.IsWallEdge(s, t, 3) }
 	local feats = nearWalls(index, Storage.GetTriangleFloor(s, t), edges, r)
-	local rec = { r, edges, walls, feats, {} } -- [5]: verdicts asked here (CutOff, Separated)
-	table.insert(list, 1, rec)
-	list[RADII + 1] = nil
+	rec = { edges, walls, feats, {}, 0 }
+	memo[key] = rec
+	memo.n += 1
 	return edges, walls, feats, rec
 end
 
@@ -825,7 +815,8 @@ end
 	an odd number of times; PQ crosses the path from a contact to a fixed point Z of the root's
 	disc with parity par(contact), and a pair's polyline (the two paths joined at Z, the shared
 	part crossed twice) with par(a) xor par(b). So one parity per contact, not a polygon per
-	pair (E3: Separated ran per link start, and the pairs were O(contacts^2) polygons).
+	pair (E3: Separated ran per link start, and the pairs were O(contacts^2) polygons). Two
+	contacts at one point count too: their polyline is a closed covered loop.
 	ponytail: one path per pair; a pocket that a loop inside a component closes is missed (a
 	missed block, never a false one).
 ]]
@@ -934,15 +925,10 @@ local function barriers(
 			end
 		end
 		if pq then
-			-- Z: a contact on the root wall (in its disc). first[i]: the first point of the path
-			-- from wall i to Z; par[i]: PQ's crossing parity with that path.
-			local zx, zz = 0, 0
-			for _, c in mine do
-				if of[c] == root then
-					zx, zz = atX[c], atZ[c]
-					break
-				end
-			end
+			-- Z: the component's first contact, which is on the root (contacts are gathered in
+			-- wall order, and the root is its first wall with one). first[i]: the first point of
+			-- the path from wall i to Z; par[i]: PQ's crossing parity with that path.
+			local zx, zz = atX[mine[1]], atZ[mine[1]]
 			local firstX, firstZ, par = { [root] = zx }, { [root] = zz }, { [root] = false }
 			local function odd(ax: number, az: number, bx: number, bz: number): boolean
 				return (crosses(pq, { ax, az, bx, bz }))
@@ -953,14 +939,13 @@ local function barriers(
 				firstX[i], firstZ[i] = l[2], l[3]
 				par[i] = par[up[i]] ~= odd(l[2], l[3], firstX[up[i]], firstZ[up[i]])
 			end
-			-- Some pair at different points differs in parity iff both parities occur and the
-			-- contacts are not all at one point.
-			local has, spread = {}, false
+			-- Two contacts of different parity part P and Q. Two at one point give a closed loop
+			-- of covered pieces (no arc), which parts them too.
+			local has = {}
 			for _, c in mine do
 				has[par[of[c]] ~= odd(atX[c], atZ[c], firstX[of[c]], firstZ[of[c]])] = true
-				spread = spread or atX[c] ~= atX[mine[1]] or atZ[c] ~= atZ[mine[1]]
 			end
-			if has[true] and has[false] and spread then
+			if has[true] and has[false] then
 				return out, true
 			end
 			continue
@@ -985,17 +970,17 @@ end
 local function cutOffNow(s: Storage.State, t: number, e: number, r: number, px: number, pz: number): boolean
 	local edges, walls, feats = around(s, t, r)
 	local x, z = standing(feats, r, px, pz)
-	if x == nil or z == nil then
+	if x == nil then -- (standing gives both coordinates or neither)
 		return false
 	end
 	local edge = edges[e]
 	for _, u in { 0.5, 0.25, 0.75 } do
-		if clear(feats, r, x, z, edge[1] + u * (edge[3] - edge[1]), edge[2] + u * (edge[4] - edge[2])) then
+		if clear(feats, r, x, z :: number, edge[1] + u * (edge[3] - edge[1]), edge[2] + u * (edge[4] - edge[2])) then
 			return false
 		end
 	end
 	for _, poly in (barriers(edges, walls, feats, r, { e % 3 + 1, (e + 1) % 3 + 1 })) do
-		if inside(poly, x, z) then
+		if inside(poly, x, z :: number) then
 			return true
 		end
 	end
@@ -1020,15 +1005,18 @@ local function separatedNow(
 	local edges, walls, feats = around(s, t, r)
 	local ax, az = standing(feats, r, px, pz)
 	local bx, bz = standing(feats, r, qx, qz)
-	if ax == nil or az == nil or bx == nil or bz == nil or clear(feats, r, ax, az, bx, bz) then
+	if ax == nil or bx == nil then -- (standing gives both coordinates or neither)
+		return false
+	end
+	local ay, by = az :: number, bz :: number
+	if clear(feats, r, ax, ay, bx, by) then
 		return false
 	end
 	-- A point pushed out of the triangle (off a wall of a thin one) is inside no barrier, so its
-	-- parity says nothing (E3: a link's start against a wall). Pushed over one crossable edge,
-	-- it stands just past that edge, so the other is parted from it when cut off from that edge;
-	-- past a vertex (or both pushed out) its side is unknown, and they are not parted.
-	local ea = if ax ~= px or az ~= pz then beyond(edges, ax, az) else 0
-	local eb = if bx ~= qx or bz ~= qz then beyond(edges, bx, bz) else 0
+	-- parity says nothing (E3: a link's start against a wall). Over one crossable edge it stands
+	-- just past that edge, so the other is parted from it when cut off from that edge; past a
+	-- vertex (or both out) its side is unknown, and they are not parted.
+	local ea, eb = beyond(edges, ax, ay), beyond(edges, bx, by)
 	if ea ~= 0 or eb ~= 0 then
 		if ea < 0 or eb < 0 or (ea > 0 and eb > 0) then
 			return false
@@ -1037,36 +1025,22 @@ local function separatedNow(
 		return not walls[e]
 			and if ea > 0 then Clearance.CutOff(s, t, e, r, qx, qz) else Clearance.CutOff(s, t, e, r, px, pz)
 	end
-	local _, parted = barriers(edges, walls, feats, r, { 1, 2, 3 }, { ax, az, bx, bz })
+	local _, parted = barriers(edges, walls, feats, r, { 1, 2, 3 }, { ax, ay, bx, by })
 	return parted
 end
 
--- The verdicts asked of triangle t at radius r are kept with its `around` answer (E3: a search
--- with links asks the same landing and link-start questions on every query at one radius):
--- flat (edge or 0, px, pz, qx, qz, verdict) records.
--- ponytail: a linear scan, the list dropped at VERDICT_CAP; a hash if a triangle gets many asks.
-local VERDICT_CAP = 64
-local function remembered(
-	s: Storage.State,
-	t: number,
-	r: number,
-	e: number,
-	px: number,
-	pz: number,
-	qx: number,
-	qz: number
-): ({ any }, number)
-	local _, _, _, rec = around(s, t, r)
-	local v = rec[5]
-	for i = 1, #v, 6 do
-		if v[i] == e and v[i + 1] == px and v[i + 2] == pz and v[i + 3] == qx and v[i + 4] == qz then
-			return v, i + 5
-		end
+-- Keeps a verdict in triangle t's record at radius r (see `around`; E3: a search with links asks
+-- the same landing and link-start questions on every query at one radius).
+-- ponytail: the record's verdicts are dropped at VERDICT_CAP; an LRU if a triangle gets many.
+local VERDICT_CAP = 256
+local function remember(rec: { any }, key: string, verdict: boolean): boolean
+	if rec[5] >= VERDICT_CAP then
+		table.clear(rec[4])
+		rec[5] = 0
 	end
-	if #v >= 6 * VERDICT_CAP then
-		table.clear(v)
-	end
-	return v, 0
+	rec[4][key] = verdict
+	rec[5] += 1
+	return verdict
 end
 
 --[=[
@@ -1077,13 +1051,13 @@ end
 	miss a block.
 ]=]
 function Clearance.CutOff(s: Storage.State, t: number, e: number, r: number, px: number, pz: number): boolean
-	local v, at = remembered(s, t, r, e, px, pz, 0, 0)
-	if at > 0 then
-		return v[at]
+	local _, _, _, rec = around(s, t, r)
+	local key = string.format("%d %.17g %.17g", e, px, pz)
+	local known = rec[4][key]
+	if known ~= nil then
+		return known
 	end
-	local verdict = cutOffNow(s, t, e, r, px, pz)
-	table.move({ e, px, pz, 0, 0, verdict }, 1, 6, #v + 1, v)
-	return verdict
+	return remember(rec, key, cutOffNow(s, t, e, r, px, pz))
 end
 
 --[=[
@@ -1100,13 +1074,13 @@ function Clearance.Separated(
 	qx: number,
 	qz: number
 ): boolean
-	local v, at = remembered(s, t, r, 0, px, pz, qx, qz)
-	if at > 0 then
-		return v[at]
+	local _, _, _, rec = around(s, t, r)
+	local key = string.format("s %.17g %.17g %.17g %.17g", px, pz, qx, qz)
+	local known = rec[4][key]
+	if known ~= nil then
+		return known
 	end
-	local verdict = separatedNow(s, t, r, px, pz, qx, qz)
-	table.move({ 0, px, pz, qx, qz, verdict }, 1, 6, #v + 1, v)
-	return verdict
+	return remember(rec, key, separatedNow(s, t, r, px, pz, qx, qz))
 end
 
 return Clearance
