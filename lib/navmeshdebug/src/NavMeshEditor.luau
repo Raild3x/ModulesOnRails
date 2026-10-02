@@ -35,6 +35,8 @@
 	| T | show or hide the tile grid |
 	| P | print the description as Luau source |
 	| B | build the description and save a bake next to the editor (`SaveBake`) |
+	| G | generate drop and jump links (`NavMesh.GenerateLinks`, Clearance = the agent radius) and draw them in orange, without adding them |
+	| Enter | add the generated links to the description (any other edit discards them) |
 
 	From code (for example a Studio command bar or a screenshot script), `SetMarkers` and
 	`SetAgentRadius` place the path markers and set the radius, and `SaveBake` saves a bake.
@@ -87,6 +89,7 @@ local HANDLE_COLOR = "#000000"
 local SELECTED_COLOR = "#fdd835"
 local START_COLOR = "#00c853"
 local GOAL_COLOR = "#d50000"
+local PROPOSED_COLOR = "#ff6d00"
 
 local NavMeshEditor = {}
 NavMeshEditor.__index = NavMeshEditor
@@ -125,6 +128,19 @@ local function drawList(self: EditorInternal): { any }
 			end
 		end
 		list = NavMesh.ToDrawList(self._built, { Tiles = self._showTiles, Seams = true, Links = true }, path)
+	end
+	for _, link in state.Proposed or {} do
+		local a, b = link.From, link.To
+		local ends = if link.Bidirectional == false then { { a, b } } else { { a, b }, { b, a } }
+		for _, pair in ends do
+			local p, q = pair[1], pair[2]
+			table.insert(list, {
+				Kind = "Arrow",
+				Points = { p.X, p.Y, p.Z, q.X, q.Y, q.Z },
+				Color = PROPOSED_COLOR,
+				Layer = "ProposedLinks",
+			})
+		end
 	end
 	local selection = state.Selection
 	for _, h in EditorState.Handles(state) do
@@ -195,6 +211,9 @@ local function refresh(self: EditorInternal, rebuild: boolean)
 	local status = `{state.Mode} | radius {state.AgentRadius} | selected {describe(state.Selection)}`
 	if self._pathStatus then
 		status ..= ` | path {self._pathStatus}`
+	end
+	if state.Proposed then
+		status ..= ` | {#state.Proposed} links generated (Enter adds them)`
 	end
 	if self._error then
 		status ..= ` | ERROR: {self._error}`
@@ -296,6 +315,21 @@ local KEYS: { [Enum.KeyCode]: (self: EditorInternal, p: vector) -> EditorState.E
 			print(`[NavMeshEditor] saved {result:GetFullName()}: move it into the place (see SaveBake)`)
 		end
 		return nil
+	end,
+	[Enum.KeyCode.G] = function(self)
+		if self._state.Mode ~= "NavMesh" or self._built == nil then
+			return nil
+		end
+		local ok, links = pcall(NavMesh.GenerateLinks, self._built, { Clearance = self._state.AgentRadius })
+		if not ok then
+			self._error = tostring(links)
+			refresh(self, false)
+			return nil
+		end
+		return { Type = "ProposeLinks", Links = links }
+	end,
+	[Enum.KeyCode.Return] = function()
+		return { Type = "CommitLinks" }
 	end,
 }
 

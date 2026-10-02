@@ -46,6 +46,7 @@ local Build = require("./Build")
 local DrawList = require("./DrawList")
 local Fixtures = require("./Fixtures")
 local Funnel = require("./Funnel")
+local Generate = require("./Generate")
 local Queries = require("./Queries")
 local Search = require("./Search")
 local Serialize = require("./Serialize")
@@ -73,6 +74,7 @@ export type RandomPointOptions = Types.RandomPointOptions
 export type ChangedRegion = Types.ChangedRegion
 export type SeamDesc = Types.SeamDesc
 export type LinkDesc = Types.LinkDesc
+export type GenerateLinksOptions = Types.GenerateLinksOptions
 export type NavMeshData = Storage.State
 
 local DEFAULT_SNAP_EXTENTS = vector.create(0.5, 4, 0.5)
@@ -177,7 +179,7 @@ function NavMesh.FindPath(mesh: NavMeshData, from: Vector3, to: Vector3, filter:
 	end
 	local status, corridor, vias, endP, cost =
 		Search.Run(mesh, startT, startP, goalT, goalP :: vector, costs, maxExpansions, radius)
-	local points, owners, labels =
+	local points, owners, links =
 		Funnel.StringPull(mesh, corridor, vias, startP, endP, radius, if next(costs) then costs else nil)
 	local n = #points
 	points[n], owners[n] = Queries.Push(mesh, owners[n], points[n], radius, costs)
@@ -187,10 +189,13 @@ function NavMesh.FindPath(mesh: NavMeshData, from: Vector3, to: Vector3, filter:
 		if i > 1 then
 			length += vector.magnitude(p - points[i - 1])
 		end
+		local link = links[i]
+		local label = if link then select(7, Storage.GetLink(mesh, link)) else ""
 		waypoints[i] = {
 			Position = p :: any, -- a vector is a Vector3 on Roblox
 			Floor = Storage.GetFloorName(mesh, Storage.GetTriangleFloor(mesh, owners[i])),
-			Label = labels[i],
+			Label = if label ~= "" then label else nil,
+			LinkId = if link then Storage.GetLinkId(mesh, link) else nil,
 		}
 	end
 	-- Every tile the corridor passes through, and the pushed end's, with its stamp now (tile,
@@ -334,7 +339,7 @@ local STALL = 0.1 -- a step that moves less than this fraction of maxStep made n
 	  stalls within `AgentRadius` of it: the funnel puts corner waypoints on the
 	  portal, which can be nearer a wall than the radius (SR4), and the push keeps the agent
 	  off it. The path's end is already offset.
-	- **Links:** at a waypoint with a `Label`, it returns `"Link"` without moving; move the agent
+	- **Links:** at a waypoint with a `LinkId`, it returns `"Link"` without moving; move the agent
 	  to `follower.Link.To` yourself, then call again from there.
 	- It never throws for an agent off the mesh (a door closed on it): that is `"Blocked"` at
 	  once, with no floor.
@@ -368,10 +373,10 @@ function NavMesh.Advance(
 		return position, last and last.Floor, "Arrived" :: FollowEvent
 	end
 	local here = waypoints[follower.Next - 1]
-	if here.Label then
+	if here.LinkId then
 		-- The next waypoint is the link's landing: never walk that segment.
 		follower.Next += 1
-		follower.Link = { Label = here.Label, From = here.Position, To = target.Position }
+		follower.Link = { Label = here.Label or "", Id = here.LinkId, From = here.Position, To = target.Position }
 		return position, here.Floor, "Link" :: FollowEvent
 	end
 	local p, goal = toVector(position), toVector(target.Position)
@@ -515,7 +520,7 @@ end
 	(the path's `AgentRadius`). Returns nil when none does: then `FindPath` would return the same
 	path again, unless a removal opened a better route through a box (see `ChangedRegion`).
 
-	A link's segment (from a waypoint with a `Label`) has no surface between its ends, so only its
+	A link's segment (from a waypoint with a `LinkId`) has no surface between its ends, so only its
 	two ends are tested. The radius grows boxes square, so it can report a segment the round agent
 	would miss by up to 0.41 radius at a box corner, never the reverse. Plain data in and out: one
 	check per agent costs O(regions) when the path's bounds miss every box.
@@ -585,7 +590,7 @@ function NavMesh.FirstAffectedSegment(
 			if r.Floor ~= a.Floor and r.Floor ~= b.Floor then
 				continue
 			end
-			local hit = if a.Label
+			local hit = if a.LinkId
 				then segmentMeets(pa, pa, r, radius) or segmentMeets(pb, pb, r, radius)
 				else segmentMeets(pa, pb, r, radius)
 			if hit then
@@ -598,27 +603,101 @@ end
 
 --[=[
 	@within NavMesh
-	Enables or disables link `linkId` (its 1-based index in `Links`). Paths through either end's
-	tile become invalid (SR5), whether or not they use the link.
+	Enables or disables a link at once (not at `Update`): link id `link`, or every link whose
+	`LinkDesc.Name` is `link`. Paths through either end's tile become invalid (SR5), whether or
+	not they use the link. Errors when no link has that id or name.
 ]=]
-function NavMesh.SetLinkEnabled(mesh: NavMeshData, linkId: number, enabled: boolean)
-	if type(linkId) ~= "number" or linkId % 1 ~= 0 or linkId < 1 or linkId > Storage.LinkCount(mesh) then
-		error(`NavMesh.SetLinkEnabled: no link {linkId} (the mesh has {Storage.LinkCount(mesh)})`, 2)
-	end
+function NavMesh.SetLinkEnabled(mesh: NavMeshData, link: number | string, enabled: boolean)
 	if type(enabled) ~= "boolean" then
 		error("NavMesh.SetLinkEnabled: enabled must be a boolean", 2)
 	end
-	local fromTri, _, toTri = Storage.GetLink(mesh, linkId)
-	Storage.SetLinkFlag(mesh, linkId, enabled)
-	-- An end covered by an obstacle has no triangle (0): nothing to bump there.
-	local bumped = {}
-	for _, t in { fromTri, toTri } do
-		local tile = if t ~= 0 then Storage.GetTriangleTile(mesh, t) else 0
-		if tile ~= 0 and not bumped[tile] then
-			bumped[tile] = true
-			Storage.BumpTileStamp(mesh, tile)
+	local slots = {}
+	if type(link) == "string" then
+		for slot = 1, Storage.LinkCount(mesh) do
+			if Storage.GetLinkName(mesh, slot) == link then
+				table.insert(slots, slot)
+			end
+		end
+		if #slots == 0 then
+			error(`NavMesh.SetLinkEnabled: no link named '{link}'`, 2)
+		end
+	else
+		local slot = if type(link) == "number" then Storage.FindLink(mesh, link) else 0
+		if slot == 0 then
+			error(`NavMesh.SetLinkEnabled: no link {link}`, 2)
+		end
+		slots = { slot }
+	end
+	-- An end covered by an obstacle, or of a link waiting for Update, has no triangle (0):
+	-- nothing to bump there. A tile bumped twice is just as invalid.
+	for _, slot in slots do
+		local fromTri, _, toTri = Storage.GetLink(mesh, slot)
+		Storage.SetLinkFlag(mesh, slot, enabled)
+		for _, t in { fromTri, toTri } do
+			if t ~= 0 then
+				Storage.BumpTileStamp(mesh, Storage.GetTriangleTile(mesh, t))
+			end
 		end
 	end
+end
+
+--[=[
+	@within NavMesh
+	Adds a link (a jump, ladder or teleport) at runtime. It takes effect at the next `Update`,
+	which snaps its ends onto the mesh as `Build` does; an end that doesn't snap then fails that
+	`Update`. Errors at the call on a bad description. Returns its id, which is never reused.
+]=]
+function NavMesh.AddLink(mesh: NavMeshData, link: LinkDesc): number
+	return Tiles.AddLink(mesh, link)
+end
+
+--[=[
+	@within NavMesh
+	Removes link `linkId`; it takes effect at the next `Update`.
+]=]
+function NavMesh.RemoveLink(mesh: NavMeshData, linkId: number)
+	Tiles.RemoveLink(mesh, linkId)
+end
+
+--[=[
+	@within NavMesh
+	Drop and jump links read off a built mesh (ticket 30): pure, it returns descriptions and
+	changes nothing. Rebuild with them in `NavMeshDesc.Links`, or pass each to `AddLink` and
+	`Update`.
+
+	- **Where:** every wall edge is sampled every `Spacing / 4` studs and probed straight out.
+	  The first spot out there with a surface between `MaxDrop` below and `MaxJumpUp` above,
+	  within `MaxJumpDistance`, is the landing.
+	- **Drops:** a landing lower than the ledge, within `Clearance` of it, gives a one-way link
+	  labelled `"Drop"`. Anything else is a `"Jump"`, two-way when the way back is within both
+	  `MaxJumpUp` and `MaxDrop`.
+	- **No links through walls:** the probe stops at an obstacle of the ledge's own floor, so an
+	  interior wall or a railing gives none. Both ends are pushed `Clearance` off the walls and
+	  must then admit it.
+	- **No duplicates:** a link is dropped when walking between its ends (`FindPath`'s `Length`
+	  at `AgentRadius = Clearance`) is shorter than `DetourFactor` times the link's, and
+	  when both its ends lie within `Spacing` of a link already kept between the same floors.
+	- **Deterministic:** the same mesh gives the same list, in the same order.
+	- **Turning them off:** every link gets area `Area`, so `AreaCosts = { [Area] = math.huge }`
+	  is an agent that can't jump. Give it an id no surface uses.
+
+	Obstacles have no height, so the probe can't tell a low railing from a wall: it stops at
+	both. A gap between two floors with no obstacle in it reads as jumpable even when, in the
+	game, a wall stands there.
+
+	```lua
+	local desc = buildDescription()
+	desc.Links = NavMesh.GenerateLinks(NavMesh.Build(desc), { Clearance = 1, Area = 9 })
+	local mesh = NavMesh.Build(desc)
+	local walker = NavMesh.FindPath(mesh, from, to, { AgentRadius = 1, AreaCosts = { [9] = math.huge } })
+	```
+]=]
+function NavMesh.GenerateLinks(mesh: NavMeshData, options: GenerateLinksOptions?): { LinkDesc }
+	return Generate.Links(mesh, options, function(from, to, radius)
+		local path = NavMesh.FindPath(mesh, from :: any, to :: any, { AgentRadius = radius })
+		-- Both are lengths of real walks; the funnel's can fold back badly across a seam line.
+		return if path.Status == "Success" then math.min(path.Length, path.Cost) else math.huge
+	end)
 end
 
 --[=[
@@ -641,22 +720,17 @@ end
 
 --[=[
 	@within NavMesh
-	True while an obstacle added or removed since the last `Update` is waiting for it: until then,
-	queries still see the mesh without the change.
+	True while an obstacle or link added or removed since the last `Update` is waiting for it:
+	until then, queries still see the mesh without the change.
 ]=]
 function NavMesh.HasPendingChanges(mesh: NavMeshData): boolean
-	for slot = 1, Storage.ObstacleCount(mesh) do
-		if Storage.GetObstacleState(mesh, slot) ~= Storage.OBSTACLE_ACTIVE then
-			return true
-		end
-	end
-	return false
+	return Tiles.HasPending(mesh)
 end
 
 --[=[
 	@within NavMesh
-	Applies every obstacle added or removed since the last `Update`, rebuilding only the tiles
-	they touch, plus the clearance within reach of the walls that changed. Paths through changed
+	Applies every obstacle and link added or removed since the last `Update`, rebuilding only the
+	tiles the obstacles touch, plus the clearance within reach of the walls that changed. Paths through changed
 	tiles then fail `IsPathValid`. The cost follows the tiles the change touches (smaller tiles,
 	cheaper updates), plus a copy of the rest of the mesh at about 0.1-0.2 ms per 1,000 triangles
 	under Lune; a `MaxAgentRadius` cap makes the clearance part much cheaper.
@@ -664,14 +738,14 @@ end
 	Returns two lists of boxes (`ChangedRegion`), both empty when nothing was pending. Test a path
 	against either with `FirstAffectedSegment`, which is finer than `IsPathValid`'s per-tile stamps:
 	- **The changed regions** hold everything the Update changed: whole rebuilt tiles, so smaller
-	  tiles give tighter regions. A path clear of them, fattened by its `AgentRadius`, is what
+	  tiles give tighter regions, and the tiles at both ends of each link added or removed. A path clear of them, fattened by its `AgentRadius`, is what
 	  `FindPath` would return again (unless a removal opened a better way).
 	- **The added footprints:** one box per obstacle the Update added, its ring's bounds. A path
 	  clear of them is still walkable, though `FindPath` may now return another. Usually that is
 	  what a game needs: it replans far fewer agents. A removal adds no box, since it blocks
 	  nothing; it may open a way for a `Partial` path, so retry those after removing.
 
-	Atomic (SR13): on an error the mesh is unchanged, the pending obstacle changes are rolled back,
+	Atomic (SR13): on an error the mesh is unchanged, the pending changes are rolled back,
 	and the error is raised again. Triangle and vertex ids are only stable until the next `Update`
 	(SR14).
 

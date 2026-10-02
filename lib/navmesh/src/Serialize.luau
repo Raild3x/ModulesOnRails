@@ -27,11 +27,16 @@
 	| 0x8004 | vertices (f32 X/Y/Z, as stored, plus the wall flag) |
 	| 0x8005 | per tile, its triangles: vertices, neighbours, area, open edges, corner and portal widths (f64) |
 	| 0x8006 | seams, then seam pieces |
-	| 0x8007 | links: the next link id, then records with their ids (sparse, like obstacles; today dense) |
+	| 0x0001 | link names (optional, written only when a link has one): count, then (link id, name) |
+	| 0x8007 | links: the next link id, then records with their ids (sparse, like obstacles) and flags: 1 both ways, 2 enabled, 4 pending add, 8 pending removal |
 	| 0x8008 | obstacles: the next obstacle id, then the live records (id, floor, state, quantized ring) |
 
+	A pending add (ticket 30) is stored as the caller gave it: no triangles, its points unsnapped,
+	and cost -1 when it takes the default. Link names are optional: a reader that skips them
+	still has every link, just not `SetLinkEnabled` by name.
+
 	Reserved for later (not written yet): ticket 29's headroom source (the `FloorDesc.Headroom`
-	rings), ticket 30's per-link extra fields (a section keyed by link id), and Track D's
+	rings), and Track D's
 	simplification tolerance (rings are stored simplified, so it is only metadata).
 
 	Extra links (seam portals and links) are derived data: `Deserialize` rebuilds them exactly
@@ -51,6 +56,7 @@ local MAGIC = "NVMS"
 local VERSION = 3
 local REQUIRED = 0x8000
 
+local TAG_LINK_NAMES = 0x0001
 local TAG_CAP = 0x8001
 local TAG_FLOORS = 0x8002
 local TAG_TILES = 0x8003
@@ -160,6 +166,21 @@ function Serialize.Serialize(s: State): buffer
 	w.Size = 4
 	u16(w, VERSION)
 
+	local named = {}
+	for slot = 1, Storage.LinkCount(s) do
+		if Storage.GetLinkName(s, slot) ~= "" then
+			table.insert(named, slot)
+		end
+	end
+	if #named > 0 then
+		section(w, TAG_LINK_NAMES, function(b)
+			u32(b, #named)
+			for _, slot in named do
+				u32(b, Storage.GetLinkId(s, slot))
+				str(b, Storage.GetLinkName(s, slot))
+			end
+		end)
+	end
 	section(w, TAG_CAP, function(b)
 		f64(b, Storage.GetMaxAgentRadius(s))
 	end)
@@ -242,11 +263,12 @@ function Serialize.Serialize(s: State): buffer
 		end
 	end)
 	section(w, TAG_LINKS, function(b)
-		u32(b, Storage.LinkCount(s) + 1) -- the next link id
+		u32(b, Storage.GetLinkNextId(s))
 		u32(b, Storage.LinkCount(s))
-		for id = 1, Storage.LinkCount(s) do
-			local fromTri, from, toTri, to, cost, area, label, both, enabled = Storage.GetLink(s, id)
-			u32(b, id)
+		for slot = 1, Storage.LinkCount(s) do
+			local fromTri, from, toTri, to, cost, area, label, both, enabled = Storage.GetLink(s, slot)
+			local state = Storage.GetLinkState(s, slot)
+			u32(b, Storage.GetLinkId(s, slot))
 			u32(b, fromTri)
 			vec(b, from)
 			u32(b, toTri)
@@ -254,7 +276,13 @@ function Serialize.Serialize(s: State): buffer
 			f64(b, cost)
 			u32(b, area)
 			str(b, label)
-			u8(b, (if both then 1 else 0) + (if enabled then 2 else 0))
+			u8(
+				b,
+				(if both then 1 else 0)
+					+ (if enabled then 2 else 0)
+					+ (if state == Storage.OBSTACLE_PENDING_ADD then 4 else 0)
+					+ (if state == Storage.OBSTACLE_PENDING_REMOVE then 8 else 0)
+			)
 		end
 	end)
 	section(w, TAG_OBSTACLES, function(b)
@@ -460,17 +488,44 @@ function Serialize.Deserialize(data: buffer): State
 	read(TAG_LINKS, function(b)
 		local nextId = ru32(b)
 		for slot = 1, ru32(b) do
-			-- ponytail: link ids are dense today (1..n); ticket 30's sparse ids need Storage ids.
-			if ru32(b) ~= slot or slot >= nextId then
-				corrupt()
-			end
+			local id = ru32(b)
 			local fromTri, from, toTri, to, cost, area = ru32(b), rvec(b), ru32(b), rvec(b), rf64(b), ru32(b)
 			local label = rstr(b)
 			local flags = ru8(b)
-			Storage.InsertLink(s, fromTri, from, toTri, to, cost, area, label, bit32.btest(flags, 1))
+			-- Ids increase and stay below the next id; a pending add has no triangles, and only it
+			-- may have the default cost (-1); a link is not both added and removed.
+			local adding = bit32.btest(flags, 4)
+			if
+				id < Storage.GetLinkNextId(s)
+				or id >= nextId
+				or flags >= 16
+				or (adding and (bit32.btest(flags, 8) or fromTri ~= 0 or toTri ~= 0))
+				or not (cost >= 0 or (adding and cost == -1))
+			then
+				corrupt()
+			end
+			Storage.InsertLink(s, fromTri, from, toTri, to, cost, area, label, bit32.btest(flags, 1), "", id)
 			Storage.SetLinkFlag(s, slot, bit32.btest(flags, 2))
+			if adding then
+				Storage.SetLinkState(s, slot, Storage.OBSTACLE_PENDING_ADD)
+			elseif bit32.btest(flags, 8) then
+				Storage.SetLinkState(s, slot, Storage.OBSTACLE_PENDING_REMOVE)
+			end
 		end
+		Storage.SetLinkNextId(s, math.max(nextId, 1))
 	end)
+	if sections[TAG_LINK_NAMES] then
+		read(TAG_LINK_NAMES, function(b)
+			for _ = 1, ru32(b) do
+				local slot = Storage.FindLink(s, ru32(b))
+				local name = rstr(b)
+				if slot == 0 or name == "" then
+					corrupt()
+				end
+				Storage.SetLinkName(s, slot, name)
+			end
+		end)
+	end
 	read(TAG_OBSTACLES, function(b)
 		local nextId = ru32(b)
 		for slot = 1, ru32(b) do

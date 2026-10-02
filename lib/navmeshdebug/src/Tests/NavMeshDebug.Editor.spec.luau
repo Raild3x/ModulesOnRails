@@ -249,6 +249,51 @@ return function(t: tiniest)
 			cdt:Destroy()
 		end)
 
+		test("G draws generated links without adding them; Enter adds them", function()
+			local editor, folder = open("NavMesh", NavMesh.Fixtures.ThreeFloorStairs.Desc)
+			local keys = NavMeshEditor._Keys
+			local function proposedDrawn(): number
+				local n = 0
+				for _, item in folder:GetDescendants() do
+					if item:GetAttribute("Layer") == "ProposedLinks" then
+						n += 1
+					end
+				end
+				return n
+			end
+			editor:SetAgentRadius(0.5)
+			editor:_apply(keys[Enum.KeyCode.G](editor, vector.zero))
+			local proposed = editor._state.Proposed
+			expect(#proposed > 0).is_true()
+			expect(same(proposed, NavMesh.GenerateLinks(editor._built, { Clearance = 0.5 }))).is_true()
+			expect(editor:GetDescription().Links).never_exists()
+			expect(proposedDrawn() > 0).is_true()
+			expect(string.find(status(folder), `{#proposed} links generated`, 1, true) ~= nil).is_true()
+			local fired = 0
+			editor.Changed:Connect(function()
+				fired += 1
+			end)
+			editor:_apply(keys[Enum.KeyCode.Return](editor, vector.zero))
+			expect(fired).is(1)
+			expect(#editor:GetDescription().Links).is(#proposed)
+			expect(editor._error).never_exists()
+			-- (The renderer keeps an emptied layer's adornment, so check the state.)
+			expect(editor._state.Proposed).never_exists()
+			expect(string.find(status(folder), "links generated", 1, true)).never_exists()
+			-- A radius above the mesh's cap shows the error instead.
+			local capped = table.clone(NavMesh.Fixtures.ThreeFloorStairs.Desc)
+			capped.MaxAgentRadius = 0.25
+			editor:_apply { Type = "SetDescription", Description = capped }
+			expect(keys[Enum.KeyCode.G](editor, vector.zero)).never_exists()
+			expect(string.find(tostring(editor._error), "MaxAgentRadius", 1, true) ~= nil).is_true()
+			editor:Destroy()
+			folder:Destroy()
+			local cdt, cdtFolder = open("CDT")
+			expect(keys[Enum.KeyCode.G](cdt, vector.zero)).never_exists()
+			cdt:Destroy()
+			cdtFolder:Destroy()
+		end)
+
 		test("rejects an initial description for the other mode", function()
 			expect(function()
 				NavMeshEditor.new(Instance.new("Folder"), "CDT", NavMesh.Fixtures.Courtyard.Desc)

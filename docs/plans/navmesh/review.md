@@ -7,6 +7,30 @@ U1–U3, N1–N4, V1–V4), plus the Phase 0 requirement: "Prototype and Test yo
 framework as part of phase 0 so we can ensure it will work for our goals at every step." R4 and
 the const question are deliberately open, gated on benchmarks.
 
+### Rulings during Track E (2026-10-01)
+- **The generator's default `Area` stays 1,** as for `LinkDesc`. A game that wants
+  `AreaCosts` to switch generated links off passes its own `Area`. User: "Keep 1 (Recommended)".
+- **Link density: one link per `Spacing`,** as built. Kept links are at least `Spacing` apart
+  along a ledge (about 10 on a 40-stud ledge at the default 4), not one per straight ledge as
+  ticket 30's wording had it. After Part 1, 1,000 links add about 10-17 us per `FindPath`.
+  User: "One per Spacing (Recommended)".
+- **The default reach numbers stay** (`MaxDrop` 10, `MaxJumpDistance` 6, `MaxJumpUp` 3,
+  `Clearance` 1). User: "Keep the guesses (Recommended)".
+- **Other floors' obstacles: probes stop only at the ledge floor's own obstacles, for now.**
+  The user asked whether obstacles should be 3D, with a height, so an obstacle's top acts as a
+  floor. Ruled: do it with ticket 29, which already plans a height per obstacle (for ceilings).
+  There, the generator jumps over low obstacles and lands on their tops. User: "With ticket 29
+  (Recommended)".
+- **Clearance mutation 79.9% accepted** (floor 80.1), after E3. The survivors on new code are
+  triaged as equivalent in ticket 27 ("Link and seam entries (E3)"). User: "Accept, documented
+  (Recommended)".
+- **Link landings with a radius stay as built (E3):** each link landing is its own search node,
+  with barrier verdicts cached per triangle and radius. At 1,000 links that is 1.4x once a radius
+  is warm, and up to 17x on a dense room when every query uses a radius never seen before.
+  Rejected: precomputing verdicts per declared radius at Build/Update, and going back to one node
+  per triangle (that brings back Partial for reachable pairs). User: "keep as built. Keep an eye
+  out for if this becomes an issue later". The watch item is in known-gaps.md.
+
 ### Rulings during Track M1 (2026-10-01)
 - **Ticket 34, how stair steps join (the adapter's step-height rule).** Riser seams were the
   obvious shape, but Build refuses a seam whose two sides differ in height. Measured on the

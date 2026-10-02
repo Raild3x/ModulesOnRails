@@ -14,7 +14,10 @@ A layered 2.5D navigation mesh for pathfinding queries, built on ConstrainedDela
 - **Area**: an integer surface class. Queries give each area a cost multiplier or exclude it.
 - **Seam**: a walk-through segment shared by two floors, such as the top of a staircase.
 - **Link**: a point-to-point action hop between surface points, such as a ladder, jump or
-  teleporter. A link can be switched off.
+  teleporter. A link can be switched off, by id or by name. Links come from the description or
+  are added and removed at runtime, which waits for `Update` like an obstacle. Ids are never
+  reused.
+- **Generated link**: a drop or jump link that `GenerateLinks` finds from a built mesh.
 - **Tile**: a square cell of a floor, aligned to the world origin. It is the unit the mesh rebuilds when obstacles change.
 - **Clearance**: the widest agent that can pass through a place. It lets one mesh serve any
   agent radius.
@@ -37,8 +40,8 @@ A layered 2.5D navigation mesh for pathfinding queries, built on ConstrainedDela
 - **Follower**: plain data (`NewFollower`) that `Advance` walks a path with, a step at a time.
   It reports arriving, reaching a link (which it never walks) and being blocked (stalled, or
   off the mesh).
-- **Waypoint**: one point of a returned path. It carries a link's label when a link starts
-  there.
+- **Waypoint**: one point of a returned path. It carries a link's id, and its label if it has
+  one, when a link starts there.
 - **Corner width**: the widest agent that can pass through a triangle between two of its edges.
   Only walls bound it.
 - **Portal width**: the widest agent that can cross one edge.
@@ -46,7 +49,9 @@ A layered 2.5D navigation mesh for pathfinding queries, built on ConstrainedDela
   It bounds how much clearance an `Update` recomputes.
 - **Wall**: a mesh edge with no neighbour that is not open: the edge of walkable surface or of
   an obstacle. Tile, area and seam edges are never walls.
-- **Open edge**: a seam edge. It has no neighbour on its own floor, yet it is walkable.
+- **Open edge**: a seam edge. It usually has no neighbour on its own floor, yet it is walkable.
+  It can keep one where its floor runs on past the seam (ThreeFloorStairs' Ground under the
+  ramp).
 - **Seam portal**: the overlap of two floors' seam edges, stored as a crossing between their
   triangles. The floors' seam vertices may differ by up to one grid pixel.
 - **Extra link**: a transition beyond a triangle's three edges, either a seam portal or a link.

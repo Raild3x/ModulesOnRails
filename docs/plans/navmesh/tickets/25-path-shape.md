@@ -19,8 +19,8 @@ dogfood report, pain points 8, 9 and 15, and repros 4 and 7.
 - [x] **Equal-cost area boundaries don't bend paths.** (Heron nodes; the bend was general.)
   - Repro 4: a patch with cost 1 makes a path 8% longer.
   - Candidate fix: a final shortcut pass over segments whose area costs are equal.
-- [ ] **Link id on the link's waypoint.**
-- [ ] **An optional `Name` on `LinkDesc`,** with `SetLinkEnabled` accepting it, since today
+- [x] **Link id on the link's waypoint.** (Track E: `Waypoint.LinkId`, `FollowerLink.Id`.)
+- [x] **An optional `Name` on `LinkDesc`,** (Track E: `SetLinkEnabled(mesh, name, on)` toggles every link with that name) with `SetLinkEnabled` accepting it, since today
       it only takes an index into `Links`.
 - [x] Decide whether `PathResult` gains a `Length` (the 3D polyline length). `Cost` is the
       search cost and differs from it.

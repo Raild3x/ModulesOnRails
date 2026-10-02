@@ -121,3 +121,10 @@ It came out of a design conversation on 2026-10-01 and has not been prototyped o
       areas.
 - [ ] Serialize round-trip; a bench of `FindPath` with and without postures; mutation at or
       above the baseline. Every spec has a negative control.
+
+## Added 2026-10-01 (ruled during Track E)
+- **The link generator uses obstacle heights.** Once an obstacle can carry a height, the
+  generator's probe (`Generate.luau`) should jump over an obstacle lower than `MaxJumpUp` and
+  can land on its top, as if the top were a floor. It should also stop at a tall obstacle on any
+  floor, not just the ledge's own. Today it can't tell a railing from a wall, so it stops only
+  at the ledge floor's obstacles (review.md, "Rulings during Track E").

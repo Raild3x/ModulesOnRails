@@ -242,5 +242,26 @@ return function(t: tiniest)
 				end).fails_with("maxStep")
 			end
 		end)
+
+		test("follower errors point at the caller's line", function()
+			local path = NavMesh.FindPath(court, v(2, 0, 2), v(5, 0, 2))
+			for i, call in
+				{
+					function()
+						NavMesh.NewFollower(nil :: any)
+					end,
+					function()
+						NavMesh.NewFollower(path, 0)
+					end,
+					function()
+						NavMesh.Advance(court, NavMesh.NewFollower(path), v(2, 0, 2), -1)
+					end,
+				}
+			do
+				local ok, err = pcall(call)
+				expect(ok).is(false)
+				expect(tostring(err):find("Follow.spec", 1, true) ~= nil).with_context(`call {i}: {err}`).is_true()
+			end
+		end)
 	end)
 end

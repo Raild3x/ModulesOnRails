@@ -59,6 +59,7 @@ export type Handle = {
 	.Start vector? -- path start marker
 	.Goal vector? -- path goal marker
 	.AgentRadius number
+	.Proposed { any }? -- links shown but not yet in the description (ProposeLinks); any edit drops them
 ]=]
 export type State = {
 	Mode: Mode,
@@ -67,6 +68,7 @@ export type State = {
 	Start: vector?,
 	Goal: vector?,
 	AgentRadius: number,
+	Proposed: { any }?,
 }
 
 --[=[
@@ -91,10 +93,12 @@ export type State = {
 	.Which string? -- SetMarker: "Start" or "Goal"
 	.Radius number? -- SetAgentRadius
 	.Description any? -- SetDescription
+	.Links { any }? -- ProposeLinks: the LinkDescs to show (from NavMesh.GenerateLinks)
 
 	Types: `PointerDown`, `Drag`, `PointerUp`, `CreateRing`, `CreateEdge` (CDT),
 	`CreateSeam` (NavMesh), `CreateLink` (NavMesh), `InsertVertex`, `Delete`, `SetMarker`,
-	`SetAgentRadius`, `SetDescription`.
+	`SetAgentRadius`, `SetDescription`, `ProposeLinks` and `CommitLinks` (NavMesh: show links,
+	then add them to the description).
 ]=]
 export type Event = {
 	Type: string,
@@ -116,6 +120,7 @@ export type Event = {
 	Which: string?,
 	Radius: number?,
 	Description: any?,
+	Links: { any }?,
 }
 
 local GRID = 0.25
@@ -506,11 +511,8 @@ local function insertVertex(state: State): boolean
 	return false
 end
 
---[=[
-	@within EditorState
-	Applies one event to `state` and returns whether the description changed.
-]=]
-function EditorState.Apply(state: State, event: Event): boolean
+-- One event; whether the description changed.
+local function apply(state: State, event: Event): boolean
 	local t = event.Type
 	local desc = state.Description
 	if t == "PointerDown" then
@@ -616,8 +618,34 @@ function EditorState.Apply(state: State, event: Event): boolean
 		state.Description = EditorState.Copy(description)
 		state.Selection = nil
 		return true
+	elseif t == "ProposeLinks" then
+		requireMode(state, "NavMesh", t)
+		state.Proposed = EditorState.Copy(need(event.Links, "Links", t))
+		return false
+	elseif t == "CommitLinks" then
+		requireMode(state, "NavMesh", t)
+		local proposed = state.Proposed
+		if proposed == nil or #proposed == 0 then
+			return false
+		end
+		desc.Links = desc.Links or {}
+		table.move(proposed, 1, #proposed, #desc.Links + 1, desc.Links)
+		return true
 	end
 	error(`EditorState: unknown event Type "{tostring(t)}"`, 0)
+end
+
+--[=[
+	@within EditorState
+	Applies one event to `state` and returns whether the description changed. A change drops
+	the proposed links: they were generated from the description before it.
+]=]
+function EditorState.Apply(state: State, event: Event): boolean
+	local changed = apply(state, event)
+	if changed then
+		state.Proposed = nil
+	end
+	return changed
 end
 
 return EditorState

@@ -704,6 +704,26 @@ Compressing (bake time only, zstd level 19): demo 1.7-1.8 ms, bench 95-104 ms.
   - a per-mesh memo of the last triangle's walls, dropped by `Refresh`.
 - **Without them:** 163 us per call on props.
 
+## E3: radius FindPath with links (Track E, 2026-10-01)
+`lune run tools/navmesh/bench/findpath_links_cost.luau` (against `lib/navmesh/src_old`, the
+sources before E3). Random links between on-mesh points, two in three bidirectional; 400 random
+pairs, median of 7 passes after a warm-up. ms per 400 queries, old / new:
+
+| scene | links | radius 0 | radius 0.3-2 per query | radius 1 |
+|---|---|---|---|---|
+| props (64) | 0 | 31.5 / 29.6 | 85.2 / 53.0 | 71.8 / 42.0 |
+| props | 100 | 32.4 / 32.3 | 110.3 / 198.8 (1.8x) | 125.9 / 102.9 |
+| props | 1,000 | 47.4 / 48.4 | 141.8 / 2,457 (17x) | 155.1 / 215.7 (1.4x) |
+| bench (256) | 0 | 33.3 / 32.9 | 81.4 / 76.6 | 79.1 / 72.4 |
+| bench | 100 | 34.4 / 33.5 | 71.2 / 76.9 | 69.2 / 64.2 |
+| bench | 1,000 | 48.2 / 47.5 | 97.3 / 254.7 (2.6x) | 85.7 / 93.8 |
+
+- Each link landing is a node with a barrier test or two (7-13 us cold). A radius drawn per
+  query keeps them cold; at one radius they are remembered with each triangle's walls (per
+  triangle and radius, until the walls change). Details and the Partial / Success split in ticket 27, "Link and
+  seam entries".
+- Before the pair-free `Separated` and the memo, props with 1,000 links ran 14,400 ms (103x).
+
 ## Track G: path output (2026-10-01)
 The full tables are in the tickets; this is the index.
 - **Door repaths with `FirstAffectedSegment`** (ticket 28), for 19 door toggles:
@@ -946,6 +966,37 @@ the bench prints.
   - a warm `Update` under 25 ms with the ring index alone, and about 5 ms with Opt1 too.
 - **Terrain-like input needs the surface index before anything else.** No region scheme helps
   a Build that is quadratic within a floor.
+
+## Ticket 30: FindPath with many links (Track E, 2026-10-01)
+`lune run tools/navmesh/bench/link_scale.luau`. Random links between on-mesh points on each
+scene, dearer than walking (Cost 1-2x the distance, areas 1-4); 400 random pairs at r 0, median
+of 7 passes. "HeuristicScale" is 1,000 calls with `AreaCosts = { [2] = 1.5, [3] = 0.8 }`.
+
+**Before** (the scale looped over every link on every query):
+
+| scene | links | FindPath us | HeuristicScale us |
+|---|---|---|---|
+| props | 0 / 100 / 1,000 | 76 / 85 / 125 | 0.04 / 4.1 / 44 |
+| bench | 0 / 100 / 1,000 | 81 / 123 / 169 | 0.05 / 6.6 / 55 |
+| terrain | 0 / 100 / 1,000 | 44 / 68 / 114 | 0.03 / 5.5 / 60 |
+| walls | 0 / 100 / 1,000 | 108 / 111 / 170 | 0.05 / 5.4 / 57 |
+
+At 1,000 links the scale was 35-50% of a query. The candidate, the cheapest Cost / length kept
+per link area (rebuilt once after any link change), took 0.07-0.11 us and gave the same scale
+in all 12 cases. The other candidate in ticket 30, a cache keyed by the `AreaCosts` table, was
+not built: it breaks when a caller edits its table in place, and per-area is already O(areas).
+
+**After** (`Storage.LinkPrices`, read by `Search.HeuristicScale`):
+
+| scene | links | FindPath us | HeuristicScale us |
+|---|---|---|---|
+| props | 0 / 100 / 1,000 | 73 / 80 / 88 | 0.02 / 0.07 / 0.07 |
+| bench | 0 / 100 / 1,000 | 87 / 80 / 95 | 0.02 / 0.08 / 0.08 |
+| terrain | 0 / 100 / 1,000 | 38 / 41 / 55 | 0.02 / 0.07 / 0.09 |
+| walls | 0 / 100 / 1,000 | 78 / 77 / 74 | 0.02 / 0.08 / 0.08 |
+
+What 1,000 links still add (up to 17 us on terrain) is the search expanding the links
+themselves. Runs vary by about 10%: other sessions shared the machine.
 
 ## Uneven terrain (ticket 37, 2026-10-02)
 The baseline Track F's simplification passes re-measure against. ForestRiver (823 Parts: 576
