@@ -9,7 +9,7 @@
 --   South of z 80 and east of x 160 the ground is raised 0.5 studs: steps, walkable by the
 --   adapter's step-height rule (MaxStepHeight 1, ticket 34). Trees (upright cylinders) and rocks fill x 135-190, z 0-100,
 --   leaving a 5-stud trail from the bridge east.
--- `WithTilt(degrees, seed?)` builds the same layout at another tilt (or seed) (the sweep in
+-- `WithTilt(degrees, seed?, options?)` builds the same layout at another tilt (or seed) (the sweep in
 -- tools/navmesh/bench/terrain_sweep.luau); this module is the 5-degree map.
 local Parts = require("../Parts")
 
@@ -42,7 +42,8 @@ local function trailDistance(x: number, z: number): number
 	return best
 end
 
-local function make(tilt: number, seed: number?)
+-- `options.LevelSouth`: the meadow's south edge (z 160) is level too, to meet a sidewalk (ticket 38).
+local function make(tilt: number, seed: number?, options: { LevelSouth: boolean? }?)
 	local seed0 = seed or 37
 	local rise = 10 * math.tan(math.rad(tilt)) -- the most a 10-stud piece climbs
 
@@ -75,7 +76,8 @@ local function make(tilt: number, seed: number?)
 				+ 0.3 * (90 - x) / 90 -- the fall to the river
 			local edge = math.clamp((90 - x) / 20, 0, 1) -- level at the river
 			local pad = math.clamp(math.max(60 - x, z - 50, 30 - z) / 10, 0, 1) -- level on the pad
-			return y * edge * pad
+			local south = if options and options.LevelSouth then math.clamp((160 - z) / 20, 0, 1) else 1
+			return y * edge * pad * south
 		end
 		local h = {}
 		for i = 0, 9 do

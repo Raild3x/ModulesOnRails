@@ -38,7 +38,8 @@ local function excluded(radius: number)
 	end
 end
 
-return function(curbs: boolean)
+-- `building` is passed to Building.Build (the city map, ticket 38, turns the elevator on).
+return function(curbs: boolean, building: { Ramps: boolean?, Elevator: boolean? }?)
 	local roadY = if curbs then -0.5 else 0
 	return {
 		Name = if curbs then "Street" else "StreetFlush",
@@ -46,8 +47,14 @@ return function(curbs: boolean)
 		AdapterOptions = { MaxStepHeight = 1 },
 		View = nil,
 		Build = function(rbx: any, parent: Instance?)
-			local walkable, obstacles = Building.Build(rbx, parent)
-			local built = { Walkable = walkable, Obstacles = obstacles, Points = {} }
+			local walkable, obstacles, links, cab = Building.Build(rbx, parent, building)
+			local built = {
+				Walkable = walkable,
+				Obstacles = obstacles,
+				Points = {},
+				Links = if #links > 0 then links else nil,
+				Extra = cab,
+			}
 			local P = Parts(rbx, parent)
 			local CF, V3 = rbx.CFrame, rbx.Vector3
 			local function tagged(p, area: string)
