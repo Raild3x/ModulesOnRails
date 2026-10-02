@@ -159,7 +159,7 @@ def main() -> int:
     drawn, cleared = OUT / f"{name}.png", OUT / f"{name}-cleared.png"
     captures = [capture(drawn, args.settle), capture(cleared, args.settle + args.hold)]
     result = subprocess.run(["run-in-roblox", "--place", str(place), "--script", str(OUT / "run.luau")],
-                            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=2 * args.hold + 300)
+                            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=2 * args.hold + 900)
     text = result.stdout + result.stderr
     (OUT / f"{name}.txt").write_text(text, encoding="utf-8")
     print(text.strip())
