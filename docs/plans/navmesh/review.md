@@ -99,6 +99,13 @@ the const question are deliberately open, gated on benchmarks.
   - Those numbers were on the first (noise) meadow. The meadow became landforms the same day
     (user: "more variation in the terrain structure"); ticket 37 and bench.md have both.
 
+- **Adapter speed: bounding-box checks before each cut and each seam clip** (2026-10-02, for
+  the big terrain map the user asked for). User: "Yes, merge early (Recommended)".
+  - Measured first: the adapter compared every piece with every other (1,250 triangles 9.9 s);
+    with the checks 1.1 s, and 3,200 triangles 8.1 s. Output byte-identical on every map
+    (City 2,414 to 133 ms, ForestRiver 2,130 to 105 ms). Breaking either check fails 6-11 specs.
+  - Rejected: capping the new map at about 25 x 25 cells.
+
 ### Rulings after Track H (2026-10-01)
 - **D6, large worlds, ruled on ticket 31's numbers** (bench.md, "Large worlds, 1-4 km"): fix
   the O(map) costs first, then re-measure. Region bakes are decided after that re-measure.

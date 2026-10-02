@@ -413,7 +413,7 @@ local function nameAreas(walkable: { BasePart }): { [string]: number }
 	return areas
 end
 
-type Face = { Ring: { vector }, Floor: Floor }
+type Face = { Ring: { vector }, Floor: Floor, Box: { number }? }
 type Seam = { FloorA: string, FloorB: string, From: vector, To: vector }
 
 -- How far a riser strip reaches out over the lower floor, in studs.
@@ -654,6 +654,15 @@ local function fromParts(
 		table.insert(solids, toWorld(part, sides))
 	end
 
+	local solidBoxes = {}
+	for k, solid in solids do
+		local x0, z0, x1, z1 = math.huge, math.huge, -math.huge, -math.huge
+		for _, p in solid.Points do
+			x0, z0, x1, z1 = math.min(x0, p.x), math.min(z0, p.z), math.max(x1, p.x), math.max(z1, p.z)
+		end
+		solidBoxes[k] = { x0, z0, x1, z1 }
+	end
+
 	-- Each floor: its welded faces, minus every solid standing within the agent's height.
 	local seams: { Seam } = {}
 	local desc = { Floors = {}, Seams = seams }
@@ -672,7 +681,11 @@ local function fromParts(
 			end
 		end
 		local obstacleRings = {}
-		for _, solid in solids do
+		for k, solid in solids do
+			local sb = solidBoxes[k]
+			if sb[3] <= lo.x or sb[1] >= hi.x or sb[4] <= lo.z or sb[2] >= hi.z then
+				continue
+			end
 			local ring = cut(solid, f, agentHeight)
 			if ring == nil then
 				continue
@@ -707,11 +720,24 @@ local function fromParts(
 		end
 		return false
 	end
+	for _, face in faces do
+		local x0, z0, x1, z1 = math.huge, math.huge, -math.huge, -math.huge
+		for _, p in face.Ring do
+			x0, z0, x1, z1 = math.min(x0, p.x), math.min(z0, p.z), math.max(x1, p.x), math.max(z1, p.z)
+		end
+		local t = HEIGHT_TOLERANCE
+		face.Box = { x0 - t, z0 - t, x1 + t, z1 + t }
+	end
 	for _, fb in faces do
 		local ring = fb.Ring
+		local bb = fb.Box
 		for i, p in ring do
 			local q = ring[i % #ring + 1]
 			for _, fa in faces do
+				local ab = fa.Box
+				if ab[3] < bb[1] or ab[1] > bb[3] or ab[4] < bb[2] or ab[2] > bb[4] then
+					continue
+				end
 				local A = fa.Floor
 				if
 					A == fb.Floor
