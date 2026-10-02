@@ -21,6 +21,15 @@ the const question are deliberately open, gated on benchmarks.
   floor. Ruled: do it with ticket 29, which already plans a height per obstacle (for ceilings).
   There, the generator jumps over low obstacles and lands on their tops. User: "With ticket 29
   (Recommended)".
+- **Clearance mutation 79.9% accepted** (floor 80.1), after E3. The survivors on new code are
+  triaged as equivalent in ticket 27 ("Link and seam entries (E3)"). User: "Accept, documented
+  (Recommended)".
+- **Link landings with a radius stay as built (E3):** each link landing is its own search node,
+  with barrier verdicts cached per triangle and radius. At 1,000 links that is 1.4x once a radius
+  is warm, and up to 17x on a dense room when every query uses a radius never seen before.
+  Rejected: precomputing verdicts per declared radius at Build/Update, and going back to one node
+  per triangle (that brings back Partial for reachable pairs). User: "keep as built. Keep an eye
+  out for if this becomes an issue later". The watch item is in known-gaps.md.
 
 ### Rulings during Track M2 (2026-10-01)
 - **Adapter seams between tilted Parts (ticket 37's pre-work):** fix the three f32 tolerances

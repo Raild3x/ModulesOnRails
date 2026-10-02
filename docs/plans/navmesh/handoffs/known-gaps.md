@@ -24,6 +24,18 @@ ends" section. Two kinds of end still pass unjudged; both are below.
   1: 160 to 235 us). Success queries don't pay it. The cost is one push plus one barrier test
   per candidate end.
 
+**Watch (ruled 2026-10-01, Track E): cold link landings with an agent radius.**
+- Each link landing is its own search node, and its barrier verdict costs 7-13 us the first time
+  per triangle and radius (then cached). With 1,000 links, a radius never seen before costs up to
+  17x per `FindPath` on a dense 64-stud room (2.6x on the bench map), against 1.4x warm.
+  `tools/navmesh/bench/findpath_links_cost.luau` measures it.
+- The user ruled "keep as built" and asked us to watch for it. Re-measure whenever a track
+  touches links, Clearance or Search, or a map (tickets 33-38) uses many generated links with
+  several agent sizes.
+- **If it bites:** first add a `Prewarm(mesh, radius)` that fills the cache once after load. The
+  rejected options were precomputing per declared radius at Build/Update, or one node per
+  triangle (which gives wrong Partials).
+
 **Found by Track E (2026-10-01), not fixed (no owner; Funnel was Track G's):**
 - **The funnel folds back at a seam line.** In `ThreeFloorStairs`, `FindPath` from the ramp
   (10.5, 0.25, 3) to the Ground just past the ramp's side (10.5, 0, 5.05) returns Success with
