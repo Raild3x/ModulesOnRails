@@ -1,7 +1,8 @@
 --!strict
--- A landform sampler (the user's reference charts, 2026-10-02): one 320 x 320 heightfield of
--- wedge-triangle Parts (8-stud cells, 3,200 triangles) holding as many kinds of ground as fit, so
--- slope-merging work has a wide spread of slopes to start from. X runs east, Z south.
+-- A landform sampler (the user's reference charts, 2026-10-02): one 320 x 320 adaptive
+-- heightfield of wedge-triangle Parts (cells 32 studs on flat ground down to 2 on the trail and
+-- the lava, about 8,300 triangles) holding as many kinds of ground as fit, so slope-merging work
+-- has a wide spread of slopes and triangle sizes to start from. X runs east, Z south.
 --
 --   z   0  mountains: two peaks and a saddle, a U-shaped glacier valley | volcano with a crater
 --   z 100  alluvial fan | hills | terraced hill | sinkhole | plateau (cliffs, west ramp), canyon
@@ -15,12 +16,17 @@
 -- Ordinary Parts too (the user: "overhangs and caves"): a cave into a hillside, with a walkable
 -- roof; a high overhang off the plateau (walk under it) and a low tilted shelf (too low); 30
 -- outcrops at random turns; a log across the river; sea stacks.
--- Triangles are coloured by slope: green (flat) through yellow and brown to grey (too steep);
--- snow above 45 studs, sand at the shore.
+-- Triangles are coloured by slope: green (flat) through yellow and brown to grey (too steep).
+-- Areas with costs (Filter): a trail (cheap), mud by the river, sand at the shore and on the
+-- dunes, snow on the heights, scree on 35-45 degree slopes, and a lava flow nobody crosses.
+-- Drops and jumps are generated (GenerateLinks); Studio draws them, the areas, and a draggable
+-- Start and Goal (Studio.luau).
 local Parts = require("../Parts")
 local Terrain = require("../Terrain")
 
-local SIZE, CELL = 320, 8
+local SIZE, CELL, MIN_CELL = 320, 32, 2
+-- Terrain.Adaptive's stitch; bench/adaptive_fan_repro.luau sets Fan to show the adapter's fold.
+local STITCH = { Fan = false }
 local N = SIZE // CELL
 
 local function clamp01(v: number): number
@@ -57,6 +63,24 @@ end
 local GLACIER = { { 98, 30 }, { 96, 80 }, { 104, 130 } }
 local RIVER = { { 104, 130 }, { 112, 165 }, { 96, 200 }, { 80, 225 }, { 66, 240 } }
 local CANYON = { { 250, 100 }, { 262, 150 }, { 248, 200 }, { 258, 250 }, { 252, 300 } }
+-- A trail (cheap to walk): from the fan to the log, and from the log up the ramp onto the plateau.
+local TRAILS = {
+	{ { 40, 120 }, { 62, 150 }, { 90, 150 } },
+	{ { 130, 150 }, { 150, 168 }, { 200, 168 }, { 216, 160 } },
+}
+-- A lava flow down the volcano's south-west flank (excluded).
+local LAVA = { { 256, 74 }, { 242, 92 }, { 226, 102 } }
+
+local function dunesAt(x: number, z: number): number
+	return smooth(118, 128, x) * (1 - smooth(176, 186, x)) * smooth(155, 165, z) * (1 - smooth(240, 250, z))
+end
+local function nearTrail(x: number, z: number): number
+	local best = math.huge
+	for _, trail in TRAILS do
+		best = math.min(best, (toLine(x, z, trail)))
+	end
+	return best
+end
 
 -- The ground's height at (x, z), before the water.
 local function height(x: number, z: number): number
@@ -106,7 +130,7 @@ local function height(x: number, z: number): number
 
 	-- Plateau (east): 22 up, ringed by cliffs, with a ramp up its west side.
 	local inside = smooth(186, 190, x) * (1 - smooth(312, 316, x)) * smooth(110, 114, z) * (1 - smooth(226, 230, z))
-	local ramp = clamp01((x - 150) / 40) * (1 - smooth(12, 16, math.abs(z - 168))) * (1 - smooth(186, 192, x))
+	local ramp = clamp01((x - 150) / 40) * (1 - smooth(12, 16, math.abs(z - 168))) * (1 - smooth(300, 304, x))
 	h = math.max(h, 3 + 19 * math.max(inside, ramp))
 
 	-- Canyon through the plateau and on to the sea: floor 2 up, walls near vertical.
@@ -114,7 +138,7 @@ local function height(x: number, z: number): number
 	h = h + (2 - h) * (1 - smooth(7, 11, cd))
 
 	-- Dunes: asymmetric ridges, gentle to windward, steep to lee.
-	local dunes = smooth(118, 128, x) * (1 - smooth(176, 186, x)) * smooth(155, 165, z) * (1 - smooth(240, 250, z))
+	local dunes = dunesAt(x, z)
 	local phase = ((x + 6 * math.sin(z / 14)) % 18) / 18
 	h += dunes * 5 * (if phase < 0.75 then phase / 0.75 else (1 - phase) / 0.25)
 
@@ -147,12 +171,60 @@ local function height(x: number, z: number): number
 	return h
 end
 
+-- Areas (NavArea on the triangles' Parts), costs in Filter. The Parts take each area's natural
+-- colour; Studio draws the mesh in AREA_DRAW_COLORS (saturated, a legend in the corner).
+local PART_COLORS = {
+	Trail = { 225, 205, 160 },
+	Lava = { 230, 70, 20 },
+	Mud = { 95, 70, 45 },
+	Sand = { 214, 196, 150 },
+	Snow = { 235, 238, 242 },
+	Scree = { 150, 140, 150 },
+}
+local AREA_DRAW_COLORS = {
+	Trail = "#ffe14d",
+	Lava = "#ff1f1f",
+	Mud = "#8a4b14",
+	Sand = "#ff9f0a",
+	Snow = "#c77dff",
+	Scree = "#6e6e6e",
+}
+local LINK_AREA = 20 -- no NavArea name gets this id
+local AREA_COSTS = { Trail = 0.5, Mud = 4, Sand = 2, Snow = 3, Scree = 3, Lava = math.huge }
+
+-- The area of a triangle centred at (x, y, z) with this slope, or nil for plain ground.
+local function areaAt(x: number, y: number, z: number, slope: number): string?
+	if slope >= 45 then
+		return nil
+	elseif (toLine(x, z, LAVA)) < 4 then
+		return "Lava"
+	elseif nearTrail(x, z) < 2.5 and slope < 30 then
+		return "Trail"
+	elseif y > 0 and y < 5 and (toLine(x, z, RIVER)) < 15 and slope < 30 then
+		return "Mud"
+	elseif (y < 1.2 or dunesAt(x, z) > 0.5) and slope < 30 then
+		return "Sand"
+	elseif y > 45 then
+		return "Snow"
+	elseif slope >= 35 then
+		return "Scree"
+	end
+	return nil
+end
+
+-- An agent 1 stud round that pays the area costs.
+local function HIGHLANDS_FILTER(areas: { [string]: number }): any
+	local costs = {}
+	for name, cost in AREA_COSTS do
+		if areas[name] then
+			costs[areas[name]] = cost
+		end
+	end
+	return { AgentRadius = 1, AreaCosts = costs }
+end
+
 local function color(slope: number, y: number): { number }
-	if y > 45 and slope < 45 then
-		return { 235, 238, 242 } -- snow
-	elseif y < 1.2 and slope < 20 then
-		return { 214, 196, 150 } -- shore sand
-	elseif slope < 5 then
+	if slope < 5 then
 		return { 92, 150, 72 }
 	elseif slope < 15 then
 		return { 140, 170, 80 }
@@ -170,22 +242,62 @@ return {
 	AdapterOptions = { MaxStepHeight = 1 },
 	View = { From = { 160, 300, 470 }, To = { 160, 0, 150 } },
 	Height = height,
+	Stitch = STITCH,
+	-- Studio loads the mesh baked in Lune (bake.luau): building it takes about a minute.
+	Bake = true,
+	AreaColors = AREA_DRAW_COLORS,
+	-- Drops off ledges and jumps over gaps, generated; their area (LINK_AREA) turns them off.
+	GenerateLinks = { Clearance = 1, Area = LINK_AREA },
+	-- The filter the draggable Start and Goal use in Studio, and the "costs" scenarios.
+	Filter = HIGHLANDS_FILTER,
 	Build = function(rbx: any, parent: Instance?)
 		local P = Parts(rbx, parent)
 		local V3, CF = rbx.Vector3, rbx.CFrame
 		local walkable, obstacles = {}, {}
-		local h = {}
-		for i = 0, N do
-			h[i] = {}
-			for j = 0, N do
-				h[i][j] = height(i * CELL, j * CELL)
+		-- Fidelity varies: 32-stud cells on flat ground down to 4 on cliffs; 2 along the trail and
+		-- on the lava; the mountains coarsest (a stud and a half of slack).
+		local cache = {}
+		local function cached(x: number, z: number): number
+			local k = x * 4096 + z
+			local y = cache[k]
+			if y == nil then
+				y = height(x, z)
+				cache[k] = y
 			end
+			return y
 		end
-		Terrain.Heightfield(P, rbx, walkable, "H", 0, 0, CELL, N, N, function(i, j)
-			return h[i][j]
-		end, function(i, j, slope)
-			return color(slope, (h[i][j] + h[i + 1][j + 1]) / 2)
-		end)
+		local _, ground = Terrain.Adaptive(
+			P,
+			rbx,
+			walkable,
+			"H",
+			0,
+			0,
+			CELL,
+			N,
+			N,
+			MIN_CELL,
+			cached,
+			function(x, z, size)
+				if nearTrail(x, z) < 6 or (toLine(x, z, LAVA)) < 6 then
+					return 0.05
+				elseif size <= 4 then
+					return math.huge
+				elseif z < 90 and x < 200 then
+					return 1.5
+				end
+				return 0.5
+			end,
+			function(a, b, c, slope)
+				if math.max(a.Y, b.Y, c.Y) < -0.5 then
+					return nil -- under water all over: nobody walks it
+				end
+				local m = (a + b + c) / 3
+				local area = areaAt(m.X, m.Y, m.Z, slope)
+				return if area then PART_COLORS[area] else color(slope, m.Y), area
+			end,
+			STITCH.Fan
+		)
 
 		-- Sea level: one Water block under y 0 over the whole map.
 		local water = P.box("Water", 0, 0, SIZE, SIZE, -12, 12, { 60, 110, 170 })
@@ -223,7 +335,7 @@ return {
 			obstacles,
 			P.part("Part", "Rubble", V3.new(3, 2, 3), CF.new(139, 4, 98) * CF.Angles(0.3, 0.6, 0.2), DARK)
 		)
-		local foot = height(133, 132)
+		local foot = math.max(ground(128, 132), ground(138, 132)) + 0.1 -- a small step up all along
 		local ramp = P.part(
 			"WedgePart",
 			"Cave Ramp",
@@ -240,7 +352,7 @@ return {
 		rock("Low Shelf", V3.new(14, 1.5, 10), CF.new(85, 7.5, 120) * CF.Angles(0, 0.4, math.rad(8)))
 
 		-- Outcrops: rocks and slabs at random turns on the hills and the plain.
-		local seed = 4242
+		local seed = 4245
 		local function rnd(): number
 			seed = seed * 16807 % 2147483647
 			return seed / 2147483647
@@ -248,7 +360,7 @@ return {
 		for k = 1, 30 do
 			local x, z = 12 + rnd() * 120, 112 + rnd() * 90
 			local size = V3.new(2 + rnd() * 8, 1 + rnd() * 5, 2 + rnd() * 8)
-			local cf = CF.new(x, height(x, z) + size.Y * 0.3, z)
+			local cf = CF.new(x, ground(x, z) + size.Y * 0.3, z)
 				* CF.Angles((rnd() - 0.5) * 1.4, rnd() * math.pi * 2, (rnd() - 0.5) * 1.4)
 			if k % 4 == 0 then
 				table.insert(walkable, P.part("WedgePart", "Outcrop", size, cf, ROCK))
@@ -264,7 +376,7 @@ return {
 		-- and the rule drops that riser: known-gaps.md, "riser lean".)
 		local log = P.part("Part", "Log", V3.new(24, 8, 8), CF.new(110, 0.4, 150), { 110, 80, 55 })
 		for _, x in { 96, 124 } do
-			local base = height(x, 150) - 2
+			local base = ground(x, 150) - 2
 			rock("Abutment", V3.new(4, 3.9 - base, 9), CF.new(x, (3.9 + base) / 2, 150))
 		end
 		log.Shape = rbx.Enum.PartType.Cylinder
@@ -278,13 +390,14 @@ return {
 		end
 
 		local function at(x: number, z: number, lift: number?): any
-			return V3.new(x, height(x, z) + (lift or 0), z)
+			return V3.new(x, ground(x, z) + (lift or 0), z)
 		end
 		return {
 			Walkable = walkable,
 			Obstacles = obstacles,
 			Points = {
 				Plain = at(136, 144),
+				LavaEast = at(252, 96),
 				Saddle = at(104, 40),
 				Peak = at(56, 40),
 				FanFoot = at(40, 120),
@@ -361,10 +474,37 @@ return {
 		{ Name = "down into the sinkhole", From = "Plain", To = "SinkholeFloor", Expect = { Status = "Success" } },
 		{ Name = "the mesa's sheer sides: no way up", From = "Plain", To = "MesaTop", Expect = { Status = "Partial" } },
 		{
-			Name = "the crater's walls: no way in",
+			Name = "into the crater: a jump off the rim",
 			From = "VolcanoFoot",
 			To = "CraterFloor",
+			Expect = { Status = "Success", Links = { "Jump" } },
+		},
+		{
+			Name = "the crater, no links: no way in",
+			From = "VolcanoFoot",
+			To = "CraterFloor",
+			Filter = { AreaCosts = { [LINK_AREA] = math.huge } },
 			Expect = { Status = "Partial" },
+		},
+		{
+			Name = "down into the canyon: jumps cut the walk",
+			From = "PlateauTop",
+			To = "CanyonFloor",
+			Expect = { Status = "Success", MaxLength = 180 },
+		},
+		{
+			Name = "the canyon, no links: the long way round",
+			From = "PlateauTop",
+			To = "CanyonFloor",
+			Filter = { AreaCosts = { [LINK_AREA] = math.huge } },
+			Expect = { Status = "Success", MinLength = 200 },
+		},
+		{
+			Name = "round the lava (costs)",
+			From = "VolcanoFoot",
+			To = "LavaEast",
+			Filter = HIGHLANDS_FILTER,
+			Expect = { Status = "Success", Avoids = { "Lava" } },
 		},
 		{
 			Name = "the lake island: water all round",
@@ -372,7 +512,7 @@ return {
 			To = "Island",
 			Expect = { Status = "Partial" },
 		},
-		{ Name = "the peak: too steep to stand on", From = "Plain", To = "Peak", Expect = { Status = "NoGoal" } },
+		{ Name = "the peak: no way up its faces", From = "Plain", To = "Peak", Expect = { Status = "Partial" } },
 		-- Negative controls.
 		{
 			Name = "control: the mesa is not climbed",
@@ -380,6 +520,13 @@ return {
 			To = "MesaTop",
 			Expect = { Status = "Success" },
 			MustFail = "Status",
+		},
+		{
+			Name = "control: with no costs the lava is crossed",
+			From = "VolcanoFoot",
+			To = "LavaEast",
+			Expect = { Status = "Success", Avoids = { "Lava" } },
+			MustFail = "Avoids",
 		},
 		{
 			Name = "control: the arch is not a detour",
