@@ -704,6 +704,26 @@ Compressing (bake time only, zstd level 19): demo 1.7-1.8 ms, bench 95-104 ms.
   - a per-mesh memo of the last triangle's walls, dropped by `Refresh`.
 - **Without them:** 163 us per call on props.
 
+## E3: radius FindPath with links (Track E, 2026-10-01)
+`lune run tools/navmesh/bench/findpath_links_cost.luau` (against `lib/navmesh/src_old`, the
+sources before E3). Random links between on-mesh points, two in three bidirectional; 400 random
+pairs, median of 7 passes after a warm-up. ms per 400 queries, old / new:
+
+| scene | links | radius 0 | radius 0.3-2 per query | radius 1 |
+|---|---|---|---|---|
+| props (64) | 0 | 31.5 / 29.6 | 85.2 / 53.0 | 71.8 / 42.0 |
+| props | 100 | 32.4 / 32.3 | 110.3 / 198.8 (1.8x) | 125.9 / 102.9 |
+| props | 1,000 | 47.4 / 48.4 | 141.8 / 2,457 (17x) | 155.1 / 215.7 (1.4x) |
+| bench (256) | 0 | 33.3 / 32.9 | 81.4 / 76.6 | 79.1 / 72.4 |
+| bench | 100 | 34.4 / 33.5 | 71.2 / 76.9 | 69.2 / 64.2 |
+| bench | 1,000 | 48.2 / 47.5 | 97.3 / 254.7 (2.6x) | 85.7 / 93.8 |
+
+- Each link landing is a node with a barrier test or two (7-13 us cold). A radius drawn per
+  query keeps them cold; at one radius they are remembered with each triangle's walls (per
+  triangle and radius, until the walls change). Details and the Partial / Success split in ticket 27, "Link and
+  seam entries".
+- Before the pair-free `Separated` and the memo, props with 1,000 links ran 14,400 ms (103x).
+
 ## Track G: path output (2026-10-01)
 The full tables are in the tickets; this is the index.
 - **Door repaths with `FirstAffectedSegment`** (ticket 28), for 19 door toggles:

@@ -422,6 +422,7 @@ return function(t: tiniest)
 		local Clearance = require("../Clearance")
 		local Search = require("../Search")
 		local Snap = require("../Snap")
+		local Flood = require("./Helpers/Flood")
 		local extents = vector.create(0.5, 4, 0.5)
 		-- The ticket's room: 20 x 10 in one tile, a slab up to z = 9 (a 1-stud gap over it), and
 		-- the sliver (0, 10) (10, 9) (20, 10) spanning the gap. `south` and `slabFrom` open a way
@@ -448,6 +449,138 @@ return function(t: tiniest)
 			expect(status(mesh, v(14, 9.8), v(15, 5), 0.51)).is("Success")
 			-- 0.5 from the north wall, before the gap: pushed out it is still before it.
 			expect(status(mesh, v(9.6, 9.5), v(15, 5), 0.51)).is("Partial")
+		end)
+
+		test(
+			"a point pushed out of the triangle is parted from one only if that is cut off from the edge it crossed",
+			function()
+				-- (15, 9.9) is 0.1 under the north wall: pushed to r 0.51 it stands at z 9.49, under the
+				-- sliver's east edge (z 9.5 there), outside the sliver (E3: a link's start there).
+				local mesh = room(0, -1)
+				local sliver = Snap.Snap(mesh, v(15, 9.9), extents, {})
+				expect(Snap.Snap(mesh, v(9.6, 9.5), extents, {})).is(sliver)
+				-- From east of the gap it is a step away; from west of it, past the gap.
+				expect(Clearance.Separated(mesh, sliver, 0.51, 12, 9.45, 15, 9.9)).is(false)
+				expect(Clearance.Separated(mesh, sliver, 0.51, 15, 9.9, 12, 9.45)).is(false)
+				expect(Clearance.Separated(mesh, sliver, 0.51, 9.6, 9.5, 15, 9.9)).is(true)
+				expect(Clearance.Separated(mesh, sliver, 0.51, 15, 9.9, 9.6, 9.5)).is(true)
+			end
+		)
+
+		test("remembered verdicts don't depend on the order asked, across radii (E3)", function()
+			-- Verdicts are kept per triangle and radius (a few radii each). Ask the same questions
+			-- of two copies of the room, in opposite orders: every answer must match.
+			local questions = {}
+			for _, r in { 0.45, 0.51, 0.6, 0.7, 0.8 } do
+				for _, p in { v(9.6, 9.5), v(12, 9.45), v(15, 9.9), v(5, 5), v(10, 9.05) } do
+					table.insert(questions, { r, p })
+				end
+			end
+			local function ask(mesh: any, order: { number }): { string }
+				local out = {}
+				for _, k in order do
+					local r, p = questions[k][1], questions[k][2]
+					local tri = Snap.Snap(mesh, p, extents, {})
+					local bits = {}
+					for e = 1, 3 do
+						table.insert(bits, if Clearance.CutOff(mesh, tri, e, r, p.X, p.Z) then "1" else "0")
+					end
+					local sep = Clearance.Separated(mesh, tri, r, p.X, p.Z, 9.6, 9.5)
+					table.insert(bits, if sep then "S" else "s")
+					out[k] = table.concat(bits)
+				end
+				return out
+			end
+			local forward, backward = {}, {}
+			for k = 1, #questions do
+				table.insert(forward, k)
+				table.insert(backward, 1, k)
+			end
+			local first = room(0, -1)
+			local a, b = ask(first, forward), ask(room(0, -1), backward)
+			expect(table.concat(b, " ")).is(table.concat(a, " "))
+			-- And a second pass on the first copy, now all remembered.
+			expect(table.concat(ask(first, backward), " ")).is(table.concat(a, " "))
+			-- The questions are not all one answer.
+			expect(string.find(table.concat(a), "1") ~= nil and string.find(table.concat(a), "S") ~= nil).is_true()
+		end)
+
+		test("remembered verdicts are told apart by every input (E3)", function()
+			-- Pairs of questions that differ in one input only, with different answers, asked in
+			-- turn of one mesh: a verdict kept under too loose a key would answer the second.
+			local function edgeWhere(mesh: any, t: number, pick: (a: vector, b: vector) -> boolean): number
+				local ids = { Storage.GetTriangle(mesh, t) }
+				for e = 1, 3 do
+					if pick(Storage.GetVertex(mesh, ids[e % 3 + 1]), Storage.GetVertex(mesh, ids[(e + 1) % 3 + 1])) then
+						return e
+					end
+				end
+				error("no such edge")
+			end
+			-- The room, and the room turned a quarter (the gap at x 9..10 over a slab from the
+			-- west wall), for questions that differ in z only.
+			local turned = NavMesh.Build {
+				TileSize = 64,
+				Floors = {
+					Ground = {
+						Walkable = { flat(0, { 0, 0, 10, 0, 10, 20, 0, 20 }) },
+						Obstacles = { flat(0, { -1, 10, 9, 10, 9, 11, -1, 11 }) },
+					},
+				},
+			}
+			local mesh = room(0, -1)
+			local sliver = Snap.Snap(mesh, v(9.6, 9.5), extents, {})
+			local strip = Snap.Snap(turned, v(9.5, 9.6), extents, {})
+			expect(Snap.Snap(turned, v(9.5, 12), extents, {})).is(strip)
+			local east = edgeWhere(mesh, sliver, function(a, b)
+				return a.X >= 10 and b.X >= 10
+			end)
+			local north = edgeWhere(turned, strip, function(a, b)
+				return a.Z >= 10 and b.Z >= 10
+			end)
+			local function answers(): string
+				return table.concat({
+					tostring(Clearance.CutOff(mesh, sliver, east, 0.51, 9.6, 9.5)),
+					tostring(Clearance.CutOff(mesh, sliver, east, 0.51, 12, 9.5)), -- x differs
+					tostring(Clearance.CutOff(turned, strip, north, 0.51, 9.5, 9.6)),
+					tostring(Clearance.CutOff(turned, strip, north, 0.51, 9.5, 12)), -- z differs
+					tostring(Clearance.Separated(mesh, sliver, 0.51, 9.6, 9.5, 12, 9.45)),
+					tostring(Clearance.Separated(mesh, sliver, 0.51, 9.6, 9.5, 9.65, 9.45)), -- qx
+					tostring(Clearance.Separated(turned, strip, 0.51, 9.5, 9.6, 9.45, 12)),
+					tostring(Clearance.Separated(turned, strip, 0.51, 9.5, 9.6, 9.45, 9.65)), -- qz
+				}, " ")
+			end
+			local expected = "true false true false true false true false"
+			expect(answers()).is(expected)
+			-- Asked again, now all remembered, and once more after a question at another radius.
+			expect(answers()).is(expected)
+			Clearance.CutOff(mesh, sliver, east, 0.6, 9.6, 9.5)
+			expect(answers()).is(expected)
+		end)
+
+		test("a point pushed over an edge the other reaches is not parted from it (E3)", function()
+			-- A long sliver on the south wall of a floor of 400 small posts: both points stand
+			-- pushed off the wall, one past the sliver's edge, and the flood connects them. Read
+			-- by its barrier parity alone (it lies in no barrier polygon), they came out parted.
+			math.randomseed(2727)
+			local posts = {}
+			for _ = 1, 400 do
+				local cx, cz = 1 + math.random() * 62, 1 + math.random() * 30
+				local w, d = 0.1 + math.random() * 0.3, 0.1 + math.random() * 0.3
+				table.insert(posts, flat(0, { cx, cz, cx + w, cz, cx + w, cz + d, cx, cz + d }))
+			end
+			local mesh = NavMesh.Build {
+				TileSize = 64,
+				Floors = { Ground = { Walkable = { flat(0, { 0, 0, 64, 0, 64, 32, 0, 32 }) }, Obstacles = posts } },
+			}
+			local p, q, r =
+				v(42.976383209228516, 0.49771571159362793),
+				v(2.6359567642211914, 0.03136702626943588),
+				0.8229155590030512
+			local tri = Snap.Snap(mesh, p, vector.create(1e-4, 4, 1e-4), {})
+			expect(Snap.Snap(mesh, q, vector.create(1e-4, 4, 1e-4), {})).is(tri)
+			expect(Clearance.Separated(mesh, tri, r, p.X, p.Z, q.X, q.Z)).is(false)
+			expect(Flood.Connected(Flood.New(mesh), r, p, q)).is(true)
 		end)
 
 		test("an end still covered once pushed out has no side, and is not cut off", function()
@@ -593,8 +726,10 @@ return function(t: tiniest)
 			for i, b in bits do
 				hash = (hash * 31 + string.byte(b) * i) % 1000000007
 			end
+			-- Re-pinned in E3 (was 3 parted): all three had a point pushed out of its thin
+			-- triangle, and the flood connects the two pushed points in each.
 			expect(`{#bits} verdicts, {cuts} cut off, {parted} parted, hash {hash}`).is(
-				"1844 verdicts, 221 cut off, 3 parted, hash 553896827"
+				"1844 verdicts, 221 cut off, 0 parted, hash 557876296"
 			)
 		end)
 	end)

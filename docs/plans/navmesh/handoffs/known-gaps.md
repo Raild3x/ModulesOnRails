@@ -4,7 +4,9 @@ Read this before touching `Search`, `Clearance`, `Tiles` or `Serialize`. Each it
 track that now owns it, where one does. Items without an owner are deferred until the user asks.
 
 **Owned by a round-2 track:**
-- **Links skip ticket 27's end check, and Storage link ids are dense:** Track E.
+- **Links skip ticket 27's end check, and Storage link ids are dense:** Track E. The end check
+  is closed by E3 (ticket 27, "Link and seam entries"); what it leaves is in the Track B list
+  below.
 - **Update time grows badly with one huge authored ring:** Track F.
 
 **Narrowed by Track G (2026-10-01):** a Partial or Budget end is now judged with ticket 27's
@@ -75,23 +77,32 @@ than it looks. Read them before touching `Search`, `Clearance`, `Tiles` or `Seri
   - Measure Refresh's reach rule and the wall-index churn on long rings first. Re-snapping the
     whole ring is the smaller part: about 19 ms for a planar 8,192-point ring, marked
     `ponytail:` in `Tiles.reSnap`, with a per-ring edge index as its upgrade path.
-- **Links skip ticket 27's end check.**
-  - A link that lands in the goal triangle, or starts in the start triangle, doesn't check that
-    the agent can get between the link point and the end. Barriers are only checked across
-    edges and seam portals.
-  - Leaving a triangle entered by a link or a seam reads the exit edge's portal width only, as
-    the start did before ticket 27; the landing point itself is never checked.
-  - Ticket 30 (runtime and generated links, on `research/roblox-pathfinding`) will make links
-    far more common, so fold this in there.
+- ~~**Links skip ticket 27's end check.**~~ Closed by E3 (2026-10-01; ticket 27, "Link and seam
+  entries"): link landings and link starts in the end triangles are judged with `CutOff` /
+  `Separated`, and a seam entry takes the seam's edge as its entry edge. Still optimistic (each
+  falls back to the old answer, never a false block):
+  - from a triangle entered by an edge, a link's start is reached unchecked (checking it would
+    close the triangle to a better entry: the node model's gap below);
+  - a seam portal is judged by its whole edge (the corner widths), not by the piece;
+  - a link end the agent can't stand at, even pushed off the wall, is cut off from nothing, as
+    ticket 27 treats an end. The E3 oracle counts 121 new Successes through such points (of
+    206 changes) that its flood can't follow;
+  - `CutOff` from a point pushed out of its (thin) triangle answers "not cut off".
+- **Clearance doesn't see the other floor's walls at a seam** (found by E3's oracle). Widths and
+  barriers read the walls of the triangle's own floor, and a seam edge is open, so an agent
+  walking along a seam line squeezes between one floor's props and the other's. On the oracle's
+  `props+seam` scene (the props room split into two floors at x = 32) both the old and the new
+  search return Success along the seam where the flood (one plane) has no room for the radius.
+  Two of E3's Partial-to-Success changes are of this kind.
 - **Barrier completeness (ticket 27 is sound, not complete).** It misses:
   - a pocket closed by a loop inside one component;
   - a chain between two edges that cuts a corner off without reaching a vertex;
   - a second barrier when the first one found doesn't hold the end;
   - any barrier ending inside a crossable edge. That one is deliberate: no corridor holds the
     U-turn round it.
-  Each miss falls back to the old optimistic answer. The search's start-again and goal-again
-  node ids have no spec that reaches them; no mesh built so far needs them (ticket 27's
-  mutation notes).
+  Each miss falls back to the old optimistic answer. The goal-again node id has no spec that
+  reaches it (ticket 27's mutation notes); the start-again node is now reached by E3's spec of
+  a link start past a floating slab.
 - **A Partial or Budget end can still lie past a gap narrower than 2r** (narrowed by Track G).
   - Since Track G, each candidate end is pushed off the walls, then checked with
     `Clearance.CutOff` / `Separated` in the triangle the push lands in. A stranded one is
@@ -111,10 +122,17 @@ than it looks. Read them before touching `Search`, `Clearance`, `Tiles` or `Seri
 - ~~**Link ids are dense in Storage.**~~ Closed by Track E (ticket 30 part 1, 3b4d0d5): Storage
   link records are sparse, and the v3 reader takes increasing ids below the next id.
 - **FindPath with a radius costs 15-40 us more,** mostly gathering the walls around the start
-  and goal triangles (bench.md, "Ticket 27"). The last answer is memoized per mesh. Cache per
-  triangle if radius queries get hot.
-- **The old-sources oracles need a hand-made copy.** `tools/navmesh/bench/radius_oracle.luau`
-  and `findpath_radius_cost.luau` compare against `lib/navmesh/src_old`, made with
+  and goal triangles (bench.md, "Ticket 27"). Since E3 the walls and the verdicts are kept per
+  triangle and radius (up to 32,768 records per mesh), until the walls change.
+- **A radius FindPath on a link-dense mesh pays per link node at a new radius** (E3). Each
+  link landing is a node, checked with `CutOff` / `Separated` (7-13 us each, cold). On the
+  props room with 1,000 random links, a radius drawn per query costs 17x the pre-E3 FindPath
+  (Partial 0.5 to 11 ms); at one radius, remembered, 1.4x. With 100 links: 1.8x and 0.8x
+  (ticket 27, "Link and seam entries"). Precompute landing verdicts per agent radius if many
+  radii matter.
+- **The old-sources oracles need a hand-made copy.** `tools/navmesh/bench/radius_oracle.luau`,
+  `findpath_radius_cost.luau` and `findpath_links_cost.luau` compare against
+  `lib/navmesh/src_old`, made with
   `git archive <base> lib/navmesh/src`. Keep it out of the tree during coverage runs.
 - **Scratch archive:** the old `navmesh-phase0` worktree's untracked `zz_*` probes are in the
   main checkout's gitignored `.bench/navmesh/archive/navmesh-phase0/`.

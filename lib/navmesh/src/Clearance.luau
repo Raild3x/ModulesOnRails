@@ -301,8 +301,8 @@ type WallIndex = {
 -- width, which bounds how far a change can reach into it (nil = not measured yet).
 local indexes: { [Storage.State]: WallIndex } = setmetatable({}, { __mode = "k" }) :: any
 local tileReaches: { [Storage.State]: { [number]: number } } = setmetatable({}, { __mode = "k" }) :: any
--- Per mesh (weak): the last triangle `around` answered for (ticket 27 queries).
-local lastAround: { [Storage.State]: { any } } = setmetatable({}, { __mode = "k" }) :: any
+-- Per mesh (weak): what `around` answered per triangle (ticket 27 queries).
+local lastAround: { [Storage.State]: any } = setmetatable({}, { __mode = "k" }) :: any
 
 local function cellKey(floor: number, cx: number, cz: number): number
 	return (floor * 65536 + cx + 32768) * 65536 + cz + 32768
@@ -702,14 +702,39 @@ local function inside(poly: { number }, x: number, z: number): boolean
 	return odd
 end
 
--- Triangle t's edges (edge e opposite vertex e, CCW), which of them are walls, and the walls
--- within r of it. The last
--- answer per mesh is kept (a search asks about its start triangle once per exit edge), until the
--- walls change (Refresh drops it).
-local function around(s: Storage.State, t: number, r: number): (Region, { boolean }, { Seg })
-	local last = lastAround[s]
-	if last and last[1] == t and last[2] == r then
-		return last[3], last[4], last[5]
+-- The one edge of a triangle (its `edges`) that (x, z) lies beyond, 0 when inside, or -1 when
+-- beyond two (past a vertex).
+local function beyond(edges: Region, x: number, z: number): number
+	local found = 0
+	for e = 1, 3 do
+		local ed, o = edges[e], edges[(e + 1) % 3 + 1] -- o starts at vertex e
+		if cross(ed[1], ed[2], ed[3], ed[4], x, z) * cross(ed[1], ed[2], ed[3], ed[4], o[1], o[2]) < 0 then
+			if found ~= 0 then
+				return -1
+			end
+			found = e
+		end
+	end
+	return found
+end
+
+-- Triangle t's edges (edge e opposite vertex e, CCW), which of them are walls, the walls within
+-- r of it, and the record holding them: [4] the CutOff / Separated verdicts asked there, [5]
+-- their count. Records are kept per mesh, triangle and radius (a search asks about a triangle
+-- once per exit edge and link, and E3's landing checks repeat on every query at one radius: a
+-- game has a few agent sizes), until the walls change (Refresh drops them).
+-- ponytail: dropped wholesale at AROUND_CAP records; an LRU if huge maps thrash it.
+local AROUND_CAP = 32768
+local function around(s: Storage.State, t: number, r: number): (Region, { boolean }, { Seg }, { any })
+	local memo = lastAround[s]
+	if memo == nil or memo.n >= AROUND_CAP then
+		memo = { n = 0 }
+		lastAround[s] = memo
+	end
+	local key = string.format("%d %.17g", t, r)
+	local rec = memo[key]
+	if rec then
+		return rec[1], rec[2], rec[3], rec
 	end
 	local index = indexes[s] or buildIndex(s, false)
 	indexes[s] = index
@@ -724,8 +749,10 @@ local function around(s: Storage.State, t: number, r: number): (Region, { boolea
 	end
 	local walls = { Storage.IsWallEdge(s, t, 1), Storage.IsWallEdge(s, t, 2), Storage.IsWallEdge(s, t, 3) }
 	local feats = nearWalls(index, Storage.GetTriangleFloor(s, t), edges, r)
-	lastAround[s] = { t, r, edges, walls, feats }
-	return edges, walls, feats
+	rec = { edges, walls, feats, {}, 0 }
+	memo[key] = rec
+	memo.n += 1
+	return edges, walls, feats, rec
 end
 
 -- Whether the segment (ax, az)-(bx, bz) keeps at least r from every wall in `feats`.
@@ -780,8 +807,16 @@ end
 	  its end into the neighbour and back across the same edge, which no corridor can hold;
 	  round a vertex it passes other triangles, which a corridor can;
 	- consecutive polyline points (a contact, then link points, then a contact) share a disc.
-	Per component, the pair is its first and last contact along `arc`, or with `allPairs` (when
-	`arc` is the whole boundary, which has no first) every pair of contacts at different points.
+	Per component, the pair is its first and last contact along `arc`.
+	With `pq` (Separated: `arc` is the whole boundary, which has no first) it returns instead
+	whether some pair of contacts at different points gives a polygon holding exactly one of the
+	points P and Q. Each pair's polyline runs through the component's breadth-first tree from
+	its first wall, so the polygon holds one of them when the segment PQ crosses that polyline
+	an odd number of times; PQ crosses the path from a contact to a fixed point Z of the root's
+	disc with parity par(contact), and a pair's polyline (the two paths joined at Z, the shared
+	part crossed twice) with par(a) xor par(b). So one parity per contact, not a polygon per
+	pair (E3: Separated ran per link start, and the pairs were O(contacts^2) polygons). Two
+	contacts at one point count too: their polyline is a closed covered loop.
 	ponytail: one path per pair; a pocket that a loop inside a component closes is missed (a
 	missed block, never a false one).
 ]]
@@ -791,8 +826,8 @@ local function barriers(
 	feats: { Seg },
 	r: number,
 	arc: { number },
-	allPairs: boolean
-): { { number } }
+	pq: Seg?
+): ({ { number } }, boolean)
 	local m = #feats
 	-- Contacts: position along the arc (edge slot - 1 + u), point and wall, in wall order.
 	local at, atX, atZ, of = {}, {}, {}, {}
@@ -869,6 +904,7 @@ local function barriers(
 			continue
 		end
 		local members = { root }
+		local up = { [root] = 0 } -- the breadth-first tree, for `pq`
 		component[root] = root
 		local head = 1
 		while head <= #members do
@@ -877,6 +913,7 @@ local function barriers(
 			for j = 1, m do
 				if component[j] == 0 and link(i, j)[1] < r then
 					component[j] = root
+					up[j] = i
 					table.insert(members, j)
 				end
 			end
@@ -887,63 +924,76 @@ local function barriers(
 				table.insert(mine, c)
 			end
 		end
+		if pq then
+			-- Z: the component's first contact, which is on the root (contacts are gathered in
+			-- wall order, and the root is its first wall with one). first[i]: the first point of
+			-- the path from wall i to Z; par[i]: PQ's crossing parity with that path.
+			local zx, zz = atX[mine[1]], atZ[mine[1]]
+			local firstX, firstZ, par = { [root] = zx }, { [root] = zz }, { [root] = false }
+			local function odd(ax: number, az: number, bx: number, bz: number): boolean
+				return (crosses(pq, { ax, az, bx, bz }))
+			end
+			for k = 2, #members do -- parents come first in breadth-first order
+				local i = members[k]
+				local l = link(i, up[i])
+				firstX[i], firstZ[i] = l[2], l[3]
+				par[i] = par[up[i]] ~= odd(l[2], l[3], firstX[up[i]], firstZ[up[i]])
+			end
+			-- Two contacts of different parity part P and Q. Two at one point give a closed loop
+			-- of covered pieces (no arc), which parts them too.
+			local has = {}
+			for _, c in mine do
+				has[par[of[c]] ~= odd(atX[c], atZ[c], firstX[of[c]], firstZ[of[c]])] = true
+			end
+			if has[true] and has[false] then
+				return out, true
+			end
+			continue
+		end
 		table.sort(mine, function(a: number, b: number): boolean
 			return at[a] < at[b]
 		end)
-		if allPairs then
-			for x = 1, #mine do
-				for y = x + 1, #mine do
-					local a, b = mine[x], mine[y]
-					if atX[a] ~= atX[b] or atZ[a] ~= atZ[b] then
-						table.insert(out, polygon(members, a, b))
-					end
-				end
-			end
-		elseif #mine >= 2 and at[mine[#mine]] > at[mine[1]] then
+		if #mine >= 2 and at[mine[#mine]] > at[mine[1]] then
 			table.insert(out, polygon(members, mine[1], mine[#mine]))
 		end
 	end
-	return out
+	return out, false
 end
 
---[=[
-	@within NavMeshClearance
-	Whether an agent of radius `r` at point (x, z) of triangle `t` is cut off from its edge `e`
-	inside `t` (ticket 27): found at query time, not stored.
-
-	A straight clear line to a point of `e` proves it is not. Otherwise each barrier (see
-	`barriers`) along the other two edges closes a polygon that holds no point of `e` but its
-	ends; a point inside it (odd crossings) can reach `e` only across the barrier. So the test
-	is sound: it never cuts off a point that can pass. It can miss a block.
-]=]
-function Clearance.CutOff(s: Storage.State, t: number, e: number, r: number, px: number, pz: number): boolean
+--[[
+	Clearance.CutOff, unremembered. A straight clear line to a point of `e` proves the point is
+	not cut off. Otherwise each barrier (see `barriers`) along the other two edges closes a
+	polygon that holds no point of `e` but its ends; a point inside it (odd crossings) can reach
+	`e` only across the barrier. So the test is sound: it never cuts off a point that can pass.
+	It can miss a block.
+]]
+local function cutOffNow(s: Storage.State, t: number, e: number, r: number, px: number, pz: number): boolean
 	local edges, walls, feats = around(s, t, r)
 	local x, z = standing(feats, r, px, pz)
-	if x == nil or z == nil then
+	if x == nil then -- (standing gives both coordinates or neither)
 		return false
 	end
 	local edge = edges[e]
 	for _, u in { 0.5, 0.25, 0.75 } do
-		if clear(feats, r, x, z, edge[1] + u * (edge[3] - edge[1]), edge[2] + u * (edge[4] - edge[2])) then
+		if clear(feats, r, x, z :: number, edge[1] + u * (edge[3] - edge[1]), edge[2] + u * (edge[4] - edge[2])) then
 			return false
 		end
 	end
-	for _, poly in barriers(edges, walls, feats, r, { e % 3 + 1, (e + 1) % 3 + 1 }, false) do
-		if inside(poly, x, z) then
+	for _, poly in (barriers(edges, walls, feats, r, { e % 3 + 1, (e + 1) % 3 + 1 })) do
+		if inside(poly, x, z :: number) then
 			return true
 		end
 	end
 	return false
 end
 
---[=[
-	@within NavMeshClearance
-	Whether two points of triangle `t` are parted inside it for an agent of radius `r` (ticket
-	27, start and goal in one triangle): a clear straight line proves they are not; otherwise
-	they are when their crossing parities differ for some barrier along the whole boundary (the
-	two polygons one barrier closes, either way round, differ by the whole triangle).
-]=]
-function Clearance.Separated(
+--[[
+	Clearance.Separated, unremembered. A clear straight line proves the points are not parted;
+	otherwise they are when their crossing parities differ for some barrier along the whole
+	boundary (the two polygons one barrier closes, either way round, differ by the whole
+	triangle).
+]]
+local function separatedNow(
 	s: Storage.State,
 	t: number,
 	r: number,
@@ -955,15 +1005,82 @@ function Clearance.Separated(
 	local edges, walls, feats = around(s, t, r)
 	local ax, az = standing(feats, r, px, pz)
 	local bx, bz = standing(feats, r, qx, qz)
-	if ax == nil or az == nil or bx == nil or bz == nil or clear(feats, r, ax, az, bx, bz) then
+	if ax == nil or bx == nil then -- (standing gives both coordinates or neither)
 		return false
 	end
-	for _, poly in barriers(edges, walls, feats, r, { 1, 2, 3 }, true) do
-		if inside(poly, ax, az) ~= inside(poly, bx, bz) then
-			return true
-		end
+	local ay, by = az :: number, bz :: number
+	if clear(feats, r, ax, ay, bx, by) then
+		return false
 	end
-	return false
+	-- A point pushed out of the triangle (off a wall of a thin one) is inside no barrier, so its
+	-- parity says nothing (E3: a link's start against a wall). Over one crossable edge it stands
+	-- just past that edge, so the other is parted from it when cut off from that edge; past a
+	-- vertex (or both out) its side is unknown, and they are not parted.
+	local ea, eb = beyond(edges, ax, ay), beyond(edges, bx, by)
+	if ea ~= 0 or eb ~= 0 then
+		if ea < 0 or eb < 0 or (ea > 0 and eb > 0) then
+			return false
+		end
+		local e = math.max(ea, eb)
+		return not walls[e]
+			and if ea > 0 then Clearance.CutOff(s, t, e, r, qx, qz) else Clearance.CutOff(s, t, e, r, px, pz)
+	end
+	local _, parted = barriers(edges, walls, feats, r, { 1, 2, 3 }, { ax, ay, bx, by })
+	return parted
+end
+
+-- Keeps a verdict in triangle t's record at radius r (see `around`; E3: a search with links asks
+-- the same landing and link-start questions on every query at one radius).
+-- ponytail: the record's verdicts are dropped at VERDICT_CAP; an LRU if a triangle gets many.
+local VERDICT_CAP = 256
+local function remember(rec: { any }, key: string, verdict: boolean): boolean
+	if rec[5] >= VERDICT_CAP then
+		table.clear(rec[4])
+		rec[5] = 0
+	end
+	rec[4][key] = verdict
+	rec[5] += 1
+	return verdict
+end
+
+--[=[
+	@within NavMeshClearance
+	Whether an agent of radius `r` at point (x, z) of triangle `t` is cut off from its edge `e`
+	inside `t` (ticket 27): found at query time, not stored in the mesh (remembered per triangle
+	and radius until the walls change). Sound: it never cuts off a point that can pass. It can
+	miss a block.
+]=]
+function Clearance.CutOff(s: Storage.State, t: number, e: number, r: number, px: number, pz: number): boolean
+	local _, _, _, rec = around(s, t, r)
+	local key = string.format("%d %.17g %.17g", e, px, pz)
+	local known = rec[4][key]
+	if known ~= nil then
+		return known
+	end
+	return remember(rec, key, cutOffNow(s, t, e, r, px, pz))
+end
+
+--[=[
+	@within NavMeshClearance
+	Whether two points of triangle `t` are parted inside it for an agent of radius `r` (ticket
+	27, start and goal in one triangle; E3, a link's landing and another link's start).
+]=]
+function Clearance.Separated(
+	s: Storage.State,
+	t: number,
+	r: number,
+	px: number,
+	pz: number,
+	qx: number,
+	qz: number
+): boolean
+	local _, _, _, rec = around(s, t, r)
+	local key = string.format("s %.17g %.17g %.17g %.17g", px, pz, qx, qz)
+	local known = rec[4][key]
+	if known ~= nil then
+		return known
+	end
+	return remember(rec, key, separatedNow(s, t, r, px, pz, qx, qz))
 end
 
 return Clearance

@@ -468,8 +468,20 @@ return function(t: tiniest)
 
 		test("every step of a path with a radius has the clearance the rule asks for (SR4)", function()
 			-- The rule, derived here from the corridor alone: leaving a triangle over edge e needs
-			-- the corner width between its entry edge and e, or e's portal width when it was the
-			-- start or entered by a seam or link; links themselves need nothing.
+			-- the corner width between its entry edge (the edge it shares with the one before, or
+			-- for a seam entry the seam's edge) and e, or e's portal width when it was the start,
+			-- entered by a link, or e is its entry edge; links themselves need nothing.
+			local function seamEdgeOf(mesh: any, t: number, from: number): number
+				local id = Storage.GetExtraHead(mesh, t)
+				while id ~= 0 do
+					local nextId, to, kind, ref = Storage.GetExtra(mesh, id)
+					if to == from and kind == Storage.EXTRA_SEAM then
+						return ref
+					end
+					id = nextId
+				end
+				return 0
+			end
 			local function violations(mesh: any, corridor: { number }, vias: { number }, radius: number): { string }
 				local found = {}
 				for i = 1, #corridor - 1 do
@@ -484,11 +496,17 @@ return function(t: tiniest)
 						end
 						e = ref
 					end
+					local entry = 0
+					if i > 1 and vias[i] == 0 then
+						entry = sharedEdge(mesh, t, corridor[i - 1])
+					elseif i > 1 and select(3, Storage.GetExtra(mesh, vias[i])) == Storage.EXTRA_SEAM then
+						entry = seamEdgeOf(mesh, t, corridor[i - 1])
+					end
 					local clear
-					if i == 1 or vias[i] ~= 0 then
+					if entry == 0 or entry == e then
 						clear = Storage.GetPortalWidth(mesh, t, e)
 					else
-						clear = Storage.GetCornerWidth(mesh, t, 6 - e - sharedEdge(mesh, t, corridor[i - 1]))
+						clear = Storage.GetCornerWidth(mesh, t, 6 - e - entry)
 					end
 					if clear < 2 * radius then
 						table.insert(found, `step {i}: {clear} < {2 * radius}`)

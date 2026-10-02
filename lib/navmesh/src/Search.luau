@@ -47,11 +47,26 @@
 	  portal's midpoint, and the corner width to the seam edge applies.
 	- A link walks to its start point, pays `Cost` times its area's multiplier, and lands at its
 	  end point. Disabled links and excluded areas are skipped; agent radius is not checked on a
-	  link.
-	- A triangle entered by a seam or a link has no entry edge of its own, so leaving it needs
-	  the exit edge's portal width, like the start.
+	  link itself.
 	The corridor records how each triangle was entered (`Via`: 0 = an edge, else the extra link
 	id), for the funnel.
+
+	**Radius at seam and link entries (E3, ticket 27's barriers):**
+	- A triangle entered across a seam takes the seam's own edge as its entry edge, so the
+	  corner widths apply (the portal is part of that edge: where the whole edge can't pass,
+	  no part of it can). Back over that edge (it can have a neighbour on its own floor too, as
+	  in ThreeFloorStairs) the edge's portal width applies.
+	- A link's landing is a point the agent stands at, like the start: leaving its triangle by
+	  an edge or seam needs `Clearance.CutOff` from it, and by another link `Separated` from it.
+	  A link starting in the start triangle needs `Separated` from the start; a link landing in
+	  the goal triangle reaches the goal only if `Separated` says they are not parted.
+	- With a radius each seam or link entry is a node of its own, n + 3 + its extra id: a
+	  landing cut off from an edge must not close the triangle to a walk in by another edge.
+	  Such an entry never goes straight back over the seam or link it came by, as an edge entry
+	  never goes back over its edge: the U-turn would swap a triangle's entry edge for the
+	  seam's and dodge its corner width.
+	- Not checked (optimistic): from a triangle entered by an edge, a link start is reached
+	  unchecked, and a seam piece is judged by its whole edge.
 
 	**Scratch:** a per-mesh pool in a weak-keyed table, holding only arrays and the open list, so
 	it never keeps a mesh alive.
@@ -215,7 +230,9 @@ function Search.Run(
 	-- triangle cuts its end off from one of its edges (ticket 27), a path may leave that
 	-- triangle and come back into it past the chain, so two more nodes stand for them entered
 	-- again: the start's and the goal's (passed through). The goal is goalT's node, or a third
-	-- one when the ends share a triangle that a chain parts them in.
+	-- one when the ends share a triangle that a chain parts them in. With a radius, a triangle
+	-- entered by a seam or a link is a node of its own, n + 3 + the extra's id (E3): a landing
+	-- cut off from an edge must not close the triangle to a walk in by another edge.
 	local n = Storage.TriangleCount(s)
 	local startAgain, goalAgain = n + 1, n + 2
 	local goalNode = goalT
@@ -230,7 +247,11 @@ function Search.Run(
 		goalNode = n + 3
 	end
 	local function triangleOf(u: number): number
-		return if u <= n then u elseif u == goalAgain then goalT else startT
+		if u <= n + 3 then
+			return if u <= n then u elseif u == goalAgain then goalT else startT
+		end
+		local _, to = Storage.GetExtra(s, u - n - 3)
+		return to
 	end
 	local startCut = false
 	local cutOff = Clearance.CutOff
@@ -248,6 +269,7 @@ function Search.Run(
 		scratch.ClosedList,
 		scratch.Open
 	table.clear(closedList)
+	local extraClosed = {} -- the closed nodes of seam and link entries, for the Partial end
 	OpenList.Clear(open)
 	local push, pop = OpenList.Push, OpenList.Pop
 	local GetTriangle, GetTriangleArea, GetVertex = Storage.GetTriangle, Storage.GetTriangleArea, Storage.GetVertex
@@ -295,6 +317,9 @@ function Search.Run(
 			break
 		end
 		table.insert(closedList, u)
+		if u > n + 3 then
+			table.insert(extraClosed, u)
+		end
 		if expansions >= maxExpansions then
 			status = "Budget"
 			break
@@ -304,28 +329,54 @@ function Search.Run(
 		local tp = pos[u]
 		local tm = costs[GetTriangleArea(s, t)] or 1
 		local gt = g[u]
+		-- A point u was entered at, which must itself reach where u is left (ticket 27, E3): the
+		-- start, or a link's landing. Edge and seam entries rely on the widths. With a radius, a
+		-- seam or link entry can't go straight back the way it came (as an edge entry can't):
+		-- the U-turn would make the seam's edge the entry edge, or the landing the entry point,
+		-- of a triangle entered otherwise, dodging its corner width.
+		local ep: vector? = nil
+		local inKind, inRef, inFrom = 0, 0, 0
+		if width > 0 then
+			if u == startT then
+				ep = startP
+			elseif via[u] ~= 0 then
+				local _, _, k, rf = GetExtra(s, via[u])
+				inKind, inRef = k, rf
+				inFrom = triangleOf(parent[u])
+				if inKind == EXTRA_LINK then
+					ep = tp
+				end
+			end
+		end
 		local ia, ib, ic = GetTriangle(s, t)
 		local base = (t - 1) * 12
 		for e = 1, 3 do
 			local m = buffer.readi32(nb, base + (e - 1) * 4)
-			if m == 0 or e == entry[u] then
-				continue -- no neighbour, or back the way it came
+			if m == 0 or (e == entry[u] and via[u] == 0) then
+				continue -- no neighbour, or back the way it came (a seam's edge may have one too)
 			end
 			local mm = costs[GetTriangleArea(s, m)] or 1
 			if mm == math.huge then
 				continue
 			end
+			if m ~= goalT and closed[target(m, false)] == stamp then
+				continue -- already closed: skip the barrier tests
+			end
 			local back = 0
 			local goalCut = false
 			if width > 0 then
-				-- Edges e and entry[u] meet at the third vertex, 6 - e - entry[u].
-				local clear = if entry[u] == 0 then GetPortalWidth(s, t, e) else GetCornerWidth(s, t, 6 - e - entry[u])
+				-- Edges e and entry[u] meet at the third vertex, 6 - e - entry[u]. Back over a
+				-- seam's own edge only that edge's width applies.
+				local clear = if entry[u] == 0 or entry[u] == e
+					then GetPortalWidth(s, t, e)
+					else GetCornerWidth(s, t, 6 - e - entry[u])
 				if clear < width then
 					continue
 				end
-				-- Inside the start and goal triangles the ends themselves must reach the edge.
-				if u == startT and cutOff(s, t, e, radius, startP.X, startP.Z) then
-					startCut = true
+				-- Inside the start and goal triangles the ends themselves must reach the edge, and
+				-- so must a link's landing.
+				if ep and cutOff(s, t, e, radius, ep.X, ep.Z) then
+					startCut = startCut or u == startT
 					continue
 				end
 				back = if GetNeighbor(s, m, 1) == t then 1 elseif GetNeighbor(s, m, 2) == t then 2 else 3
@@ -355,46 +406,67 @@ function Search.Run(
 			local extra = id
 			id = nextId
 			local mm = costs[GetTriangleArea(s, m)] or 1
-			if mm == math.huge then
+			if mm == math.huge or (kind == inKind and (if kind == EXTRA_LINK then ref == inRef else m == inFrom)) then
+				continue -- an excluded area, or straight back over the seam or link it came by
+			end
+			if width > 0 and m ~= goalT and closed[n + 3 + extra] == stamp then
 				continue
 			end
 			local node, mp, ng
+			local goalCut = false
+			local back = 0 -- the entry edge: a seam's own edge of m (with a radius), none for a link
+			local linkG = 0 -- a link's cost to its landing
 			if kind == EXTRA_LINK then
 				local _, _, _, _, cost, area, _, _, enabled = GetLink(s, ref)
 				local lm = costs[area] or 1
 				if not enabled or lm == math.huge then
 					continue
 				end
-				node = target(m, false)
-				ng = gt + vector.magnitude(a - tp) * tm + cost * lm
-				if node == goalNode then
-					mp = goalP
-					ng += vector.magnitude(goalP - b) * mm
-				else
-					mp = b
+				linkG = gt + vector.magnitude(a - tp) * tm + cost * lm
+				if width > 0 then
+					-- The link's start must be reachable from the point u was entered at, and its
+					-- landing must reach the goal in the goal's triangle.
+					if ep and Clearance.Separated(s, t, radius, ep.X, ep.Z, a.X, a.Z) then
+						startCut = startCut or u == startT
+						continue
+					end
+					goalCut = m == goalT and Clearance.Separated(s, m, radius, b.X, b.Z, goalP.X, goalP.Z)
 				end
 			else
-				-- A seam portal on edge `ref` of t.
-				local goalCut = false
+				-- A seam portal on edge `ref` of t. Back over the entry edge (a seam's edge can
+				-- have a neighbour on its own floor too) only that edge's width applies: the corner
+				-- index 6 - 2 * ref would name no corner.
 				if width > 0 then
-					local clear = if entry[u] == 0
+					local clear = if entry[u] == 0 or entry[u] == ref
 						then GetPortalWidth(s, t, ref)
 						else GetCornerWidth(s, t, 6 - ref - entry[u])
 					if clear < width then
 						continue
 					end
-					if u == startT and cutOff(s, t, ref, radius, startP.X, startP.Z) then
-						startCut = true
+					if ep and cutOff(s, t, ref, radius, ep.X, ep.Z) then
+						startCut = startCut or u == startT
 						continue
 					end
-					goalCut = m == goalT and cutOff(s, m, seamEdge(s, m, t), radius, goalP.X, goalP.Z)
+					-- The piece lies on this edge of m, so the corner widths from it bound the
+					-- way on (a subset of the edge can't pass where the whole edge can't).
+					back = seamEdge(s, m, t)
+					goalCut = m == goalT and cutOff(s, m, back, radius, goalP.X, goalP.Z)
 				end
-				node = target(m, goalCut)
+			end
+			if width == 0 then
+				node = target(m, false)
+			else
+				node = if m == goalT and not goalCut then goalNode else n + 3 + extra
+			end
+			if kind == EXTRA_LINK then
+				mp = if node == goalNode then goalP else b
+				ng = linkG + (if node == goalNode then vector.magnitude(goalP - b) * mm else 0)
+			else
 				mp = if node == goalNode then goalP else (a + b) * 0.5
 				ng = gt + stepCost(tp, mp, a, b, tm, mm, node == goalNode)
 			end
 			if closed[node] ~= stamp and (seen[node] ~= stamp or ng < g[node]) then
-				g[node], pos[node], seen[node], parent[node], via[node], entry[node] = ng, mp, stamp, u, extra, 0
+				g[node], pos[node], seen[node], parent[node], via[node], entry[node] = ng, mp, stamp, u, extra, back
 				push(open, node, ng + vector.magnitude(goalP - mp) * scale)
 			end
 		end
@@ -412,14 +484,13 @@ function Search.Run(
 		local z = p.Z + ((a.Z + b.Z + c.Z) / 3 - p.Z) * 1e-6
 		if u == startT then
 			return Clearance.Separated(s, t, radius, startP.X, startP.Z, x, z)
-		elseif via[u] == 0 then
-			return cutOff(s, t, entry[u], radius, x, z)
+		elseif via[u] ~= 0 then
+			local _, _, kind, _, _, landing = GetExtra(s, via[u])
+			if kind == EXTRA_LINK then
+				return Clearance.Separated(s, t, radius, landing.X, landing.Z, x, z)
+			end
 		end
-		local _, _, kind, _, _, landing = GetExtra(s, via[u])
-		if kind == EXTRA_LINK then
-			return Clearance.Separated(s, t, radius, landing.X, landing.Z, x, z)
-		end
-		return cutOff(s, t, seamEdge(s, t, triangleOf(parent[u])), radius, x, z)
+		return cutOff(s, t, entry[u], radius, x, z) -- its edge, or a seam's
 	end
 
 	-- Whether the end FindPath makes of point p of node u's triangle, pushed off the walls
@@ -434,6 +505,11 @@ function Search.Run(
 		end
 		local q, t = Queries.Push(s, triangleOf(u), p, radius, costs)
 		local nodes = if t == startT then { startT, startAgain } elseif t == goalT then { goalAgain } else { t }
+		for _, w in extraClosed do
+			if triangleOf(w) == t then
+				table.insert(nodes, w)
+			end
+		end
 		for _, w in nodes do
 			if closed[w] == stamp and not stranded(w, q) then
 				return true

@@ -4,7 +4,8 @@
 -- flood of Tests/Helpers/Flood.luau (a proof they are parted). If the flood connects them, the
 -- flip is refuted. Half the ends are aimed near wall corners; half the queries are fair (both
 -- ends clear of every wall by r), the rest may start touching a wall, as the ticket's repro does.
---   lune run tools/navmesh/bench/radius_oracle.luau [queries per config] [max flips] [seed offset]
+--   lune run tools/navmesh/bench/radius_oracle.luau [queries per config] [max flips] [seed offset] [links]
+-- With `links` (E3) it runs the link and seam scenes instead (see withLinks below).
 -- The old build is lib/navmesh/src_old: a copy of the sources before the change, e.g.
 --   git archive <base> lib/navmesh/src | tar -x -C <tmp>, then move it there.
 local process = require("@lune/process")
@@ -56,7 +57,92 @@ for _, scene in Scenes do
 	end
 end
 
-local totals = { queries = 0, flips = 0, fair = 0, confirmed = 0, refuted = 0, gained = 0 }
+-- E3: the same scenes with links (`count` of them, half one-way, half their ends near wall
+-- corners where the slivers are), and props split into two floors joined by a seam down
+-- x = 32. The flood takes links (Flood.luau) and sees the two side-by-side floors as one plane.
+local function withLinks(scene: any, count: number): any
+	return {
+		Name = scene.Name .. "+links",
+		Side = scene.Side,
+		Make = function()
+			local desc = scene.Make()
+			desc.TileSize = 64
+			local base = NavMesh.Build(desc)
+			local oracle = Flood.New(base)
+			local corners = {}
+			for v = 1, Storage.VertexCount(base) do
+				if Storage.IsWallVertex(base, v) then
+					table.insert(corners, Storage.GetVertex(base, v))
+				end
+			end
+			local rng = makeRng(count * 31 + #scene.Name)
+			local function point(nearCorner: boolean): vector
+				while true do
+					local p
+					if nearCorner then
+						local c = corners[math.floor(rng(1, #corners + 1))]
+						local angle, d = rng(0, 2 * math.pi), rng(0.1, 2)
+						p = vector.create(c.X + d * math.cos(angle), 0, c.Z + d * math.sin(angle))
+					else
+						p = vector.create(rng(0, scene.Side), 0, rng(0, scene.Side))
+					end
+					if Flood.OnMesh(oracle, p.X, p.Z) then
+						return p
+					end
+				end
+			end
+			local links = {}
+			for i = 1, count do
+				table.insert(links, { From = point(i % 2 == 0), To = point(i % 4 < 2), Bidirectional = i % 3 ~= 0 })
+			end
+			desc.Links = links
+			return desc
+		end,
+	}
+end
+local seamed = {
+	Name = "props+seam",
+	Side = 64,
+	Make = function()
+		local desc = Scenes[1].Make()
+		local west, east = {}, {}
+		for _, ring in desc.Floors.Ground.Obstacles do
+			local lo, hi = math.huge, -math.huge
+			for _, p in ring do
+				lo, hi = math.min(lo, p.X), math.max(hi, p.X)
+			end
+			if hi < 32 then
+				table.insert(west, ring)
+			elseif lo > 32 then
+				table.insert(east, ring)
+			end
+		end
+		local function half(x0: number, x1: number): { vector }
+			return {
+				vector.create(x0, 0, 0),
+				vector.create(x1, 0, 0),
+				vector.create(x1, 0, 64),
+				vector.create(x0, 0, 64),
+			}
+		end
+		return {
+			Floors = {
+				West = { Walkable = { half(0, 32) }, Obstacles = west },
+				East = { Walkable = { half(32, 64) }, Obstacles = east },
+			},
+			Seams = {
+				{ FloorA = "West", FloorB = "East", From = vector.create(32, 0, 0), To = vector.create(32, 0, 64) },
+			},
+		}
+	end,
+}
+if process.args[4] == "links" then
+	scenes = { withLinks(notches, 12), withLinks(Scenes[1], 40), withLinks(Scenes[4], 60), seamed }
+	table.insert(scenes, withLinks(Scenes[2], 60))
+end
+
+local totals =
+	{ queries = 0, flips = 0, fair = 0, confirmed = 0, refuted = 0, gained = 0, unsound = 0, unstandable = 0 }
 for _, scene in scenes do
 	for _, tileSize in { 64, 16 } do
 		local desc = scene.Make()
@@ -73,6 +159,18 @@ for _, scene in scenes do
 		for v = 1, Storage.VertexCount(mesh) do
 			if Storage.IsWallVertex(mesh, v) then
 				table.insert(corners, Storage.GetVertex(mesh, v))
+			end
+		end
+		-- And at link ends, as often as at all the corners (E3: landings in end triangles).
+		local wallCorners = #corners
+		for _ = 1, if Storage.LinkCount(mesh) > 0 then wallCorners // (2 * Storage.LinkCount(mesh)) + 1 else 0 do
+			for id = 1, Storage.LinkCount(mesh) do
+				local fromTri, from, _, to = Storage.GetLink(mesh, id)
+				if fromTri == 0 then
+					continue -- a free slot
+				end
+				table.insert(corners, from)
+				table.insert(corners, to)
 			end
 		end
 		local function near(r: number): vector
@@ -128,7 +226,48 @@ for _, scene in scenes do
 				end
 			elseif before ~= after then
 				totals.gained += 1
-				print(string.format("CHANGED %s ts=%d %s -> %s r=%.3f", scene.Name, tileSize, before, after, r))
+				-- A new Success the flood proves impossible would be unsound (E3's extra nodes let a
+				-- path back into a triangle), unless the path stops at a point the agent can't
+				-- stand at (an end or a link end in a corner): the search then takes it as cut off
+				-- from nothing, as ticket 27 does, while the flood can't leave it.
+				local proven = ""
+				if after == "Success" and not Flood.Connected(oracle, r, a, b) then
+					local standsAll = true
+					for _, w in NavMesh.FindPath(mesh, a, b, filter).Waypoints do
+						local p = w.Position :: any
+						local d, qx, qz = oracle.Nearest(p.X, p.Z, r)
+						if d < r * (1 - 1e-6) then
+							local ok = qx ~= nil and qz ~= nil and d > 0
+							if ok then
+								local x, z = qx + (p.X - qx) * r / d, qz + (p.Z - qz) * r / d
+								ok = clearance(x, z, r) >= r * (1 - 1e-9)
+							end
+							standsAll = standsAll and ok
+						end
+					end
+					if standsAll then
+						totals.unsound += 1
+						proven = " UNSOUND"
+					else
+						totals.unstandable += 1
+						proven = " (flood stuck at a point that can't stand)"
+					end
+				end
+				print(
+					string.format(
+						"CHANGED %s ts=%d %s -> %s r=%.3f (%.3f, %.3f) -> (%.3f, %.3f)%s",
+						scene.Name,
+						tileSize,
+						before,
+						after,
+						r,
+						a.X,
+						a.Z,
+						b.X,
+						b.Z,
+						proven
+					)
+				)
 			end
 		end
 		totals.queries += n
@@ -136,12 +275,14 @@ for _, scene in scenes do
 end
 print(
 	string.format(
-		"ORACLE queries %d flips %d (fair %d) confirmed %d refuted %d other changes %d",
+		"ORACLE queries %d flips %d (fair %d) confirmed %d refuted %d other changes %d (unsound %d, flood stuck %d)",
 		totals.queries,
 		totals.flips,
 		totals.fair,
 		totals.confirmed,
 		totals.refuted,
-		totals.gained
+		totals.gained,
+		totals.unsound,
+		totals.unstandable
 	)
 )
