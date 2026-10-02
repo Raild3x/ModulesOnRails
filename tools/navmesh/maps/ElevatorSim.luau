@@ -44,6 +44,11 @@ export type Npc = {
 	WaitFrom: number?, -- when it joined the queue, and the wait it was promised
 	Promised: number?,
 	StairsTime: number, -- seconds on the step floors (the stairs area; risers and the landing aren't)
+	-- From `o.Crowd` (ticket 38's city day); building-only crowds leave them nil.
+	Radius: number?, -- agent radius (default 1)
+	Costs: { [number]: number }?, -- more AreaCosts (the road, the ford)
+	Legs: { Vector3 }?, -- goals in turn; Goal is Legs[Leg]
+	Leg: number?,
 }
 
 local Sim = {}
@@ -86,6 +91,8 @@ end
 
 -- o: NavMesh, Mesh, ElevatorArea, StairsArea, Policy, Count, Seed, SpawnWindow, Enabled (at
 -- t = 0), Points ({ Ground: {Vector3}, Upper: {Vector3} } to draw spawns and goals from).
+-- Or o.Crowd instead of Count and Points: a list of { Kind, Stairs, Radius?, Costs?, Spawn,
+-- From, Legs } (ticket 38's city day), each walking its legs in turn.
 function Sim.new(o: any)
 	local NavMesh, mesh = o.NavMesh, o.Mesh
 	math.randomseed(o.Seed)
@@ -97,6 +104,8 @@ function Sim.new(o: any)
 		Enabled = o.Enabled,
 		FindPaths = 0,
 		FindPathMs = 0,
+		FindPathTimes = {} :: { number }, -- ms per call
+		Repaths = 0, -- re-planned by Changed
 		Stranded = 0, -- NPCs left at a cab that won't come (the library policy, out of service)
 		WaitErrors = {} :: { number }, -- actual minus promised seconds, per ride
 		Invalidated = 0, -- library policy: walking paths IsPathValid rejected
@@ -119,10 +128,11 @@ function Sim.new(o: any)
 	end
 
 	local function filter(npc: Npc, elevator: number): any
-		return {
-			AgentRadius = 1,
-			AreaCosts = { [o.StairsArea] = npc.Stairs, [o.ElevatorArea] = elevator },
-		}
+		local costs = { [o.StairsArea] = npc.Stairs, [o.ElevatorArea] = elevator }
+		for area, cost in npc.Costs or {} do
+			costs[area] = cost
+		end
+		return { AgentRadius = npc.Radius or 1, AreaCosts = costs }
 	end
 	local function elevatorFactor(npc: Npc): number
 		if not self.Enabled then
@@ -134,7 +144,9 @@ function Sim.new(o: any)
 	local function findPath(from: Vector3, to: Vector3, f: any): any
 		local t0 = os.clock()
 		local path = NavMesh.FindPath(mesh, from, to, f)
-		self.FindPathMs += (os.clock() - t0) * 1000
+		local ms = (os.clock() - t0) * 1000
+		self.FindPathMs += ms
+		table.insert(self.FindPathTimes, ms)
 		self.FindPaths += 1
 		return path
 	end
@@ -193,8 +205,55 @@ function Sim.new(o: any)
 		end
 	end
 
+	-- An obstacle came or went (the game ran NavMesh.Update and passes its regions): re-plan each
+	-- walker whose path ahead crosses one, and each stuck NPC. Returns how many re-planned.
+	function self.Changed(regions: { any }): number
+		local count = 0
+		for _, npc in self.Npcs do
+			local follower = npc.Follower
+			if
+				npc.State == "stuck"
+				or npc.State == "walk"
+					and NavMesh.FirstAffectedSegment(
+						follower.Path,
+						regions,
+						npc.Radius or 1,
+						math.max(1, follower.Next - 1)
+					) ~= nil
+			then
+				count += 1
+				self.Repaths += 1
+				npc.Reroutes += 1
+				plan(npc)
+			end
+		end
+		return count
+	end
+
+	-- A given crowd (the city day): each NPC walks its legs in turn.
+	for id, spec in o.Crowd or {} do
+		table.insert(self.Npcs, {
+			Id = id,
+			Kind = spec.Kind,
+			Stairs = spec.Stairs,
+			Radius = spec.Radius,
+			Costs = spec.Costs,
+			Legs = spec.Legs,
+			Leg = 1,
+			Position = spec.From,
+			Floor = nil,
+			Goal = spec.Legs[1],
+			Spawn = spec.Spawn,
+			State = "pending",
+			Follower = nil,
+			Reroutes = 0,
+			UsedElevator = false,
+			StairsTime = 0,
+		})
+	end
+
 	-- The crowd: kinds by share, spawns over SpawnWindow seconds, 80% bound for the other floor.
-	for id = 1, o.Count do
+	for id = 1, if o.Crowd then 0 else o.Count do
 		local r, kind = math.random(), KINDS[#KINDS]
 		local acc = 0
 		for _, k in KINDS do
@@ -299,7 +358,11 @@ function Sim.new(o: any)
 			if npc.Floor and string.find(npc.Floor, "^Step") then -- the floors with the stairs area
 				npc.StairsTime += dt
 			end
-			if event == "Arrived" then
+			if event == "Arrived" and npc.Legs and (npc.Leg :: number) < #npc.Legs then
+				npc.Leg = (npc.Leg :: number) + 1
+				npc.Goal = npc.Legs[npc.Leg :: number]
+				plan(npc)
+			elseif event == "Arrived" then
 				npc.State, npc.Done = "done", self.Time
 			elseif event == "Link" then
 				local link = npc.Follower.Link

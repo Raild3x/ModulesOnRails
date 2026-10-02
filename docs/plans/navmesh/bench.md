@@ -1022,6 +1022,24 @@ machine had another track's Studio open (idle).
   crate's AddObstacle + `Update` 5 to 8 ms (measured on the earlier noise build, `.bench`-only
   probe, 7 reps x 3 interleaved rounds). Ticket 37 has the ruling: decide after Track F.
 
+## Combined city (ticket 38, 2026-10-02)
+The regression map for realistic content: `lune run tools/navmesh/bench/city_day.luau [seed]`
+(60 NPCs, seeded; ticket 38 has the crowd and the events). One build per seed; numbers for seeds
+1-3, as min-max.
+
+| Measure | Value |
+|---|---|
+| triangles / floors / seams | 5,667 / 326 / 513 |
+| bake | 809,898 bytes |
+| FromParts / Build / Deserialize ms | 2,620-2,748 / 1,804-1,840 / 10.6-14.8 |
+| `FindPath` median / p95 ms (218-239 calls) | 1.89-2.36 / 12.3-13.1 |
+| `Update`: crate dropped / taken away ms | 10.0-12.8 / 8.7-10.4 |
+| `Update`: door closes / opens ms | 14.7-16.1 / 12.4-14.4 |
+| elevator out / back: handling ms (link toggle and re-plans) | 125-171 / 19-32 |
+
+- Each event's `Update` returns one region. The re-plans it causes (3-46) are counted in ticket
+  38, not timed here; elevator handling includes its re-plans (about 9 ms each, weighted).
+
 ## Not measured (flagged)
 - Remote transfer time and payload size per layout (needs a live server/client session).
 - Locality on a real CDT's vertex and triangle ordering. The grid mesh has near-ideal locality,

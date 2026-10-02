@@ -3,7 +3,7 @@ table as run.luau), draws the mesh and every scenario's path, and captures the S
 Run from the repo root, with lib/navmesh, lib/navmeshadapter and lib/constraineddelaunaydebug
 set up (their link modules and _Index: `npm run setup <pkg>`, or copy them from a set-up checkout).
 
-    python tools/navmesh/maps/studio.py FlatLot [--hold 30] [--settle 20]
+    python tools/navmesh/maps/studio.py FlatLot [--hold 30] [--settle 20] [--view fx,fy,fz,tx,ty,tz --tag name]
 
 Studio.luau draws for --hold seconds, then clears the drawing and holds again. The first capture
 (at --settle seconds after the window opens) shows the drawing; the second (--hold seconds later)
@@ -32,7 +32,7 @@ require(Maps.Studio)({{
 \tAdapter = require(src.navmeshadapter.src.NavMeshAdapter),
 \tRenderer = require(src.constraineddelaunaydebug.src.DrawListRenderer),
 \tHarness = require(Maps.Harness),
-\tMap = require(Maps.Maps["{map}"]),
+\tMap = {view}(require(Maps.Maps["{map}"])),
 \tHold = {hold},
 }})
 print("[MARK] done")
@@ -75,15 +75,23 @@ def main() -> int:
     ap.add_argument("map", help="a module name in tools/navmesh/maps/Maps")
     ap.add_argument("--hold", type=int, default=30, help="seconds the drawing stays, then the cleared view")
     ap.add_argument("--settle", type=int, default=20, help="seconds after the window opens before the first capture")
+    ap.add_argument("--view", help="camera override 'fx,fy,fz,tx,ty,tz' (eye, then target), for a close-up")
+    ap.add_argument("--tag", help="suffix for the output files (one name per view)")
     args = ap.parse_args()
 
-    place = build_place(RUN.format(map=args.map, hold=args.hold))
-    drawn, cleared = OUT / f"{args.map}.png", OUT / f"{args.map}-cleared.png"
+    view = ""
+    if args.view:
+        f = [float(v) for v in args.view.split(",")]
+        view = (f"(function(m) local c = table.clone(m) c.View = {{ From = {{ {f[0]}, {f[1]}, {f[2]} }}, "
+                f"To = {{ {f[3]}, {f[4]}, {f[5]} }} }} return c end)")
+    name = args.map + (f"-{args.tag}" if args.tag else "")
+    place = build_place(RUN.format(map=args.map, hold=args.hold, view=view))
+    drawn, cleared = OUT / f"{name}.png", OUT / f"{name}-cleared.png"
     captures = [capture(drawn, args.settle), capture(cleared, args.settle + args.hold)]
     result = subprocess.run(["run-in-roblox", "--place", str(place), "--script", str(OUT / "run.luau")],
                             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=2 * args.hold + 300)
     text = result.stdout + result.stderr
-    (OUT / f"{args.map}.txt").write_text(text, encoding="utf-8")
+    (OUT / f"{name}.txt").write_text(text, encoding="utf-8")
     print(text.strip())
     saved = [c.communicate(timeout=120)[0].strip() for c in captures]
     print("\n".join(saved))

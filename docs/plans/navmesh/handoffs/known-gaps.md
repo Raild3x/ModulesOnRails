@@ -131,6 +131,18 @@ ends" section. Two kinds of end still pass unjudged; both are below.
     100.00004), 0.003 studs apart. Snapped, they swap order: "the ring folds back on itself".
   - The adapter's hull fix keeps Part input out of it; `AddObstacle` with a ring like this
     still fails. A fix would drop corners that snap within a grid step of the last.
+- **Core, open: a walker beside a vertex where several floors meet can stall for good** (found
+  by ticket 38's city day).
+  - **Repro:** `lune run tools/navmesh/bench/follower_vertex_stall.luau` prints Blocked. An NPC
+    0.2 studs north of the line z = -110 on City's meadow is on floor Meadow6_10a; FindPath
+    starts its path on Meadow6_9a, on the line, and routes it through the four-floor vertex
+    (40, -110). `Advance` moves it on Meadow6_10a and it stops at (41.21, -109.79). A re-plan
+    from there gives the same path, so a game that re-plans on Blocked loops.
+  - Not traced further (core). The same walk on ForestRiver alone, whose Parts aren't shifted
+    and so round differently, arrives. Suspects: the start snapped onto another floor than the
+    one `Advance` uses, and a path through a vertex shared by floors that meet there only.
+  - The city day's crowd no longer draws that spot (10 of 10 seeds pass), so the bench doesn't
+    catch it; this repro does.
 - **Adapter, open: the step-height rule makes no riser where the upper slab tilts down from the
   step** (ticket 34's `MaxStepHeight`, M1's code; found by ticket 37).
   - **Repro:** `lune run tools/navmesh/bench/riser_lean_repro.luau`: a slab rising from a

@@ -41,7 +41,7 @@ for your track. Everything named here lives on branch `feat/navmesh` unless it s
   4. Ticket 29 (W) starts after E and F have both merged.
 - **Merge order:** G, then E, then F. Each later track merges `feat/navmesh` into its branch
   before its own merge.
-- **Complex-map tickets 33-38 (added 2026-10-01): Tracks [M1](M1-maps-indoor-urban.md) (33, 34, 35), [M3](M3-maps-street.md) (36) and [M2](M2-maps-outdoor-combined.md) (37, 38). M2 and M3 start once 33 merges:**
+- **Complex-map tickets 33-38 (added 2026-10-01): Tracks [M1](M1-maps-indoor-urban.md) (33, 34, 35), [M3](M3-maps-street.md) (36) and [M2](M2-maps-outdoor-combined.md) (37, 38). M2 and M3 start once 33 merges.** M2 done 2026-10-02: ForestRiver (37; re-run its sweep after Track F) and City with `city_day.luau` (38).
   - **Ticket 33 merged 2026-10-01:** the harness is in `tools/navmesh/maps/`. Run
     `lune run tools/navmesh/maps/run.luau`; screenshots come from
     `python tools/navmesh/maps/studio.py <Map>`. The conventions are in ticket 33's as-built
