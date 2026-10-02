@@ -185,3 +185,26 @@ second terrain map; ForestRiver stays as it is (it feeds the City map and the nu
 - **Studio:** `python tools/navmesh/maps/studio.py Highlands --settle 20 --hold 30` (the map
   takes a few seconds to build). Triangles are coloured by slope in the Parts themselves
   (green flat to grey too steep, snow on the heights).
+
+### Highlands, round 2: fidelity, costs, links, probe (2026-10-02)
+
+The user asked for varied fidelity, links and cost areas drawn, and a draggable start and goal.
+- **Fidelity:** `Terrain.Adaptive`, a quadtree from 32-stud cells (flat ground) to 4 (cliffs)
+  and 2 (the trail, the lava), stitched at T-junctions by snapping (fans fold rings:
+  known-gaps). About 5,900 ground triangles kept above water (11,793 Parts); the mesh is
+  10,665 triangles, 3,461 floors, 5,196 seams. Ground under water is left out.
+- **The finer ground showed the old coarse grid's luck:** the plateau ramp dipped into a cliff
+  just below the top (the 8-stud samples stepped over it), and Parts placed by the height
+  formula missed the built ground by up to the tolerance; `Adaptive` now returns the built
+  surface's height for placing them.
+- **Areas:** Trail 0.5, Mud 4, Sand 2, Snow 3, Scree 3, Lava never (the map's `Filter`).
+- **Links:** `GenerateLinks` (Harness `GenerateLinks` field): 329 drops and jumps. The crater
+  is now reached by a jump off the rim; the peak is Partial, not NoGoal (a coarse mountain cell
+  leaves a walkable triangle near the top).
+- **Scenarios:** 22, with controls: a jump into the crater and no way in without links; the
+  canyon by jumps (161 studs) and the long way without (213); round the lava with costs, and
+  across it without (control).
+- **Studio:** links as arrows (drops white, jump arcs green), the mesh by area with a legend,
+  Start/Goal balls (drag them; `AgentRadius`, `Costs`, `Links`, `Scenarios` on Start),
+  `studio.py --tour` (one capture per camera stop). `plan.luau` draws the same from above with
+  no Studio, by area, floor or slope, with a probe.
