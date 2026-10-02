@@ -48,6 +48,9 @@ local HEIGHT_TOLERANCE = 0.01
 -- HEIGHT_TOLERANCE: a face joining a floor 0.004 off its own plane moves the floor's cuts, and
 -- under a ramp's foot that walls the crossing (ticket 37).
 local COPLANAR_TOLERANCE = 0.001
+-- Walkable faces narrower than this (in plan) are left out: nothing stands on them, and the thin
+-- sides of a cliff's wedges, tilted toward flat by the slope, would be ledges along every cliff.
+local MIN_FACE_WIDTH = 0.5
 
 -- A convex solid in world space: its vertices and faces (vertex index lists).
 type Solid = { Points: { vector }, Faces: { { number } } }
@@ -323,6 +326,24 @@ local function weld(f: Floor, tolerance: number)
 			end
 		end
 	end
+end
+
+-- The convex ring's narrowest width in plan: over its edges, the farthest corner from each.
+local function width(ring: { vector }): number
+	local narrowest = math.huge
+	for k, a in ring do
+		local b = ring[k % #ring + 1]
+		local dx, dz = b.x - a.x, b.z - a.z
+		local len = math.sqrt(dx * dx + dz * dz)
+		if len > 1e-9 then
+			local far = 0
+			for _, q in ring do
+				far = math.max(far, math.abs((q.x - a.x) * dz - (q.z - a.z) * dx) / len)
+			end
+			narrowest = math.min(narrowest, far)
+		end
+	end
+	return narrowest
 end
 
 -- Drops corners on a straight line between their neighbours (within HEIGHT_TOLERANCE).
@@ -607,6 +628,9 @@ local function fromParts(
 			local ring = {}
 			for _, i in face do
 				table.insert(ring, solid.Points[i])
+			end
+			if width(ring) < MIN_FACE_WIDTH then
+				continue
 			end
 			if area2D(ring) < 0 then
 				local m = #ring

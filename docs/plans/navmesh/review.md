@@ -105,6 +105,13 @@ the const question are deliberately open, gated on benchmarks.
     with the checks 1.1 s, and 3,200 triangles 8.1 s. Output byte-identical on every map
     (City 2,414 to 133 ms, ForestRiver 2,130 to 105 ms). Breaking either check fails 6-11 specs.
   - Rejected: capping the new map at about 25 x 25 cells.
+- **Adapter: walkable faces narrower than 0.5 studs are left out** (2026-10-02). On a cliff
+  triangle made of two 0.2-thick wedges, the wedges' thin sides tilt toward flat and became
+  0.18-stud ledges along every cliff; Build then failed ("floors don't meet across it"). User:
+  "Adapter rule, merge early (Recommended)".
+  - Measured first: the rule and a map-side alternative (steep triangles as obstacles) gave
+    Highlands the same mesh; every existing map is byte-identical with the rule.
+  - Rejected: map-side only (the trap stays for games that tag all terrain walkable).
 
 ### Rulings after Track H (2026-10-01)
 - **D6, large worlds, ruled on ticket 31's numbers** (bench.md, "Large worlds, 1-4 km"): fix
