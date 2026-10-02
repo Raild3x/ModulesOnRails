@@ -602,10 +602,49 @@ local function clipToRect(
 	return outX, outZ
 end
 
+-- Per surface list (weak keys): for each tile (`size` in grid units, origin-aligned), the indices
+-- of the surfaces whose box meets its closed rectangle, ascending. A tile asks only those for
+-- heights and planes: asking every ring's surface for every triangle made Build and Update
+-- O(triangles x walkable rings) on a floor (known-gaps.md, Track H).
+local nearCache: { [any]: { [number]: { number } } } = setmetatable({}, { __mode = "k" }) :: any
+
+local function nearSurfaces(surfaces: { Surface }, size: number, x0: number, z0: number): { number }
+	local byTile = nearCache[surfaces]
+	if byTile == nil then
+		byTile = {}
+		for i, surface in surfaces do
+			local xs, zs = surface.Ring.X, surface.Ring.Z
+			local bx0, bz0, bx1, bz1 = math.huge, math.huge, -math.huge, -math.huge
+			for k = 1, #xs do
+				bx0, bx1 = math.min(bx0, xs[k]), math.max(bx1, xs[k])
+				bz0, bz1 = math.min(bz0, zs[k]), math.max(bz1, zs[k])
+			end
+			-- A bound on a tile line belongs to the tiles on both sides of it.
+			for j = math.ceil(bz0 / size) - 1, math.floor(bz1 / size) do
+				for k = math.ceil(bx0 / size) - 1, math.floor(bx1 / size) do
+					local key = pointKey(k, j)
+					local list = byTile[key]
+					if list == nil then
+						list = {}
+						byTile[key] = list
+					end
+					table.insert(list, i)
+				end
+			end
+		end
+		for _, list in byTile do
+			table.sort(list)
+		end
+		nearCache[surfaces] = byTile
+	end
+	return byTile[pointKey(x0 // size, z0 // size)] or {}
+end
+
 -- What triangulating a tile needs to know about its floor.
 type FloorData = {
 	Context: string,
 	Surfaces: { Surface },
+	TileSize: number, -- grid units
 	AreaIds: { number },
 	DefaultArea: number,
 	-- Heights by grid point key, shared by the floor's tiles, so a vertex gets one height.
@@ -639,7 +678,8 @@ local function dissolve(
 	kept: { number },
 	keptArea: { number },
 	tg: { number },
-	floor: FloorData
+	floor: FloorData,
+	near: { number }
 ): { Coords: { number }, Edges: { number }, Groups: { number } }?
 	local class = table.create(CDT.TriangleCount(tri), false) :: { any } -- area, then plane key
 	for i, t in kept do
@@ -690,8 +730,8 @@ local function dissolve(
 		local cx, cz = CDT.GetVertex(tri, c)
 		local px, pz = (ax + bx + cx) / 3, (az + bz + cz) / 3
 		local planes: { string } = {}
-		for _, surface in floor.Surfaces do
-			local h0, hx, hz, inside = surfaceHeights(surface, px, pz, x0, z0, x0 + 1, z0, x0, z0 + 1)
+		for _, s in near do
+			local h0, hx, hz, inside = surfaceHeights(floor.Surfaces[s], px, pz, x0, z0, x0 + 1, z0, x0, z0 + 1)
 			if h0 ~= nil and inside then
 				-- Integers, so a tiny negative can't print as "-0".
 				local key = string.format(
@@ -785,6 +825,12 @@ end
 local function triangulateTile(tc: { number }, te: { number }, tg: { number }, floor: FloorData): { TileTriangle }
 	local floorContext = floor.Context
 	local surfaces, vertexHeight, vertexFrom = floor.Surfaces, floor.Heights, floor.HeightFrom
+	-- The tile's min corner: its rectangle's corners are among the input points.
+	local tx0, tz0 = math.huge, math.huge
+	for k = 1, #tc, 2 do
+		tx0, tz0 = math.min(tx0, tc[k]), math.min(tz0, tc[k + 1])
+	end
+	local near = nearSurfaces(surfaces, floor.TileSize, tx0, tz0)
 	local function run(c: { number }, e: { number }, g: { number }): Triangulation
 		local t = CDT.Triangulate { Coords = c, Edges = e, EdgeGroups = g }
 		for v = 1, CDT.VertexCount(t) do
@@ -823,7 +869,7 @@ local function triangulateTile(tc: { number }, te: { number }, tg: { number }, f
 	end
 	local tri = run(tc, te, tg)
 	local kept, keptArea = classify(tri)
-	local again = if DISSOLVE.Enabled then dissolve(tri, kept, keptArea, tg, floor) else nil
+	local again = if DISSOLVE.Enabled then dissolve(tri, kept, keptArea, tg, floor, near) else nil
 	if again then
 		tri = run(again.Coords, again.Edges, again.Groups)
 		kept, keptArea = classify(tri)
@@ -839,8 +885,8 @@ local function triangulateTile(tc: { number }, te: { number }, tg: { number }, f
 		local cx, cz = CDT.GetVertex(tri, c)
 		local px, pz = (ax + bx + cx) / 3, (az + bz + cz) / 3
 		local h1, h2, h3, from = nil :: number?, 0, 0, 0
-		for i, surface in surfaces do
-			local s1, s2, s3, inside = surfaceHeights(surface, px, pz, ax, az, bx, bz, cx, cz)
+		for _, i in near do
+			local s1, s2, s3, inside = surfaceHeights(surfaces[i], px, pz, ax, az, bx, bz, cx, cz)
 			if s1 == nil or not inside then
 				continue
 			end
@@ -1361,6 +1407,7 @@ local function buildFloor(
 	local floorData: FloorData = {
 		Context = floorContext,
 		Surfaces = surfaces,
+		TileSize = tileSize,
 		AreaIds = areaIds,
 		DefaultArea = defaultArea,
 		Heights = {},

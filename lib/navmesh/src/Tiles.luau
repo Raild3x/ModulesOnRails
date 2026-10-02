@@ -182,44 +182,75 @@ local function tileRect(s: State, tile: number): (number, number, number, number
 	return math.round(x0 * GRID), math.round(z0 * GRID), math.round(x1 * GRID), math.round(z1 * GRID)
 end
 
--- Per mesh (weak), per floor: the walkable rings' height surfaces (Build.Internal.MakeSurface),
--- by ring index. Rings never change after Build, so they are made once, on the first Update;
--- runtime state, never serialized.
-local surfaceCache: { [State]: { [number]: { [number]: any } } } = setmetatable({}, { __mode = "k" }) :: any
+-- A floor's authored sources, which never change after Build: its tile size (grid units),
+-- default area, area ids, rings and their groups, the walkable rings' height surfaces
+-- (Build.Internal.MakeSurface) by ring index, and for each tile (by its index on the floor's
+-- grid) the rings whose box comes within a pixel of its rectangle, ascending.
+type FloorCache = {
+	TileSize: number,
+	DefaultArea: number,
+	AreaIds: { number },
+	Rings: { any },
+	Groups: { number },
+	Surfaces: { [number]: any },
+	Near: { [number]: { number } },
+}
 
-local function surfacesOf(s: State, floor: number): { [number]: any }
-	local floors = surfaceCache[s] or {}
-	surfaceCache[s] = floors
-	local surfaces = floors[floor]
-	if surfaces == nil then
-		surfaces = {}
-		local _, _, _, rings, groups = Storage.GetFloorSources(s, floor)
-		for i, ring in rings do
-			if groups[i] == Internal.GROUP_WALKABLE then
-				surfaces[i] = Internal.MakeSurface(ring)
+-- Per mesh (weak), per floor, made on the first Update that touches the floor; runtime state,
+-- never serialized. Copying every ring out of Storage and scanning their points on each Update
+-- cost 34-42 ms of a 58-65 ms Update on a 4 km open map (known-gaps.md, Track H).
+local floorCache: { [State]: { [number]: FloorCache } } = setmetatable({}, { __mode = "k" }) :: any
+
+local function floorOf(s: State, floor: number): FloorCache
+	local floors = floorCache[s] or {}
+	floorCache[s] = floors
+	local cached = floors[floor]
+	if cached == nil then
+		local size, defaultArea, areaIds, rings, groups = Storage.GetFloorSources(s, floor)
+		local surfaces, near = {}, {}
+		for r, ring in rings do
+			if groups[r] == Internal.GROUP_WALKABLE then
+				surfaces[r] = Internal.MakeSurface(ring)
+			end
+			local x0, z0, x1, z1 = bounds(ring.X, ring.Z)
+			-- Grown by a pixel; a bound on a tile line belongs to the tiles on both sides of it.
+			for j = math.ceil((z0 - 1) / size) - 1, math.floor((z1 + 1) / size) do
+				for i = math.ceil((x0 - 1) / size) - 1, math.floor((x1 + 1) / size) do
+					local key = PointKey(i, j)
+					local list = near[key]
+					if list == nil then
+						list = {}
+						near[key] = list
+					end
+					table.insert(list, r)
+				end
 			end
 		end
-		floors[floor] = surfaces
+		cached = {
+			TileSize = size,
+			DefaultArea = defaultArea,
+			AreaIds = areaIds,
+			Rings = rings,
+			Groups = groups,
+			Surfaces = surfaces,
+			Near = near,
+		}
+		floors[floor] = cached
 	end
-	return surfaces
+	return cached
 end
 
 type Obstacle = { Id: number, Floor: number, X: { number }, Z: { number }, Box: { number } }
 
 -- The triangulation input for each of a floor's dirty tiles: Build's own snap rounding and
--- clipping, fed the floor's authored rings and seams within a pixel of those tiles and the active
--- obstacles there, after the static ones as if baked (SR14). `Build.Internal.TileInputs` says
--- why that is exactly Build's input.
+-- clipping, fed the floor's authored rings within a pixel of those tiles (`FloorCache.Near`), the
+-- seams and active obstacles near them, after the static ones as if baked (SR14).
+-- `Build.Internal.TileInputs` says why that is exactly Build's input.
 -- ponytail: whole rings near the tiles are re-snapped (a planar 8,192-point ring near a change
--- costs about 19 ms); a per-ring edge index if huge authored rings show up.
-local function reSnap(
-	s: State,
-	floor: number,
-	tiles: { number },
-	obstacles: { Obstacle },
-	surfaces: { [number]: any }
-): { [number]: any }
-	local tileSize, _, _, rings, groups = Storage.GetFloorSources(s, floor)
+-- costs about 17 ms); a per-ring edge index if huge authored rings show up.
+local function reSnap(s: State, floor: number, tiles: { number }, obstacles: { Obstacle }): { [number]: any }
+	local cached = floorOf(s, floor)
+	local tileSize, rings, groups, surfaces = cached.TileSize, cached.Rings, cached.Groups, cached.Surfaces
 	local only: { number } = {}
 	local tileAt: { [number]: number } = {}
 	local x0, z0, x1, z1 = math.huge, math.huge, -math.huge, -math.huge
@@ -231,24 +262,31 @@ local function reSnap(
 		x0, z0 = math.min(x0, tx0 - 1), math.min(z0, tz0 - 1)
 		x1, z1 = math.max(x1, tx1 + 1), math.max(z1, tz1 + 1)
 	end
-	local sources = {}
-	local function add(ring: any, group: number, surface: any)
-		local bx0, bz0, bx1, bz1 = bounds(ring.X, ring.Z)
-		if bx0 <= x1 and x0 <= bx1 and bz0 <= z1 and z0 <= bz1 then
-			table.insert(sources, { Ring = ring, Group = group, Surface = surface })
+	local near, picked, list = cached.Near, {}, {}
+	for k = 1, #only, 2 do
+		for _, r in near[PointKey(only[k] // tileSize, only[k + 1] // tileSize)] or {} do
+			if not picked[r] then
+				picked[r] = true
+				table.insert(list, r)
+			end
 		end
 	end
-	for r, ring in rings do
+	table.sort(list)
+	local sources = {}
+	for _, r in list do
 		if groups[r] <= GROUP_OBSTACLE then
-			add(ring, groups[r], surfaces[r])
+			table.insert(sources, { Ring = rings[r], Group = groups[r], Surface = surfaces[r] })
 		end
 	end
 	for _, obstacle in obstacles do
-		add(obstacle, GROUP_OBSTACLE, nil)
+		local bx0, bz0, bx1, bz1 = bounds(obstacle.X, obstacle.Z)
+		if bx0 <= x1 and x0 <= bx1 and bz0 <= z1 and z0 <= bz1 then
+			table.insert(sources, { Ring = obstacle, Group = GROUP_OBSTACLE })
+		end
 	end
-	for r, ring in rings do
+	for _, r in list do
 		if groups[r] > GROUP_OBSTACLE then
-			add(ring, groups[r], nil)
+			table.insert(sources, { Ring = rings[r], Group = groups[r] })
 		end
 	end
 	local seams = {}
@@ -392,18 +430,18 @@ local function prepare(s: State): Plan
 	local rebuilt: { [number]: { any } } = {}
 	local rebuiltInput: { [number]: any } = {}
 	for floor, tiles in dirtyByFloor do
-		local _, defaultArea, areaIds = Storage.GetFloorSources(s, floor)
-		local surfaces = surfacesOf(s, floor)
+		local cached = floorOf(s, floor)
 		local floorData = {
 			Context = `floor '{Storage.GetFloorName(s, floor)}'`,
-			Surfaces = surfaces,
-			AreaIds = areaIds,
-			DefaultArea = defaultArea,
+			Surfaces = cached.Surfaces,
+			TileSize = cached.TileSize,
+			AreaIds = cached.AreaIds,
+			DefaultArea = cached.DefaultArea,
 			Heights = floorHeights[floor],
 			HeightFrom = {},
 		}
 		-- Every dirty tile is re-snapped from the floor's rings, with the active obstacles.
-		local inputs = reSnap(s, floor, tiles, active[floor] or {}, surfaces)
+		local inputs = reSnap(s, floor, tiles, active[floor] or {})
 		for _, tile in tiles do
 			local input = inputs[tile]
 			if input == nil then
