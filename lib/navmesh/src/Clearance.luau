@@ -453,25 +453,28 @@ local function computeWidths(s: Storage.State, cap: number, only: { [number]: bo
 			not Storage.IsWallEdge(s, t, 3),
 		}
 		local limit = math.min(FIRST_LIMIT, limitCap)
+		-- Only widths a query reads: a corner between two crossable edges, a crossable portal.
+		-- The rest stay 0 (nothing crosses a wall). A width found within a smaller limit is
+		-- exact and is not searched again (only walls within it can bound it).
+		local r = table.create(6, 0)
+		local solved = table.create(6, false)
 		while true do
 			local feats, toTri, toEdge = nearWalls(index, floor, edges, limit)
-			-- Only widths a query reads: a corner between two crossable edges, a crossable portal.
-			-- The rest stay 0 (nothing crosses a wall).
-			local r = table.create(6, 0)
 			local exact = true
 			local triLinks, gaps = {}, {}
 			for k = 1, 3 do
-				if crossable[k % 3 + 1] and crossable[(k + 1) % 3 + 1] then
+				if not solved[k] and crossable[k % 3 + 1] and crossable[(k + 1) % 3 + 1] then
 					r[k] = chain(feats, toTri, edges, triLinks, gaps, P[k].X, P[k].Z, edges[k])
 				end
 				-- A portal is shared: the lower-numbered triangle computes it (see below), unless
 				-- that one is outside `only`. A seam edge (open, no neighbour) is its own alone.
-				if crossable[k] and owns(k) then
+				if not solved[3 + k] and crossable[k] and owns(k) then
 					local u = P[k % 3 + 1]
 					local sink = { edges[k][3], edges[k][4], edges[k][3], edges[k][4] }
 					r[3 + k] = chain(feats, toEdge[k], { edges[k] }, {}, gaps, u.X, u.Z, sink)
 				end
-				exact = exact and r[k] <= limit and r[3 + k] <= limit
+				solved[k], solved[3 + k] = r[k] <= limit, r[3 + k] <= limit
+				exact = exact and solved[k] and solved[3 + k]
 			end
 			if exact or limit >= limitCap then
 				-- Past the limit only a lower bound is known: the cap (or, uncapped, the whole
