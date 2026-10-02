@@ -1040,6 +1040,13 @@ The regression map for realistic content: `lune run tools/navmesh/bench/city_day
 - Each event's `Update` returns one region. The re-plans it causes (3-46) are counted in ticket
   38, not timed here; elevator handling includes its re-plans (about 9 ms each, weighted).
 
+## Highlands, slope spread (2026-10-02)
+`lune run tools/navmesh/bench/terrain_slopes.luau Highlands`: 6,449 Parts, FromParts 4.0 s,
+Build 2.1 s, 4,567 triangles, 1,768 floors, 2,596 seams, bake 2,205,113 bytes. Floors by slope:
+54 under 0.5 degrees (35% of the area), then 98-205 per 5-degree band up to 45, and 23 riser
+strips above. Ticket 37's "Highlands" section has the table. The baseline for merging floors
+of similar slope.
+
 ## Not measured (flagged)
 - Remote transfer time and payload size per layout (needs a live server/client session).
 - Locality on a real CDT's vertex and triangle ordering. The grid mesh has near-ideal locality,
