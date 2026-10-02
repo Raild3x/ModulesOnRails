@@ -184,6 +184,78 @@ return function(t: tiniest)
 				end).fails_with("SimplifyTolerance must be a number")
 			end
 		end)
+
+		test("exact counts: collinear runs go, a dense triangle comes down to its corners", function()
+			-- A 10-stud square with a point every stud, exactly on its sides: only the corners stay,
+			-- as an obstacle and as a walkable ring.
+			local square = {}
+			for _, side in { { 0, 0, 1, 0 }, { 10, 0, 0, 1 }, { 10, 10, -1, 0 }, { 0, 10, 0, -1 } } do
+				for k = 0, 9 do
+					table.insert(square, v(side[1] + side[3] * k, 0, side[2] + side[4] * k))
+				end
+			end
+			expect(#Internal.ObstacleRing(square, "square", 0.25).X).is(4)
+			local mesh = Build.Build { SimplifyTolerance = 0.25, Floors = { G = { Walkable = { square } } } }
+			local _, _, _, rings = Storage.GetFloorSources(mesh, 1)
+			expect(#rings[1].X).is(4)
+			-- An obstacle triangle with 19 points a side, each 0.03 inside it: back to 3 points.
+			local triangle = {}
+			local corners = { { 0, 0 }, { 10, 0 }, { 5, 8 } }
+			for c = 1, 3 do
+				local a, b = corners[c], corners[c % 3 + 1]
+				local nx, nz = -(b[2] - a[2]), b[1] - a[1]
+				local len = math.sqrt(nx * nx + nz * nz)
+				for k = 0, 19 do
+					local t, inset = k / 20, if k == 0 then 0 else 0.03
+					table.insert(
+						triangle,
+						v(a[1] + t * (b[1] - a[1]) + inset * nx / len, 0, a[2] + t * (b[2] - a[2]) + inset * nz / len)
+					)
+				end
+			end
+			expect(#Internal.ObstacleRing(triangle, "triangle", 0.25).X).is(3)
+			-- Seeded rings, as measured when R1 was built (a regression check on how far the chord
+			-- and collapse moves reach).
+			expect(#Internal.ObstacleRing(blob(10, 10, 2, 24, 0), "cylinder", 0.1).X).is(13)
+			expect(#Internal.ObstacleRing(blob(10, 10, 3, 24, 0), "cylinder", 0.1).X).is(24)
+			expect(#Internal.ObstacleRing(blob(10, 10, 3, 24, 0), "cylinder", 0.25).X).is(13)
+			math.randomseed(21)
+			local rock = blob(10, 10, 5, 120, 0.3)
+			for _, case in { { 1 / 16, 80 }, { 0.1, 71 }, { 0.25, 50 } } do
+				expect(#Internal.ObstacleRing(rock, "rock", case[1]).X).with_context(`rock at {case[1]}`).is(case[2])
+			end
+			math.randomseed(22)
+			local coast = blob(0, 0, 30, 300, 0.4)
+			for _, case in { { 1 / 16, 246 }, { 0.1, 214 }, { 0.25, 139 } } do
+				local built = Build.Build { SimplifyTolerance = case[1], Floors = { G = { Walkable = { coast } } } }
+				local _, _, _, coastRings = Storage.GetFloorSources(built, 1)
+				expect(#coastRings[1].X).with_context(`coast at {case[1]}`).is(case[2])
+			end
+		end)
+
+		test("collapsed obstacle points round-trip through a bake", function()
+			-- Cylinders collapse to new grid points; their rings (heights too) are stored.
+			local desc = {
+				SimplifyTolerance = 0.25,
+				Floors = {
+					G = {
+						Walkable = { { v(0, 0, 0), v(30, 0, 0), v(30, 0, 30), v(0, 0, 30) } },
+						Obstacles = { blob(10, 10, 3, 24, 0), blob(20, 18, 2, 24, 0) },
+					},
+				},
+			}
+			local mesh = NavMesh.Build(desc)
+			local loaded = NavMesh.Deserialize(NavMesh.Serialize(mesh))
+			local _, _, _, a = Storage.GetFloorSources(mesh, 1)
+			local _, _, _, b = Storage.GetFloorSources(loaded, 1)
+			for r = 2, 3 do
+				expect(#a[r].X).is(13)
+				for k = 1, #a[r].X do
+					expect(b[r].X[k]).is(a[r].X[k])
+					expect(b[r].Y[k]).is(0)
+				end
+			end
+		end)
 	end)
 
 	-- A dense room: a noisy outline round noisy rocks and cylinders.
@@ -527,9 +599,10 @@ return function(t: tiniest)
 	end
 
 	local function withDissolve(on: boolean, f: () -> any): any
+		local was = Internal.Dissolve.Enabled
 		Internal.Dissolve.Enabled = on
 		local ok, result = pcall(f)
-		Internal.Dissolve.Enabled = true
+		Internal.Dissolve.Enabled = was
 		if not ok then
 			error(result, 0)
 		end
@@ -578,6 +651,50 @@ return function(t: tiniest)
 				NavMesh.RemoveObstacle(mesh, id)
 				NavMesh.Update(mesh)
 				expect(differs(mesh, NavMesh.Build(desc))).with_context("removed").is("")
+			end
+		end)
+
+		test("a change of slope through the tile corner stays an edge, even where Delaunay would flip it", function()
+			-- A flat triangle and a tilted one meet along L: z = x / 10, from the tile corner (0, 0) to
+			-- (20, 2). Both are at height 0 on L, so at the tile corner only their slopes differ.
+			-- The quad they make is long and thin, so without L as a constraint the triangulation
+			-- takes the short diagonal across it. A second flat piece inside the first gives the
+			-- tile something to dissolve.
+			local function rampY(x: number, z: number): number
+				return -0.5 * (z - x / 10)
+			end
+			local ramp = { v(0, 0, 0), v(10, rampY(10, 0.2), 0.2), v(20, 0, 2) }
+			local desc = {
+				TileSize = 64,
+				Floors = {
+					Ground = {
+						Walkable = {
+							{ v(0, 0, 0), v(20, 0, 2), v(10, 0, 2.5) },
+							ramp,
+							{ v(6, 0, 1.2), v(12, 0, 1.8), v(9, 0, 2.1) },
+						},
+					},
+				},
+			}
+			local off = withDissolve(false, function()
+				return NavMesh.Build(desc)
+			end)
+			local on = NavMesh.Build(desc)
+			expect(Storage.TriangleCount(on) < Storage.TriangleCount(off)).is_true()
+			for tri = 1, Storage.TriangleCount(on) do
+				local below, above = 0, 0
+				for _, id in { Storage.GetTriangle(on, tri) } do
+					local p = Storage.GetVertex(on, id)
+					local side = p.Z - p.X / 10
+					if side < -1e-3 then
+						below += 1
+					elseif side > 1e-3 then
+						above += 1
+					end
+					local want = if side < 0 then rampY(p.X, p.Z) else 0
+					expect(math.abs(p.Y - want) < 1e-3).with_context(`vertex ({p.X}, {p.Z}) height {p.Y}`).is_true()
+				end
+				expect(below == 0 or above == 0).with_context(`triangle {tri} crosses L`).is_true()
 			end
 		end)
 
