@@ -50,6 +50,7 @@
 	triangulation itself, and dominated by exact link costs.
 ]=]
 
+local OpenList = require("./OpenList")
 local Storage = require("./Storage")
 
 type Seg = { number } -- x1, z1, x2, z2
@@ -244,12 +245,44 @@ local function chain(
 	for i = 1, m do
 		label[i] = math.max(pointSeg(sx, sz, feats[i]), reach[i])
 	end
+	local halfLen = table.create(m, 0)
+	for i = 1, m do
+		local f = feats[i]
+		halfLen[i] = math.sqrt((f[3] - f[1]) ^ 2 + (f[4] - f[2]) ^ 2) * 0.5
+	end
 	local best = math.huge
+	-- Links are evaluated lazily (most never lower a label; 6-8% did on long rings): a relaxation
+	-- whose cost isn't cached waits in a heap, keyed by a lower bound of what it could give,
+	-- max(li, gap / 2, reach), as source * (m + 1) + target. It is evaluated only once no label
+	-- left is below that bound, and dropped if its target's label has fallen to it. Labels are
+	-- exact when popped, as in the eager search, so `best` is the same number; a source's label
+	-- is final once it is done, so it is read back at the pop.
+	local waiting = OpenList.new()
 	while true do
 		local i, li = 0, math.huge
 		for j = 1, m do
 			if not done[j] and label[j] < li then
 				i, li = j, label[j]
+			end
+		end
+		while waiting.Size > 0 and waiting.Keys[1] < li and waiting.Keys[1] < best do
+			local pair, key = OpenList.Pop(waiting)
+			local a, b = pair // (m + 1), pair % (m + 1)
+			if done[b] or key >= label[b] then
+				continue
+			end
+			local k = if a < b then a * (m + 1) + b else b * (m + 1) + a
+			local cost = links[k]
+			if cost == nil then
+				cost = linkCost(region, feats[a], feats[b])
+				links[k] = cost
+			end
+			local via = math.max(label[a], cost)
+			if via < label[b] then
+				label[b] = via
+				if via < li then
+					i, li = b, via
+				end
 			end
 		end
 		if i == 0 or li >= best then
@@ -264,25 +297,32 @@ local function chain(
 			if done[j] or bound <= li or reach[j] >= bound then
 				continue
 			end
-			-- Cheap lower bound first: two discs can't meet before r = d(f, g) / 2.
+			-- Cheap lower bound first: two discs can't meet before r = d(f, g) / 2. A bound on
+			-- d(f, g) is enough here: the midpoints' distance less the half lengths.
 			local k = if i < j then i * (m + 1) + j else j * (m + 1) + i
 			local gap = gaps[k]
 			if gap == nil then
-				gap = segSeg(fi, feats[j])
+				local fj = feats[j]
+				gap = math.max(
+					0,
+					math.sqrt(((fi[1] + fi[3]) - (fj[1] + fj[3])) ^ 2 + ((fi[2] + fi[4]) - (fj[2] + fj[4])) ^ 2) * 0.5
+						- halfLen[i]
+						- halfLen[j]
+				)
 				gaps[k] = gap
 			end
 			if gap * 0.5 >= bound then
 				continue
 			end
 			local cost = links[k]
-			if cost == nil then
-				cost = linkCost(region, fi, feats[j])
-				links[k] = cost
+			if cost ~= nil then
+				local via = math.max(li, cost)
+				if via < label[j] then
+					label[j] = via
+				end
+				continue
 			end
-			local via = math.max(li, cost)
-			if via < label[j] then
-				label[j] = via
-			end
+			OpenList.Push(waiting, i * (m + 1) + j, math.max(li, gap * 0.5, reach[j]))
 		end
 	end
 end
