@@ -46,7 +46,9 @@ A layered 2.5D navigation mesh for pathfinding queries, built on ConstrainedDela
   It bounds how much clearance an `Update` recomputes.
 - **Wall**: a mesh edge with no neighbour that is not open: the edge of walkable surface or of
   an obstacle. Tile, area and seam edges are never walls.
-- **Open edge**: a seam edge. It has no neighbour on its own floor, yet it is walkable.
+- **Open edge**: a seam edge. It usually has no neighbour on its own floor, yet it is walkable.
+  It can keep one where its floor runs on past the seam (ThreeFloorStairs' Ground under the
+  ramp).
 - **Seam portal**: the overlap of two floors' seam edges, stored as a crossing between their
   triangles. The floors' seam vertices may differ by up to one grid pixel.
 - **Extra link**: a transition beyond a triangle's three edges, either a seam portal or a link.

@@ -160,3 +160,96 @@ first)
 - **Numbers** (`tools/navmesh/bench/partial_end.luau`, many-slab rooms, 5 seeds, 405
   Partial/Budget ends): ends a flood proves unreachable went from 216 (53%) to 90 (22%). Partial
   FindPath went from 30 to 56-61 us mean (p95 54 to 111-125). Success paths don't run this code.
+
+## Link and seam entries (2026-10-01, Track E, E3)
+- **The gap** (known-gaps.md, Track B): a link landing in the goal triangle, or starting in the
+  start triangle, was never checked against the end; a triangle entered by a link or a seam was
+  left on the exit edge's portal width alone. Repros (all Success at r 0.51 before, through the
+  1-stud gap of this ticket's room): a link landing west of the gap with the goal east of it in
+  the same sliver; a link starting east of the gap with the start west of it; a link landing
+  west of the gap, leaving east; a sliver entered across a seam whose corner width (1) forbids
+  the exit its portal widths (1.76, 1.82) allowed.
+- **As built, all in `Search.Run` with this ticket's checks:**
+  - a link landing is an entry point like the start: leaving its triangle by an edge or seam
+    needs `CutOff` from it, by another link `Separated`;
+  - a link from the start triangle needs `Separated` from the start (a refusal sets the start's
+    cut flag, so a way back in, the start-again node, can take it); a link landing in the goal
+    triangle reaches the goal only if `Separated` says so, else it passes through;
+  - a seam entry takes the seam's own edge as its entry edge (the portal is part of that edge,
+    so its corner widths are a sound bound), and back over that edge the portal width applies;
+  - with a radius, every seam or link entry is a node of its own (n + 3 + extra id). With one
+    node per triangle a cheap landing cut off from an edge closed its triangle to a walk in by
+    another edge (spec: two links in the gap room);
+  - such an entry never goes straight back over the seam or link it came by: the bounce over a
+    seam and back made the seam's edge the entry edge of a triangle entered otherwise, and
+    dodged its corner width (found by the oracle on `props+seam`);
+  - barrier tests run only for neighbours not yet closed; the Partial end (Track G's
+    `reachable`) also asks the closed seam and link nodes of the triangle it lands in.
+- **Found on the way:**
+  - *ThreeFloorStairs at any radius:* its Ground seam edge keeps its Ground neighbour, and a
+    path from under the ramp crosses that edge, then takes the seam on it. The old code read
+    corner `6 - 2e` there (a wrong slot, 0) and returned Partial for the ramp at r 0.2-1.1.
+    That step now reads the edge's portal width. The SR4 spec's rule is updated to match.
+  - *`Separated` with a pushed-out point:* a point pushed off a wall out of a thin triangle is
+    inside no barrier polygon, so its parity proved nothing, and the old test called such pairs
+    parted (all 3 parted verdicts of the pinned Clearance sample; the flood connects each pair
+    pushed). It is now parted only if the other point is cut off from the edge the push crossed;
+    past a vertex, not parted.
+  - *`Separated` cost:* one polygon per pair of contacts was O(contacts^2) (450 us per barrier
+    test on the props room). It now reads one crossing parity per contact along each
+    component's breadth-first tree (63 us), with the same verdicts on the pinned sample.
+  - *The flood started an end touching a wall from its own cell only,* which can't leave a
+    wall's disc: any flip from such an end was "confirmed". It now also floods from the end
+    pushed off its wall, as the search judges it.
+- **Oracle** (`radius_oracle.luau ... links`: notches, props, walls and bench with 12-60 random
+  links, half one-way, ends half near wall corners, queries aimed at link ends as often as at
+  corners; and `props+seam`, the props room as two floors joined down x = 32; flood with links
+  as one-way teleports):
+  - seeds 0 and 1, 40,000 queries: 40 Success-to-Partial flips, all confirmed (19 fair),
+    **0 refuted**;
+  - the plain scenes (seeds 0 and 1, 32,000 queries): 0 flips;
+  - 206 Partial-to-Success changes (the separate entry nodes): 83 the flood connects, 121 pass
+    through a link end that can't stand even pushed (taken as cut off from nothing, as this
+    ticket treats ends), 2 along the seam line of `props+seam`, where Clearance doesn't see the
+    other floor's walls (the old search succeeds along the same line: known-gaps.md).
+- **Specs** (`NavMesh.LinkBarriers.spec`, 11; Clearance spec, 2 more and a re-pin): the four
+  repros, the start-again way round a floating slab, a link start standing just outside its
+  sliver, a landing leaving by a seam, the two-link entry, the seam U-turn (the props room
+  split, 0.5 s), ThreeFloorStairs, a Partial end in a pad reached only by link, radius 0
+  unchanged; pushed-out `Separated` both ways; remembered verdicts in either order.
+- **Negative controls**, each failing at least one spec: no goal-landing check (1), no
+  link-start check (3), landing edge check only at the start (2), one node per triangle (1),
+  seam entry edge left 0 (2), corner `6 - 2e` (1), no pushed-out rule (3), no U-turn rule (1),
+  Partial end without the entry nodes (1), landing seam check only at the start (1), memo key
+  without the edge (10), memo without its radius (9). One survives: dropping the parent's
+  parity in the tree (a depth-2 contact with PQ crossing the root's link); no counterexample in
+  about 100k random pairs.
+- **Cost** (`tools/navmesh/bench/findpath_links_cost.luau`, ms per 400 queries, old / new):
+
+  | scene | links | radius 0 | radius 0.3-2 per query | radius 1 |
+  |---|---|---|---|---|
+  | props (64) | 0 | 31.5 / 29.6 | 85.2 / 53.0 | 71.8 / 42.0 |
+  | props | 100 | 32.4 / 32.3 | 110.3 / 198.8 (1.8x) | 125.9 / 102.9 |
+  | props | 1,000 | 47.4 / 48.4 | 141.8 / 2,457 (17x) | 155.1 / 215.7 (1.4x) |
+  | bench (256) | 0 | 33.3 / 32.9 | 81.4 / 76.6 | 79.1 / 72.4 |
+  | bench | 100 | 34.4 / 33.5 | 71.2 / 76.9 | 69.2 / 64.2 |
+  | bench | 1,000 | 48.2 / 47.5 | 97.3 / 254.7 (2.6x) | 85.7 / 93.8 |
+
+  - Radius 0 is unchanged. A link node costs a barrier test or two at a new radius (7-13 us);
+    Partial queries expand them all (props, 1,000 links: Partial 0.5 to 11 ms cold, 0.8 to 2.4
+    ms at one radius; Success 0.3 to 2.2 ms cold, 0.4 ms at one radius).
+  - The verdicts are kept with each triangle's walls per radius (up to 32,768 records per mesh), so a game's few
+    agent sizes pay this once per landing. Without radius links, FindPath got faster (the
+    pair-free `Separated`).
+- **Mutation** (`--mutate-files=src/Search.luau,src/Clearance.luau`, covered-line score):
+  - Search **86.4%** (319 / 369; baseline 84.0, Track G's 89.7 not reached).
+  - Clearance **79.9%** (639 / 800; baseline 80.1, short by about two mutants). The first run
+    was 74.7%; simpler memo keys, the parity test without its same-point guard, and four specs
+    (verdict keys, a pushed-over point, a seam-entered goal, a sub-1-stud agent) raised it.
+  - Survivors in the new code, triaged: *equivalent* (cache caps and counters, which only cost
+    time; a parity flip applied to every contact; the early "already closed" skips; placeholder
+    literals; `width > 0` turned to `>= 0`, since CutOff and Separated are false at r 0; the
+    extra-node id test at `n + 3` against `n`, which only adds nodes the list already holds);
+    *redundant on meshes built*: the start's cut flag from a link or seam check (the edge
+    check sets it first); *unreached*: dropping the parent's parity in the contact tree (no
+    counterexample in about 100k random pairs) and the goal-again node id.
