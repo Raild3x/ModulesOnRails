@@ -1021,14 +1021,18 @@ return function(t: tiniest)
 		test(
 			"an Update whose seam join fails after the tiles are rebuilt leaves the mesh as it was (ticket 22)",
 			function()
-				-- Covering the Ground side of the Ground-Stairs seam (x = 10) removes every piece of it,
-				-- so Connect fails after the rebuilt tiles are written: an in-place commit must undo.
+				-- Connect fails after the rebuilt tiles are written: an in-place commit must undo.
 				local stairs = Fixtures.ThreeFloorStairs.Desc
 				local mesh = NavMesh.Build(stairs)
 				local before = canonical(mesh)
 				local widths = byTriangle(mesh)
 				NavMesh.AddObstacle(mesh, "Ground", flat(0, { 8.5, -1, 11, -1, 11, 5, 8.5, 5 }))
+				local original = Build.Internal.Connect
+				Build.Internal.Connect = function()
+					error("NavMesh.Build: injected failure", 0)
+				end
 				local ok = pcall(NavMesh.Update, mesh)
+				Build.Internal.Connect = original
 				expect(ok).is(false)
 				expect(canonical(mesh)).is(before)
 				local after = byTriangle(mesh)
@@ -1042,5 +1046,79 @@ return function(t: tiniest)
 				expect(canonical(mesh)).is(before)
 			end
 		)
+	end)
+
+	-- Ticket 37: a crate at a ramp's foot, or a rock on Part terrain, can cover a whole seam on one
+	-- floor. The seam is closed there; it is not an authoring error.
+	describe("Obstacles over a seam", function()
+		-- Covers the Ground side of ThreeFloorStairs' Ground-Stairs seam (x = 10, z 0..4).
+		local crate = { 8.5, -1, 11, -1, 11, 5, 8.5, 5 }
+
+		test("one in the description closes the seam, on either floor or split between them", function()
+			local covers = {
+				{ Ground = crate }, -- the seam runs through Ground's ring
+				{ Stairs = { 9, -1, 11, -1, 11, 5, 9, 5 } }, -- the seam is Stairs' ring edge
+				{ Stairs = { 19, -1, 21, -1, 21, 5, 19, 5 } }, -- Stairs-Upper: on its far edge, not inside
+				{ Ground = { 8.5, -1, 11, -1, 11, 2, 8.5, 2 }, Stairs = { 9, 2, 11, 2, 11, 5, 9, 5 } }, -- nothing pairs
+			}
+			-- Every vector in `value`, moved by d.
+			local function moved(value: any, d: vector): any
+				if type(value) == "vector" then
+					return value + d
+				elseif type(value) ~= "table" then
+					return value
+				end
+				local out = {}
+				for k, x in value do
+					out[k] = moved(x, d)
+				end
+				return out
+			end
+			-- At the origin, and far from it (where a wrong point would miss every ring).
+			for _, d in { vector.zero, vector.create(1000, 0, 1000) } do
+				for _, cover in covers do
+					local desc = table.clone(Fixtures.ThreeFloorStairs.Desc)
+					desc.Floors = table.clone(desc.Floors)
+					for floor, xz in cover do
+						desc.Floors[floor] = { Walkable = desc.Floors[floor].Walkable, Obstacles = { flat(0, xz) } }
+					end
+					local mesh = NavMesh.Build(moved(desc, d))
+					expect(structureOk(mesh)).is("")
+					expect(NavMesh.FindPath(mesh, v(2, 0, 2) + d, v(30, 5, 2) + d).Status).is("Partial")
+				end
+			end
+		end)
+
+		test("floors crossing at the seam, each cut along half of it, leave it closed", function()
+			-- A is flat, B tilts through it along x = 10: each floor has pieces on both sides of the
+			-- seam, so each keeps half of it twice over, and nothing pairs.
+			local mesh = NavMesh.Build {
+				Floors = {
+					A = {
+						Walkable = { flat(0, { 0, 0, 20, 0, 20, 4, 0, 4 }) },
+						Obstacles = { flat(0, { 9, -1, 11, -1, 11, 2, 9, 2 }) },
+					},
+					B = {
+						Walkable = { { v(0, -1, 0), v(20, 1, 0), v(20, 1, 4), v(0, -1, 4) } },
+						Obstacles = { flat(0, { 9, 2, 11, 2, 11, 5, 9, 5 }) },
+					},
+				},
+				Seams = { { FloorA = "A", FloorB = "B", From = v(10, 0, 0), To = v(10, 0, 4) } },
+			}
+			expect(structureOk(mesh)).is("")
+		end)
+
+		test("one dropped by AddObstacle closes it; removing it opens it again", function()
+			local mesh = NavMesh.Build(Fixtures.ThreeFloorStairs.Desc)
+			local before = canonical(mesh)
+			local id = NavMesh.AddObstacle(mesh, "Ground", flat(0, crate))
+			NavMesh.Update(mesh)
+			expect(structureOk(mesh)).is("")
+			expect(NavMesh.FindPath(mesh, v(2, 0, 2), v(30, 5, 2)).Status).is("Partial")
+			NavMesh.RemoveObstacle(mesh, id)
+			NavMesh.Update(mesh)
+			expect(canonical(mesh)).is(before)
+			expect(NavMesh.FindPath(mesh, v(2, 0, 2), v(30, 5, 2)).Status).is("Success")
+		end)
 	end)
 end

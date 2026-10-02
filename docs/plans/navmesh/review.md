@@ -31,6 +31,33 @@ the const question are deliberately open, gated on benchmarks.
   per triangle (that brings back Partial for reachable pairs). User: "keep as built. Keep an eye
   out for if this becomes an issue later". The watch item is in known-gaps.md.
 
+### Rulings during Track M1 (2026-10-01)
+- **Ticket 34, how stair steps join (the adapter's step-height rule).** Riser seams were the
+  obvious shape, but Build refuses a seam whose two sides differ in height. Measured on the
+  building map (ticket 34's as-built notes): ramp strips, riser seams (core check loosened
+  locally), a merged sloped floor (wedge ramp as stand-in), and links per riser. User: "We will
+  go with ramp strips for now, but make a ticket for riser seams to replace it".
+  - Built: `AdapterOptions.MaxStepHeight` (default off). Each riser up to that height gets a
+    0.25-stud strip floor seamed to both steps.
+  - Ticket 40 (riser seams in the core) is filed to replace the strips.
+  - Rejected: links per riser (Partial at radius 1 and up; 12 link events per climb) and a
+    merged sloped floor (needs stair-run detection, can't do a single curb).
+- **Ticket 35, reroute when the elevator frees up mid-stairs?** Measured over 20 seeded crowds
+  of 40 (ticket 35's as-built notes): only 2-4% of NPCs would switch, gaining 1-2 s each;
+  library-only handling strands 6% when the elevator goes out of service. User: "Hysteresis +
+  library aids".
+  - The game, which owns the elevator, re-checks walking NPCs on its own reopen event. An NPC
+    switches if a fresh path costs at least 15% less than staying off the elevator. The game
+    also broadcasts out-of-service. Built in `tools/navmesh/maps/ElevatorSim.luau` as the
+    reference policy for ticket 38.
+  - The library aids are ticket 41, for a library track: link toggles that invalidate only the
+    paths using the link, and a remaining-cost query on a follower.
+  - Rejected: re-planning at waypoints (10x the FindPath calls, no gain), library-only (strands
+    NPCs), and never rerouting (the commit point measured the same as never).
+- **Studio camera (map harness):** "You may move the camera where needed at the start, but do
+  not lock it so I cant look around". `Studio.luau` places the camera once and leaves the
+  camera type alone.
+
 ### Rulings during Track M2 (2026-10-01)
 - **Adapter seams between tilted Parts (ticket 37's pre-work):** fix the three f32 tolerances
   in `clipSegment` and the seam loop now, with specs, and merge into `feat/navmesh` before the
@@ -38,6 +65,29 @@ the const question are deliberately open, gated on benchmarks.
   - Rejected: leaving it for M1's step-height rule (it would block ticket 37 until 34), and
     fixing it only on M2's branch (the other map tracks keep hitting it).
   - Repro: `tools/navmesh/bench/adapter_f32_seams.luau`; details in known-gaps.md.
+- **Two more adapter changes for wedge-triangle terrain:** join a floor's faces that share an
+  edge into one ring (dropping corners left on a straight line), and merge cut-hull corners
+  closer than 0.01 studs. User: "Both, merge early (Recommended)".
+  - Measured first on ForestRiver, 10 seeds x 4 tilts: 16 of 40 layouts built and passed on the
+    adapter of the first fix, 31 of 40 with both; the other 9 were the core bug below.
+  - Rejected: the hull fix alone (most terrain still fails), and slabs-only ground (skips the
+    most common Part-terrain form).
+- **The core bug, an obstacle covering a whole seam, is fixed by Track M2 now,** an exception to
+  the handoff's "core is off limits". User: "M2 fixes it now (Recommended)".
+  - The fix: such a seam is closed (no portals) instead of a Build or `Update` error; a seam that
+    never lay on a floor stays an error.
+  - Rejected: leaving it to a core track (the regression map couldn't cover it, and dropping a
+    crate on a ramp's foot would keep failing).
+- **A third adapter change: faces join a floor within 0.001 studs of its plane** (seams keep
+  0.01). User: "Yes, 0.001, merge early (Recommended)".
+  - Measured first: 37 of 40 layouts passed with the changes above; the 3 failures (all at 1
+    degree) were a ramp's foot walled to agents with a radius, because a level pad had joined a
+    floor 0.004 off its plane. 40 of 40 with 0.001 (and with 0.0001). At 1 degree, 290 floors
+    instead of 246, with the same triangles, bake and Build time.
+  - Rejected: 0.0001 (too close to f32 noise for faces meant to be coplanar), and keeping 0.01
+    (closes crossings silently on slightly tilted terrain).
+  - So ticket 37's "merge near-coplanar faces" idea is answered: merging saves floors, not
+    triangles, and it moves cuts.
 
 ### Rulings after Track H (2026-10-01)
 - **D6, large worlds, ruled on ticket 31's numbers** (bench.md, "Large worlds, 1-4 km"): fix
@@ -268,6 +318,15 @@ the const question are deliberately open, gated on benchmarks.
   repaths (regions) to 43 for 19 door toggles, and Track H measured 10.8 replans per Update
   against 0.57. Removed-obstacle boxes were offered too, and not chosen. User: "Add footprint
   boxes (Recommended)".
+
+### Rulings during the build (2026-10-01, Track M3)
+- **The adapter's area-name table (D5, ticket 26's open item, built for ticket 36):** a Part
+  names its area with a text `NavArea` attribute. `FromParts` returns `(desc, areas)`; each name
+  gets an id from 2 up, in name order, skipping ids used by numeric `NavArea`s. Numeric
+  `NavArea` still works. Rejected: areas by `Material` (every existing map would gain areas, and
+  repainting a Part would change paths) and a caller-supplied table (stable ids, but names
+  written twice). Adding a name can renumber the later ones, so a saved bake's costs may need
+  the table rebuilt. User: "Text NavArea (Recommended)".
 
 ### Rulings during the build (2026-09-27)
 - **U-a (clearance reach), ruled after the P4 probe (ticket 15 notes):** no cap by default,

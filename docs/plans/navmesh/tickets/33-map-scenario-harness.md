@@ -57,14 +57,28 @@ Everything lives in `tools/navmesh/maps/`. No library code changed.
   - `Scenarios`, a list (below);
   - optional: `MaxAgentRadius` (default 2), `AdapterOptions` (passed to `FromParts`), and
     `View = { From = {x, y, z}, To = {x, y, z} }` for the Studio camera (default: straight
-    down, framed on the walkable Parts).
+    down, framed on the walkable Parts), and `SeeThrough = { "PartName", ... }`, Parts Studio
+    draws at 0.75 transparency (an upper floor over a stair).
+- **Shared builders:** a map used by several map files lives at the top of
+  `tools/navmesh/maps/` (ticket 34's `Building.luau` and `BuildingPoints.luau`). studio.py
+  mounts every top-level `.luau` there except `run.luau`.
+- **Later additions (tickets 34-35):** `Built.Extra` (anything the map's Studio code needs),
+  a map's `Animate(report, NavMesh, rbx, parent)`, which returns a per-frame step function
+  Studio runs during the hold (moving NPCs), and a scenario's `DisabledLinks = { label }`
+  (links off for that scenario, an elevator out of service).
 - **A scenario** is `{ Name, From, To, Filter?, Expect?, MustFail? }`. `From` and `To` are point
-  names; `Filter` is the `QueryFilter`. Every `Expect` field is optional:
+  names; `Filter` is the `QueryFilter`, or (added in ticket 36) a function of the adapter's
+  area-name table returning it, so a scenario writes `AreaCosts = { [areas.Road] = 10 }`.
+  Every `Expect` field is optional:
   - `Status`: the `PathStatus`;
   - `Floors`: the floors visited, in order, with repeats collapsed;
+  - `Visits`: floors that must appear in this order, among others. Added in ticket 34: with
+    riser strips, a stair's floor list holds every riser;
   - `Links`: the labels of the links used, in order;
-  - `Avoids`: area ids no walked segment may enter. A segment along an area's edge doesn't
-    count; a link's hop isn't checked. The check samples every 0.25 studs;
+  - `Avoids`: areas no walked segment may enter, as ids or (ticket 36) names. A segment along
+    an area's edge doesn't count; a link's hop isn't checked. The check samples every 0.25
+    studs, against every floor's areas at the sample's height (ticket 36: a crossing between
+    two curb strips lies on the road floor, which neither end waypoint is on);
   - `MaxStretch`: `Length` at most this many times the straight line From-To;
   - `MinLength` / `MaxLength`, in studs. For a reference path, run it once and use its length
     plus slack.
@@ -75,13 +89,18 @@ Everything lives in `tools/navmesh/maps/`. No library code changed.
   prints one table per map, then `ALL MAPS PASS` or `MAPS FAIL`, and exits 1 on any failure. It
   sits beside the spec run (`tools/navmesh/specs.luau`) rather than inside it: maps import the
   adapter, which the navmesh package's coverage copy can't reach.
-- **Screenshot command:** `python tools/navmesh/maps/studio.py <MapName> [--hold 20]
-  [--settle 12]`. It needs `lib/navmesh`, `lib/navmeshadapter` and `lib/constraineddelaunaydebug`
+- **Screenshot command:** `python tools/navmesh/maps/studio.py <MapName> [--hold 30]
+  [--settle 20]`. (Raised from 20 and 12 in ticket 34, after a slow Studio load missed the
+  drawn frame.) It needs `lib/navmesh`, `lib/navmeshadapter` and `lib/constraineddelaunaydebug`
   set up (link modules and `_Index`). It draws the mesh (seams and links on) and each
-  scenario's path in its own colour, holds, then clears the drawing. It captures once while
+  scenario's path in its own colour, holds, then clears the drawing. The camera is placed once
+  and not locked, so the user can look around (ruled during ticket 34). It captures once while
   drawn and once after, and fails unless the two differ. Output lands in `.bench/navmesh/maps/`:
   `<Map>.png`, `<Map>-viewport.png` (cropped, for this machine's maximized layout) and
   `<Map>.txt` (the log, with the same table). Check the PNG with the Read tool.
+  - Other sessions also use run-in-roblox's port 50312. If the log shows another game's output
+    or the capture shows another window, wait until
+    `netstat -ano | grep :50312 | grep LISTENING` is empty, then rerun.
 
 ### The tracer map, `FlatLot`
 A 60 x 40 lot, a 6 x 6 crate in the middle, and a mud patch (`NavArea` 3) to the north.

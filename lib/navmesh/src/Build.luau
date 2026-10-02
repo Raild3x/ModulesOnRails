@@ -955,17 +955,52 @@ local function edgeEnds(s: Storage.State, t: number, e: number): (vector, vector
 	return Storage.GetVertex(s, verts[e % 3 + 1]), Storage.GetVertex(s, verts[(e + 1) % 3 + 1])
 end
 
+-- Does the seam from (ax, az) to (bx, bz) (grid units) lie on one of the floor's authored
+-- walkable rings: is a point a pixel to either side of its middle inside one (even-odd)?
+local function onWalkable(s: Storage.State, floor: number, ax: number, az: number, bx: number, bz: number): boolean
+	local len = math.sqrt((bx - ax) ^ 2 + (bz - az) ^ 2)
+	local mx, mz, nx, nz = (ax + bx) / 2, (az + bz) / 2, (az - bz) / len, (bx - ax) / len
+	local _, _, _, rings, groups = Storage.GetFloorSources(s, floor)
+	for r, ring in rings do
+		if groups[r] ~= GROUP_WALKABLE then
+			continue
+		end
+		for _, side in { 1, -1 } do
+			local x, z, odd = mx + nx * side, mz + nz * side, false
+			for i = 1, #ring.X do
+				local j = i % #ring.X + 1
+				local px, pz, qx, qz = ring.X[i], ring.Z[i], ring.X[j], ring.Z[j]
+				if (pz > z) ~= (qz > z) and x < px + (z - pz) / (qz - pz) * (qx - px) then
+					odd = not odd
+				end
+			end
+			if odd then
+				return true
+			end
+		end
+	end
+	return false
+end
+
 -- Joins two floors across seam `id` (ruling: overlap portals). Every piece on floor A pairs
 -- with every piece on floor B that overlaps it along the seam and whose triangle lies on the
 -- other side of it, so walking across leads onto the other floor. Each pairing is a portal in
 -- both directions, on the crossing triangle's own edge. Seam edges without a neighbour become
 -- open (walkable, not walls).
+--
+-- Obstacles can cut a seam away on a floor (a crate at a ramp's foot): then it is closed where
+-- cut, or wholly (no portals). A seam that never lay on a floor, or whose floors meet it on the
+-- same side, is an authoring error.
 local function joinSeam(s: Storage.State, id: number, a: { SeamPiece }?, b: { SeamPiece }?)
 	local context = `seam {id}`
 	local floorA, floorB, ax, az, bx, bz = Storage.GetSeam(s, id)
 	local desc = { FloorA = Storage.GetFloorName(s, floorA), FloorB = Storage.GetFloorName(s, floorB) }
 	if a == nil or b == nil then
-		fail(context, `does not lie on floor '{if a == nil then desc.FloorA else desc.FloorB}'`)
+		local floor = if a == nil then floorA else floorB
+		if onWalkable(s, floor, ax, az, bx, bz) then
+			return -- cut away by obstacles: closed
+		end
+		fail(context, `does not lie on floor '{Storage.GetFloorName(s, floor)}'`)
 	end
 	local sx, sz = ax / GRID, az / GRID
 	local dx, dz = bx / GRID - sx, bz / GRID - sz
@@ -996,7 +1031,7 @@ local function joinSeam(s: Storage.State, id: number, a: { SeamPiece }?, b: { Se
 		end
 		return at(t0), at(t1)
 	end
-	local joined = 0
+	local joined, overlapped = 0, false
 	for _, pa in a :: { SeamPiece } do
 		local ua, va = edgeEnds(s, pa.Tri, pa.Edge)
 		local a0, a1 = math.min(param(ua), param(va)), math.max(param(ua), param(va))
@@ -1005,7 +1040,11 @@ local function joinSeam(s: Storage.State, id: number, a: { SeamPiece }?, b: { Se
 			local ub, vb = edgeEnds(s, pb.Tri, pb.Edge)
 			local t0 = math.max(a0, math.min(param(ub), param(vb)))
 			local t1 = math.min(a1, math.max(param(ub), param(vb)))
-			if t1 - t0 <= 1e-9 or side(pb.Tri) == sideA then
+			if t1 - t0 <= 1e-9 then
+				continue
+			end
+			overlapped = true
+			if side(pb.Tri) == sideA then
 				continue
 			end
 			local leftA, rightA = portal(pa, t0, t1)
@@ -1029,7 +1068,10 @@ local function joinSeam(s: Storage.State, id: number, a: { SeamPiece }?, b: { Se
 			joined += 1
 		end
 	end
-	if joined == 0 then
+	-- Nothing paired: an error only if both floors keep the whole seam (so they are on one side).
+	-- Pieces overlapping but none across: the floors are on one side of the seam. None
+	-- overlapping: obstacles cut them apart, so the seam is closed.
+	if joined == 0 and overlapped then
 		fail(context, `floors '{desc.FloorA}' and '{desc.FloorB}' don't meet across it`)
 	end
 end

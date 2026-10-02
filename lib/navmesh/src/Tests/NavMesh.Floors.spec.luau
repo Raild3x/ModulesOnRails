@@ -422,9 +422,36 @@ return function(t: tiniest)
 				"does not lie on floor 'B'",
 			},
 			{
+				-- Not an obstacle cutting the seam away (ticket 37): it never lay on B.
+				"a seam off a floor that has obstacles",
+				{
+					Floors = {
+						A = ground,
+						B = {
+							Walkable = { flat(0, { 20, 0, 30, 0, 30, 10, 20, 10 }) },
+							Obstacles = { flat(0, { 22, 2, 24, 2, 24, 4, 22, 4 }) },
+						},
+					},
+					Seams = { { FloorA = "A", FloorB = "B", From = v(10, 0, 0), To = v(10, 0, 5) } },
+				},
+				"does not lie on floor 'B'",
+			},
+			{
 				"floors on the same side of a seam",
 				{
 					Floors = { A = ground, B = { Walkable = { flat(0, { 5, 0, 10, 0, 10, 10, 5, 10 }) } } },
+					Seams = { { FloorA = "A", FloorB = "B", From = v(10, 0, 0), To = v(10, 0, 5) } },
+				},
+				"don't meet across it",
+			},
+			{
+				-- An obstacle cutting part of the seam away doesn't hide it (ticket 37).
+				"floors on the same side of a seam, one partly cut",
+				{
+					Floors = {
+						A = { Walkable = ground.Walkable, Obstacles = { flat(0, { 8, 1, 11, 1, 11, 3, 8, 3 }) } },
+						B = { Walkable = { flat(0, { 5, 0, 10, 0, 10, 10, 5, 10 }) } },
+					},
 					Seams = { { FloorA = "A", FloorB = "B", From = v(10, 0, 0), To = v(10, 0, 5) } },
 				},
 				"don't meet across it",

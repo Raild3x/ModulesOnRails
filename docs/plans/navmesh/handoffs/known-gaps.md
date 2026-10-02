@@ -46,6 +46,30 @@ ends" section. Two kinds of end still pass unjudged; both are below.
   - **Repro:** `lune run tools/navmesh/bench/funnel_seam_repro.luau`.
   - The link generator works round it: its walk test takes `min(Length, Cost)`.
 
+**Found by Track M1 (2026-10-01):**
+- **A path and its reverse can differ in length by about 7%.** On the building maps
+  (`lune run tools/navmesh/maps/run.luau Building BuildingRamp`), Lobby to Upstairs is 55.0
+  studs up the wedge ramps and 51.3 back down; with step strips it is 57.6 and 61.7 (radius
+  0.5). The corridor search is not optimal (entry-edge midpoint nodes, and a triangle closes on
+  first entry; see the Track G item above), so each direction can settle on a different
+  corridor. No fix is planned here; it is a measurement for whoever revisits the node model.
+- **`PathResult.Cost` changes meaning with the filter.** With uniform costs (or only
+  exclusions, `math.huge`), it is the heron-node cost, about the path's length. Any finite
+  multiplier other than 1, even on an area the path never touches, switches the search to
+  edge-midpoint costs, and the same waypoints cost more.
+  - **Repro:** `lune run tools/navmesh/bench/path_cost_modes.luau`. A straight 36-stud path costs 36.000 at `AreaCosts[5] = 1` or
+    `math.huge`, and 36.374 at 1.0001, 2 or 5, with area 5 off the path.
+  - On the building's stairs: 69.6 at uniform costs, 88.0 at `AreaCosts[5] = 1.0001` (+26%).
+  - **Why it matters:** costs from two filters can't be compared, and a reroute rule compares
+    exactly that ("fresh path with the elevator" against "stay off it"). Ticket 35's study
+    keeps both queries in the same mode. Owner: whoever next touches Search (the heron-node
+    gate is Track G's).
+- **Riser strips have no area.** The adapter's step strips (ticket 34) take the default area,
+  not the step Parts' `NavArea`, so a stairs multiplier misses about 1/6 of each tread. Small;
+  fix when ticket 40 replaces the strips, or give a strip its upper face's area.
+- **A seam can't join floors at different heights.** Build refuses it, so a stair riser needs
+  the adapter's strip floor. Ticket 40 owns it.
+
 **Found by Track M2 (2026-10-01), in the Part adapter, not the core:**
 - **Tilted Parts lose their seams, or get zero-length ones that `NavMesh.Build` rejects.**
   - **Repro:** `lune run tools/navmesh/bench/adapter_f32_seams.luau`. Seven hinged slabs give
@@ -67,6 +91,46 @@ ends" section. Two kinds of end still pass unjudged; both are below.
     degrees.
   - Axis-aligned levels never hit this, which is why the adapter's specs and both demos passed;
     the demo's `adapter_check` output is unchanged.
+- **Wedge-triangle terrain still failed on most layouts (16 of 40 seed x tilt layouts of
+  ForestRiver) after that fix. Fixed (2026-10-01, ruled) by three more adapter changes and one
+  core change; 40 of 40 now build and pass:**
+  - **Face join (adapter):** a floor's faces that share an edge become one ring, without the
+    corners that leaves on a straight line. Two wedges made one triangle with a corner (the
+    altitude's foot) mid-diagonal, which each side snapped differently.
+  - **Hull corners (adapter):** cut corners closer than 0.01 studs become one; two 0.003 apart
+    swapped on the core's grid and folded the ring.
+  - **Coplanar tolerance (adapter):** faces join a floor within 0.001 studs of its plane, not
+    0.01. A level pad that joined a floor 0.004 off its own plane moved the floor's cut from a
+    ramp 0.016 past the ramp's foot, and the sliver of ground left there walled the crossing
+    to any agent with a radius.
+  - **Core 1, an obstacle covering a whole seam:** see below.
+- **Core: three inputs that Part terrain makes and `NavMesh.Build` rejected.** One script shows
+  all three: `lune run tools/navmesh/bench/core_seam_repros.luau`.
+- **Core 1, fixed (2026-10-01, ruled, by Track M2): an obstacle covering a whole seam on one
+  floor failed the Build, and an `Update`.**
+  - **Repro (case 1):** floors A and B meet at a 4-stud seam; a crate on A covers it. Build
+    threw "seam 1: does not lie on floor 'A'", and `AddObstacle` of the crate then `Update`
+    failed the same way (SR13 kept the old mesh, so the crate never landed).
+  - **Now:** `joinSeam` (Build.luau) closes such a seam (no portals). A seam whose middle isn't
+    in or on the floor's authored walkable rings is still "does not lie on floor"; floors whose
+    pieces overlap along the seam but never across it (one side) are still "don't meet across
+    it", cut or not.
+- **Core 2, open: a seam end near a diagonal edge can snap a grid step off it.**
+  - **Repro (case 2):** two triangles share the diagonal (0,0)-(10,10), and a seam runs from
+    (0,0) to (5.001953125, 5.0019459), 7e-6 studs off the diagonal. On the 1/256 grid, x rounds
+    up and z rounds down, so the end lands a step off the snapped edge.
+  - Before Core 1's fix this threw "does not lie on floor 'B'"; **now the seam is closed
+    silently**, which is worse to debug. The case prints "ok" in the repro either way, so check
+    the seam joins, not only that Build runs.
+  - The core tolerates about 1e-3 studs off an edge in general; this is the half-grid rounding
+    case. The face join keeps Part terrain out of it (seam ends are triangle corners); a
+    hand-written description can still hit it. A fix would snap seam ends onto the floor's
+    snapped edge.
+- **Core 3, open: an obstacle whose corners are under a grid step apart can fold on the grid.**
+  - **Repro (case 3):** a convex obstacle with corners (30.00198, 99.99806) and (30.00002,
+    100.00004), 0.003 studs apart. Snapped, they swap order: "the ring folds back on itself".
+  - The adapter's hull fix keeps Part input out of it; `AddObstacle` with a ring like this
+    still fails. A fix would drop corners that snap within a grid step of the last.
 
 ## Deferred, only if the user asks
 - **Precise `IsPathValid`.** Ticket 22 notes what `Clearance.Refresh` already knows.
@@ -148,6 +212,30 @@ than it looks. Read them before touching `Search`, `Clearance`, `Tiles` or `Seri
   `git archive <base> lib/navmesh/src`. Keep it out of the tree during coverage runs.
 - **Scratch archive:** the old `navmesh-phase0` worktree's untracked `zz_*` probes are in the
   main checkout's gitignored `.bench/navmesh/archive/navmesh-phase0/`.
+
+## Found by Track M3 on the Street map (2026-10-01)
+Neither is fixed: Track M3 may not change the core, and its adapter change is limited to the
+area-name table.
+- **The adapter ignores a Part exactly `AgentHeight` tall standing on a floor.**
+  - In `cut`, its top corners sit at exactly `agentHeight`, which the `< agentHeight` test
+    leaves out, and no edge strictly crosses that level. So `top` stays 0 and the cut is dropped.
+  - Repro: a 10 x 10 ground slab at y 0 and a 2 x h x 2 box on it, default options. h 4.99 and
+    5.01 give one obstacle ring, h 5 gives none.
+  - Found when the Street's 5-stud cars didn't cut the road: paths and radius 3.5 went straight
+    through them. The map uses 4.5-stud cars.
+  - **Fix:** count a point at exactly `agentHeight` toward `top` (and the hull), or test
+    `<= agentHeight` for the top. Owner: whichever track next changes the adapter.
+- **A finite area cost turns heron nodes off for the whole query, even for paths that never
+  touch that area.** `Search` keeps heron nodes only when every multiplier is 1 or excluded.
+  - On the Street (`lune run tools/navmesh/maps/street_measure.luau`), at road cost 5 or 10
+    every path stays off the road, yet it is on average 0.5% and at worst 11.7% longer than the
+    best crosswalk-only path (road excluded, heron on). The worst, S52->N44, takes the east
+    crosswalk (73.8) instead of the west one (66.1). That is midpoint A* picking the wrong
+    crosswalk.
+  - At road cost 1.5 to 3 the worst is 7.3-10.7%.
+  - This is the trade-off Search's header documents (goal-ward nodes overprice routes round
+    dear areas), seen on a realistic layout. A fix would need the heron gate to be finer than
+    "any cost but 1". It is not ruled.
 
 ## Found by Track H on 1-4 km maps (2026-10-01)
 These are numbers on large maps, not wrong answers. Each has a script under

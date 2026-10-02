@@ -13,9 +13,12 @@ stay `Vector3`. The rulings are in review.md (2026-09-28 and 2026-10-01).
     solid ramp.
   - Today the demo authors its level twice, and a ramp needs three hand-written pieces.
 - [ ] **From the Roblox comparison (added 2026-09-28, review.md D5 and D1; open):**
-    - **Area names (not built yet; the adapter reads a numeric `NavArea` attribute):** the adapter maps each Part's `Material` (or an area attribute) to an
-      integer area id, and returns a plain `{ [string]: number }` name-to-id table beside the
-      description. Games write `AreaCosts = { [areas.Mud] = 4 }`. The core keeps integer ids.
+    - **Area names (built 2026-10-01, Track M3, ruled in review.md):** a text `NavArea`
+      attribute names the area, and `FromParts` returns a plain `{ [string]: number }`
+      name-to-id table beside the description (ids from 2, in name order, skipping numeric
+      `NavArea` ids). Games write `AreaCosts = { [areas.Mud] = 4 }`. The core keeps integer
+      ids. Spec and negative control in `NavMeshAdapter.spec.luau`; mutation 87.0% for the
+      file (322 mutants), no survivors on the new lines.
     - **One-shot:** the adapter converts once. Watching Parts for moves is ruled out; games
       call `AddObstacle`/`Update` themselves.
     - **Headroom:** when ticket 29 lands, the adapter also emits `FloorDesc.Headroom` rings
