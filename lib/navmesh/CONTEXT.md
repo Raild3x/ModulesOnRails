@@ -69,8 +69,13 @@ A layered 2.5D navigation mesh for pathfinding queries, built on ConstrainedDela
   `Update`.
 - **Dirty tile**: a tile an `Update` must rebuild: its rectangle, grown by one grid pixel,
   overlaps a changed obstacle.
-- **Authored rings**: a floor's walkable, obstacle and area rings, quantized to the grid but
-  not snap-rounded, each with its winding group. `Update` re-snaps the ones near its dirty
+- **Simplify tolerance**: how far (studs) a ring may move to lose points: an obstacle only
+  grows and a planar walkable ring only shrinks, by at most this much (`SimplifyTolerance`,
+  default 1/4). Areas are never simplified.
+- **Dissolve**: retriangulating a tile from its class boundaries only, when edges run inside
+  one class (kept, same area, same planes): floors authored in overlapping pieces. Exact.
+- **Authored rings**: a floor's walkable, obstacle and area rings, quantized to the grid (and
+  simplified) but not snap-rounded, each with its winding group. `Update` re-snaps the ones near its dirty
   tiles with the active obstacles, through Build's own code, so a rebuilt tile is exactly what
   a fresh Build would make (format v3). Before v3 it re-snapped each tile's stored *baseline*
   (the snapped input Build gave it), which could land a crossing one grid pixel off.

@@ -1,7 +1,32 @@
 # Plan: geometry simplification for the NavMesh/CDT pipeline
 
-Status: research and plan, 2026-09-28. Nothing in `lib/` changed. The numbers come from scratch
-prototypes, listed under "Reproducing" at the end.
+Status: research and plan, 2026-09-28. **Built by Track F (2026-10-02)**, as below; the rest
+of this file is the plan as written. The numbers come from scratch prototypes, listed under
+"Reproducing" at the end (their scene files were lost; `tools/navmesh/bench/SimplifyScenes.luau`
+rebuilds rocks and pieces, and bench.md "Simplification" has the as-built numbers).
+
+**As built (Track F):**
+- **R1 (C2 at P1)** in `Build.luau` (`simplifyRing`, `obstacleRing`, `walkableRing`). Rulings:
+  `NavMeshDesc.SimplifyTolerance`, default **1/4 stud** (D1, ruled from measured 1/16, 1/10
+  and 1/4), 0 = off (D2a); welding in the adapter (D3a). Bake v3 tag 0x8009, written only when
+  not 0.
+  - Changes from the plan: the collapse move is in the library (the prototype had it only in
+    Python) and applies to walkable rings too (their reflex edges); it must turn toward the
+    kept side and keep the points it replaces beside both new edges (the first version let a
+    rounded point fall short of the corner). Removed points are judged against the chord
+    segment, not its line. Seam pins cover the ends of any edge within the tolerance of a
+    seam, not only nearby points: a convex corner next to a long seam edge was the real case.
+  - Planarity now takes three well-spread points and allows the slope's rounding slack, so
+    tilted rings with off-grid corners count as planar (they didn't before, with or without
+    this track).
+- **R2 (C1 at P3)** in `triangulateTile` (`dissolve`), D4a. The class is the area plus the set
+  of distinct planes of every surface covering the triangle: with the first surface only, an
+  overlap of rings at different heights dissolved into one ring and the height error changed
+  message. Tile-border vertices next to kept triangles stay through the kept loops (no
+  separate pin needed). Plane keys are computed only when an area-only check finds a
+  candidate.
+- **Specs:** `NavMesh.Simplify.spec` (G1-G8), the one-sided random-floor checks in
+  `NavMesh.Build.spec`, negative controls in the commit messages.
 
 The user's idea: "Running a pass on the navmesh/CDT and merging lines that are collinear within
 some epsilon... careful on very long lengths since even a single degree on a mile long line

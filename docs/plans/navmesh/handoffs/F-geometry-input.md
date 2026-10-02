@@ -5,6 +5,11 @@ has merged, because both tracks touch Tiles and Serialize.
 
 **Setup:** a worktree off `feat/navmesh`, branch `navmesh-geometry`.
 
+**Status (2026-10-02): built.** R1, R2, the F2 fixes and the two Track H costs F owned are on
+`navmesh-geometry`. Rulings: default tolerance 1/4 stud; v3 lazy links plus a default
+`MaxAgentRadius` of 8 (review.md, "Rulings during Track F"). Numbers: bench.md
+"Simplification" and "Huge rings".
+
 ## F1. The simplification passes
 - **Read first:** the plan is `docs/plans/navmesh/simplification-plan.md`. It is measured, and
   it has guarantees G1-G8.
