@@ -64,6 +64,16 @@ the const question are deliberately open, gated on benchmarks.
     (closes crossings silently on slightly tilted terrain).
   - So ticket 37's "merge near-coplanar faces" idea is answered: merging saves floors, not
     triangles, and it moves cuts.
+- **Ticket 37's terrain cost: one floor per terrain (non-planar floors) is decided after Track F**
+  (2026-10-02). User: "Defer the call to after Track F".
+  - The numbers asked on: tilt makes 24x the floors, 14x the seams, bake +49%, `FindPath` +65%
+    (Build +3%). The prototype: 94% fewer floors, 91% fewer seams, bake -17%, but triangles +8%,
+    a dropped crate's `Update` 5 to 8 ms, and one random path broken.
+  - Rejected for now: recording only (no revisit point), and building it now (F's passes may
+    make it redundant).
+  - Re-run: ticket 37's "Re-run after Track F".
+  - Those numbers were on the first (noise) meadow. The meadow became landforms the same day
+    (user: "more variation in the terrain structure"); ticket 37 and bench.md have both.
 
 ### Rulings after Track H (2026-10-01)
 - **D6, large worlds, ruled on ticket 31's numbers** (bench.md, "Large worlds, 1-4 km"): fix

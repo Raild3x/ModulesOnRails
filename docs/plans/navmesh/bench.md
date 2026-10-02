@@ -947,6 +947,30 @@ the bench prints.
 - **Terrain-like input needs the surface index before anything else.** No region scheme helps
   a Build that is quadratic within a floor.
 
+## Uneven terrain (ticket 37, 2026-10-02)
+The baseline Track F's simplification passes re-measure against. ForestRiver (823 Parts: 576
+wedge-triangle meadow pieces shaped as hills, a valley and a ridge, hinged forest strips, 198
+trees, 30 rocks), seed 37, built at each tilt (the steepest triangle's slope). `lune run tools/navmesh/bench/terrain_sweep.luau 3`: 3 rounds, tilt order rotated each
+round, times the median over rounds; `FindPath` over 200 seeded random pairs at radius 1. The
+machine had another track's Studio open (idle).
+
+| tilt | floors | seams | triangles | cut rings | FromParts ms | Build ms | bake KB | Deserialize ms | FindPath us p50 / p95 | turns / 100 st | waypoints / 100 st |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0 | 12 | 32 | 4,611 | 273 | 440 | 1,146 | 474 | 5.2 | 241 / 1,029 | 6.27 | 10.81 |
+| 1 | 240 | 413 | 5,109 | 1,392 | 2,212 | 1,093 | 666 | 11.0 | 350 / 1,096 | 6.66 | 13.59 |
+| 3 | 256 | 412 | 5,129 | 1,422 | 2,391 | 1,099 | 673 | 9.7 | 343 / 1,139 | 6.78 | 15.43 |
+| 5 | 264 | 413 | 5,204 | 1,504 | 2,454 | 1,106 | 690 | 10.6 | 355 / 1,138 | 6.77 | 16.23 |
+| 10 | 274 | 423 | 5,249 | 1,717 | 2,431 | 1,172 | 721 | 11.5 | 343 / 1,067 | 6.76 | 17.01 |
+
+- 1 degree costs most of it: 20x the floors, 13x the seams, bake +41%, Deserialize 2.1x,
+  `FindPath` median +45%; 10 degrees a little more (bake +52%). Build -5 to +2%; the adapter's
+  `FromParts` 5x (its seam search is every face against every face). Turns barely change;
+  waypoints rise 26-57% (one per seam).
+- The deferred one-floor-per-terrain option (`... 1 37 onefloor`, 1 round): 18 floors, 38-40
+  seams, ~330 cut rings, triangles +8-9%, bake -13 to -19%, `FindPath` no better; a dropped
+  crate's AddObstacle + `Update` 5 to 8 ms (measured on the earlier noise build, `.bench`-only
+  probe, 7 reps x 3 interleaved rounds). Ticket 37 has the ruling: decide after Track F.
+
 ## Not measured (flagged)
 - Remote transfer time and payload size per layout (needs a live server/client session).
 - Locality on a real CDT's vertex and triangle ordering. The grid mesh has near-ideal locality,

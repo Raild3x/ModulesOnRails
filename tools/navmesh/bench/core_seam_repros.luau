@@ -1,6 +1,7 @@
 --!strict
 -- Repros (Track M2, ticket 37): three ways NavMesh.Build rejects input that Part terrain makes.
--- Each prints `false` and the error today. known-gaps.md, "Found by Track M2", has the details.
+-- Case 1 is fixed (closed seam, prints ok); case 2 prints ok but the seam is closed, not joined;
+-- case 3 still fails. known-gaps.md, "Found by Track M2", has the details.
 --   lune run tools/navmesh/bench/core_seam_repros.luau
 local NavMesh = require("../../../lib/navmesh/src/NavMesh")
 

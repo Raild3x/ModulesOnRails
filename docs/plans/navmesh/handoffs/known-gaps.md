@@ -107,6 +107,15 @@ ends" section. Two kinds of end still pass unjudged; both are below.
     100.00004), 0.003 studs apart. Snapped, they swap order: "the ring folds back on itself".
   - The adapter's hull fix keeps Part input out of it; `AddObstacle` with a ring like this
     still fails. A fix would drop corners that snap within a grid step of the last.
+- **Adapter, open: the step-height rule makes no riser where the upper slab tilts down from the
+  step** (ticket 34's `MaxStepHeight`, M1's code; found by ticket 37).
+  - **Repro:** `lune run tools/navmesh/bench/riser_lean_repro.luau`: a slab rising from a
+    0.5-stud step gets 1 riser and Success; the same slab falling gets 0 and Partial.
+  - **Cause:** a tilted block's end face leans with it, so the bottom of the face overhangs the
+    lower floor (by thickness x sine of the slope). The rule reads that overhang as a cut in the
+    riser's band and drops the edge. Upright stair steps never lean, so the building maps pass.
+  - **Workaround in ForestRiver:** its first plateau strip starts past its own lean. A fix in the
+    rule would ignore cuts from the upper face's own Part.
 
 ## Deferred, only if the user asks
 - **Precise `IsPathValid`.** Ticket 22 notes what `Clearance.Refresh` already knows.
