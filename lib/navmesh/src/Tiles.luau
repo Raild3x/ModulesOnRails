@@ -53,6 +53,7 @@
 
 local Build = require("./Build")
 local Clearance = require("./Clearance")
+local Funnel = require("./Funnel")
 local Snap = require("./Snap")
 local Storage = require("./Storage")
 local Types = require("./Types")
@@ -912,6 +913,7 @@ function Tiles.Update(s: State): { Types.ChangedRegion }
 	for key, value in result :: any do
 		(s :: any)[key] = value
 	end
+	Funnel.Forget(s) -- its answers are by the old vertex ids and walls
 	return regions
 end
 

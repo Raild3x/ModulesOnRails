@@ -146,9 +146,13 @@ ends" section. Two kinds of end still pass unjudged; both are below.
   - **Fix:** the funnel's wall-corner test turns round the vertex's fan across neighbours and
     seam portals, so a wall on any floor meeting there counts. Spec: "a wall corner where several
     floors meet is rounded at the radius, and arrived past" (NavMesh.Follow).
-  - **Cost:** `FindPath` with `AgentRadius` > 0 on City is 12-17% slower (the fan walks, memoized
-    per call; 200 queries, in-process A/B); radius 0 is unchanged. A per-mesh cache of the
-    answer, cleared by `Update`, would take it back if it matters.
+  - **Cost (ruled 2026-10-02: cache it):** the fan walks alone made `FindPath` with
+    `AgentRadius` > 0 on City 12-14% slower. The answers are now cached per mesh by vertex id
+    (seam-portal ends too), and `Tiles.Update` drops the cache when it swaps the fresh state in
+    (`Funnel.Forget`); a deserialized mesh starts empty. Warm, City r = 1 is back to
+    0.99-1.02x of before; a query on an empty cache costs what the uncached fix did (about
+    +15%); radius 0 is unchanged (200 queries, in-process A/B/C, median of 20). Spec: "an
+    Update that walls or frees a corner where several floors meet changes how paths pass it".
   - Track F's tip (18f42e7) stalled on `city_day.luau` seeds 1 and 8 at this spot and on seed 6
     at a riser (NPC 37 on Riser 42); with this fix all three pass.
   - **Left:** clearance is still per floor, so the search can still pick a narrow seam piece
