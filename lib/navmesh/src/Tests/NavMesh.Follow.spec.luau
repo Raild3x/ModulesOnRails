@@ -97,6 +97,41 @@ return function(t: tiniest)
 			expect(event).is("Arrived")
 		end)
 
+		test("a wall corner where several floors meet is rounded at the radius, and arrived past", function()
+			-- Four 10 x 10 quadrant floors meet at the origin. NE and SE touch along z = 0 (x > 0)
+			-- with no seam: a wall that ends at the origin. The way round runs NE, NW, SW, SE
+			-- across seams, and on NW and SW the origin is free space: only NE's and SE's
+			-- copies of it are wall vertices (City's meadow, follower_vertex_stall.luau).
+			local mesh = NavMesh.Build {
+				Floors = {
+					NE = { Walkable = { rect(0, 0, 10, 10) } },
+					NW = { Walkable = { rect(-10, 0, 0, 10) } },
+					SW = { Walkable = { rect(-10, -10, 0, 0) } },
+					SE = { Walkable = { rect(0, -10, 10, 0) } },
+				},
+				Seams = {
+					{ FloorA = "NE", FloorB = "NW", From = v(0, 0, 0), To = v(0, 0, 10) },
+					{ FloorA = "NW", FloorB = "SW", From = v(-10, 0, 0), To = v(0, 0, 0) },
+					{ FloorA = "SW", FloorB = "SE", From = v(0, 0, -10), To = v(0, 0, 0) },
+				},
+			}
+			local filter = { AgentRadius = 1 }
+			local from = v(3, 0, 1.5)
+			local path = NavMesh.FindPath(mesh, from, v(3, 0, -1.5), filter)
+			expect(path.Status).is("Success")
+			-- No leg of the path comes within half the radius of the wall's end.
+			local w = path.Waypoints
+			for i = 1, #w - 1 do
+				local a, b = w[i].Position, w[i + 1].Position
+				local dx, dz = b.X - a.X, b.Z - a.Z
+				local k = math.clamp(-(a.X * dx + a.Z * dz) / (dx * dx + dz * dz), 0, 1)
+				local d = math.sqrt((a.X + k * dx) ^ 2 + (a.Z + k * dz) ^ 2)
+				expect(d >= 0.5).with_context(`leg {i}: {fmt(a)} -> {fmt(b)} is {d} from the corner`).is_true()
+			end
+			local event, p = run(mesh, NavMesh.NewFollower(path), from, 0.5, filter)
+			expect(event).with_context(fmt(p)).is("Arrived")
+		end)
+
 		test("every path on the courtyard is followed to Arrived without a stall, over many seeds", function()
 			local rng = seeded(23)
 			for i = 1, 150 do

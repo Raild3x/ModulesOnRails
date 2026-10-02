@@ -6,7 +6,8 @@
 -- re-plan from there gives the same path, so a game re-planning on Blocked loops forever.
 -- The same walk on ForestRiver alone (no -20, -210 shift, so different f32 rounding) arrives.
 --   lune run tools/navmesh/bench/follower_vertex_stall.luau
--- Expected: Arrived. Today: Blocked.
+-- Expected: Arrived. Blocked before the funnel's wall-corner test turned round the vertex's fan
+-- across floors (known-gaps.md).
 local roblox = require("@lune/roblox") :: any
 local NavMesh = require("../../../lib/navmesh/src/NavMesh")
 local Adapter = require("../../../lib/navmeshadapter/src/NavMeshAdapter")
