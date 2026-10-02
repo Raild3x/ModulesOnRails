@@ -7,6 +7,23 @@ U1–U3, N1–N4, V1–V4), plus the Phase 0 requirement: "Prototype and Test yo
 framework as part of phase 0 so we can ensure it will work for our goals at every step." R4 and
 the const question are deliberately open, gated on benchmarks.
 
+### Rulings during Track F (2026-10-02)
+- **Default `NavMeshDesc.SimplifyTolerance` (D1): 1/4 stud.** User picked "1/4 stud" over the
+  recommended 1/10 (the user's own earlier suggestion), 1/16 and 0 (off).
+  - Measured first (`tools/navmesh/bench/simplify_measure.luau`, 3 rounds; bench.md
+    "Simplification"): at 1/4, rocks -48% triangles and Build 32.9 s to 7.7 s; City -27% and
+    -52%; ForestRiver -30% and -49%; pieces -4% and -23%. The box maps (props, bench, terrain,
+    walls, demo) are identical at every tolerance.
+  - The cost the user accepted: walls may move into free space by up to 1/4 stud, so clearance
+    shrinks by up to that (never grows), gaps under about 1/2 stud can close, and mean paths
+    get 0.07-0.38% longer.
+  - The worst single pairs (+14% City, +27% ForestRiver) appear at every tolerance, 1/16
+    included. Probed: the original route still exists on the simplified mesh and the reverse
+    query is about the original length, so it is the corridor-search spread (known-gaps.md),
+    not lost space.
+- Earlier rulings this track builds on (2026-09-28): one mesh-wide tolerance (D2a), crack
+  welding in the adapter only (D3a).
+
 ### Rulings during Track E (2026-10-01)
 - **The generator's default `Area` stays 1,** as for `LinkDesc`. A game that wants
   `AreaCosts` to switch generated links off passes its own `Area`. User: "Keep 1 (Recommended)".

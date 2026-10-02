@@ -67,6 +67,7 @@ export type State = {
 	PortalWidths: buffer, -- f64 x3 per triangle: width across edge e
 	WallVertex: { boolean }, -- per vertex: on a wall edge
 	MaxAgentRadius: number, -- 0 = uncapped
+	SimplifyTolerance: number, -- studs; 0 = off
 	TriOpenEdges: buffer, -- i32 per triangle: bit e-1 set when edge e is open (a seam edge)
 	TriExtraHead: buffer, -- i32 per triangle: first extra link, 0 = none
 	ExtraNext: { number },
@@ -189,6 +190,7 @@ function Storage.New(): State
 		PortalWidths = buffer.create(MIN_CAPACITY * TRI_SLOTS * F64),
 		WallVertex = {},
 		MaxAgentRadius = 0,
+		SimplifyTolerance = 0,
 		TriOpenEdges = buffer.create(MIN_CAPACITY * I32),
 		TriExtraHead = buffer.create(MIN_CAPACITY * I32),
 		ExtraNext = {},
@@ -378,6 +380,19 @@ end
 
 function Storage.SetMaxAgentRadius(s: State, radius: number)
 	s.MaxAgentRadius = radius
+end
+
+--[=[
+	@within NavMeshStorage
+	The ring simplification tolerance the mesh was built with (studs; 0 = off). AddObstacle
+	simplifies new obstacles with it, as Build did the baked ones.
+]=]
+function Storage.GetSimplifyTolerance(s: State): number
+	return s.SimplifyTolerance
+end
+
+function Storage.SetSimplifyTolerance(s: State, tolerance: number)
+	s.SimplifyTolerance = tolerance
 end
 
 --[=[
@@ -1066,6 +1081,7 @@ function Storage.ShellFrom(s: State): State
 	end
 	n.VertexCount = s.VertexCount
 	n.MaxAgentRadius = s.MaxAgentRadius
+	n.SimplifyTolerance = s.SimplifyTolerance
 	return n
 end
 

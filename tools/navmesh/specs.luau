@@ -1,18 +1,19 @@
 -- Quick navmesh spec run (no coverage instrumentation), for iterating: every
 -- lib/navmesh/src/Tests/*.spec.luau, failures only. The gate is still
 -- `lune run coverage.luau package=navmesh`. Run from the repo root:
---   lune run tools/navmesh/specs.luau
+--   lune run tools/navmesh/specs.luau [part of a spec name, e.g. Simplify]
 local fs = require("@lune/fs")
+local process = require("@lune/process")
 local tiniest = require("../../test/tiniest/tiniest_for_lune").configure {
 	snapshot_path = "./test/__snapshots__",
 	save_snapshots = false,
-	pretty = { hide_passed_tests = true },
+	pretty = { hide_passed_tests = process.env.SHOW_PASSED == nil },
 }
 local dynRequire: any = require
 local names = {}
 for _, file in fs.readDir("lib/navmesh/src/Tests") do
 	local name = file:match("^(.+%.spec)%.luau$")
-	if name then
+	if name and (process.args[1] == nil or name:find(process.args[1], 1, true)) then
 		table.insert(names, name)
 	end
 end

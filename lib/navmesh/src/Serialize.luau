@@ -30,14 +30,18 @@
 	| 0x0001 | link names (optional, written only when a link has one): count, then (link id, name) |
 	| 0x8007 | links: the next link id, then records with their ids (sparse, like obstacles) and flags: 1 both ways, 2 enabled, 4 pending add, 8 pending removal |
 	| 0x8008 | obstacles: the next obstacle id, then the live records (id, floor, state, quantized ring) |
+	| 0x8009 | the ring simplification tolerance (f64, studs; written only when not 0, absent = 0) |
 
 	A pending add (ticket 30) is stored as the caller gave it: no triangles, its points unsnapped,
 	and cost -1 when it takes the default. Link names are optional: a reader that skips them
 	still has every link, just not `SetLinkEnabled` by name.
 
+	Rings and obstacle records are stored simplified (Track F R1); the tolerance is stored only
+	so that `AddObstacle` after `Deserialize` simplifies a new obstacle the same way. It is
+	required: a reader that ignored it would rebuild tiles differently from a fresh Build.
+
 	Reserved for later (not written yet): ticket 29's headroom source (the `FloorDesc.Headroom`
-	rings), and Track D's
-	simplification tolerance (rings are stored simplified, so it is only metadata).
+	rings).
 
 	Extra links (seam portals and links) are derived data: `Deserialize` rebuilds them exactly
 	as Build does.
@@ -65,6 +69,7 @@ local TAG_TRIANGLES = 0x8005
 local TAG_SEAMS = 0x8006
 local TAG_LINKS = 0x8007
 local TAG_OBSTACLES = 0x8008
+local TAG_SIMPLIFY = 0x8009
 
 local Serialize = {}
 
@@ -297,6 +302,12 @@ function Serialize.Serialize(s: State): buffer
 			list(b, zs, i32)
 		end
 	end)
+	-- Only when on: a bake without it reads as 0, which every bake before it was.
+	if Storage.GetSimplifyTolerance(s) ~= 0 then
+		section(w, TAG_SIMPLIFY, function(b)
+			f64(b, Storage.GetSimplifyTolerance(s))
+		end)
+	end
 
 	local out = buffer.create(w.Size)
 	buffer.copy(out, 0, w.Buffer, 0, w.Size)
@@ -398,7 +409,7 @@ function Serialize.Deserialize(data: buffer): State
 		sections[tag] = { Buffer = data, At = at, End = at + length }
 	end
 	for tag in sections do
-		if bit32.btest(tag, REQUIRED) and (tag < TAG_CAP or tag > TAG_OBSTACLES) then
+		if bit32.btest(tag, REQUIRED) and (tag < TAG_CAP or tag > TAG_SIMPLIFY) then
 			error(
 				`NavMesh.Deserialize: the bake needs a newer build (it has required section {string.format(
 					"0x%04X",
@@ -544,6 +555,15 @@ function Serialize.Deserialize(data: buffer): State
 		end
 		Storage.SetObstacleNextId(s, math.max(nextId, 1))
 	end)
+	if sections[TAG_SIMPLIFY] then
+		read(TAG_SIMPLIFY, function(b)
+			local tolerance = rf64(b)
+			if not (tolerance >= 0) then
+				corrupt()
+			end
+			Storage.SetSimplifyTolerance(s, tolerance)
+		end)
+	end
 
 	Storage.SetMaxAgentRadius(s, cap)
 	Build.Internal.Connect(s)

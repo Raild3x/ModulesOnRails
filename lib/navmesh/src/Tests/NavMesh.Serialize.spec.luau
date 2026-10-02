@@ -278,8 +278,9 @@ return function(t: tiniest)
 			local mesh = NavMesh.Build(Fixtures.SplitLevel.Desc)
 			NavMesh.AddObstacle(mesh, "Ground", flat(0, { 2, 2, 4, 2, 4, 4, 2, 4 }))
 			local data = NavMesh.Serialize(mesh)
-			-- The tail: next id, count, then one record (id, floor, state u8, two 4-point lists).
-			local recordAt = buffer.len(data) - (4 + 4 + 1 + 2 * (4 + 4 * 4))
+			-- The tail: next id, count, then one record (id, floor, state u8, two 4-point lists),
+			-- then the simplify tolerance section (tag, length, f64).
+			local recordAt = buffer.len(data) - (4 + 4 + 1 + 2 * (4 + 4 * 4)) - (2 + 4 + 8)
 			expect(buffer.readu32(data, recordAt - 8)).is(2) -- the next id
 			expect(buffer.readu32(data, recordAt)).is(1) -- the record's id
 			for _, damage in { { recordAt, 2, 4 }, { recordAt, 0, 4 }, { recordAt + 8, 0, 1 }, { recordAt + 8, 4, 1 } } do

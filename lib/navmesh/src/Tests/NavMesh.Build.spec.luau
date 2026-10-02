@@ -512,11 +512,17 @@ return function(t: tiniest)
 				for _ = 1, math.floor(rng(0, 3)) do
 					table.insert(floor.Areas, { Polygon = star(rng, rng(0, 20), rng(0, 20), 2, 6), Area = 2 })
 				end
-				local mesh = NavMesh.Build(oneFloor(floor))
-				local bad = MeshChecks.Structure(mesh)
-				expect(#bad).with_context(`seed {seed}: {bad[1]}`).is(0)
-				bad = MeshChecks.Region(mesh, 1, floor, 1 / 128, 0.9)
-				expect(#bad).with_context(`seed {seed}: {bad[1]}`).is(0)
+				-- Exact at tolerance 0; one-sided within the default 0.25 (G1, G2).
+				for _, eps in { 0, 0.25 } do
+					local mesh = NavMesh.Build {
+						SimplifyTolerance = if eps == 0 then 0 else nil,
+						Floors = { Ground = floor },
+					}
+					local bad = MeshChecks.Structure(mesh)
+					expect(#bad).with_context(`seed {seed} eps {eps}: {bad[1]}`).is(0)
+					bad = MeshChecks.Region(mesh, 1, floor, 1 / 128, 0.9, eps)
+					expect(#bad).with_context(`seed {seed} eps {eps}: {bad[1]}`).is(0)
+				end
 			end
 		end)
 
@@ -638,16 +644,22 @@ return function(t: tiniest)
 					table.insert(floor.Areas, { Polygon = star(rng, rng(0, 20), rng(0, 20), 2, 6), Area = 2 })
 				end
 				local size = math.floor(rng(2, 12) * 256) / 256
-				local mesh = NavMesh.Build { TileSize = size, Floors = { Ground = floor } }
+				-- Exact at tolerance 0; one-sided within the default 0.25 (G1, G2).
+				local eps = if seed % 2 == 0 then 0 else 0.25
+				local mesh = NavMesh.Build {
+					TileSize = size,
+					SimplifyTolerance = if eps == 0 then 0 else nil,
+					Floors = { Ground = floor },
+				}
 				for _, bad in
 					{
 						MeshChecks.Structure(mesh),
-						MeshChecks.Region(mesh, 1, floor, 1 / 128, 0.9),
-						MeshChecks.Walls(mesh, 1, floor, 1 / 128),
+						MeshChecks.Region(mesh, 1, floor, 1 / 128, 0.9, eps),
+						MeshChecks.Walls(mesh, 1, floor, 1 / 128, eps),
 						MeshChecks.InTiles(mesh),
 					}
 				do
-					expect(#bad).with_context(`seed {seed} TileSize {size}: {bad[1]}`).is(0)
+					expect(#bad).with_context(`seed {seed} TileSize {size} eps {eps}: {bad[1]}`).is(0)
 				end
 				for v = 1, Storage.VertexCount(mesh) do
 					local p = Storage.GetVertex(mesh, v)

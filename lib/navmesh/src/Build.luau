@@ -59,6 +59,9 @@ local HEIGHT_TOLERANCE = 0.05
 -- heights are f32 (Vector3), so a tilted planar ring misses its plane by f32 rounding; a crease
 -- this small is invisible and well under HEIGHT_TOLERANCE.
 local PLANAR_TOLERANCE = 1e-3
+-- NavMeshDesc.SimplifyTolerance when not given (studs; Track F R1, simplification-plan.md D1;
+-- ruled 2026-10-02 from the measured 1/16, 1/10 and 1/4: bench.md "Simplification").
+local DEFAULT_SIMPLIFY_TOLERANCE = 0.25
 -- The default TileSize adapts to each floor (bench.md, "TileSize re-run over scenes"): about 36
 -- constraint edges per tile balanced a tile's rebuild time (1-2 ms) against the triangles its
 -- borders add (about 15%) in every scene. Rounded to a power of two from 4 to 256 studs.
@@ -109,6 +112,247 @@ local function segmentsTouch(
 		or (o4 == 0 and within(cx, cz, dx, dz, bx, bz))
 end
 
+-- Why a closed ring of grid points (no repeated consecutive point) isn't simple, or nil. A ring
+-- that folds back on itself counts too.
+local function ringProblem(xs: { number }, zs: { number }): string?
+	local n = #xs
+	for i = 1, n do
+		local p, q, r = (i - 2) % n + 1, i, i % n + 1
+		if
+			Orient2D(xs[p], zs[p], xs[q], zs[q], xs[r], zs[r]) == 0
+			and (xs[q] - xs[p]) * (xs[r] - xs[q]) + (zs[q] - zs[p]) * (zs[r] - zs[q]) < 0
+		then
+			return `the ring folds back on itself at point {i} ({fmt(xs[q] / GRID)}, {fmt(zs[q] / GRID)})`
+		end
+	end
+	-- ponytail: all-pairs O(n^2) per ring; a sweep if authored rings get large.
+	for i = 1, n do
+		local i2 = i % n + 1
+		for j = i + 2, n do
+			local j2 = j % n + 1
+			if j2 == i then
+				continue
+			end
+			if segmentsTouch(xs[i], zs[i], xs[i2], zs[i2], xs[j], zs[j], xs[j2], zs[j2]) then
+				return `the ring intersects itself (edges {i} and {j})`
+			end
+		end
+	end
+	return nil
+end
+
+-- The plane through three well-spread points of a ring (point 1, the point furthest from it, and
+-- the point furthest from their line: neighbours on a dense ring would magnify the f32 noise in
+-- authored heights), as a height at grid (x, z), and whether every point lies on it within
+-- PLANAR_TOLERANCE.
+local function planeOf(xs: { number }, zs: { number }, ys: { number }): ((number, number) -> number, boolean)
+	local n = #xs
+	local j, k, far, det = 1, 1, 0, 0
+	for i = 2, n do
+		local d = (xs[i] - xs[1]) ^ 2 + (zs[i] - zs[1]) ^ 2
+		if d > far then
+			j, far = i, d
+		end
+	end
+	for i = 2, n do
+		local d = (xs[j] - xs[1]) * (zs[i] - zs[1]) - (xs[i] - xs[1]) * (zs[j] - zs[1])
+		if math.abs(d) > math.abs(det) then
+			k, det = i, d
+		end
+	end
+	if det == 0 then
+		-- Every point collinear: a valid ring never is.
+		return function()
+			return ys[1]
+		end, false
+	end
+	local function at(x: number, z: number): number
+		local wj = ((x - xs[1]) * (zs[k] - zs[1]) - (xs[k] - xs[1]) * (z - zs[1])) / det
+		local wk = ((xs[j] - xs[1]) * (z - zs[1]) - (x - xs[1]) * (zs[j] - zs[1])) / det
+		return ys[1] + wj * (ys[j] - ys[1]) + wk * (ys[k] - ys[1])
+	end
+	-- Heights were authored at the unquantized points, up to half a grid step away on each axis,
+	-- so each point misses the true plane by up to half its rise per step on each axis, and the
+	-- plane through three of them, extrapolated, by a few times that (still far under
+	-- HEIGHT_TOLERANCE).
+	local slack = PLANAR_TOLERANCE
+		+ 2 * (math.abs(at(xs[1] + 1, zs[1]) - ys[1]) + math.abs(at(xs[1], zs[1] + 1) - ys[1]))
+	for i = 1, n do
+		if math.abs(at(xs[i], zs[i]) - ys[i]) > slack then
+			return at, false
+		end
+	end
+	return at, true
+end
+
+-- Squared distance from (px, pz) to the segment a-b.
+local function pointSegment2(px: number, pz: number, ax: number, az: number, bx: number, bz: number): number
+	local dx, dz = bx - ax, bz - az
+	local len2 = dx * dx + dz * dz
+	local t = if len2 > 0 then math.clamp(((px - ax) * dx + (pz - az) * dz) / len2, 0, 1) else 0
+	local ex, ez = ax + t * dx - px, az + t * dz - pz
+	return ex * ex + ez * ez
+end
+
+--[[
+	One-sided ring simplification (Track F R1; simplification-plan.md C2 and G1/G2). `eps` is in
+	grid units. `side` 1 (an obstacle) only lets the ring grow, -1 (a walkable ring) only shrink.
+	Two moves, each judged exactly with Orient2D on grid points:
+	- Removal: a run of points becomes the chord over it when each lies on the permitted side of
+	  the chord and within eps of it.
+	- Collapse: edge b-c becomes a grid point q near where the lines through its neighbouring
+	  edges meet, when b and c then lie on the permitted side of the new edges a-q and q-d and q is
+	  within eps of b-c. That is the only move a convex ring (a cylinder's 24-gon) admits.
+	Every point an edge replaces is checked against that edge, so each lies within eps of the new
+	ring and on its permitted side. Pinned points (`pinned`, by ring index) stay. `heightAt` gives
+	a collapsed point's height. A result that isn't simple falls back to the ring as given.
+]]
+local function simplifyRing(
+	ring: Ring,
+	eps: number,
+	side: number,
+	pinned: { [number]: boolean }?,
+	heightAt: (number, number) -> number
+): Ring
+	local xs, zs, ys = ring.X, ring.Z, ring.Y
+	local n = #xs
+	if eps <= 0 or n <= 3 then
+		return ring
+	end
+	-- Rotated to start at the lexicographically smallest point, the anchor: convex, never removed
+	-- or collapsed. Original points are then 1..n, and n + 1 is the anchor again, so runs never
+	-- wrap.
+	local m = 1
+	for i = 2, n do
+		if xs[i] < xs[m] or (xs[i] == xs[m] and zs[i] < zs[m]) then
+			m = i
+		end
+	end
+	local ox, oz, oy, pin = table.create(n + 1), table.create(n + 1), table.create(n + 1), table.create(n + 1, false)
+	for k = 1, n do
+		local i = (m + k - 2) % n + 1
+		ox[k], oz[k], oy[k], pin[k] = xs[i], zs[i], ys[i], pinned ~= nil and pinned[i] == true
+	end
+	ox[n + 1], oz[n + 1] = ox[1], oz[1]
+	local eps2 = eps * eps
+	-- Whether original points first..last may all go under the edge u-w: each on the permitted
+	-- side of it, and within eps of it. (A removed run and its chord then bound one region,
+	-- wholly on the permitted side.)
+	local function under(ux: number, uz: number, wx: number, wz: number, first: number, last: number): boolean
+		if ux == wx and uz == wz then
+			return false
+		end
+		for k = first, last do
+			if
+				pin[k]
+				or Orient2D(ux, uz, wx, wz, ox[k], oz[k]) * side < 0
+				or pointSegment2(ox[k], oz[k], ux, uz, wx, wz) > eps2
+			then
+				return false
+			end
+		end
+		return true
+	end
+	-- Whether original points first..last all lie on the permitted side of the line u-w.
+	local function beside(ux: number, uz: number, wx: number, wz: number, first: number, last: number): boolean
+		for k = first, last do
+			if Orient2D(ux, uz, wx, wz, ox[k], oz[k]) * side < 0 then
+				return false
+			end
+		end
+		return true
+	end
+
+	-- Removal, greedily from the anchor: the original indices of the points kept.
+	-- ponytail: each run is re-checked whole as it grows, O(run^2); a wedge test if long
+	-- near-straight runs show up in profiles.
+	local kept = { 1 }
+	local a = 1
+	while a <= n do
+		local best = a + 1
+		for j = a + 2, n + 1 do
+			if not under(ox[a], oz[a], ox[j], oz[j], a + 1, j - 1) then
+				break
+			end
+			best = j
+		end
+		if best <= n then
+			table.insert(kept, best)
+		end
+		a = best
+	end
+
+	-- Collapse, one pass over the kept edges b-c that are original edges away from the anchor.
+	-- Output points carry the original points they stand on: lo == hi for an original point; a
+	-- collapsed one stands on edge lo-hi. The edge out of a point covers the original points after
+	-- it (from hi itself, for a collapsed one); the edge into one covers those up to it.
+	local rx, rz, ry, rlo, rhi = { ox[1] }, { oz[1] }, { oy[1] }, { 1 }, { 1 }
+	local k = 2
+	while k <= #kept do
+		local b0, c0 = kept[k], kept[k + 1]
+		local collapsed = false
+		if c0 == b0 + 1 then
+			local r = #rx
+			local ax, az = rx[r], rz[r]
+			local aOut = rhi[r] + (if rlo[r] == rhi[r] then 1 else 0)
+			local d0 = kept[k + 2] or n + 1
+			local dx, dz = ox[d0], oz[d0]
+			local bx, bz, cx, cz = ox[b0], oz[b0], ox[c0], oz[c0]
+			-- Where line a-b meets line c-d.
+			local ux, uz, vx, vz = bx - ax, bz - az, dx - cx, dz - cz
+			local denom = ux * vz - uz * vx
+			if denom ~= 0 then
+				local t = ((cx - ax) * vz - (cz - az) * vx) / denom
+				local px, pz = ax + t * ux, az + t * uz
+				if pointSegment2(px, pz, bx, bz, cx, cz) <= eps2 then
+					local fx, fz = math.floor(px), math.floor(pz)
+					-- The four grid points round it, nearest first.
+					local cands = { { fx, fz }, { fx + 1, fz }, { fx, fz + 1 }, { fx + 1, fz + 1 } }
+					table.sort(cands, function(p: { number }, q: { number }): boolean
+						return (p[1] - px) ^ 2 + (p[2] - pz) ^ 2 < (q[1] - px) ^ 2 + (q[2] - pz) ^ 2
+					end)
+					for _, q in cands do
+						-- q turns toward the kept side (a convex corner of an obstacle, a reflex one
+						-- of a walkable ring), so the points it replaces must be beside both new edges.
+						local qx, qz = q[1], q[2]
+						if
+							pointSegment2(qx, qz, bx, bz, cx, cz) <= eps2
+							and Orient2D(ax, az, qx, qz, dx, dz) * side > 0
+							and under(ax, az, qx, qz, aOut, b0)
+							and under(qx, qz, dx, dz, c0, d0 - 1)
+							and beside(ax, az, qx, qz, c0, d0 - 1)
+							and beside(qx, qz, dx, dz, aOut, b0)
+						then
+							table.insert(rx, qx)
+							table.insert(rz, qz)
+							table.insert(ry, heightAt(qx, qz))
+							table.insert(rlo, b0)
+							table.insert(rhi, c0)
+							collapsed = true
+							break
+						end
+					end
+				end
+			end
+		end
+		if collapsed then
+			k += 2
+		else
+			table.insert(rx, ox[b0])
+			table.insert(rz, oz[b0])
+			table.insert(ry, oy[b0])
+			table.insert(rlo, b0)
+			table.insert(rhi, b0)
+			k += 1
+		end
+	end
+
+	if #rx == n or #rx < 3 or ringProblem(rx, rz) ~= nil then
+		return ring
+	end
+	return { X = rx, Z = rz, Y = ry }
+end
+
 local function quantizeRing(polygon: Polygon, context: string): Ring
 	-- A point where a ring belongs: usually one ring given where a list of rings goes. A point is
 	-- a vector (a Vector3 on Roblox) or, under Lune, a Vector3 shim table with a numeric X.
@@ -147,28 +391,10 @@ local function quantizeRing(polygon: Polygon, context: string): Ring
 	end
 
 	-- Self-intersection (SR6): the quantized ring, before snap rounding, so rounding can't
-	-- pinch a thin neck into a false error. A ring that folds back on itself counts too.
-	for i = 1, n do
-		local p, q, r = (i - 2) % n + 1, i, i % n + 1
-		if
-			Orient2D(xs[p], zs[p], xs[q], zs[q], xs[r], zs[r]) == 0
-			and (xs[q] - xs[p]) * (xs[r] - xs[q]) + (zs[q] - zs[p]) * (zs[r] - zs[q]) < 0
-		then
-			fail(context, `the ring folds back on itself at point {i} ({fmt(xs[q] / GRID)}, {fmt(zs[q] / GRID)})`)
-		end
-	end
-	-- ponytail: all-pairs O(n^2) per ring; a sweep if authored rings get large.
-	for i = 1, n do
-		local i2 = i % n + 1
-		for j = i + 2, n do
-			local j2 = j % n + 1
-			if j2 == i then
-				continue
-			end
-			if segmentsTouch(xs[i], zs[i], xs[i2], zs[i2], xs[j], zs[j], xs[j2], zs[j2]) then
-				fail(context, `the ring intersects itself (edges {i} and {j})`)
-			end
-		end
+	-- pinch a thin neck into a false error.
+	local problem = ringProblem(xs, zs)
+	if problem ~= nil then
+		fail(context, problem)
 	end
 
 	-- Orient CCW. The lexicographically smallest vertex is convex, so its turn gives the
@@ -189,6 +415,51 @@ local function quantizeRing(polygon: Polygon, context: string): Ring
 		end
 	end
 	return { X = xs, Z = zs, Y = ys }
+end
+
+-- An obstacle ring, quantized, then simplified to grow by at most `tolerance` studs (R1). Build
+-- and AddObstacle both come here, so a dynamic obstacle is simplified like a baked one.
+local function obstacleRing(polygon: Polygon, context: string, tolerance: number): Ring
+	local ring = quantizeRing(polygon, context)
+	local ys = ring.Y
+	return simplifyRing(ring, tolerance * GRID, 1, nil, function()
+		return ys[1]
+	end)
+end
+
+-- A walkable ring, quantized, then simplified to shrink by at most `tolerance` studs (R1) when
+-- it is planar (a non-planar ring's points carry its creases). Points on edges within the
+-- tolerance (plus a pixel) of one of the floor's seams stay, so the ring still meets the seam.
+local function walkableRing(polygon: Polygon, context: string, tolerance: number, seams: { FloorSeam }): Ring
+	local ring = quantizeRing(polygon, context)
+	local eps = tolerance * GRID
+	if eps <= 0 then
+		return ring
+	end
+	local xs, zs = ring.X, ring.Z
+	local heightAt, planar = planeOf(xs, zs, ring.Y)
+	if not planar then
+		return ring
+	end
+	local n = #xs
+	local pinned: { [number]: boolean } = {}
+	local reach2 = (eps + 1) ^ 2
+	for _, seam in seams do
+		for i = 1, n do
+			local j = i % n + 1
+			-- Segment distance: the closer of the four end-to-segment distances, 0 if they cross.
+			if
+				segmentsTouch(xs[i], zs[i], xs[j], zs[j], seam.AX, seam.AZ, seam.BX, seam.BZ)
+				or pointSegment2(xs[i], zs[i], seam.AX, seam.AZ, seam.BX, seam.BZ) <= reach2
+				or pointSegment2(xs[j], zs[j], seam.AX, seam.AZ, seam.BX, seam.BZ) <= reach2
+				or pointSegment2(seam.AX, seam.AZ, xs[i], zs[i], xs[j], zs[j]) <= reach2
+				or pointSegment2(seam.BX, seam.BZ, xs[i], zs[i], xs[j], zs[j]) <= reach2
+			then
+				pinned[i], pinned[j] = true, true
+			end
+		end
+	end
+	return simplifyRing(ring, eps, -1, pinned, heightAt)
 end
 
 local function checkArea(area: any, context: string): number
@@ -220,22 +491,7 @@ local function makeSurface(ring: Ring): Surface
 	ringEdges(n, 0, edges)
 	local tri = CDT.Triangulate { Coords = coords, Edges = edges, EdgeGroups = table.create(n, GROUP_WALKABLE) }
 
-	-- Planar iff every point lies on the plane through the first three non-collinear points.
-	local planar = true
-	for k = 3, n do
-		local det = (xs[2] - xs[1]) * (zs[k] - zs[1]) - (xs[k] - xs[1]) * (zs[2] - zs[1])
-		if det ~= 0 then
-			for i = 1, n do
-				local w2 = ((xs[i] - xs[1]) * (zs[k] - zs[1]) - (xs[k] - xs[1]) * (zs[i] - zs[1])) / det
-				local w3 = ((xs[2] - xs[1]) * (zs[i] - zs[1]) - (xs[i] - xs[1]) * (zs[2] - zs[1])) / det
-				local h = ys[1] + w2 * (ys[2] - ys[1]) + w3 * (ys[k] - ys[1])
-				if math.abs(h - ys[i]) > PLANAR_TOLERANCE then
-					planar = false
-				end
-			end
-			break
-		end
-	end
+	local _, planar = planeOf(xs, zs, ys)
 	return { Ring = ring, Tri = tri, Planar = planar }
 end
 
@@ -875,7 +1131,8 @@ local function buildFloor(
 	name: string,
 	floor: FloorDesc,
 	explicitTileSize: number?,
-	seams: { FloorSeam }
+	seams: { FloorSeam },
+	tolerance: number
 )
 	local floorContext = `floor '{name}'`
 	if type(floor) ~= "table" or type(floor.Walkable) ~= "table" or #floor.Walkable == 0 then
@@ -886,11 +1143,11 @@ local function buildFloor(
 	-- 1. Quantize and validate.
 	local walkable: { Ring } = {}
 	for i, polygon in floor.Walkable do
-		walkable[i] = quantizeRing(polygon, `{floorContext} walkable ring {i}`)
+		walkable[i] = walkableRing(polygon, `{floorContext} walkable ring {i}`, tolerance, seams)
 	end
 	local obstacles: { Ring } = {}
 	for i, polygon in floor.Obstacles or {} do
-		obstacles[i] = quantizeRing(polygon, `{floorContext} obstacle {i}`)
+		obstacles[i] = obstacleRing(polygon, `{floorContext} obstacle {i}`, tolerance)
 	end
 	local areas: { Ring } = {}
 	local areaIds: { number } = {}
@@ -1232,8 +1489,15 @@ function Build.Build(desc: NavMeshDesc): Storage.State
 	if cap ~= nil and (type(cap) ~= "number" or not (cap > 0 and cap <= LIMIT)) then
 		error(`NavMesh.Build: MaxAgentRadius must be a number of studs above 0, got {cap}`, 2)
 	end
+	local tolerance = desc.SimplifyTolerance
+	if tolerance == nil then
+		tolerance = DEFAULT_SIMPLIFY_TOLERANCE
+	elseif type(tolerance) ~= "number" or not (tolerance >= 0 and tolerance <= LIMIT) then
+		error(`NavMesh.Build: SimplifyTolerance must be a number of studs from 0 to {LIMIT}, got {tolerance}`, 2)
+	end
 	table.sort(names)
 	local s = Storage.New()
+	Storage.SetSimplifyTolerance(s, tolerance)
 	local floorIds: { [string]: number } = {}
 	for _, name in names do
 		buildFloor(
@@ -1241,7 +1505,8 @@ function Build.Build(desc: NavMeshDesc): Storage.State
 			name,
 			desc.Floors[name],
 			if tileStuds == nil then nil else Quantize.ToGrid(tileStuds),
-			floorSeams[name] or {}
+			floorSeams[name] or {},
+			tolerance
 		)
 		floorIds[name] = Storage.FloorCount(s)
 	end
@@ -1266,7 +1531,7 @@ Build.Internal = {
 	EDGE_KEY = EDGE_KEY,
 	Fail = fail,
 	Fmt = fmt,
-	QuantizeRing = quantizeRing,
+	ObstacleRing = obstacleRing,
 	MakeSurface = makeSurface,
 	TileInputs = tileInputs,
 	TriangulateTile = triangulateTile,

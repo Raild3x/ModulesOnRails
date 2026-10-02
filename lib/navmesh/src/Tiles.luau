@@ -85,7 +85,8 @@ function Tiles.AddObstacle(s: State, floorName: string, polygon: Types.Polygon):
 	if floor == 0 then
 		error(`NavMesh.AddObstacle: no floor '{floorName}'`, 3)
 	end
-	local ok, ring = pcall(Internal.QuantizeRing, polygon, `obstacle on floor '{floorName}'`)
+	local ok, ring =
+		pcall(Internal.ObstacleRing, polygon, `obstacle on floor '{floorName}'`, Storage.GetSimplifyTolerance(s))
 	if not ok then
 		error((tostring(ring):gsub("^NavMesh.Build:", "NavMesh.AddObstacle:")), 3)
 	end

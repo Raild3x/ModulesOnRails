@@ -95,11 +95,20 @@ end
 
 --[=[
 	The kept region matches the authored one (walkable rings minus obstacles), away from ring
-	edges by more than `tolerance` (snapping moves edges by up to half a grid pixel):
-	- every triangle's centroid is inside it;
-	- every sample point on a `step` lattice that is inside it lies in some triangle of `floor`.
+	edges by more than `tolerance` (snapping moves edges by up to half a grid pixel), one-sided
+	by `eps` (the ring simplification tolerance, G1/G2; default 0):
+	- every triangle's centroid is inside it (kept within the region);
+	- every sample point on a `step` lattice that is inside it, further than `eps` from its
+	  edges, lies in some triangle of `floor` (the region eroded by eps within the kept one).
 ]=]
-function MeshChecks.Region(mesh: any, floorId: number, floor: any, tolerance: number, step: number): { string }
+function MeshChecks.Region(
+	mesh: any,
+	floorId: number,
+	floor: any,
+	tolerance: number,
+	step: number,
+	eps: number?
+): { string }
 	local found = {}
 	local minX, minZ, maxX, maxZ = math.huge, math.huge, -math.huge, -math.huge
 	local tris = {}
@@ -125,7 +134,7 @@ function MeshChecks.Region(mesh: any, floorId: number, floor: any, tolerance: nu
 	for x = minX + step / 2, maxX, step do
 		for z = minZ + step / 2, maxZ, step do
 			local keep, near = classify(floor, x, z)
-			if not keep or near <= tolerance then
+			if not keep or near <= tolerance + (eps or 0) then
 				continue
 			end
 			local covered = false
@@ -150,10 +159,11 @@ end
 
 --[=[
 	Every wall (an edge with no neighbour) lies on an authored walkable or obstacle edge, within
-	`tolerance`. A tile border left unlinked, or split differently on its two sides (a
-	T-junction), shows up as a wall off every authored edge.
+	`tolerance` plus `eps` (the ring simplification tolerance; default 0). A tile border left
+	unlinked, or split differently on its two sides (a T-junction), shows up as a wall off every
+	authored edge.
 ]=]
-function MeshChecks.Walls(mesh: any, floorId: number, floor: any, tolerance: number): { string }
+function MeshChecks.Walls(mesh: any, floorId: number, floor: any, tolerance: number, eps: number?): { string }
 	local found = {}
 	local rings = table.clone(floor.Walkable)
 	for _, ring in floor.Obstacles or {} do
@@ -175,7 +185,7 @@ function MeshChecks.Walls(mesh: any, floorId: number, floor: any, tolerance: num
 				for _, ring in rings do
 					best = math.min(best, MeshChecks.EdgeDistance(ring, x, z))
 				end
-				if best > tolerance then
+				if best > tolerance + (eps or 0) then
 					table.insert(found, `triangle {t} edge {e} is a wall off every authored edge near ({x}, {z})`)
 					break
 				end

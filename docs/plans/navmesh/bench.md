@@ -1040,6 +1040,47 @@ The regression map for realistic content: `lune run tools/navmesh/bench/city_day
 - Each event's `Update` returns one region. The re-plans it causes (3-46) are counted in ticket
   38, not timed here; elevator handling includes its re-plans (about 9 ms each, weighted).
 
+## Simplification (Track F, 2026-10-02)
+
+### R1: one-sided ring simplification, by tolerance
+`lune run tools/navmesh/bench/simplify_measure.luau 3 rocks,pieces,props,bench,terrain,walls,demo,city,forestriver 0,1/16,1/10,1/4`.
+
+**Method:**
+- 3 rounds, with every scene x tolerance built once per round in shuffled order. Build is the median, with its range.
+- FindPath is the sum over 200 fixed pairs (best of 3, median over rounds), at AgentRadius 0 and 1.
+- Paths are compared with an untimed tolerance-0 build. The ratio pools both radii: the mean, then the worst single pair.
+- Rocks and pieces are rebuilt from the plan's description (`tools/navmesh/bench/SimplifyScenes.luau`, seeded). The prototype's files were lost with the `navmesh-phase0` worktree. Rocks came out denser than the prototype's (11,915 triangles against 8,380).
+- City and ForestRiver are built through `NavMeshAdapter.FromParts`.
+
+| scene | tolerance | triangles | wall edges | Build ms (range) | FindPath r0 / r1 ms | path mean / worst | kept area |
+|---|---|---|---|---|---|---|---|
+| rocks | 0 | 11,915 | 11,205 | 32,930 (32,619-33,511) | 18.9 / 18.8 | - | 240,996.8 |
+| rocks | 1/16 | 9,288 (-22%) | 8,578 | 18,870 | 16.8 / 18.6 | +0.00% / +0.01% | -0.01% |
+| rocks | 1/10 | 8,082 (-32%) | 7,372 | 13,457 | 15.3 / 16.2 | +0.00% / +0.43% | -0.03% |
+| rocks | **1/4 (default)** | **6,205 (-48%)** | 5,495 | **7,690** | 14.5 / 16.8 | +0.00% / +0.43% | -0.09% |
+| pieces | 0 | 9,946 | 2,892 | 3,224 | 27.7 / 32.8 | - | 60,009.0 |
+| pieces | 1/16 | 9,767 | 2,713 | 2,850 | 27.1 / 31.5 | +0.00% / +0.02% | -0.003% |
+| pieces | 1/10 | 9,587 | 2,533 | 2,542 | 26.1 / 30.9 | +0.00% / +0.24% | -0.01% |
+| pieces | 1/4 | 9,557 (-4%) | 2,503 | 2,494 (-23%) | 28.2 / 31.8 | +0.00% / +0.24% | -0.01% |
+| City | 0 | 5,667 | 4,025 | 1,585 | 55.2 / 78.0 | - | 41,844.6 |
+| City | 1/16 | 5,268 | 3,713 | 1,349 | 54.4 / 77.0 | +0.02% / +14.4% | -0.01% |
+| City | 1/10 | 4,712 | 3,170 | 1,001 | 52.2 / 76.1 | +0.02% / +14.4% | -0.03% |
+| City | 1/4 | 4,157 (-27%) | 2,664 | 767 (-52%) | 47.6 / 70.8 | +0.07% / +14.4% | -0.08% |
+| ForestRiver | 0 | 5,204 | 3,747 | 996 | 56.2 / 73.1 | - | 29,102.7 |
+| ForestRiver | 1/16 | 4,752 | 3,428 | 853 | 51.3 / 68.2 | +0.29% / +26.9% | -0.01% |
+| ForestRiver | 1/10 | 4,210 | 2,891 | 637 | 50.2 / 65.7 | +0.31% / +26.9% | -0.04% |
+| ForestRiver | 1/4 | 3,651 (-30%) | 2,372 | 511 (-49%) | 47.1 / 61.0 | +0.38% / +27.0% | -0.12% |
+| props, bench, terrain, walls, demo | any | unchanged | | within noise | | +0.00% / +0.00% | unchanged |
+
+**The worst pairs are a corridor-search artifact, not lost space** (`.bench/worst_probe.luau`, a scratch file):
+- Every pair more than 2% longer was re-checked at the same radius:
+  - City, both tolerances: 10 of 10 kept the reference route.
+  - ForestRiver at 1/10: 33 of 35 kept it. The other two failed only because a waypoint sits too close to a wall to start a path from at radius 1.
+- Run in reverse on the simplified mesh, the worst pairs come back at about the reference length:
+  - ForestRiver pair 159 is 187.7 forward and 147.3 backward, against a reference of 152.1;
+  - City pair 142 is 239.1 forward and 212.6 backward, against 209.0.
+- This is the midpoint A* corridor spread in known-gaps.md, which the plan also saw on rocks at 1/4.
+
 ## Not measured (flagged)
 - Remote transfer time and payload size per layout (needs a live server/client session).
 - Locality on a real CDT's vertex and triangle ordering. The grid mesh has near-ideal locality,

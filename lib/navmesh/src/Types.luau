@@ -106,6 +106,7 @@ export type GenerateLinksOptions = {
 	.Links { LinkDesc }? -- link id = its 1-based index
 	.TileSize number? -- studs, from 1/256 to 32768; tiles are aligned to the world origin (default: per floor, about 36 edges per tile, a power of two from 4 to 256)
 	.MaxAgentRadius number? -- optional cap on AgentRadius (studs); bounds how far Build and Update compute clearance, so set it when you can: uncapped, Update costs 30-50% more (default: no cap)
+	.SimplifyTolerance number? -- studs (default 0.25; 0 = off): dense obstacle rings may grow and planar walkable rings shrink by up to this much, never the other way, to drop points; AddObstacle uses the same value
 
 	The authored description a mesh is built from. Part→polygon conversion belongs in a separate
 	adapter package (Q1).
@@ -116,6 +117,7 @@ export type NavMeshDesc = {
 	Links: { LinkDesc }?,
 	TileSize: number?,
 	MaxAgentRadius: number?,
+	SimplifyTolerance: number?,
 }
 
 --[=[
