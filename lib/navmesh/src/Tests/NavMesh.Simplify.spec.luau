@@ -424,6 +424,49 @@ return function(t: tiniest)
 			local path = NavMesh.FindPath(mesh, v(5, 0, 5), v(15, 0, 5))
 			expect(path.Status).is("Success")
 		end)
+
+		test("an obstacle along a seam keeps it open, built or added (G6, G7)", function()
+			-- The Part adapter's turned ramp (grid units, flattened): Ground is cut where the ramp
+			-- stands, and the Ramp floor's obstacle is the ground beyond its foot, its edge along
+			-- the seam. Simplifying that obstacle moved the seam's end corner a pixel, which
+			-- covered the end of the seam and cut the path.
+			local function grid(points: { number }): { any }
+				local out = {}
+				for i = 1, #points, 2 do
+					table.insert(out, v(points[i] / 256, 0, points[i + 1] / 256))
+				end
+				return out
+			end
+			local foot = grid { 4009, 1824, 6669, 288, 7437, 1618, 4777, 3154 }
+			local beyond = grid { 0, 0, 1774, -1024, 2217, -1280, 4777, 3154, 4334, 3410, 2560, 4434 }
+			local desc: any = {
+				Floors = {
+					Ground = {
+						Walkable = { grid { 0, 0, 8868, -5120, 11428, -686, 2560, 4434 } },
+						Obstacles = { foot },
+					},
+					Ramp = { Walkable = { foot }, Obstacles = { beyond } },
+				},
+				Seams = {
+					{
+						FloorA = "Ground",
+						FloorB = "Ramp",
+						From = v(4777 / 256, 0, 3154 / 256),
+						To = v(4009 / 256, 0, 1824 / 256),
+					},
+				},
+			}
+			local from, to = v(8, 0, 6), v(22.4, 0, 6.7)
+			expect(NavMesh.FindPath(NavMesh.Build(desc), from, to).Status).is("Success")
+			-- Added at runtime, the same obstacle is pinned by the same seams.
+			local open = table.clone(desc)
+			open.Floors = { Ground = desc.Floors.Ground, Ramp = { Walkable = { foot } } }
+			local mesh = NavMesh.Build(open)
+			NavMesh.AddObstacle(mesh, "Ramp", beyond)
+			NavMesh.Update(mesh)
+			expect(differs(mesh, NavMesh.Build(desc))).is("")
+			expect(NavMesh.FindPath(mesh, from, to).Status).is("Success")
+		end)
 	end)
 
 	-- A rectangle (cx, cz) half-sizes (hx, hz), turned by `turn` radians, at height y.

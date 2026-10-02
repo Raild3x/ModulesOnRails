@@ -423,28 +423,10 @@ end
 
 -- An obstacle ring, quantized, then simplified to grow by at most `tolerance` studs (R1). Build
 -- and AddObstacle both come here, so a dynamic obstacle is simplified like a baked one.
-local function obstacleRing(polygon: Polygon, context: string, tolerance: number): Ring
-	local ring = quantizeRing(polygon, context)
-	local ys = ring.Y
-	return simplifyRing(ring, tolerance * GRID, 1, nil, function()
-		return ys[1]
-	end)
-end
-
--- A walkable ring, quantized, then simplified to shrink by at most `tolerance` studs (R1) when
--- it is planar (a non-planar ring's points carry its creases). Points on edges within the
--- tolerance (plus a pixel) of one of the floor's seams stay, so the ring still meets the seam.
-local function walkableRing(polygon: Polygon, context: string, tolerance: number, seams: { FloorSeam }): Ring
-	local ring = quantizeRing(polygon, context)
-	local eps = tolerance * GRID
-	if eps <= 0 then
-		return ring
-	end
+-- The points of a ring (grid units) on edges within `eps` (plus a pixel) of one of `seams`:
+-- moving them could move the ring's edge onto or off a seam (G6), which opens or closes it.
+local function seamPins(ring: Ring, eps: number, seams: { FloorSeam }): { [number]: boolean }
 	local xs, zs = ring.X, ring.Z
-	local heightAt, planar = planeOf(xs, zs, ring.Y)
-	if not planar then
-		return ring
-	end
 	local n = #xs
 	local pinned: { [number]: boolean } = {}
 	local reach2 = (eps + 1) ^ 2
@@ -463,7 +445,38 @@ local function walkableRing(polygon: Polygon, context: string, tolerance: number
 			end
 		end
 	end
-	return simplifyRing(ring, eps, -1, pinned, heightAt)
+	return pinned
+end
+
+-- An obstacle ring, quantized, then simplified to grow by at most `tolerance` studs (R1), with
+-- points near the floor's seams pinned. Build and AddObstacle both come here with the floor's
+-- seams, so a dynamic obstacle is simplified like a baked one.
+local function obstacleRing(polygon: Polygon, context: string, tolerance: number, seams: { FloorSeam }?): Ring
+	local ring = quantizeRing(polygon, context)
+	local eps = tolerance * GRID
+	if eps <= 0 then
+		return ring
+	end
+	local ys = ring.Y
+	return simplifyRing(ring, eps, 1, seamPins(ring, eps, seams or {}), function()
+		return ys[1]
+	end)
+end
+
+-- A walkable ring, quantized, then simplified to shrink by at most `tolerance` studs (R1) when
+-- it is planar (a non-planar ring's points carry its creases), with points near the floor's
+-- seams pinned, so the ring still meets each seam.
+local function walkableRing(polygon: Polygon, context: string, tolerance: number, seams: { FloorSeam }): Ring
+	local ring = quantizeRing(polygon, context)
+	local eps = tolerance * GRID
+	if eps <= 0 then
+		return ring
+	end
+	local heightAt, planar = planeOf(ring.X, ring.Z, ring.Y)
+	if not planar then
+		return ring
+	end
+	return simplifyRing(ring, eps, -1, seamPins(ring, eps, seams), heightAt)
 end
 
 local function checkArea(area: any, context: string): number
@@ -1374,7 +1387,7 @@ local function buildFloor(
 	end
 	local obstacles: { Ring } = {}
 	for i, polygon in floor.Obstacles or {} do
-		obstacles[i] = obstacleRing(polygon, `{floorContext} obstacle {i}`, tolerance)
+		obstacles[i] = obstacleRing(polygon, `{floorContext} obstacle {i}`, tolerance, seams)
 	end
 	local areas: { Ring } = {}
 	local areaIds: { number } = {}

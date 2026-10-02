@@ -85,8 +85,16 @@ function Tiles.AddObstacle(s: State, floorName: string, polygon: Types.Polygon):
 	if floor == 0 then
 		error(`NavMesh.AddObstacle: no floor '{floorName}'`, 3)
 	end
+	-- The floor's seams pin the points near them, as in Build.
+	local seams = {}
+	for id = 1, Storage.SeamCount(s) do
+		local a, b, ax, az, bx, bz = Storage.GetSeam(s, id)
+		if a == floor or b == floor then
+			table.insert(seams, { Id = id, AX = ax, AZ = az, BX = bx, BZ = bz })
+		end
+	end
 	local ok, ring =
-		pcall(Internal.ObstacleRing, polygon, `obstacle on floor '{floorName}'`, Storage.GetSimplifyTolerance(s))
+		pcall(Internal.ObstacleRing, polygon, `obstacle on floor '{floorName}'`, Storage.GetSimplifyTolerance(s), seams)
 	if not ok then
 		error((tostring(ring):gsub("^NavMesh.Build:", "NavMesh.AddObstacle:")), 3)
 	end
