@@ -9,11 +9,12 @@
 -- mesh counts (round 1), Build median (min-max), the FindPath sum over 200 fixed pairs at
 -- AgentRadius 0 and 1 (best of 3, median over rounds), path length against an untimed
 -- tolerance-0 reference build (mean and worst ratio over pairs that succeed in both, radii
--- pooled), successes and the kept plan area.
+-- pooled), successes and the kept plan area. DISSOLVE=0 turns R2 (the same-class dissolve) off.
 local fs = require("@lune/fs")
 local process = require("@lune/process")
 local NavMesh = require("../../../lib/navmesh/src/NavMesh")
 local Storage = require("../../../lib/navmesh/src/Storage")
+require("../../../lib/navmesh/src/Build").Internal.Dissolve.Enabled = process.env.DISSOLVE ~= "0"
 local Scenes = require("./Scenes")
 local SimplifyScenes = require("./SimplifyScenes")
 

@@ -617,39 +617,216 @@ type FloorData = {
 -- within the tile (indices into the tile's list, 0 = none).
 type TileTriangle = { X: { number }, Z: { number }, Keys: { number }, Area: number, Neighbors: { number } }
 
+-- R2's switch (on by default): specs turn it off to compare a dissolved tile with the plain one.
+local DISSOLVE = { Enabled = true }
+
+--[[
+	R2 (Track F; simplification-plan.md C1): when constraint edges run inside one class of a
+	tile's first triangulation (kept, same area, same height plane), the input for a second one
+	from the class boundaries only. Floors authored in overlapping pieces leave such edges, and
+	the hot pixels where they cross.
+	- Kept triangles are joined by balanced loops (CCW round the kept region, group 1), each
+	  non-default area by loops of its own group; a boundary between two planes stays as an open
+	  edge, so two walkable rings at different heights never merge.
+	- Open edges (creases, seams), the tile rectangle and every border vertex next to a kept
+	  triangle stay (G6).
+	It is exact (G5): every boundary is an edge of the first triangulation, so the kept region, each
+	area and every wall are unchanged, and no edge crosses another, so no vertex is added (G8).
+	Returns nil when nothing dissolves.
+]]
+local function dissolve(
+	tri: Triangulation,
+	kept: { number },
+	keptArea: { number },
+	tg: { number },
+	floor: FloorData
+): { Coords: { number }, Edges: { number }, Groups: { number } }?
+	local class = table.create(CDT.TriangleCount(tri), false) :: { any } -- area, then plane key
+	for i, t in kept do
+		class[t] = keptArea[i]
+	end
+	-- Whether edge e of t carries a constraint, and whether one that always stays (open or tile).
+	local function covered(t: number, e: number): (boolean, boolean)
+		local n, stays = CDT.GetCoveringEdgeCount(tri, t, e), false
+		for k = 1, n do
+			local g = tg[CDT.GetCoveringEdge(tri, t, e, k)]
+			stays = stays or g == GROUP_OPEN or g == GROUP_TILE
+		end
+		return n > 0, stays
+	end
+	local function anyDissolvable(): boolean
+		for _, t in kept do
+			for e = 1, 3 do
+				local m = CDT.GetNeighbor(tri, t, e)
+				if m ~= 0 and class[m] == class[t] then
+					local constrained, stays = covered(t, e)
+					if constrained and not stays then
+						return true
+					end
+				end
+			end
+		end
+		return false
+	end
+	-- First by area alone, which is cheap: most tiles stop here.
+	if not anyDissolvable() then
+		return nil
+	end
+	local x0, z0, x1, z1 = math.huge, math.huge, -math.huge, -math.huge
+	for v = 1, CDT.VertexCount(tri) do
+		local x, z = CDT.GetVertex(tri, v)
+		x0, z0, x1, z1 = math.min(x0, x), math.min(z0, z), math.max(x1, x), math.max(z1, z)
+	end
+	-- The planes under each kept triangle: the distinct planes of every surface containing it,
+	-- each as its heights at the tile corner and a grid step along each axis. Coplanar pieces
+	-- share one; an overlap of rings at different heights is a class of its own, so it never
+	-- dissolves into either ring (and the heights below still report it). Rounded: float noise can
+	-- only split one plane in two, which keeps an edge.
+	local areaOf: { [number]: number } = {}
+	for i, t in kept do
+		local a, b, c = CDT.GetTriangle(tri, t)
+		local ax, az = CDT.GetVertex(tri, a)
+		local bx, bz = CDT.GetVertex(tri, b)
+		local cx, cz = CDT.GetVertex(tri, c)
+		local px, pz = (ax + bx + cx) / 3, (az + bz + cz) / 3
+		local planes: { string } = {}
+		for _, surface in floor.Surfaces do
+			local h0, hx, hz, inside = surfaceHeights(surface, px, pz, x0, z0, x0 + 1, z0, x0, z0 + 1)
+			if h0 ~= nil and inside then
+				-- Integers, so a tiny negative can't print as "-0".
+				local key = string.format(
+					"%d/%d/%d",
+					math.round(h0 * 1e3),
+					math.round((hx - h0) * 1e6),
+					math.round((hz - h0) * 1e6)
+				)
+				if not table.find(planes, key) then
+					table.insert(planes, key)
+				end
+			end
+		end
+		table.sort(planes)
+		areaOf[t] = keptArea[i]
+		-- Outside every surface (a sliver, see the heights below): dissolves with nothing.
+		class[t] = if #planes == 0 then `-{t}` else `{keptArea[i]}:{table.concat(planes, "|")}`
+	end
+	if not anyDissolvable() then
+		return nil
+	end
+
+	local areaGroup: { [number]: number } = {}
+	for i = #floor.AreaIds, 1, -1 do
+		areaGroup[floor.AreaIds[i]] = GROUP_FIRST_AREA + i - 1
+	end
+	local coords, edges, groups = {}, {}, {}
+	local ids: { [number]: number } = {}
+	local function id(v: number): number
+		local out = ids[v]
+		if out == nil then
+			local x, z = CDT.GetVertex(tri, v)
+			table.insert(coords, x)
+			table.insert(coords, z)
+			out = #coords // 2
+			ids[v] = out
+		end
+		return out
+	end
+	local function add(u: number, w: number, group: number)
+		table.insert(edges, id(u))
+		table.insert(edges, id(w))
+		table.insert(groups, group)
+	end
+	-- Tile-border vertices next to kept triangles stay (G6): the tile's edge is the hull, so the
+	-- kept loops run along it through every one of them.
+	for t = 1, CDT.TriangleCount(tri) do
+		local verts = { CDT.GetTriangle(tri, t) }
+		for e = 1, 3 do
+			local m = CDT.GetNeighbor(tri, t, e)
+			-- CCW round t: from the vertex after e to the one after that.
+			local u, w = verts[e % 3 + 1], verts[(e + 1) % 3 + 1]
+			if m < t then -- once per edge (a hull edge has m = 0)
+				for k = 1, CDT.GetCoveringEdgeCount(tri, t, e) do
+					if tg[CDT.GetCoveringEdge(tri, t, e, k)] == GROUP_OPEN then
+						add(u, w, GROUP_OPEN)
+						break
+					end
+				end
+				if class[t] and m ~= 0 and class[m] and class[t] ~= class[m] and areaOf[t] == areaOf[m] then
+					add(u, w, GROUP_OPEN) -- a change of plane only
+				end
+			end
+			if class[t] then
+				local outside = m == 0 or not class[m]
+				if outside then
+					add(u, w, GROUP_WALKABLE)
+				end
+				local area = areaOf[t]
+				if area ~= floor.DefaultArea and (outside or areaOf[m] ~= area) then
+					add(u, w, areaGroup[area])
+				end
+			end
+		end
+	end
+	local corner = #coords // 2
+	for _, p in { { x0, z0 }, { x1, z0 }, { x1, z1 }, { x0, z1 } } do
+		table.insert(coords, p[1])
+		table.insert(coords, p[2])
+	end
+	for i = 1, 4 do
+		table.insert(edges, corner + i)
+		table.insert(edges, corner + i % 4 + 1)
+		table.insert(groups, GROUP_TILE)
+	end
+	return { Coords = coords, Edges = edges, Groups = groups }
+end
+
 -- Triangulates one tile's input and applies the keep rule, areas and heights (SR6). Errors
 -- (with the floor's context) on an authoring mistake. Used by Build and by Update.
 local function triangulateTile(tc: { number }, te: { number }, tg: { number }, floor: FloorData): { TileTriangle }
 	local floorContext = floor.Context
 	local surfaces, vertexHeight, vertexFrom = floor.Surfaces, floor.Heights, floor.HeightFrom
-	local tri = CDT.Triangulate { Coords = tc, Edges = te, EdgeGroups = tg }
-	for v = 1, CDT.VertexCount(tri) do
-		if CDT.InputVertexOf(tri, v) == nil then
-			fail(floorContext, "internal error: the triangulator added a vertex, so snap rounding missed a crossing")
-		end
-	end
-
-	-- Keep rule and areas.
-	local kept: { number } = {}
-	local keptArea: { number } = {}
-	-- A tile only has the area groups up to the highest one clipped into it.
-	local lastArea = math.min(#floor.AreaIds, CDT.GroupCount(tri) - GROUP_FIRST_AREA + 1)
-	for t = 1, CDT.TriangleCount(tri) do
-		if
-			CDT.GetWinding(tri, t, GROUP_WALKABLE) > 0
-			and CDT.GetWinding(tri, t, GROUP_OBSTACLE) == 0
-			and CDT.GetWinding(tri, t, GROUP_TILE) > 0
-		then
-			local area = floor.DefaultArea
-			for i = lastArea, 1, -1 do
-				if CDT.GetWinding(tri, t, GROUP_FIRST_AREA + i - 1) > 0 then
-					area = floor.AreaIds[i]
-					break
-				end
+	local function run(c: { number }, e: { number }, g: { number }): Triangulation
+		local t = CDT.Triangulate { Coords = c, Edges = e, EdgeGroups = g }
+		for v = 1, CDT.VertexCount(t) do
+			if CDT.InputVertexOf(t, v) == nil then
+				fail(
+					floorContext,
+					"internal error: the triangulator added a vertex, so snap rounding missed a crossing"
+				)
 			end
-			table.insert(kept, t)
-			table.insert(keptArea, area)
 		end
+		return t
+	end
+	-- Keep rule and areas: the kept triangles and their areas.
+	local function classify(t: Triangulation): ({ number }, { number })
+		local kept: { number }, keptArea: { number } = {}, {}
+		-- A tile only has the area groups up to the highest one clipped into it.
+		local lastArea = math.min(#floor.AreaIds, CDT.GroupCount(t) - GROUP_FIRST_AREA + 1)
+		for k = 1, CDT.TriangleCount(t) do
+			if
+				CDT.GetWinding(t, k, GROUP_WALKABLE) > 0
+				and CDT.GetWinding(t, k, GROUP_OBSTACLE) == 0
+				and CDT.GetWinding(t, k, GROUP_TILE) > 0
+			then
+				local area = floor.DefaultArea
+				for i = lastArea, 1, -1 do
+					if CDT.GetWinding(t, k, GROUP_FIRST_AREA + i - 1) > 0 then
+						area = floor.AreaIds[i]
+						break
+					end
+				end
+				table.insert(kept, k)
+				table.insert(keptArea, area)
+			end
+		end
+		return kept, keptArea
+	end
+	local tri = run(tc, te, tg)
+	local kept, keptArea = classify(tri)
+	local again = if DISSOLVE.Enabled then dissolve(tri, kept, keptArea, tg, floor) else nil
+	if again then
+		tri = run(again.Coords, again.Edges, again.Groups)
+		kept, keptArea = classify(tri)
 	end
 
 	-- Heights. Each kept triangle takes its heights from the first walkable surface that
@@ -1526,6 +1703,7 @@ end
 -- The pieces `Update` (Tiles.luau) reuses, so a rebuilt tile goes through exactly Build's steps.
 Build.Internal = {
 	GRID = GRID,
+	Dissolve = DISSOLVE,
 	GROUP_WALKABLE = GROUP_WALKABLE,
 	GROUP_OBSTACLE = GROUP_OBSTACLE,
 	EDGE_KEY = EDGE_KEY,

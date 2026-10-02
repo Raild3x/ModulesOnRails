@@ -425,4 +425,137 @@ return function(t: tiniest)
 			expect(path.Status).is("Success")
 		end)
 	end)
+
+	-- A rectangle (cx, cz) half-sizes (hx, hz), turned by `turn` radians, at height y.
+	local function piece(cx: number, cz: number, hx: number, hz: number, turn: number, y: number?): { any }
+		local c, s = math.cos(turn), math.sin(turn)
+		local out = {}
+		for _, corner in { { -hx, -hz }, { hx, -hz }, { hx, hz }, { -hx, hz } } do
+			table.insert(out, v(cx + corner[1] * c - corner[2] * s, y or 0, cz + corner[1] * s + corner[2] * c))
+		end
+		return out
+	end
+
+	-- A floor authored in overlapping pieces, with same-id areas and a few crates.
+	local function piecesFloor(seed: number): any
+		math.randomseed(seed)
+		local walkable, areas, obstacles = {}, {}, {}
+		for i = 0, 3 do
+			for j = 0, 3 do
+				if math.random() > 0.1 then
+					table.insert(walkable, piece(8 * i + 4, 8 * j + 4, 4.3, 4.3, (math.random() - 0.5) * 0.01))
+				end
+			end
+		end
+		for _ = 1, 3 do
+			local x, z = 4 + math.random() * 24, 4 + math.random() * 24
+			table.insert(areas, { Polygon = piece(x, z, 3, 2, math.random()), Area = 2 })
+			table.insert(areas, { Polygon = piece(x + 2, z + 1, 2, 3, math.random()), Area = 2 })
+		end
+		for _ = 1, 3 do
+			table.insert(obstacles, piece(4 + math.random() * 24, 4 + math.random() * 24, 0.8, 0.8, math.random()))
+		end
+		return { TileSize = 8, Floors = { Ground = { Walkable = walkable, Areas = areas, Obstacles = obstacles } } }
+	end
+
+	-- The kept plan area per area id, and the walls as a set of grid-point pairs.
+	local function regions(mesh: any): ({ [number]: number }, { [string]: boolean })
+		local areas, walls = {}, {}
+		for tri = 1, Storage.TriangleCount(mesh) do
+			local ids = { Storage.GetTriangle(mesh, tri) }
+			local p = {}
+			for k, id in ids do
+				p[k] = Storage.GetVertex(mesh, id)
+			end
+			local area = Storage.GetTriangleArea(mesh, tri)
+			areas[area] = (areas[area] or 0)
+				+ ((p[2].X - p[1].X) * (p[3].Z - p[1].Z) - (p[3].X - p[1].X) * (p[2].Z - p[1].Z)) / 2
+			for e = 1, 3 do
+				if Storage.IsWallEdge(mesh, tri, e) then
+					local a, b = p[e % 3 + 1], p[(e + 1) % 3 + 1]
+					walls[`{math.round(a.X * 256)},{math.round(a.Z * 256)}>{math.round(b.X * 256)},{math.round(
+						b.Z * 256
+					)}`] =
+						true
+				end
+			end
+		end
+		return areas, walls
+	end
+
+	local function withDissolve(on: boolean, f: () -> any): any
+		Internal.Dissolve.Enabled = on
+		local ok, result = pcall(f)
+		Internal.Dissolve.Enabled = true
+		if not ok then
+			error(result, 0)
+		end
+		return result
+	end
+
+	describe("R2: exact dissolve of same-class edges (G5, G6, G7, G8)", function()
+		test("overlapping pieces: the same areas, walls and wall distances, in fewer triangles", function()
+			for seed = 1, 6 do
+				local desc = piecesFloor(seed)
+				local off = withDissolve(false, function()
+					return NavMesh.Build(desc)
+				end)
+				local on = NavMesh.Build(desc)
+				expect(table.concat(MeshChecks.Structure(on), "\n")).is("")
+				expect(Storage.TriangleCount(on) < Storage.TriangleCount(off))
+					.with_context(`seed {seed}: {Storage.TriangleCount(on)} vs {Storage.TriangleCount(off)}`)
+					.is_true()
+				local areasOff, wallsOff = regions(off)
+				local areasOn, wallsOn = regions(on)
+				for area, size in areasOff do
+					expect(math.abs((areasOn[area] or 0) - size) < 1e-6)
+						.with_context(`seed {seed} area {area}: {areasOn[area]} vs {size}`)
+						.is_true()
+				end
+				for key in wallsOff do
+					expect(wallsOn[key]).with_context(`seed {seed} wall {key}`).is(true)
+				end
+				for key in wallsOn do
+					expect(wallsOff[key]).with_context(`seed {seed} wall {key}`).is(true)
+				end
+				for _ = 1, 40 do
+					local p = v(math.random() * 32, 0, math.random() * 32)
+					expect(NavMesh.FindDistanceToWall(on, p, 4)).is(NavMesh.FindDistanceToWall(off, p, 4))
+				end
+			end
+		end)
+
+		test("adding and removing a crate across dissolved strips and tile lines equals a fresh Build", function()
+			local desc = piecesFloor(7)
+			local mesh = NavMesh.Build(desc)
+			for _, crate in { piece(8, 8, 1.5, 1.5, 0.3), piece(16.2, 11, 2.5, 1, 0.1) } do
+				local id = NavMesh.AddObstacle(mesh, "Ground", crate)
+				NavMesh.Update(mesh)
+				expect(differs(mesh, NavMesh.Build(baked(desc, { crate })))).with_context("added").is("")
+				NavMesh.RemoveObstacle(mesh, id)
+				NavMesh.Update(mesh)
+				expect(differs(mesh, NavMesh.Build(desc))).with_context("removed").is("")
+			end
+		end)
+
+		test("coplanar pieces dissolve, but never across a change of plane", function()
+			-- Flat piece B starts inside flat piece A (its corners at x = 6 dissolve); ramp C meets B
+			-- along x = 20 and rises to y = 2.
+			local ramp = { v(20, 0, 2), v(30, 2, 2), v(30, 2, 8), v(20, 0, 8) }
+			local desc = {
+				TileSize = 32,
+				Floors = { Ground = { Walkable = { piece(5, 5, 5, 5, 0), piece(13, 5, 7, 3, 0), ramp } } },
+			}
+			local off = withDissolve(false, function()
+				return NavMesh.Build(desc)
+			end)
+			local on = NavMesh.Build(desc)
+			expect(Storage.TriangleCount(on) < Storage.TriangleCount(off)).is_true()
+			for vtx = 1, Storage.VertexCount(on) do
+				local p = Storage.GetVertex(on, vtx)
+				local want = if p.X <= 20 then 0 else 0.2 * (p.X - 20)
+				expect(math.abs(p.Y - want) < 1e-4).with_context(`vertex ({p.X}, {p.Z}) height {p.Y}`).is_true()
+			end
+		end)
+	end)
 end

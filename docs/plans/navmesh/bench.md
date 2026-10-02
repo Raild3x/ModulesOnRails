@@ -1081,6 +1081,25 @@ The regression map for realistic content: `lune run tools/navmesh/bench/city_day
   - City pair 142 is 239.1 forward and 212.6 backward, against 209.0.
 - This is the midpoint A* corridor spread in known-gaps.md, which the plan also saw on rocks at 1/4.
 
+### R2: exact dissolve of same-class edges, off vs on
+- **Command:** `DISSOLVE=0 lune run tools/navmesh/bench/simplify_measure.luau 3 pieces,bench,city,forestriver 1/4`, then the same command without `DISSOLVE=0`.
+- **Tolerance:** both runs at the default 1/4.
+- **Path change:** measured against tolerance 0 with the dissolve on or off to match, so the path column mixes the two passes.
+
+| scene | dissolve | triangles | wall edges | Build ms (range) | FindPath r0 / r1 ms | kept area |
+|---|---|---|---|---|---|---|
+| pieces | off | 9,557 | 2,503 | 2,397 (2,381-2,417) | 26.2 / 29.7 | 60,000.96 |
+| pieces | **on** | **4,819 (-50%)** | 2,503 | **2,055 (-14%)** | **15.7 / 18.3 (-40%)** | 60,000.96 |
+| bench | off / on | 4,605 / 4,571 (-0.7%) | 3,305 / 3,305 | 605 / 615 | 18.1 / 18.5 | equal |
+| City | off / on | 4,157 / 4,151 | 2,664 / 2,664 | 724 / 733 | 46.4 / 48.6 | equal |
+| ForestRiver | off / on | 3,651 / 3,643 | 2,372 / 2,372 | 490 / 481 | 44.2 / 44.7 | equal |
+| props, terrain, walls, rocks | either | identical (no tile dissolves) | | | | |
+
+- **Where it fires:** only on floors authored in overlapping pieces.
+- **Adapter maps:** the Part adapter already joins a floor's faces into one ring, so City and ForestRiver gain almost nothing from it.
+- **Cost:** tiles with nothing to dissolve pay one pass over their kept triangles.
+- **Wall edges and kept area:** equal in every row, as G5 requires.
+
 ## Not measured (flagged)
 - Remote transfer time and payload size per layout (needs a live server/client session).
 - Locality on a real CDT's vertex and triangle ordering. The grid mesh has near-ideal locality,
