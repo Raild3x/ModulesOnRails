@@ -48,6 +48,9 @@ local HEIGHT_TOLERANCE = 0.01
 -- HEIGHT_TOLERANCE: a face joining a floor 0.004 off its own plane moves the floor's cuts, and
 -- under a ramp's foot that walls the crossing (ticket 37).
 local COPLANAR_TOLERANCE = 0.001
+-- Walkable faces narrower than this (in plan) are left out: nothing stands on them, and the thin
+-- sides of a cliff's wedges, tilted toward flat by the slope, would be ledges along every cliff.
+local MIN_FACE_WIDTH = 0.5
 
 -- A convex solid in world space: its vertices and faces (vertex index lists).
 type Solid = { Points: { vector }, Faces: { { number } } }
@@ -325,6 +328,24 @@ local function weld(f: Floor, tolerance: number)
 	end
 end
 
+-- The convex ring's narrowest width in plan: over its edges, the farthest corner from each.
+local function width(ring: { vector }): number
+	local narrowest = math.huge
+	for k, a in ring do
+		local b = ring[k % #ring + 1]
+		local dx, dz = b.x - a.x, b.z - a.z
+		local len = math.sqrt(dx * dx + dz * dz)
+		if len > 1e-9 then
+			local far = 0
+			for _, q in ring do
+				far = math.max(far, math.abs((q.x - a.x) * dz - (q.z - a.z) * dx) / len)
+			end
+			narrowest = math.min(narrowest, far)
+		end
+	end
+	return narrowest
+end
+
 -- Drops corners on a straight line between their neighbours (within HEIGHT_TOLERANCE).
 local function straighten(ring: { vector }): { vector }
 	local i = 1
@@ -413,7 +434,7 @@ local function nameAreas(walkable: { BasePart }): { [string]: number }
 	return areas
 end
 
-type Face = { Ring: { vector }, Floor: Floor }
+type Face = { Ring: { vector }, Floor: Floor, Box: { number }? }
 type Seam = { FloorA: string, FloorB: string, From: vector, To: vector }
 
 -- How far a riser strip reaches out over the lower floor, in studs.
@@ -608,6 +629,9 @@ local function fromParts(
 			for _, i in face do
 				table.insert(ring, solid.Points[i])
 			end
+			if width(ring) < MIN_FACE_WIDTH then
+				continue
+			end
 			if area2D(ring) < 0 then
 				local m = #ring
 				for i = 1, m // 2 do
@@ -654,6 +678,15 @@ local function fromParts(
 		table.insert(solids, toWorld(part, sides))
 	end
 
+	local solidBoxes = {}
+	for k, solid in solids do
+		local x0, z0, x1, z1 = math.huge, math.huge, -math.huge, -math.huge
+		for _, p in solid.Points do
+			x0, z0, x1, z1 = math.min(x0, p.x), math.min(z0, p.z), math.max(x1, p.x), math.max(z1, p.z)
+		end
+		solidBoxes[k] = { x0, z0, x1, z1 }
+	end
+
 	-- Each floor: its welded faces, minus every solid standing within the agent's height.
 	local seams: { Seam } = {}
 	local desc = { Floors = {}, Seams = seams }
@@ -672,7 +705,11 @@ local function fromParts(
 			end
 		end
 		local obstacleRings = {}
-		for _, solid in solids do
+		for k, solid in solids do
+			local sb = solidBoxes[k]
+			if sb[3] <= lo.x or sb[1] >= hi.x or sb[4] <= lo.z or sb[2] >= hi.z then
+				continue
+			end
 			local ring = cut(solid, f, agentHeight)
 			if ring == nil then
 				continue
@@ -707,11 +744,24 @@ local function fromParts(
 		end
 		return false
 	end
+	for _, face in faces do
+		local x0, z0, x1, z1 = math.huge, math.huge, -math.huge, -math.huge
+		for _, p in face.Ring do
+			x0, z0, x1, z1 = math.min(x0, p.x), math.min(z0, p.z), math.max(x1, p.x), math.max(z1, p.z)
+		end
+		local t = HEIGHT_TOLERANCE
+		face.Box = { x0 - t, z0 - t, x1 + t, z1 + t }
+	end
 	for _, fb in faces do
 		local ring = fb.Ring
+		local bb = fb.Box
 		for i, p in ring do
 			local q = ring[i % #ring + 1]
 			for _, fa in faces do
+				local ab = fa.Box
+				if ab[3] < bb[1] or ab[1] > bb[3] or ab[4] < bb[2] or ab[2] > bb[4] then
+					continue
+				end
 				local A = fa.Floor
 				if
 					A == fb.Floor

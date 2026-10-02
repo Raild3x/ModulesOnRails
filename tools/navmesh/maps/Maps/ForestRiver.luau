@@ -12,6 +12,7 @@
 -- `WithTilt(degrees, seed?, options?)` builds the same layout at another tilt (or seed) (the sweep in
 -- tools/navmesh/bench/terrain_sweep.luau); this module is the 5-degree map.
 local Parts = require("../Parts")
+local Terrain = require("../Terrain")
 
 local FORD = 7
 local BANK = math.rad(20)
@@ -146,42 +147,13 @@ local function make(tilt: number, seed: number?, options: { LevelSouth: boolean?
 			table.insert(walkable, P.part("Part", name, V3.new(len, 1, z1 - z0), cf, rgb))
 		end
 
-		-- Triangle abc as two WedgeParts, 0.2 thick, hanging below it.
-		local function triangle(name: string, a: any, b: any, c: any, rgb)
-			local ab, ac, bc = b - a, c - a, c - b
-			if ab:Dot(ab) > ac:Dot(ac) and ab:Dot(ab) > bc:Dot(bc) then
-				c, a = a, c
-			elseif ac:Dot(ac) > bc:Dot(bc) then
-				a, b = b, a
-			end
-			ab, ac, bc = b - a, c - a, c - b
-			local right = ac:Cross(ab).Unit
-			local up, back = bc:Cross(right).Unit, bc.Unit
-			local down = if right.Y > 0 then -right else right
-			local h = math.abs(ab:Dot(up))
-			local sa, sb = V3.new(0.2, h, math.abs(ab:Dot(back))), V3.new(0.2, h, math.abs(ac:Dot(back)))
-			table.insert(
-				walkable,
-				P.part("WedgePart", name, sa, CF.fromMatrix((a + b) / 2 + down * 0.1, right, up, back), rgb)
-			)
-			table.insert(
-				walkable,
-				P.part("WedgePart", name, sb, CF.fromMatrix((a + c) / 2 + down * 0.1, -right, up, -back), rgb)
-			)
-		end
-
 		-- West meadow.
 		local h = meadow()
-		for i = 0, 8 do
-			for j = 0, 15 do
-				local function at(a: number, b: number): any
-					return V3.new(a * 10, h[a][b], b * 10)
-				end
-				local green = { 86 + (i * 7 + j * 3) % 12, 125 + (i * 5 + j * 11) % 14, 70 }
-				triangle(`Meadow{i}_{j}a`, at(i, j), at(i + 1, j), at(i + 1, j + 1), green)
-				triangle(`Meadow{i}_{j}b`, at(i, j), at(i + 1, j + 1), at(i, j + 1), green)
-			end
-		end
+		Terrain.Heightfield(P, rbx, walkable, "Meadow", 0, 0, 10, 9, 16, function(i, j)
+			return h[i][j]
+		end, function(i, j)
+			return { 86 + (i * 7 + j * 3) % 12, 125 + (i * 5 + j * 11) % 14, 70 }
+		end)
 
 		-- The river: banks down to the channel's floor at -3, water over it but the ford.
 		local run = 3 / math.tan(BANK)

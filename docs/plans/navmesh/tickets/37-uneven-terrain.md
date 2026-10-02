@@ -135,3 +135,76 @@ moves if anyone touches Studio). The meadow's per-floor triangles with a wide le
 the river, the channel and ford gap, the bridge, the trees, the plateau joined by risers, and
 the scenario paths (the costly-ford route over the bridge, the cheap one through the ford).
 Drawn and cleared frames differ in 13.6% of pixels.
+
+## Highlands, the landform sampler (2026-10-02)
+
+The user asked for far more variation ("cliffs, mountains ... overhangs and caves"; reference
+charts of landforms), to start slope-merging work from a wide spread. `Maps/Highlands.luau` is a
+second terrain map; ForestRiver stays as it is (it feeds the City map and the numbers above).
+
+- **Ground:** a 320 x 320 heightfield of wedge triangles, 8-stud cells (40 x 40, 6,400 wedges),
+  built by `tools/navmesh/maps/Terrain.luau` (shared with ForestRiver). Two peaks and a saddle,
+  a U-shaped glacier valley, a volcano with a crater, an alluvial fan, hills, a terraced hill,
+  a sinkhole, a plateau ringed by cliffs with a west ramp, a canyon through it, dunes, a mesa,
+  a butte, a basin with a lake and an island, a river, and a coast with a bay, a cape, a
+  peninsula on an isthmus, islands and a sea cliff. Sea level is one Water block at y 0.
+- **Ordinary Parts:** a cave dug into the glacier valley's side (7 studs of headroom, walkable
+  roof with a ramp), a high overhang off the plateau (walk under it), a low tilted shelf (too
+  low), 30 outcrops at random turns, a natural arch over the canyon, hoodoos, a log across the
+  river on two abutments, sea stacks.
+- **Scenarios:** 16 plus 2 negative controls, all pass: the ramp, the arch, under and onto the
+  overhang, into and onto the cave, the glacier valley, the log, the isthmus, the dunes, the
+  sinkhole; and four places nobody reaches (the mesa's top, the crater, the lake island, the
+  peak).
+- **Slope spread** (`lune run tools/navmesh/bench/terrain_slopes.luau Highlands`; the floors'
+  planes, mesh triangles, authored walkable area):
+
+| slope | floors | mesh triangles | area |
+|---|---|---|---|
+| 0-0.5 | 54 | 668 | 35% |
+| 0.5-2 | 174 | 298 | 7% |
+| 2-5 | 190 | 383 | 7% |
+| 5-10 | 176 | 453 | 7% |
+| 10-15 | 198 | 514 | 7% |
+| 15-20 | 152 | 349 | 6% |
+| 20-25 | 178 | 420 | 7% |
+| 25-30 | 135 | 349 | 6% |
+| 30-35 | 98 | 282 | 4% |
+| 35-40 | 205 | 400 | 8% |
+| 40-45 | 185 | 378 | 7% |
+| 45+ (riser strips) | 23 | 73 | 0% |
+
+- **Numbers:** 6,449 Parts; FromParts 4.0 s, Build 2.1 s; 4,567 triangles, 1,768 floors, 2,596
+  seams; bake 2,205,113 bytes.
+- **What it took** (each ruled and merged early; review.md):
+  - the adapter's bounding-box checks (a 3,200-triangle heightfield took over a minute);
+  - leaving out walkable faces narrower than 0.5 studs (a cliff's wedges tilt their thin sides
+    toward flat, which became ledges along every cliff and failed Build).
+- **The log** lies level on abutments: tilted, its higher end's disk leaned over the bank and
+  the step rule dropped that riser (the "riser lean" gap, again).
+- **Studio:** `python tools/navmesh/maps/studio.py Highlands --settle 20 --hold 30` (the map
+  takes a few seconds to build). Triangles are coloured by slope in the Parts themselves
+  (green flat to grey too steep, snow on the heights).
+
+### Highlands, round 2: fidelity, costs, links, probe (2026-10-02)
+
+The user asked for varied fidelity, links and cost areas drawn, and a draggable start and goal.
+- **Fidelity:** `Terrain.Adaptive`, a quadtree from 32-stud cells (flat ground) to 4 (cliffs)
+  and 2 (the trail, the lava), stitched at T-junctions by snapping (fans fold rings:
+  known-gaps). About 5,900 ground triangles kept above water (11,793 Parts); the mesh is
+  10,665 triangles, 3,461 floors, 5,196 seams. Ground under water is left out.
+- **The finer ground showed the old coarse grid's luck:** the plateau ramp dipped into a cliff
+  just below the top (the 8-stud samples stepped over it), and Parts placed by the height
+  formula missed the built ground by up to the tolerance; `Adaptive` now returns the built
+  surface's height for placing them.
+- **Areas:** Trail 0.5, Mud 4, Sand 2, Snow 3, Scree 3, Lava never (the map's `Filter`).
+- **Links:** `GenerateLinks` (Harness `GenerateLinks` field): 329 drops and jumps. The crater
+  is now reached by a jump off the rim; the peak is Partial, not NoGoal (a coarse mountain cell
+  leaves a walkable triangle near the top).
+- **Scenarios:** 22, with controls: a jump into the crater and no way in without links; the
+  canyon by jumps (161 studs) and the long way without (213); round the lava with costs, and
+  across it without (control).
+- **Studio:** links as arrows (drops white, jump arcs green), the mesh by area with a legend,
+  Start/Goal balls (drag them; `AgentRadius`, `Costs`, `Links`, `Scenarios` on Start),
+  `studio.py --tour` (one capture per camera stop). `plan.luau` draws the same from above with
+  no Studio, by area, floor or slope, with a probe.

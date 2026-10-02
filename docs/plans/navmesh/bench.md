@@ -1123,6 +1123,19 @@ Cells are add / remove, in ms.
 - **With the cap, what still grows with N is the whole-ring re-snap, `TileInputs`:** 0.5 ms at 512 points, 1.9 at 2,048 and 8 at 8,192. That is the `ponytail:` in `Tiles.reSnap`, whose upgrade path is a per-ring edge index.
 - **v3 (lazy links):** about 10-31% off uncapped Build on the bench scenes, with widths bitwise unchanged on 10 builds.
 
+## Highlands, slope spread (2026-10-02)
+`lune run tools/navmesh/bench/terrain_slopes.luau Highlands`: 6,449 Parts, FromParts 4.0 s,
+Build 2.1 s, 4,567 triangles, 1,768 floors, 2,596 seams, bake 2,205,113 bytes. Floors by slope:
+54 under 0.5 degrees (35% of the area), then 98-205 per 5-degree band up to 45, and 23 riser
+strips above. Ticket 37's "Highlands" section has the table. The baseline for merging floors
+of similar slope.
+
+## Highlands, adaptive (2026-10-02)
+`lune run tools/navmesh/maps/run.luau Highlands`: 11,793 Parts, FromParts 12.1 s, Build 4.2 s,
+GenerateLinks 42 s (329 links), 10,665 triangles, 3,461 floors, 5,196 seams, bake 4,321,370
+bytes. Studio loads the bake (`maps/bake.luau`) instead of building.
+
+
 ## Not measured (flagged)
 - Remote transfer time and payload size per layout (needs a live server/client session).
 - Locality on a real CDT's vertex and triangle ordering. The grid mesh has near-ideal locality,

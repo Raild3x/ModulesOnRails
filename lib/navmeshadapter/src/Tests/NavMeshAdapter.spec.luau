@@ -507,6 +507,49 @@ return function(t: tiniest)
 
 	-- Ticket 37's meadow (ForestRiver, seed 37, 1 degree): one triangle as two WedgeParts, and the
 	-- next triangle's first wedge, exactly as the map makes them (f32 Part data).
+	describe("narrow faces", function()
+		test("a walkable face narrower than half a stud is left out; a wider one stays", function()
+			local desc: any = NavMeshAdapter.FromParts({
+				part("Part", "Beam", { 10, 1, 0.4 }, CFrame.new(0, -0.5, 0)),
+				part("Part", "Plank", { 10, 1, 0.6 }, CFrame.new(0, -0.5, 5)),
+			}, {})
+			expect(desc.Floors.Beam).never_exists()
+			expect(desc.Floors.Plank).exists()
+		end)
+
+		test("a cliff of wedge triangles makes no ledges of the wedges' thin sides", function()
+			-- A 60-degree triangle as two 0.2-thick wedges: their side faces tilt toward flat.
+			local a, b, c = Vector3.new(0, 0, 0), Vector3.new(8, 0, 0), Vector3.new(4, 12, 7)
+			local ab, ac, bc = b - a, c - a, c - b
+			if ac:Dot(ac) > bc:Dot(bc) and ac:Dot(ac) > ab:Dot(ab) then
+				a, b = b, a
+			elseif ab:Dot(ab) > bc:Dot(bc) then
+				c, a = a, c
+			end
+			ab, ac, bc = b - a, c - a, c - b
+			local right = ac:Cross(ab).Unit
+			local up, back = bc:Cross(right).Unit, bc.Unit
+			local down = if right.Y > 0 then -right else right
+			local h = math.abs(ab:Dot(up))
+			local parts = {
+				part(
+					"WedgePart",
+					"Cliff",
+					{ 0.2, h, math.abs(ab:Dot(back)) },
+					CFrame.fromMatrix((a + b) / 2 + down * 0.1, right, up, back)
+				),
+				part(
+					"WedgePart",
+					"Cliff",
+					{ 0.2, h, math.abs(ac:Dot(back)) },
+					CFrame.fromMatrix((a + c) / 2 + down * 0.1, -right, up, -back)
+				),
+			}
+			local desc: any = NavMeshAdapter.FromParts(parts, {})
+			expect(next(desc.Floors)).never_exists()
+		end)
+	end)
+
 	describe("Part terrain", function()
 		local function wedge(name: string, size: { number }, c: { number }): any
 			return part("WedgePart", name, size, CFrame.new(table.unpack(c)))

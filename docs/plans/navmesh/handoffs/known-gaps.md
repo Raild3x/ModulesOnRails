@@ -319,3 +319,25 @@ changes no library code.
 - **The load spike, measured** (the item above). On the 4 km open map:
   - the first radius `FindPath` takes 130 ms, against 22 ms warm;
   - the first `Update` takes 250 ms, against 73 ms.
+
+## Found on Highlands' adaptive terrain (Track M2, 2026-10-02)
+
+Highlands moved to `Terrain.Adaptive` (cells 32 down to 2 studs). Each of these failed the
+build or slowed it; the map dodges the first three, none is fixed.
+- **Adapter, riser seams under the grid:** `riserStrips` keeps an interval longer than 0.001
+  studs, below the core's 1/256-stud grid, so Build fails "seam N: has zero length on the
+  1/256-stud grid" (the log's riser over a 2-stud terrain cell). The other adapter cutoffs use
+  HEIGHT_TOLERANCE (0.01); this one is a one-line change, M1's code, unruled. Dodged: the trail
+  ends were moved off the log.
+- **Adapter, fans fold rings:** terrain stitched with fans (a cell's middle joined to its
+  smaller neighbours' corners) joins into walkable rings that run out to a vertex and back, and
+  Build rejects "the ring folds back on itself". Repro: `tools/navmesh/bench/adaptive_fan_repro.luau`
+  (snap stitching builds, fan fails). A small fan alone builds; it needs Highlands' cuts too.
+- **Adapter, risers on tilted outcrops:** random tilted rocks (outcrop seeds 4242, 4246) fail
+  Build "floors 'Riser N' and 'Outcrop M' don't meet across it": a 0.18-stud riser onto a tilted
+  face that other cuts crowd. Dodged: seed 4245.
+- **Core, Build uncapped:** without `MaxAgentRadius`, Build on a 64 x 64 adaptive patch
+  (215 floors, 356 seams) ran over two minutes; with 2, 0.2 s. The docs say "30-50% more".
+- **Core, GenerateLinks cost:** 42 s on Highlands (10,665 triangles, 329 links), against 12 s
+  FromParts and 4 s Build: the detour walk per candidate. Studio can't run it inside its
+  10-second "not responding" watchdog, so big maps bake in Lune (`maps/bake.luau`).

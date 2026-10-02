@@ -52,6 +52,14 @@ export type Map = {
 	-- hold (NPCs walking). See Maps/BuildingElevator.luau.
 	Animate: ((report: any, NavMesh: any, rbx: Rbx, parent: Instance) -> (dt: number) -> ())?,
 	SeeThrough: { string }?, -- names of Parts Studio draws see-through (an upper floor over a stair)
+	-- NavMesh.GenerateLinks options: drops and jumps are generated off the built mesh and added
+	-- to Built.Links, then the mesh is built again with them.
+	GenerateLinks: any?,
+	-- Studio only: the filter the draggable Start and Goal use (a function of the area-name
+	-- table), and a colour per area name for the area view.
+	Filter: ((areas: { [string]: number }) -> any)?,
+	AreaColors: { [string]: string }?,
+	Bake: boolean?, -- Studio (studio.py) loads the mesh baked in Lune by bake.luau: for big maps
 }
 
 export type Row = {
@@ -71,6 +79,7 @@ export type Report = {
 	Rows: { Row },
 	FromPartsMs: number,
 	BuildMs: number,
+	GenerateMs: number?,
 	Triangles: number,
 	Floors: number,
 	Seams: number,
@@ -229,6 +238,17 @@ function Harness.Run(map: Map, NavMesh: any, Adapter: any, rbx: Rbx, parent: Ins
 	t0 = os.clock()
 	local mesh = NavMesh.Build(desc)
 	local buildMs = (os.clock() - t0) * 1000
+	local generateMs
+	if map.GenerateLinks then
+		t0 = os.clock()
+		local links = table.clone(built.Links or {})
+		for _, link in NavMesh.GenerateLinks(mesh, map.GenerateLinks) do
+			table.insert(links, link)
+		end
+		generateMs = (os.clock() - t0) * 1000
+		desc.Links = links
+		mesh = NavMesh.Build(desc)
+	end
 
 	local floors = 0
 	for _ in desc.Floors do
@@ -243,6 +263,7 @@ function Harness.Run(map: Map, NavMesh: any, Adapter: any, rbx: Rbx, parent: Ins
 		Rows = {},
 		FromPartsMs = fromPartsMs,
 		BuildMs = buildMs,
+		GenerateMs = generateMs,
 		Triangles = mesh.TriangleCount,
 		Floors = floors,
 		Seams = #(desc.Seams or {}),
@@ -318,6 +339,9 @@ function Harness.Format(r: Report): string
 			r.BakeBytes
 		)
 	)
+	if r.GenerateMs then
+		table.insert(lines, string.format("GenerateLinks %.1f ms: %d links", r.GenerateMs, #r.Desc.Links))
+	end
 	table.insert(lines, if r.Pass then "MAP PASS" else "MAP FAIL")
 	return table.concat(lines, "\n")
 end
