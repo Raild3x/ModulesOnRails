@@ -1100,6 +1100,29 @@ The regression map for realistic content: `lune run tools/navmesh/bench/city_day
 - **Cost:** tiles with nothing to dissolve pay one pass over their kept triangles.
 - **Wall edges and kept area:** equal in every row, as G5 requires.
 
+## Huge rings (Track F F2, 2026-10-02)
+`lune run tools/navmesh/bench/huge_ring_update.luau ns=512,2048,8192 tiles=8,32 cycles=3 check=1 [eps=0] [cap=...]`
+
+- **Scene:** one noisy circle of N points (radius 150, noise about ±0.5 stud), flat.
+- **Measured:** a 2 x 2 crate 3 studs inside the circle is added, then removed. Each cell is the median over 3 cycles of the Update, in ms.
+- **Oracle:** every row's mesh equals a fresh Build with the crate baked in (`check=1`).
+
+| N | TileSize | before (no simplification, uncapped) | F1 + v1 (uncapped) | **defaults (1/4 stud, cap 8)** |
+|---|---|---|---|---|
+| 512 | 8 | 389 / 433 | 178 / 177 | **2.6 / 2.4** |
+| 512 | 32 | 455 / 478 | 125 / 125 | **1.7 / 1.1** |
+| 2,048 | 8 | 3,641 / 4,255 | 1,007 / 1,151 | **5.9 / 5.4** |
+| 2,048 | 32 | 7,642 / 7,274 | 1,481 / 1,548 | **5.4 / 5.4** |
+| 8,192 | 8 | about 56,000 / 67,000 (the F2 agent's run) | 14,024 / 17,001 | **22 / 25** |
+| 8,192 | 32 | not run | not run | **31 / 34** |
+
+Cells are add / remove, in ms.
+
+**Where the time went:**
+- **Uncapped, it is all `Clearance.Refresh`.** Each recomputed width searches walls across the room: about N^2 per triangle, with a recompute set that stays fixed at 70-280 triangles.
+- **With the cap, what still grows with N is the whole-ring re-snap, `TileInputs`:** 0.5 ms at 512 points, 1.9 at 2,048 and 8 at 8,192. That is the `ponytail:` in `Tiles.reSnap`, whose upgrade path is a per-ring edge index.
+- **v3 (lazy links):** about 10-31% off uncapped Build on the bench scenes, with widths bitwise unchanged on 10 builds.
+
 ## Not measured (flagged)
 - Remote transfer time and payload size per layout (needs a live server/client session).
 - Locality on a real CDT's vertex and triangle ordering. The grid mesh has near-ideal locality,

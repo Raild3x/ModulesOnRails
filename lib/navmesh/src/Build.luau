@@ -62,6 +62,10 @@ local PLANAR_TOLERANCE = 1e-3
 -- NavMeshDesc.SimplifyTolerance when not given (studs; Track F R1, simplification-plan.md D1;
 -- ruled 2026-10-02 from the measured 1/16, 1/10 and 1/4: bench.md "Simplification").
 local DEFAULT_SIMPLIFY_TOLERANCE = 0.25
+-- NavMeshDesc.MaxAgentRadius when not given (studs; math.huge = no cap). Ruled 2026-10-02: an
+-- uncapped width searches walls across the whole room, so one crate near a long outline cost
+-- seconds per Update; capped, milliseconds (bench.md "Huge rings").
+local DEFAULT_MAX_AGENT_RADIUS = 8
 -- The default TileSize adapts to each floor (bench.md, "TileSize re-run over scenes"): about 36
 -- constraint edges per tile balanced a tile's rebuild time (1-2 ms) against the triangles its
 -- borders add (about 15%) in every scene. Rounded to a power of two from 4 to 256 studs.
@@ -1710,7 +1714,9 @@ function Build.Build(desc: NavMeshDesc): Storage.State
 		error(`NavMesh.Build: TileSize must be a number of studs from 1/{GRID} to {LIMIT}, got {tileStuds}`, 2)
 	end
 	local cap = desc.MaxAgentRadius
-	if cap ~= nil and (type(cap) ~= "number" or not (cap > 0 and cap <= LIMIT)) then
+	if cap == nil then
+		cap = DEFAULT_MAX_AGENT_RADIUS
+	elseif type(cap) ~= "number" or not (cap > 0 and (cap <= LIMIT or cap == math.huge)) then
 		error(`NavMesh.Build: MaxAgentRadius must be a number of studs above 0, got {cap}`, 2)
 	end
 	local tolerance = desc.SimplifyTolerance
@@ -1743,7 +1749,7 @@ function Build.Build(desc: NavMeshDesc): Storage.State
 		addLink(s, i, link)
 	end
 	connect(s)
-	Clearance.Compute(s, cap or 0)
+	Clearance.Compute(s, if cap == math.huge then 0 else cap) -- 0 = uncapped
 	return s
 end
 

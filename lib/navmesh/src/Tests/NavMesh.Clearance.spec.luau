@@ -118,8 +118,10 @@ return function(t: tiniest)
 
 		test("an open floor across a tile corner admits its true free width (SR4)", function()
 			-- 40 x 40 with 8-stud tiles: the middle triangles have only free (tile) vertices.
+			-- Uncapped: the free width here is up to 40 studs.
 			local mesh = NavMesh.Build {
 				TileSize = 8,
+				MaxAgentRadius = math.huge,
 				Floors = { Ground = { Walkable = { flat(0, { 0, 0, 40, 0, 40, 40, 0, 40 }) } } },
 			}
 			local wallList = walls(mesh)
@@ -307,7 +309,10 @@ return function(t: tiniest)
 			for _, desc in
 				{ slanted, tiny, stackedWalls, NavMesh.Fixtures.ThreeFloorStairs.Desc, NavMesh.Fixtures.Courtyard.Desc }
 			do
-				local mesh = NavMesh.Build(desc)
+				-- Uncapped, so every width is the true one.
+				local uncapped = table.clone(desc)
+				uncapped.MaxAgentRadius = math.huge
+				local mesh = NavMesh.Build(uncapped)
 				local wallsByFloor = {}
 				for tri = 1, Storage.TriangleCount(mesh) do
 					local floor = Storage.GetTriangleFloor(mesh, tri)
@@ -415,6 +420,30 @@ return function(t: tiniest)
 			expect(function()
 				NavMesh.FindPath(mesh, v(2, 2), v(18, 2), { AgentRadius = -1 })
 			end).fails_with("AgentRadius must be")
+		end)
+
+		test("MaxAgentRadius defaults to 8 studs; math.huge means no cap", function()
+			-- An open 40 x 40 floor: its middle is about 20 studs from every wall.
+			local open: any =
+				{ TileSize = 8, Floors = { Ground = { Walkable = { flat(0, { 0, 0, 40, 0, 40, 40, 0, 40 }) } } } }
+			local mesh = NavMesh.Build(open)
+			expect(Storage.GetMaxAgentRadius(mesh)).is(8)
+			local widest = 0
+			for tri = 1, Storage.TriangleCount(mesh) do
+				for k = 1, 3 do
+					widest =
+						math.max(widest, Storage.GetCornerWidth(mesh, tri, k), Storage.GetPortalWidth(mesh, tri, k))
+				end
+			end
+			expect(widest).is(16)
+			expect(NavMesh.FindPath(mesh, v(10, 20), v(30, 20), { AgentRadius = 8 }).Status).is("Success")
+			expect(function()
+				NavMesh.FindPath(mesh, v(10, 20), v(30, 20), { AgentRadius = 9 })
+			end).fails_with("MaxAgentRadius")
+			open.MaxAgentRadius = math.huge
+			local uncapped = NavMesh.Build(open)
+			expect(Storage.GetMaxAgentRadius(uncapped)).is(0)
+			expect(NavMesh.FindPath(uncapped, v(10, 20), v(30, 20), { AgentRadius = 9 }).Status).is("Success")
 		end)
 	end)
 

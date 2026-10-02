@@ -7,7 +7,8 @@ track that now owns it, where one does. Items without an owner are deferred unti
 - **Links skip ticket 27's end check, and Storage link ids are dense:** Track E. The end check
   is closed by E3 (ticket 27, "Link and seam entries"); what it leaves is in the Track B list
   below.
-- **Update time grows badly with one huge authored ring:** Track F.
+- ~~**Update time grows badly with one huge authored ring:** Track F.~~ Done (2026-10-02); see
+  the entry under Track B below.
 
 **Narrowed by Track G (2026-10-01):** a Partial or Budget end is now judged with ticket 27's
 barriers, as FindPath returns it (pushed off the walls). See ticket 27's "Partial and Budget
@@ -166,7 +167,13 @@ ends" section. Two kinds of end still pass unjudged; both are below.
 ## Known gaps left by Track B (2026-10-01)
 None of these are wrong answers today, but each is a place where the mesh is weaker or slower
 than it looks. Read them before touching `Search`, `Clearance`, `Tiles` or `Serialize`.
-- **Update time grows badly with one huge authored ring.**
+- ~~**Update time grows badly with one huge authored ring.**~~ **Fixed by Track F (2026-10-02;
+  bench.md "Huge rings"):** the cause was each uncapped width searching walls across the
+  whole room (about N^2 per recomputed triangle), not the reach rule or the wall index. Ring
+  simplification (F1), lazy link evaluation (v3) and the default `MaxAgentRadius` of 8 (ruled)
+  bring a crate next to an 8,192-point outline from about 56 s to 22-34 ms. Uncapped
+  (`MaxAgentRadius = math.huge`) it still costs seconds; the whole-ring re-snap (8 ms at
+  8,192 points) is the `ponytail:` in `Tiles.reSnap`. The original report:
   - This predates Track B; old and new code are within noise.
   - A crate near a walkable outline of 2,048 points takes 1.6 s to add at TileSize 8, and 5.0
     s at TileSize 32. At 512 points a remove spent about 270 of 275 ms in
@@ -262,7 +269,12 @@ area-name table.
 These are numbers on large maps, not wrong answers. Each has a script under
 `tools/navmesh/bench/`. Details are in bench.md, "Large worlds, 1-4 km". None is fixed. Track H
 changes no library code.
-- **Build and Update cost O(triangles x walkable rings) on a floor.**
+- ~~**Build and Update cost O(triangles x walkable rings) on a floor.**~~ **Fixed by Track F
+  (2026-10-02, a601e6a):** surfaces are bucketed by tile once per floor, and a tile asks only
+  those whose box meets it. `rings_repro.luau` at 4,096 rings: Build 7.3 s to 1.2 s, Locates
+  per triangle 13,413 to 113 (flat in the ring count). `large_world.luau` terrain Build: 1 km
+  3.3 s to 0.45 s, 2 km 63 s to 1.9 s (with the default simplification on). The original
+  report:
   - Build's heights loop (`triangulateTile`, "Heights. Each kept triangle...") asks every
     walkable ring's surface for every kept triangle, with one `CDT.Locate` each. `Update` hands
     the same per-floor surface list to `TriangulateTile`.
@@ -284,8 +296,12 @@ changes no library code.
     `table.move`, and 4-5 ms by index.
   - **Fix:** append by index, or `table.create` the destination.
   - Without it, `Deserialize` would run at about 0.9 us per triangle, about 240 ms at 4 km.
-- **A warm Update scans every authored ring on its floor.** `Tiles.reSnap` takes the bounds of
-  every ring to find those near the dirty tiles.
+- ~~**A warm Update scans every authored ring on its floor.**~~ **Fixed by Track F
+  (2026-10-02, a601e6a):** most of it was `Storage.GetFloorSources` copying every ring out on
+  each call, twice per Update. Tiles now caches each floor's sources, surfaces and a tile to
+  nearby-rings index per mesh. `update_profile.luau` on the 4 km open map: 65.2 ms to 24.7 ms
+  per warm Update; what is left is the O(T) clean copy (18 ms, below). The original report:
+  `Tiles.reSnap` takes the bounds of every ring to find those near the dirty tiles.
   - `update_profile.luau`: on the open map, the scan takes 1.5 ms at 1 km, 8.4 ms at 2 km and
     44 ms at 4 km, out of a 67 ms `Update`. The rebuild itself is about 2 ms.
   - **Fix:** a per-floor index of ring boxes, like Snap's tile hash.

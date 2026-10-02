@@ -21,6 +21,17 @@ the const question are deliberately open, gated on benchmarks.
     included. Probed: the original route still exists on the simplified mesh and the reverse
     query is about the original length, so it is the corridor-search spread (known-gaps.md),
     not lost space.
+- **Huge rings, uncapped widths (F2): land the v3 speedup and default `MaxAgentRadius` to 8
+  studs.** User: "Lets land the v3 speedup if it will improve performance. Also implement a cap
+  of 8 studs". Offered: keep and document (recommended), v3 only, or a default cap.
+  - Measured first: the F2 profile found the cost is each uncapped width searching walls
+    across the whole room (about N^2 in the ring's points), not the reach rule or the wall
+    index. After F1 an 8,192-point outline still took 14 s per Update uncapped; with a cap,
+    milliseconds.
+  - Built: v3 (lazy link evaluation on OpenList, a cheaper gap bound; widths bitwise
+    unchanged), and the default cap. `MaxAgentRadius = math.huge` means no cap (stored as 0,
+    as before); bakes keep the cap they were built with. An `AgentRadius` above 8 now errors
+    on a mesh built without a cap of its own.
 - Earlier rulings this track builds on (2026-09-28): one mesh-wide tolerance (D2a), crack
   welding in the adapter only (D3a).
 

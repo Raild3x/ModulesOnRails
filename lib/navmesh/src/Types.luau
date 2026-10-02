@@ -105,7 +105,7 @@ export type GenerateLinksOptions = {
 	.Seams { SeamDesc }?
 	.Links { LinkDesc }? -- link id = its 1-based index
 	.TileSize number? -- studs, from 1/256 to 32768; tiles are aligned to the world origin (default: per floor, about 36 edges per tile, a power of two from 4 to 256)
-	.MaxAgentRadius number? -- optional cap on AgentRadius (studs); bounds how far Build and Update compute clearance, so set it when you can: uncapped, Update costs 30-50% more (default: no cap)
+	.MaxAgentRadius number? -- cap on AgentRadius (studs; default 8, math.huge = no cap); bounds how far Build and Update compute clearance: uncapped, one obstacle near a long outline can cost seconds per Update
 	.SimplifyTolerance number? -- studs (default 0.25; 0 = off): dense obstacle rings may grow and planar walkable rings shrink by up to this much, never the other way, to drop points; AddObstacle uses the same value
 
 	The authored description a mesh is built from. Part→polygon conversion belongs in a separate
