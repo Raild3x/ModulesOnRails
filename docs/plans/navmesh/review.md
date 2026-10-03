@@ -32,6 +32,17 @@ the const question are deliberately open, gated on benchmarks.
     unchanged), and the default cap. `MaxAgentRadius = math.huge` means no cap (stored as 0,
     as before); bakes keep the cap they were built with. An `AgentRadius` above 8 now errors
     on a mesh built without a cap of its own.
+- **The vertex stall (known-gaps, "a walker beside a vertex where several floors meet"): land
+  the funnel fix with a per-mesh cache.** User: "Land it + per-mesh cache (Recommended)".
+  - Why it came up: Track F's mesh changes made City's day fail on seeds 1, 6 and 8, all at
+    stalls of this kind. The repro was Blocked on `feat/navmesh` too.
+  - Cause: the funnel rounded a portal end by the radius only if it was a wall vertex on that
+    portal's own floor. At a vertex shared by several floors with a wall on only one of them, a
+    waypoint sat exactly on the wall's tip.
+  - Built on branch `navmesh-vertex-stall` (709b94e, 398cb37), merged into Track F: `wallAt`
+    walks the fan round the vertex across seams; a cache per mesh, emptied by `Update`. Warm
+    radius FindPath on City went from 1.13x without the cache to 0.99-1.02x of `feat/navmesh`.
+    City's day passes all 10 seeds.
 - Earlier rulings this track builds on (2026-09-28): one mesh-wide tolerance (D2a), crack
   welding in the adapter only (D3a).
 

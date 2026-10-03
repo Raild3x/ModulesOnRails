@@ -45,6 +45,35 @@ survived), the covered-line score.
   - Every behaviour of the change has a spec that fails without it: the edge probe, a seam off
     a floor that has obstacles, floors on one side of a seam with one partly cut, and floors
     crossing at the seam (the overlap rule).
+- **Track F (2026-10-02): Build 81.5% (998 / 1224 decided, 226 survived), Clearance 79.0%
+  (677 / 857, 180 survived).** Serialize 89.0%, Tiles 82.4% and Quantize 85.3% held their
+  baselines. Covered-line score, `--mutate-files` runs on F's files.
+  - **Build: the first run was 79.2%.** New-code survivors that were real gaps got specs (commit
+    2406665):
+    - exact ring counts (collinear runs, a triangle, seeded cylinders, a rock, a coast);
+    - a change of slope through the tile corner;
+    - collapsed points in a bake;
+    - the dissolve default.
+
+    That brought Build to 81.5%.
+  - **Build, triaged as not real** (about 60 left in the new code):
+    - `table.create` sizes, and the `pin` default for the unused index n + 1;
+    - which point is the anchor (any anchor gives a valid ring), and the order the four grid
+      candidates are tried (any one that passes the checks is valid);
+    - `<` against `<=` on float distances, and the `eps <= 0` guards repeated inside
+      `simplifyRing`;
+    - `beside` refusing exactly collinear points (a collapse just doesn't happen);
+    - the seam pin's one-pixel slack;
+    - a slope key built from one axis only. Two planes equal at the tile corner that differ
+      in one slope meet along a tile line, and tile lines never dissolve.
+  - **Clearance: the drop is v3's lazy link evaluation in `chain`** (30 survivors):
+    - the half-length gap bound;
+    - `<` against `<=` on keys and labels;
+    - the pair packing.
+
+    Each one changes how much work the exact search does, never its answer, so widths stay
+    bitwise the same and no spec can see them. The old eager search had the same kind
+    (`barriers`, `edgeMinMax`).
 - **`src/Tests/Helpers/Flood.luau` is a test helper**, and it gets mutated too (48.7%, 77
   survivors). It's not library code, so leave it out of the baseline. Excluding `Tests/` from
   `--mutate` is a small tooling fix for whoever touches the coverage tool next.
