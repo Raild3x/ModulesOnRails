@@ -97,6 +97,87 @@ return function(t: tiniest)
 			expect(event).is("Arrived")
 		end)
 
+		test("a wall corner where several floors meet is rounded at the radius, and arrived past", function()
+			-- Four 10 x 10 quadrant floors meet at the origin. NE and SE touch along z = 0 (x > 0)
+			-- with no seam: a wall that ends at the origin. The way round runs NE, NW, SW, SE
+			-- across seams, and on NW and SW the origin is free space: only NE's and SE's
+			-- copies of it are wall vertices (City's meadow, follower_vertex_stall.luau).
+			local mesh = NavMesh.Build {
+				Floors = {
+					NE = { Walkable = { rect(0, 0, 10, 10) } },
+					NW = { Walkable = { rect(-10, 0, 0, 10) } },
+					SW = { Walkable = { rect(-10, -10, 0, 0) } },
+					SE = { Walkable = { rect(0, -10, 10, 0) } },
+				},
+				Seams = {
+					{ FloorA = "NE", FloorB = "NW", From = v(0, 0, 0), To = v(0, 0, 10) },
+					{ FloorA = "NW", FloorB = "SW", From = v(-10, 0, 0), To = v(0, 0, 0) },
+					{ FloorA = "SW", FloorB = "SE", From = v(0, 0, -10), To = v(0, 0, 0) },
+				},
+			}
+			local filter = { AgentRadius = 1 }
+			local from = v(3, 0, 1.5)
+			local path = NavMesh.FindPath(mesh, from, v(3, 0, -1.5), filter)
+			expect(path.Status).is("Success")
+			-- No leg of the path comes within half the radius of the wall's end.
+			local w = path.Waypoints
+			for i = 1, #w - 1 do
+				local a, b = w[i].Position, w[i + 1].Position
+				local dx, dz = b.X - a.X, b.Z - a.Z
+				local k = math.clamp(-(a.X * dx + a.Z * dz) / (dx * dx + dz * dz), 0, 1)
+				local d = math.sqrt((a.X + k * dx) ^ 2 + (a.Z + k * dz) ^ 2)
+				expect(d >= 0.5).with_context(`leg {i}: {fmt(a)} -> {fmt(b)} is {d} from the corner`).is_true()
+			end
+			local event, p = run(mesh, NavMesh.NewFollower(path), from, 0.5, filter)
+			expect(event).with_context(fmt(p)).is("Arrived")
+		end)
+
+		test("an Update that walls or frees a corner where several floors meet changes how paths pass it", function()
+			-- The four quadrants, all seamed: the origin is free space until an obstacle on SE
+			-- (a wedge from the origin) makes it a wall vertex of SE only. The funnel caches its
+			-- wall-corner answers per mesh; a cached answer from before an Update must not last.
+			local mesh = NavMesh.Build {
+				Floors = {
+					NE = { Walkable = { rect(0, 0, 10, 10) } },
+					NW = { Walkable = { rect(-10, 0, 0, 10) } },
+					SW = { Walkable = { rect(-10, -10, 0, 0) } },
+					SE = { Walkable = { rect(0, -10, 10, 0) } },
+				},
+				Seams = {
+					{ FloorA = "NE", FloorB = "NW", From = v(0, 0, 0), To = v(0, 0, 10) },
+					{ FloorA = "NW", FloorB = "SW", From = v(-10, 0, 0), To = v(0, 0, 0) },
+					{ FloorA = "SW", FloorB = "SE", From = v(0, 0, -10), To = v(0, 0, 0) },
+					{ FloorA = "NE", FloorB = "SE", From = v(0, 0, 0), To = v(10, 0, 0) },
+				},
+			}
+			local filter = { AgentRadius = 1 }
+			-- The nearest any leg of the path from a to b comes to the origin.
+			local function nearest(a: any, b: any): number
+				local w = NavMesh.FindPath(mesh, a, b, filter).Waypoints
+				local best = math.huge
+				for i = 1, #w - 1 do
+					local p, q = w[i].Position, w[i + 1].Position
+					local dx, dz = q.X - p.X, q.Z - p.Z
+					local k = math.clamp(-(p.X * dx + p.Z * dz) / (dx * dx + dz * dz), 0, 1)
+					best = math.min(best, math.sqrt((p.X + k * dx) ^ 2 + (p.Z + k * dz) ^ 2))
+				end
+				return best
+			end
+			-- Free: these pass the origin's portals on NE and NW (and cache that it is free).
+			expect(nearest(v(1, 0, 3), v(-3, 0, -1)) > 1.4).is_true()
+			expect(nearest(v(3, 0, 1), v(-1, 0, -3)) > 1.4).is_true()
+			expect(nearest(v(3, 0, 1), v(-3, 0, -1)) < 1e-3).is_true()
+			local wedge = NavMesh.AddObstacle(mesh, "SE", { v(0, 0, 0), v(6, 0, -5.5), v(5.5, 0, -6) })
+			NavMesh.Update(mesh)
+			-- Walled: the way round, over NE, NW and SW, keeps every leg 0.92 r off the origin
+			-- (chords of the radius-r circle); a stale "free" on NW's origin cuts it to 0.83.
+			local walled = nearest(v(3, 0, 1), v(-3, 0, -1))
+			expect(walled > 0.9).with_context(`{walled}`).is_true()
+			NavMesh.RemoveObstacle(mesh, wedge)
+			NavMesh.Update(mesh)
+			expect(nearest(v(3, 0, 1), v(-3, 0, -1)) < 1e-3).is_true()
+		end)
+
 		test("every path on the courtyard is followed to Arrived without a stall, over many seeds", function()
 			local rng = seeded(23)
 			for i = 1, 150 do

@@ -23,8 +23,9 @@
 
 	**Agent radius (SR4):** each portal end that is a wall vertex is moved along the portal,
 	towards its other end, by min(r, half the portal's length). Free-space vertices (tile, area,
-	seam) are not offset, but a seam portal's end that is a wall vertex on either of its floors
-	is: the corner where a seam meets a wall.
+	seam) are not offset, but a vertex that is a wall vertex on any floor meeting there is: the
+	corner where a seam meets a wall, even on a floor that only meets the walled one at that
+	vertex.
 
 	That is the whole guarantee: where the path crosses a portal ending at a wall corner, it
 	crosses at least that far from the corner, measured along the portal. It is not a distance
@@ -285,16 +286,83 @@ local function refract(lefts: { vector }, rights: { vector }, owners: { number }
 	end
 end
 
--- Whether `p` is a wall vertex of triangle `t`, matched in (X, Z) only (a seam point has one
--- height per floor) and well inside a grid pixel (vertices are on the 1/256 grid).
-local function wallAt(s: Storage.State, t: number, p: vector): boolean
-	for _, v in { Storage.GetTriangle(s, t) } do
-		local q = Storage.GetVertex(s, v)
-		if math.abs(q.X - p.X) < 1e-3 and math.abs(q.Z - p.Z) < 1e-3 then
-			return Storage.IsWallVertex(s, v)
+local PIXEL = 1 / 256 + 1e-9 -- a seam's two floors' copies of a vertex differ by up to this
+
+-- The vertex of triangle `t` at `p` in (X, Z), within a grid pixel, or 0.
+local function vertexAt(s: Storage.State, t: number, p: vector): number
+	local v1, v2, v3 = Storage.GetTriangle(s, t)
+	local v, best = 0, PIXEL
+	for k = 1, 3 do
+		local w = if k == 1 then v1 elseif k == 2 then v2 else v3
+		local q = Storage.GetVertex(s, w)
+		local d = math.max(math.abs(q.X - p.X), math.abs(q.Z - p.Z))
+		if d <= best then
+			v, best = w, d
+		end
+	end
+	return v
+end
+
+-- Whether vertex `v` of triangle `t` is a wall corner: a wall vertex of any floor meeting there.
+-- Turns round v's fan across neighbours and seam portals, both ways, until it closes or ends, so
+-- a floor that meets t's only at v, through other floors, counts too (a corner where four floors
+-- meet). Across a seam the vertex is matched in (X, Z) only: a seam point has one height per floor.
+local function wallAt(s: Storage.State, t: number, v: number): boolean
+	if Storage.IsWallVertex(s, v) then
+		return true
+	end
+	local p = Storage.GetVertex(s, v)
+	for side = 1, 2 do
+		local at, vi = t, v
+		for _ = 1, 64 do
+			if vi == 0 then
+				-- Just crossed a seam: find p among this floor's vertices.
+				vi = vertexAt(s, at, p)
+				if vi == 0 then
+					break
+				elseif Storage.IsWallVertex(s, vi) then
+					return true
+				end
+			end
+			local v1, v2 = Storage.GetTriangle(s, at)
+			local i = if v1 == vi then 1 elseif v2 == vi then 2 else 3
+			-- The two edges at vertex i, one per turning direction.
+			local e = if side == 1 then (i + 1) % 3 + 1 else i % 3 + 1
+			local n = Storage.GetNeighbor(s, at, e)
+			local id = if n == 0 then Storage.GetExtraHead(s, at) else 0
+			while id ~= 0 do
+				local nextId, target, kind, ref, a, b = Storage.GetExtra(s, id)
+				local ends = math.min(
+					math.max(math.abs(a.X - p.X), math.abs(a.Z - p.Z)),
+					math.max(math.abs(b.X - p.X), math.abs(b.Z - p.Z))
+				)
+				if kind == Storage.EXTRA_SEAM and ref == e and ends <= PIXEL then
+					n, vi = target, 0
+					break
+				end
+				id = nextId
+			end
+			if n == t then
+				return false -- the fan closed: v is inside free space
+			elseif n == 0 then
+				break
+			end
+			at = n
 		end
 	end
 	return false
+end
+
+-- Per mesh (weak): wallAt by vertex id, for shared-edge portal ends. Update renumbers vertices
+-- and changes walls, so it calls Forget; runtime state, never serialized.
+local cornerCache: { [Storage.State]: { [number]: boolean } } = setmetatable({}, { __mode = "k" }) :: any
+
+--[=[
+	@within NavMeshFunnel
+	Drops `s`'s cached wall-corner answers. `Tiles.Update` calls it when it swaps a fresh state in.
+]=]
+function Funnel.Forget(s: Storage.State)
+	cornerCache[s] = nil
 end
 
 --[=[
@@ -318,6 +386,24 @@ function Funnel.StringPull(
 	costs: { [number]: number }?
 ): ({ vector }, { number }, { [number]: number })
 	local points, from, links = {}, {}, {}
+	local corners = cornerCache[s]
+	if corners == nil then
+		corners = {}
+		cornerCache[s] = corners
+	end
+	-- Whether the portal end `p` (vertex `v` of t, or 0 to find it) is a wall corner, cached.
+	local function corner(t: number, p: vector, v: number): boolean
+		v = if v == 0 then vertexAt(s, t, p) else v
+		if v == 0 then
+			return false
+		end
+		local c = corners[v]
+		if c == nil then
+			c = wallAt(s, t, v)
+			corners[v] = c
+		end
+		return c
+	end
 	local lefts, rights, owners = { startP }, { startP }, { corridor[1] }
 	local function finish(stop: vector, owner: number)
 		table.insert(lefts, stop)
@@ -359,8 +445,8 @@ function Funnel.StringPull(
 				push(
 					a,
 					b,
-					offset and (wallAt(s, t, a) or wallAt(s, nextT, a)),
-					offset and (wallAt(s, t, b) or wallAt(s, nextT, b)),
+					offset and (corner(t, a, 0) or corner(nextT, a, 0)),
+					offset and (corner(t, b, 0) or corner(nextT, b, 0)),
 					t
 				)
 			end
@@ -370,13 +456,8 @@ function Funnel.StringPull(
 		for e = 1, 3 do
 			if Storage.GetNeighbor(s, t, e) == nextT then
 				local lv, rv = verts[(e + 1) % 3 + 1], verts[e % 3 + 1]
-				push(
-					Storage.GetVertex(s, lv),
-					Storage.GetVertex(s, rv),
-					Storage.IsWallVertex(s, lv),
-					Storage.IsWallVertex(s, rv),
-					t
-				)
+				local lp, rp = Storage.GetVertex(s, lv), Storage.GetVertex(s, rv)
+				push(lp, rp, radius > 0 and corner(t, lp, lv), radius > 0 and corner(t, rp, rv), t)
 				break
 			end
 		end
