@@ -77,3 +77,19 @@ survived), the covered-line score.
 - **`src/Tests/Helpers/Flood.luau` is a test helper**, and it gets mutated too (48.7%, 77
   survivors). It's not library code, so leave it out of the baseline. Excluding `Tests/` from
   `--mutate` is a small tooling fix for whoever touches the coverage tool next.
+- **Funnel after the cross-floor wall-corner fix (2026-10-02, branch `navmesh-vertex-stall`):**
+  85.3% (285 / 334 decided, 49 survived; `--mutate-files=src/Funnel.luau`). It was 79.8%
+  before the "Wall corners where floors meet" specs (NavMesh.Floors). The 12 survivors in the
+  new code (`vertexAt`, `wallAt`, `corner`) are triaged as not real:
+  - `PIXEL`'s `1e-9` -> 0: grid coordinates are exact, so a copy one pixel off is still
+    `<= 1/256`.
+  - `vertexAt`'s loop from 0, and `k == 2` -> `~=`: both still look at all three vertices.
+    `<=` -> `<`: a tie needs two vertices of a triangle at the same distance within a pixel.
+  - `wallAt`'s `side` loop from 0, and `side == 1` -> `~=`: each walks both ways round, and
+    the answer doesn't depend on the order. The step loop from 0 runs 65 steps, not 64.
+  - The vertex index `else 3` -> 0: 0 and 3 give the same edges mod 3.
+  - `ends <= PIXEL` -> `<`: a portal end exactly `1/256 + 1e-9` off needs off-grid input.
+  - The two `radius > 0` -> `>=` guards: at radius 0 the push ignores the flags.
+  - `vi == 0` -> `vi == 1` after a seam crossing finds no copy: walking on can only get back
+    to the vertex through a portal ending there. No mesh tried changed the answer (12 layouts
+    in 8 orientations); treated as not real in practice.

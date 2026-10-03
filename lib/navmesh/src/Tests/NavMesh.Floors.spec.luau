@@ -515,6 +515,158 @@ return function(t: tiniest)
 		end
 	end)
 
+	-- The funnel offsets a portal end by AgentRadius when it is a wall corner on any floor meeting
+	-- there: it turns round the vertex's fan across neighbours and seam portals (Funnel.wallAt).
+	-- Each case runs in 8 orientations (4 quarter turns, mirrored or not), so the vertex is every
+	-- corner of its triangles and the fan is walked both ways round.
+	describe("Wall corners where floors meet", function()
+		local filter = { AgentRadius = 1 }
+
+		-- Builds desc(P, ring) for each orientation: P(x, y, z) places a point, ring(y, xz) a CCW
+		-- ring. Calls check(mesh, P, name).
+		local function oriented(desc: (any, any) -> any, check: (any, any, string) -> ())
+			for o = 0, 7 do
+				local mirror, turns = o >= 4, o % 4
+				local function P(x: number, y: number, z: number): any
+					x = if mirror then -x else x
+					for _ = 1, turns do
+						x, z = -z, x
+					end
+					return v(x, y, z)
+				end
+				local function ring(y: number, xz: { number }): any
+					local out = {}
+					for i = 1, #xz, 2 do
+						table.insert(out, P(xz[i], y, xz[i + 1]))
+					end
+					if mirror then
+						local back = {}
+						for i = #out, 1, -1 do
+							table.insert(back, out[i])
+						end
+						return back
+					end
+					return out
+				end
+				check(NavMesh.Build(desc(P, ring)), P, `orientation {o}`)
+			end
+		end
+
+		-- How near any leg of the path a -> b comes to point c, in plan, and the waypoint count.
+		local function pass(mesh: any, a: any, b: any, c: any): (number, number)
+			local w = NavMesh.FindPath(mesh, a, b, filter).Waypoints
+			local best = math.huge
+			for i = 1, #w - 1 do
+				local p, q = w[i].Position, w[i + 1].Position
+				local dx, dz = q.X - p.X, q.Z - p.Z
+				local k = math.clamp(((c.X - p.X) * dx + (c.Z - p.Z) * dz) / (dx * dx + dz * dz), 0, 1)
+				best = math.min(best, math.sqrt((p.X + k * dx - c.X) ^ 2 + (p.Z + k * dz - c.Z) ^ 2))
+			end
+			return best, #w
+		end
+
+		test("a wall ending where four floors meet is rounded at the radius, either way round", function()
+			-- NE and SE touch along z = 0 with no seam; the way round crosses NW and SW, where the
+			-- origin is free space. Every leg is a chord of the radius-r circle round the origin, a
+			-- quarter turn at most (0.71 r); without the offset the path runs through it.
+			oriented(function(P, ring)
+				return {
+					Floors = {
+						NE = { Walkable = { ring(0, { 0, 0, 10, 0, 10, 10, 0, 10 }) } },
+						NW = { Walkable = { ring(0, { -10, 0, 0, 0, 0, 10, -10, 10 }) } },
+						SW = { Walkable = { ring(0, { -10, -10, 0, -10, 0, 0, -10, 0 }) } },
+						SE = { Walkable = { ring(0, { 0, -10, 10, -10, 10, 0, 0, 0 }) } },
+					},
+					Seams = {
+						{ FloorA = "NE", FloorB = "NW", From = P(0, 0, 0), To = P(0, 0, 10) },
+						{ FloorA = "NW", FloorB = "SW", From = P(-10, 0, 0), To = P(0, 0, 0) },
+						{ FloorA = "SW", FloorB = "SE", From = P(0, 0, -10), To = P(0, 0, 0) },
+					},
+				}
+			end, function(mesh, P, name)
+				for _, ends in { { 1.5, -1.5 }, { -1.5, 1.5 } } do
+					local near = pass(mesh, P(3, 0, ends[1]), P(3, 0, ends[2]), P(0, 0, 0))
+					expect(near > 0.7).with_context(`{name}: {near}`).is_true()
+				end
+			end)
+		end)
+
+		test("a corner whose fan meets a wall one way and a cut-away seam the other is a corner", function()
+			-- A's vertex (0, 5) is on its seam with W. An obstacle on W cuts the seam on one side
+			-- of it, so that way the fan ends at an open edge with no portal (no wall); the other
+			-- way it crosses to W, where (0, 5) is the obstacle's corner. Both sides, both ways;
+			-- and with the corner one grid pixel off A's vertex, as two floors' copies may be.
+			local pixel = 1 / 256
+			for _, cut in { { 5, 8 }, { 2, 5 }, { 5 + pixel, 8 }, { 2, 5 - pixel } } do
+				oriented(function(P, ring)
+					return {
+						Floors = {
+							A = { Walkable = { ring(0, { 0, 0, 10, 0, 10, 10, 0, 10, 0, 5 }) } },
+							W = {
+								Walkable = { ring(0, { -10, 0, 0, 0, 0, 10, -10, 10 }) },
+								Obstacles = { ring(0, { -3, cut[1], 0, cut[1], 0, cut[2], -3, cut[2] }) },
+							},
+						},
+						Seams = { { FloorA = "A", FloorB = "W", From = P(0, 0, 0), To = P(0, 0, 10) } },
+					}
+				end, function(mesh, P, name)
+					local near = pass(mesh, P(0.5, 0, 1), P(0.5, 0, 9), P(0, 0, 5))
+					expect(near > 0.85).with_context(`cut {cut[1]}, {name}: {near}`).is_true()
+				end)
+			end
+		end)
+
+		test("a fan that ends at cut-away seams both ways is no corner, nor is a link from it", function()
+			-- A's vertex (0, 5) lies inside the cut (3..7): no portal reaches it either way. A drop
+			-- link from it onto L, whose corner is right below, is not a way round the fan (after
+			-- 0-2 other links, so its slot takes each edge number).
+			for others = -1, 2 do
+				oriented(function(P, ring)
+					local links = {}
+					for k = 1, others do
+						table.insert(links, { From = P(8, 0, 8 - k), To = P(8, -3, 8 - k) })
+					end
+					if others >= 0 then
+						table.insert(links, { From = P(0, 0, 5), To = P(0, -3, 5) })
+					end
+					return {
+						Floors = {
+							A = { Walkable = { ring(0, { 0, 0, 10, 0, 10, 10, 0, 10, 0, 5 }) } },
+							W = {
+								Walkable = { ring(0, { -10, 0, 0, 0, 0, 10, -10, 10 }) },
+								Obstacles = { ring(0, { -3, 3, 0, 3, 0, 7, -3, 7 }) },
+							},
+							L = { Walkable = { ring(-3, { 0, 5, 9, 5, 9, 9, 0, 9 }) } },
+						},
+						Seams = { { FloorA = "A", FloorB = "W", From = P(0, 0, 0), To = P(0, 0, 10) } },
+						Links = links,
+					}
+				end, function(mesh, P, name)
+					local _, count = pass(mesh, P(0.5, 0, 1), P(0.5, 0, 9), P(0, 0, 5))
+					expect(count).with_context(`{others} other links, {name}`).is(2)
+				end)
+			end
+		end)
+
+		test("a seam portal end that is a vertex of one floor only is no corner", function()
+			-- B's seam edge has a vertex at (0, 5), A's runs straight past it.
+			oriented(function(P, ring)
+				return {
+					Floors = {
+						A = { Walkable = { ring(0, { 0, 0, 10, 0, 10, 10, 0, 10 }) } },
+						B = { Walkable = { ring(0, { -10, 0, 0, 0, 0, 5, 0, 10, -10, 10 }) } },
+					},
+					Seams = { { FloorA = "A", FloorB = "B", From = P(0, 0, 0), To = P(0, 0, 10) } },
+				}
+			end, function(mesh, P, name)
+				for _, ends in { { 3, 4.8, -3, 5.2 }, { -0.5, 1, -0.5, 9 }, { 0.5, 1, 0.5, 9 } } do
+					local _, count = pass(mesh, P(ends[1], 0, ends[2]), P(ends[3], 0, ends[4]), P(0, 0, 5))
+					expect(count).with_context(`{name}: {ends[1]}, {ends[2]}`).is(2)
+				end
+			end)
+		end)
+	end)
+
 	describe("Drawing", function()
 		test("seams and links draw on their own layers", function()
 			local count = function(list: any, layer: string): number
