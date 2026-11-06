@@ -15,6 +15,8 @@
 	extension per instance. A dependency cycle is an error.
 ]=]
 
+local Keys = require(script.Parent.Keys)
+
 type Extension = any
 type Component = any
 
@@ -100,6 +102,14 @@ function Extensions.BindMethods(target: Component, extensionList: { Extension })
 			continue
 		end
 		for key, value in extension.Methods do
+			if type(key) == "string" and string.match(key, "^On%u") and not Keys.ReservedHookNames[key] then
+				-- A hook in Methods would claim the class's single-assignment
+				-- hook slot; extension hooks are independent connections.
+				error(
+					`[Component] Extension method '{key}' looks like a member hook — declare it in the extension's Hooks table, not Methods`,
+					0
+				)
+			end
 			if type(value) ~= "function" then
 				error(`[Component] Invalid extension method '{tostring(key)}': expected a function`, 0)
 			end
@@ -114,6 +124,61 @@ function Extensions.BindMethods(target: Component, extensionList: { Extension })
 			boundBy[key] = extension
 		end
 	end
+end
+
+--[=[
+	@within ComponentExtensions
+	Validates and flattens every extension's declarative `Hooks` table into
+	connect-ready entries (`Keys.ExtensionHookEntry`). Called once per class at
+	`_setup`. Unlike `Methods`, hooks are ADDITIVE connections — no collision
+	checks between extensions or with class hooks, because each entry is its
+	own independent connection (as if the extension had `Connect`ed manually in
+	construct and disconnected in stop).
+
+	Accepted shapes: `Hooks.OnTouched = fn` (instance-event wrapper) and
+	`Hooks.OnAttributeChanged / OnPropertyChanged = { Name = fn, ... }`.
+	`kind`/`name` are pre-split so the per-instance connect loop does zero
+	string work.
+]=]
+function Extensions.CollectHooks(extensionList: { Extension }): { Keys.ExtensionHookEntry }
+	local out: { Keys.ExtensionHookEntry } = {}
+	local function add(ext: any, kind: "event" | "attr" | "prop", name: string, fn: (...any) -> any)
+		local entry: Keys.ExtensionHookEntry = { ext = ext, kind = kind, name = name, fn = fn }
+		table.insert(out, entry)
+	end
+	for _, extension in extensionList do
+		local hooks: { [any]: any }? = (extension :: any).Hooks
+		if hooks == nil then
+			continue
+		end
+		if type(hooks) ~= "table" then
+			error(`[Component] Extension 'Hooks' must be a table, got {typeof(hooks)}`, 0)
+		end
+		for key, value in hooks do
+			if key == "OnAttributeChanged" or key == "OnPropertyChanged" then
+				local kind: "attr" | "prop" = if key == "OnAttributeChanged" then "attr" else "prop"
+				if type(value) ~= "table" then
+					error(`[Component] Extension hook '{key}' must be a table of functions`, 0)
+				end
+				for name, fn in value :: { [any]: any } do
+					if type(name) ~= "string" or type(fn) ~= "function" then
+						error(`[Component] Extension hook '{key}.{tostring(name)}': expected a function`, 0)
+					end
+					add(extension, kind, name, fn)
+				end
+			else
+				local eventName = if type(key) == "string" then string.match(key, "^On(%u%w*)$") else nil
+				if eventName == nil or Keys.ReservedHookNames[key] then
+					error(`[Component] Extension hook '{tostring(key)}' is not a valid hook name`, 0)
+				end
+				if type(value) ~= "function" then
+					error(`[Component] Extension hook '{key}': expected a function, got {typeof(value)}`, 0)
+				end
+				add(extension, "event", eventName, value)
+			end
+		end
+	end
+	return out
 end
 
 --[=[

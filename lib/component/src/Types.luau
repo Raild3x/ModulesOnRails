@@ -81,6 +81,7 @@ export type ExtensionShouldFn = (any) -> boolean
 	.Stopped ExtensionFn?
 	.Extensions {Extension}?
 	.Methods {[string]: (component, ...any) -> ...any}?
+	.Hooks {[string]: (component, ...any) -> () | {[string]: (component) -> ()}}?
 
 	Extensions hook into the component lifecycle. `ShouldConstruct` (all must pass)
 	gates construction. `ShouldExtend` toggles an extension per-instance. `Methods`
@@ -88,6 +89,13 @@ export type ExtensionShouldFn = (any) -> boolean
 	a name collision between two extensions, or with an existing class member, is an
 	error. Extensions listed in another extension's `Extensions` array are treated
 	as dependencies and resolved first (topological order; a cycle is an error).
+
+	`Hooks` declares member hooks (`OnTouched = fn`,
+	`OnAttributeChanged = { Name = fn }`, `OnPropertyChanged = { ... }`) as
+	**independent per-instance connections** — they coexist with a same-name
+	class hook and with other extensions' hooks (all fire), connect once the
+	instance is fully constructed, disconnect at teardown, and respect
+	`ShouldExtend`. Declaring a hook inside `Methods` is an error.
 ]=]
 export type Extension = {
 	ShouldExtend: ExtensionShouldFn?,
@@ -102,6 +110,9 @@ export type Extension = {
 	-- Loosely typed: the new solver rejects a user's concrete methods table
 	-- (named function props) against a `{ [string]: function }` indexer type.
 	Methods: any?,
+	-- Loosely typed for the same reason; shape validated at `_setup` by
+	-- Extensions.CollectHooks.
+	Hooks: any?,
 }
 
 --[=[
@@ -126,7 +137,10 @@ export type Extension = {
 	clobber it.
 ]=]
 export type ComponentConfig = {
-	Tag: string,
+	-- Exactly ONE of Tag / Selector (runtime-validated XOR). `Selector` attaches
+	-- by selector-dialect match (see Query.Selector) instead of a raw tag.
+	Tag: string?,
+	Selector: string?,
 	Ancestors: AncestorList?,
 	-- `{ any }`, not `{ Extension }`: the new solver rejects concrete extension
 	-- tables against optional structured props ("is not exactly" union checks),
@@ -153,8 +167,8 @@ export type ComponentConfig = {
 -- `InitFields` together (they contribute different keys); the instance type
 -- gets both, merged.
 export type ComponentConfigOf<E, M = {}, F = { [any]: any }, IF = {}> = {
-	Tag: string,
-	Ancestors: AncestorList?,
+	Tag: string?,
+	Selector: string?,
 	-- `Ancestors` is deliberately NOT declared here: the new solver's
 	-- union-exactness rejects a concrete `{ workspace }` (i.e. `{Workspace}`)
 	-- against an optional `{ Instance }` / `{ any }` prop, and array element
@@ -201,6 +215,7 @@ export type TypedClass<M = {}, F = {}, I = Instance> = {
 	__ComponentInstanceTypeExport: (self: TypedClass<M, F, I>) -> TypedInstance<M, F, I>,
 
 	Tag: string,
+	Selector: string?,
 	DelaySetup: boolean,
 	RenderPriority: number?,
 	Started: ComponentSignal<TypedInstance<M, F, I>>,
@@ -209,24 +224,42 @@ export type TypedClass<M = {}, F = {}, I = Instance> = {
 
 	-- Lifecycle methods run on a component INSTANCE, so `self` is the instance
 	-- type (that is what makes `self.Instance` resolve inside them).
+	-- `On*` spellings are primary; the legacy names remain as aliases through
+	-- v1.x (the `On*` form wins when both are defined) and go away in v2.0.0.
 	Construct: (self: TypedInstance<M, F, I>) -> (),
 	Start: (self: TypedInstance<M, F, I>) -> ()?,
 	Stop: (self: TypedInstance<M, F, I>, reason: StopReason) -> ()?,
 	HeartbeatUpdate: ((self: TypedInstance<M, F, I>, dt: number) -> ())?,
 	SteppedUpdate: ((self: TypedInstance<M, F, I>, dt: number) -> ())?,
 	RenderSteppedUpdate: ((self: TypedInstance<M, F, I>, dt: number) -> ())?,
+	OnConstruct: ((self: TypedInstance<M, F, I>) -> ())?,
+	OnStart: ((self: TypedInstance<M, F, I>) -> ())?,
+	OnStop: ((self: TypedInstance<M, F, I>, reason: StopReason) -> ())?,
+	OnHeartbeat: ((self: TypedInstance<M, F, I>, dt: number) -> ())?,
+	OnPreSimulation: ((self: TypedInstance<M, F, I>, dt: number) -> ())?,
+	OnPreRender: ((self: TypedInstance<M, F, I>, dt: number) -> ())?,
+	-- Collection-style hook namespaces (indexer scoped to these tables only —
+	-- the class itself keeps its deliberate no-indexer design). Dot-form with
+	-- explicit `self`: `function MyClass.OnAttributeChanged.Health(self) end`.
+	-- Event-wrapper hooks (`OnTouched`, ...) are declared through the config's
+	-- `Methods` table so they stay fully typed.
+	OnAttributeChanged: { [string]: (self: TypedInstance<M, F, I>) -> () },
+	OnPropertyChanged: { [string]: (self: TypedInstance<M, F, I>) -> () },
 
 	GetLifecycleStatus: (self: TypedClass<M, F, I>, instanceOrComponent: any) -> LifecyclePhase,
+	Has: (self: TypedClass<M, F, I>, instance: Instance) -> boolean,
 	FromInstance: (self: TypedClass<M, F, I>, instance: I & Instance) -> TypedInstance<M, F, I>?,
 	WaitForInstance: (
 		self: TypedClass<M, F, I>,
 		instance: I & Instance,
 		timeout: number?
 	) -> Promise<TypedInstance<M, F, I>>,
+	GetCreateFromInstance: (self: TypedClass<M, F, I>, instance: I & Instance) -> Promise<TypedInstance<M, F, I>>,
 	GetOrCreateFromInstance: (self: TypedClass<M, F, I>, instance: I & Instance) -> Promise<TypedInstance<M, F, I>>,
 	GetAll: <T>(self: T) -> { T },
 	UpdateAncestors: (self: TypedClass<M, F, I>, newAncestors: { Instance }) -> (),
 	GetAncestors: (self: TypedClass<M, F, I>) -> { Instance },
+	SetEnabled: (self: TypedClass<M, F, I>, enabled: boolean) -> (),
 
 	Destroy: (self: TypedClass<M, F, I>) -> (),
 } & M
@@ -269,6 +302,8 @@ type ComponentClass_Internal_Methods = {
 	_startWatching: (self: ComponentClass_Internal, instance: Instance) -> (),
 	_stopWatching: (self: ComponentClass_Internal, instance: Instance) -> (),
 	_setup: (self: ComponentClass_Internal) -> (),
+	_setupSelectorDriver: (self: ComponentClass_Internal) -> (),
+	_teardownSelectorDriver: (self: ComponentClass_Internal) -> (),
 }
 export type ComponentClass_Internal = ComponentClass_Internal_Methods & ComponentClass
 

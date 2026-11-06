@@ -169,4 +169,63 @@ for _, c in TypedComponent:GetAll() do
 	c:Greet("each")
 end
 
+--------------------------------------------------------------------------------
+-- Wave 2/4 surface: On* lifecycle spellings, hook namespaces, selector classes,
+-- SetEnabled, and the previously missing exports (Has / GetCreateFromInstance /
+-- GetMatches).
+--------------------------------------------------------------------------------
+
+-- On* lifecycle methods are post-hoc definable with typed `self`, like the
+-- legacy names.
+function myComponent:OnStart()
+	local inst: Instance = self.Instance
+	print(inst)
+end
+
+function myComponent:OnStop(reason)
+	local r: Component.StopReason = reason
+	print(r)
+end
+
+function myComponent:OnHeartbeat(dt)
+	local n: number = dt
+	print(n)
+end
+
+-- Namespace hooks: dot form with explicit self, typed via the scoped indexer.
+function myComponent.OnAttributeChanged.Health(self)
+	local inst: Instance = self.Instance
+	print(inst)
+end
+
+myComponent.OnPropertyChanged.Anchored = function(self)
+	print(self.Instance)
+end
+
+-- Previously missing exports.
+local has: boolean = myComponent:Has(workspace)
+print(has)
+myComponent:GetCreateFromInstance(Instance.new("Part"))
+local matches: { Instance } = Component.query("SomeTag"):GetMatches()
+print(matches)
+
+-- Selector-attached classes type like tag classes; SetEnabled is exported.
+local SelectorClass = Component.new {
+	Selector = "BasePart.Lava[$On = 1]",
+	Ancestors = { workspace },
+}
+
+function SelectorClass:OnConstruct()
+	local inst: Instance = self.Instance
+	print(inst)
+end
+
+SelectorClass:SetEnabled(false)
+SelectorClass:SetEnabled(true)
+
+-- Query.Selector composes as a Queryable.
+local selectorQuery = Component.query(Component.Query.Selector("BasePart.Lava", workspace))
+local count: number = selectorQuery:count()
+print(count)
+
 return nil

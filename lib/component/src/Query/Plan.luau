@@ -27,6 +27,7 @@ const isQuery = Build.isQuery
 const isFilter = Build.isFilter
 const isCombinator = Build.isCombinator
 const isSub = Build.isSub
+const isSelectorSource = Build.isSelectorSource
 
 const INTERNAL = Keys.Internal -- hoisted for the plan compiler's class probe
 
@@ -61,7 +62,8 @@ end
 -- when any child can (that child's members are a superset of the And's); an
 -- `Or` only when every child can (its members are the union of the children's).
 const function isEnumerable(req: Queryable): boolean
-	if type(req) == "string" or isQuery(req) or isSub(req) then
+	if type(req) == "string" or isQuery(req) or isSub(req) or isSelectorSource(req) then
+		-- A SelectorSource is bounded by its root's descendant set.
 		return true
 	end
 	if isFilter(req) then
@@ -189,6 +191,8 @@ const KIND_COST: { [string]: number } = {
 	class = 1,
 	query = 2,
 	tag = 4,
+	-- IsA loop + IsDescendantOf walk: comparable to a tag probe.
+	selector = 4,
 	attr = 5,
 	prop = 6,
 	where = 7,
@@ -211,6 +215,15 @@ end
 const function compileReq(req: Queryable, buildIndex: number): PlanReq
 	if type(req) == "string" then
 		return { kind = "tag" :: "tag", buildIndex = buildIndex, tag = req }
+	end
+	if isSelectorSource(req) then
+		const source = req :: Types.SelectorSource
+		return {
+			kind = "selector" :: "selector",
+			buildIndex = buildIndex,
+			classes = source.classes,
+			root = source.root,
+		}
 	end
 	if isSub(req) then
 		return { kind = "query" :: "query", buildIndex = buildIndex, query = (req :: Sub).query :: QueryInternal }
@@ -322,6 +335,16 @@ const function reqSatisfied(req: PlanReq, instance: Instance, satisfiedFn: Satis
 		return (req.startedMap :: { [Instance]: number })[instance] ~= nil
 	elseif kind == "tag" then
 		return CollectionService:HasTag(instance, req.tag :: string)
+	elseif kind == "selector" then
+		if not instance:IsDescendantOf(req.root :: Instance) then
+			return false
+		end
+		for _, className in req.classes :: { string } do
+			if not instance:IsA(className) then
+				return false
+			end
+		end
+		return true
 	elseif kind == "query" then
 		return satisfiedFn(req.query :: QueryInternal, instance)
 	elseif kind == "attr" then

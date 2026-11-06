@@ -42,6 +42,18 @@ const isQuery = Build.isQuery
 const isFilter = Build.isFilter
 const isCombinator = Build.isCombinator
 const isSub = Build.isSub
+const isSelectorSource = Build.isSelectorSource
+
+type SelectorSource = Types.SelectorSource
+
+const function selectorMatchesClasses(instance: Instance, classes: { string }): boolean
+	for _, className in classes do
+		if not instance:IsA(className) then
+			return false
+		end
+	end
+	return true
+end
 
 const isEnumerable = Plan.isEnumerable
 const reqSatisfied = Plan.reqSatisfied
@@ -143,6 +155,11 @@ function prototype._signature(self: QueryInternal): string
 	const function reqToken(req: Queryable): string
 		if type(req) == "string" then
 			return "t:" .. req
+		elseif isSelectorSource(req) then
+			const source = req :: SelectorSource
+			const classes = table.clone(source.classes)
+			table.sort(classes)
+			return "s:" .. table.concat(classes, "+") .. "@" .. idOf(source.root)
 		elseif isSub(req) then
 			return "q:(" .. ((req :: Sub).query :: QueryInternal):_signature() .. ")"
 		elseif isQuery(req) then
@@ -490,10 +507,30 @@ function prototype._activate(self: QueryInternal): Engine
 	-- Subscribe to every referenced input so a change re-evaluates the instance.
 	const connectedClasses: { [ComponentClassLike]: boolean } = {}
 	const connectedTags: { [string]: boolean } = {}
+	const connectedSelectors: { [any]: boolean } = {}
 	const function subscribeRef(req: Queryable)
 		if isFilter(req) then
 			-- Attr/prop names already fed the watched sets above; a `where` node's
 			-- recheck signal is connected with the chain predicates below.
+			return
+		end
+		if isSelectorSource(req) then
+			-- Root-boundary crossings drive re-evaluation. DescendantRemoving
+			-- fires BEFORE the reparent takes effect (the instance is still under
+			-- the root at delivery), so its re-check is deferred to observe the
+			-- settled state.
+			if connectedSelectors[req] then
+				return
+			end
+			connectedSelectors[req] = true
+			const source = req :: SelectorSource
+			janitor:Add(source.root.DescendantAdded:Connect(reevaluate), "Disconnect")
+			janitor:Add(
+				source.root.DescendantRemoving:Connect(function(instance)
+					task.defer(reevaluate, instance)
+				end),
+				"Disconnect"
+			)
 			return
 		end
 		if type(req) == "string" then
@@ -622,6 +659,17 @@ function prototype._enumerate(
 		if type(req) == "string" then
 			for _, instance in CollectionService:GetTagged(req) do
 				set[instance] = true
+			end
+		elseif isSelectorSource(req) then
+			-- ponytail: O(root descendants) per enumeration even when a narrower
+			-- sibling source exists in the same group; scoped Ancestors roots keep
+			-- this cheap (~0.16ms/1000 measured). Revisit if whole-Workspace roots
+			-- become a real workload.
+			const source = req :: SelectorSource
+			for _, instance in source.root:GetDescendants() do
+				if selectorMatchesClasses(instance, source.classes) then
+					set[instance] = true
+				end
 			end
 		elseif isSub(req) or isQuery(req) then
 			const subQuery = (if isSub(req) then (req :: Sub).query else req) :: QueryInternal
@@ -949,6 +997,7 @@ function prototype._collect(self: QueryInternal, onMatch: (Instance) -> boolean?
 	local seedSize = math.huge -- smallest KNOWN population so far
 	local firstTag: PlanReq? = nil
 	local firstQuery: PlanReq? = nil
+	local firstSelector: PlanReq? = nil
 	for _, req in required do
 		const kind = req.kind
 		if kind == "class" then
@@ -960,6 +1009,10 @@ function prototype._collect(self: QueryInternal, onMatch: (Instance) -> boolean?
 			firstTag = firstTag or req
 		elseif kind == "query" then
 			firstQuery = firstQuery or req
+		elseif kind == "selector" then
+			-- Population unknown without a descendant scan; used as the seed of
+			-- last resort (a sibling class/tag/sub-query bounds tighter).
+			firstSelector = firstSelector or req
 		end
 	end
 
@@ -996,7 +1049,7 @@ function prototype._collect(self: QueryInternal, onMatch: (Instance) -> boolean?
 	-- No direct source among the required reqs (they are all filter/combinator
 	-- nodes; validation guarantees an enumerable one is nested somewhere): fall
 	-- back to the union scan, same as the anyOf-only shape.
-	const fallbackSeed = seed or firstTag or firstQuery
+	const fallbackSeed = seed or firstTag or firstQuery or firstSelector
 	if not fallbackSeed then
 		for instance in self:_enumerate(false, subSets) do
 			if self:_fullMatch(instance, staticSub) then
@@ -1119,6 +1172,13 @@ function prototype._collect(self: QueryInternal, onMatch: (Instance) -> boolean?
 		const seedInstances = if tagArrays then (tagArrays :: { [PlanReq]: { Instance } })[chosenSeed] else nil
 		for _, instance in seedInstances or CollectionService:GetTagged(chosenSeed.tag :: string) do
 			if consider(instance) then
+				return
+			end
+		end
+	elseif seedKind == "selector" then
+		const classes = chosenSeed.classes :: { string }
+		for _, instance in (chosenSeed.root :: Instance):GetDescendants() do
+			if selectorMatchesClasses(instance, classes) and consider(instance) then
 				return
 			end
 		end

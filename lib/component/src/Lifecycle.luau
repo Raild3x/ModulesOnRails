@@ -495,7 +495,8 @@ const function teardown(class: ClassAny, component: InstanceAny, reason: StopRea
 	disconnectUpdates(component)
 
 	const function warnError(err: any)
-		warn(string.format("[Component] Error during teardown of '%s': %s", tostring(class.Tag), tostring(err)))
+		const identity = class.Tag or (class :: any).Selector
+		warn(string.format("[Component] Error during teardown of '%s': %s", tostring(identity), tostring(err)))
 	end
 
 	-- Runs `fn` to completion on the stop thread, warning (never re-raising) on
@@ -537,7 +538,7 @@ const function teardown(class: ClassAny, component: InstanceAny, reason: StopRea
 		end
 
 		runStopPhase("Stopping")
-		invokeSafe(component.Stop, component, reason)
+		invokeSafe(component.OnStop or component.Stop, component, reason)
 		runStopPhase("Stopped")
 
 		const coreJanitor = ic.janitor
@@ -564,6 +565,190 @@ const function teardown(class: ClassAny, component: InstanceAny, reason: StopRea
 			cci.janitor:Destroy()
 		end
 	end)
+end
+
+--[[
+	Collection-style member hooks: `On*`-named class members become per-instance
+	event/attribute/property subscriptions, live from the moment construction
+	fully succeeds until teardown begins.
+
+	The class's `hooks` registry (Keys.HookRegistry) is authoritative and is
+	maintained by write interception, never by scanning: `Component.__newindex`
+	routes hook-shaped class writes through `ClassHookWrite`, and the two
+	namespace tables (built by `MakeHookNamespace`) intercept their own entries.
+	Parity with native Collection callbacks (probed, test/collection_probe/
+	late_hooks.luau): a hook declared at ANY time connects to every live
+	instance in the same resumption cycle (no replay of earlier events), each
+	name is declare-once (second definition errors), and assigning nil or a
+	non-function errors — there is no unhook.
+
+	Lifecycle/update names and the two namespace tables are reserved
+	(Keys.ReservedHookNames); everything else `On`-prefixed is an
+	instance-event wrapper (`OnTouched` -> `instance.Touched`). A member the
+	instance's class lacks is silently skipped (mirrors Collection's
+	mixed-class behavior), so one component class can span multiple Roblox
+	classes safely.
+
+	Every dispatch is gated on live membership: `instToComponents[instance]`
+	must still be THIS component. Untracking happens synchronously at
+	release/teardown, so the guard silences a released component's hooks even
+	before their physical disconnection (which is deferred with the stop
+	sequence), and a superseding construction's replacement entry silences the
+	old component automatically.
+]]
+const function connectOneHook(
+	cci: Keys.ClassInternal,
+	component: InstanceAny,
+	instance: Instance,
+	kind: "event" | "attr" | "prop",
+	name: string,
+	fn: (...any) -> any,
+	cleanups: { () -> () }
+)
+	const instToComponents = cci.instToComponents
+	const function dispatch(...: any)
+		if instToComponents[instance] == component then
+			fn(component, ...)
+		end
+	end
+	local connection: RBXScriptConnection? = nil
+	if kind == "event" then
+		const okMember, member = pcall(function()
+			return (instance :: any)[name]
+		end)
+		if okMember and typeof(member) == "RBXScriptSignal" then
+			connection = (member :: RBXScriptSignal):Connect(dispatch)
+		end
+	elseif kind == "attr" then
+		connection = instance:GetAttributeChangedSignal(name):Connect(dispatch)
+	else
+		const okSignal, signal = pcall(instance.GetPropertyChangedSignal, instance, name)
+		if okSignal then
+			connection = (signal :: RBXScriptSignal):Connect(dispatch)
+		end
+	end
+	if connection ~= nil then
+		const conn = connection
+		table.insert(cleanups, function()
+			conn:Disconnect()
+		end)
+	end
+end
+
+-- Connects a hook that was just registered to every live (constructed or
+-- started) instance of the class. Instances mid-construction connect at their
+-- own connect point instead: tracking and hook connection are one contiguous
+-- synchronous block in `run`, so the two sets cannot overlap.
+const function connectHookToLiveInstances(
+	cci: Keys.ClassInternal,
+	kind: "event" | "attr" | "prop",
+	name: string,
+	fn: (...any) -> any
+)
+	for instance, component in cci.instToComponents do
+		const cleanups = (component :: InstanceAny)._updateCleanup
+		if cleanups then
+			connectOneHook(cci, component :: InstanceAny, instance, kind, name, fn, cleanups)
+		end
+	end
+end
+
+--[[
+	The class-write interceptor behind `Component.__newindex`. Returns true if
+	`key` was consumed as a member-hook registration; false to have the caller
+	`rawset` a normal member (reserved/lifecycle names, non-`On*` keys, symbol
+	keys — identical behavior to an uninstrumented table).
+
+	Also called directly by the config-`Methods` copy loop, which additionally
+	rawsets hook-shaped entries so they remain real, typed, callable members.
+]]
+const function classHookWrite(class: any, key: unknown, value: unknown): boolean
+	if type(key) ~= "string" or Keys.ReservedHookNames[key] then
+		return false
+	end
+	const eventName = string.match(key, "^On(%u%w*)$")
+	if eventName == nil then
+		return false
+	end
+	if type(value) ~= "function" then
+		error(`[Component] Hook '{key}': expected a function, got {typeof(value)}`, 0)
+	end
+	const cci = Keys.class(class)
+	const hooks = cci.hooks
+	if hooks.events[eventName] ~= nil then
+		error(`[Component] Hook '{key}' already assigned`, 0)
+	end
+	const fn = value :: (...any) -> any
+	hooks.events[eventName] = fn
+	hooks.any = true
+	connectHookToLiveInstances(cci, "event", eventName, fn)
+	return true
+end
+
+--[[
+	Builds one of the two hook-namespace tables seeded on every new class
+	(`OnAttributeChanged` / `OnPropertyChanged`). Entries are intercepted with
+	the same registration semantics as class hooks and are never stored raw in
+	the table — which is exactly what keeps every later write interceptable.
+]]
+const function makeHookNamespace(class: any, kind: "attr" | "prop"): any
+	const label = if kind == "attr" then "OnAttributeChanged" else "OnPropertyChanged"
+	return setmetatable({}, {
+		__newindex = function(_, name: unknown, value: unknown)
+			if type(name) ~= "string" then
+				error(`[Component] Hook '{label}[...]': name must be a string`, 0)
+			end
+			if type(value) ~= "function" then
+				error(`[Component] Hook '{label}.{name}': expected a function, got {typeof(value)}`, 0)
+			end
+			const cci = Keys.class(class)
+			const registry = if kind == "attr" then cci.hooks.attrs else cci.hooks.props
+			if registry[name] ~= nil then
+				error(`[Component] Hook '{label}.{name}' already assigned`, 0)
+			end
+			const fn = value :: (...any) -> any
+			registry[name] = fn
+			cci.hooks.any = true
+			connectHookToLiveInstances(cci, kind, name, fn)
+		end,
+	})
+end
+
+-- Connects every registered class hook and extension hook for one freshly
+-- constructed instance. Runs inside the Constructed tracking block of `run`.
+const function connectMemberHooks(
+	cci: Keys.ClassInternal,
+	ic: Keys.ComponentInternal,
+	component: InstanceAny,
+	instance: Instance,
+	updateCleanup: { () -> () }
+)
+	const hooks = cci.hooks
+	if hooks.any then
+		for eventName, fn in hooks.events do
+			connectOneHook(cci, component, instance, "event", eventName, fn, updateCleanup)
+		end
+		for name, fn in hooks.attrs do
+			connectOneHook(cci, component, instance, "attr", name, fn, updateCleanup)
+		end
+		for name, fn in hooks.props do
+			connectOneHook(cci, component, instance, "prop", name, fn, updateCleanup)
+		end
+	end
+	const extensionHooks = cci.extensionHooks
+	if #extensionHooks > 0 then
+		-- `ic.activeExtensions` is the per-instance resolved list; when
+		-- extensions don't vary per instance it IS the class-shared list and
+		-- every entry passes without the find. table.find on a short array
+		-- beats building a set per construction.
+		const active = ic.activeExtensions
+		for _, entry in extensionHooks do
+			if cci.extensionsVaryPerInstance and table.find(active, entry.ext) == nil then
+				continue -- ShouldExtend vetoed this extension for this instance
+			end
+			connectOneHook(cci, component, instance, entry.kind, entry.name, entry.fn, updateCleanup)
+		end
+	end
 end
 
 --[[
@@ -696,7 +881,7 @@ const function run(class: ClassAny, instance: Instance, constructId: number)
 		if abort then
 			return abort
 		end
-		abort = invokeMethod(component.Construct)
+		abort = invokeMethod(component.OnConstruct or component.Construct)
 		if abort then
 			return abort
 		end
@@ -712,6 +897,17 @@ const function run(class: ClassAny, instance: Instance, constructId: number)
 		cci.instToComponents[instance] = component
 		table.insert(cci.components, component)
 		register(instance, class, component)
+
+		-- Member hooks go live the moment construction has fully succeeded
+		-- (parity with native Collection: hooks cover the whole membership
+		-- window, so events during the start phases deliver). `_updateCleanup`
+		-- is created here so hook cleanups run on every teardown path, even
+		-- when start never completes. This block must stay contiguous with the
+		-- tracking writes above: a hook registered between them could neither
+		-- see this instance as live nor be seen by this connect pass.
+		const updateCleanup: { () -> () } = {}
+		component._updateCleanup = updateCleanup
+		connectMemberHooks(cci, ic, component, instance, updateCleanup)
 
 		-- The one deferral boundary: start phases never run on the thread that
 		-- drove construction.
@@ -729,7 +925,7 @@ const function run(class: ClassAny, instance: Instance, constructId: number)
 		if abort then
 			return abort
 		end
-		abort = invokeMethod(component.Start)
+		abort = invokeMethod(component.OnStart or component.Start)
 		if abort then
 			return abort
 		end
@@ -738,11 +934,13 @@ const function run(class: ClassAny, instance: Instance, constructId: number)
 			return abort
 		end
 
-		-- Connect update loops, mark started, fire Started.
-		const updateCleanup: { () -> () } = {}
-		component._updateCleanup = updateCleanup
-		if type(component.HeartbeatUpdate) == "function" then
-			const update = component.HeartbeatUpdate :: (self: InstanceAny, dt: number) -> ()
+		-- Connect update loops (started-only semantics; member hooks connected
+		-- at the Constructed block above share the same cleanup list), mark
+		-- started, fire Started. `On*` names take precedence over the legacy
+		-- update spellings.
+		const heartbeatFn = component.OnHeartbeat or component.HeartbeatUpdate
+		if type(heartbeatFn) == "function" then
+			const update = heartbeatFn :: (self: InstanceAny, dt: number) -> ()
 			const conn = RunService.Heartbeat:Connect(function(dt)
 				update(component, dt)
 			end)
@@ -750,8 +948,9 @@ const function run(class: ClassAny, instance: Instance, constructId: number)
 				conn:Disconnect()
 			end)
 		end
-		if type(component.SteppedUpdate) == "function" then
-			const update = component.SteppedUpdate :: (self: InstanceAny, dt: number) -> ()
+		const preSimulationFn = component.OnPreSimulation or component.SteppedUpdate
+		if type(preSimulationFn) == "function" then
+			const update = preSimulationFn :: (self: InstanceAny, dt: number) -> ()
 			const conn = RunService.Stepped:Connect(function(_, dt)
 				update(component, dt)
 			end)
@@ -759,8 +958,9 @@ const function run(class: ClassAny, instance: Instance, constructId: number)
 				conn:Disconnect()
 			end)
 		end
-		if type(component.RenderSteppedUpdate) == "function" and not IS_SERVER then
-			const update = component.RenderSteppedUpdate :: (self: InstanceAny, dt: number) -> ()
+		const preRenderFn = component.OnPreRender or component.RenderSteppedUpdate
+		if type(preRenderFn) == "function" and not IS_SERVER then
+			const update = preRenderFn :: (self: InstanceAny, dt: number) -> ()
 			if component.RenderPriority then
 				const name = NextRenderName()
 				RunService:BindToRenderStep(name, component.RenderPriority, function(dt)
@@ -813,7 +1013,7 @@ const function run(class: ClassAny, instance: Instance, constructId: number)
 		warn(
 			string.format(
 				"[Component] Error constructing '%s' on '%s':\n%s",
-				tostring(class.Tag),
+				tostring(class.Tag or (class :: any).Selector),
 				instance:GetFullName(),
 				tostring(failure)
 			)
@@ -959,4 +1159,6 @@ return {
 	GetPhase = getPhase,
 	DestroyClass = destroyClass,
 	GetAllForInstance = getAllForInstance,
+	ClassHookWrite = classHookWrite,
+	MakeHookNamespace = makeHookNamespace,
 }

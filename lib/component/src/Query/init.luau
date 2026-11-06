@@ -73,6 +73,7 @@ export type RecheckSignal = Types.RecheckSignal
 export type Filter = Types.Filter
 export type Combinator = Types.Combinator
 export type Sub = Types.Sub
+export type SelectorSource = Types.SelectorSource
 export type Queryable = Types.Queryable
 export type QueryConnection = Types.QueryConnection
 export type Query = Types.Query
@@ -90,6 +91,7 @@ Query.And = Build.And
 Query.Or = Build.Or
 Query.Not = Build.Not
 Query.Sub = Build.Sub
+Query.Selector = Build.Selector
 
 -- Callable module: `Query(...)` == `Query.new(...)`. Query INSTANCES are
 -- unaffected — their metatable is `prototype`; this metatable is the module's.

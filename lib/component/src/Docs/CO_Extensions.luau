@@ -86,6 +86,38 @@
 	enemy:Heal(10)
 	```
 
+	### 4b. Contribute member hooks
+
+	An extension's `Hooks` table declares [member hooks](/api/CO%20Lifecycle%20&%20Cleanup)
+	(`OnTouched`, `OnAttributeChanged.X`, `OnPropertyChanged.X`) as
+	**independent per-instance connections** — exactly as if the extension had
+	connected in construct and disconnected in stop. They coexist with a
+	same-name class hook and with other extensions' hooks (all fire), and a
+	`ShouldExtend` veto excludes them for that instance. Do NOT put hooks in
+	`Methods` — that's an error, because `Methods` names are single-owner.
+
+	```lua
+	local Burning = {
+		ShouldExtend = function(component)
+			return component.Instance:GetAttribute("Flammable") == true
+		end,
+		Hooks = {
+			OnTouched = function(component, otherPart)
+				component:_igniteFrom(otherPart)
+			end,
+			OnAttributeChanged = {
+				Flammable = function(component)
+					component:_reevaluateBurn()
+				end,
+			},
+		},
+		Methods = {
+			_igniteFrom = function(self, otherPart) --[[...]] end,
+			_reevaluateBurn = function(self) --[[...]] end,
+		},
+	}
+	```
+
 	### 5. Depend on other extensions
 
 	An extension may list its own dependencies in a nested `Extensions` array. They

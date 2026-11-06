@@ -28,30 +28,85 @@
 		Ancestors = { workspace }, -- only bind instances under here (default: {workspace, Players})
 	})
 
-	function Lava:Construct()
+	function Lava:OnConstruct()
 		-- Set up state. Runs first, before the instance is "live". Do not touch
 		-- other components here — they may not have started yet.
 		self.Touched = 0
 	end
 
-	function Lava:Start()
+	function Lava:OnStart()
 		-- The instance is live. Connect events, start loops, read other components.
 		print(self.Instance:GetFullName(), "is now hot")
 	end
 
-	function Lava:Stop(reason)
+	function Lava:OnStop(reason)
 		-- Teardown. `reason` says why (see the Lifecycle guide). Anything you
 		-- registered with self:AddTask is already being cleaned up for you.
 		print("cooling down:", reason)
 	end
 	```
 
+	The legacy spellings (`Construct` / `Start` / `Stop`, `HeartbeatUpdate` /
+	`SteppedUpdate` / `RenderSteppedUpdate`) still work through v1.x; the `On*`
+	form wins when both are defined and is the documented spelling going forward.
+
 	:::tip Typed classes
-	`Construct` / `Start` / `Stop` may be defined post-hoc as above. Custom methods
-	and fields, though, go through the config's `Methods` / `Fields` so the new type
+	Lifecycle methods may be defined post-hoc as above. Custom methods and
+	fields, though, go through the config's `Methods` / `Fields` so the new type
 	solver can check them — the class type has no `[string]: any` escape hatch by
 	design. See [Component.new](/api/Component#new) for the typed `Methods` /
 	`Fields` / `InitFields` pattern.
+	:::
+
+	### 2b. Or bind by selector instead of a tag
+
+	A class can attach by a **selector-dialect match** instead of a raw tag:
+	ClassName (IsA semantics), `#Name`, `.Tag`, `[Property = value]`,
+	`[$Attribute op value]` terms and `:not(...)` compose into one string, and
+	instances construct/tear down as they start/stop matching — no tagging
+	required. `Ancestors` scopes the match (each entry is a watched root).
+
+	```lua
+	local Lava = Component.new({
+		Selector = [[BasePart.Lava[Anchored = true][$Heat >= 1]]],
+		Ancestors = { workspace.Map },
+	})
+	```
+
+	A component stopped because its instance stopped matching (while still in
+	the world) gets the `"SelectorUnmatched"` stop reason. Exactly one of
+	`Tag` / `Selector` must be given. See the Queries guide for the full
+	dialect grammar. `Class:SetEnabled(false)` pauses a whole class (stop
+	reason `"Disabled"`), and `SetEnabled(true)` reconstructs current matches —
+	including instances that appeared while disabled.
+
+	### 2c. Member event hooks
+
+	Any other `On`-prefixed method is a **member hook**, live from the moment
+	an instance finishes constructing until it tears down, and cleaned up
+	automatically. Hooks may be declared at any time (even after instances
+	exist — they connect immediately), but each name is declare-once: a second
+	definition, or assigning a non-function, is an error, same as native
+	Collection callbacks. See the Lifecycle guide for the full contract.
+
+	```lua
+	function Lava:OnTouched(otherPart) -- instance.Touched, auto-managed
+		self:Burn(otherPart)
+	end
+
+	function Lava.OnAttributeChanged.Heat(self) -- dot form + explicit self!
+		self.Damage = self.Instance:GetAttribute("Heat") * 10
+	end
+
+	function Lava.OnPropertyChanged.Anchored(self)
+		print("anchoring changed")
+	end
+	```
+
+	:::caution
+	Use the DOT form with an explicit `self` for the namespace hooks — the
+	colon form (`function Lava.OnAttributeChanged:Heat()`) would bind `self`
+	to the namespace table, not the component.
 	:::
 
 	### 3. Bind an instance

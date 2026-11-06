@@ -7,6 +7,7 @@
 -- Authors: Logan Hunt [Raildex]
 
 const Types = require(script.Parent.Types)
+const Selector = require(script.Parent.Selector)
 
 type Queryable = Types.Queryable
 type QueryInternal = Types.QueryInternal
@@ -17,6 +18,7 @@ type Sub = Types.Sub
 type Matcher = Types.Matcher
 type MatchSpec = Types.MatchSpec
 type PredicateRequirement = Types.PredicateRequirement
+type SelectorSource = Types.SelectorSource
 
 const Build = {}
 
@@ -35,6 +37,8 @@ const ComboProto = {}
 ComboProto.__index = ComboProto
 const SubProto = {}
 SubProto.__index = SubProto
+const SelSourceProto = {}
+SelSourceProto.__index = SelSourceProto
 
 const function isQuery(value: unknown): boolean
 	return type(value) == "table" and getmetatable(value) == prototype
@@ -56,11 +60,24 @@ const function isSub(value: unknown): boolean
 end
 Build.isSub = isSub
 
+const function isSelectorSource(value: unknown): boolean
+	return type(value) == "table" and getmetatable(value) == SelSourceProto
+end
+Build.isSelectorSource = isSelectorSource
+
 const function isComponentClass(value: unknown): boolean
-	if type(value) ~= "table" or isQuery(value) or isFilter(value) or isCombinator(value) or isSub(value) then
+	if
+		type(value) ~= "table"
+		or isQuery(value)
+		or isFilter(value)
+		or isCombinator(value)
+		or isSub(value)
+		or isSelectorSource(value)
+	then
 		return false
 	end
-	return type((value :: { read Tag: unknown }).Tag) == "string"
+	const view = value :: { read Tag: unknown, read Selector: unknown }
+	return type(view.Tag) == "string" or type(view.Selector) == "string"
 end
 
 const function assertQueryable(value: Queryable, method: string)
@@ -70,12 +87,13 @@ const function assertQueryable(value: Queryable, method: string)
 		or isFilter(value)
 		or isCombinator(value)
 		or isSub(value)
+		or isSelectorSource(value)
 		or isComponentClass(value)
 	then
 		return
 	end
 	error(
-		`[Component] :{method}() expects a component class, tag string, Query, or Query.Attr/Prop/Pred/And/Or/Not/Sub node`,
+		`[Component] :{method}() expects a component class, tag string, Query, or Query.Attr/Prop/Pred/And/Or/Not/Sub/Selector node`,
 		3
 	)
 end
@@ -180,6 +198,7 @@ end
 	@param fn (instance: Instance) -> boolean
 	@param recheckSignal RecheckSignal? -- fire to force re-evaluation
 	@return Filter
+	@ignore -- internal IR since the selector dialect; use [Query:where]
 	A predicate filter node. Same semantics (and staleness caveat) as [Query:where].
 ]=]
 function Build.Pred(fn: (Instance) -> boolean, recheckSignal: Types.RecheckSignal?): Filter
@@ -203,6 +222,7 @@ end
 	@function And
 	@param ... Queryable
 	@return Combinator
+	@ignore -- internal IR since the selector dialect (a compound selector is an And)
 	Satisfied when ALL children are. Bounded (usable as a candidate source) when
 	any child is bounded.
 ]=]
@@ -215,6 +235,7 @@ end
 	@function Or
 	@param ... Queryable
 	@return Combinator
+	@ignore -- internal IR since the selector dialect (comma groups are an Or)
 	Satisfied when AT LEAST ONE child is. Bounded only when every child is
 	bounded (an unbounded branch would make the candidate set unbounded).
 ]=]
@@ -227,6 +248,7 @@ end
 	@function Not
 	@param ... Queryable
 	@return Combinator
+	@ignore -- internal IR since the selector dialect (:not(...) lowers here)
 	Satisfied when NONE of the children are (variadic "none of", mirroring
 	[Query:without]). Refinement-only: contributes no candidates.
 ]=]
@@ -267,6 +289,130 @@ end
 -- they are immutable after creation, so sharing is safe).
 const function filterFromSpec(op: "attr" | "prop", spec: MatchSpec): Filter
 	return (setmetatable({ _node = "filter", op = op, name = spec.name, spec = spec }, FilterProto) :: any) :: Filter
+end
+
+--------------------------------------------------------------------------------
+-- Selector-dialect lowering (`Query.Selector`)
+--------------------------------------------------------------------------------
+
+const DEFAULT_SELECTOR_ROOT = workspace
+
+-- One constructed node per (normalized selector, root): repeated spellings of
+-- an equivalent selector must return the IDENTICAL node so its :not Pred
+-- closures keep one identity and structurally equal queries intern into one
+-- engine. Weak-keyed on root so a destroyed root cannot leak its cache.
+const selectorNodeCache: { [Instance]: { [string]: Queryable } } = setmetatable({}, { __mode = "k" }) :: any
+
+const function makeSelSource(classes: { string }, root: Instance): SelectorSource
+	-- ClassNames are NOT validated: `IsA` returns false (never errors) for
+	-- unknown names, so there is no reliable reflection to check against; a
+	-- typo'd class matches nothing, same as CSS and the native grammar.
+	return (
+		setmetatable({ _node = "selsource", classes = classes, root = root }, SelSourceProto) :: any
+	) :: SelectorSource
+end
+
+-- IsA predicates for classes in :not(...) position (a SelectorSource there
+-- would drag root-scoping into the negation). Cached per ClassName so every
+-- selector mentioning `:not(Model)` shares one closure identity.
+const notClassPreds: { [string]: (Instance) -> boolean } = {}
+const function notClassPred(className: string): (Instance) -> boolean
+	const cached = notClassPreds[className]
+	if cached then
+		return cached
+	end
+	const pred = function(instance: Instance): boolean
+		return instance:IsA(className)
+	end
+	notClassPreds[className] = pred
+	return pred
+end
+
+-- Lowers one parsed compound in ATOMIC (:not inner) position to a single node.
+const function lowerNotCompound(lowered: Selector.LoweredCompound): Queryable
+	const parts: { Queryable } = {}
+	for _, className in lowered.classes do
+		table.insert(
+			parts,
+			(setmetatable({ _node = "filter", op = "where", fn = notClassPred(className) }, FilterProto) :: any) :: Filter
+		)
+	end
+	for _, tag in lowered.tags do
+		table.insert(parts, tag)
+	end
+	for _, spec in lowered.attrs do
+		table.insert(parts, filterFromSpec("attr", spec))
+	end
+	for _, spec in lowered.props do
+		table.insert(parts, filterFromSpec("prop", spec))
+	end
+	if #parts == 1 then
+		return parts[1]
+	end
+	return makeCombinator("and", "Selector", table.unpack(parts))
+end
+
+--[=[
+	@within Query
+	@function Selector
+	@param selector string -- a Component selector-dialect string
+	@param root Instance? -- scope root; defaults to Workspace
+	@return Queryable
+
+	Lowers a selector-dialect string to a composable requirement node, usable
+	anywhere a Queryable is accepted. Tag/attribute/property/`:not` terms lower
+	onto the existing filter primitives (so they compose, re-evaluate, and
+	intern exactly like the chain-built spellings); ClassName terms and the
+	root scope compile to a root-scoped IsA source enumerated from
+	`root:GetDescendants()` and watched via DescendantAdded/DescendantRemoving.
+	Comma groups become an OR. Equivalent spellings return the identical node.
+
+	`>` / `>>` / `:has()` require the engine-native Collection backend and are
+	not yet supported here.
+]=]
+function Build.Selector(selector: string, root: Instance?): Queryable
+	const scopeRoot = root or DEFAULT_SELECTOR_ROOT
+	assert(typeof(scopeRoot) == "Instance", "[Component] Query.Selector root must be an Instance")
+	const parsed = Selector.parse(selector)
+	if parsed.needsNative then
+		error(
+			"[Component] Query.Selector: '>' / '>>' / ':has()' require the engine-native Collection backend, "
+				.. "which is not supported yet — restructure the selector or scope with the root parameter",
+			0
+		)
+	end
+
+	local rootCache = selectorNodeCache[scopeRoot]
+	if rootCache == nil then
+		rootCache = {}
+		selectorNodeCache[scopeRoot] = rootCache
+	end
+	const cachedNode = rootCache[parsed.normalized]
+	if cachedNode ~= nil then
+		return cachedNode
+	end
+
+	const groupNodes: { Queryable } = {}
+	for _, group in parsed.groups do
+		const parts: { Queryable } = { makeSelSource(group.lowered.classes, scopeRoot) }
+		for _, tag in group.lowered.tags do
+			table.insert(parts, tag)
+		end
+		for _, spec in group.lowered.attrs do
+			table.insert(parts, filterFromSpec("attr", spec))
+		end
+		for _, spec in group.lowered.props do
+			table.insert(parts, filterFromSpec("prop", spec))
+		end
+		for _, loweredNot in group.loweredNots do
+			table.insert(parts, makeCombinator("not", "Selector", lowerNotCompound(loweredNot)))
+		end
+		table.insert(groupNodes, if #parts == 1 then parts[1] else makeCombinator("and", "Selector", table.unpack(parts)))
+	end
+
+	const node = if #groupNodes == 1 then groupNodes[1] else makeCombinator("or", "Selector", table.unpack(groupNodes))
+	rootCache[parsed.normalized] = node
+	return node
 end
 
 const function predToFilter(pred: PredicateRequirement): Filter
@@ -442,6 +588,7 @@ end
 	@within Query
 	@param ... Queryable
 	@return Query
+	@deprecated v1.1.0 -- absorbed by selector comma groups: `Query.Selector("A, B")`. Removal in v2.0.0.
 	Returns a NEW query with an "at least one of" group added: the instance
 	must satisfy at least one of the given requirements. Multiple `:withAny`
 	calls each add an independent group. The receiver is unchanged.
@@ -479,6 +626,7 @@ end
 	@within Query
 	@param ... Queryable
 	@return Query
+	@deprecated v1.1.0 -- absorbed by selector `:not(...)`: `Query.Selector("Part:not(.X)")`. Removal in v2.0.0.
 	Returns a NEW query with the given excluded requirements added: the
 	instance must satisfy none of them. The receiver is unchanged.
 ]=]
@@ -496,6 +644,7 @@ end
 	@param name string
 	@param ... any -- values to equal and/or `(instance, value) -> boolean` predicates; matches if ANY does. Omit all for existence.
 	@return Query
+	@deprecated v1.1.0 -- value forms absorbed by selector `[$Attr op v]` terms; function matchers stay via [Query.Attr]. Removal in v2.0.0.
 	Returns a NEW query that additionally requires an attribute; the receiver
 	is unchanged. With no matchers, the attribute must merely exist; otherwise
 	the attribute's value must satisfy at least one matcher (equal a value, or a
@@ -513,6 +662,7 @@ end
 	@param name string
 	@param ... any -- values to equal and/or `(instance, value) -> boolean` predicates; matches if ANY does. Omit all for existence.
 	@return Query
+	@deprecated v1.1.0 -- value forms absorbed by selector `[Prop op v]` terms; function matchers stay via [Query.Prop]. Removal in v2.0.0.
 	Returns a NEW query that additionally requires an Instance property; the
 	receiver is unchanged. Re-evaluated reactively when the property changes.
 

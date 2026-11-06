@@ -32,19 +32,47 @@
 	`:with`, or `:withAny`.
 	:::
 
-	### 2. Refine it
+	### 2. Refine it — selector strings first
 
-	Builders return a **new** query (queries are immutable values), so chains branch
-	freely and the receiver is never mutated.
+	The **selector dialect** is the primary spelling for value requirements: a
+	CSS-like string lowered onto the same engine primitives as the chain
+	builders (same re-evaluation, same interning — equivalent spellings share
+	one engine).
+
+	```lua
+	local q = Component.query(
+			Query.Selector([[Model.Enemy[$Team = "Red"][$Level >= 10]:not(.Stunned)]], workspace.Arena)
+		)
+		:with(Targetable)            -- component classes stay code-level (AND)
+		:where(function(instance)    -- arbitrary predicate escape hatch
+			return instance:GetPivot().Position.Y > 0
+		end)
+	```
+
+	Grammar: `ClassName` (IsA semantics), `#Name`, `.Tag`,
+	`[Prop op value]` / `[$Attr op value]` with ops
+	`=  !=  >  >=  <  <=  ~ (Lua pattern, quoted)  :typeof(t)`,
+	`:not(compound)`, and comma-separated OR groups. The optional second
+	argument scopes the match to a root instance (default `workspace`);
+	`[$Attr = 5]` is type-exact (`5` ≠ `"5"`), `!=` matches absent values,
+	comparisons match numbers only, and `~` matches strings only.
+	`>` / `>>` / `:has()` are reserved for the engine-native Collection
+	backend and error for now.
+
+	The chain builders still exist; `:withAny` / `:without` /
+	`:withAttribute` / `:withProperty` are **deprecated** in favor of the
+	dialect (comma groups, `:not(...)`, and bracket terms) and will be removed
+	in v2.0.0. `:with` (component classes / composition) and `:where`
+	(function predicates) are permanent.
 
 	```lua
 	local q = Component.query(Enemy)
 		:with(Targetable)             -- also require this (AND)
-		:withAny(Ranged, Melee)       -- at least one of these
-		:without(Stunned)             -- none of these
-		:withAttribute("Team", "Red") -- attribute equals a value
-		:withProperty("Anchored", false)
-		:where(function(instance)     -- arbitrary predicate
+		:withAny(Ranged, Melee)       -- DEPRECATED: selector comma groups
+		:without(Stunned)             -- DEPRECATED: selector :not(...)
+		:withAttribute("Team", "Red") -- DEPRECATED: [$Team = "Red"]
+		:withProperty("Anchored", false) -- DEPRECATED: [Anchored = false]
+		:where(function(instance)     -- arbitrary predicate (permanent)
 			return instance:GetPivot().Position.Y > 0
 		end)
 	```
@@ -62,18 +90,19 @@
 
 	### 3. Compose with nodes
 
-	`Query.Attr` / `Query.Prop` / `Query.Pred` are filter nodes, and
-	`Query.And` / `Query.Or` / `Query.Not` combine any requirements (they must be
-	constructors — `and`/`or`/`not` are reserved words). They nest freely and go
-	anywhere a requirement is accepted:
+	`Query.Selector(str, root?)` is the composable node form of the dialect.
+	`Query.Attr` / `Query.Prop` remain for what strings cannot express —
+	**function matchers** with per-name change re-evaluation:
 
 	```lua
-	-- "B or C, but not both" (exclusive or)
-	Component.query(A):withAny(B, C):without(Query.And(B, C))
-
-	-- a nested boolean requirement
-	Component.query(Enemy):with(Query.Or(Ranged, Query.And(Melee, Enraged)))
+	Component.query(Enemy):with(Query.Attr("Level", function(_, v)
+		return typeof(v) == "number" and v % 5 == 0
+	end))
 	```
+
+	(`Query.And` / `Query.Or` / `Query.Not` / `Query.Pred` still exist at
+	runtime but are internal IR now — the dialect's compounds, commas, and
+	`:not(...)` are their public spelling, and `:where` covers `Pred`.)
 
 	### 4. Observe it (reactive)
 

@@ -15,6 +15,29 @@ return function(t: any)
 	local expect = t.expect
 
 	describe("update loops", function()
+		test("On* update aliases take precedence over legacy spellings", function()
+			local winner = nil
+			local A, aTag = H.makeClass {
+				OnHeartbeat = function(_self, _dt)
+					winner = winner or "OnHeartbeat"
+				end,
+				HeartbeatUpdate = function(_self, _dt)
+					winner = winner or "HeartbeatUpdate"
+				end,
+				OnPreSimulation = function(_self, _dt) end,
+				OnPreRender = function(_self, _dt) end,
+			}
+			local p = H.taggedPart(aTag)
+			expect(H.waitStarted(A, p, 3)).is(true)
+			H.waitUntil(function()
+				return winner ~= nil
+			end, 2)
+			expect(winner).is("OnHeartbeat")
+
+			A:Destroy()
+			p:Destroy()
+		end)
+
 		test("defining update methods connects them on start", function()
 			local heartbeats = 0
 			local A, aTag = H.makeClass {

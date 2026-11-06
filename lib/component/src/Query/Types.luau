@@ -18,7 +18,7 @@ export type Janitor = Janitor.Janitor
 -- types, so both class variants satisfy this view.
 export type ComponentLike = { read Instance: Instance }
 export type ComponentClassLike = {
-	read Tag: string,
+	read Tag: string?, -- nil for selector-attached classes (which carry Selector)
 	read Instance: Instance,
 	-- `unknown`, not a structural signal type: `Signal`'s generics are
 	-- invariant (via `Fire`), so no one signal type accepts every class's
@@ -88,7 +88,19 @@ export type Sub = {
 	query: Query,
 }
 
-export type Queryable = ComponentClassLike | string | Query | Filter | Combinator | Sub
+-- Root-scoped IsA seed produced by lowering a selector-dialect group
+-- (`Query.Selector`): an enumerable source over `root:GetDescendants()`
+-- filtered by `classes` (IsA semantics, matching the native selector grammar).
+-- The selector's tag/attr/prop/:not terms lower onto the EXISTING primitives
+-- around it; this node only carries what no existing node can express — the
+-- class filter and the root scope (with its descendant-watcher subscription).
+export type SelectorSource = {
+	_node: "selsource",
+	classes: { string },
+	root: Instance,
+}
+
+export type Queryable = ComponentClassLike | string | Query | Filter | Combinator | Sub | SelectorSource
 
 --[=[
 	@interface QueryConnection
@@ -115,6 +127,7 @@ export type Query = {
 	observeUnyielding: (self: Query, callback: (Instance, Janitor) -> ()) -> QueryConnection,
 	track: (self: Query) -> QueryConnection,
 	get: (self: Query) -> { Instance },
+	GetMatches: (self: Query) -> { Instance },
 	iter: (self: Query) -> () -> Instance?,
 	contains: (self: Query, instance: Instance) -> boolean,
 	count: (self: Query) -> number,
@@ -161,9 +174,11 @@ export type ChangedSignal = Signal.Signal<(Instance, boolean) -> (), Instance, b
 -- SINGLE table lookup — membership in `startedMap` IS "started" — and
 -- `startedList` gives `get()` an O(1)-sized, already-filtered seed source.
 export type PlanReq = {
-	kind: "tag" | "class" | "query" | "attr" | "prop" | "where" | "not" | "or" | "and",
+	kind: "tag" | "class" | "query" | "attr" | "prop" | "where" | "not" | "or" | "and" | "selector",
 	buildIndex: number, -- declaration position; tiebreak for the stable sort
 	tag: string?,
+	classes: { string }?, -- selector: IsA class filters
+	root: Instance?, -- selector: scope root
 	startedList: { Instance }?, -- class: live dense started-instance array
 	startedMap: { [Instance]: number }?, -- class: live instance -> list index
 	query: QueryInternal?,

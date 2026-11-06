@@ -37,19 +37,47 @@ export type LifecyclePhase = "None" | "Constructing" | "Constructed" | "Starting
 	Why a component is being stopped, passed as the first argument to `Stop()`.
 
 	- `"Untagged"` — the CollectionService tag was removed
+	- `"SelectorUnmatched"` — a selector-attached instance stopped matching while still parented
 	- `"LeftAncestry"` — the instance left the valid ancestor list
 	- `"InstanceDestroyed"` — the bound instance was destroyed
 	- `"ClassDestroyed"` — the component class was destroyed
 	- `"ConstructionCancelled"` — torn down before it finished constructing
 	- `"Superseded"` — a newer construction attempt replaced this one
+	- `"Disabled"` — the class was disabled via `SetEnabled(false)`
 ]=]
 export type StopReason =
 	"Untagged"
+	| "SelectorUnmatched"
 	| "LeftAncestry"
 	| "InstanceDestroyed"
 	| "ClassDestroyed"
 	| "ConstructionCancelled"
 	| "Superseded"
+	| "Disabled"
+
+-- The class's authoritative `On*` member-hook registry (Lifecycle-owned,
+-- maintained by the `__newindex` interceptors — never scanned). A hook may be
+-- declared at any time: registration connects it to every live instance
+-- immediately and each future instance connects at its construction. Names are
+-- declare-once (parity with native Collection callbacks). `events` keys are
+-- the wrapped INSTANCE member names (`Touched`, not `OnTouched`).
+export type HookRegistry = {
+	events: { [string]: (...any) -> any },
+	attrs: { [string]: (...any) -> any },
+	props: { [string]: (...any) -> any },
+	any: boolean,
+}
+
+-- One extension-declared hook, flattened by `Extensions.CollectHooks` at class
+-- `_setup`. Extension hooks are ADDITIVE connections: they coexist with a
+-- same-name class hook and with other extensions' hooks (all fire), and are
+-- filtered per instance by extension activity when `ShouldExtend` varies it.
+export type ExtensionHookEntry = {
+	ext: any, -- source extension (identity, for the active filter)
+	kind: "event" | "attr" | "prop",
+	name: string, -- instance member ("Touched") or attribute/property name
+	fn: (...any) -> any,
+}
 
 -- Private state carried by every component INSTANCE.
 export type ComponentInternal = {
@@ -100,12 +128,39 @@ export type ClassInternal = {
 	-- teardowns still have to fire on.
 	teardownsInFlight: number,
 	destroyJanitorWhenIdle: boolean,
+	-- Lifecycle-owned: the live `On*` member-hook registry (see HookRegistry
+	-- above) and the flattened extension hooks (see ExtensionHookEntry).
+	hooks: HookRegistry,
+	extensionHooks: { ExtensionHookEntry },
+	-- Selector-attached classes (init.luau's selector driver): the config's
+	-- selector string, and one activated query engine + changed connection per
+	-- Ancestors root (union membership across roots; see `_setupSelectorDriver`).
+	selector: string?,
+	selectorEngines: { { query: any, conn: any } }?,
+	-- `SetEnabled(false)` gates construction requests and mass-releases with
+	-- reason "Disabled"; re-enabling re-requests current matches.
+	enabled: boolean,
 }
 
 local INTERNAL = Symbol("Internal")
 
+-- Class members with these names are NOT member hooks despite the `On` prefix:
+-- the lifecycle/update methods and the two hook-namespace tables. Lives here
+-- (not Lifecycle) so Extensions.luau can share it without a circular require.
+local RESERVED_HOOK_NAMES: { [string]: boolean } = {
+	OnConstruct = true,
+	OnStart = true,
+	OnStop = true,
+	OnHeartbeat = true,
+	OnPreSimulation = true,
+	OnPreRender = true,
+	OnAttributeChanged = true,
+	OnPropertyChanged = true,
+}
+
 local Keys = {
 	Internal = INTERNAL,
+	ReservedHookNames = RESERVED_HOOK_NAMES,
 }
 
 --[=[

@@ -75,11 +75,50 @@
 	| Reason | Cause |
 	| --- | --- |
 	| `Untagged` | the CollectionService tag was removed |
+	| `SelectorUnmatched` | a selector-attached instance stopped matching while still parented |
 	| `LeftAncestry` | the instance left the valid ancestor list |
 	| `InstanceDestroyed` | the bound instance was destroyed |
 	| `ClassDestroyed` | the component class was destroyed |
 	| `ConstructionCancelled` | torn down before it finished constructing |
 	| `Superseded` | a newer construction attempt replaced this one |
+	| `Disabled` | the class was disabled via `SetEnabled(false)` |
+
+	### 3b. Naming: `On*` is primary; member hooks
+
+	`OnConstruct` / `OnStart` / `OnStop` (and `OnHeartbeat` /
+	`OnPreSimulation` / `OnPreRender` for the update loops) are the primary
+	spellings; the legacy names remain as aliases through v1.x, with the `On*`
+	form winning when both are defined.
+
+	Every OTHER `On`-prefixed class member is a **member hook**, connected on
+	the bound instance and cleaned up automatically — never write matching
+	disconnect logic for them:
+
+	- `function MyClass:OnTouched(part)` — wraps `instance.Touched` (any
+	  instance event; a member the instance's class lacks is silently skipped);
+	- `function MyClass.OnAttributeChanged.X(self)` — wraps
+	  `GetAttributeChangedSignal("X")`;
+	- `function MyClass.OnPropertyChanged.X(self)` — wraps
+	  `GetPropertyChangedSignal("X")` (unknown properties silently skipped).
+
+	Hooks follow the same rules as native Collection callbacks:
+
+	- **Live from successful construction to teardown.** A change during
+	  `OnConstruct` never dispatches; a change during the start window (after
+	  construction, `OnStart` possibly still running) DOES — state made in
+	  `OnConstruct` is safe inside a hook, state made in `OnStart` may not
+	  exist yet.
+	- **Declare any time, effective immediately.** A hook defined while
+	  instances are already live connects to all of them in the same cycle
+	  (events from before the definition are never replayed).
+	- **Declare-once.** Defining the same hook name twice errors, and
+	  assigning `nil` or a non-function errors — there is no unhook.
+	- Hooks are callbacks, not methods: a hook declared post-hoc is not
+	  readable back off the class (hooks declared via the config `Methods`
+	  table remain callable members).
+
+	Use the DOT form with explicit `self` for the namespace hooks — the colon
+	form would bind `self` to the namespace table.
 
 	### 4. The cleanup guarantee
 

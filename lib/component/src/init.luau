@@ -141,6 +141,18 @@ const fromEvent = (Promise.fromEvent :: unknown) :: FromEventFn
 const Component = {}
 Component.prototype = {}
 Component.__index = Component.prototype
+-- `Component` doubles as every class table's metatable (`setmetatable({},
+-- Component)` in `componentClassNew`), so this intercepts NEW-key writes on
+-- every class: member-hook definitions (`function Class:OnTouched()`) register
+-- in the class's hook registry and connect to live instances immediately;
+-- everything else rawsets, byte-identical to an uninstrumented table.
+-- Component-INSTANCE writes are unaffected — metamethod lookup is raw, and the
+-- class table itself never carries a raw `__newindex` key.
+Component.__newindex = function(class: any, key: unknown, value: unknown)
+	if not Lifecycle.ClassHookWrite(class, key, value) then
+		rawset(class, key, value)
+	end
+end
 
 --[=[
 	@within Component
@@ -241,7 +253,18 @@ Component.GetAllComponentsForInstance = Lifecycle.GetAllForInstance
 	})
 	```
 ]=]
-const function componentNew(config: Types.ComponentConfig): Class_Internal
+const function componentClassNew(config: Types.ComponentConfig): Class_Internal
+	const tag = config.Tag
+	const selector = config.Selector
+	if (tag == nil) == (selector == nil) then
+		error("[Component] Component.new requires exactly one of `Tag` or `Selector`", 2)
+	end
+	if tag ~= nil then
+		assert(type(tag) == "string", "[Component] `Tag` must be a string")
+	else
+		assert(type(selector) == "string", "[Component] `Selector` must be a string")
+	end
+
 	-- Built dynamically (symbol slot, signals, user methods) under `any`, then
 	-- viewed as ClassAny; the public type comes from the NewFn cast below. The
 	-- `:: any` on the RHS keeps the solver from stamping `@metatable` onto the
@@ -267,22 +290,37 @@ const function componentNew(config: Types.ComponentConfig): Class_Internal
 		failed = janitor:Add(Signal.new(), "Destroy"),
 		teardownsInFlight = 0,
 		destroyJanitorWhenIdle = false,
+		hooks = { events = {}, attrs = {}, props = {}, any = false },
+		extensionHooks = {},
+		selector = selector,
+		enabled = true,
 	}
 	classAny[Keys.Internal] = ci
-	classAny.Tag = config.Tag
+	classAny.Tag = tag
+	classAny.Selector = selector
 	classAny.AncestorsChanged = Signal.new(janitor)
 	classAny.Started = Signal.new(janitor)
 	classAny.Stopped = Signal.new(janitor)
+	-- Collection-style hook namespaces, seeded so the dot-form function
+	-- statement works: `function MyClass.OnAttributeChanged.Health(self) end`.
+	-- (Never the colon form — it would bind `self` to the namespace table.)
+	-- Their entries are intercepted into the hook registry, never stored raw.
+	classAny.OnAttributeChanged = Lifecycle.MakeHookNamespace(classAny, "attr")
+	classAny.OnPropertyChanged = Lifecycle.MakeHookNamespace(classAny, "prop")
 
 	-- Copy user methods before _setup so extension-method collision checks in
-	-- Extensions.BindMethods also fire against them.
+	-- Extensions.BindMethods also fire against them. Hook-shaped entries
+	-- (`OnTouched = fn`) register as member hooks AND stay real, typed,
+	-- callable members (the rawset) — redefining one post-hoc is therefore
+	-- not interceptable and is documented undefined.
 	const methods: { [string]: unknown }? = config.Methods
 	if methods then
 		for name, fn in methods do
 			if rawget(classAny, name) ~= nil then
 				error(`[Component] Method '{name}' collides with an existing class member`, 2)
 			end
-			classAny[name] = fn
+			Lifecycle.ClassHookWrite(classAny, name, fn)
+			rawset(classAny, name, fn)
 		end
 	end
 
@@ -303,7 +341,7 @@ const function componentNew(config: Types.ComponentConfig): Class_Internal
 	end
 	return customComponent
 end
-Component.new = (componentNew :: any) :: Types.NewFn
+Component.new = (componentClassNew :: any) :: Types.NewFn
 
 --------------------------------------------------------------------------------
 -- Tag / ancestry watching
@@ -333,7 +371,9 @@ function Component.prototype._startWatching(self: Class_Internal, instance: Inst
 
 	const function evaluate()
 		if self:_isInAncestorList(instance) then
-			Lifecycle.Request(self, instance)
+			if ci.enabled then
+				Lifecycle.Request(self, instance)
+			end
 		else
 			const reason: StopReason = if instance:IsDescendantOf(game) then "LeftAncestry" else "InstanceDestroyed"
 			Lifecycle.Release(self, instance, reason)
@@ -345,7 +385,7 @@ function Component.prototype._startWatching(self: Class_Internal, instance: Inst
 		self.AncestorsChanged:Connect(evaluate),
 	}
 
-	if self:_isInAncestorList(instance) then
+	if ci.enabled and self:_isInAncestorList(instance) then
 		Lifecycle.Request(self, instance)
 	end
 end
@@ -378,6 +418,7 @@ function Component.prototype._setup(self: Class_Internal)
 	const classActiveExtensions = Extensions.Resolve(self, ci.extensions, true)
 	ci.classActiveExtensions = classActiveExtensions
 	Extensions.BindMethods(self, classActiveExtensions)
+	ci.extensionHooks = Extensions.CollectHooks(classActiveExtensions)
 
 	-- Without a `ShouldExtend` anywhere, every instance resolves to exactly this
 	-- list, so the lifecycle engine can share it instead of re-sorting per instance.
@@ -386,6 +427,11 @@ function Component.prototype._setup(self: Class_Internal)
 			ci.extensionsVaryPerInstance = true
 			break
 		end
+	end
+
+	if ci.selector ~= nil then
+		self:_setupSelectorDriver()
+		return
 	end
 
 	ci.janitor:Add(CollectionService:GetInstanceAddedSignal(self.Tag):Connect(function(instance)
@@ -400,6 +446,88 @@ function Component.prototype._setup(self: Class_Internal)
 		task.defer(function()
 			self:_startWatching(instance)
 		end)
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Selector driver (Selector-attached classes)
+--------------------------------------------------------------------------------
+
+--[[
+	The unified driver for `Selector =` classes: one interned Query.Selector
+	engine per Ancestors root, track-style (`changed` edges, no per-match
+	janitors), mapped to Lifecycle.Request / reason-mapped Lifecycle.Release.
+	Union membership across roots: an instance under two overlapping roots is
+	released only when NO engine still matches it. Edge semantics are identical
+	to the tag driver's (the engines are edge-faithful; probe finding F8), so
+	the same-frame supersede protocol behaves the same for both attachment
+	spellings.
+]]
+function Component.prototype._setupSelectorDriver(self: Class_Internal)
+	const ci = Keys.class(self)
+	const engines: { { query: any, conn: any } } = {}
+	ci.selectorEngines = engines
+
+	const function stillMatchedElsewhere(instance: Instance): boolean
+		for _, entry in engines do
+			const engine = entry.query._engine
+			if engine and engine.matched[instance] ~= nil then
+				return true
+			end
+		end
+		return false
+	end
+
+	const function onChanged(instance: Instance, isMatch: boolean)
+		if isMatch then
+			if ci.enabled then
+				Lifecycle.Request(self, instance)
+			end
+		else
+			if stillMatchedElsewhere(instance) then
+				return
+			end
+			-- Same reason rule as the tag driver's ancestry watcher, plus the
+			-- selector-specific "still parented but stopped matching" case.
+			const reason: StopReason = if not instance:IsDescendantOf(game)
+				then "InstanceDestroyed"
+				elseif not self:_isInAncestorList(instance) then "LeftAncestry"
+				else "SelectorUnmatched"
+			Lifecycle.Release(self, instance, reason)
+		end
+	end
+
+	for _, root in ci.ancestors do
+		const query = Query(Query.Selector(ci.selector :: string, root)) :: any
+		query:_validate()
+		const engine = query:_activate()
+		const conn = engine.changed:Connect(onChanged)
+		table.insert(engines, { query = query, conn = conn })
+	end
+
+	-- Seed from matches that existed before our `changed` connections attached.
+	if ci.enabled then
+		for _, entry in engines do
+			const engine = entry.query._engine
+			if engine then
+				for _, instance in table.clone(engine.matchedList) do
+					Lifecycle.Request(self, instance)
+				end
+			end
+		end
+	end
+end
+
+function Component.prototype._teardownSelectorDriver(self: Class_Internal)
+	const ci = Keys.class(self)
+	const engines = ci.selectorEngines
+	if not engines then
+		return
+	end
+	ci.selectorEngines = nil
+	for _, entry in engines do
+		entry.conn:Disconnect()
+		entry.query:_deactivate()
 	end
 end
 
@@ -493,6 +621,13 @@ function Component.prototype.GetCreateFromInstance(
 	self: Class_Internal,
 	instance: Instance
 ): Promise<Types.AnyComponent>
+	if Keys.class(self).selector ~= nil then
+		error(
+			"[Component] GetCreateFromInstance is tag-only: a Selector-attached class cannot force-create "
+				.. "(make the instance match the selector instead)",
+			2
+		)
+	end
 	return Promise.new(function(resolve, reject, onCancel)
 		const existing = self:FromInstance(instance)
 		if existing and Keys.inst(existing).started then
@@ -521,7 +656,7 @@ function Component.prototype.GetCreateFromInstance(
 			CollectionService:AddTag(instance, self.Tag)
 		end
 		self:_startWatching(instance)
-		if self:_isInAncestorList(instance) then
+		if Keys.class(self).enabled and self:_isInAncestorList(instance) then
 			Lifecycle.Request(self, instance)
 		end
 	end)
@@ -537,12 +672,97 @@ Component.prototype.GetOrCreateFromInstance = Component.prototype.GetCreateFromI
 --[=[
 	@within Component
 	@tag Component Class
+	@param enabled boolean
+
+	Enables or disables the whole class, mirroring `Collection.Enabled`.
+	Disabling stops every component (and cancels pending constructions) with
+	reason `"Disabled"` and gates new construction; re-enabling re-evaluates,
+	reconstructing current matches — including instances that appeared while
+	the class was disabled.
+]=]
+function Component.prototype.SetEnabled(self: Class_Internal, enabled: boolean)
+	const ci = Keys.class(self)
+	if ci.enabled == enabled then
+		return
+	end
+	ci.enabled = enabled
+	if not enabled then
+		-- Snapshot: Release mutates both tables synchronously.
+		const toRelease: { Instance } = {}
+		for instance in ci.pending do
+			table.insert(toRelease, instance)
+		end
+		for instance in ci.instToComponents do
+			if not table.find(toRelease, instance) then
+				table.insert(toRelease, instance)
+			end
+		end
+		for _, instance in toRelease do
+			Lifecycle.Release(self, instance, "Disabled")
+		end
+		return
+	end
+	if ci.selector ~= nil then
+		for _, entry in ci.selectorEngines or {} do
+			const engine = (entry :: any).query._engine
+			if engine then
+				for _, instance in table.clone(engine.matchedList) do
+					Lifecycle.Request(self, instance)
+				end
+			end
+		end
+	else
+		for instance in ci.watching do
+			if self:_isInAncestorList(instance) then
+				Lifecycle.Request(self, instance)
+			end
+		end
+	end
+end
+
+--[=[
+	@within Component
+	@tag Component Class
 	Updates the valid ancestors of this class and re-evaluates watched instances.
 ]=]
 function Component.prototype.UpdateAncestors(self: Class_Internal, newAncestors: { Instance })
 	const ci = Keys.class(self)
 	const lastAncestors = ci.ancestors
 	ci.ancestors = newAncestors
+	if ci.selector ~= nil and ci.selectorEngines ~= nil then
+		-- Roots ARE the engines for a selector class: rebuild against the new
+		-- list. Instances no longer under any root release via the fresh
+		-- engines' membership (LeftAncestry through the reason mapping).
+		const previouslyMatched: { [Instance]: boolean } = {}
+		for _, entry in ci.selectorEngines :: { any } do
+			const engine = entry.query._engine
+			if engine then
+				for _, instance in engine.matchedList do
+					previouslyMatched[instance] = true
+				end
+			end
+		end
+		self:_teardownSelectorDriver()
+		self:_setupSelectorDriver()
+		const engines = ci.selectorEngines :: { any }
+		for instance in previouslyMatched do
+			local stillMatched = false
+			for _, entry in engines do
+				const engine = entry.query._engine
+				if engine and engine.matched[instance] ~= nil then
+					stillMatched = true
+					break
+				end
+			end
+			if not stillMatched then
+				Lifecycle.Release(
+					self,
+					instance,
+					if instance:IsDescendantOf(game) then "LeftAncestry" else "InstanceDestroyed"
+				)
+			end
+		end
+	end
 	self.AncestorsChanged:Fire(newAncestors, lastAncestors)
 end
 
@@ -558,6 +778,38 @@ end
 --[=[
 	@within Component
 	@tag Component Class
+	@function OnConstruct
+	Called before the component starts, to initialize it. May yield or return a
+	Promise. Primary spelling of the legacy `Construct` (the `On*` form wins
+	when both are defined).
+]=]
+--[=[
+	@within Component
+	@tag Component Class
+	@function OnStart
+	Called when the component starts. Sibling components on the same instance
+	are safe to access here. May yield or return a Promise. Primary spelling of
+	the legacy `Start`.
+]=]
+--[=[
+	@within Component
+	@tag Component Class
+	@function OnStop
+	@param reason StopReason
+	Called when the component stops. The bound instance may already be gone —
+	check `reason`. Anything added via `self:AddTask` is cleaned up
+	automatically after this returns. Primary spelling of the legacy `Stop`.
+
+	Beyond the lifecycle names, ANY other `On`-prefixed method on the class is
+	a **member event hook**: `function MyClass:OnTouched(otherPart)` connects
+	`instance.Touched` while the component is started (auto-disconnected on
+	stop; a member the instance's class lacks is silently skipped). Declare
+	event hooks through the config's `Methods` table to keep them fully typed.
+]=]
+--[=[
+	@within Component
+	@tag Component Class
+	@deprecated v1.1.0 -- renamed to `OnConstruct` (Collection-aligned). Removal in v2.0.0.
 	Called before the component starts, to initialize it. May yield or return a
 	Promise.
 ]=]
@@ -566,6 +818,7 @@ function Component.prototype.Construct(_self: Instance_Internal) end
 --[=[
 	@within Component
 	@tag Component Class
+	@deprecated v1.1.0 -- renamed to `OnStart`. Removal in v2.0.0.
 	Called when the component starts. Sibling components on the same instance are
 	safe to access here. May yield or return a Promise.
 ]=]
@@ -575,6 +828,7 @@ function Component.prototype.Start(_self: Instance_Internal) end
 	@within Component
 	@tag Component Class
 	@param _reason StopReason
+	@deprecated v1.1.0 -- renamed to `OnStop`. Removal in v2.0.0.
 	Called when the component stops. The bound instance may already be gone — check
 	`reason`. Anything added via `self:AddTask` is cleaned up automatically after
 	this returns.
@@ -667,9 +921,37 @@ end
 
 --[=[
 	@tag Component Class
+	@function OnHeartbeat
+	@param dt number
+	@within Component
+	If present, connected to `RunService.Heartbeat` while the component runs.
+	Primary spelling of the legacy `HeartbeatUpdate` (the `On*` form wins when
+	both are defined).
+]=]
+--[=[
+	@tag Component Class
+	@function OnPreSimulation
+	@param dt number
+	@within Component
+	If present, connected to `RunService.Stepped` while the component runs.
+	Primary spelling of the legacy `SteppedUpdate`.
+]=]
+--[=[
+	@tag Component Class
+	@function OnPreRender
+	@param dt number
+	@within Component
+	@client
+	If present, connected to `RunService.RenderStepped` while the component
+	runs, or to `BindToRenderStep` when `RenderPriority` is set. Primary
+	spelling of the legacy `RenderSteppedUpdate`.
+]=]
+--[=[
+	@tag Component Class
 	@function HeartbeatUpdate
 	@param dt number
 	@within Component
+	@deprecated v1.1.0 -- renamed to `OnHeartbeat` (Collection-aligned). Removal in v2.0.0.
 	If present, connected to `RunService.Heartbeat` while the component runs.
 ]=]
 --[=[
@@ -677,6 +959,7 @@ end
 	@function SteppedUpdate
 	@param dt number
 	@within Component
+	@deprecated v1.1.0 -- renamed to `OnPreSimulation`. Removal in v2.0.0.
 	If present, connected to `RunService.Stepped` while the component runs.
 ]=]
 --[=[
@@ -685,8 +968,33 @@ end
 	@param dt number
 	@within Component
 	@client
+	@deprecated v1.1.0 -- renamed to `OnPreRender`. Removal in v2.0.0.
 	If present, connected to `RunService.RenderStepped` while the component runs, or
 	to `BindToRenderStep` when `RenderPriority` is set.
+]=]
+--[=[
+	@tag Component Class
+	@prop OnAttributeChanged { [string]: (self) -> () }
+	@within Component
+	Collection-style hook namespace, seeded on every class. An entry named `X`
+	is connected to `GetAttributeChangedSignal("X")` on the bound instance
+	while the component is started (auto-disconnected on stop). Declare with
+	the DOT form and an explicit `self` — the colon form would bind `self` to
+	the namespace table:
+
+	```lua
+	function MyClass.OnAttributeChanged.Health(self)
+		print(self.Instance:GetAttribute("Health"))
+	end
+	```
+]=]
+--[=[
+	@tag Component Class
+	@prop OnPropertyChanged { [string]: (self) -> () }
+	@within Component
+	Like `OnAttributeChanged`, for `GetPropertyChangedSignal`. An entry naming
+	a property the bound instance's class lacks is silently skipped, so one
+	component class can span multiple Roblox classes.
 ]=]
 
 --[=[
@@ -707,6 +1015,7 @@ function Component.prototype.Destroy(self: Class_Internal)
 		self:_stopWatching(instance)
 	end
 	table.clear(ci.watching)
+	self:_teardownSelectorDriver()
 
 	Lifecycle.DestroyClass(self)
 end
