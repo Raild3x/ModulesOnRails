@@ -1,0 +1,23 @@
+# Justified coverage suppressions for lib/component.
+# Rule forms: qualified function name, src/path.luau:LINE, or site:<key>.
+
+# Selector.luau bracketValue: defensive tonumber-nil guard. The number token
+# pattern (%-?%d+%.?%d*) cannot produce a string tonumber rejects, so the
+# branch is unreachable by construction; kept as a guard against future
+# pattern edits.
+src/Query/Selector.luau:161
+
+# Lifecycle.luau connectOneHook dispatch guard, false branch: reachable only
+# under Deferred SignalBehavior (an event queued before Stop delivered after
+# teardown) or in the release-to-deferred-teardown gap of a mid-construction
+# cancel. The test environment runs Immediate with started-instance releases,
+# where the synchronous disconnect makes post-stop delivery impossible.
+# Probe-verified necessity: test/collection_probe T4.4 + late_hooks LH4.
+src/Lifecycle.luau:610
+
+# Lifecycle.luau connectHookToLiveInstances cleanup-list guard, false branch:
+# a tracked component always carries `_updateCleanup` — tracking and the
+# list's creation are one contiguous synchronous block in `run`, and
+# untrack/disconnectUpdates are likewise contiguous on every removal path.
+# Defensive invariant guard against future seam changes.
+src/Lifecycle.luau:650

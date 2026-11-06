@@ -69,7 +69,16 @@ classes = [
 
 [[classOrder]]
 section = "Instance Component Systems"
-classes = ["Component", "RemoteComponent", "BaseComponent"]
+classes = ["Component", "Query", "RemoteComponent", "BaseComponent"]
+
+[[classOrder.items]]
+section = "[Guides]"
+classes = [
+	"CO Getting Started",
+	"CO Extensions",
+	"CO Lifecycle & Cleanup",
+	"CO Queries",
+]
 
 [[classOrder]]
 section = "DropletManager"
